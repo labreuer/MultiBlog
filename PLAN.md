@@ -1,0 +1,247 @@
+# MultiBlog — Architecture Plan
+
+A multi-author blog with post revisions and tree-structured comments that can quote
+sections of an article, with an inline indicator showing which passages have comments.
+
+Decisions locked: **Node/TypeScript**, **ProseMirror** editor, **small/hobby scale**,
+**self-managed Linode/Ubuntu**.
+
+---
+
+## 1. The one genuinely hard part
+
+Everything here is routine except one thing: **anchoring a comment to a span of article
+text so the highlight stays on the right words after the author edits and re-publishes the
+post.** Get this right and the rest is plumbing. The whole design below is shaped around it.
+
+The core idea:
+
+- Article content is a ProseMirror document (JSON). Each publish creates an **immutable
+  revision** of that doc.
+- A comment thread does **not** store "characters 412–438". It stores a position range
+  *relative to a specific revision* plus the literal quoted text.
+- Comment highlights are rendered as ProseMirror **decorations** (an ephemeral display
+  layer), never as marks baked into the author's content. Readers commenting can never
+  mutate an author's document or revision history.
+- When a new revision is published, we compute the change between old and new docs and
+  **remap** every anchor's range forward. Anchors whose text survived move with it; anchors
+  whose text was deleted become **detached** and move to a sidebar instead of vanishing.
+
+See §5 for the full mechanism.
+
+---
+
+## 2. Stack
+
+| Concern        | Choice | Why |
+|----------------|--------|-----|
+| Language       | TypeScript (Node 20+) | Locked. |
+| Framework      | **Next.js (App Router)** | Published posts server-render/SSG for SEO; the editor and comment layer hydrate client-side. Remix is a fine leaner alternative. |
+| Editor         | **TipTap** (wraps ProseMirror) | You get ProseMirror's model exactly, but schema, marks, and React integration are far less boilerplate. |
+| Real-time collab | **Yjs + `y-prosemirror`**, server = **Hocuspocus** | Real-time co-editing in v1 (§3a). Hocuspocus is the TipTap-native Yjs websocket backend with auth + persistence hooks. |
+| DB             | **PostgreSQL** | Recursive CTEs for comment trees, JSONB for PM docs, room to grow. SQLite would also work at this scale, but Postgres costs little extra on a box you already run. |
+| ORM/migrations | **Prisma** | Great DX and migration story for a solo/small project. Drizzle if you prefer something lighter and closer to SQL. |
+| Auth           | **Auth.js** (email/password + optional GitHub/Google OAuth) | Integrates with Next; Lucia is the more hands-on alternative. |
+| Sanitization   | DOMPurify + a strict TipTap schema | Mandatory for reader-submitted comment HTML/JSON (XSS). |
+| Diff/remap     | `prosemirror-changeset` and/or `prosemirror-recreate` | For revision diffs and anchor remapping (§5). |
+
+---
+
+## 3. Roles & "multi-author"
+
+**Decided:** a post can have multiple authors, and the **listed byline is decoupled from
+who actually edited.** `post_authors` is a manual byline list (chosen from user accounts,
+so author pages work); edit attribution lives separately in `revisions.editor_id`. You can
+credit three co-authors on a post even if only one of them touched a given revision, and
+vice-versa.
+
+Roles: `admin` (everything, user mgmt), `editor` (edit/publish any post, moderate
+comments), `author` (write/publish own posts, sits on bylines), `commenter` (name+email or
+logged-in — see §6).
+
+### 3a. Real-time collaborative editing (in v1)
+
+**Decided:** build real-time co-editing from the start with a CRDT layer — **Yjs +
+`y-prosemirror`**, wired through TipTap's Collaboration extension.
+
+- **Transport/server:** a **Hocuspocus** websocket server (the TipTap-native Yjs backend).
+  It owns the live shared document, broadcasts updates, and exposes persistence + auth hooks.
+- **Live state vs. revisions:** the live document is a Yjs doc, persisted as Yjs updates
+  (binary) so a reconnecting client resumes mid-edit. This is **separate** from the
+  immutable revision history. **Publishing snapshots the current ProseMirror doc into a new
+  `revisions` row** (§4); the Yjs update log is the working state between publishes.
+- **Awareness:** Yjs "awareness" gives presence (who's in the doc, cursors/selections) for
+  free — useful even with the byline being separate from edit attribution.
+- **Attribution:** `revisions.editor_id` at publish records who pressed publish; if you want
+  finer per-author edit credit later, Yjs updates carry an origin/client id we can attribute.
+- **Auth:** the Hocuspocus `onConnect`/`onAuthenticate` hook validates the user's session
+  (via Auth.js token) and checks they may edit that post before joining the room.
+
+This raises the ops footprint (a second long-running service + websocket proxying — see §7),
+which is the main cost of doing it now rather than later.
+
+---
+
+## 4. Data model
+
+```
+users            id, email, name, password_hash | oauth, role, created_at,
+                 moderation_policy('inherit'|'always'|'auto')   -- per-author override
+posts            id, slug, title, status(draft|published|archived),
+                 current_revision_id, created_at, published_at,
+                 moderation_policy('inherit'|'always'|'auto')   -- per-post override
+post_authors     post_id, user_id, byline_order                 -- manual byline, decoupled
+revisions        id, post_id, revision_number, doc JSONB (ProseMirror),
+                 title, editor_id, changelog, created_at         -- IMMUTABLE
+post_collab      post_id, ydoc BYTEA, updated_at                 -- live Yjs state (working draft)
+site_settings    id(singleton), default_moderation_policy, trust_threshold(int, e.g. 3), ...
+commenters       id, user_id NULL, email, display_name,          -- identity for a commenter
+                 approved_count(int), force_moderate(bool)        -- per-commenter override
+comment_threads  id, post_id, anchored_revision_id,
+                 anchor_from int, anchor_to int, quoted_text,
+                 status(active|detached|resolved), created_at
+comments         id, thread_id, parent_comment_id NULL,
+                 commenter_id, body JSONB,
+                 status(pending|approved|spam|deleted),
+                 created_at, edited_at
+```
+
+Notes:
+
+- **Revisions are append-only.** Publishing creates a new row; nothing is overwritten.
+  "Restore version N" = copy doc N into a new revision. Diff view between any two revisions
+  via `prosemirror-changeset`. `editor_id` records who made the revision — separate from the
+  `post_authors` byline.
+- **Drafts / working state** live in `post_collab.ydoc` (the live Yjs document), persisted
+  by Hocuspocus. Edits never pollute revision history; only an explicit **publish** snapshots
+  the current doc into a `revisions` row.
+- **Comment tree**: `parent_comment_id` self-reference; render the tree with one recursive
+  CTE. Plenty fast at hobby scale.
+- A **thread** is the unit anchored to a quote; **comments** form the reply tree inside it.
+- **Commenter identity** (§6): a `commenter` is keyed by account (`user_id`) when logged in,
+  otherwise by email. `approved_count` and `force_moderate` drive the trust model.
+
+---
+
+## 5. Quote anchoring & surviving revisions (the mechanism)
+
+**Creating a comment on a quote**
+1. Reader selects text in the published article. The client reads the selection's
+   ProseMirror positions `{from, to}` in the *current* revision's coordinates, plus the
+   plain quoted text.
+2. POST creates a `comment_thread` with `anchored_revision_id = current`, `anchor_from`,
+   `anchor_to`, `quoted_text`, then the first `comment`.
+
+**Rendering the indicator**
+- On a published post we load the current revision's doc + all active threads.
+- A ProseMirror plugin builds **decorations**: an inline highlight over each
+  `[anchor_from, anchor_to)` range and a small gutter/inline marker (e.g. a count badge)
+  where one or more threads land. Clicking opens the thread panel.
+- Decorations are display-only, so this never alters stored content.
+
+**Surviving a new revision**
+- On publish, compare previous doc → new doc. We don't capture live editing steps from the
+  reader's perspective, so we reconstruct the change set between the two stored docs with
+  `prosemirror-recreate` (→ steps) and build a `Mapping`.
+- For each thread: map `anchor_from`/`anchor_to` through the Mapping.
+  - Range still has positive length → update positions, set `anchored_revision_id = new`.
+  - Range collapsed (the quoted text was deleted) → set `status = detached`.
+- Optional safety net: if mapping looks suspicious, fuzzy-match `quoted_text` against the
+  new doc to re-anchor.
+
+**What the reader sees (decided)**
+- **Every** comment thread — active or detached — always appears in the comment list at the
+  bottom of the post. Detached threads are never hidden.
+- **Active** threads also get the inline highlight + indicator next to the quoted passage.
+- **Detached** threads have no inline indicator (the text is gone). When the reader clicks
+  "jump to quote" on a detached thread, instead of scrolling we show a notice that the
+  quoted passage was edited or removed in a later revision, and offer to show the quote in
+  the context of the revision it was made against.
+
+This is the standard ProseMirror pattern (decorations + position mapping) and keeps the
+content layer and the comment layer cleanly separated.
+
+---
+
+## 6. Commenting, moderation & abuse
+
+**Identity (decided):** Disqus-style. A commenter must at minimum give a **name + email**;
+logging in to an account is also allowed (and a logged-in commenter is the same `commenter`
+record keyed by `user_id`). Email lets us tie anonymous comments to a stable identity for
+the trust model; optional double opt-in verification can come later.
+
+**Moderation policy — three-level cascade (decided).** Each comment's required policy is
+resolved as **post override → author override → site default**, where each level is one of
+`always` (queue for approval), `auto` (publish immediately), or `inherit` (defer to the
+next level up). So the site sets a default, an author can override for all their posts, and
+a single post can override again.
+
+**Trust model (decided).** Independently of the cascade, once a commenter has had
+`trust_threshold` comments approved (default 3, configurable in `site_settings`), their
+later comments auto-approve. A per-commenter `force_moderate` flag overrides this to always
+require approval, no matter how many they've had approved.
+
+Resolution order for a new comment: if the commenter is `force_moderate` → queue. Else if
+trusted (`approved_count >= threshold`) → publish. Else apply the cascade policy.
+
+**Hardening:** sanitize all comment bodies; restrict the comment editor to a safe schema
+(no raw HTML/scripts; links get `rel="nofollow noopener"`). Rate-limit by IP and by
+commenter. Consider Akismet given anonymous commenting is allowed.
+
+---
+
+## 7. Deployment on Linode/Ubuntu
+
+- **Two** Node services under **systemd**: the Next.js app and the **Hocuspocus** collab
+  websocket server. Both behind **nginx**.
+- nginx must **proxy websockets** for the Hocuspocus route (`Upgrade`/`Connection` headers,
+  generous read timeout). Keep it on its own path/subdomain (e.g. `collab.example.com`).
+- **TLS** via Let's Encrypt / certbot, auto-renew (covers the collab host too → `wss://`).
+- **Postgres** on the same box; daily `pg_dump` cron shipped off-box to Linode Object
+  Storage (or S3). Test a restore once — a backup you haven't restored isn't a backup.
+- Deploy flow: build on server (or build artifact + rsync), run Prisma migrations,
+  restart the service. A short `deploy.sh` is enough; no containers needed since you chose
+  the self-managed path. (Docker Compose remains an easy later upgrade for reproducibility.)
+- Firewall: ufw allow 80/443/22 only; Postgres bound to localhost.
+
+---
+
+## 8. Suggested build order
+
+1. Skeleton: Next.js + Prisma + Postgres + Auth.js; users/roles; deploy the empty shell to
+   the Linode end-to-end (nginx+TLS+systemd) so ops is proven early.
+2. Posts + TipTap editor (single-user first) + immutable revisions + publish + diff/restore.
+3. **Real-time collab:** stand up Hocuspocus, wire Yjs + `y-prosemirror`, presence/awareness,
+   auth on connect, persist `post_collab.ydoc`, snapshot-on-publish.
+4. Public rendering of published posts (SSG/SSR) with clean slugs.
+5. Tree comments (no anchoring yet): threads + recursive replies + moderation cascade + trust.
+6. Quote anchoring: selection capture, decoration highlights + indicator, thread panel.
+7. Revision survival: remap-on-publish + detached-thread handling (§5).
+8. Polish: spam controls, search, RSS, author pages.
+
+Two risky parts to de-risk early with throwaway spikes: **collab persistence/auth (step 3)**
+and **anchor remapping across revisions (steps 6–7)**.
+
+---
+
+## 9. Decisions & remaining questions
+
+**Settled**
+- Multi-author: posts carry a manual byline (`post_authors`) decoupled from edit
+  attribution (`revisions.editor_id`) (§3).
+- Concurrency: **real-time collaborative editing in v1** via Yjs + Hocuspocus; live state in
+  `post_collab.ydoc`, snapshot to a revision on publish (§3a).
+- Commenting identity: name+email minimum, login allowed (§6).
+- Moderation: three-level cascade (post → author → site) plus a trust model that
+  auto-approves commenters after N approvals, with a per-commenter force-moderate override (§6).
+- Editor: TipTap. ORM: Prisma.
+- Detached comments: always listed at the bottom; inline indicator only while active; on
+  jump, show an "edited/removed in a later revision" notice (§5).
+
+**Defaults I've assumed (say if you want different)**
+- Trust threshold = 3 approved comments before auto-approval (configurable site-wide).
+- Email is collected but not verified (no double opt-in) in v1.
+- Bylines are chosen from real user accounts (so author pages work), not free text.
+
+**Nothing blocking left.** All six original questions plus concurrency are settled. Remaining
+calls are tuning (trust threshold, email verification) and can change anytime.
