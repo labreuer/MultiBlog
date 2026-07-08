@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
+import { canManagePosts } from "@/lib/authz";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -12,6 +14,11 @@ export default async function DashboardPage() {
       <h1>Dashboard</h1>
       <p>Signed in as {session.user.email}</p>
       <p>Role: {session.user.role}</p>
+      {canManagePosts(session.user.role) && (
+        <p>
+          <Link href="/posts">Manage posts</Link>
+        </p>
+      )}
       <form
         action={async () => {
           "use server";
