@@ -1,0 +1,201 @@
+// Prisma schema for MultiBlog — see PLAN.md §4 for the data model rationale.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+  AUTHOR
+  COMMENTER
+}
+
+enum ModerationPolicy {
+  INHERIT
+  ALWAYS
+  AUTO
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ThreadStatus {
+  ACTIVE
+  DETACHED
+  RESOLVED
+}
+
+enum CommentStatus {
+  PENDING
+  APPROVED
+  SPAM
+  DELETED
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  emailVerified    DateTime?
+  name             String?
+  image            String?
+  passwordHash     String?
+  role             Role              @default(COMMENTER)
+  moderationPolicy ModerationPolicy  @default(INHERIT)
+  createdAt        DateTime          @default(now())
+
+  accounts    Account[]
+  sessions    Session[]
+  postAuthors PostAuthor[]
+  revisions   Revision[]   @relation("RevisionEditor")
+  commenter   Commenter?
+}
+
+// Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Post {
+  id                String     @id @default(cuid())
+  slug              String     @unique
+  title             String
+  status            PostStatus @default(DRAFT)
+  currentRevisionId String?    @unique
+  moderationPolicy  ModerationPolicy @default(INHERIT)
+  createdAt         DateTime   @default(now())
+  publishedAt       DateTime?
+
+  currentRevision Revision?       @relation("CurrentRevision", fields: [currentRevisionId], references: [id])
+  authors         PostAuthor[]
+  revisions       Revision[]      @relation("PostRevisions")
+  collab          PostCollab?
+  threads         CommentThread[]
+}
+
+model PostAuthor {
+  postId      String
+  userId      String
+  bylineOrder Int
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+}
+
+model Revision {
+  id             String   @id @default(cuid())
+  postId         String
+  revisionNumber Int
+  doc            Json
+  title          String
+  editorId       String?
+  changelog      String?
+  createdAt      DateTime @default(now())
+
+  post           Post            @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade)
+  editor         User?           @relation("RevisionEditor", fields: [editorId], references: [id])
+  currentForPost Post?           @relation("CurrentRevision")
+  threads        CommentThread[]
+
+  @@unique([postId, revisionNumber])
+}
+
+model PostCollab {
+  postId    String   @id
+  ydoc      Bytes
+  updatedAt DateTime @updatedAt
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model SiteSettings {
+  id                      Int               @id @default(1)
+  defaultModerationPolicy ModerationPolicy  @default(ALWAYS)
+  trustThreshold          Int               @default(3)
+}
+
+model Commenter {
+  id            String  @id @default(cuid())
+  userId        String? @unique
+  email         String  @unique
+  displayName   String
+  approvedCount Int     @default(0)
+  forceModerate Boolean @default(false)
+
+  user     User?     @relation(fields: [userId], references: [id])
+  comments Comment[]
+}
+
+model CommentThread {
+  id                 String       @id @default(cuid())
+  postId             String
+  anchoredRevisionId String
+  anchorFrom         Int
+  anchorTo           Int
+  quotedText         String
+  status             ThreadStatus @default(ACTIVE)
+  createdAt          DateTime     @default(now())
+
+  post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  revision Revision  @relation(fields: [anchoredRevisionId], references: [id])
+  comments Comment[]
+}
+
+model Comment {
+  id              String        @id @default(cuid())
+  threadId        String
+  parentCommentId String?
+  commenterId     String
+  body            Json
+  status          CommentStatus @default(PENDING)
+  createdAt       DateTime      @default(now())
+  editedAt        DateTime?
+
+  thread    CommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  parent    Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
+  replies   Comment[]     @relation("CommentReplies")
+  commenter Commenter     @relation(fields: [commenterId], references: [id])
+}
