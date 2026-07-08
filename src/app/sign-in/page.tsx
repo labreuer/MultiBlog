@@ -29,6 +29,9 @@ export default function SignInPage() {
       <p>
         No account? <Link href="/sign-up">Sign up</Link>
       </p>
+      <p>
+        <Link href="/forgot-password">Forgot password?</Link>
+      </p>
     </main>
   );
 }

@@ -53,11 +53,12 @@ model User {
   moderationPolicy ModerationPolicy  @default(INHERIT)
   createdAt        DateTime          @default(now())
 
-  accounts    Account[]
-  sessions    Session[]
-  postAuthors PostAuthor[]
-  revisions   Revision[]   @relation("RevisionEditor")
-  commenter   Commenter?
+  accounts            Account[]
+  sessions            Session[]
+  postAuthors         PostAuthor[]
+  revisions           Revision[]          @relation("RevisionEditor")
+  commenter           Commenter?
+  passwordResetTokens PasswordResetToken[]
 }
 
 // Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
@@ -95,6 +96,16 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Post {
