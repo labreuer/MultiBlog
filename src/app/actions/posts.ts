@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { uniqueSlug } from "@/lib/slug";
-import { canManagePosts, canEditAnyPost } from "@/lib/authz";
+import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { Prisma } from "@/generated/prisma/client";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
@@ -16,16 +16,12 @@ async function requireEditableSession(postId: string) {
     redirect("/sign-in");
   }
 
-  const post = await prisma.post.findUnique({
-    where: { id: postId },
-    include: { authors: { select: { userId: true } } },
-  });
+  const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post) {
     throw new Error("Post not found.");
   }
 
-  const isOwner = post.authors.some((a) => a.userId === session.user.id);
-  if (!canEditAnyPost(session.user.role) && !isOwner) {
+  if (!(await canUserEditPost(session.user.id, session.user.role, postId))) {
     throw new Error("You don't have permission to edit this post.");
   }
 

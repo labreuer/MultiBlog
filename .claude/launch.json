@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "collab",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "collab"],
+      "port": 1234
     }
   ]
 }

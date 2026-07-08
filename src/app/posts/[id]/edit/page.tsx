@@ -1,5 +1,4 @@
 import { notFound, redirect } from "next/navigation";
-import type { JSONContent } from "@tiptap/react";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
@@ -16,7 +15,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     where: { id },
     include: {
       authors: { select: { userId: true } },
-      revisions: { orderBy: { revisionNumber: "desc" }, take: 1 },
+      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { title: true, revisionNumber: true } },
     },
   });
   if (!post) {
@@ -39,8 +38,8 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     <PostEditor
       postId={post.id}
       initialTitle={latest?.title ?? post.title}
-      initialDoc={(latest?.doc as JSONContent | undefined) ?? { type: "doc", content: [{ type: "paragraph" }] }}
       revisionNumber={latest?.revisionNumber ?? 0}
+      userName={session.user.name ?? session.user.email ?? "Anonymous"}
     />
   );
 }

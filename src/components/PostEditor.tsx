@@ -1,31 +1,80 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import * as Y from "yjs";
+import { HocuspocusProvider } from "@hocuspocus/provider";
+import type { Editor } from "@tiptap/react";
 import { saveDraft, publishPost } from "@/app/actions/posts";
+import CollabEditorBody from "./CollabEditorBody";
 
 type Props = {
   postId: string;
   initialTitle: string;
-  initialDoc: JSONContent;
   revisionNumber: number;
+  userName: string;
 };
 
-export default function PostEditor({ postId, initialTitle, initialDoc, revisionNumber }: Props) {
+type ConnectionStatus = "connecting" | "connected" | "disconnected";
+
+export default function PostEditor({ postId, initialTitle, revisionNumber, userName }: Props) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [changelog, setChangelog] = useState("");
   const [pending, startTransition] = useTransition();
+  const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  const [peers, setPeers] = useState<string[]>([]);
+  const [editor, setEditor] = useState<Editor | null>(null);
 
-  const editor = useEditor({
-    extensions: [StarterKit],
-    content: initialDoc,
-    immediatelyRender: false,
-  });
+  // Recreate the Y.Doc if postId ever changes under the same mounted instance.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ydoc = useMemo(() => new Y.Doc(), [postId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let instance: HocuspocusProvider | null = null;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/collab-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ postId }),
+        });
+        if (!res.ok) {
+          throw new Error("Failed to authenticate for live editing.");
+        }
+        const { token } = await res.json();
+        if (cancelled) return;
+
+        instance = new HocuspocusProvider({
+          url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
+          name: postId,
+          document: ydoc,
+          token,
+          onStatus: ({ status: s }) => setConnectionStatus(s),
+          onAuthenticationFailed: ({ reason }) => setError(`Live editing unavailable: ${reason}`),
+          onAwarenessUpdate: ({ states }) => {
+            const names = states
+              .map((s) => (s.user as { name?: string } | undefined)?.name)
+              .filter((n): n is string => typeof n === "string" && n !== userName);
+            setPeers(Array.from(new Set(names)));
+          },
+        });
+        setProvider(instance);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to connect.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      instance?.destroy();
+    };
+  }, [postId, ydoc, userName]);
 
   const handleSaveDraft = () => {
     if (!editor) return;
@@ -58,10 +107,6 @@ export default function PostEditor({ postId, initialTitle, initialDoc, revisionN
     });
   };
 
-  if (!editor) {
-    return null;
-  }
-
   return (
     <div style={{ maxWidth: 720, margin: "2rem auto", fontFamily: "sans-serif" }}>
       <input
@@ -70,12 +115,17 @@ export default function PostEditor({ postId, initialTitle, initialDoc, revisionN
         aria-label="Title"
         style={{ fontSize: "1.5rem", width: "100%", marginBottom: 12, padding: 4 }}
       />
-      <div style={{ border: "1px solid #ccc", borderRadius: 4 }}>
-        <Toolbar editor={editor} />
-        <EditorContent editor={editor} style={{ minHeight: 300, padding: 12 }} />
-      </div>
+      <p style={{ color: "#666", fontSize: "0.85rem" }}>
+        {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
+        {peers.length > 0 && ` — editing with ${peers.join(", ")}`}
+      </p>
+      {provider ? (
+        <CollabEditorBody provider={provider} ydoc={ydoc} userName={userName} onEditorReady={setEditor} />
+      ) : (
+        <p>Connecting to live editor…</p>
+      )}
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-        <button type="button" onClick={handleSaveDraft} disabled={pending}>
+        <button type="button" onClick={handleSaveDraft} disabled={pending || !editor}>
           Save draft
         </button>
         <input
@@ -84,38 +134,13 @@ export default function PostEditor({ postId, initialTitle, initialDoc, revisionN
           onChange={(e) => setChangelog(e.target.value)}
           style={{ flex: 1 }}
         />
-        <button type="button" onClick={handlePublish} disabled={pending}>
+        <button type="button" onClick={handlePublish} disabled={pending || !editor}>
           Publish
         </button>
       </div>
       {status && <p style={{ color: "green" }}>{status}</p>}
       {error && <p style={{ color: "crimson" }}>{error}</p>}
       <p style={{ color: "#666", fontSize: "0.9rem" }}>Currently viewing revision #{revisionNumber}.</p>
-    </div>
-  );
-}
-
-function Toolbar({ editor }: { editor: Editor }) {
-  return (
-    <div style={{ display: "flex", gap: 4, padding: 8, borderBottom: "1px solid #ccc" }}>
-      <button type="button" onClick={() => editor.chain().focus().toggleBold().run()}>
-        Bold
-      </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()}>
-        Italic
-      </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
-        H2
-      </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()}>
-        Bullets
-      </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()}>
-        Numbered
-      </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleBlockquote().run()}>
-        Quote
-      </button>
     </div>
   );
 }
