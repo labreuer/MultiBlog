@@ -8,6 +8,7 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import styles from "./PostEditor.module.css";
+import proseStyles from "@/styles/prose.module.css";
 
 const CARET_COLORS = ["#f783ac", "#845ef7", "#339af0", "#20c997", "#fab005", "#ff6b6b"];
 
@@ -48,7 +49,7 @@ export default function CollabEditorBody({ provider, ydoc, userName, onEditorRea
   return (
     <div className={styles.editorFrame}>
       <Toolbar editor={editor} />
-      <EditorContent editor={editor} className={styles.editorContent} />
+      <EditorContent editor={editor} className={`${styles.editorContent} ${proseStyles.prose}`} />
     </div>
   );
 }
