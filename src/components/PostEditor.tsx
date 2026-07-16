@@ -7,6 +7,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
 import { saveDraft, publishPost } from "@/app/actions/posts";
 import CollabEditorBody from "./CollabEditorBody";
+import styles from "./PostEditor.module.css";
 
 type Props = {
   postId: string;
@@ -108,14 +109,14 @@ export default function PostEditor({ postId, initialTitle, revisionNumber, userN
   };
 
   return (
-    <div style={{ maxWidth: 720, margin: "2rem auto", fontFamily: "sans-serif" }}>
+    <div className={styles.container}>
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         aria-label="Title"
-        style={{ fontSize: "1.5rem", width: "100%", marginBottom: 12, padding: 4 }}
+        className={styles.titleInput}
       />
-      <p style={{ color: "#666", fontSize: "0.85rem" }}>
+      <p className={styles.statusLine}>
         {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
         {peers.length > 0 && ` — editing with ${peers.join(", ")}`}
       </p>
@@ -124,7 +125,7 @@ export default function PostEditor({ postId, initialTitle, revisionNumber, userN
       ) : (
         <p>Connecting to live editor…</p>
       )}
-      <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+      <div className={styles.actionsRow}>
         <button type="button" onClick={handleSaveDraft} disabled={pending || !editor}>
           Save draft
         </button>
@@ -132,15 +133,15 @@ export default function PostEditor({ postId, initialTitle, revisionNumber, userN
           placeholder="Changelog (optional)"
           value={changelog}
           onChange={(e) => setChangelog(e.target.value)}
-          style={{ flex: 1 }}
+          className={styles.changelogInput}
         />
         <button type="button" onClick={handlePublish} disabled={pending || !editor}>
           Publish
         </button>
       </div>
-      {status && <p style={{ color: "green" }}>{status}</p>}
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
-      <p style={{ color: "#666", fontSize: "0.9rem" }}>Currently viewing revision #{revisionNumber}.</p>
+      {status && <p className={styles.statusMessage}>{status}</p>}
+      {error && <p className={styles.errorMessage}>{error}</p>}
+      <p className={styles.revisionNote}>Currently viewing revision #{revisionNumber}.</p>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
+import styles from "./PostEditor.module.css";
 
 const CARET_COLORS = ["#f783ac", "#845ef7", "#339af0", "#20c997", "#fab005", "#ff6b6b"];
 
@@ -45,32 +46,48 @@ export default function CollabEditorBody({ provider, ydoc, userName, onEditorRea
   }
 
   return (
-    <div style={{ border: "1px solid #ccc", borderRadius: 4 }}>
+    <div className={styles.editorFrame}>
       <Toolbar editor={editor} />
-      <EditorContent editor={editor} style={{ minHeight: 300, padding: 12 }} />
+      <EditorContent editor={editor} className={styles.editorContent} />
     </div>
   );
 }
 
 function Toolbar({ editor }: { editor: Editor }) {
   return (
-    <div style={{ display: "flex", gap: 4, padding: 8, borderBottom: "1px solid #ccc" }}>
-      <button type="button" onClick={() => editor.chain().focus().toggleBold().run()}>
+    <div className={styles.toolbar}>
+      <button type="button" className={styles.toolbarButton} onClick={() => editor.chain().focus().toggleBold().run()}>
         Bold
       </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()}>
+      <button type="button" className={styles.toolbarButton} onClick={() => editor.chain().focus().toggleItalic().run()}>
         Italic
       </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
+      <button
+        type="button"
+        className={styles.toolbarButton}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+      >
         H2
       </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()}>
+      <button
+        type="button"
+        className={styles.toolbarButton}
+        onClick={() => editor.chain().focus().toggleBulletList().run()}
+      >
         Bullets
       </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()}>
+      <button
+        type="button"
+        className={styles.toolbarButton}
+        onClick={() => editor.chain().focus().toggleOrderedList().run()}
+      >
         Numbered
       </button>
-      <button type="button" onClick={() => editor.chain().focus().toggleBlockquote().run()}>
+      <button
+        type="button"
+        className={styles.toolbarButton}
+        onClick={() => editor.chain().focus().toggleBlockquote().run()}
+      >
         Quote
       </button>
     </div>

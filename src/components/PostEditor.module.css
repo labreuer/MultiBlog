@@ -1,0 +1,146 @@
+.container {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem;
+  font-family: sans-serif;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  /* A definite (not min-) height is required: flex-shrink has no budget to
+     work with otherwise, so .editorContent below would never be bounded —
+     it'd just grow to fit its content instead of scrolling internally.
+     Fallback first for browsers without dvh support; the dvh rule after it
+     overrides where available and correctly excludes mobile browser chrome. */
+  height: 100vh;
+  height: 100dvh;
+}
+
+.titleInput {
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 4px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.statusLine {
+  color: #666;
+  font-size: 0.85rem;
+  flex: 0 0 auto;
+}
+
+/* Grows to fill whatever space is left after the header/footer. min-height:
+   0 overrides the default content-based automatic minimum size that flex
+   items get — without it, .editorContent's own long content would inflate
+   this box instead of scrolling inside it. The 300px floor lives on
+   .editorContent itself; when the available space can't satisfy it,
+   .editorContent overflows this frame (which has no overflow:hidden), and
+   the page scrolls to reveal it instead of the editor shrinking below a
+   usable height — body { overflow-x: hidden } in globals.css implicitly
+   computes body's overflow-y to auto per the CSS overflow spec (an
+   element can't have one axis hidden and the other stay visible), which
+   is what makes that page-level scroll actually happen. */
+.editorFrame {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid #ccc;
+  flex: 0 0 auto;
+}
+
+.toolbarButton {
+  min-height: 36px;
+  padding: 4px 10px;
+}
+
+/* The scroll container: sized by flex-grow up to the space available, with
+   a 300px floor and its own scrollbar for content taller than that. */
+.editorContent {
+  flex: 1 1 auto;
+  min-height: 300px;
+  overflow-y: auto;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+/* .tiptap is the actual contenteditable ProseMirror node, rendered by the
+   TipTap library itself (unscoped, hence :global). Without this, it's only
+   as tall as its content, leaving dead space below short content that
+   looks editable but isn't. flex: 1 1 auto stretches it to fill
+   .editorContent when content is short; when content is taller than the
+   available space, .tiptap's own automatic (content-based) minimum size
+   keeps it from being squashed, and the overflow scrolls within
+   .editorContent instead — a percentage min-height here doesn't reliably
+   resolve against a flex-item ancestor, so this uses flex-grow instead. */
+.editorContent :global(.tiptap) {
+  flex: 1 1 auto;
+  outline: none;
+  cursor: text;
+}
+
+.actionsRow {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.changelogInput {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.statusMessage {
+  color: green;
+}
+
+.errorMessage {
+  color: crimson;
+}
+
+.revisionNote {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 0.75rem;
+  }
+
+  .toolbarButton {
+    min-height: 44px;
+    padding: 6px 12px;
+  }
+
+  .editorContent {
+    min-height: 200px;
+  }
+
+  .actionsRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .changelogInput {
+    flex: 1 1 auto;
+  }
+}
