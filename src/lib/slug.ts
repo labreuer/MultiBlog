@@ -1,5 +1,17 @@
 import { prisma } from "@/lib/prisma";
 
+// Top-level route segments under src/app/ — a post slug matching one of
+// these would be shadowed by the static route and never resolve to /[slug].
+const RESERVED_SLUGS = new Set([
+  "api",
+  "dashboard",
+  "forgot-password",
+  "posts",
+  "reset-password",
+  "sign-in",
+  "sign-up",
+]);
+
 export function slugify(title: string): string {
   const base = title
     .toLowerCase()
@@ -11,7 +23,7 @@ export function slugify(title: string): string {
 
 export async function uniqueSlug(title: string): Promise<string> {
   const base = slugify(title);
-  let candidate = base;
+  let candidate = RESERVED_SLUGS.has(base) ? `${base}-post` : base;
   let suffix = 2;
   while (await prisma.post.findUnique({ where: { slug: candidate }, select: { id: true } })) {
     candidate = `${base}-${suffix}`;

@@ -2,12 +2,11 @@ import "dotenv/config";
 import * as Y from "yjs";
 import { Server } from "@hocuspocus/server";
 import { TiptapTransformer } from "@hocuspocus/transformer";
-import StarterKit from "@tiptap/starter-kit";
 import { prisma } from "../src/lib/prisma";
 import { verifyCollabToken } from "../src/lib/collab-token";
+import { contentExtensions } from "../src/lib/tiptap-schema";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
-const EXTENSIONS = [StarterKit];
 const PORT = Number(process.env.COLLAB_PORT ?? 1234);
 
 const server = new Server({
@@ -35,7 +34,7 @@ const server = new Server({
       where: { postId: documentName },
       orderBy: { revisionNumber: "desc" },
     });
-    const seedYdoc = TiptapTransformer.toYdoc(latestRevision?.doc ?? EMPTY_DOC, "default", EXTENSIONS);
+    const seedYdoc = TiptapTransformer.toYdoc(latestRevision?.doc ?? EMPTY_DOC, "default", contentExtensions);
     Y.applyUpdate(document, Y.encodeStateAsUpdate(seedYdoc));
   },
 
