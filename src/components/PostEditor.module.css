@@ -65,6 +65,49 @@
   padding: 4px 10px;
 }
 
+/* Split button: .quoteGroup has no gap of its own, so the two buttons sit
+   pixel-adjacent instead of getting .toolbar's normal 4px inter-button gap. */
+.quoteGroup {
+  position: relative;
+  display: inline-flex;
+}
+
+.quoteDropdownTrigger {
+  min-height: 36px;
+  padding: 4px 6px;
+  line-height: 1;
+  font-size: 0.6rem;
+  cursor: pointer;
+}
+
+.quoteMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.quoteMenuItem {
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.quoteMenuItem:hover {
+  background: #f0f0f0;
+}
+
 /* The scroll container: sized by flex-grow up to the space available, with
    a 300px floor and its own scrollbar for content taller than that. */
 .editorContent {
@@ -129,6 +172,11 @@
   .toolbarButton {
     min-height: 44px;
     padding: 6px 12px;
+  }
+
+  .quoteDropdownTrigger {
+    min-height: 44px;
+    padding: 6px 8px;
   }
 
   .editorContent {

@@ -9,6 +9,7 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import styles from "./PostEditor.module.css";
 import proseStyles from "@/styles/prose.module.css";
+import QuoteControls from "./QuoteControls";
 
 const CARET_COLORS = ["#f783ac", "#845ef7", "#339af0", "#20c997", "#fab005", "#ff6b6b"];
 
@@ -84,12 +85,13 @@ function Toolbar({ editor }: { editor: Editor }) {
       >
         Numbered
       </button>
+      <QuoteControls editor={editor} />
       <button
         type="button"
         className={styles.toolbarButton}
-        onClick={() => editor.chain().focus().toggleBlockquote().run()}
+        onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
       >
-        Quote
+        Clear formatting
       </button>
     </div>
   );
