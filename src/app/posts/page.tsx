@@ -45,7 +45,8 @@ export default async function PostsPage() {
                 [{post.status}
                 {post.revisions[0] ? ` · last saved ${post.revisions[0].createdAt.toLocaleString()}` : ""}]
               </span>{" "}
-              <Link href={`/posts/${post.id}/history`}>history</Link>
+              <Link href={`/posts/${post.id}/history`}>history</Link>{" "}
+              <Link href={`/posts/${post.id}/comments`}>comments</Link>
             </li>
           ))}
         </ul>

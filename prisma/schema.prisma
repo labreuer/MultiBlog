@@ -53,12 +53,13 @@ model User {
   moderationPolicy ModerationPolicy  @default(INHERIT)
   createdAt        DateTime          @default(now())
 
-  accounts            Account[]
-  sessions            Session[]
-  postAuthors         PostAuthor[]
-  revisions           Revision[]          @relation("RevisionEditor")
-  commenter           Commenter?
-  passwordResetTokens PasswordResetToken[]
+  accounts             Account[]
+  sessions             Session[]
+  postAuthors          PostAuthor[]
+  revisions            Revision[]           @relation("RevisionEditor")
+  commenter            Commenter?
+  passwordResetTokens  PasswordResetToken[]
+  commentStatusChanges Comment[]            @relation("CommentStatusChangedBy")
 }
 
 // Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
@@ -196,17 +197,21 @@ model CommentThread {
 }
 
 model Comment {
-  id              String        @id @default(cuid())
-  threadId        String
-  parentCommentId String?
-  commenterId     String
-  body            Json
-  status          CommentStatus @default(PENDING)
-  createdAt       DateTime      @default(now())
-  editedAt        DateTime?
+  id                String        @id @default(cuid())
+  threadId          String
+  parentCommentId   String?
+  commenterId       String
+  body              Json
+  status            CommentStatus @default(PENDING)
+  ipAddress         String?
+  statusChangedById String?
+  statusChangedAt   DateTime?
+  createdAt         DateTime      @default(now())
+  editedAt          DateTime?
 
-  thread    CommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  parent    Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
-  replies   Comment[]     @relation("CommentReplies")
-  commenter Commenter     @relation(fields: [commenterId], references: [id])
+  thread          CommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  parent          Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
+  replies         Comment[]     @relation("CommentReplies")
+  commenter       Commenter     @relation(fields: [commenterId], references: [id])
+  statusChangedBy User?         @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
 }

@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import SiteHeader from "@/components/SiteHeader";
+import CommentSection from "@/components/CommentSection";
 import proseStyles from "@/styles/prose.module.css";
 
 export const revalidate = 60;
@@ -74,6 +75,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
           {post.publishedAt?.toLocaleDateString()}
         </p>
         <article className={proseStyles.prose}>{content}</article>
+        <CommentSection postId={post.id} />
         <p>
           <Link href="/">← Back to all posts</Link>
         </p>
