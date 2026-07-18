@@ -9,9 +9,19 @@ type Props = {
   postId: string;
   parentCommentId?: string;
   userName: string | null;
+  anchorFrom?: number;
+  anchorTo?: number;
+  quotedText?: string;
 };
 
-export default function CommentForm({ postId, parentCommentId, userName }: Props) {
+export default function CommentForm({
+  postId,
+  parentCommentId,
+  userName,
+  anchorFrom,
+  anchorTo,
+  quotedText,
+}: Props) {
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
   if (state.status) {
@@ -26,6 +36,13 @@ export default function CommentForm({ postId, parentCommentId, userName }: Props
     <form action={formAction} style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <input type="hidden" name="postId" value={postId} />
       {parentCommentId && <input type="hidden" name="parentCommentId" value={parentCommentId} />}
+      {anchorFrom !== undefined && anchorTo !== undefined && quotedText && (
+        <>
+          <input type="hidden" name="anchorFrom" value={anchorFrom} />
+          <input type="hidden" name="anchorTo" value={anchorTo} />
+          <input type="hidden" name="quotedText" value={quotedText} />
+        </>
+      )}
       {!userName && (
         <>
           <input name="name" type="text" placeholder="Name" required />

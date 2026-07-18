@@ -19,3 +19,50 @@
   border-left: 3px solid #ccc;
   color: #555;
 }
+
+/* Quote-anchoring decorations (step 6) — set as literal class names by a
+   ProseMirror plugin, not through this module's scoping, hence :global(). */
+.prose :global(.quote-highlight) {
+  background: #fff3b0;
+  border-radius: 2px;
+}
+
+.prose :global(.quote-indicator) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-left: 2px;
+  border: none;
+  border-radius: 9px;
+  background: #d4a017;
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: super;
+}
+
+.prose :global(.quote-indicator:hover) {
+  background: #b8860b;
+}
+
+/* Triggered from the comments section's jump-to-quote arrow (see
+   QuoteThreadHeader) to draw the eye back to the source text — the base
+   .quote-highlight background is too close to this pulse color to read as
+   "flash" on its own, so it briefly intensifies to a more saturated gold. */
+.prose :global(.quote-highlight.pulse) {
+  animation: quoteHighlightPulse 0.6s ease-in-out 2;
+}
+
+@keyframes quoteHighlightPulse {
+  0%,
+  100% {
+    background-color: #fff3b0;
+  }
+  50% {
+    background-color: #ffd43b;
+  }
+}

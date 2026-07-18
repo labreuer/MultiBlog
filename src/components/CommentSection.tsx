@@ -1,7 +1,8 @@
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getPostThreadsWithApprovedComments } from "@/lib/comment-data";
 import CommentForm from "./CommentForm";
-import CommentNode, { type CommentNodeData } from "./CommentNode";
+import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
+import { type CommentNodeData } from "./CommentNode";
 
 function buildTree(
   flat: { id: string; parentCommentId: string | null; displayName: string; bodyText: string; createdAt: string }[],
@@ -27,33 +28,38 @@ export default async function CommentSection({ postId }: { postId: string }) {
   const session = await auth();
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
 
-  const thread = await prisma.commentThread.findFirst({ where: { postId, quotedText: "" } });
-  const comments = thread
-    ? await prisma.comment.findMany({
-        where: { threadId: thread.id, status: "APPROVED" },
-        orderBy: { createdAt: "asc" },
-        include: { commenter: { select: { displayName: true } } },
-      })
-    : [];
+  const threads = await getPostThreadsWithApprovedComments(postId);
+  const generalThread = threads.find((t) => t.quotedText === "");
+  const quoteThreads = threads.filter((t) => t.quotedText !== "");
 
-  const tree = buildTree(
-    comments.map((c) => ({
-      id: c.id,
-      parentCommentId: c.parentCommentId,
-      displayName: c.commenter.displayName,
-      bodyText: (c.body as { text?: string } | null)?.text ?? "",
-      createdAt: c.createdAt.toISOString(),
-    })),
-  );
+  const entries: CommentEntry[] = [
+    ...quoteThreads.flatMap((thread) =>
+      buildTree(thread.comments).map((root) => ({
+        threadId: thread.id,
+        quotedText: thread.quotedText,
+        anchorFrom: thread.anchorFrom,
+        root,
+      })),
+    ),
+    ...(generalThread
+      ? buildTree(generalThread.comments).map((root) => ({
+          threadId: generalThread.id,
+          quotedText: "",
+          anchorFrom: null,
+          root,
+        }))
+      : []),
+  ];
 
   return (
     <section style={{ marginTop: "2rem", paddingTop: "1rem", borderTop: "1px solid #ddd" }}>
       <h2>Comments</h2>
       <CommentForm postId={postId} userName={userName} />
-      {tree.length === 0 ? (
+
+      {threads.length === 0 ? (
         <p style={{ color: "#666" }}>No comments yet.</p>
       ) : (
-        tree.map((c) => <CommentNode key={c.id} comment={c} postId={postId} userName={userName} />)
+        <CommentEntryList entries={entries} postId={postId} userName={userName} />
       )}
     </section>
   );

@@ -1,0 +1,57 @@
+"use client";
+
+import { useState } from "react";
+import CommentNode, { type CommentNodeData } from "./CommentNode";
+import QuoteThreadHeader from "./QuoteThreadHeader";
+
+export type CommentEntry = {
+  threadId: string;
+  quotedText: string;
+  anchorFrom: number | null;
+  root: CommentNodeData;
+};
+
+type SortMode = "datetime" | "quoteIndex";
+
+type Props = {
+  entries: CommentEntry[];
+  postId: string;
+  userName: string | null;
+};
+
+export default function CommentEntryList({ entries, postId, userName }: Props) {
+  const [sortMode, setSortMode] = useState<SortMode>("datetime");
+
+  const sorted = [...entries].sort((a, b) => {
+    if (sortMode === "quoteIndex") {
+      const aIndex = a.anchorFrom ?? Infinity;
+      const bIndex = b.anchorFrom ?? Infinity;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+    }
+    return new Date(a.root.createdAt).getTime() - new Date(b.root.createdAt).getTime();
+  });
+
+  return (
+    <>
+      <div style={{ margin: "12px 0" }}>
+        <label style={{ fontSize: "0.85rem", color: "#555" }}>
+          Sort by:{" "}
+          <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
+            <option value="datetime">Comment date</option>
+            <option value="quoteIndex">Quoted text position</option>
+          </select>
+        </label>
+      </div>
+
+      {sorted.map((entry) => (
+        // data-thread-id (not id) since sorting can scatter a thread's entries
+        // apart, and every one of them needs to be reachable — AnnotatableArticle's
+        // onIndicatorClick uses querySelectorAll to scroll to and flash all of them.
+        <div key={entry.root.id} data-thread-id={entry.threadId} style={{ marginTop: 24 }}>
+          {entry.quotedText && <QuoteThreadHeader threadId={entry.threadId} quotedText={entry.quotedText} />}
+          <CommentNode comment={entry.root} postId={postId} userName={userName} />
+        </div>
+      ))}
+    </>
+  );
+}

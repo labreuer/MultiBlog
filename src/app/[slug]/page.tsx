@@ -3,10 +3,13 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
 import { renderToReactElement } from "@tiptap/static-renderer";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { contentExtensions } from "@/lib/tiptap-schema";
+import { getPostThreadsWithApprovedComments } from "@/lib/comment-data";
 import SiteHeader from "@/components/SiteHeader";
+import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -56,14 +59,20 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
     notFound();
   }
 
+  const session = await auth();
+  const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
+
   const byline = post.authors
     .map((a) => a.user.name)
     .filter(Boolean)
     .join(", ");
-  const content = renderToReactElement({
-    content: post.currentRevision.doc as JSONContent,
-    extensions: contentExtensions,
-  });
+  const doc = post.currentRevision.doc as JSONContent;
+  const staticContent = renderToReactElement({ content: doc, extensions: contentExtensions });
+
+  const threads = await getPostThreadsWithApprovedComments(post.id);
+  const quoteHighlights = threads
+    .filter((t) => t.quotedText !== "")
+    .map((t) => ({ id: t.id, from: t.anchorFrom, to: t.anchorTo, count: t.comments.length }));
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", fontFamily: "sans-serif" }}>
@@ -74,7 +83,13 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
           {byline && `By ${byline} — `}
           {post.publishedAt?.toLocaleDateString()}
         </p>
-        <article className={proseStyles.prose}>{content}</article>
+        <AnnotatableArticle
+          postId={post.id}
+          doc={doc}
+          threads={quoteHighlights}
+          userName={userName}
+          staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
+        />
         <CommentSection postId={post.id} />
         <p>
           <Link href="/">← Back to all posts</Link>

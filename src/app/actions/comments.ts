@@ -21,6 +21,9 @@ export async function submitComment(
   const postId = formData.get("postId");
   const parentCommentId = formData.get("parentCommentId");
   const body = formData.get("body");
+  const anchorFromRaw = formData.get("anchorFrom");
+  const anchorToRaw = formData.get("anchorTo");
+  const quotedText = formData.get("quotedText");
 
   if (typeof postId !== "string" || !postId) {
     return { error: "Missing post." };
@@ -79,30 +82,52 @@ export async function submitComment(
         create: { email, displayName },
       });
 
-  // Every comment in step 5 (no quote-anchoring yet, that's a later step)
-  // attaches to one general per-post thread, created lazily on first use.
-  let thread = await prisma.commentThread.findFirst({
-    where: { postId, quotedText: "" },
-  });
-  if (!thread) {
-    thread = await prisma.commentThread.create({
-      data: {
-        postId,
-        anchoredRevisionId: post.currentRevisionId,
-        anchorFrom: 0,
-        anchorTo: 0,
-        quotedText: "",
-      },
-    });
-  }
-
   let parentId: string | null = null;
+  let thread: { id: string };
+
   if (typeof parentCommentId === "string" && parentCommentId) {
-    const parent = await prisma.comment.findUnique({ where: { id: parentCommentId } });
-    if (!parent || parent.threadId !== thread.id) {
+    // A reply always belongs to its parent's existing thread — never
+    // creates a new one, even if anchor fields were also submitted.
+    const parent = await prisma.comment.findUnique({
+      where: { id: parentCommentId },
+      include: { thread: { select: { postId: true } } },
+    });
+    if (!parent || parent.thread.postId !== postId) {
       return { error: "Invalid reply target." };
     }
     parentId = parent.id;
+    thread = { id: parent.threadId };
+  } else if (typeof anchorFromRaw === "string" && typeof anchorToRaw === "string" && typeof quotedText === "string") {
+    const anchorFrom = Number(anchorFromRaw);
+    const anchorTo = Number(anchorToRaw);
+    if (!Number.isInteger(anchorFrom) || !Number.isInteger(anchorTo) || anchorTo <= anchorFrom || !quotedText.trim()) {
+      return { error: "Invalid quote selection." };
+    }
+    thread =
+      (await prisma.commentThread.findFirst({ where: { postId, anchorFrom, anchorTo } })) ??
+      (await prisma.commentThread.create({
+        data: {
+          postId,
+          anchoredRevisionId: post.currentRevisionId,
+          anchorFrom,
+          anchorTo,
+          quotedText: quotedText.trim(),
+        },
+      }));
+  } else {
+    // No parent, no anchor: falls back to the one general per-post thread,
+    // created lazily on first use.
+    thread =
+      (await prisma.commentThread.findFirst({ where: { postId, quotedText: "" } })) ??
+      (await prisma.commentThread.create({
+        data: {
+          postId,
+          anchoredRevisionId: post.currentRevisionId,
+          anchorFrom: 0,
+          anchorTo: 0,
+          quotedText: "",
+        },
+      }));
   }
 
   const siteSettings = await getSiteSettings();
