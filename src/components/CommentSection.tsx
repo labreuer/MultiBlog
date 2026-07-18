@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { getPostThreadsWithApprovedComments } from "@/lib/comment-data";
+import { getPostThreadsWithApprovedComments, getDetachedThreadContext } from "@/lib/comment-data";
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
 import { type CommentNodeData } from "./CommentNode";
@@ -32,12 +32,24 @@ export default async function CommentSection({ postId }: { postId: string }) {
   const generalThread = threads.find((t) => t.quotedText === "");
   const quoteThreads = threads.filter((t) => t.quotedText !== "");
 
+  const detachedContextByThread = new Map<string, string | null>();
+  for (const thread of quoteThreads) {
+    if (thread.status === "DETACHED") {
+      detachedContextByThread.set(
+        thread.id,
+        await getDetachedThreadContext(thread.anchoredRevisionId, thread.anchorFrom, thread.anchorTo),
+      );
+    }
+  }
+
   const entries: CommentEntry[] = [
     ...quoteThreads.flatMap((thread) =>
       buildTree(thread.comments).map((root) => ({
         threadId: thread.id,
         quotedText: thread.quotedText,
         anchorFrom: thread.anchorFrom,
+        status: thread.status,
+        context: detachedContextByThread.get(thread.id) ?? null,
         root,
       })),
     ),
@@ -46,6 +58,8 @@ export default async function CommentSection({ postId }: { postId: string }) {
           threadId: generalThread.id,
           quotedText: "",
           anchorFrom: null,
+          status: generalThread.status,
+          context: null,
           root,
         }))
       : []),

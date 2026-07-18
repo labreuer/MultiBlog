@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { uniqueSlug } from "@/lib/slug";
 import { canManagePosts, canUserEditPost } from "@/lib/authz";
+import { remapThreadsToRevision } from "@/lib/anchor-remap";
 import { Prisma } from "@/generated/prisma/client";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
@@ -127,6 +128,8 @@ export async function publishPost(
       publishedAt: post.publishedAt ?? new Date(),
     },
   });
+
+  await remapThreadsToRevision(postId, revision.id);
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);

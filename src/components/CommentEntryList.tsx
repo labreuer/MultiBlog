@@ -3,11 +3,14 @@
 import { useState } from "react";
 import CommentNode, { type CommentNodeData } from "./CommentNode";
 import QuoteThreadHeader from "./QuoteThreadHeader";
+import type { ThreadStatus } from "@/generated/prisma/enums";
 
 export type CommentEntry = {
   threadId: string;
   quotedText: string;
   anchorFrom: number | null;
+  status: ThreadStatus;
+  context: string | null;
   root: CommentNodeData;
 };
 
@@ -48,7 +51,14 @@ export default function CommentEntryList({ entries, postId, userName }: Props) {
         // apart, and every one of them needs to be reachable — AnnotatableArticle's
         // onIndicatorClick uses querySelectorAll to scroll to and flash all of them.
         <div key={entry.root.id} data-thread-id={entry.threadId} style={{ marginTop: 24 }}>
-          {entry.quotedText && <QuoteThreadHeader threadId={entry.threadId} quotedText={entry.quotedText} />}
+          {entry.quotedText && (
+            <QuoteThreadHeader
+              threadId={entry.threadId}
+              quotedText={entry.quotedText}
+              status={entry.status}
+              context={entry.context}
+            />
+          )}
           <CommentNode comment={entry.root} postId={postId} userName={userName} />
         </div>
       ))}

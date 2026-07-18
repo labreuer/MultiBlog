@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
+    "@fellow/prosemirror-recreate-transform": "^1.2.3",
     "@hocuspocus/provider": "^4.3.0",
     "@hocuspocus/server": "^4.3.0",
     "@hocuspocus/transformer": "^4.3.0",

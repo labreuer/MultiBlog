@@ -248,11 +248,11 @@ calls are tuning (trust threshold, email verification) and can change anytime.
 
 ---
 
-## 10. Implementation progress (as of 2026-07-17)
+## 10. Implementation progress (as of 2026-07-18)
 
-Steps 1–6 of §8 are built and verified locally. Nothing is deployed — the Linode/nginx/TLS
-work from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev
-box. Git history carries per-step detail.
+Steps 1–7 of §8 are built and verified locally. Nothing is deployed — the deployment work
+from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev box.
+Git history carries per-step detail.
 
 **Done**
 
@@ -281,25 +281,50 @@ box. Git history carries per-step detail.
    jump-back arrow (pulses the source text); sort control (date vs. article position).
    Overlapping quote ranges are pre-split into non-overlapping segments because ProseMirror
    silently drops one decoration's custom attributes where inline decorations overlap.
+7. **Revision survival** — on publish, `src/lib/anchor-remap.ts` groups every ACTIVE
+   quote thread by its current `anchoredRevisionId`, diffs that revision's doc against the
+   newly-published one with `@fellow/prosemirror-recreate-transform`'s `recreateTransform`
+   (a community fork of the `prosemirror-recreate-steps` package this plan originally named —
+   same mechanism, actively maintained), and maps each anchor through the resulting
+   `Mapping`, biasing the start forward and the end backward so text inserted exactly at a
+   boundary doesn't get pulled into the quote. A mapped range that collapses, or whose text
+   no longer matches the stored `quotedText` (the §5 "fuzzy-match" safety net, done as an
+   exact-match check rather than fuzzy), flips the thread to `DETACHED` and freezes its
+   anchor at the last revision it was valid against. Detached threads lose the inline
+   highlight/indicator (`page.tsx` only builds decorations for `ACTIVE` threads) but stay
+   listed at the bottom with a notice and a "show where it used to appear" toggle that pulls
+   an ~80-char-padded snippet from the frozen revision's doc (`getDetachedThreadContext` in
+   `comment-data.ts`) — satisfying §5's "show the quote in context of the revision it was
+   made against" without a new public revision-viewer route/page. Verified against the
+   `my-own-test` post's pre-existing stale anchors (§10 "known gaps" below, now resolved):
+   editing text before the "kind"/"kind of" quotes and republishing moved both anchors
+   forward by the exact inserted length and re-pinned them to the new revision; deleting the
+   "consequat" quote's text and republishing flipped that thread to `DETACHED` with a working
+   context snippet, while unrelated ACTIVE threads remapped correctly alongside it.
 
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
   XSS surface, so the DOMPurify/strict-schema work is deferred until rich comments happen.
 - Email delivery is a **console-log stub** (`src/lib/mail.ts`) behind a `sendMail()` seam.
-- The revision **diff view** uses a self-contained word-level LCS text diff
-  (`src/lib/diff.ts`), not `prosemirror-changeset`/`prosemirror-recreate` — that machinery
-  is deferred to step 7, where it's load-bearing for anchor remapping.
+- The revision **diff view** (history page) still uses a self-contained word-level LCS text
+  diff (`src/lib/diff.ts`), not the ProseMirror-aware diff machinery — that's cosmetic (plain
+  text is good enough for a human reading a diff) and unrelated to anchor remapping, which
+  now does use real ProseMirror diffing (`@fellow/prosemirror-recreate-transform`, step 7
+  above) since positions genuinely need to survive structural edits, not just look diffable.
 - With multiple co-authors, moderation overrides combine **most-conservative-wins** (the
   plan's cascade wording assumed a single author).
 - General (non-quote) comments live in one per-post thread keyed by `quoted_text = ''`.
 
-**Known gaps → step 7 is next**
+**Known gaps → step 8 is next**
 
-- **Anchors are not remapped on publish.** Threads store `anchored_revision_id`, but
-  highlights render against the *current* doc using possibly-stale positions. Two existing
-  threads on the `my-own-test` post are anchored to revision 4 while the post is on 6 —
-  they only display correctly because the text at those offsets happens to be unchanged.
-  Detached-thread status/UX (§5 "what the reader sees") is entirely unbuilt.
 - Step 8 items untouched: rate limiting, Akismet, search, RSS, author pages.
 - No deployment; `.env` secrets are dev-only.
+- `restoreRevision` (history page) creates a new revision row but doesn't publish it —
+  the author still has to hit Publish afterward, which is when remapping runs. Not a gap
+  particular to step 7; that's just what "restore" has always meant here (§8 step 2).
+- The "quoted-text position" sort in the comment list compares `anchorFrom` across threads
+  that may be anchored to *different* revisions (an active thread's position is in the
+  current doc's coordinates; a detached thread's is frozen in an old revision's) — so sort
+  order between an active and a detached entry is not meaningful. Pre-existing limitation,
+  more visible now that detached threads are a real state instead of a hypothetical one.
