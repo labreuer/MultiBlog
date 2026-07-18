@@ -250,7 +250,7 @@ calls are tuning (trust threshold, email verification) and can change anytime.
 
 ## 10. Implementation progress (as of 2026-07-18)
 
-Steps 1–7 of §8 are built and verified locally. Nothing is deployed — the deployment work
+Steps 1–8 of §8 are built and verified locally. Nothing is deployed — the deployment work
 from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev box.
 Git history carries per-step detail.
 
@@ -301,6 +301,26 @@ Git history carries per-step detail.
    forward by the exact inserted length and re-pinned them to the new revision; deleting the
    "consequat" quote's text and republishing flipped that thread to `DETACHED` with a working
    context snippet, while unrelated ACTIVE threads remapped correctly alongside it.
+8. **Polish** — rate limiting, a spam-check seam, search, RSS, and author pages:
+   - **Rate limiting** (`src/lib/rate-limit.ts`): reuses `Comment.ipAddress`/`createdAt`
+     (already recorded for moderation) rather than a separate table — a rolling 10-minute
+     count, capped at 5 by IP and 5 by commenter. Checked in `submitComment` before thread
+     creation, so a blocked attempt doesn't leave an orphan thread behind. Thresholds are
+     hardcoded, not admin-configurable — consistent with `trustThreshold` also having no
+     admin UI yet.
+   - **Spam-check seam** (`src/lib/spam-check.ts`): `checkSpam()` stubbed exactly like
+     `sendMail()` in `mail.ts` — no `AKISMET_API_KEY` is configured, so it always says "not
+     spam" and logs instead of calling out. Wired into `submitComment` ahead of the
+     moderation cascade so a real integration only has to fill in the one function body.
+   - **Search** (`/search`): in-app substring match over post titles + `extractText(doc)`,
+     no search index — the plan's own "small/hobby scale" call means the post count never
+     justifies one. Search box lives in `SiteHeader`.
+   - **RSS** (`/rss.xml`, a literal-named route-handler folder): last 30 published posts,
+     RSS 2.0. Discovery `<link>` added via `layout.tsx`'s `metadata.alternates`.
+   - **Author pages** (`/authors/[id]`): a user's name + their published posts, linked from
+     every byline (home, search, and article pages now share one `AuthorByline` component
+     instead of three copies of comma-joining logic). `authors`, `search`, and `rss.xml`
+     added to the reserved-slug list (`src/lib/slug.ts`) so a post title can't shadow them.
 
 **Deliberate deviations from §2–§6**
 
@@ -316,10 +336,14 @@ Git history carries per-step detail.
   plan's cascade wording assumed a single author).
 - General (non-quote) comments live in one per-post thread keyed by `quoted_text = ''`.
 
-**Known gaps → step 8 is next**
+**Known gaps**
 
-- Step 8 items untouched: rate limiting, Akismet, search, RSS, author pages.
-- No deployment; `.env` secrets are dev-only.
+- **§8 is now fully built at the code level; nothing is deployed yet.** No Linode/nginx/TLS
+  (§7), so `.env` secrets are dev-only and there's no real Akismet key to swap into the
+  spam-check seam.
+- Comment hardening from §6 ("restrict the comment editor to a safe schema... links get
+  `rel=nofollow noopener`") is still moot — comment bodies are plain text (deviation above),
+  so there's no HTML to sanitize until rich comments happen.
 - `restoreRevision` (history page) creates a new revision row but doesn't publish it —
   the author still has to hit Publish afterward, which is when remapping runs. Not a gap
   particular to step 7; that's just what "restore" has always meant here (§8 step 2).

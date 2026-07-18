@@ -17,7 +17,10 @@ export default async function SiteHeader() {
       <Link href="/" style={{ fontWeight: "bold", textDecoration: "none", color: "inherit" }}>
         MultiBlog
       </Link>
-      <nav>
+      <nav style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <form action="/search">
+          <input type="search" name="q" placeholder="Search…" style={{ padding: "0.3rem 0.5rem" }} />
+        </form>
         {session?.user ? (
           <Link href="/dashboard">Dashboard</Link>
         ) : (

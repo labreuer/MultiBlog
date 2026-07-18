@@ -7,6 +7,8 @@ import { canUserEditPost } from "@/lib/authz";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
 import { getClientIp } from "@/lib/request-ip";
+import { isCommentRateLimited } from "@/lib/rate-limit";
+import { checkSpam } from "@/lib/spam-check";
 import type { CommentStatus } from "@/generated/prisma/enums";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
@@ -82,6 +84,11 @@ export async function submitComment(
         create: { email, displayName },
       });
 
+  const ipAddress = await getClientIp();
+  if (await isCommentRateLimited(ipAddress, commenter.id)) {
+    return { error: "You're posting comments too quickly. Please wait a few minutes and try again." };
+  }
+
   let parentId: string | null = null;
   let thread: { id: string };
 
@@ -130,24 +137,27 @@ export async function submitComment(
       }));
   }
 
-  const siteSettings = await getSiteSettings();
-  const status = resolveCommentStatus({
-    commenterForceModerate: commenter.forceModerate,
-    commenterApprovedCount: commenter.approvedCount,
-    trustThreshold: siteSettings.trustThreshold,
-    postPolicy: post.moderationPolicy,
-    authorPolicies: post.authors.map((a) => a.user.moderationPolicy),
-    sitePolicy: siteSettings.defaultModerationPolicy === "AUTO" ? "AUTO" : "ALWAYS",
-  });
+  const trimmedBody = body.trim();
+  const isSpam = await checkSpam({ body: trimmedBody, displayName, email, ipAddress });
 
-  const ipAddress = await getClientIp();
+  const siteSettings = await getSiteSettings();
+  const status: CommentStatus = isSpam
+    ? "SPAM"
+    : resolveCommentStatus({
+        commenterForceModerate: commenter.forceModerate,
+        commenterApprovedCount: commenter.approvedCount,
+        trustThreshold: siteSettings.trustThreshold,
+        postPolicy: post.moderationPolicy,
+        authorPolicies: post.authors.map((a) => a.user.moderationPolicy),
+        sitePolicy: siteSettings.defaultModerationPolicy === "AUTO" ? "AUTO" : "ALWAYS",
+      });
 
   await prisma.comment.create({
     data: {
       threadId: thread.id,
       parentCommentId: parentId,
       commenterId: commenter.id,
-      body: { text: body.trim() },
+      body: { text: trimmedBody },
       status,
       ipAddress,
     },

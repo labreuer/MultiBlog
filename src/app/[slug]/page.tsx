@@ -9,6 +9,7 @@ import { extractText } from "@/lib/diff";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { getPostThreadsWithApprovedComments } from "@/lib/comment-data";
 import SiteHeader from "@/components/SiteHeader";
+import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
 import proseStyles from "@/styles/prose.module.css";
@@ -62,10 +63,6 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
   const session = await auth();
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
 
-  const byline = post.authors
-    .map((a) => a.user.name)
-    .filter(Boolean)
-    .join(", ");
   const doc = post.currentRevision.doc as JSONContent;
   const staticContent = renderToReactElement({ content: doc, extensions: contentExtensions });
 
@@ -80,7 +77,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
       <main style={{ padding: "1rem" }}>
         <h1>{post.currentRevision.title}</h1>
         <p style={{ color: "#666", fontSize: "0.9rem" }}>
-          {byline && `By ${byline} — `}
+          <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, name: a.user.name }))} />
           {post.publishedAt?.toLocaleDateString()}
         </p>
         <AnnotatableArticle

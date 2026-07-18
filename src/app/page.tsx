@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import SiteHeader from "@/components/SiteHeader";
+import AuthorByline from "@/components/AuthorByline";
 
 export const revalidate = 60;
 
@@ -26,10 +27,6 @@ export default async function Home() {
           <p>No posts published yet.</p>
         ) : (
           posts.map((post) => {
-            const byline = post.authors
-              .map((a) => a.user.name)
-              .filter(Boolean)
-              .join(", ");
             const excerpt = post.currentRevision ? extractText(post.currentRevision.doc).slice(0, 200) : "";
 
             return (
@@ -38,7 +35,7 @@ export default async function Home() {
                   <Link href={`/${post.slug}`}>{post.currentRevision?.title ?? post.title}</Link>
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>
-                  {byline && `By ${byline} — `}
+                  <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, name: a.user.name }))} />
                   {post.publishedAt?.toLocaleDateString()}
                 </p>
                 <p>{excerpt}{excerpt.length === 200 ? "…" : ""}</p>
