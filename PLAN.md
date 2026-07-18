@@ -245,3 +245,61 @@ and **anchor remapping across revisions (steps 6–7)**.
 
 **Nothing blocking left.** All six original questions plus concurrency are settled. Remaining
 calls are tuning (trust threshold, email verification) and can change anytime.
+
+---
+
+## 10. Implementation progress (as of 2026-07-17)
+
+Steps 1–6 of §8 are built and verified locally. Nothing is deployed — the Linode/nginx/TLS
+work from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev
+box. Git history carries per-step detail.
+
+**Done**
+
+1. **Skeleton** — Next.js 16 (App Router) + Prisma 6 + local Postgres + Auth.js v5
+   credentials auth with roles; forgot-password flow (single-use hashed tokens, 1h expiry,
+   enumeration-safe).
+2. **Posts & editor** — TipTap v3 editor, immutable append-only revisions, publish,
+   diff + restore-as-new-revision. Editor is responsive and fills window height (300px floor).
+   Toolbar grew beyond plan: clear-formatting, and a split-button quote dropdown exposing
+   `wrapIn`/`lift` for multi-level blockquote nesting (toggleBlockquote can't nest).
+3. **Real-time collab** — Hocuspocus v4 server (`server/collab.ts`, port 1234, `npm run
+   collab`); short-lived JWT minted by `/api/collab-token` gates connections using the same
+   authz as post editing; live state persisted to `post_collab.ydoc`, seeded from the latest
+   revision; publish snapshots via `editor.getJSON()` exactly as planned. `npm run dev:all`
+   runs web + collab together.
+4. **Public rendering** — `/[slug]` with SSG/ISR (`revalidate = 60`), `generateMetadata`,
+   reserved-slug guard so post slugs can't shadow app routes. Rendering uses
+   `@tiptap/static-renderer` (`generateHTML` needs a DOM and fails server-side).
+5. **Tree comments** — Disqus-style identity (name+email or session), three-level moderation
+   cascade + trust threshold per §6, moderation queue at `/posts/[id]/comments`. Beyond
+   plan: `comments` also records submitter IP and who/when last changed its status.
+6. **Quote anchoring** — the article server-renders statically for SEO, then swaps to a
+   read-only ProseMirror view after hydration (progressive enhancement). Decoration
+   highlights + count badges per §5; selection → floating comment form capturing real PM
+   positions; threads deduped by exact anchor range; per-root-comment quote headers with a
+   jump-back arrow (pulses the source text); sort control (date vs. article position).
+   Overlapping quote ranges are pre-split into non-overlapping segments because ProseMirror
+   silently drops one decoration's custom attributes where inline decorations overlap.
+
+**Deliberate deviations from §2–§6**
+
+- Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
+  XSS surface, so the DOMPurify/strict-schema work is deferred until rich comments happen.
+- Email delivery is a **console-log stub** (`src/lib/mail.ts`) behind a `sendMail()` seam.
+- The revision **diff view** uses a self-contained word-level LCS text diff
+  (`src/lib/diff.ts`), not `prosemirror-changeset`/`prosemirror-recreate` — that machinery
+  is deferred to step 7, where it's load-bearing for anchor remapping.
+- With multiple co-authors, moderation overrides combine **most-conservative-wins** (the
+  plan's cascade wording assumed a single author).
+- General (non-quote) comments live in one per-post thread keyed by `quoted_text = ''`.
+
+**Known gaps → step 7 is next**
+
+- **Anchors are not remapped on publish.** Threads store `anchored_revision_id`, but
+  highlights render against the *current* doc using possibly-stale positions. Two existing
+  threads on the `my-own-test` post are anchored to revision 4 while the post is on 6 —
+  they only display correctly because the text at those offsets happens to be unchanged.
+  Detached-thread status/UX (§5 "what the reader sees") is entirely unbuilt.
+- Step 8 items untouched: rate limiting, Akismet, search, RSS, author pages.
+- No deployment; `.env` secrets are dev-only.
