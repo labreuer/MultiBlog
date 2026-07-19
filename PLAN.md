@@ -72,8 +72,12 @@ logged-in — see §6).
   `revisions` row** (§4); the Yjs update log is the working state between publishes.
 - **Awareness:** Yjs "awareness" gives presence (who's in the doc, cursors/selections) for
   free — useful even with the byline being separate from edit attribution.
-- **Attribution:** `revisions.editor_id` at publish records who pressed publish; if you want
-  finer per-author edit credit later, Yjs updates carry an origin/client id we can attribute.
+- **Attribution:** `revisions.editor_id` at publish records who pressed publish.
+  Finer-grained credit — colored per-author highlighting of contributions *since the last
+  revision*, Etherpad-style — is now built too (§10 item 9): an inline `authorHighlight`
+  mark carries the author's `User.color`, applied to newly-typed text and cleared (a real,
+  synced transaction) on every save so it always reflects only what's new. It's
+  working-session state, not content — stripped before anything reaches `revisions.doc`.
 - **Auth:** the Hocuspocus `onConnect`/`onAuthenticate` hook validates the user's session
   (via Auth.js token) and checks they may edit that post before joining the room.
 
@@ -86,6 +90,7 @@ which is the main cost of doing it now rather than later.
 
 ```
 users            id, email, name, password_hash | oauth, role, created_at,
+                 color                                           -- author-highlight/caret color
                  moderation_policy('inherit'|'always'|'auto')   -- per-author override
 posts            id, slug, title, status(draft|published|archived),
                  current_revision_id, created_at, published_at,
@@ -94,6 +99,8 @@ post_authors     post_id, user_id, byline_order                 -- manual byline
 revisions        id, post_id, revision_number, doc JSONB (ProseMirror),
                  title, editor_id, changelog, created_at         -- IMMUTABLE
 post_collab      post_id, ydoc BYTEA, updated_at                 -- live Yjs state (working draft)
+post_collab_updates id, post_id, created_at, update BYTEA        -- raw Yjs update log, since
+                                                                  -- last revision only (§10 item 9)
 site_settings    id(singleton), default_moderation_policy, trust_threshold(int, e.g. 3), ...
 commenters       id, user_id NULL, email, display_name,          -- identity for a commenter
                  approved_count(int), force_moderate(bool)        -- per-commenter override
@@ -115,6 +122,9 @@ Notes:
 - **Drafts / working state** live in `post_collab.ydoc` (the live Yjs document), persisted
   by Hocuspocus. Edits never pollute revision history; only an explicit **publish** snapshots
   the current doc into a `revisions` row.
+- **`post_collab_updates`** is an append-only log of raw Yjs updates for the *current*
+  session only — reset (rows deleted) every time a revision is saved, so it never grows past
+  "since the last revision" regardless of how long a post has existed (§10 item 9).
 - **Comment tree**: `parent_comment_id` self-reference; render the tree with one recursive
   CTE. Plenty fast at hobby scale.
 - A **thread** is the unit anchored to a quote; **comments** form the reply tree inside it.
@@ -248,7 +258,7 @@ calls are tuning (trust threshold, email verification) and can change anytime.
 
 ---
 
-## 10. Implementation progress (as of 2026-07-18)
+## 10. Implementation progress (as of 2026-07-19)
 
 Steps 1–8 of §8 are built and verified locally. Nothing is deployed — the deployment work
 from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev box.
@@ -321,6 +331,32 @@ Git history carries per-step detail.
      every byline (home, search, and article pages now share one `AuthorByline` component
      instead of three copies of comma-joining logic). `authors`, `search`, and `rss.xml`
      added to the reserved-slug list (`src/lib/slug.ts`) so a post title can't shadow them.
+9. **Author attribution & live history** — beyond §8's original 8 steps; fulfills the
+   "finer per-author edit credit" idea noted in §3a.
+   - **Per-author highlighting**: an `authorHighlight` TipTap mark
+     (`src/lib/author-highlight-extension.ts`), not a suggest/accept "tracked changes"
+     workflow — an `appendTransaction` plugin tags newly-typed text with the current user's
+     id, skipping Yjs-sync-origin transactions (`isChangeOrigin`) so remote edits never get
+     mislabeled. Rendered via `User.color` (assigned at sign-up, `src/lib/author-colors.ts`),
+     painted through a small dynamically-generated `<style>` tag rather than baked into the
+     mark, so a color lookup is one small API call away
+     (`/api/users/colors`) rather than schema data. Cleared on every save (`removeMark`
+     transaction in `PostEditor.tsx`) so highlighting always reflects only "since the last
+     revision," not the post's whole life — see the CLAUDE.md gotcha. Stripped
+     (`stripMarkFromDoc`) before anything reaches `revisions.doc`; `contentExtensions` (the
+     shared editor/seed/render schema) never has to know the mark exists.
+   - **Live-scrubbable history** (`/posts/[id]/live-history`, `LiveHistoryViewer.tsx`):
+     read-only, and stays live-connected rather than being a one-time snapshot. Hocuspocus's
+     `onChange` hook (`server/collab.ts`) appends every raw Yjs update to a new
+     `post_collab_updates` row, reset whenever a revision is saved — bounding it to "since
+     the last revision" controls how much CRDT history is ever kept around. The viewer fetches
+     that log, replays prefixes of it into a scratch `Y.Doc` for the scrub slider, and taps a
+     second, otherwise-unused `HocuspocusProvider` connection purely to keep appending new
+     updates as they arrive live.
+   - **Collaborator cursors**: `CollaborationCaret`'s default always-visible name label
+     replaced with a thin colored bar (`renderCaret` in `CollabEditorBody.tsx`) — the name
+     shows in a CSS `:hover`-only tooltip instead. The local user's own cursor was already
+     unaffected (y-prosemirror excludes the local clientID before `render` runs).
 
 **Deliberate deviations from §2–§6**
 
@@ -352,3 +388,15 @@ Git history carries per-step detail.
   current doc's coordinates; a detached thread's is frozen in an old revision's) — so sort
   order between an active and a detached entry is not meaningful. Pre-existing limitation,
   more visible now that detached threads are a real state instead of a hypothetical one.
+- The collab JWT (`signCollabToken`) expires after 2 minutes and a `HocuspocusProvider`
+  doesn't fetch a fresh one on reconnect — a long-idle editor or live-history tab can end up
+  silently stuck retrying with an expired token until the page is reloaded. Pre-existing
+  (not introduced by item 9), just newly relevant now that live-history explicitly promises
+  to "stay connected."
+- Live-history's scrub slider is indexed by update count, not wall-clock time (each logged
+  update — one per dispatch, not per keystroke, since ProseMirror/Yjs batch a whole typed
+  burst into one update — is one slider step), so a long pause and a fast typing burst take
+  the same one step; the per-step timestamp label is shown to compensate. Replay itself is a
+  full re-apply from position 0 on every scrub, not checkpointed — fine at the update-log
+  sizes one session between revisions produces, would need periodic snapshots to stay cheap
+  if that ever changed.

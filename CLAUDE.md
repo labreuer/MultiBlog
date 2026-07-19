@@ -33,6 +33,16 @@ Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually
   `read_page` / `javascript_tool` measurements (bounding rects, computed styles) instead.
 - The browser pane's console buffer accumulates across navigations; for a clean error
   check, open a fresh tab.
+- To verify a concurrent-editing feature, sign up two throwaway accounts
+  (`something@example.com` / any password via `/sign-up`), promote to ADMIN with
+  `psql -U multiblog -h 127.0.0.1 -d multiblog -c "UPDATE \"User\" SET role='ADMIN' WHERE
+  email='...'"` (new sign-ups default to COMMENTER and can't edit posts), and delete both
+  the test `Post` row and the `User` rows when done.
+- The browser pane's tabs share one cookie jar. If you sign in as a second user in tab B,
+  tab A silently becomes that second user too the next time it does a fresh navigation —
+  an already-loaded tab's live WS connection/React state keeps its original identity only
+  until you reload or navigate it. Do each test user's sign-in in its own tab, and only
+  reload a tab when you actually mean to switch who it's authenticated as.
 
 ## Gotchas
 
@@ -49,6 +59,25 @@ Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually
   via `src/lib/tiptap-schema.ts` — change it only there so the three can't drift.
 - ProseMirror drops custom attributes where inline decorations overlap; the quote-highlight
   extension pre-splits ranges into non-overlapping segments (`data-thread-ids`, plural).
+- `authorHighlight` marks (per-author color-coding, `src/lib/author-highlight-extension.ts`)
+  live in the working Yjs doc and nothing else ever removes them — stripping them from
+  `revisions.doc` (`stripMarkFromDoc`) keeps them out of published/historical content, but
+  the *live* editor still shows them forever unless something clears the doc itself. See
+  `clearAuthorHighlights` in `PostEditor.tsx`: a plain `removeMark` transaction dispatched
+  after a successful save, synced like any other edit so every connected client (and anyone
+  reconnecting later) sees the reset.
+- The `PostCollabUpdate` replay log (`server/collab.ts`'s `onChange`) can't just append every
+  delta — a delta's inserted text references *origin* items (the paragraph, prior text) that
+  may predate the log's current generation. Whenever the log is empty (fresh session, or
+  right after a save reset it), the first `onChange` stores the *full* current state instead
+  of the one delta; only later changes store plain deltas. Skipping this makes replay from an
+  empty scratch `Y.Doc` silently produce nothing (Yjs queues the delta as a missing
+  dependency rather than erroring).
+- `CollaborationCaret`'s default `render` shows an always-visible name label. We override it
+  (`renderCaret` in `CollabEditorBody.tsx`) to draw just a colored bar, with the name in a
+  CSS `:hover`-only tooltip (`.collabCaret`/`.collabCaretLabel` in `PostEditor.module.css`).
+  The local user's own cursor was never affected either way — y-prosemirror's cursor plugin
+  filters out the local clientID before `render` is ever called.
 
 ## Conventions
 
