@@ -51,6 +51,7 @@ model User {
   passwordHash     String?
   role             Role              @default(COMMENTER)
   moderationPolicy ModerationPolicy  @default(INHERIT)
+  color            String            @default("#5b8cff")
   createdAt        DateTime          @default(now())
 
   accounts             Account[]
@@ -119,10 +120,11 @@ model Post {
   createdAt         DateTime   @default(now())
   publishedAt       DateTime?
 
-  currentRevision Revision?       @relation("CurrentRevision", fields: [currentRevisionId], references: [id])
+  currentRevision Revision?          @relation("CurrentRevision", fields: [currentRevisionId], references: [id])
   authors         PostAuthor[]
-  revisions       Revision[]      @relation("PostRevisions")
+  revisions       Revision[]         @relation("PostRevisions")
   collab          PostCollab?
+  collabUpdates   PostCollabUpdate[]
   threads         CommentThread[]
 }
 
@@ -161,6 +163,21 @@ model PostCollab {
   updatedAt DateTime @updatedAt
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+// Append-only log of raw Yjs updates for a post's current (unpublished) collab
+// session, used to replay/scrub through in-progress editing history. Reset
+// (deleted) every time a revision is created — see PLAN.md §3a: this is
+// working-session state, not part of the immutable revision history.
+model PostCollabUpdate {
+  id        BigInt   @id @default(autoincrement())
+  postId    String
+  createdAt DateTime @default(now())
+  update    Bytes
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, id])
 }
 
 model SiteSettings {

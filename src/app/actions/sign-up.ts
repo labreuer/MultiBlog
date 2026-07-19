@@ -3,6 +3,7 @@
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { colorForSeed } from "@/lib/author-colors";
 
 export type SignUpState = { error?: string };
 
@@ -29,6 +30,7 @@ export async function signUp(_prevState: SignUpState, formData: FormData): Promi
       email,
       name: typeof name === "string" && name ? name : null,
       passwordHash,
+      color: colorForSeed(email),
     },
   });
 

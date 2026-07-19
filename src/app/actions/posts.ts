@@ -7,7 +7,9 @@ import { prisma } from "@/lib/prisma";
 import { uniqueSlug } from "@/lib/slug";
 import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { remapThreadsToRevision } from "@/lib/anchor-remap";
+import { stripMarkFromDoc } from "@/lib/tiptap-schema";
 import { Prisma } from "@/generated/prisma/client";
+import type { JSONContent } from "@tiptap/core";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
@@ -86,12 +88,14 @@ export async function saveDraft(
 ): Promise<{ revisionNumber: number }> {
   const { session } = await requireEditableSession(postId);
   const revisionNumber = await nextRevisionNumber(postId);
+  const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
 
   await prisma.$transaction([
     prisma.revision.create({
-      data: { postId, revisionNumber, title, doc, editorId: session.user.id },
+      data: { postId, revisionNumber, title, doc: cleanDoc, editorId: session.user.id },
     }),
     prisma.post.update({ where: { id: postId }, data: { title } }),
+    prisma.postCollabUpdate.deleteMany({ where: { postId } }),
   ]);
 
   revalidatePath(`/posts/${postId}/edit`);
@@ -107,13 +111,14 @@ export async function publishPost(
 ): Promise<{ revisionNumber: number }> {
   const { session, post } = await requireEditableSession(postId);
   const revisionNumber = await nextRevisionNumber(postId);
+  const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
 
   const revision = await prisma.revision.create({
     data: {
       postId,
       revisionNumber,
       title,
-      doc,
+      doc: cleanDoc,
       editorId: session.user.id,
       changelog: changelog?.trim() || undefined,
     },
@@ -129,6 +134,7 @@ export async function publishPost(
     },
   });
 
+  await prisma.postCollabUpdate.deleteMany({ where: { postId } });
   await remapThreadsToRevision(postId, revision.id);
 
   revalidatePath(`/posts/${postId}/edit`);

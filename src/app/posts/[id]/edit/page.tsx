@@ -39,7 +39,9 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       postId={post.id}
       initialTitle={latest?.title ?? post.title}
       revisionNumber={latest?.revisionNumber ?? 0}
+      userId={session.user.id}
       userName={session.user.name ?? session.user.email ?? "Anonymous"}
+      userColor={session.user.color}
     />
   );
 }

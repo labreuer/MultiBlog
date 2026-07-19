@@ -1,41 +1,40 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
+import { AuthorHighlight } from "@/lib/author-highlight-extension";
+import { collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { useAuthorColors } from "@/lib/use-author-colors";
+import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import styles from "./PostEditor.module.css";
 import proseStyles from "@/styles/prose.module.css";
 import QuoteControls from "./QuoteControls";
 
-const CARET_COLORS = ["#f783ac", "#845ef7", "#339af0", "#20c997", "#fab005", "#ff6b6b"];
-
-function colorFor(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return CARET_COLORS[hash % CARET_COLORS.length];
-}
-
 type Props = {
   provider: HocuspocusProvider;
   ydoc: Y.Doc;
+  userId: string;
   userName: string;
+  userColor: string;
   onEditorReady: (editor: Editor | null) => void;
 };
 
-export default function CollabEditorBody({ provider, ydoc, userName, onEditorReady }: Props) {
+export default function CollabEditorBody({ provider, ydoc, userId, userName, userColor, onEditorReady }: Props) {
+  const [authorIds, setAuthorIds] = useState<string[]>([]);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false }),
       Collaboration.configure({ document: ydoc }),
-      CollaborationCaret.configure({ provider, user: { name: userName, color: colorFor(userName) } }),
+      CollaborationCaret.configure({ provider, user: { id: userId, name: userName, color: userColor } }),
+      AuthorHighlight.configure({ getAuthorId: () => userId }),
     ],
     immediatelyRender: false,
+    onUpdate: ({ editor: e }) => setAuthorIds(collectMarkAttrValues(e.getJSON(), "authorHighlight", "authorId")),
   });
 
   useEffect(() => {
@@ -43,12 +42,16 @@ export default function CollabEditorBody({ provider, ydoc, userName, onEditorRea
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
+  const knownColors = useMemo(() => ({ [userId]: { name: userName, color: userColor } }), [userId, userName, userColor]);
+  const authorColors = useAuthorColors(authorIds, knownColors);
+
   if (!editor) {
     return null;
   }
 
   return (
     <div className={styles.editorFrame}>
+      <AuthorHighlightStyles colors={authorColors} />
       <Toolbar editor={editor} />
       <EditorContent editor={editor} className={`${styles.editorContent} ${proseStyles.prose}`} />
     </div>

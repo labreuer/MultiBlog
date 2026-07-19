@@ -32,7 +32,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        return { id: user.id, email: user.email, name: user.name, role: user.role };
+        return { id: user.id, email: user.email, name: user.name, role: user.role, color: user.color };
       },
     }),
   ],
@@ -41,12 +41,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.id = user.id as string;
         token.role = (user as { role: Role }).role;
+        token.color = (user as { color: string }).color;
       }
       return token;
     },
     session: async ({ session, token }) => {
       session.user.id = token.id;
       session.user.role = token.role;
+      session.user.color = token.color;
       return session;
     },
   },

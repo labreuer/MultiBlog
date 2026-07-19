@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
@@ -13,12 +14,27 @@ type Props = {
   postId: string;
   initialTitle: string;
   revisionNumber: number;
+  userId: string;
   userName: string;
+  userColor: string;
 };
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
-export default function PostEditor({ postId, initialTitle, revisionNumber, userName }: Props) {
+// Author-highlight marks live in the working Yjs doc, not in the saved
+// revision — but nothing else ever removes them, so without this they'd
+// keep accumulating across every future revision instead of reflecting only
+// what's changed *since* the one just saved. Clearing them here (a real
+// transaction, synced like any edit) propagates to every connected client
+// and persists into the doc, so a later viewer sees the same reset state.
+function clearAuthorHighlights(editor: Editor) {
+  const markType = editor.schema.marks.authorHighlight;
+  if (!markType) return;
+  const { tr } = editor.state;
+  editor.view.dispatch(tr.removeMark(0, tr.doc.content.size, markType));
+}
+
+export default function PostEditor({ postId, initialTitle, revisionNumber, userId, userName, userColor }: Props) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
   const [status, setStatus] = useState<string | null>(null);
@@ -84,6 +100,7 @@ export default function PostEditor({ postId, initialTitle, revisionNumber, userN
       try {
         const doc = editor.getJSON();
         const result = await saveDraft(postId, title, doc);
+        clearAuthorHighlights(editor);
         setStatus(`Saved as revision #${result.revisionNumber}`);
         router.refresh();
       } catch (e) {
@@ -99,6 +116,7 @@ export default function PostEditor({ postId, initialTitle, revisionNumber, userN
       try {
         const doc = editor.getJSON();
         const result = await publishPost(postId, title, doc, changelog);
+        clearAuthorHighlights(editor);
         setStatus(`Published as revision #${result.revisionNumber}`);
         setChangelog("");
         router.refresh();
@@ -121,7 +139,14 @@ export default function PostEditor({ postId, initialTitle, revisionNumber, userN
         {peers.length > 0 && ` — editing with ${peers.join(", ")}`}
       </p>
       {provider ? (
-        <CollabEditorBody provider={provider} ydoc={ydoc} userName={userName} onEditorReady={setEditor} />
+        <CollabEditorBody
+          provider={provider}
+          ydoc={ydoc}
+          userId={userId}
+          userName={userName}
+          userColor={userColor}
+          onEditorReady={setEditor}
+        />
       ) : (
         <p>Connecting to live editor…</p>
       )}
@@ -141,7 +166,9 @@ export default function PostEditor({ postId, initialTitle, revisionNumber, userN
       </div>
       {status && <p className={styles.statusMessage}>{status}</p>}
       {error && <p className={styles.errorMessage}>{error}</p>}
-      <p className={styles.revisionNote}>Currently viewing revision #{revisionNumber}.</p>
+      <p className={styles.revisionNote}>
+        Currently viewing revision #{revisionNumber}. <Link href={`/posts/${postId}/live-history`}>Scrub live history</Link>
+      </p>
     </div>
   );
 }
