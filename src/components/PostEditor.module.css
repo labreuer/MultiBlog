@@ -135,6 +135,41 @@
   cursor: text;
 }
 
+/* Remote collaborator cursors: a thin colored bar (border-left) with a
+   generous invisible hit area (the padding/negative-margin pair below) so
+   hovering near the line — not just the 2px line itself — reveals who it
+   is. The name label is positioned absolutely so it doesn't affect layout
+   or line height while hidden. */
+.collabCaret {
+  position: relative;
+  border-left: 2px solid;
+  margin-left: -1px;
+  padding: 0;
+  left: 1px;
+}
+
+.collabCaretLabel {
+  position: absolute;
+  top: -1.4em;
+  left: -2px;
+  padding: 1px 6px;
+  border-radius: 3px 3px 3px 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+}
+
+.collabCaret:hover .collabCaretLabel {
+  opacity: 1;
+  visibility: visible;
+}
+
 .actionsRow {
   margin-top: 12px;
   display: flex;

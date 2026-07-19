@@ -24,13 +24,36 @@ type Props = {
   onEditorReady: (editor: Editor | null) => void;
 };
 
+// A thin colored bar rather than the library default's always-visible name
+// label — the name still shows, but only in a tooltip on hover (see
+// .collabCaretLabel in PostEditor.module.css). Never rendered for the local
+// user: y-prosemirror's cursor plugin filters out the client's own
+// awareness state before this is ever called.
+function renderCaret(user: Record<string, unknown>): HTMLElement {
+  const caret = document.createElement("span");
+  caret.classList.add(styles.collabCaret);
+  caret.style.borderColor = typeof user.color === "string" ? user.color : "#999";
+
+  const label = document.createElement("div");
+  label.classList.add(styles.collabCaretLabel);
+  label.style.backgroundColor = typeof user.color === "string" ? user.color : "#999";
+  label.textContent = typeof user.name === "string" ? user.name : "Anonymous";
+
+  caret.appendChild(label);
+  return caret;
+}
+
 export default function CollabEditorBody({ provider, ydoc, userId, userName, userColor, onEditorReady }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false }),
       Collaboration.configure({ document: ydoc }),
-      CollaborationCaret.configure({ provider, user: { id: userId, name: userName, color: userColor } }),
+      CollaborationCaret.configure({
+        provider,
+        user: { id: userId, name: userName, color: userColor },
+        render: renderCaret,
+      }),
       AuthorHighlight.configure({ getAuthorId: () => userId }),
     ],
     immediatelyRender: false,
