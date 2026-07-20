@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { pmSchema } from "@/lib/tiptap-schema";
+import { colorForSeed } from "@/lib/author-colors";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 
 export type ThreadComment = {
@@ -18,6 +19,12 @@ export type ThreadWithComments = {
   status: ThreadStatus;
   anchoredRevisionId: string;
   comments: ThreadComment[];
+  // The thread's own color, not any one comment's — shared by every reply
+  // in the thread (the highlight/bubble/arrow are per-thread UI, not
+  // per-comment). Taken from whoever opened the thread: a signed-in
+  // commenter's real User.color, or a stable seeded color for anonymous
+  // ones so unrelated threads still read as visually distinct.
+  color: string;
 };
 
 const CONTEXT_PADDING = 80;
@@ -54,26 +61,36 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
       comments: {
         where: { status: "APPROVED" },
         orderBy: { createdAt: "asc" },
-        include: { commenter: { select: { displayName: true } } },
+        include: { commenter: { select: { displayName: true, email: true, user: { select: { color: true } } } } },
       },
     },
   });
 
   return threads
     .filter((thread) => thread.comments.length > 0)
-    .map((thread) => ({
-      id: thread.id,
-      anchorFrom: thread.anchorFrom,
-      anchorTo: thread.anchorTo,
-      quotedText: thread.quotedText,
-      status: thread.status,
-      anchoredRevisionId: thread.anchoredRevisionId,
-      comments: thread.comments.map((c) => ({
-        id: c.id,
-        parentCommentId: c.parentCommentId,
-        displayName: c.commenter.displayName,
-        bodyText: (c.body as { text?: string } | null)?.text ?? "",
-        createdAt: c.createdAt.toISOString(),
-      })),
-    }));
+    .map((thread) => {
+      // comments is ordered by createdAt asc and already filtered to
+      // non-empty, so [0] is the earliest approved comment — a reasonable
+      // proxy for "whoever opened the thread" even in the rare case where
+      // the true root comment is still pending/spam and a reply approved
+      // ahead of it.
+      const opener = thread.comments[0].commenter;
+      const color = opener.user?.color ?? colorForSeed(opener.email);
+      return {
+        id: thread.id,
+        anchorFrom: thread.anchorFrom,
+        anchorTo: thread.anchorTo,
+        quotedText: thread.quotedText,
+        status: thread.status,
+        anchoredRevisionId: thread.anchoredRevisionId,
+        color,
+        comments: thread.comments.map((c) => ({
+          id: c.id,
+          parentCommentId: c.parentCommentId,
+          displayName: c.commenter.displayName,
+          bodyText: (c.body as { text?: string } | null)?.text ?? "",
+          createdAt: c.createdAt.toISOString(),
+        })),
+      };
+    });
 }

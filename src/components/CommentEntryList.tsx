@@ -11,6 +11,7 @@ export type CommentEntry = {
   anchorFrom: number | null;
   status: ThreadStatus;
   context: string | null;
+  color: string;
   root: CommentNodeData;
 };
 
@@ -57,6 +58,7 @@ export default function CommentEntryList({ entries, postId, userName }: Props) {
               quotedText={entry.quotedText}
               status={entry.status}
               context={entry.context}
+              color={entry.color}
             />
           )}
           <CommentNode comment={entry.root} postId={postId} userName={userName} />

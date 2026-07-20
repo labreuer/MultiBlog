@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 import styles from "./QuoteThreadHeader.module.css";
 
@@ -13,9 +13,10 @@ type Props = {
   quotedText: string;
   status: ThreadStatus;
   context: string | null;
+  color: string;
 };
 
-export default function QuoteThreadHeader({ threadId, quotedText, status, context }: Props) {
+export default function QuoteThreadHeader({ threadId, quotedText, status, context, color }: Props) {
   const [showContext, setShowContext] = useState(false);
   const detached = status === "DETACHED";
 
@@ -42,7 +43,7 @@ export default function QuoteThreadHeader({ threadId, quotedText, status, contex
           role="button"
           aria-label={detached ? "Show where this quote used to appear" : "Jump to quoted text in the article"}
           className={styles.markerColumn}
-          style={{ width: HEAD_WIDTH }}
+          style={detached ? { width: HEAD_WIDTH } : ({ width: HEAD_WIDTH, "--thread-color": color } as CSSProperties)}
         >
           <svg
             width={HEAD_WIDTH}

@@ -525,6 +525,53 @@ Git history carries per-step detail.
       as a write-only audit trail, not a source of truth read on any hot
       path — visibility/status derivation never queries it.
 
+13. **Quote-thread color coding, comment-posting UX polish, and a live-update fix** — a
+    follow-up round touching both the quote-anchoring mechanism (§5/item 6) and the
+    comment-submission flow.
+    - **Per-thread color** (`src/lib/comment-data.ts`): each quote thread now carries one
+      color, resolved from whoever opened it — a signed-in commenter's real `User.color`,
+      or `colorForSeed(email)` (the same palette-seeding helper used at sign-up,
+      `src/lib/author-colors.ts`) for an anonymous commenter — not any one reply's author.
+      That color is shared across every rendering of the thread: the inline highlight, the
+      count badge, the `QuoteThreadHeader` jump-back arrow/bar, and the click-to-pulse
+      effect, carried as an inline `--thread-color` CSS custom property consumed by
+      `prose.module.css`/`QuoteThreadHeader.module.css` (`color-mix()` for the highlight's
+      translucent wash and the pulse's brighter peak) — see STYLE.md.
+    - **Overlapping quotes from different authors render gray.** A single ProseMirror
+      decoration span can only carry one background, and `quote-highlight-extension.ts`
+      already pre-splits overlapping quote ranges into shared non-overlapping segments (the
+      item 6 note about attributes being dropped on overlap) — a segment covered by threads
+      of different colors now leaves `--thread-color` unset so it falls back to the
+      stylesheet's neutral gray instead of arbitrarily picking one author's color; a segment
+      covered only by same-colored thread(s) still gets that color.
+    - **Live update without a reload.** `AnnotatableArticle`'s `useEditor()` previously had
+      no deps array, so the `QuoteHighlight` plugin's `threads` option was captured once at
+      first mount and never re-read — a comment posted in the same page session (the server
+      action's `revalidatePath` refreshes props without a real navigation) never showed its
+      own highlight/badge until an actual page reload. Now keyed on `[threads]`, which
+      TipTap's `useEditor` treats as a recreate-the-editor dependency list, so a genuinely
+      new `threads` array (i.e. new server data) rebuilds the editor and its decorations
+      immediately.
+    - **Comment-posting UX**: `CommentForm` no longer shows a "Comment posted." confirmation
+      for an auto-approved comment (it now renders nothing) — the immediate highlight/badge
+      from the fix above is confirmation enough, and the old message plus a still-visible
+      Reply/Cancel link invited an accidental double-post. `CommentNode` hides its own
+      Reply/Cancel toggle the same way once a reply auto-approves, via a new `onPosted`
+      callback on `CommentForm`; both cases are local component state, so they come back
+      only on a real page refresh, not automatically. A comment that lands in moderation
+      still shows "Your comment is awaiting moderation." and leaves the form/toggle visible,
+      since there's no highlight yet to signal success there.
+    - **Quote-selection popup** (`AnnotatableArticle`): now closes itself automatically once
+      its comment auto-approves (same `onPosted` mechanism) instead of staying open. Its
+      "Close" button was merged into `CommentForm`'s own button row next to "Post comment"
+      (same styling, dark grey background instead of near-black, right-aligned), renamed
+      "Cancel", via a new optional `onCancel` prop — optional so the top-level and reply
+      comment forms, which have no such button, are unaffected. The badge-click-to-flash
+      effect (scrolls to and briefly tints the matching comment-list entry) was hardcoded
+      pale yellow regardless of author; it now uses the same per-thread color via
+      `color-mix()`. The comment textarea now resizes in both directions (`resize: both`),
+      not just vertically.
+
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no

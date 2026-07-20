@@ -14,7 +14,7 @@
 }
 
 .textarea {
-  resize: vertical;
+  resize: both;
 }
 
 .error {
@@ -25,8 +25,13 @@
   color: #666;
 }
 
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .submit {
-  align-self: flex-start;
   font: inherit;
   font-size: 0.95rem;
   padding: 3px 6px;
@@ -41,4 +46,16 @@
   background: #eee;
   color: #999;
   cursor: default;
+}
+
+.cancel {
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 3px 6px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #666;
+  color: #fff;
+  cursor: pointer;
 }

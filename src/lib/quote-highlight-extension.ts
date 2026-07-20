@@ -7,6 +7,7 @@ export type QuoteHighlightThread = {
   from: number;
   to: number;
   count: number;
+  color: string;
 };
 
 export type QuoteHighlightOptions = {
@@ -27,20 +28,34 @@ const quoteHighlightKey = new PluginKey("quoteHighlight");
 function buildSegments(
   threads: QuoteHighlightThread[],
   docSize: number,
-): { from: number; to: number; threadIds: string[] }[] {
+): { from: number; to: number; threadIds: string[]; color: string | null }[] {
   const ranges = threads
-    .map((t) => ({ id: t.id, from: Math.max(0, Math.min(t.from, docSize)), to: Math.max(0, Math.min(t.to, docSize)) }))
+    .map((t) => ({
+      id: t.id,
+      color: t.color,
+      from: Math.max(0, Math.min(t.from, docSize)),
+      to: Math.max(0, Math.min(t.to, docSize)),
+    }))
     .filter((t) => t.to > t.from);
 
   const boundaries = Array.from(new Set(ranges.flatMap((r) => [r.from, r.to]))).sort((a, b) => a - b);
 
-  const segments: { from: number; to: number; threadIds: string[] }[] = [];
+  const segments: { from: number; to: number; threadIds: string[]; color: string | null }[] = [];
   for (let i = 0; i < boundaries.length - 1; i++) {
     const from = boundaries[i];
     const to = boundaries[i + 1];
-    const threadIds = ranges.filter((r) => r.from <= from && r.to >= to).map((r) => r.id);
-    if (threadIds.length > 0) {
-      segments.push({ from, to, threadIds });
+    const covering = ranges.filter((r) => r.from <= from && r.to >= to);
+    if (covering.length > 0) {
+      // A segment shared by threads from different authors has no single
+      // color to show — falls back to the neutral gray in prose.module.css
+      // rather than picking one arbitrarily.
+      const colors = new Set(covering.map((r) => r.color));
+      segments.push({
+        from,
+        to,
+        threadIds: covering.map((r) => r.id),
+        color: colors.size === 1 ? covering[0].color : null,
+      });
     }
   }
   return segments;
@@ -75,6 +90,7 @@ export const QuoteHighlight = Extension.create<QuoteHighlightOptions>({
                 Decoration.inline(segment.from, segment.to, {
                   class: "quote-highlight",
                   "data-thread-ids": segment.threadIds.join(" "),
+                  ...(segment.color ? { style: `--thread-color:${segment.color}` } : {}),
                 }),
               );
             }
@@ -90,6 +106,7 @@ export const QuoteHighlight = Extension.create<QuoteHighlightOptions>({
                   const badge = document.createElement("button");
                   badge.type = "button";
                   badge.className = "quote-indicator";
+                  badge.style.setProperty("--thread-color", thread.color);
                   badge.textContent = String(thread.count);
                   badge.setAttribute(
                     "aria-label",

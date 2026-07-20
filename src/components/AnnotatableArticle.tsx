@@ -23,13 +23,12 @@ type Props = {
   staticContent: ReactNode;
 };
 
-const FLASH_COLOR = "#fff9c4";
-
-// Briefly tints the target thread's section pale yellow so it's obvious
-// which comment(s) the quote indicator pointed at, then fades it back out.
-function flashHighlight(element: HTMLElement) {
+// Briefly tints the target thread's section a light version of the
+// thread's own color so it's obvious which comment(s) the quote indicator
+// pointed at, then fades it back out.
+function flashHighlight(element: HTMLElement, color: string) {
   element.style.transition = "background-color 0.3s ease-in";
-  element.style.backgroundColor = FLASH_COLOR;
+  element.style.backgroundColor = `color-mix(in srgb, ${color} 35%, white)`;
   window.setTimeout(() => {
     element.style.transition = "background-color 1.5s ease-out";
     element.style.backgroundColor = "";
@@ -49,8 +48,9 @@ export default function AnnotatableArticle({ postId, doc, threads, userName, sta
         onIndicatorClick: (threadId) => {
           const targets = document.querySelectorAll<HTMLElement>(`[data-thread-id="${threadId}"]`);
           if (targets.length === 0) return;
+          const color = threads.find((t) => t.id === threadId)?.color ?? "#999";
           targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
-          targets.forEach((target) => flashHighlight(target));
+          targets.forEach((target) => flashHighlight(target, color));
         },
       }),
     ],
@@ -80,7 +80,12 @@ export default function AnnotatableArticle({ postId, doc, threads, userName, sta
         left: coords.left - containerRect.left,
       });
     },
-  });
+    // Threads is otherwise baked into the QuoteHighlight plugin's options at
+    // creation time and never re-read — without this dep, a comment posted
+    // on this same page load (revalidatePath refreshes props, not a real
+    // navigation) would never show its own highlight/badge until an actual
+    // page reload.
+  }, [threads]);
 
   useEffect(() => {
     if (!pending) return;
@@ -124,10 +129,9 @@ export default function AnnotatableArticle({ postId, doc, threads, userName, sta
             anchorFrom={pending.from}
             anchorTo={pending.to}
             quotedText={pending.quotedText}
+            onPosted={() => setPending(null)}
+            onCancel={() => setPending(null)}
           />
-          <button type="button" onClick={() => setPending(null)} style={{ marginTop: 8 }}>
-            Close
-          </button>
         </div>
       )}
     </div>

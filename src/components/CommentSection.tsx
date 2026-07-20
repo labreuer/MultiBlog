@@ -51,6 +51,7 @@ export default async function CommentSection({ postId }: { postId: string }) {
         anchorFrom: thread.anchorFrom,
         status: thread.status,
         context: detachedContextByThread.get(thread.id) ?? null,
+        color: thread.color,
         root,
       })),
     ),
@@ -61,6 +62,7 @@ export default async function CommentSection({ postId }: { postId: string }) {
           anchorFrom: null,
           status: generalThread.status,
           context: null,
+          color: generalThread.color,
           root,
         }))
       : []),

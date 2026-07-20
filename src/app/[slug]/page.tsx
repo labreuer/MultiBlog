@@ -75,7 +75,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
   const threads = await getPostThreadsWithApprovedComments(post.id);
   const quoteHighlights = threads
     .filter((t) => t.quotedText !== "" && t.status === "ACTIVE")
-    .map((t) => ({ id: t.id, from: t.anchorFrom, to: t.anchorTo, count: t.comments.length }));
+    .map((t) => ({ id: t.id, from: t.anchorFrom, to: t.anchorTo, count: t.comments.length, color: t.color }));
 
   return (
     <div className={styles.container}>

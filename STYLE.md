@@ -15,10 +15,10 @@ where media queries or pseudo-classes (`:hover`, `:focus`) are needed** — plai
 | File | Needs a stylesheet for |
 |---|---|
 | `PostEditor.module.css` | `:hover` (toolbar/quote menu), `@media` (mobile toolbar) |
-| `styles/prose.module.css` | shared across editor + public rendering; `.quote-highlight.pulse` keyframe animation |
+| `styles/prose.module.css` | shared across editor + public rendering; `.quote-highlight.pulse` keyframe animation; reads the per-thread `--thread-color` custom property (see Color palette) |
 | `app/page.module.css`, `app/authors/[id]/page.module.css`, `app/[slug]/page.module.css` | `:hover`-only underline on post-title links |
 | `components/CommentSection.module.css`, `CommentNode.module.css`, `CommentForm.module.css` | none needed a pseudo-class directly, but were pulled into modules alongside `QuoteThreadHeader` for consistency when that pass happened (see git history 2026-07-20) |
-| `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values |
+| `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values; `.arrowActive`/`.barActive` also read `--thread-color` |
 
 Numeric constants that also drive non-CSS geometry (e.g. `QuoteThreadHeader`'s
 `HEAD_WIDTH`/`HEAD_HEIGHT`, used in both the SVG `viewBox` and a CSS `width`) stay as
@@ -50,15 +50,23 @@ value that two systems depend on invites drift.
 | Light divider (between list/article rows) | `1px solid #eee` | every post-listing `<article>` (`page.tsx`, `authors/[id]/page.tsx`, `search/page.tsx`) |
 | Stronger border (panels, table headers, comment-admin rows) | `1px solid #ddd` | `PostsTable.tsx`, `SiteHeader.tsx`, admin comments/history pages |
 | Nested-reply rail | `2px solid #e0e0e0` | `CommentNode.module.css` `.nested` |
-| Quote-thread marker (active) | `#b8935a` (muted amber) | `QuoteThreadHeader.module.css`, `prose.module.css` `.quote-indicator` |
-| Quote-thread marker (detached) | `#999` | `QuoteThreadHeader.module.css` |
-| Quote highlight background | `#f2e8c8` (muted pale gold), pulses to `#e0c481` | `prose.module.css` |
+| Quote-thread marker/highlight/badge (active) | `var(--thread-color, #999)` — see note below | `QuoteThreadHeader.module.css`, `prose.module.css` `.quote-highlight`/`.quote-indicator` |
+| Quote-thread marker (detached) | `#999`, fixed (not `--thread-color`-driven) | `QuoteThreadHeader.module.css` |
+| Quote highlight background / pulse | `color-mix(in srgb, var(--thread-color, #999) 25%, transparent)`, pulses to 55% | `prose.module.css` |
+| Comment-form buttons | `#333` (Post comment) / `#666` (Cancel) | `CommentForm.module.css` `.submit`/`.cancel` |
 | Error text | `crimson` | form validation errors |
 | Diff view: insertion / deletion | `#0a5` on `#d4f7d4` / `#c00` on `#fbdada` | `history/[revisionNumber]/page.tsx` — not part of the palette above, ad hoc and only used there |
 
-The amber/gold quote-thread colors were deliberately muted from an earlier, more
-saturated version (`#fff3b0`/`#d4a017`) to read as minimalist rather than loud — see
-git history for the before/after.
+Quote-thread coloring was originally one fixed muted amber (`#b8935a`, itself toned down
+from an earlier, more saturated `#fff3b0`/`#d4a017` — see git history), the same for every
+thread. It's now **one real color per thread** — the thread-opener's `User.color`, or a
+seeded fallback for anonymous commenters (PLAN.md §10 item 13) — carried as an inline
+`--thread-color` custom property rather than a CSS Modules class, since there's one value
+per *thread instance*, not a small fixed set of states. The `#999` fallback above is what
+renders when that property is left unset: either a decoration span shared by threads of
+different colors (a single span can only paint one background, so an ambiguous overlap
+goes neutral rather than picking one author arbitrarily) or, coincidentally, the same shade
+used for the unrelated "detached" state.
 
 ## Typography
 

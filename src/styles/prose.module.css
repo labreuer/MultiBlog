@@ -40,9 +40,14 @@
 }
 
 /* Quote-anchoring decorations (step 6) — set as literal class names by a
-   ProseMirror plugin, not through this module's scoping, hence :global(). */
+   ProseMirror plugin, not through this module's scoping, hence :global().
+   Each thread's own color rides in via the inline `--thread-color` custom
+   property (quote-highlight-extension.ts); the gray fallback here is what
+   renders when a segment is shared by threads from different authors —
+   ProseMirror can only paint one background per span, so an ambiguous
+   overlap goes neutral instead of arbitrarily picking one author's color. */
 .prose :global(.quote-highlight) {
-  background: #f2e8c8;
+  background: color-mix(in srgb, var(--thread-color, #999) 25%, transparent);
   border-radius: 2px;
 }
 
@@ -56,7 +61,7 @@
   margin-left: 2px;
   border: none;
   border-radius: 9px;
-  background: #b8935a;
+  background: var(--thread-color, #999);
   color: #fff;
   font-size: 0.7rem;
   line-height: 1;
@@ -65,13 +70,14 @@
 }
 
 .prose :global(.quote-indicator:hover) {
-  background: #9c7a45;
+  background: color-mix(in srgb, var(--thread-color, #999) 80%, black);
 }
 
 /* Triggered from the comments section's jump-to-quote arrow (see
    QuoteThreadHeader) to draw the eye back to the source text — the base
    .quote-highlight background is too close to this pulse color to read as
-   "flash" on its own, so it briefly intensifies to a more saturated gold. */
+   "flash" on its own, so it briefly intensifies to a more saturated tint
+   of the same thread color. */
 .prose :global(.quote-highlight.pulse) {
   animation: quoteHighlightPulse 0.6s ease-in-out 2;
 }
@@ -79,9 +85,9 @@
 @keyframes quoteHighlightPulse {
   0%,
   100% {
-    background-color: #f2e8c8;
+    background-color: color-mix(in srgb, var(--thread-color, #999) 25%, transparent);
   }
   50% {
-    background-color: #e0c481;
+    background-color: color-mix(in srgb, var(--thread-color, #999) 55%, transparent);
   }
 }

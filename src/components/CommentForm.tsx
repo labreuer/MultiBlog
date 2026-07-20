@@ -14,6 +14,7 @@ type Props = {
   anchorTo?: number;
   quotedText?: string;
   onPosted?: () => void;
+  onCancel?: () => void;
 };
 
 export default function CommentForm({
@@ -24,6 +25,7 @@ export default function CommentForm({
   anchorTo,
   quotedText,
   onPosted,
+  onCancel,
 }: Props) {
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
@@ -66,13 +68,20 @@ export default function CommentForm({
         className={`${styles.field} ${styles.textarea}`}
       />
       {state.error && <p className={styles.error}>{state.error}</p>}
-      <button
-        type="submit"
-        disabled={pending}
-        className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
-      >
-        {pending ? "Posting..." : "Post comment"}
-      </button>
+      <div className={styles.buttonRow}>
+        <button
+          type="submit"
+          disabled={pending}
+          className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
+        >
+          {pending ? "Posting..." : "Post comment"}
+        </button>
+        {onCancel && (
+          <button type="button" onClick={onCancel} className={styles.cancel}>
+            Cancel
+          </button>
+        )}
+      </div>
     </form>
   );
 }
