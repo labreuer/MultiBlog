@@ -15,7 +15,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     where: { id },
     include: {
       authors: { select: { userId: true } },
-      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { title: true, revisionNumber: true } },
+      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { title: true, revisionNumber: true, doc: true } },
     },
   });
   if (!post) {
@@ -39,6 +39,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       postId={post.id}
       initialTitle={latest?.title ?? post.title}
       revisionNumber={latest?.revisionNumber ?? 0}
+      lastRevisionDoc={latest?.doc ?? null}
       userId={session.user.id}
       userName={session.user.name ?? session.user.email ?? "Anonymous"}
       userColor={session.user.color}

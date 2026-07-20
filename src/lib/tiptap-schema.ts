@@ -1,5 +1,6 @@
 import StarterKit from "@tiptap/starter-kit";
 import { getSchema, type JSONContent } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
 
 // The node/mark schema used for a post's content. Shared between the
@@ -55,4 +56,28 @@ export function collectMarkAttrValues(doc: JSONContent, markName: string, attrNa
     }
   });
   return Array.from(values);
+}
+
+// Same idea as collectMarkAttrValues, but walks a *live* ProseMirror Node via
+// descendants() instead of a getJSON() snapshot, and sums text length per
+// attribute value in the same pass — used for the author-highlight status
+// line so it doesn't need a second full-document serialize/walk on top of
+// whatever else is already collecting authorIds.
+export function collectAuthorHighlightStats(
+  doc: PMNode,
+  markName: string,
+  attrName: string,
+): { authorIds: string[]; charsByAuthor: Record<string, number> } {
+  const charsByAuthor: Record<string, number> = {};
+  doc.descendants((node) => {
+    if (!node.isText || !node.text) return;
+    for (const mark of node.marks) {
+      if (mark.type.name !== markName) continue;
+      const value = mark.attrs[attrName];
+      if (typeof value === "string" && value) {
+        charsByAuthor[value] = (charsByAuthor[value] ?? 0) + node.text.length;
+      }
+    }
+  });
+  return { authorIds: Object.keys(charsByAuthor), charsByAuthor };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
@@ -8,12 +8,19 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
-import { collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
+import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import styles from "./PostEditor.module.css";
 import proseStyles from "@/styles/prose.module.css";
 import QuoteControls from "./QuoteControls";
+
+// See PERFORMANCE.md — walking the whole document for author-mark stats is
+// O(document size); debouncing keeps it off the per-keystroke path.
+const AUTHOR_STATS_DEBOUNCE_MS = 400;
+
+export type AuthorStat = { authorId: string; chars: number; name: string; color: string };
 
 type Props = {
   provider: HocuspocusProvider;
@@ -22,6 +29,7 @@ type Props = {
   userName: string;
   userColor: string;
   onEditorReady: (editor: Editor | null) => void;
+  onAuthorStats?: (stats: AuthorStat[]) => void;
 };
 
 // A thin colored bar rather than the library default's always-visible name
@@ -43,8 +51,19 @@ function renderCaret(user: Record<string, unknown>): HTMLElement {
   return caret;
 }
 
-export default function CollabEditorBody({ provider, ydoc, userId, userName, userColor, onEditorReady }: Props) {
+export default function CollabEditorBody({
+  provider,
+  ydoc,
+  userId,
+  userName,
+  userColor,
+  onEditorReady,
+  onAuthorStats,
+}: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
+  const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false }),
@@ -57,7 +76,16 @@ export default function CollabEditorBody({ provider, ydoc, userId, userName, use
       AuthorHighlight.configure({ getAuthorId: () => userId }),
     ],
     immediatelyRender: false,
-    onUpdate: ({ editor: e }) => setAuthorIds(collectMarkAttrValues(e.getJSON(), "authorHighlight", "authorId")),
+    onUpdate: ({ editor: e }) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const { authorIds: ids, charsByAuthor } = perfMeasure("author-highlight walk", () =>
+          collectAuthorHighlightStats(e.state.doc, "authorHighlight", "authorId"),
+        );
+        setAuthorIds(ids);
+        setAuthorCharCounts(charsByAuthor);
+      }, AUTHOR_STATS_DEBOUNCE_MS);
+    },
   });
 
   useEffect(() => {
@@ -65,8 +93,26 @@ export default function CollabEditorBody({ provider, ydoc, userId, userName, use
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   const knownColors = useMemo(() => ({ [userId]: { name: userName, color: userColor } }), [userId, userName, userColor]);
   const authorColors = useAuthorColors(authorIds, knownColors);
+
+  useEffect(() => {
+    if (!onAuthorStats) return;
+    onAuthorStats(
+      Object.entries(authorCharCounts).map(([authorId, chars]) => ({
+        authorId,
+        chars,
+        name: authorColors[authorId]?.name ?? authorId,
+        color: authorColors[authorId]?.color ?? "#999",
+      })),
+    );
+  }, [authorCharCounts, authorColors, onAuthorStats]);
 
   if (!editor) {
     return null;
