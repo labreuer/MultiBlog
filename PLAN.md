@@ -258,7 +258,7 @@ calls are tuning (trust threshold, email verification) and can change anytime.
 
 ---
 
-## 10. Implementation progress (as of 2026-07-19)
+## 10. Implementation progress (as of 2026-07-20)
 
 Steps 1–8 of §8 are built and verified locally. Nothing is deployed — the deployment work
 from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev box.
@@ -363,6 +363,48 @@ Git history carries per-step detail.
      indicator. Both figures are debounced ~400ms rather than recomputed per keystroke — see
      PERFORMANCE.md, which also has a real before/after benchmark of this branch's cost.
 
+10. **Site navigation, admin posts table, and per-post edit affordances** — beyond §8's
+    original 8 steps; mostly UI/navigation polish plus one genuinely new piece of logic (the
+    edit-status heuristic).
+    - **Global site navigation**: `SiteHeader` (title, search, sign-in/out) previously had to
+      be rendered by hand on each page and had drifted onto only 4 of them; it now lives once
+      in `RootLayout`, so every route gets consistent nav for free. Shows "`{name or email}` /
+      Sign out" when signed in, "Log in / Sign up" otherwise, plus a "Manage Posts" link (any
+      `canManagePosts` role — ADMIN/EDITOR/AUTHOR) to `/posts`.
+    - **Admin posts table** (`/posts`, `PostsTable.tsx`): rebuilt from a bulleted list into a
+      table — Title (→ editor), Published (→ public post, blank if unpublished), Comments
+      (approved count, with a "(in moderation N)" link to that post's moderation queue when
+      there's anything pending), Revisions ("+N" ahead of the published revision, or
+      "current" when they match, → history), Last edit by/at, Created at. Column headers sort
+      the table client-side; a plain click sorts by just that column, Ctrl-click adds it as a
+      secondary/tertiary key without disturbing already-sorted columns' positions (shown via
+      a superscript priority number next to the ▲/▼). A date-format dropdown (`yyyy-MM-dd`
+      default, three alternates) re-renders every date in the table immediately, client-side.
+    - **Editor status line** (`PostEditor.tsx`): replaced the old fixed "Currently viewing
+      revision #N" with "`{Published revision #N (linked to the live post) | Unpublished}`.
+      `{EDITED | Currently viewing revision #M}`." — the second clause disappears entirely
+      once the last-saved revision matches what's published *and* there's no live diff from
+      it. Updates live on publish (the existing `router.refresh()` re-derives the published
+      revision number from the DB) and live on undo back to a clean state (the existing
+      debounced revision-diff, already recomputed on every editor `update` event).
+    - **Per-post edit badge on public pages** (`PostEditBadge.tsx`,
+      `src/lib/post-edit-status.ts`): logged-in users who can edit a given post (ADMIN/EDITOR
+      always; AUTHOR only if listed on that post's byline) see a small "(edit)"/"(edited)"
+      link next to its title everywhere it's publicly displayed — home, search, author page,
+      and the post itself — going straight to the editor. "edited" vs. "edit" comes from
+      comparing `PostCollab.updatedAt` against the latest revision's `createdAt` (see the
+      `PostCollab` lifecycle gotcha in CLAUDE.md) rather than an actual diff against the live
+      Yjs doc, which would need decoding it and running the same `O(n·m)` `diffText` the
+      editor's own status line already uses (see PERFORMANCE.md) — fine for one post at a
+      time, not for every row of a list. Badge is sized `0.5em` (half of whichever heading it
+      sits inside, `h1` or `h2`) with `vertical-align: middle`; see the `em`-vs-`rem` gotcha
+      in CLAUDE.md for why this needed to be parent-relative rather than root-relative.
+    - **Trade-off, not a bug**: giving the home and author-page listings per-viewer content
+      (the edit badge) meant both pages now call `auth()`, which made Next.js treat them as
+      fully dynamic — their pre-existing `revalidate = 60` ISR caching is now a no-op. See
+      CACHING.md for the detail and a possible fix (split the personalized part out
+      client-side) if that caching ever needs restoring.
+
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
@@ -417,3 +459,6 @@ Git history carries per-step detail.
   computation above is the one measurable new cost, and scales worse than linearly with
   content length (~16x slower at 5x length) — see PERFORMANCE.md's 2026-07-19 benchmark
   entry for methodology and numbers.
+- The home and author pages' `revalidate = 60` ISR caching is now a no-op — item 10's edit
+  badge made both pages call `auth()`, which Next.js treats as inherently dynamic. Not fixed;
+  see CACHING.md's 2026-07-20 entry for why and a possible client-side-split fix.

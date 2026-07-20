@@ -21,7 +21,15 @@ body {
 }
 
 body {
-  min-height: 100%;
+  /* A definite (not min-) height is required: flex-grow/flex-shrink on
+     children (e.g. PostEditor's .container) have no budget to work with
+     otherwise — a flex item's auto flex-basis falls back to its own
+     content size when the flex container's main size is indefinite, which
+     is exactly what min-height alone produces. Fallback first for browsers
+     without dvh support; the dvh rule after it overrides where available
+     and correctly excludes mobile browser chrome. */
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   color: var(--foreground);
@@ -38,8 +46,12 @@ body {
 }
 
 a {
-  color: inherit;
+  color: #0000ee;
   text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
 }
 
 @media (prefers-color-scheme: dark) {

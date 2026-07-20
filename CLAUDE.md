@@ -3,6 +3,7 @@
 Multi-author blog with revisions, real-time collab, and quote-anchored comments.
 Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually built vs. planned.
 Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMANCE.md).
+Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
 
 ## Running
 
@@ -46,6 +47,12 @@ Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMA
   `psql -U multiblog -h 127.0.0.1 -d multiblog -c "UPDATE \"User\" SET role='ADMIN' WHERE
   email='...'"` (new sign-ups default to COMMENTER and can't edit posts), and delete both
   the test `Post` row and the `User` rows when done.
+- Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` are baked
+  into the session cookie once at sign-in and never re-read from the DB on later requests.
+  Deleting a throwaway `User` row mid-session does **not** sign them out or revoke their
+  role — the browser tab keeps showing (and acting as) that stale identity until an explicit
+  sign-out or the JWT expires. Don't take "the user row is gone" as proof a test session has
+  ended; click Sign out (or open a fresh tab) before relying on the signed-out UI state.
 - The browser pane's tabs share one cookie jar. If you sign in as a second user in tab B,
   tab A silently becomes that second user too the next time it does a fresh navigation —
   an already-loaded tab's live WS connection/React state keeps its original identity only
@@ -99,6 +106,32 @@ Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMA
   CSS `:hover`-only tooltip (`.collabCaret`/`.collabCaretLabel` in `PostEditor.module.css`).
   The local user's own cursor was never affected either way — y-prosemirror's cursor plugin
   filters out the local clientID before `render` is ever called.
+- A flex item's `flex-grow`/`flex-shrink` only has a budget to work with if its flex
+  *container* has a definite (not `min-height`-only) main size — `min-height` lets the
+  container's own size fall back to its content's, which defeats grow/shrink on children
+  entirely. `body` (`globals.css`) sets `height: 100vh`/`100dvh` for exactly this reason: it's
+  what lets `PostEditor.module.css`'s `.container` (and everything nested under it —
+  `.editorFrame` → `.editorContent`) actually fill "the viewport minus the global
+  `SiteHeader`" instead of silently reverting to content-based sizing and producing an
+  always-present page scrollbar.
+- Sizing something as "half of the heading it sits next to" needs `em` (relative to the
+  *immediate parent's* font-size), not `rem` (relative to the *root* font-size) — `rem` gives
+  you "half of whatever the root/site-header text renders at," which is a different, usually
+  smaller, number than the actual surrounding `h1`/`h2`. `PostEditBadge.tsx`'s
+  `(edit)`/`(edited)` link learned this the hard way: `0.5rem` came out as a *quarter* of the
+  `h1` on the single-post page (32px) and a *third* of the `h2` in listings (24px), both
+  because it was computing against the root's 16px instead of either heading's own size.
+- `PostCollab` (`ydoc`, one row per post, `server/collab.ts`) is only ever created by
+  `onStoreDocument`, which Hocuspocus fires from the shared doc's `update` event — an event
+  listener attached *after* `onLoadDocument` finishes seeding the doc, so merely opening the
+  editor never creates a row; it takes a real edit. But nothing ever deletes it — `saveDraft`/
+  `publishPost` only clear `PostCollabUpdate` (the replay log), not `PostCollab` itself — so
+  once a post has been edited even once, the row persists forever, including long after that
+  edit was saved into a revision. Its existence therefore answers "has this doc ever
+  diverged," not "are there unsaved edits right now." `src/lib/post-edit-status.ts` answers
+  the second question by comparing `PostCollab.updatedAt` against the latest `Revision`'s
+  `createdAt` — a cheap heuristic (can false-positive after a type-then-undo-to-net-zero
+  edit), not a real diff against the last saved revision.
 
 ## Conventions
 

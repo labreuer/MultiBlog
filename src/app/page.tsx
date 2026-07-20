@@ -1,12 +1,15 @@
 import Link from "next/link";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
-import SiteHeader from "@/components/SiteHeader";
+import { getPostEditStatus } from "@/lib/post-edit-status";
 import AuthorByline from "@/components/AuthorByline";
+import PostEditBadge from "@/components/PostEditBadge";
 
 export const revalidate = 60;
 
 export default async function Home() {
+  const session = await auth();
   const posts = await prisma.post.findMany({
     where: { status: "PUBLISHED", currentRevisionId: { not: null } },
     orderBy: { publishedAt: "desc" },
@@ -16,23 +19,26 @@ export default async function Home() {
         orderBy: { bylineOrder: "asc" },
         include: { user: { select: { name: true } } },
       },
+      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { createdAt: true } },
+      collab: { select: { updatedAt: true } },
     },
   });
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", fontFamily: "sans-serif" }}>
-      <SiteHeader />
       <main style={{ padding: "1rem" }}>
         {posts.length === 0 ? (
           <p>No posts published yet.</p>
         ) : (
           posts.map((post) => {
             const excerpt = post.currentRevision ? extractText(post.currentRevision.doc).slice(0, 200) : "";
+            const editStatus = getPostEditStatus(session?.user, post);
 
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
                 <h2>
                   <Link href={`/${post.slug}`}>{post.currentRevision?.title ?? post.title}</Link>
+                  {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>
                   <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, name: a.user.name }))} />

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { auth } from "@/lib/auth";
+import { auth, signOut } from "@/lib/auth";
+import { canManagePosts } from "@/lib/authz";
 
 export default async function SiteHeader() {
   const session = await auth();
@@ -14,18 +15,53 @@ export default async function SiteHeader() {
         borderBottom: "1px solid #ddd",
       }}
     >
-      <Link href="/" style={{ fontWeight: "bold", textDecoration: "none", color: "inherit" }}>
-        MultiBlog
-      </Link>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Link href="/" style={{ fontWeight: "bold", textDecoration: "none", color: "inherit" }}>
+          MultiBlog
+        </Link>
+        {session?.user && canManagePosts(session.user.role) && (
+          <>
+            <span aria-hidden="true" style={{ color: "#ccc" }}>
+              |
+            </span>
+            <Link href="/posts">Manage Posts</Link>
+          </>
+        )}
+      </div>
       <nav style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <form action="/search">
           <input type="search" name="q" placeholder="Search…" style={{ padding: "0.3rem 0.5rem" }} />
         </form>
         {session?.user ? (
-          <Link href="/dashboard">Dashboard</Link>
+          <>
+            <Link href="/dashboard">{session.user.name ?? session.user.email}</Link>{" "}
+            /{" "}
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: "/" });
+              }}
+              style={{ display: "inline" }}
+            >
+              <button
+                type="submit"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  font: "inherit",
+                  color: "inherit",
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                }}
+              >
+                Sign out
+              </button>
+            </form>
+          </>
         ) : (
           <>
-            <Link href="/sign-in">Sign in</Link> · <Link href="/sign-up">Sign up</Link>
+            <Link href="/sign-in">Log in</Link> / <Link href="/sign-up">Sign up</Link>
           </>
         )}
       </nav>

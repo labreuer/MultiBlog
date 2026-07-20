@@ -15,6 +15,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     where: { id },
     include: {
       authors: { select: { userId: true } },
+      currentRevision: { select: { revisionNumber: true } },
       revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { title: true, revisionNumber: true, doc: true } },
     },
   });
@@ -33,12 +34,15 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   }
 
   const latest = post.revisions[0];
+  const isPublished = post.status === "PUBLISHED" && post.currentRevisionId != null;
 
   return (
     <PostEditor
       postId={post.id}
+      slug={post.slug}
       initialTitle={latest?.title ?? post.title}
       revisionNumber={latest?.revisionNumber ?? 0}
+      publishedRevisionNumber={isPublished ? post.currentRevision!.revisionNumber : null}
       lastRevisionDoc={latest?.doc ?? null}
       userId={session.user.id}
       userName={session.user.name ?? session.user.email ?? "Anonymous"}

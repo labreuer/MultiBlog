@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
+import PostsTable from "@/components/PostsTable";
 
 export default async function PostsPage() {
   const session = await auth();
@@ -24,33 +25,58 @@ export default async function PostsPage() {
       : { authors: { some: { userId: session.user.id } } },
     orderBy: { createdAt: "desc" },
     include: {
-      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { createdAt: true } },
+      currentRevision: { select: { revisionNumber: true } },
+      revisions: {
+        orderBy: { revisionNumber: "desc" },
+        take: 1,
+        select: {
+          revisionNumber: true,
+          createdAt: true,
+          editor: { select: { name: true, email: true } },
+        },
+      },
+      threads: { select: { comments: { select: { status: true } } } },
     },
   });
 
+  const rows = posts.map((post) => {
+    const latest = post.revisions[0];
+    const isPublished = post.status === "PUBLISHED" && post.currentRevisionId != null;
+    const latestRevisionNumber = latest?.revisionNumber ?? 0;
+    const publishedRevisionNumber = post.currentRevision?.revisionNumber ?? 0;
+    const ahead = isPublished ? latestRevisionNumber - publishedRevisionNumber : latestRevisionNumber;
+
+    let approved = 0;
+    let pending = 0;
+    for (const thread of post.threads) {
+      for (const comment of thread.comments) {
+        if (comment.status === "APPROVED") approved++;
+        else if (comment.status === "PENDING") pending++;
+      }
+    }
+
+    return {
+      id: post.id,
+      slug: post.slug,
+      title: post.title,
+      isPublished,
+      publishedAt: post.publishedAt,
+      createdAt: post.createdAt,
+      ahead,
+      lastEditorName: latest?.editor?.name ?? latest?.editor?.email ?? "—",
+      lastEditAt: latest?.createdAt ?? null,
+      approved,
+      pending,
+    };
+  });
+
   return (
-    <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
+    <main style={{ maxWidth: 1000, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Posts</h1>
       <p>
         <Link href="/posts/new">+ New post</Link>
       </p>
-      {posts.length === 0 ? (
-        <p>No posts yet.</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {posts.map((post) => (
-            <li key={post.id} style={{ padding: "8px 0", borderBottom: "1px solid #ddd" }}>
-              <Link href={`/posts/${post.id}/edit`}>{post.title}</Link>{" "}
-              <span style={{ color: "#666" }}>
-                [{post.status}
-                {post.revisions[0] ? ` · last saved ${post.revisions[0].createdAt.toLocaleString()}` : ""}]
-              </span>{" "}
-              <Link href={`/posts/${post.id}/history`}>history</Link>{" "}
-              <Link href={`/posts/${post.id}/comments`}>comments</Link>
-            </li>
-          ))}
-        </ul>
-      )}
+      <PostsTable rows={rows} />
     </main>
   );
 }

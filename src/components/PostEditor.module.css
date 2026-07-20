@@ -7,13 +7,18 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  /* A definite (not min-) height is required: flex-shrink has no budget to
-     work with otherwise, so .editorContent below would never be bounded —
-     it'd just grow to fit its content instead of scrolling internally.
-     Fallback first for browsers without dvh support; the dvh rule after it
-     overrides where available and correctly excludes mobile browser chrome. */
-  height: 100vh;
-  height: 100dvh;
+  /* Fills whatever height remains below the global SiteHeader instead of
+     claiming a fixed 100vh/100dvh — that overflowed the viewport by the
+     header's height and forced a permanent scrollbar. body (globals.css) is
+     a column flex container with a definite height (html/body both 100%),
+     so flex-grow here resolves to a definite, bounded height each layout
+     pass — the same mechanism .editorFrame/.editorContent below rely on.
+     min-height: 0 lets this shrink to fit that budget instead of growing to
+     fit content; .editorContent's own 300px floor is still the hard
+     minimum, below which the page falls back to scrolling rather than
+     squashing the editor further. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .titleInput {

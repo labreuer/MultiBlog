@@ -14,8 +14,10 @@ import styles from "./PostEditor.module.css";
 
 type Props = {
   postId: string;
+  slug: string;
   initialTitle: string;
   revisionNumber: number;
+  publishedRevisionNumber: number | null;
   lastRevisionDoc: unknown;
   userId: string;
   userName: string;
@@ -46,8 +48,10 @@ function clearAuthorHighlights(editor: Editor) {
 
 export default function PostEditor({
   postId,
+  slug,
   initialTitle,
   revisionNumber,
+  publishedRevisionNumber,
   lastRevisionDoc,
   userId,
   userName,
@@ -184,6 +188,8 @@ export default function PostEditor({
   };
 
   const hasRevisionDiff = !!revisionDiff && (revisionDiff.added > 0 || revisionDiff.removed > 0);
+  const isAtPublished = publishedRevisionNumber !== null && revisionNumber === publishedRevisionNumber;
+  const showViewingClause = hasRevisionDiff || !isAtPublished;
 
   // Union of "currently connected" (from awareness, zero edits allowed) and
   // "has made edits" (from authorStats' authorHighlight-mark walk, which can
@@ -270,7 +276,14 @@ export default function PostEditor({
       {status && <p className={styles.statusMessage}>{status}</p>}
       {error && <p className={styles.errorMessage}>{error}</p>}
       <p className={styles.revisionNote}>
-        Currently viewing revision #{revisionNumber}. <Link href={`/posts/${postId}/live-history`}>Scrub live history</Link>
+        {publishedRevisionNumber !== null ? (
+          <Link href={`/${slug}`}>Published revision #{publishedRevisionNumber}</Link>
+        ) : (
+          "Unpublished"
+        )}
+        {". "}
+        {showViewingClause && <>{hasRevisionDiff ? "EDITED" : `Currently viewing revision #${revisionNumber}`}. </>}
+        <Link href={`/posts/${postId}/live-history`}>Scrub live history</Link>
       </p>
     </div>
   );
