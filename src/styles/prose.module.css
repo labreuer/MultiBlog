@@ -4,9 +4,28 @@
    default list-item indent and leaves blockquote with no visual distinction
    at all, so both need to be restored explicitly here. */
 
+.prose {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 1.125rem;
+  line-height: 1.7;
+  color: #222;
+}
+
+.prose :global(p) {
+  margin: 0 0 1.25em;
+}
+
+.prose :global(h1),
+.prose :global(h2),
+.prose :global(h3) {
+  margin: 1.5em 0 0.5em;
+  line-height: 1.3;
+}
+
 .prose :global(ul),
 .prose :global(ol) {
   padding-left: 1.5rem;
+  margin: 0 0 1.25em;
 }
 
 .prose :global(li) + :global(li) {
@@ -14,7 +33,7 @@
 }
 
 .prose :global(blockquote) {
-  margin-left: 0;
+  margin: 0 0 1.25em;
   padding-left: 1rem;
   border-left: 3px solid #ccc;
   color: #555;
@@ -23,7 +42,7 @@
 /* Quote-anchoring decorations (step 6) — set as literal class names by a
    ProseMirror plugin, not through this module's scoping, hence :global(). */
 .prose :global(.quote-highlight) {
-  background: #fff3b0;
+  background: #f2e8c8;
   border-radius: 2px;
 }
 
@@ -37,7 +56,7 @@
   margin-left: 2px;
   border: none;
   border-radius: 9px;
-  background: #d4a017;
+  background: #b8935a;
   color: #fff;
   font-size: 0.7rem;
   line-height: 1;
@@ -46,7 +65,7 @@
 }
 
 .prose :global(.quote-indicator:hover) {
-  background: #b8860b;
+  background: #9c7a45;
 }
 
 /* Triggered from the comments section's jump-to-quote arrow (see
@@ -60,9 +79,9 @@
 @keyframes quoteHighlightPulse {
   0%,
   100% {
-    background-color: #fff3b0;
+    background-color: #f2e8c8;
   }
   50% {
-    background-color: #ffd43b;
+    background-color: #e0c481;
   }
 }

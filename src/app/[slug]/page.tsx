@@ -14,6 +14,7 @@ import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
 import PostEditBadge from "@/components/PostEditBadge";
 import proseStyles from "@/styles/prose.module.css";
+import styles from "./page.module.css";
 
 export const revalidate = 60;
 
@@ -76,13 +77,13 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
     .map((t) => ({ id: t.id, from: t.anchorFrom, to: t.anchorTo, count: t.comments.length }));
 
   return (
-    <div style={{ maxWidth: 680, margin: "0 auto", fontFamily: "sans-serif" }}>
-      <main style={{ padding: "1rem" }}>
-        <h1>
+    <div className={styles.container}>
+      <main className={styles.main}>
+        <h1 className={styles.title}>
           {post.currentRevision.title}
           {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
         </h1>
-        <p style={{ color: "#666", fontSize: "0.9rem" }}>
+        <p className={styles.byline}>
           <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, name: a.user.name }))} />
           {post.publishedAt?.toLocaleDateString()}
         </p>

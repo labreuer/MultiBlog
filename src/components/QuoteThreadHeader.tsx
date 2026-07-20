@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import type { ThreadStatus } from "@/generated/prisma/enums";
+import styles from "./QuoteThreadHeader.module.css";
 
-const BORDER_COLOR = "#d4a017";
-const DETACHED_COLOR = "#999";
 const BORDER_WIDTH = 3;
 const HEAD_WIDTH = 10;
 const HEAD_HEIGHT = 6;
@@ -19,7 +18,6 @@ type Props = {
 export default function QuoteThreadHeader({ threadId, quotedText, status, context }: Props) {
   const [showContext, setShowContext] = useState(false);
   const detached = status === "DETACHED";
-  const color = detached ? DETACHED_COLOR : BORDER_COLOR;
 
   const jumpToQuote = () => {
     // ~= matches one word in a space-separated attribute value — needed
@@ -37,44 +35,32 @@ export default function QuoteThreadHeader({ threadId, quotedText, status, contex
   };
 
   return (
-    <div style={{ marginBottom: 8 }}>
-      {/* No CSS border anywhere — a border and an SVG fill of the "same"
-          color don't reliably rasterize to the same pixels. The arrowhead
-          (fixed-size SVG) and the line below it (a plain background-color
-          div) are both solid fills instead, and flexbox stretches the line
-          to the blockquote's actual height — no JS measurement. */}
-      <div style={{ display: "flex", gap: 8 }}>
+    <div className={styles.wrapper}>
+      <div className={styles.row}>
         <div
           onClick={detached ? () => setShowContext((v) => !v) : jumpToQuote}
           role="button"
           aria-label={detached ? "Show where this quote used to appear" : "Jump to quoted text in the article"}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            width: HEAD_WIDTH,
-            flexShrink: 0,
-            cursor: "pointer",
-          }}
+          className={styles.markerColumn}
+          style={{ width: HEAD_WIDTH }}
         >
           <svg
             width={HEAD_WIDTH}
             height={HEAD_HEIGHT}
             viewBox={`0 0 ${HEAD_WIDTH} ${HEAD_HEIGHT}`}
-            style={{ display: "block", flexShrink: 0 }}
+            className={styles.arrow}
           >
-            <path d={`M${HEAD_WIDTH / 2} 0 L${HEAD_WIDTH} ${HEAD_HEIGHT} L0 ${HEAD_HEIGHT} Z`} fill={color} />
+            <path
+              d={`M${HEAD_WIDTH / 2} 0 L${HEAD_WIDTH} ${HEAD_HEIGHT} L0 ${HEAD_HEIGHT} Z`}
+              className={detached ? styles.arrowDetached : styles.arrowActive}
+            />
           </svg>
-          <div style={{ width: BORDER_WIDTH, flex: 1, backgroundColor: color }} />
+          <div
+            className={`${styles.bar} ${detached ? styles.barDetached : styles.barActive}`}
+            style={{ width: BORDER_WIDTH }}
+          />
         </div>
-        <blockquote
-          style={{
-            margin: 0,
-            fontSize: "0.85rem",
-            color: detached ? "#777" : "#555",
-            fontStyle: "italic",
-          }}
-        >
+        <blockquote className={`${styles.quote} ${detached ? styles.quoteDetached : styles.quoteActive}`}>
           {quotedText}
         </blockquote>
       </div>
@@ -82,30 +68,14 @@ export default function QuoteThreadHeader({ threadId, quotedText, status, contex
           in a later revision) loses the inline indicator but stays listed,
           with a notice and a way to see the quote in its original context. */}
       {detached && (
-        <p style={{ fontSize: "0.78rem", color: "#999", margin: "2px 0 0 18px" }}>
+        <p className={styles.detachedNotice}>
           This quote was edited or removed in a later revision of the article.{" "}
-          <button
-            type="button"
-            onClick={() => setShowContext((v) => !v)}
-            style={{
-              font: "inherit",
-              color: "#777",
-              background: "none",
-              border: "none",
-              padding: 0,
-              textDecoration: "underline",
-              cursor: "pointer",
-            }}
-          >
+          <button type="button" onClick={() => setShowContext((v) => !v)} className={styles.contextToggle}>
             {showContext ? "Hide" : "Show"} where it used to appear
           </button>
         </p>
       )}
-      {detached && showContext && (
-        <p style={{ fontSize: "0.8rem", color: "#666", margin: "4px 0 0 18px", fontStyle: "italic" }}>
-          {context ?? "No longer available."}
-        </p>
-      )}
+      {detached && showContext && <p className={styles.contextText}>{context ?? "No longer available."}</p>}
     </div>
   );
 }

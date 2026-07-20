@@ -1,0 +1,26 @@
+.container {
+  max-width: 680px;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.main {
+  padding: 1rem;
+}
+
+.title {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 2rem;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+}
+
+.byline {
+  color: #666;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #eee;
+}

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { getPostEditStatus } from "@/lib/post-edit-status";
 import PostEditBadge from "@/components/PostEditBadge";
+import styles from "./page.module.css";
 
 export const revalidate = 60;
 
@@ -58,8 +59,10 @@ export default async function AuthorPage({ params }: { params: Promise<{ id: str
             const editStatus = getPostEditStatus(session?.user, post);
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
-                <h2>
-                  <Link href={`/${post.slug}`}>{post.currentRevision?.title ?? post.title}</Link>
+                <h2 className={styles.postHeading}>
+                  <Link href={`/${post.slug}`} className={styles.titleLink}>
+                    {post.currentRevision?.title ?? post.title}
+                  </Link>
                   {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>{post.publishedAt?.toLocaleDateString()}</p>

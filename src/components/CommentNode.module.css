@@ -1,0 +1,36 @@
+.node {
+  margin-top: 12px;
+}
+
+.nested {
+  margin-left: 20px;
+  padding-left: 14px;
+  border-left: 2px solid #e0e0e0;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.name {
+  font-weight: bold;
+}
+
+.timestamp {
+  color: #666;
+  font-size: 0.8rem;
+}
+
+.replyButton {
+  font-size: 0.85rem;
+  margin-top: 4px;
+  border: none;
+  background: none;
+  color: #666;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}

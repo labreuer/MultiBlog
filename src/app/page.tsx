@@ -5,6 +5,7 @@ import { extractText } from "@/lib/diff";
 import { getPostEditStatus } from "@/lib/post-edit-status";
 import AuthorByline from "@/components/AuthorByline";
 import PostEditBadge from "@/components/PostEditBadge";
+import styles from "./page.module.css";
 
 export const revalidate = 60;
 
@@ -36,8 +37,10 @@ export default async function Home() {
 
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
-                <h2>
-                  <Link href={`/${post.slug}`}>{post.currentRevision?.title ?? post.title}</Link>
+                <h2 className={styles.postHeading}>
+                  <Link href={`/${post.slug}`} className={styles.titleLink}>
+                    {post.currentRevision?.title ?? post.title}
+                  </Link>
                   {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>

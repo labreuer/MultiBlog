@@ -4,6 +4,7 @@ Multi-author blog with revisions, real-time collab, and quote-anchored comments.
 Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually built vs. planned.
 Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMANCE.md).
 Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
+Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STYLE.md).
 
 ## Running
 

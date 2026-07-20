@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
+import styles from "./CommentForm.module.css";
 
 const initialState: SubmitCommentState = {};
 
@@ -25,15 +26,11 @@ export default function CommentForm({
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
   if (state.status) {
-    return (
-      <p style={{ color: "#666" }}>
-        {state.status === "APPROVED" ? "Comment posted." : "Your comment is awaiting moderation."}
-      </p>
-    );
+    return <p className={styles.status}>{state.status === "APPROVED" ? "Comment posted." : "Your comment is awaiting moderation."}</p>;
   }
 
   return (
-    <form action={formAction} style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+    <form action={formAction} className={styles.form}>
       <input type="hidden" name="postId" value={postId} />
       {parentCommentId && <input type="hidden" name="parentCommentId" value={parentCommentId} />}
       {anchorFrom !== undefined && anchorTo !== undefined && quotedText && (
@@ -45,8 +42,8 @@ export default function CommentForm({
       )}
       {!userName && (
         <>
-          <input name="name" type="text" placeholder="Name" required />
-          <input name="email" type="email" placeholder="Email" required />
+          <input name="name" type="text" placeholder="Name" required className={styles.field} />
+          <input name="email" type="email" placeholder="Email" required className={styles.field} />
         </>
       )}
       <textarea
@@ -54,9 +51,14 @@ export default function CommentForm({
         placeholder={userName ? `Commenting as ${userName}` : "Write a comment..."}
         required
         rows={3}
+        className={`${styles.field} ${styles.textarea}`}
       />
-      {state.error && <p style={{ color: "crimson" }}>{state.error}</p>}
-      <button type="submit" disabled={pending} style={{ alignSelf: "flex-start" }}>
+      {state.error && <p className={styles.error}>{state.error}</p>}
+      <button
+        type="submit"
+        disabled={pending}
+        className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
+      >
         {pending ? "Posting..." : "Post comment"}
       </button>
     </form>

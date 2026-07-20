@@ -3,6 +3,7 @@ import { getPostThreadsWithApprovedComments, getDetachedThreadContext } from "@/
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
 import { type CommentNodeData } from "./CommentNode";
+import styles from "./CommentSection.module.css";
 
 function buildTree(
   flat: { id: string; parentCommentId: string | null; displayName: string; bodyText: string; createdAt: string }[],
@@ -66,12 +67,12 @@ export default async function CommentSection({ postId }: { postId: string }) {
   ];
 
   return (
-    <section style={{ marginTop: "2rem", paddingTop: "1rem", borderTop: "1px solid #ddd" }}>
-      <h2>Comments</h2>
+    <section className={styles.section}>
+      <h2 className={styles.heading}>Comments</h2>
       <CommentForm postId={postId} userName={userName} />
 
       {threads.length === 0 ? (
-        <p style={{ color: "#666" }}>No comments yet.</p>
+        <p className={styles.empty}>No comments yet.</p>
       ) : (
         <CommentEntryList entries={entries} postId={postId} userName={userName} />
       )}

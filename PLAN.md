@@ -397,9 +397,7 @@ Git history carries per-step detail.
       `PostCollab` lifecycle gotcha in CLAUDE.md) rather than an actual diff against the live
       Yjs doc, which would need decoding it and running the same `O(n·m)` `diffText` the
       editor's own status line already uses (see PERFORMANCE.md) — fine for one post at a
-      time, not for every row of a list. Badge is sized `0.5em` (half of whichever heading it
-      sits inside, `h1` or `h2`) with `vertical-align: middle`; see the `em`-vs-`rem` gotcha
-      in CLAUDE.md for why this needed to be parent-relative rather than root-relative.
+      time, not for every row of a list. Badge sizing/positioning conventions are in STYLE.md.
     - **Trade-off, not a bug**: giving the home and author-page listings per-viewer content
       (the edit badge) meant both pages now call `auth()`, which made Next.js treat them as
       fully dynamic — their pre-existing `revalidate = 60` ISR caching is now a no-op. See

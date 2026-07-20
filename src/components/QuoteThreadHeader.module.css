@@ -1,0 +1,86 @@
+.wrapper {
+  margin-bottom: 8px;
+}
+
+/* No CSS border anywhere — a border and an SVG fill of the "same" color
+   don't reliably rasterize to the same pixels. The arrowhead (fixed-size
+   SVG) and the line below it (a plain background-color div) are both solid
+   fills instead, and flexbox stretches the line to the blockquote's actual
+   height — no JS measurement. */
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.markerColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.arrow {
+  display: block;
+  flex-shrink: 0;
+}
+
+.arrowActive {
+  fill: #b8935a;
+}
+
+.arrowDetached {
+  fill: #999;
+}
+
+.bar {
+  flex: 1;
+}
+
+.barActive {
+  background-color: #b8935a;
+}
+
+.barDetached {
+  background-color: #999;
+}
+
+.quote {
+  margin: 0;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.quoteActive {
+  color: #555;
+}
+
+.quoteDetached {
+  color: #777;
+}
+
+/* Per PLAN.md §5: a detached thread (its quote was edited or removed in a
+   later revision) loses the inline indicator but stays listed, with a
+   notice and a way to see the quote in its original context. */
+.detachedNotice {
+  font-size: 0.78rem;
+  color: #999;
+  margin: 2px 0 0 18px;
+}
+
+.contextToggle {
+  font: inherit;
+  color: #777;
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.contextText {
+  font-size: 0.8rem;
+  color: #666;
+  margin: 4px 0 0 18px;
+  font-style: italic;
+}

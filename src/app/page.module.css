@@ -1,0 +1,13 @@
+.postHeading {
+  display: flex;
+  align-items: center;
+}
+
+.titleLink {
+  color: #000;
+  text-decoration: none;
+}
+
+.titleLink:hover {
+  text-decoration: underline;
+}
