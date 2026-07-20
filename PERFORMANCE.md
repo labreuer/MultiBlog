@@ -110,3 +110,74 @@ means also revisiting whether the 400ms debounce and/or algorithm (e.g. a
 prefix/suffix-trim-style approach, which is only valid for a single
 contiguous edit region rather than the many scattered edits a whole session
 against the last revision can accumulate) still holds up.
+
+## 2026-07-19 — Editing-latency benchmark: this branch vs. pre-branch baseline
+
+**Prompt:** "Come up with a performance test for `/posts/cmrshyi5k0000j1ng3hx8pdv5/edit`,
+given what we've done in this branch. How much has editing been slowed down?
+Then test something five times as long. See if you can detect any noticeable
+performance degradation."
+
+**Branch:** `author-highlight-and-live-history`, HEAD at the time (`a501532`,
+"Add status-line revision diff + per-author contribution counts") compared
+against `26b03dd` ("Upgrade @tiptap/* to 3.28.0..."), the commit immediately
+before this branch's work started — a real `git checkout` + dev-server
+restart for each side, not an estimate.
+
+**Methodology**
+
+- Rather than edit the real post directly, its latest revision content
+  (3,689 characters across 17 paragraphs) was copied into a throwaway post.
+  A second throwaway post held the same 17 paragraphs repeated 5× (85
+  paragraphs, 18,445 characters) for the scaling test. The real post was
+  never opened during this test.
+- **Per-keystroke latency**: `document.execCommand('insertText', false, 'a')`
+  called 300 times in a tight loop inside the live editor (via the browser
+  pane's `javascript_exec`), timing each call with `performance.now()`. This
+  drives a real ProseMirror transaction through the same path a keystroke
+  would (mark-tagging, Yjs sync, decorations) without OS input-pipeline
+  noise, which would otherwise dominate a true keystroke-by-keystroke
+  measurement — reproducible, and valid for relative (before/after,
+  1x/5x) comparison even though it isn't literal human typing speed.
+- **Debounced computation cost**: `multiblogPerf.enable()`, then read the
+  `revision diff` / `author-highlight walk` timings it logs ~400ms after the
+  same 300-character burst settles.
+- Each measurement run was followed by deleting the same number of
+  characters (`execCommand('delete', false)` × N) to leave the throwaway
+  post's content unchanged before switching commits or content sizes.
+
+**Results — per-keystroke latency** (mean / p95 of the 300-call distribution):
+
+| Content | Baseline (`26b03dd`) | HEAD (`a501532`) |
+|---|---|---|
+| 1x (~3.7k chars) | 0.53ms / 1.0ms | 0.48ms / 0.8ms |
+| 5x (~18.6k chars) | 1.17ms / 1.9ms | 1.18ms / 1.6ms |
+
+Statistically indistinguishable at both sizes — the mark-tagging
+(`appendTransaction` in `author-highlight-extension.ts`) and custom caret
+render add no measurable per-keystroke cost. The ~2.4x growth from 1x→5x is
+identical on both commits, so it's pre-existing ProseMirror/Yjs overhead
+(decoration rebuilding, `state.apply()`), not something this branch added.
+
+**Results — debounced computation** (doesn't exist at all on `26b03dd`:
+`window.multiblogPerf` is `undefined` there):
+
+| Content | author-highlight walk | revision diff |
+|---|---|---|
+| 1x | 0.10ms | 19.7ms |
+| 5x | ~0ms | **309–325ms** |
+
+The author-mark walk stays cheap regardless of size. The revision diff is
+the one real finding: ~16x slower for 5x the content — worse than linear,
+consistent with the `O(n·m)` word-level-LCS cost already documented above.
+Noticeable stutter at these sizes, not a freeze, but the super-linear curve
+means a document meaningfully larger than 18k characters could turn that
+debounced tick into a genuinely janky pause.
+
+**Not covered by this benchmark** (different scaling axis — session/edit
+count, not document size; see the "known, unaddressed hot paths" entry
+above): `server/collab.ts`'s per-update `count()` query, and
+`LiveHistoryViewer`'s from-scratch replay.
+
+**Bottom line:** editing itself hasn't slowed down. The revision-diff status
+line is the one place with real, measurable, super-linear cost.
