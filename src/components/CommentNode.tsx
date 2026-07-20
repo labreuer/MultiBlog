@@ -21,6 +21,7 @@ type Props = {
 
 export default function CommentNode({ comment, postId, userName, depth = 0 }: Props) {
   const [replying, setReplying] = useState(false);
+  const [posted, setPosted] = useState(false);
 
   return (
     <div className={`${styles.node} ${depth > 0 ? styles.nested : ""}`}>
@@ -29,10 +30,19 @@ export default function CommentNode({ comment, postId, userName, depth = 0 }: Pr
         <span className={styles.timestamp}>{new Date(comment.createdAt).toLocaleString()}</span>
       </p>
       <p>{comment.bodyText}</p>
-      <button type="button" onClick={() => setReplying((r) => !r)} className={styles.replyButton}>
-        {replying ? "Cancel" : "Reply"}
-      </button>
-      {replying && <CommentForm postId={postId} parentCommentId={comment.id} userName={userName} />}
+      {!posted && (
+        <button type="button" onClick={() => setReplying((r) => !r)} className={styles.replyButton}>
+          {replying ? "Cancel" : "Reply"}
+        </button>
+      )}
+      {replying && !posted && (
+        <CommentForm
+          postId={postId}
+          parentCommentId={comment.id}
+          userName={userName}
+          onPosted={() => setPosted(true)}
+        />
+      )}
       {comment.replies.map((reply) => (
         <CommentNode key={reply.id} comment={reply} postId={postId} userName={userName} depth={depth + 1} />
       ))}

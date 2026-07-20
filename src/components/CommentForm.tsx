@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
 import styles from "./CommentForm.module.css";
 
@@ -13,6 +13,7 @@ type Props = {
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
+  onPosted?: () => void;
 };
 
 export default function CommentForm({
@@ -22,11 +23,22 @@ export default function CommentForm({
   anchorFrom,
   anchorTo,
   quotedText,
+  onPosted,
 }: Props) {
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
-  if (state.status) {
-    return <p className={styles.status}>{state.status === "APPROVED" ? "Comment posted." : "Your comment is awaiting moderation."}</p>;
+  useEffect(() => {
+    if (state.status === "APPROVED") {
+      onPosted?.();
+    }
+  }, [state.status, onPosted]);
+
+  if (state.status === "APPROVED") {
+    return null;
+  }
+
+  if (state.status === "PENDING") {
+    return <p className={styles.status}>Your comment is awaiting moderation.</p>;
   }
 
   return (
