@@ -2,6 +2,7 @@
 
 Multi-author blog with revisions, real-time collab, and quote-anchored comments.
 Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually built vs. planned.
+Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Running
 
@@ -21,6 +22,10 @@ Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually
   locked). Stop `dev:all`, generate, restart.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
+- One-off DB scripts (seeding/inspecting data outside the app) can't `require()` the
+  generated client with plain `node -e` — it's TS source, not compiled JS. Write a `.ts`
+  file importing `prisma` from `./src/lib/prisma` (same as `server/collab.ts` does) and run
+  it with `npx tsx that-file.ts` from the project root; delete the file afterward.
 - Dev account `labreuer@gmail.com` has role ADMIN.
 - `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`,
   `NEXT_PUBLIC_COLLAB_URL`.
@@ -43,6 +48,19 @@ Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually
   an already-loaded tab's live WS connection/React state keeps its original identity only
   until you reload or navigate it. Do each test user's sign-in in its own tab, and only
   reload a tab when you actually mean to switch who it's authenticated as.
+- For editing-latency benchmarks, `document.execCommand('insertText', false, char)` in a
+  loop inside the editor's `.tiptap` element, timed with `performance.now()` per call, drives
+  a real ProseMirror transaction through the normal path (mark-tagging, Yjs sync,
+  decorations) without OS input-pipeline noise — reproducible enough for relative
+  before/after comparisons. `execCommand('delete', false)` undoes it the same way,
+  character-for-character, to restore test content afterward.
+- To A/B a performance change against actual history rather than guessing: confirm
+  `git status` is clean, `git checkout <old-commit>`, stop/restart `dev:all` (checkout
+  doesn't hot-reload cleanly across many files — the collab server especially needs a real
+  restart), measure, then `git checkout <branch-name>` and restart again.
+- For performance/stress testing at a realistic content size, copy the target content into
+  a throwaway post rather than editing the real one directly — removes any risk from a
+  botched restore step.
 
 ## Gotchas
 

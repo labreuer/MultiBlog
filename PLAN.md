@@ -357,6 +357,11 @@ Git history carries per-step detail.
      replaced with a thin colored bar (`renderCaret` in `CollabEditorBody.tsx`) — the name
      shows in a CSS `:hover`-only tooltip instead. The local user's own cursor was already
      unaffected (y-prosemirror excludes the local clientID before `render` runs).
+   - **Editor status line**: shows `(+X −Y)` (live doc vs. the last saved revision, via the
+     existing word-level `diffText`) and `(Name: +N, ...)` per contributing/connected author
+     (`collectAuthorHighlightStats`, `src/lib/tiptap-schema.ts`) next to the live/connecting
+     indicator. Both figures are debounced ~400ms rather than recomputed per keystroke — see
+     PERFORMANCE.md, which also has a real before/after benchmark of this branch's cost.
 
 **Deliberate deviations from §2–§6**
 
@@ -400,3 +405,15 @@ Git history carries per-step detail.
   full re-apply from position 0 on every scrub, not checkpointed — fine at the update-log
   sizes one session between revisions produces, would need periodic snapshots to stay cheap
   if that ever changed.
+- The status line's `(+X −Y)` figure reuses `diffText`'s word-level tokenization, which
+  reports a whole word as fully deleted+reinserted the instant an edit lands *inside* it
+  rather than the true character delta — measurably inaccurate for this use, deferred (full
+  repro and the fix trade-offs are in PERFORMANCE.md). Word-level output itself is correct
+  and stays as-is for the revision-history diff view, which genuinely wants whole-word
+  semantics for a human reading a diff.
+- A real before/after benchmark (checked out the commit predating this branch, same
+  content, same test, not a guess) confirmed per-keystroke editing latency is unaffected by
+  everything in item 9, at both normal and 5x content length. The debounced revision-diff
+  computation above is the one measurable new cost, and scales worse than linearly with
+  content length (~16x slower at 5x length) — see PERFORMANCE.md's 2026-07-19 benchmark
+  entry for methodology and numbers.
