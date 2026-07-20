@@ -23,10 +23,11 @@ enum ModerationPolicy {
   AUTO
 }
 
-enum PostStatus {
-  DRAFT
+enum PublicationEventType {
   PUBLISHED
-  ARCHIVED
+  UNPUBLISHED
+  SCHEDULED
+  SCHEDULE_CANCELED
 }
 
 enum ThreadStatus {
@@ -62,6 +63,7 @@ model User {
   commenter            Commenter?
   passwordResetTokens  PasswordResetToken[]
   commentStatusChanges Comment[]            @relation("CommentStatusChangedBy")
+  publicationEvents    PostPublicationEvent[] @relation("PublicationEventActor")
 }
 
 // Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
@@ -115,18 +117,23 @@ model Post {
   id                String     @id @default(cuid())
   slug              String     @unique
   title             String
-  status            PostStatus @default(DRAFT)
-  currentRevisionId String?    @unique
+  publishRevisionId String?    @unique
   moderationPolicy  ModerationPolicy @default(INHERIT)
   createdAt         DateTime   @default(now())
-  publishedAt       DateTime?
+  publishedAt       DateTime?  // may be in the future — see below
 
-  currentRevision Revision?          @relation("CurrentRevision", fields: [currentRevisionId], references: [id])
+  // publishRevisionId is set immediately by both an immediate publish and a
+  // *scheduled* one — visibility is gated by publishedAt vs now(), a pure
+  // query-time condition (src/lib/post-status.ts's publishedPostWhere), not
+  // a stored status or a background sweep that flips something at the
+  // scheduled instant. See PLAN.md §4/§10.
+  publishRevision Revision?          @relation("PublishRevision", fields: [publishRevisionId], references: [id])
   authors         PostAuthor[]
   revisions       Revision[]         @relation("PostRevisions")
   collab          PostCollab?
   collabUpdates   PostCollabUpdate[]
   threads         CommentThread[]
+  publicationEvents PostPublicationEvent[]
 }
 
 model PostAuthor {
@@ -150,12 +157,33 @@ model Revision {
   changelog      String?
   createdAt      DateTime @default(now())
 
-  post           Post            @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade)
-  editor         User?           @relation("RevisionEditor", fields: [editorId], references: [id])
-  currentForPost Post?           @relation("CurrentRevision")
-  threads        CommentThread[]
+  post              Post                   @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade)
+  editor            User?                  @relation("RevisionEditor", fields: [editorId], references: [id])
+  publishedAsRevisionOf Post?               @relation("PublishRevision")
+  threads           CommentThread[]
+  publicationEvents PostPublicationEvent[]
 
   @@unique([postId, revisionNumber])
+}
+
+// Append-only audit log of publish/unpublish/schedule transitions. Needed
+// because, once a no-op save/publish or an unpublish-republish cycle can
+// happen without a new Revision row, Revision.createdAt alone can no longer
+// answer "when did this go live/offline" — see PLAN.md §10.
+model PostPublicationEvent {
+  id           String               @id @default(cuid())
+  postId       String
+  type         PublicationEventType
+  revisionId   String?              // the revision that went (or would go) live; null for UNPUBLISHED/SCHEDULE_CANCELED
+  scheduledFor DateTime?            // only set for SCHEDULED events
+  actorId      String?              // null = system (the due-schedule sweep)
+  createdAt    DateTime             @default(now())
+
+  post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  revision Revision? @relation(fields: [revisionId], references: [id])
+  actor    User?     @relation("PublicationEventActor", fields: [actorId], references: [id])
+
+  @@index([postId, createdAt])
 }
 
 model PostCollab {

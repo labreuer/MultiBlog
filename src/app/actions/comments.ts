@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
+import { derivePostStatus } from "@/lib/post-status";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
 import { getClientIp } from "@/lib/request-ip";
@@ -68,7 +69,7 @@ export async function submitComment(
       authors: { include: { user: { select: { moderationPolicy: true } } } },
     },
   });
-  if (!post || post.status !== "PUBLISHED" || !post.currentRevisionId) {
+  if (!post || !post.publishRevisionId || derivePostStatus(post) !== "published") {
     return { error: "This post isn't open for comments." };
   }
 
@@ -115,7 +116,7 @@ export async function submitComment(
       (await prisma.commentThread.create({
         data: {
           postId,
-          anchoredRevisionId: post.currentRevisionId,
+          anchoredRevisionId: post.publishRevisionId,
           anchorFrom,
           anchorTo,
           quotedText: quotedText.trim(),
@@ -129,7 +130,7 @@ export async function submitComment(
       (await prisma.commentThread.create({
         data: {
           postId,
-          anchoredRevisionId: post.currentRevisionId,
+          anchoredRevisionId: post.publishRevisionId,
           anchorFrom: 0,
           anchorTo: 0,
           quotedText: "",

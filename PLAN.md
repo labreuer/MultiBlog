@@ -93,12 +93,19 @@ users            id, email, name, password_hash | oauth, role, created_at,
                  color                                           -- author-highlight/caret color
                  admin_initials(non-null string)                 -- byline shorthand, §10 item 11
                  moderation_policy('inherit'|'always'|'auto')   -- per-author override
-posts            id, slug, title, status(draft|published|archived),
-                 current_revision_id, created_at, published_at,
+posts            id, slug, title, publish_revision_id,
+                 created_at, published_at (may be future),       -- no status column, no schedule
+                                                                   -- column (§10 item 12): visible iff
+                                                                   -- publish_revision_id is set AND
+                                                                   -- published_at <= now()
                  moderation_policy('inherit'|'always'|'auto')   -- per-post override
 post_authors     post_id, user_id, byline_order                 -- manual byline, decoupled
 revisions        id, post_id, revision_number, doc JSONB (ProseMirror),
                  title, editor_id, changelog, created_at         -- IMMUTABLE
+post_publication_events id, post_id, type(published|unpublished|   -- audit log of publish/unpublish/
+                 scheduled|schedule_canceled), revision_id NULL,   -- schedule transitions (§10 item 12) —
+                 scheduled_for NULL, actor_id NULL, created_at      -- needed once those transitions can
+                                                                     -- happen without a new revision
 post_collab      post_id, ydoc BYTEA, updated_at                 -- live Yjs state (working draft)
 post_collab_updates id, post_id, created_at, update BYTEA        -- raw Yjs update log, since
                                                                   -- last revision only (§10 item 9)
@@ -116,6 +123,15 @@ comments         id, thread_id, parent_comment_id NULL,
 
 Notes:
 
+- **No `status` enum, no schedule column.** A post is actually visible iff
+  `publish_revision_id` is set **and** `published_at <= now()` — the latter
+  may hold a future date (a scheduled post), so visibility is a pure
+  query-time comparison (`src/lib/post-status.ts`'s `publishedPostWhere`),
+  not a stored flag or a background process that flips one. `derivePostStatus`
+  derives draft/scheduled/published for display from those same two columns.
+  See §10 item 12 for the fuller history (this replaced first a
+  `draft|published|archived` status column, then a separate `scheduled_for`
+  column backed by a sweep).
 - **Revisions are append-only.** Publishing creates a new row; nothing is overwritten.
   "Restore version N" = copy doc N into a new revision. Diff view between any two revisions
   via `prosemirror-changeset`. `editor_id` records who made the revision — separate from the
@@ -428,6 +444,86 @@ Git history carries per-step detail.
       pinned to the bottom in *both* sort directions. Previously they only sorted last on
       ascending; descending flipped them to the top, since the shared null-handling was
       subject to the same direction-negation as the actual date comparison.
+
+12. **Publish mechanics rework** — no-op revision skip, unpublish, scheduled
+    publishing, and dropping the `status` column entirely.
+    - **No-op revision skip**: `saveDraft`/`publishPost`/`schedulePost` all
+      route through a shared `resolveRevision` (`src/app/actions/posts.ts`)
+      that compares the incoming title+doc against the latest `Revision` row
+      via `docsEqual` (`src/lib/diff.ts`) — an order-independent deep-equal,
+      not the display-oriented word-level `diffText` — before creating a new
+      one. Needed because Postgres `jsonb` doesn't preserve object key order
+      on read-back, so a plain `JSON.stringify` compare against the doc as
+      just typed would false-positive as "changed" on key order alone. Covers
+      "typed something, then undid it" without inspecting the live Yjs doc.
+    - **No `status` column.** Originally `draft|published|archived`. Once
+      unpublish/republish/schedule cycles could happen without a new
+      revision, the only thing `status` was still doing was duplicating
+      information already sitting elsewhere — so it was dropped rather than
+      kept in sync. `ARCHIVED` was never used by any code path and was
+      dropped with it. `src/lib/post-status.ts`'s `derivePostStatus` computes
+      draft/scheduled/published for display only.
+    - **No separate schedule column, no sweep.** The first cut of this had a
+      `scheduled_for` column plus a lazy sweep (`publishDuePosts`, called from
+      every public page) that flipped `publish_revision_id` from `null` once
+      the scheduled time arrived. That sweep turned out to be pure
+      accidental complexity: `schedulePost` now sets `publish_revision_id`
+      **immediately** — exactly like an immediate publish — and just sets
+      `published_at` to the future date instead of `now()`. Visibility is
+      then purely `publish_revision_id IS NOT NULL AND published_at <= now()`
+      (`publishedPostWhere()` in `src/lib/post-status.ts`), a query-time
+      condition every public-facing query and the comment-eligibility check
+      must use instead of checking `publish_revision_id` alone — centralized
+      in that one helper rather than repeated at each of the ~7 call sites,
+      since forgetting it at even one would leak a not-yet-due post early.
+      No write ever needs to happen *at* the scheduled instant, so
+      `scheduled_for` merges into `published_at` (which may now be in the
+      future) and the whole sweep module is gone. Thread remapping
+      (`remapThreadsToRevision`) now happens synchronously inside
+      `schedulePost` itself (at the moment `publish_revision_id` changes)
+      rather than deferred to a sweep pass.
+    - **Unpublish** (`unpublishPost`): sets `publish_revision_id` to `null`
+      with no new revision; `published_at` is left untouched (inert whenever
+      `publish_revision_id` is null — nothing reads it in that state, so
+      there's nothing to clean up). Doubles as "cancel schedule" — a post is
+      never both published and scheduled at once (`derivePostStatus`), so one
+      action unambiguously covers both starting states.
+    - **Scheduling guard**: `schedulePost` is disallowed only when
+      `derivePostStatus(post) === "published"` (actually live right now) —
+      not merely when `publish_revision_id` is set, since a *scheduled* post
+      has that set too. This is what still guarantees a live post's served
+      content can never go dark while a future edit is pending, while also
+      allowing a reschedule of an already-scheduled post. Renamed from
+      `currentRevisionId` to `publishRevisionId` per an explicit request
+      during design — read as "the revision this post is currently
+      publishing," which doesn't collide with "current" meaning "most
+      recently edited."
+    - **Rescheduling freezes the target until you reschedule again.**
+      Because `publish_revision_id` is set once, at the moment
+      Schedule/Reschedule is clicked (via the same `resolveRevision` no-op-
+      skip used everywhere else), a plain `saveDraft` afterward creates a
+      newer revision but does *not* change what a pending schedule will
+      publish — you have to click Reschedule again to move the target
+      forward. This reverses the first cut's behavior (where the sweep
+      always grabbed whichever revision was *latest* at the scheduled
+      instant, so quietly continuing to edit silently changed the outcome);
+      the new behavior is more predictable and was a natural consequence of
+      removing the sweep, not a separate design choice.
+    - **Data migration note**: one already-real in-flight schedule existed in
+      the dev DB when the `scheduled_for` column was dropped (a post someone
+      had actually scheduled while testing the first cut). The migration
+      backfilled it correctly — `publish_revision_id` set to that post's
+      latest revision, `published_at` set to its `scheduled_for` value —
+      rather than just dropping the column and losing the pending schedule.
+    - **`PostPublicationEvent`**: an append-only audit log
+      (`PUBLISHED|UNPUBLISHED|SCHEDULED|SCHEDULE_CANCELED`, `postId`,
+      `revisionId?`, `scheduledFor?`, `actorId?`), written by every action
+      above. Added because, once state transitions stopped always producing
+      a new `Revision` row, `Revision.createdAt` alone could no longer answer
+      "when did this go live/offline" — no UI reads it yet, but the data
+      survives for when a publish-history view is wanted. Deliberately kept
+      as a write-only audit trail, not a source of truth read on any hot
+      path — visibility/status derivation never queries it.
 
 **Deliberate deviations from §2–§6**
 

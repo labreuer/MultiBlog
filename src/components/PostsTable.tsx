@@ -8,7 +8,7 @@ export type PostRow = {
   slug: string;
   title: string;
   authors: string;
-  isPublished: boolean;
+  status: "draft" | "scheduled" | "published";
   publishedAt: Date | null;
   createdAt: Date;
   ahead: number;
@@ -20,6 +20,58 @@ export type PostRow = {
 
 const DATE_FORMATS = ["yyyy-MM-dd HH:mm", "yyyy-MM-dd", "M/d/yyyy h:mm", "M/d/yyyy"] as const;
 type DateFormat = (typeof DATE_FORMATS)[number];
+
+// Calendar-aware breakdown (not a flat 365.25-day-year approximation) of the
+// time remaining until `target`, dropping leading zero-valued units — years/
+// months/days only appear if non-zero, hours+minutes always appear together
+// as the finest-grained element.
+function formatCountdown(target: Date): string {
+  const now = new Date();
+  let cursor = now;
+  let years = 0;
+  let months = 0;
+  let days = 0;
+
+  const step = (advance: (d: Date) => Date) => {
+    let count = 0;
+    while (true) {
+      const next = advance(cursor);
+      if (next > target) break;
+      cursor = next;
+      count++;
+    }
+    return count;
+  };
+
+  years = step((d) => {
+    const next = new Date(d);
+    next.setFullYear(next.getFullYear() + 1);
+    return next;
+  });
+  months = step((d) => {
+    const next = new Date(d);
+    next.setMonth(next.getMonth() + 1);
+    return next;
+  });
+  days = step((d) => {
+    const next = new Date(d);
+    next.setDate(next.getDate() + 1);
+    return next;
+  });
+
+  const remainingMs = Math.max(0, target.getTime() - cursor.getTime());
+  const totalMinutes = Math.floor(remainingMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years} years`);
+  if (months > 0) parts.push(`${months} months`);
+  if (days > 0) parts.push(`${days} d`);
+  parts.push(`${hours}h${minutes}m`);
+
+  return parts.join(" ");
+}
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -83,6 +135,9 @@ function compareByKey(key: SortKey, a: PostRow, b: PostRow, dir: "asc" | "desc")
     case "authors":
       return a.authors.localeCompare(b.authors);
     case "published":
+      // publishedAt holds a future date for a scheduled row and a past one
+      // for a published row (there is no separate scheduledFor anymore), so
+      // this single comparison already sorts both correctly.
       return compareNullableDatesAlwaysLast(a.publishedAt, b.publishedAt, dir);
     case "ahead":
       return a.ahead - b.ahead;
@@ -222,8 +277,12 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
               </td>
               <td style={td}>{row.authors}</td>
               <td style={td}>
-                {row.isPublished && row.publishedAt ? (
+                {row.status === "published" && row.publishedAt ? (
                   <Link href={`/${row.slug}`}>{formatDate(row.publishedAt, dateFormat)}</Link>
+                ) : row.status === "scheduled" && row.publishedAt ? (
+                  <span style={{ color: "#666" }} title={`Scheduled: ${formatCountdown(row.publishedAt)}`}>
+                    {formatDate(row.publishedAt, dateFormat)}
+                  </span>
                 ) : (
                   ""
                 )}

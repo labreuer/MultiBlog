@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
+import { derivePostStatus } from "@/lib/post-status";
 import PostsTable from "@/components/PostsTable";
 
 export default async function PostsPage() {
@@ -25,7 +26,7 @@ export default async function PostsPage() {
       : { authors: { some: { userId: session.user.id } } },
     orderBy: { createdAt: "desc" },
     include: {
-      currentRevision: { select: { revisionNumber: true } },
+      publishRevision: { select: { revisionNumber: true } },
       authors: {
         orderBy: { bylineOrder: "asc" },
         select: { user: { select: { adminInitials: true } } },
@@ -45,10 +46,13 @@ export default async function PostsPage() {
 
   const rows = posts.map((post) => {
     const latest = post.revisions[0];
-    const isPublished = post.status === "PUBLISHED" && post.currentRevisionId != null;
+    const status = derivePostStatus(post);
     const latestRevisionNumber = latest?.revisionNumber ?? 0;
-    const publishedRevisionNumber = post.currentRevision?.revisionNumber ?? 0;
-    const ahead = isPublished ? latestRevisionNumber - publishedRevisionNumber : latestRevisionNumber;
+    const publishedRevisionNumber = post.publishRevision?.revisionNumber ?? 0;
+    // publishRevision is set for a scheduled post too (not just published),
+    // so both non-draft statuses compare against it — "ahead" means "edited
+    // since whatever's committed to go/be live," not just "since published."
+    const ahead = status !== "draft" ? latestRevisionNumber - publishedRevisionNumber : latestRevisionNumber;
 
     let approved = 0;
     let pending = 0;
@@ -64,7 +68,7 @@ export default async function PostsPage() {
       slug: post.slug,
       title: post.title,
       authors: post.authors.map((a) => a.user.adminInitials).join(", "),
-      isPublished,
+      status,
       publishedAt: post.publishedAt,
       createdAt: post.createdAt,
       ahead,

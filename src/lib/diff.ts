@@ -35,6 +35,30 @@ export function extractText(doc: unknown): string {
   return parts.join("").trim();
 }
 
+// Order-independent structural equality for two ProseMirror JSON docs.
+// Postgres jsonb does not preserve object key order on read-back, so a doc
+// round-tripped through the DB can have different key order than the one
+// just produced by editor.getJSON() even when semantically identical — a
+// plain JSON.stringify comparison would false-positive as "changed" on key
+// order alone. Used to skip creating a no-op revision.
+export function docsEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || a === null || typeof b !== "object" || b === null) return false;
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, i) => docsEqual(item, b[i]));
+  }
+
+  const aKeys = Object.keys(a as Record<string, unknown>);
+  const bKeys = Object.keys(b as Record<string, unknown>);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) =>
+    Object.prototype.hasOwnProperty.call(b, key) &&
+    docsEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+  );
+}
+
 export type DiffToken = { value: string; type: "equal" | "insert" | "delete" };
 
 function tokenize(text: string): string[] {

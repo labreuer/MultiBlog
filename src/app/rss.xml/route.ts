@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
+import { publishedPostWhere } from "@/lib/post-status";
 
 export const revalidate = 60;
 
@@ -16,17 +17,17 @@ export async function GET() {
   const baseUrl = process.env.APP_URL ?? "http://localhost:3000";
 
   const posts = await prisma.post.findMany({
-    where: { status: "PUBLISHED", currentRevisionId: { not: null } },
+    where: publishedPostWhere(),
     orderBy: { publishedAt: "desc" },
     take: 30,
-    include: { currentRevision: { select: { title: true, doc: true } } },
+    include: { publishRevision: { select: { title: true, doc: true } } },
   });
 
   const items = posts
     .map((post) => {
-      const title = post.currentRevision?.title ?? post.title;
+      const title = post.publishRevision?.title ?? post.title;
       const link = `${baseUrl}/${post.slug}`;
-      const description = post.currentRevision ? extractText(post.currentRevision.doc).slice(0, 300) : "";
+      const description = post.publishRevision ? extractText(post.publishRevision.doc).slice(0, 300) : "";
       const pubDate = (post.publishedAt ?? post.createdAt).toUTCString();
       return `  <item>
     <title>${escapeXml(title)}</title>

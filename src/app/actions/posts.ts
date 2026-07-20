@@ -8,6 +8,8 @@ import { uniqueSlug } from "@/lib/slug";
 import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { remapThreadsToRevision } from "@/lib/anchor-remap";
 import { stripMarkFromDoc } from "@/lib/tiptap-schema";
+import { docsEqual } from "@/lib/diff";
+import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 
@@ -56,7 +58,6 @@ export async function createPostAction(
     data: {
       slug,
       title: trimmedTitle,
-      status: "DRAFT",
       authors: { create: { userId: session.user.id, bylineOrder: 0 } },
       revisions: {
         create: {
@@ -72,35 +73,51 @@ export async function createPostAction(
   redirect(`/posts/${post.id}/edit`);
 }
 
-async function nextRevisionNumber(postId: string): Promise<number> {
-  const latest = await prisma.revision.findFirst({
-    where: { postId },
-    orderBy: { revisionNumber: "desc" },
-    select: { revisionNumber: true },
+// Creates a new revision unless title+doc are identical to the latest one
+// (order-independent — see docsEqual), in which case the existing latest
+// revision is reused untouched. Shared by saveDraft/publishPost/schedulePost
+// so "save/publish/schedule with no real change" never grows the revision
+// history. Must run inside the same transaction as any Post update that
+// depends on the result, so it takes a transaction client rather than the
+// module-level `prisma`.
+async function resolveRevision(
+  tx: Prisma.TransactionClient,
+  postId: string,
+  title: string,
+  doc: Prisma.InputJsonValue,
+  editorId: string,
+  changelog?: string,
+): Promise<{ id: string; revisionNumber: number; created: boolean }> {
+  const latest = await tx.revision.findFirst({ where: { postId }, orderBy: { revisionNumber: "desc" } });
+  if (latest && latest.title === title && docsEqual(latest.doc, doc)) {
+    return { id: latest.id, revisionNumber: latest.revisionNumber, created: false };
+  }
+
+  const revisionNumber = (latest?.revisionNumber ?? 0) + 1;
+  const revision = await tx.revision.create({
+    data: { postId, revisionNumber, title, doc, editorId, changelog: changelog?.trim() || undefined },
   });
-  return (latest?.revisionNumber ?? 0) + 1;
+  return { id: revision.id, revisionNumber, created: true };
 }
 
 export async function saveDraft(
   postId: string,
   title: string,
   doc: Prisma.InputJsonValue,
-): Promise<{ revisionNumber: number }> {
+): Promise<{ revisionNumber: number; created: boolean }> {
   const { session } = await requireEditableSession(postId);
-  const revisionNumber = await nextRevisionNumber(postId);
   const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
 
-  await prisma.$transaction([
-    prisma.revision.create({
-      data: { postId, revisionNumber, title, doc: cleanDoc, editorId: session.user.id },
-    }),
-    prisma.post.update({ where: { id: postId }, data: { title } }),
-    prisma.postCollabUpdate.deleteMany({ where: { postId } }),
-  ]);
+  const revision = await prisma.$transaction(async (tx) => {
+    const result = await resolveRevision(tx, postId, title, cleanDoc, session.user.id);
+    await tx.post.update({ where: { id: postId }, data: { title } });
+    await tx.postCollabUpdate.deleteMany({ where: { postId } });
+    return result;
+  });
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
-  return { revisionNumber };
+  return { revisionNumber: revision.revisionNumber, created: revision.created };
 }
 
 export async function publishPost(
@@ -108,39 +125,110 @@ export async function publishPost(
   title: string,
   doc: Prisma.InputJsonValue,
   changelog?: string,
-): Promise<{ revisionNumber: number }> {
+): Promise<{ revisionNumber: number; created: boolean }> {
   const { session, post } = await requireEditableSession(postId);
-  const revisionNumber = await nextRevisionNumber(postId);
   const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
+  const now = new Date();
+  // Preserve the original go-live date across an unpublish/republish with no
+  // reschedule in between (post.publishedAt already in the past); otherwise
+  // (never published, or currently sitting on a future scheduled date being
+  // overridden) it goes live now.
+  const publishedAt = post.publishedAt && post.publishedAt <= now ? post.publishedAt : now;
 
-  const revision = await prisma.revision.create({
-    data: {
-      postId,
-      revisionNumber,
-      title,
-      doc: cleanDoc,
-      editorId: session.user.id,
-      changelog: changelog?.trim() || undefined,
-    },
+  const revision = await prisma.$transaction(async (tx) => {
+    const result = await resolveRevision(tx, postId, title, cleanDoc, session.user.id, changelog);
+    await tx.post.update({
+      where: { id: postId },
+      data: { title, publishRevisionId: result.id, publishedAt },
+    });
+    await tx.postCollabUpdate.deleteMany({ where: { postId } });
+    await tx.postPublicationEvent.create({
+      data: { postId, type: "PUBLISHED", revisionId: result.id, actorId: session.user.id },
+    });
+    return result;
   });
 
-  await prisma.post.update({
-    where: { id: postId },
-    data: {
-      title,
-      status: "PUBLISHED",
-      currentRevisionId: revision.id,
-      publishedAt: post.publishedAt ?? new Date(),
-    },
-  });
-
-  await prisma.postCollabUpdate.deleteMany({ where: { postId } });
   await remapThreadsToRevision(postId, revision.id);
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
-  return { revisionNumber };
+  return { revisionNumber: revision.revisionNumber, created: revision.created };
+}
+
+// Scheduling is only disallowed while the post is actually *live* right now
+// (derivePostStatus === "published") — a live post's currently-served
+// content must never go dark while a future edit is pending. It's fine from
+// draft or from an already-scheduled post (a reschedule): publishRevisionId
+// is set immediately either way, and publishedAt (now/future) alone decides
+// what's actually visible — see PLAN.md §10.
+export async function schedulePost(
+  postId: string,
+  title: string,
+  doc: Prisma.InputJsonValue,
+  scheduledFor: Date,
+  changelog?: string,
+): Promise<{ revisionNumber: number; created: boolean }> {
+  const { session, post } = await requireEditableSession(postId);
+  if (derivePostStatus(post) === "published") {
+    throw new Error("Unpublish this post before scheduling a new version of it.");
+  }
+  if (scheduledFor.getTime() <= Date.now()) {
+    throw new Error("Scheduled time must be in the future.");
+  }
+  const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
+
+  const revision = await prisma.$transaction(async (tx) => {
+    const result = await resolveRevision(tx, postId, title, cleanDoc, session.user.id, changelog);
+    await tx.post.update({
+      where: { id: postId },
+      data: { title, publishRevisionId: result.id, publishedAt: scheduledFor },
+    });
+    await tx.postCollabUpdate.deleteMany({ where: { postId } });
+    await tx.postPublicationEvent.create({
+      data: { postId, type: "SCHEDULED", revisionId: result.id, scheduledFor, actorId: session.user.id },
+    });
+    return result;
+  });
+
+  await remapThreadsToRevision(postId, revision.id);
+
+  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath("/posts");
+  return { revisionNumber: revision.revisionNumber, created: revision.created };
+}
+
+// Doubles as "cancel schedule": a post is published, scheduled, or draft,
+// never more than one at once (derivePostStatus), so one action covers both
+// non-draft starting states. publishedAt is left untouched — it's inert
+// whenever publishRevisionId is null, so there's nothing to clean up.
+export async function unpublishPost(postId: string): Promise<void> {
+  const { session, post } = await requireEditableSession(postId);
+  const status = derivePostStatus(post);
+  if (status === "draft") {
+    throw new Error("This post isn't published or scheduled.");
+  }
+
+  await prisma.$transaction([
+    prisma.post.update({
+      where: { id: postId },
+      data: { publishRevisionId: null },
+    }),
+    prisma.postPublicationEvent.create({
+      data: {
+        postId,
+        type: status === "scheduled" ? "SCHEDULE_CANCELED" : "UNPUBLISHED",
+        revisionId: post.publishRevisionId,
+        actorId: session.user.id,
+      },
+    }),
+  ]);
+
+  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath("/posts");
+  revalidatePath(`/${post.slug}`);
 }
 
 export async function restoreRevision(
@@ -156,7 +244,13 @@ export async function restoreRevision(
     throw new Error("Revision not found.");
   }
 
-  const newRevisionNumber = await nextRevisionNumber(postId);
+  const latest = await prisma.revision.findFirst({
+    where: { postId },
+    orderBy: { revisionNumber: "desc" },
+    select: { revisionNumber: true },
+  });
+  const newRevisionNumber = (latest?.revisionNumber ?? 0) + 1;
+
   await prisma.$transaction([
     prisma.revision.create({
       data: {

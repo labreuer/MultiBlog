@@ -6,9 +6,10 @@ import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
-import { saveDraft, publishPost } from "@/app/actions/posts";
+import { saveDraft, publishPost, unpublishPost, schedulePost } from "@/app/actions/posts";
 import { extractText, diffText } from "@/lib/diff";
 import { perfMeasure } from "@/lib/perf-monitor";
+import type { PostStatus } from "@/lib/post-status";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import styles from "./PostEditor.module.css";
 
@@ -18,11 +19,21 @@ type Props = {
   initialTitle: string;
   revisionNumber: number;
   publishedRevisionNumber: number | null;
+  postStatus: PostStatus;
+  publishedAt: Date | null;
   lastRevisionDoc: unknown;
   userId: string;
   userName: string;
   userColor: string;
 };
+
+// Formats a Date as the local-time value a <input type="datetime-local">
+// expects (YYYY-MM-DDTHH:mm) — toISOString() would convert to UTC first,
+// shifting the displayed time away from what the user actually picked.
+function toDatetimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
 type RevisionDiff = { added: number; removed: number };
@@ -52,6 +63,8 @@ export default function PostEditor({
   initialTitle,
   revisionNumber,
   publishedRevisionNumber,
+  postStatus,
+  publishedAt,
   lastRevisionDoc,
   userId,
   userName,
@@ -62,6 +75,9 @@ export default function PostEditor({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [changelog, setChangelog] = useState("");
+  const [scheduleInput, setScheduleInput] = useState(() =>
+    postStatus === "scheduled" && publishedAt ? toDatetimeLocalValue(publishedAt) : "",
+  );
   const [pending, startTransition] = useTransition();
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
@@ -162,7 +178,7 @@ export default function PostEditor({
         const doc = editor.getJSON();
         const result = await saveDraft(postId, title, doc);
         clearAuthorHighlights(editor);
-        setStatus(`Saved as revision #${result.revisionNumber}`);
+        setStatus(result.created ? `Saved as revision #${result.revisionNumber}` : `No changes since revision #${result.revisionNumber}`);
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to save.");
@@ -178,11 +194,41 @@ export default function PostEditor({
         const doc = editor.getJSON();
         const result = await publishPost(postId, title, doc, changelog);
         clearAuthorHighlights(editor);
-        setStatus(`Published as revision #${result.revisionNumber}`);
+        setStatus(result.created ? `Published as revision #${result.revisionNumber}` : `Published (no changes since revision #${result.revisionNumber})`);
         setChangelog("");
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to publish.");
+      }
+    });
+  };
+
+  const handleUnpublish = () => {
+    setError(null);
+    startTransition(async () => {
+      try {
+        await unpublishPost(postId);
+        setStatus(postStatus === "scheduled" ? "Schedule canceled" : "Unpublished");
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to unpublish.");
+      }
+    });
+  };
+
+  const handleSchedule = () => {
+    if (!editor || !scheduleInput) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        const doc = editor.getJSON();
+        const result = await schedulePost(postId, title, doc, new Date(scheduleInput), changelog);
+        clearAuthorHighlights(editor);
+        setStatus(`Scheduled revision #${result.revisionNumber}`);
+        setChangelog("");
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to schedule.");
       }
     });
   };
@@ -272,12 +318,32 @@ export default function PostEditor({
         <button type="button" onClick={handlePublish} disabled={pending || !editor}>
           Publish
         </button>
+        {postStatus !== "draft" && (
+          <button type="button" onClick={handleUnpublish} disabled={pending}>
+            {postStatus === "scheduled" ? "Cancel schedule" : "Unpublish"}
+          </button>
+        )}
+        {postStatus !== "published" && (
+          <>
+            <input
+              type="datetime-local"
+              aria-label="Schedule for"
+              value={scheduleInput}
+              onChange={(e) => setScheduleInput(e.target.value)}
+            />
+            <button type="button" onClick={handleSchedule} disabled={pending || !editor || !scheduleInput}>
+              {postStatus === "scheduled" ? "Reschedule" : "Schedule"}
+            </button>
+          </>
+        )}
       </div>
       {status && <p className={styles.statusMessage}>{status}</p>}
       {error && <p className={styles.errorMessage}>{error}</p>}
       <p className={styles.revisionNote}>
-        {publishedRevisionNumber !== null ? (
+        {postStatus === "published" ? (
           <Link href={`/${slug}`}>Published revision #{publishedRevisionNumber}</Link>
+        ) : postStatus === "scheduled" && publishedAt ? (
+          `Scheduled for ${publishedAt.toLocaleString()}`
         ) : (
           "Unpublished"
         )}

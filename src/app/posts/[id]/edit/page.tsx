@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
+import { derivePostStatus } from "@/lib/post-status";
 import PostEditor from "@/components/PostEditor";
 
 export default async function EditPostPage({ params }: { params: Promise<{ id: string }> }) {
@@ -15,7 +16,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     where: { id },
     include: {
       authors: { select: { userId: true } },
-      currentRevision: { select: { revisionNumber: true } },
+      publishRevision: { select: { revisionNumber: true } },
       revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { title: true, revisionNumber: true, doc: true } },
     },
   });
@@ -34,7 +35,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   }
 
   const latest = post.revisions[0];
-  const isPublished = post.status === "PUBLISHED" && post.currentRevisionId != null;
+  const status = derivePostStatus(post);
 
   return (
     <PostEditor
@@ -42,7 +43,9 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       slug={post.slug}
       initialTitle={latest?.title ?? post.title}
       revisionNumber={latest?.revisionNumber ?? 0}
-      publishedRevisionNumber={isPublished ? post.currentRevision!.revisionNumber : null}
+      publishedRevisionNumber={status === "published" ? post.publishRevision!.revisionNumber : null}
+      postStatus={status}
+      publishedAt={post.publishedAt}
       lastRevisionDoc={latest?.doc ?? null}
       userId={session.user.id}
       userName={session.user.name ?? session.user.email ?? "Anonymous"}

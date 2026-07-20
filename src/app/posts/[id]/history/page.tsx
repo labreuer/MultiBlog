@@ -47,7 +47,7 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
             <Link href={`/posts/${post.id}/history/${revision.revisionNumber}`}>
               Revision #{revision.revisionNumber}
             </Link>{" "}
-            {revision.id === post.currentRevisionId && (
+            {revision.id === post.publishRevisionId && (
               <strong style={{ color: "green" }}>(published)</strong>
             )}
             <div style={{ color: "#666", fontSize: "0.9rem" }}>
