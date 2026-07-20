@@ -572,6 +572,15 @@ Git history carries per-step detail.
       `color-mix()`. The comment textarea now resizes in both directions (`resize: both`),
       not just vertically.
 
+14. **Comment permalinks** — each comment's displayed timestamp
+    (`CommentNode.tsx`) is now a self-referencing anchor,
+    `<a id="…" href="#…">`, so clicking it (or copying its link) jumps
+    straight to that comment. The id is derived from the commenter's display
+    name plus their comment's timestamp truncated to the second, not the
+    comment's own database id — deliberately human-readable in a shared URL,
+    at the cost of not checking for collisions (two comments from the same
+    person in the same second, which shouldn't happen in practice).
+
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
