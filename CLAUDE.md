@@ -60,6 +60,15 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   accounts signed in in separate browser tabs at once — run `create` twice
   with different emails, and delete both (plus any throwaway `Post` row) when
   done.
+- For throwaway posts (content to publish/unpublish/schedule, or a copy of
+  real content for perf testing per below), use `npx tsx scripts/test-post.ts
+  create [authorEmail] [title]` and `... delete [slugOrId]` instead of a
+  manual DB script each time. `create` requires an existing `@example.com`
+  author (make one with `test-admin.ts create` first); `delete` refuses any
+  post that has a non-`@example.com` author. Delete the post before deleting
+  its author — once a post's only author is gone, "no authors" is
+  indistinguishable from a real post that lost its author some other way, so
+  `delete` refuses those too.
 - Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` are baked
   into the session cookie once at sign-in and never re-read from the DB on later requests.
   Deleting a throwaway `User` row mid-session does **not** sign them out or revoke their
@@ -157,5 +166,4 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 ## Conventions
 
 - Commit only when the user explicitly asks. Commit messages explain *why*, not just what.
-- Inline styles are the norm; CSS Modules only where media queries/pseudo-classes are needed.
 - Flag deviations from PLAN.md and judgment calls explicitly when reporting work.
