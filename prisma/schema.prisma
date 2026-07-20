@@ -52,6 +52,7 @@ model User {
   role             Role              @default(COMMENTER)
   moderationPolicy ModerationPolicy  @default(INHERIT)
   color            String            @default("#5b8cff")
+  adminInitials    String
   createdAt        DateTime          @default(now())
 
   accounts             Account[]

@@ -91,6 +91,7 @@ which is the main cost of doing it now rather than later.
 ```
 users            id, email, name, password_hash | oauth, role, created_at,
                  color                                           -- author-highlight/caret color
+                 admin_initials(non-null string)                 -- byline shorthand, §10 item 11
                  moderation_policy('inherit'|'always'|'auto')   -- per-author override
 posts            id, slug, title, status(draft|published|archived),
                  current_revision_id, created_at, published_at,
@@ -404,6 +405,31 @@ Git history carries per-step detail.
       fully dynamic — their pre-existing `revalidate = 60` ISR caching is now a no-op. See
       CACHING.md for the detail and a possible fix (split the personalized part out
       client-side) if that caching ever needs restoring.
+
+11. **`User.adminInitials`, an Author(s) column, and posts-table search** — a small follow-up
+    round on item 10's admin posts table.
+    - **`adminInitials`** (non-nullable `String` on `User`): added via a nullable-column →
+      backfill → `SET NOT NULL` migration pair (`add_admin_initials_nullable`,
+      `make_admin_initials_required`) instead of `prisma migrate dev`'s interactive
+      default-value prompt for adding a required column to a non-empty table — see the
+      CLAUDE.md Database note. Backfilled by hand for the two existing users (`LB`, `JD`).
+      `signUp` (`src/app/actions/sign-up.ts`) now derives it for new accounts —
+      first-letter-of-first-word + first-letter-of-last-word from the name given at sign-up
+      (e.g. "Alice Wonderland" → "AW"), falling back to the first two characters of the email
+      if no name was given.
+    - **Author(s) column** (`/posts`): each post's authors, `adminInitials` joined with
+      `", "` in `bylineOrder` — verified against real data that the join order tracks
+      `bylineOrder`, not insertion order.
+    - **Posts-table search**: a label-less textbox above the table, live-filtering by title
+      (case-insensitive substring, same "hobby-scale, no index" approach as `/search`) ahead
+      of the existing sort, so an active sort stays applied to the filtered set. Width-matched
+      to the Title column and top/left-margined to line up with it — see the
+      `ResizeObserver`/`getBoundingClientRect` gotcha in CLAUDE.md. No "no results" message
+      for an empty match set; the table just renders no rows.
+    - **Also fixed**: the "Published" column's null-sort — blank (unpublished) rows now stay
+      pinned to the bottom in *both* sort directions. Previously they only sorted last on
+      ascending; descending flipped them to the top, since the shared null-handling was
+      subject to the same direction-negation as the actual date comparison.
 
 **Deliberate deviations from §2–§6**
 

@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 export type PostRow = {
   id: string;
   slug: string;
   title: string;
+  authors: string;
   isPublished: boolean;
   publishedAt: Date | null;
   createdAt: Date;
@@ -47,12 +48,25 @@ function formatDate(date: Date, format: DateFormat): string {
   }
 }
 
-type SortKey = "title" | "published" | "comments" | "ahead" | "editor" | "lastEdit" | "created";
+type SortKey = "title" | "authors" | "published" | "comments" | "ahead" | "editor" | "lastEdit" | "created";
 
 function compareNullableDates(a: Date | null, b: Date | null): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
+  return a.getTime() - b.getTime();
+}
+
+// Nulls always sort last, in either direction — the caller negates this
+// return value for "desc", so the null-vs-non-null part has to pre-flip
+// (via `dir`) to counteract that negation and stay anchored at the bottom;
+// only the non-null-vs-non-null date comparison is left for the caller's
+// flip to actually reverse.
+function compareNullableDatesAlwaysLast(a: Date | null, b: Date | null, dir: "asc" | "desc"): number {
+  if (a === null && b === null) return 0;
+  const sign = dir === "asc" ? 1 : -1;
+  if (a === null) return sign;
+  if (b === null) return -sign;
   return a.getTime() - b.getTime();
 }
 
@@ -62,12 +76,14 @@ const sortableTh: React.CSSProperties = { ...th, cursor: "pointer", userSelect: 
 
 type SortColumn = { key: SortKey; dir: "asc" | "desc" };
 
-function compareByKey(key: SortKey, a: PostRow, b: PostRow): number {
+function compareByKey(key: SortKey, a: PostRow, b: PostRow, dir: "asc" | "desc"): number {
   switch (key) {
     case "title":
       return a.title.localeCompare(b.title);
+    case "authors":
+      return a.authors.localeCompare(b.authors);
     case "published":
-      return compareNullableDates(a.publishedAt, b.publishedAt);
+      return compareNullableDatesAlwaysLast(a.publishedAt, b.publishedAt, dir);
     case "ahead":
       return a.ahead - b.ahead;
     case "editor":
@@ -84,6 +100,21 @@ function compareByKey(key: SortKey, a: PostRow, b: PostRow): number {
 export default function PostsTable({ rows }: { rows: PostRow[] }) {
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
   const [sortColumns, setSortColumns] = useState<SortColumn[]>([]);
+  const [searchText, setSearchText] = useState("");
+  const [titleWidth, setTitleWidth] = useState<number | null>(null);
+  const titleThRef = useRef<HTMLTableCellElement>(null);
+
+  useEffect(() => {
+    const el = titleThRef.current;
+    if (!el) return;
+    // getBoundingClientRect (not ResizeObserver's contentRect, which excludes
+    // padding) so this matches the Title column's actual rendered width.
+    const update = () => setTitleWidth(el.getBoundingClientRect().width);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   function handleSort(key: SortKey, addToSort: boolean) {
     setSortColumns((prev) => {
@@ -115,17 +146,23 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
     );
   }
 
+  const filteredRows = useMemo(() => {
+    const needle = searchText.trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter((row) => row.title.toLowerCase().includes(needle));
+  }, [rows, searchText]);
+
   const sortedRows = useMemo(() => {
-    if (sortColumns.length === 0) return rows;
-    const sorted = [...rows].sort((a, b) => {
+    if (sortColumns.length === 0) return filteredRows;
+    const sorted = [...filteredRows].sort((a, b) => {
       for (const { key, dir } of sortColumns) {
-        const cmp = compareByKey(key, a, b);
+        const cmp = compareByKey(key, a, b, dir);
         if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
       }
       return 0;
     });
     return sorted;
-  }, [rows, sortColumns]);
+  }, [filteredRows, sortColumns]);
 
   if (rows.length === 0) {
     return <p>No posts yet.</p>;
@@ -133,11 +170,29 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
 
   return (
     <>
+      <input
+        type="search"
+        value={searchText}
+        onChange={(e) => setSearchText(e.target.value)}
+        placeholder="Search title …"
+        aria-label="Search title"
+        style={{
+          display: "block",
+          width: titleWidth ?? undefined,
+          padding: "6px 12px",
+          marginTop: "1em",
+          marginBottom: 8,
+          marginLeft: 0,
+        }}
+      />
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ textAlign: "left" }}>
-            <th style={sortableTh} onClick={(e) => handleSort("title", e.ctrlKey)}>
+            <th ref={titleThRef} style={sortableTh} onClick={(e) => handleSort("title", e.ctrlKey)}>
               Title{sortIndicator("title")}
+            </th>
+            <th style={sortableTh} onClick={(e) => handleSort("authors", e.ctrlKey)}>
+              Author(s){sortIndicator("authors")}
             </th>
             <th style={sortableTh} onClick={(e) => handleSort("published", e.ctrlKey)}>
               Published{sortIndicator("published")}
@@ -165,6 +220,7 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
               <td style={td}>
                 <Link href={`/posts/${row.id}/edit`}>{row.title}</Link>
               </td>
+              <td style={td}>{row.authors}</td>
               <td style={td}>
                 {row.isPublished && row.publishedAt ? (
                   <Link href={`/${row.slug}`}>{formatDate(row.publishedAt, dateFormat)}</Link>

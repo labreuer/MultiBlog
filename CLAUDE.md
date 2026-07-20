@@ -33,6 +33,13 @@ Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
 - Dev account `labreuer@gmail.com` has role ADMIN.
 - `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`,
   `NEXT_PUBLIC_COLLAB_URL`.
+- Adding a **required** (non-nullable, no `@default`) column to a table that already has
+  rows: `prisma migrate dev` normally prompts interactively for how to backfill existing
+  rows, which doesn't work non-interactively. Instead, add the field nullable first and
+  migrate, backfill via `psql`/a script, then drop the `?` and migrate again — the second
+  migration is a plain `ALTER COLUMN ... SET NOT NULL` with no prompt, since every row
+  already has a value by then. See `adminInitials`'s two migrations
+  (`add_admin_initials_nullable`, `make_admin_initials_required`) for the pattern.
 
 ## Checks & verification
 
@@ -132,6 +139,14 @@ Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
   the second question by comparing `PostCollab.updatedAt` against the latest `Revision`'s
   `createdAt` — a cheap heuristic (can false-positive after a type-then-undo-to-net-zero
   edit), not a real diff against the last saved revision.
+- When matching one element's width to another's via `ResizeObserver` (e.g. `PostsTable`'s
+  search box tracking the Title column's width): use the observed element's own
+  `getBoundingClientRect().width` inside the callback, not the callback's own
+  `entries[0].contentRect.width` — `contentRect` is always the *content* box (padding and
+  border excluded) regardless of the element's `box-sizing`, so on a padded `<th>` it under-
+  reports by the padding, and copying that value straight into another element's CSS `width`
+  (itself `box-sizing: border-box` from the global reset) makes it visibly narrower than the
+  element it's supposed to match.
 
 ## Conventions
 

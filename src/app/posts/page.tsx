@@ -26,6 +26,10 @@ export default async function PostsPage() {
     orderBy: { createdAt: "desc" },
     include: {
       currentRevision: { select: { revisionNumber: true } },
+      authors: {
+        orderBy: { bylineOrder: "asc" },
+        select: { user: { select: { adminInitials: true } } },
+      },
       revisions: {
         orderBy: { revisionNumber: "desc" },
         take: 1,
@@ -59,6 +63,7 @@ export default async function PostsPage() {
       id: post.id,
       slug: post.slug,
       title: post.title,
+      authors: post.authors.map((a) => a.user.adminInitials).join(", "),
       isPublished,
       publishedAt: post.publishedAt,
       createdAt: post.createdAt,
