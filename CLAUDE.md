@@ -50,11 +50,16 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   `read_page` / `javascript_tool` measurements (bounding rects, computed styles) instead.
 - The browser pane's console buffer accumulates across navigations; for a clean error
   check, open a fresh tab.
-- To verify a concurrent-editing feature, sign up two throwaway accounts
-  (`something@example.com` / any password via `/sign-up`), promote to ADMIN with
-  `psql -U multiblog -h 127.0.0.1 -d multiblog -c "UPDATE \"User\" SET role='ADMIN' WHERE
-  email='...'"` (new sign-ups default to COMMENTER and can't edit posts), and delete both
-  the test `Post` row and the `User` rows when done.
+- For a throwaway ADMIN account (most manual testing — e.g. exercising publish/
+  unpublish/schedule), use `npx tsx scripts/test-admin.ts create [email] [name]`
+  (defaults to `test-admin@example.com`; password is always `testpass123`) and
+  `... delete [email]` when done — one command each way instead of sign-up +
+  psql-promote + psql-delete. Restricted to `@example.com` addresses, so it
+  can't touch a real account even by mistake.
+- To verify a concurrent-editing feature specifically, you need **two** such
+  accounts signed in in separate browser tabs at once — run `create` twice
+  with different emails, and delete both (plus any throwaway `Post` row) when
+  done.
 - Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` are baked
   into the session cookie once at sign-in and never re-read from the DB on later requests.
   Deleting a throwaway `User` row mid-session does **not** sign them out or revoke their
