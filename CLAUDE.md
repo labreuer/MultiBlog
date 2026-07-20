@@ -8,6 +8,9 @@ Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMA
 
 - `npm run dev:all` — web (Next.js, :3000) + collab (Hocuspocus, :1234) via concurrently;
   one Ctrl+C stops both. Individually: `npm run dev`, `npm run collab`.
+- `npm run stop:all` — stops a `dev:all` you (Claude) started, in one command instead of a
+  netstat/parent-trace/taskkill dance across several. Verifies the port owner's command line
+  actually mentions this repo before touching anything (see `scripts/stop-dev.ps1`).
 - `.claude/launch.json` defines `web` and `collab` for the preview tool.
 - The user often runs `dev:all` themselves. If port 3000 is held by a non-preview node
   process, don't kill it — open the browser pane directly on http://localhost:3000.
