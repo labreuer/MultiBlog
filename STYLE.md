@@ -116,7 +116,8 @@ by design, not by accident.
   x-position — flexbox rows (`.fieldRow`, tried first) only align a *single* row's own
   label/value pair, not siblings' columns against each other.
 - **`white-space: nowrap` on narrow auto-sized table columns** (`PostsTable.tsx`'s
-  `nowrapTd`/`nowrapSortableTh`, added 2026-07-21): a plain `<table>` with no fixed column
+  `nowrapTd`/`nowrapSortableTh`, added 2026-07-21; the same pair independently added to
+  `UsersTable.tsx` for its `createdAt` column): a plain `<table>` with no fixed column
   widths shrinks a column until its content wraps, and the browser's default line-breaking
   treats both a space (any multi-word header/value, e.g. "Created at", "Luke Breuer") and a
   hyphen (a `yyyy-MM-dd` date) as valid break points — so a 9-column admin table routinely

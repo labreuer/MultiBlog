@@ -122,11 +122,16 @@ existing `users` table.
 permission" message for a signed-in non-admin. Linked from `SiteHeader` and `/dashboard`
 alongside "Manage Posts", admin-only.
 
-**Table** (`UsersTable.tsx`), one row per user: `id`, `name`, `email`, `adminInitials`,
-`role`, `image`, `moderationPolicy`, `color`, `createdAt`, a link to that user's published
-posts (via the existing `/authors/[id]` page, blank if they have none), a `comments`
-placeholder column reserved for future comment-management UI (no data wired up yet), and a
-trailing unlabeled delete/restore icon column (below).
+**Table** (`UsersTable.tsx`), one row per user: `name`, `email`, `adminInitials`, `role`,
+`image`, `moderationPolicy`, `color`, `createdAt`, a link to that user's published posts (via
+the existing `/authors/[id]` page, blank if they have none), a `comments` placeholder column
+reserved for future comment-management UI (no data wired up yet), and a trailing unlabeled
+delete/restore icon column (below). No `id` column — nothing on the page needs a user's raw
+id visible, and `NameCell`/`DeleteCell` etc. already thread `row.id` through as a prop rather
+than reading it off the DOM. `name` has a `minWidth` (double its previous rendered width, added
+2026-07-21) since it's the column most likely to need room for a longer value; `createdAt` is
+`white-space: nowrap` so its `yyyy-MM-dd` value can't wrap at the hyphen (`nowrapTd`/
+`nowrapSortableTh`, the same pattern `PostsTable.tsx` uses — see STYLE.md).
 Sorting reuses `useSortableRows` (shared with `PostsTable`) on the textual/status columns —
 `role` sorts by privilege order (ADMIN > EDITOR > AUTHOR > COMMENTER), not alphabetically —
 plus the same client-side date-format dropdown as `PostsTable`. Unlike `PostsTable`, there's

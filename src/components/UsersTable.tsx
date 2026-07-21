@@ -91,6 +91,13 @@ function compareByKey(key: SortKey, a: UserRow, b: UserRow): number {
 const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid #ddd" };
 const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
 const sortableTh: React.CSSProperties = { ...th, cursor: "pointer", userSelect: "none" };
+// Prevents "Created at"'s value (a yyyy-MM-dd date, or the header text
+// itself) from wrapping mid-word once the table's columns squeeze it
+// narrower than its content — see STYLE.md.
+const nowrapSortableTh: React.CSSProperties = { ...sortableTh, whiteSpace: "nowrap" };
+const nowrapTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
+// Present rendered width of the Name column was ~68px; doubled and rounded.
+const nameTh: React.CSSProperties = { ...sortableTh, minWidth: 135 };
 
 function NameCell({
   userId,
@@ -430,8 +437,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
     <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "1em" }}>
       <thead>
         <tr style={{ textAlign: "left" }}>
-          <th style={th}>ID</th>
-          <th style={sortableTh} onClick={(e) => handleSort("name", e.ctrlKey)}>
+          <th style={nameTh} onClick={(e) => handleSort("name", e.ctrlKey)}>
             Name{sortIndicator("name")}
           </th>
           <th style={sortableTh} onClick={(e) => handleSort("email", e.ctrlKey)}>
@@ -448,7 +454,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
             Moderation policy{sortIndicator("moderationPolicy")}
           </th>
           <th style={th}>Color</th>
-          <th style={sortableTh} onClick={(e) => handleSort("createdAt", e.ctrlKey)}>
+          <th style={nowrapSortableTh} onClick={(e) => handleSort("createdAt", e.ctrlKey)}>
             Created at{sortIndicator("createdAt")}
           </th>
           <th style={sortableTh} onClick={(e) => handleSort("posts", e.ctrlKey)}>
@@ -471,7 +477,6 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
               onAnimationEnd={(e) => e.currentTarget.classList.remove(styles.savedPulse)}
               style={{ borderBottom: "1px solid #eee", opacity: row.deleted ? 0.5 : 1 }}
             >
-              <td style={td}>{row.id}</td>
               <td style={td}>
                 <NameCell userId={row.id} name={row.name} onSaved={onSaved} />
               </td>
@@ -508,7 +513,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
               <td style={td}>
                 <ColorCell userId={row.id} color={row.color} onSaved={onSaved} />
               </td>
-              <td style={td}>{formatDate(row.createdAt, dateFormat)}</td>
+              <td style={nowrapTd}>{formatDate(row.createdAt, dateFormat)}</td>
               <td style={td}>{row.postCount > 0 ? <Link href={`/authors/${row.id}`}>posts</Link> : ""}</td>
               <td style={td}></td>
               <td style={td}>
@@ -520,7 +525,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
       </tbody>
       <tfoot>
         <tr>
-          <td colSpan={12} style={{ paddingTop: 12 }}>
+          <td colSpan={11} style={{ paddingTop: 12 }}>
             <label>
               Date format:{" "}
               <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as DateFormat)}>
@@ -534,7 +539,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
           </td>
         </tr>
         <tr>
-          <td colSpan={12} style={{ paddingTop: 8 }}>
+          <td colSpan={11} style={{ paddingTop: 8 }}>
             <label>
               <input
                 type="checkbox"
