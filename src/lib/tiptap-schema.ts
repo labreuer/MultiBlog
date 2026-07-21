@@ -21,6 +21,22 @@ export const pmSchema = getSchema(contentExtensions);
 // content and can't drift from it.
 export const authorHighlightExtensions = [...contentExtensions, AuthorHighlight];
 
+// ProseMirror builds every non-empty node/mark `attrs` object via
+// `Object.create(null)` (computeAttrs, prosemirror-model), and Node/Mark#toJSON
+// passes that null-prototype object straight through into editor.getJSON()'s
+// output. React's Server Action argument encoder treats any object whose
+// prototype isn't Object.prototype as opaque and silently replaces it with an
+// inert "$T" placeholder that throws the moment server code (e.g. Prisma's
+// jsonb serialization) tries to read it — surfacing as "Cannot access
+// toStringTag on the server. You cannot dot into a temporary client
+// reference...". Only docs with attrs-bearing marks/nodes (authorHighlight,
+// orderedList's start, heading levels, etc.) hit this. A JSON round-trip
+// forces every nested object back to a plain prototype before it crosses the
+// client/server boundary.
+export function toPlainJSON(doc: JSONContent): JSONContent {
+  return JSON.parse(JSON.stringify(doc));
+}
+
 function walkMarks(node: JSONContent, visit: (mark: NonNullable<JSONContent["marks"]>[number]) => void): void {
   node.marks?.forEach(visit);
   node.content?.forEach((child) => walkMarks(child, visit));

@@ -8,6 +8,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
 import { saveDraft, publishPost, unpublishPost, schedulePost } from "@/app/actions/posts";
 import { extractText, diffText } from "@/lib/diff";
+import { toPlainJSON } from "@/lib/tiptap-schema";
 import { perfMeasure } from "@/lib/perf-monitor";
 import type { PostStatus } from "@/lib/post-status";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
@@ -175,7 +176,7 @@ export default function PostEditor({
     setError(null);
     startTransition(async () => {
       try {
-        const doc = editor.getJSON();
+        const doc = toPlainJSON(editor.getJSON());
         const result = await saveDraft(postId, title, doc);
         clearAuthorHighlights(editor);
         setStatus(result.created ? `Saved as revision #${result.revisionNumber}` : `No changes since revision #${result.revisionNumber}`);
@@ -191,7 +192,7 @@ export default function PostEditor({
     setError(null);
     startTransition(async () => {
       try {
-        const doc = editor.getJSON();
+        const doc = toPlainJSON(editor.getJSON());
         const result = await publishPost(postId, title, doc, changelog);
         clearAuthorHighlights(editor);
         setStatus(result.created ? `Published as revision #${result.revisionNumber}` : `Published (no changes since revision #${result.revisionNumber})`);
@@ -221,7 +222,7 @@ export default function PostEditor({
     setError(null);
     startTransition(async () => {
       try {
-        const doc = editor.getJSON();
+        const doc = toPlainJSON(editor.getJSON());
         const result = await schedulePost(postId, title, doc, new Date(scheduleInput), changelog);
         clearAuthorHighlights(editor);
         setStatus(`Scheduled revision #${result.revisionNumber}`);

@@ -87,6 +87,24 @@ logged-in — see §6).
   though only one yjs version is installed. Marking it external makes every server-side
   layer resolve it through Node's own `require` cache instead. Doesn't affect the browser
   bundle.
+- **`editor.getJSON()` needs a JSON round-trip before it can cross a Server Action
+  boundary.** ProseMirror builds every non-empty node/mark `attrs` object via
+  `Object.create(null)` (`computeAttrs`, prosemirror-model), and `Node`/`Mark#toJSON`
+  pass that null-prototype object straight through. React's Server Action argument
+  encoder treats any object whose prototype isn't `Object.prototype` as opaque and
+  silently substitutes an inert `"$T"` placeholder, which throws the moment server code
+  (e.g. Prisma serializing the `doc` for the jsonb column) tries to read it — surfacing
+  as "Cannot access toStringTag on the server. You cannot dot into a temporary client
+  reference...". Only docs with attrs-bearing marks/nodes (`authorHighlight`,
+  `orderedList`'s `start`, heading levels, etc.) hit this, which is why it tracked
+  specific content rather than a specific post. `toPlainJSON()`
+  (`src/lib/tiptap-schema.ts`) — a `JSON.parse(JSON.stringify(...))` round-trip — forces
+  every nested attrs object back to a plain prototype; `PostEditor.tsx` applies it to
+  `editor.getJSON()`'s result at all three call sites that reach a server action
+  (`handleSaveDraft`, `handlePublish`, `handleSchedule`). A known TipTap+Next.js
+  interaction, not specific to this codebase — same root cause and same
+  `JSON.parse(JSON.stringify(...))` fix reported in
+  [tiptap#4805](https://github.com/ueberdosis/tiptap/issues/4805).
 
 This raises the ops footprint (a second long-running service + websocket proxying — see §7),
 which is the main cost of doing it now rather than later.
