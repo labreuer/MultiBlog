@@ -88,9 +88,13 @@ by design, not by accident.
 
 ## Layout patterns
 
-- **Centered reading column**: `max-width: 680px; margin: 0 auto;` — used by every
-  public-facing page (`page.tsx`, `[slug]/page.tsx`, `authors/[id]/page.tsx`,
-  `search/page.tsx`). Not yet a shared component/class; each page repeats it.
+- **Centered reading column**: `max-width: ...px; margin: 0 auto;` — not yet a shared
+  component/class; each page repeats it. Two widths, kept deliberately separate:
+  - `800px` on pages showing full post text — `[slug]/page.module.css` (public post
+    display) and `PostEditor.module.css` (editor).
+  - `680px` on listing/excerpt pages — `page.tsx` (home), `authors/[id]/page.tsx`,
+    `search/page.tsx`. These show post previews, not full text, so they weren't widened
+    alongside the two full-text surfaces above.
 - **Post-listing article block**: `padding: 1.5rem 0; border-bottom: 1px solid #eee;`
   — repeated verbatim across home, author, and search listings.
 - **Vertical centering of small elements next to a heading** (e.g. the `(edit)`/

@@ -5,7 +5,7 @@ import type { ThreadStatus } from "@/generated/prisma/enums";
 import styles from "./QuoteThreadHeader.module.css";
 
 const BORDER_WIDTH = 3;
-const HEAD_WIDTH = 10;
+const HEAD_WIDTH = 11;
 const HEAD_HEIGHT = 6;
 
 type Props = {
