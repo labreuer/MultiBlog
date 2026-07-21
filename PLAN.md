@@ -363,8 +363,9 @@ a single post can override again.
 later comments auto-approve. A per-commenter `force_moderate` flag overrides this to always
 require approval, no matter how many they've had approved.
 
-Resolution order for a new comment: if the commenter is `force_moderate` → queue. Else if
-trusted (`approved_count >= threshold`) → publish. Else apply the cascade policy.
+Resolution order for a new comment: if the commenter is logged in as an `ADMIN` → publish,
+skipping spam-checking entirely. Else if `force_moderate` → queue. Else if trusted
+(`approved_count >= threshold`) → publish. Else apply the cascade policy.
 
 **Hardening:** sanitize all comment bodies; restrict the comment editor to a safe schema
 (no raw HTML/scripts; links get `rel="nofollow noopener"`). Rate-limit by IP and by

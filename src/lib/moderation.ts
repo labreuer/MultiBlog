@@ -26,15 +26,20 @@ function resolveCascadePolicy({ postPolicy, authorPolicies, sitePolicy }: Cascad
 }
 
 type ResolveCommentStatusInput = CascadeInput & {
+  commenterIsAdmin: boolean;
   commenterForceModerate: boolean;
   commenterApprovedCount: number;
   trustThreshold: number;
 };
 
-// Resolution order per PLAN.md §6: force_moderate always queues; otherwise a
-// trusted commenter (>= trustThreshold prior approvals) publishes
-// immediately; otherwise the moderation cascade decides.
+// Resolution order per PLAN.md §6: ADMIN commenters always publish
+// immediately, ahead of force_moderate; otherwise force_moderate always
+// queues; otherwise a trusted commenter (>= trustThreshold prior approvals)
+// publishes immediately; otherwise the moderation cascade decides.
 export function resolveCommentStatus(input: ResolveCommentStatusInput): "PENDING" | "APPROVED" {
+  if (input.commenterIsAdmin) {
+    return "APPROVED";
+  }
   if (input.commenterForceModerate) {
     return "PENDING";
   }

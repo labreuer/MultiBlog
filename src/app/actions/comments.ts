@@ -139,12 +139,14 @@ export async function submitComment(
   }
 
   const trimmedBody = body.trim();
-  const isSpam = await checkSpam({ body: trimmedBody, displayName, email, ipAddress });
+  const commenterIsAdmin = session?.user?.role === "ADMIN";
+  const isSpam = !commenterIsAdmin && (await checkSpam({ body: trimmedBody, displayName, email, ipAddress }));
 
   const siteSettings = await getSiteSettings();
   const status: CommentStatus = isSpam
     ? "SPAM"
     : resolveCommentStatus({
+        commenterIsAdmin,
         commenterForceModerate: commenter.forceModerate,
         commenterApprovedCount: commenter.approvedCount,
         trustThreshold: siteSettings.trustThreshold,
