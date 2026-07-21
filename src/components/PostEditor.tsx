@@ -22,6 +22,7 @@ type Props = {
   initialTitle: string;
   revisionNumber: number;
   publishedRevisionNumber: number | null;
+  publishedTitle: string | null;
   scheduledRevisionNumber: number | null;
   postStatus: PostStatus;
   publishedAt: Date | null;
@@ -73,6 +74,7 @@ export default function PostEditor({
   initialTitle,
   revisionNumber,
   publishedRevisionNumber,
+  publishedTitle,
   scheduledRevisionNumber,
   postStatus,
   publishedAt,
@@ -252,6 +254,7 @@ export default function PostEditor({
 
   const hasRevisionDiff = !!revisionDiff && (revisionDiff.added > 0 || revisionDiff.removed > 0);
   const hasTitleChanged = title !== initialTitle;
+  const titleDivergesFromPublished = publishedTitle !== null && title !== publishedTitle;
   const isAtPublished = publishedRevisionNumber !== null && revisionNumber === publishedRevisionNumber;
   const showViewingClause = hasRevisionDiff || hasTitleChanged || !isAtPublished;
   const editedLabel = [hasRevisionDiff && "EDITED", hasTitleChanged && "TITLE CHANGED"].filter(Boolean).join(", ");
@@ -281,7 +284,7 @@ export default function PostEditor({
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         aria-label="Title"
-        className={styles.titleInput}
+        className={`${styles.titleInput} ${titleDivergesFromPublished ? styles.titleChanged : ""}`}
         disabled={deleted}
       />
       <p className={styles.statusLine}>

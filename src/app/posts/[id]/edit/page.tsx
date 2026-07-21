@@ -19,7 +19,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     where: { id },
     include: {
       authors: { select: { userId: true }, orderBy: { bylineOrder: "asc" } },
-      publishRevision: { select: { revisionNumber: true } },
+      publishRevision: { select: { revisionNumber: true, title: true } },
       revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { title: true, revisionNumber: true, doc: true } },
     },
   });
@@ -74,6 +74,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       initialTitle={latest?.title ?? post.title}
       revisionNumber={latest?.revisionNumber ?? 0}
       publishedRevisionNumber={status === "published" ? post.publishRevision!.revisionNumber : null}
+      publishedTitle={status === "published" ? post.publishRevision!.title : null}
       scheduledRevisionNumber={status === "scheduled" ? post.publishRevision!.revisionNumber : null}
       postStatus={status}
       publishedAt={post.publishedAt}

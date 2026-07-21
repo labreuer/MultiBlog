@@ -28,6 +28,14 @@
   padding: 4px;
   box-sizing: border-box;
   flex: 0 0 auto;
+  /* 2px transparent by default (rather than no border) so switching to
+     .titleChanged only swaps the color, not the box's rendered size. */
+  border: 2px solid transparent;
+}
+
+/* Persists as long as the title differs from what's currently published. */
+.titleChanged {
+  border-color: #ffd800;
 }
 
 .statusLine {

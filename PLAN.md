@@ -337,6 +337,12 @@ noted in §3a:
   the published revision number from the DB) and live on undo back to a clean state (the
   existing debounced revision-diff, already recomputed on every editor `update` event).
 
+**Title-divergence indicator:** the title `<input>` gets a persistent 2px `#ffd800` border
+whenever its live value differs from the currently *published* title (`publishedTitle`,
+`null` unless `postStatus === "published"`) — a separate check from TITLE CHANGED above,
+which compares against the last-*saved* title rather than the published one. The input has a
+2px transparent border by default (rather than none) so the color swap doesn't shift layout.
+
 **Settings panel:** rather than only managing moderation policy, authors, and deletion from
 the `/posts` admin table (§3c), the editor also has a collapsible "Settings" panel
 (`PostSettingsPanel.tsx`) for per-post knobs that don't belong on the main editing surface.
