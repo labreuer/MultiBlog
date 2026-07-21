@@ -581,6 +581,40 @@ Git history carries per-step detail.
     at the cost of not checking for collisions (two comments from the same
     person in the same second, which shouldn't happen in practice).
 
+15. **Soft comment deletion** — `Comment.deletedByUserId`/`deletedAt` (both nullable; no
+    `status` cascade involved, and the pre-existing but never-wired-up `CommentStatus.DELETED`
+    enum value is left untouched) plus a `deleteComment` server action
+    (`src/app/actions/comments.ts`), allowed when `session.user.role === "ADMIN"` or the
+    comment is the viewer's own (`commenter.userId === session.user.id`).
+    - **UI** (`CommentNode.tsx`): a "Delete" button next to "Reply", shown under the same
+      permission check, colored maroon specifically when an admin is deleting *someone else's*
+      comment (plain otherwise, including an admin deleting their own) — a deliberate visual
+      distinction so admin power reads differently from ordinary self-deletion. Clicking it
+      swaps to an inline "Are you sure you want to delete? Yes / No" (dark green / dark red,
+      both bold) in place of the button; "No" reverts, "Yes" calls the action and
+      `router.refresh()`s.
+    - **Collapse rule**: a deleted comment with at least one live descendant anywhere below it
+      (not just direct replies — computed recursively, exported as `hasNonDeletedDescendant`)
+      renders "[deleted]" in place of its name/timestamp/body/buttons; one with no live
+      descendant renders nothing at all, so a deleted leaf doesn't clutter the thread. This
+      only applies to a **fresh page load**, though — the viewer who just clicked "Yes"
+      themselves sees "[deleted]" immediately as confirmation the click worked, even for a
+      leaf comment, via a client-only `justDeleted` flag that overrides the collapse rule for
+      that one render tree; it's never set from server data, so it can't survive a real
+      navigation and doesn't affect what anyone else sees.
+    - **Everything anchored to a fully-collapsed root also disappears.** A quote thread whose
+      every comment is deleted (no live comment anywhere in it — equivalent to "no comment in
+      the thread has `deletedByUserId === null`", regardless of how many independent root
+      comments or reply chains it has) also hides: the `QuoteThreadHeader` above the comment
+      list (`CommentEntryList.tsx`, reusing the same `hasNonDeletedDescendant` check against
+      the entry's root) and the inline highlight/count-badge in the article itself
+      (`[slug]/page.tsx`'s `quoteHighlights` filter, plus its `count` now excludes deleted
+      comments too). Both were follow-up fixes, found only after the collapse rule above had
+      already shipped and been used for a while — rendering a dangling quote header or a
+      highlighted-but-commentless passage once nothing was left under it.
+    - **`/posts` comment counts** (item 13's table) also skip `deletedByUserId !== null`
+      comments when tallying approved/pending, added alongside the schema fields above.
+
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no

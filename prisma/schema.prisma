@@ -63,6 +63,7 @@ model User {
   commenter            Commenter?
   passwordResetTokens  PasswordResetToken[]
   commentStatusChanges Comment[]            @relation("CommentStatusChangedBy")
+  commentDeletions     Comment[]            @relation("CommentDeletedBy")
   publicationEvents    PostPublicationEvent[] @relation("PublicationEventActor")
 }
 
@@ -254,10 +255,13 @@ model Comment {
   statusChangedAt   DateTime?
   createdAt         DateTime      @default(now())
   editedAt          DateTime?
+  deletedByUserId   String?
+  deletedAt         DateTime?
 
   thread          CommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   parent          Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
   replies         Comment[]     @relation("CommentReplies")
   commenter       Commenter     @relation(fields: [commenterId], references: [id])
   statusChangedBy User?         @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
+  deletedBy       User?         @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
 }

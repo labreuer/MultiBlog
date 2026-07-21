@@ -6,7 +6,15 @@ import { type CommentNodeData } from "./CommentNode";
 import styles from "./CommentSection.module.css";
 
 function buildTree(
-  flat: { id: string; parentCommentId: string | null; displayName: string; bodyText: string; createdAt: string }[],
+  flat: {
+    id: string;
+    parentCommentId: string | null;
+    displayName: string;
+    bodyText: string;
+    createdAt: string;
+    deletedByUserId: string | null;
+    commenterUserId: string | null;
+  }[],
 ): CommentNodeData[] {
   const byId = new Map<string, CommentNodeData>();
   for (const c of flat) {
@@ -28,6 +36,8 @@ function buildTree(
 export default async function CommentSection({ postId }: { postId: string }) {
   const session = await auth();
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
+  const viewerId = session?.user?.id ?? null;
+  const isAdmin = session?.user?.role === "ADMIN";
 
   const threads = await getPostThreadsWithApprovedComments(postId);
   const generalThread = threads.find((t) => t.quotedText === "");
@@ -76,7 +86,13 @@ export default async function CommentSection({ postId }: { postId: string }) {
       {threads.length === 0 ? (
         <p className={styles.empty}>No comments yet.</p>
       ) : (
-        <CommentEntryList entries={entries} postId={postId} userName={userName} />
+        <CommentEntryList
+          entries={entries}
+          postId={postId}
+          userName={userName}
+          viewerId={viewerId}
+          isAdmin={isAdmin}
+        />
       )}
     </section>
   );

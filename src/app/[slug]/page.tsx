@@ -74,8 +74,18 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
 
   const threads = await getPostThreadsWithApprovedComments(post.id);
   const quoteHighlights = threads
-    .filter((t) => t.quotedText !== "" && t.status === "ACTIVE")
-    .map((t) => ({ id: t.id, from: t.anchorFrom, to: t.anchorTo, count: t.comments.length, color: t.color }));
+    // A thread where every comment has been deleted has nothing left to
+    // show in the comment list (CommentEntryList hides its header the same
+    // way — see hasNonDeletedDescendant), so the inline highlight/badge
+    // shouldn't linger over the quoted text either.
+    .filter((t) => t.quotedText !== "" && t.status === "ACTIVE" && t.comments.some((c) => c.deletedByUserId === null))
+    .map((t) => ({
+      id: t.id,
+      from: t.anchorFrom,
+      to: t.anchorTo,
+      count: t.comments.filter((c) => c.deletedByUserId === null).length,
+      color: t.color,
+    }));
 
   return (
     <div className={styles.container}>

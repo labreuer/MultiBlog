@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import CommentNode, { type CommentNodeData } from "./CommentNode";
+import CommentNode, { hasNonDeletedDescendant, type CommentNodeData } from "./CommentNode";
 import QuoteThreadHeader from "./QuoteThreadHeader";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 
@@ -21,9 +21,11 @@ type Props = {
   entries: CommentEntry[];
   postId: string;
   userName: string | null;
+  viewerId: string | null;
+  isAdmin: boolean;
 };
 
-export default function CommentEntryList({ entries, postId, userName }: Props) {
+export default function CommentEntryList({ entries, postId, userName, viewerId, isAdmin }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
 
   const sorted = [...entries].sort((a, b) => {
@@ -47,23 +49,37 @@ export default function CommentEntryList({ entries, postId, userName }: Props) {
         </label>
       </div>
 
-      {sorted.map((entry) => (
-        // data-thread-id (not id) since sorting can scatter a thread's entries
-        // apart, and every one of them needs to be reachable — AnnotatableArticle's
-        // onIndicatorClick uses querySelectorAll to scroll to and flash all of them.
-        <div key={entry.root.id} data-thread-id={entry.threadId} style={{ marginTop: 24 }}>
-          {entry.quotedText && (
-            <QuoteThreadHeader
-              threadId={entry.threadId}
-              quotedText={entry.quotedText}
-              status={entry.status}
-              context={entry.context}
-              color={entry.color}
+      {sorted.map((entry) => {
+        // A deleted root with no live descendants renders nothing (see
+        // CommentNode) — its quoted-text header would otherwise be left
+        // dangling above empty space with no comment underneath it.
+        const rootRendersNothing =
+          entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
+
+        return (
+          // data-thread-id (not id) since sorting can scatter a thread's entries
+          // apart, and every one of them needs to be reachable — AnnotatableArticle's
+          // onIndicatorClick uses querySelectorAll to scroll to and flash all of them.
+          <div key={entry.root.id} data-thread-id={entry.threadId} style={{ marginTop: 24 }}>
+            {entry.quotedText && !rootRendersNothing && (
+              <QuoteThreadHeader
+                threadId={entry.threadId}
+                quotedText={entry.quotedText}
+                status={entry.status}
+                context={entry.context}
+                color={entry.color}
+              />
+            )}
+            <CommentNode
+              comment={entry.root}
+              postId={postId}
+              userName={userName}
+              viewerId={viewerId}
+              isAdmin={isAdmin}
             />
-          )}
-          <CommentNode comment={entry.root} postId={postId} userName={userName} />
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </>
   );
 }

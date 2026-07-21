@@ -24,6 +24,10 @@
   font-size: 0.8rem;
 }
 
+.deleted {
+  color: #666;
+}
+
 .replyButton {
   font-size: 0.85rem;
   margin-top: 4px;
@@ -33,4 +37,66 @@
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.deleteButton {
+  font-size: 0.85rem;
+  margin-top: 4px;
+  margin-left: 8px;
+  border: none;
+  background: none;
+  color: #666;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* An admin deleting someone else's comment, not their own — deliberately
+   distinct from .deleteButton so the admin-power case reads differently
+   from ordinary self-deletion. */
+.deleteButtonAdmin {
+  font-size: 0.85rem;
+  margin-top: 4px;
+  margin-left: 8px;
+  border: none;
+  background: none;
+  color: #800000;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.confirmPrompt {
+  display: inline-block;
+  margin-top: 4px;
+  margin-left: 8px;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.confirmYes {
+  font: inherit;
+  font-weight: bold;
+  border: none;
+  background: none;
+  color: #006400;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.confirmNo {
+  font: inherit;
+  font-weight: bold;
+  border: none;
+  background: none;
+  color: #8b0000;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.error {
+  color: crimson;
+  font-size: 0.85rem;
 }

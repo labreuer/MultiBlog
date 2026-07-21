@@ -210,3 +210,33 @@ export async function moderateComment(commentId: string, action: "approve" | "sp
   revalidatePath(`/${comment.thread.post.slug}`);
   revalidatePath(`/posts/${comment.thread.post.id}/comments`);
 }
+
+export async function deleteComment(commentId: string): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    include: {
+      commenter: { select: { userId: true } },
+      thread: { select: { post: { select: { slug: true } } } },
+    },
+  });
+  if (!comment) {
+    throw new Error("Comment not found.");
+  }
+
+  const isOwnComment = comment.commenter.userId === session.user.id;
+  if (session.user.role !== "ADMIN" && !isOwnComment) {
+    throw new Error("You don't have permission to delete this comment.");
+  }
+
+  await prisma.comment.update({
+    where: { id: commentId },
+    data: { deletedByUserId: session.user.id, deletedAt: new Date() },
+  });
+
+  revalidatePath(`/${comment.thread.post.slug}`);
+}

@@ -9,6 +9,8 @@ export type ThreadComment = {
   displayName: string;
   bodyText: string;
   createdAt: string;
+  deletedByUserId: string | null;
+  commenterUserId: string | null;
 };
 
 export type ThreadWithComments = {
@@ -61,7 +63,9 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
       comments: {
         where: { status: "APPROVED" },
         orderBy: { createdAt: "asc" },
-        include: { commenter: { select: { displayName: true, email: true, user: { select: { color: true } } } } },
+        include: {
+          commenter: { select: { userId: true, displayName: true, email: true, user: { select: { color: true } } } },
+        },
       },
     },
   });
@@ -90,6 +94,8 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
           displayName: c.commenter.displayName,
           bodyText: (c.body as { text?: string } | null)?.text ?? "",
           createdAt: c.createdAt.toISOString(),
+          deletedByUserId: c.deletedByUserId,
+          commenterUserId: c.commenter.userId,
         })),
       };
     });

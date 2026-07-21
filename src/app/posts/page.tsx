@@ -40,7 +40,7 @@ export default async function PostsPage() {
           editor: { select: { name: true, email: true } },
         },
       },
-      threads: { select: { comments: { select: { status: true } } } },
+      threads: { select: { comments: { select: { status: true, deletedByUserId: true } } } },
     },
   });
 
@@ -58,6 +58,7 @@ export default async function PostsPage() {
     let pending = 0;
     for (const thread of post.threads) {
       for (const comment of thread.comments) {
+        if (comment.deletedByUserId !== null) continue;
         if (comment.status === "APPROVED") approved++;
         else if (comment.status === "PENDING") pending++;
       }
