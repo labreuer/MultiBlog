@@ -247,8 +247,10 @@ export default function PostEditor({
   };
 
   const hasRevisionDiff = !!revisionDiff && (revisionDiff.added > 0 || revisionDiff.removed > 0);
+  const hasTitleChanged = title !== initialTitle;
   const isAtPublished = publishedRevisionNumber !== null && revisionNumber === publishedRevisionNumber;
-  const showViewingClause = hasRevisionDiff || !isAtPublished;
+  const showViewingClause = hasRevisionDiff || hasTitleChanged || !isAtPublished;
+  const editedLabel = [hasRevisionDiff && "EDITED", hasTitleChanged && "TITLE CHANGED"].filter(Boolean).join(", ");
 
   // Union of "currently connected" (from awareness, zero edits allowed) and
   // "has made edits" (from authorStats' authorHighlight-mark walk, which can
@@ -382,7 +384,7 @@ export default function PostEditor({
           "Unpublished"
         )}
         {". "}
-        {showViewingClause && <>{hasRevisionDiff ? "EDITED" : `Currently viewing revision #${revisionNumber}`}. </>}
+        {showViewingClause && <>{editedLabel || `Currently viewing revision #${revisionNumber}`}. </>}
         <Link href={`/posts/${postId}/live-history`}>Scrub live history</Link>
       </p>
       <PostSettingsPanel
