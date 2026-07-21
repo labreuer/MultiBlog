@@ -74,8 +74,8 @@ logged-in — see §6).
   free — useful even with the byline being separate from edit attribution.
 - **Attribution:** `revisions.editor_id` at publish records who pressed publish.
   Finer-grained credit — colored per-author highlighting of contributions *since the last
-  revision*, Etherpad-style — is now built too (§10 item 9): an inline `authorHighlight`
-  mark carries the author's `User.color`, applied to newly-typed text and cleared (a real,
+  revision*, Etherpad-style (§3d) — layers on top via an inline `authorHighlight` mark
+  carrying the author's `User.color`, applied to newly-typed text and cleared (a real,
   synced transaction) on every save so it always reflects only what's new. It's
   working-session state, not content — stripped before anything reaches `revisions.doc`.
 - **Auth:** the Hocuspocus `onConnect`/`onAuthenticate` hook validates the user's session
@@ -234,46 +234,40 @@ knobs that don't belong on the main editing surface.
 
 **Editing surface & toolbar:** TipTap v3, immutable append-only revisions, publish, diff +
 restore-as-new-revision. The editor is responsive and fills the window height down to a
-300px floor rather than growing or shrinking with content. The toolbar grew beyond the
-original plan: a "Clear formatting" button, and a split-button Quote control exposing
+300px floor rather than growing or shrinking with content. The toolbar covers standard
+formatting plus a "Clear formatting" button and a split-button Quote control exposing
 `wrapIn`/`lift` directly, for multi-level blockquote nesting (`toggleBlockquote` can only
 toggle one level — it can't nest deeper).
 
-**Save/publish/unpublish/schedule mechanics** — no-op revision skip, unpublish, scheduled
-publishing, and dropping the `status` column entirely:
+**Save/publish/unpublish/schedule mechanics:**
 
 - **No-op revision skip**: `saveDraft`/`publishPost`/`schedulePost` all route through a
   shared `resolveRevision` (`src/app/actions/posts.ts`) that compares the incoming
   title+doc against the latest `Revision` row via `docsEqual` (`src/lib/diff.ts`) — an
   order-independent deep-equal, not the display-oriented word-level `diffText` — before
-  creating a new one. Needed because Postgres `jsonb` doesn't preserve object key order on
+  creating a new one. Necessary because Postgres `jsonb` doesn't preserve object key order on
   read-back, so a plain `JSON.stringify` compare against the doc as just typed would
-  false-positive as "changed" on key order alone. Covers "typed something, then undid it"
-  without inspecting the live Yjs doc. See TIPTAP.md for a real bug this equality check
-  surfaced: `stripMarkFromDoc` leaving a stray/unstripped mark behind made a freshly-saved
-  revision structurally unequal to the identical content moments later, spuriously
-  triggering an extra revision on a plain save-then-publish with no further edits.
-- **No `status` column.** Originally `draft|published|archived`. Once
-  unpublish/republish/schedule cycles could happen without a new revision, the only thing
-  `status` was still doing was duplicating information already sitting elsewhere — so it was
-  dropped rather than kept in sync. `ARCHIVED` was never used by any code path and was
-  dropped with it. `src/lib/post-status.ts`'s `derivePostStatus` computes draft/scheduled/
-  published for display only.
-- **No separate schedule column, no sweep.** The first cut of this had a `scheduled_for`
-  column plus a lazy sweep (`publishDuePosts`, called from every public page) that flipped
-  `publish_revision_id` from `null` once the scheduled time arrived. That sweep turned out to
-  be pure accidental complexity: `schedulePost` now sets `publish_revision_id`
-  **immediately** — exactly like an immediate publish — and just sets `published_at` to the
-  future date instead of `now()`. Visibility is then purely `publish_revision_id IS NOT NULL
-  AND published_at <= now()` (`publishedPostWhere()` in `src/lib/post-status.ts`), a
-  query-time condition every public-facing query and the comment-eligibility check must use
-  instead of checking `publish_revision_id` alone — centralized in that one helper rather
-  than repeated at each of the ~7 call sites, since forgetting it at even one would leak a
-  not-yet-due post early. No write ever needs to happen *at* the scheduled instant, so
-  `scheduled_for` merges into `published_at` (which may now be in the future) and the whole
-  sweep module is gone. Thread remapping (`remapThreadsToRevision`) now happens
-  synchronously inside `schedulePost` itself (at the moment `publish_revision_id` changes)
-  rather than deferred to a sweep pass.
+  false-positive as "changed" on key order alone; it's also what makes "typed something, then
+  undid it" a no-op save, without inspecting the live Yjs doc. See TIPTAP.md for a ProseMirror
+  JSON-shape gotcha this equality check is sensitive to.
+- **No `status` column**: draft/scheduled/published is derived at read time
+  (`derivePostStatus`, `src/lib/post-status.ts`) from `publish_revision_id`/`published_at`
+  alone, rather than stored as a separate field that could drift out of sync across
+  unpublish/republish/schedule cycles. Used both for display (editor status line, admin
+  table) and for real gating logic: `schedulePost`'s scheduling guard (below),
+  `unpublishPost`'s draft check and its `PostPublicationEvent` type choice, and
+  `submitComment`'s "this post isn't open for comments" check.
+- **Scheduling uses no separate column and no background sweep**: `schedulePost` sets
+  `publish_revision_id` **immediately** — exactly like an immediate publish — and just sets
+  `published_at` to a future date instead of `now()`. Visibility is purely
+  `publish_revision_id IS NOT NULL AND published_at <= now()`, expressed as a query-time
+  WHERE clause (`publishedPostWhere()` in `src/lib/post-status.ts`) for every public-facing
+  query, or the equivalent post-fetch check (`derivePostStatus(post) === "published"`) for
+  code that already has the row in hand, like the comment-eligibility check above —
+  centralized in those two helpers rather than either condition being repeated ad hoc, since
+  forgetting it at even one call site would leak a not-yet-due post early. Thread remapping
+  (`remapThreadsToRevision`) happens synchronously inside `schedulePost` itself, at the moment
+  `publish_revision_id` changes.
 - **Unpublish** (`unpublishPost`): sets `publish_revision_id` to `null` with no new revision;
   `published_at` is left untouched (inert whenever `publish_revision_id` is null — nothing
   reads it in that state, so there's nothing to clean up). Doubles as "cancel schedule" — a
@@ -281,34 +275,21 @@ publishing, and dropping the `status` column entirely:
   unambiguously covers both starting states.
 - **Scheduling guard**: `schedulePost` is disallowed only when `derivePostStatus(post) ===
   "published"` (actually live right now) — not merely when `publish_revision_id` is set,
-  since a *scheduled* post has that set too. This is what still guarantees a live post's
-  served content can never go dark while a future edit is pending, while also allowing a
-  reschedule of an already-scheduled post. Renamed from `currentRevisionId` to
-  `publishRevisionId` per an explicit request during design — read as "the revision this post
-  is currently publishing," which doesn't collide with "current" meaning "most recently
-  edited."
-- **Rescheduling freezes the target until you reschedule again.** Because
+  since a *scheduled* post has that set too. This is what guarantees a live post's served
+  content can never go dark while a future edit is pending, while still allowing a reschedule
+  of an already-scheduled post.
+- **Rescheduling freezes the target until you reschedule again**: because
   `publish_revision_id` is set once, at the moment Schedule/Reschedule is clicked (via the
   same `resolveRevision` no-op-skip used everywhere else), a plain `saveDraft` afterward
   creates a newer revision but does *not* change what a pending schedule will publish — you
-  have to click Reschedule again to move the target forward. This reverses the first cut's
-  behavior (where the sweep always grabbed whichever revision was *latest* at the scheduled
-  instant, so quietly continuing to edit silently changed the outcome); the new behavior is
-  more predictable and was a natural consequence of removing the sweep, not a separate design
-  choice.
-- **Data migration note**: one already-real in-flight schedule existed in the dev DB when the
-  `scheduled_for` column was dropped (a post someone had actually scheduled while testing the
-  first cut). The migration backfilled it correctly — `publish_revision_id` set to that
-  post's latest revision, `published_at` set to its `scheduled_for` value — rather than just
-  dropping the column and losing the pending schedule.
+  have to click Reschedule again to move the target forward.
 - **`PostPublicationEvent`**: an append-only audit log
   (`PUBLISHED|UNPUBLISHED|SCHEDULED|SCHEDULE_CANCELED`, `postId`, `revisionId?`,
-  `scheduledFor?`, `actorId?`), written by every action above. Added because, once state
-  transitions stopped always producing a new `Revision` row, `Revision.createdAt` alone could
-  no longer answer "when did this go live/offline" — no UI reads it yet, but the data
-  survives for when a publish-history view is wanted. Deliberately kept as a write-only audit
-  trail, not a source of truth read on any hot path — visibility/status derivation never
-  queries it.
+  `scheduledFor?`, `actorId?`), written by every action above. Exists because
+  `Revision.createdAt` alone can't answer "when did this go live/offline," since state
+  transitions like unpublish/reschedule don't always produce a new `Revision` row. No UI
+  reads it yet; it's a write-only audit trail, not a source of truth read on any hot path —
+  visibility/status derivation never queries it.
 
 **Author attribution & live history** — fulfills the "finer per-author edit credit" idea
 noted in §3a:
@@ -333,9 +314,9 @@ noted in §3a:
   log, replays prefixes of it into a scratch `Y.Doc` for the scrub slider, and taps a second,
   otherwise-unused `HocuspocusProvider` connection purely to keep appending new updates as
   they arrive live.
-- **Collaborator cursors**: `CollaborationCaret`'s default always-visible name label replaced
-  with a thin colored bar (`renderCaret` in `CollabEditorBody.tsx`) — the name shows in a CSS
-  `:hover`-only tooltip instead. The local user's own cursor was already unaffected
+- **Collaborator cursors**: shown as a thin colored bar rather than `CollaborationCaret`'s
+  default always-visible name label (`renderCaret` in `CollabEditorBody.tsx`) — the name
+  shows in a CSS `:hover`-only tooltip instead. The local user's own cursor is unaffected
   (y-prosemirror excludes the local clientID before `render` runs).
 
 **Status line(s):** the editor shows two separate status paragraphs.
@@ -345,9 +326,9 @@ noted in §3a:
   contributing/connected author (`collectAuthorHighlightStats`, `src/lib/tiptap-schema.ts`).
   Both figures are debounced ~400ms rather than recomputed per keystroke — see
   PERFORMANCE.md, which also has a real before/after benchmark of this branch's cost.
-- `.revisionNote` — replaced the old fixed "Currently viewing revision #N" with "`{Published
-  revision #N (bold, linked to the live post) | Scheduled for {date} | Unpublished}`.
-  `{EDITED[, TITLE CHANGED] | Currently viewing revision #M}`." — the second clause
+- `.revisionNote` — shows "`{Published revision #N (bold, linked to the live post) |
+  Scheduled for {date} | Unpublished}`. `{EDITED[, TITLE CHANGED] | Currently viewing
+  revision #M}`." — the second clause
   disappears entirely once the last-saved revision matches what's published, there's no live
   content diff from it, *and* the title input matches the last-saved title; TITLE CHANGED is
   a separate, independent check (live title state vs. the title the post was last saved with)
