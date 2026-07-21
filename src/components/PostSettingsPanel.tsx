@@ -12,11 +12,27 @@ import {
 import { ModerationPolicy, type Role } from "@/generated/prisma/enums";
 import styles from "./PostSettingsPanel.module.css";
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function formatRevisionDate(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
 export type EligibleUser = {
   id: string;
   name: string | null;
   email: string;
   role: Role;
+};
+
+export type RevisionRow = {
+  revisionNumber: number;
+  title: string;
+  editorName: string;
+  changelog: string | null;
+  createdAt: Date;
 };
 
 type Props = {
@@ -28,6 +44,9 @@ type Props = {
   eligibleUsers: EligibleUser[];
   deleted: boolean;
   onDeletedChange: (deleted: boolean) => void;
+  revisions: RevisionRow[];
+  publishedRevisionNumber: number | null;
+  scheduledRevisionNumber: number | null;
 };
 
 export default function PostSettingsPanel({
@@ -39,6 +58,9 @@ export default function PostSettingsPanel({
   eligibleUsers,
   deleted,
   onDeletedChange,
+  revisions,
+  publishedRevisionNumber,
+  scheduledRevisionNumber,
 }: Props) {
   const router = useRouter();
   const detailsRef = useRef<HTMLDetailsElement>(null);
@@ -57,6 +79,10 @@ export default function PostSettingsPanel({
   const usersById = useMemo(() => new Map(eligibleUsers.map((u) => [u.id, u])), [eligibleUsers]);
   const dragIdRef = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const sortedRevisions = useMemo(
+    () => [...revisions].sort((a, b) => a.revisionNumber - b.revisionNumber),
+    [revisions],
+  );
 
   function handlePolicyChange(next: ModerationPolicy) {
     const prev = policy;
@@ -225,6 +251,40 @@ export default function PostSettingsPanel({
               <td className={styles.label}>Published</td>
               <td>{publishedAt ? publishedAt.toString() : "—"}</td>
             </tr>
+          </tbody>
+        </table>
+
+        <p className={styles.label}>Revisions:</p>
+
+        <table className={styles.revisionsTable}>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Title</th>
+              <th>Editor</th>
+              <th>Changelog</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRevisions.map((revision) => (
+              <tr
+                key={revision.revisionNumber}
+                className={
+                  revision.revisionNumber === scheduledRevisionNumber
+                    ? styles.scheduledRevisionRow
+                    : revision.revisionNumber === publishedRevisionNumber
+                      ? styles.publishedRevisionRow
+                      : undefined
+                }
+              >
+                <td>{revision.revisionNumber}</td>
+                <td>{revision.title}</td>
+                <td>{revision.editorName}</td>
+                <td>{revision.changelog ?? ""}</td>
+                <td>{formatRevisionDate(revision.createdAt)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
 

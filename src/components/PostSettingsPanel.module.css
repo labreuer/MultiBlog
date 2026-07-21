@@ -86,6 +86,34 @@
   color: crimson;
 }
 
+.revisionsTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.revisionsTable th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #444;
+  padding: 2px 12px 2px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.revisionsTable td {
+  padding: 2px 12px 2px 0;
+  vertical-align: top;
+}
+
+.scheduledRevisionRow {
+  font-style: italic;
+}
+
+.publishedRevisionRow {
+  font-weight: 600;
+}
+
 .deleteButton {
   align-self: flex-start;
   padding: 6px 10px;

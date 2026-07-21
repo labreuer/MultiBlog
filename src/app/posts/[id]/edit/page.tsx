@@ -46,6 +46,27 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     orderBy: { name: "asc" },
   });
 
+  // Excludes doc — the Settings panel's revisions table only needs the
+  // lightweight columns, not the full ProseMirror JSON.
+  const allRevisions = await prisma.revision.findMany({
+    where: { postId: post.id },
+    orderBy: { revisionNumber: "asc" },
+    select: {
+      revisionNumber: true,
+      title: true,
+      changelog: true,
+      createdAt: true,
+      editor: { select: { name: true, email: true } },
+    },
+  });
+  const revisions = allRevisions.map((r) => ({
+    revisionNumber: r.revisionNumber,
+    title: r.title,
+    editorName: r.editor?.name ?? r.editor?.email ?? "unknown",
+    changelog: r.changelog,
+    createdAt: r.createdAt,
+  }));
+
   return (
     <PostEditor
       postId={post.id}
@@ -53,6 +74,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       initialTitle={latest?.title ?? post.title}
       revisionNumber={latest?.revisionNumber ?? 0}
       publishedRevisionNumber={status === "published" ? post.publishRevision!.revisionNumber : null}
+      scheduledRevisionNumber={status === "scheduled" ? post.publishRevision!.revisionNumber : null}
       postStatus={status}
       publishedAt={post.publishedAt}
       lastRevisionDoc={latest?.doc ?? null}
@@ -64,6 +86,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       authorIds={post.authors.map((a) => a.userId)}
       eligibleUsers={eligibleUsers}
       initialDeleted={post.deletedByUserId !== null}
+      revisions={revisions}
     />
   );
 }

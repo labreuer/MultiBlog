@@ -369,6 +369,13 @@ STYLE.md.
 - **Created/published timestamps**: shown read-only (`Date.toString()`) alongside the above,
   in a headerless label/value table — see STYLE.md's "Headerless label/value table" layout
   pattern.
+- **Revision history table**: a "Revisions:" label (same style as the labels above it)
+  introduces a table of every `Revision` — number, title, editor (name, not id), changelog,
+  and created-at (`yyyy-MM-dd HH:mm`, zero-padded local time) — sorted by `revisionNumber`,
+  positioned directly above the Delete/Undelete button. The currently published row is bold,
+  the currently scheduled row is italic (mutually exclusive — a post is never both at once).
+  Fetched with a dedicated `prisma.revision.findMany` selecting only those columns, excluding
+  `doc`.
 
 ---
 

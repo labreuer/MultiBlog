@@ -13,7 +13,7 @@ import { perfMeasure } from "@/lib/perf-monitor";
 import type { PostStatus } from "@/lib/post-status";
 import type { ModerationPolicy } from "@/generated/prisma/enums";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
-import PostSettingsPanel, { type EligibleUser } from "./PostSettingsPanel";
+import PostSettingsPanel, { type EligibleUser, type RevisionRow } from "./PostSettingsPanel";
 import styles from "./PostEditor.module.css";
 
 type Props = {
@@ -22,6 +22,7 @@ type Props = {
   initialTitle: string;
   revisionNumber: number;
   publishedRevisionNumber: number | null;
+  scheduledRevisionNumber: number | null;
   postStatus: PostStatus;
   publishedAt: Date | null;
   lastRevisionDoc: unknown;
@@ -33,6 +34,7 @@ type Props = {
   authorIds: string[];
   eligibleUsers: EligibleUser[];
   initialDeleted: boolean;
+  revisions: RevisionRow[];
 };
 
 // Formats a Date as the local-time value a <input type="datetime-local">
@@ -71,6 +73,7 @@ export default function PostEditor({
   initialTitle,
   revisionNumber,
   publishedRevisionNumber,
+  scheduledRevisionNumber,
   postStatus,
   publishedAt,
   lastRevisionDoc,
@@ -82,6 +85,7 @@ export default function PostEditor({
   authorIds,
   eligibleUsers,
   initialDeleted,
+  revisions,
 }: Props) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
@@ -396,6 +400,9 @@ export default function PostEditor({
         eligibleUsers={eligibleUsers}
         deleted={deleted}
         onDeletedChange={setDeleted}
+        revisions={revisions}
+        publishedRevisionNumber={publishedRevisionNumber}
+        scheduledRevisionNumber={scheduledRevisionNumber}
       />
     </div>
   );
