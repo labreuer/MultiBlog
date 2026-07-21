@@ -7,7 +7,7 @@
 .prose {
   font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
   font-size: 1.125rem;
-  line-height: 1.7;
+  line-height: 1.5;
   color: #222;
 }
 
@@ -28,8 +28,8 @@
   margin: 0 0 1.25em;
 }
 
-.prose :global(li) + :global(li) {
-  margin-top: 0.25rem;
+.prose :global(li) :global(p) {
+  margin: 0;
 }
 
 .prose :global(blockquote) {
