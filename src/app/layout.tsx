@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteHeader from "@/components/SiteHeader";
+import { SITE_TITLE } from "@/lib/site-config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MultiBlog",
+  title: SITE_TITLE,
   description: "A multi-author blog with revisions and quote-anchored comments.",
   alternates: {
     types: { "application/rss+xml": "/rss.xml" },

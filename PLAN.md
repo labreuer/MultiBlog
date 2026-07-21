@@ -895,3 +895,39 @@ Git history carries per-step detail.
 - The home and author pages' `revalidate = 60` ISR caching is now a no-op — item 10's edit
   badge made both pages call `auth()`, which Next.js treats as inherently dynamic. Not fixed;
   see CACHING.md's 2026-07-20 entry for why and a possible client-side-split fix.
+
+---
+
+## 11. Site-wide configuration: `site-config.ts` vs `SiteSettings`
+
+Two mechanisms hold values that apply to the whole site rather than one post/user, and which
+one a new value belongs in is a deliberate choice, not an arbitrary one.
+
+**`src/lib/site-config.ts`** — plain exported constants (currently just `SITE_TITLE`), read at
+module load. Consumed directly in `layout.tsx` (`<title>`/metadata), `SiteHeader.tsx`, and
+`rss.xml/route.ts`. Cheap and synchronous everywhere it's used, but a change only reaches
+production via a new deploy (a dev-server restart, or just HMR, locally) — there's no admin UI
+for it, and there can't sensibly be one: writing to the file at runtime doesn't work on most
+deploy targets (read-only/ephemeral filesystems) and wouldn't propagate across multiple server
+instances even where it did.
+
+**`SiteSettings`** (§4's `site_settings` singleton row, `id=1`) — currently
+`defaultModerationPolicy` and `trustThreshold` (§6), read via `getSiteSettings()`
+(`src/lib/site-settings.ts`) inside comment-submission/moderation code, which is already
+async/server-side. No admin UI writes to it yet, so today it's a DB-stored constant in
+practice — the same effective runtime-editability as `site-config.ts`, just fetched with a
+query instead of an import. The moment a settings UI exists, this becomes genuinely editable
+from the website without a deploy.
+
+**The dividing line:** a value belongs in `site-config.ts` if (a) nobody but a deploying
+developer needs to change it, and (b) it's read on render-critical/every-page paths, where an
+added DB query or an ISR-caching interaction (CACHING.md) would cost something real. It belongs
+in `SiteSettings` if it's operational/admin-tunable data — something you'd plausibly want to
+change in response to live conditions, like a spam wave — and its read sites are already
+narrow, server-side, and async, so a query there is free-ish. A value can move from one to the
+other later; moving `SITE_TITLE` into `SiteSettings` would need the column added, every read
+site switched to a cached `getSiteSettings()` call, an admin-gated write action, and
+`revalidatePath`/`revalidateTag` on write so ISR-cached pages notice the change.
+
+Not yet built: an admin UI for either existing `SiteSettings` field, despite the columns and
+read helper already existing.

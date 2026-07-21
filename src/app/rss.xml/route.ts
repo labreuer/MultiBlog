@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
+import { SITE_TITLE } from "@/lib/site-config";
 
 export const revalidate = 60;
 
@@ -42,7 +43,7 @@ export async function GET() {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 <channel>
-  <title>MultiBlog</title>
+  <title>${escapeXml(SITE_TITLE)}</title>
   <link>${escapeXml(baseUrl)}</link>
   <description>A multi-author blog with revisions and quote-anchored comments.</description>
 ${items}
