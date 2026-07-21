@@ -13,6 +13,7 @@ const RESERVED_SLUGS = new Set([
   "search",
   "sign-in",
   "sign-up",
+  "site-settings",
   "users",
 ]);
 

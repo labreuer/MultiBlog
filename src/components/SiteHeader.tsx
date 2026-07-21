@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { canManagePosts, isAdmin } from "@/lib/authz";
+import { SITE_TITLE } from "@/lib/site-config";
 
 export default async function SiteHeader() {
   const session = await auth();
@@ -17,7 +18,7 @@ export default async function SiteHeader() {
     >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <Link href="/" style={{ fontWeight: "bold", textDecoration: "none", color: "inherit" }}>
-          MultiBlog
+          {SITE_TITLE}
         </Link>
         {session?.user && canManagePosts(session.user.role) && (
           <>
@@ -33,6 +34,10 @@ export default async function SiteHeader() {
               |
             </span>
             <Link href="/users">Manage Users</Link>
+            <span aria-hidden="true" style={{ color: "#ccc" }}>
+              |
+            </span>
+            <Link href="/site-settings">Site Settings</Link>
           </>
         )}
       </div>

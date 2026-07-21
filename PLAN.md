@@ -528,6 +528,24 @@ Resolution order for a new comment: if the commenter is logged in as an `ADMIN` 
 skipping spam-checking entirely. Else if `force_moderate` → queue. Else if trusted
 (`approved_count >= threshold`) → publish. Else apply the cascade policy.
 
+**`trust_threshold` is inert whenever a comment's resolved cascade policy is `auto`.** The
+trust check runs *before* the cascade (above), but an untrusted commenter who fails it still
+falls through to the cascade — and if that resolves to `auto`, they publish immediately
+anyway, threshold or no. The threshold only ever changes an outcome for a comment whose
+resolved policy is `always`: that's the one case where a trusted commenter (publish) and an
+untrusted one (queued) actually diverge. So `trust_threshold`'s de facto value is 0 for any
+comment resolving to `auto` (aside from `force_moderate`, which still queues regardless of
+trust) — raising or lowering it changes nothing until something in the cascade — site
+default, an author override, or a post override — resolves to `always` at least some of the
+time.
+
+**Editing site-level settings.** `defaultModerationPolicy` and `trustThreshold` (the
+`site_settings` singleton, §4) are editable by an ADMIN at `/site-settings`
+(`SiteSettingsTable.tsx`, `actions/site-settings.ts`) — a policy `<select>` and a threshold
+number input, each admin-gated and saving on change/blur like `/users` (§3b). That page also
+lists `site-config.ts`'s build-time constants (e.g. `SITE_TITLE`) read-only, since those apply
+site-wide too but change only via a deploy, not from the DB.
+
 **Hardening:** sanitize all comment bodies; restrict the comment editor to a safe schema
 (no raw HTML/scripts; links get `rel="nofollow noopener"`). Rate-limit by IP and by
 commenter. Consider Akismet given anonymous commenting is allowed.
