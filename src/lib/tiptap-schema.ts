@@ -47,11 +47,24 @@ function walkMarks(node: JSONContent, visit: (mark: NonNullable<JSONContent["mar
 // persisted to revisions.doc.
 export function stripMarkFromDoc(doc: JSONContent, markName: string): JSONContent {
   function strip(node: JSONContent): JSONContent {
-    const marks = node.marks?.filter((mark) => mark.type !== markName);
-    const content = node.content?.map(strip);
+    // Destructure marks/content out of the base spread — `{...node, ...(cond
+    // ? {marks} : {})}` spreads node's *original, unfiltered* marks first,
+    // so when the conditional half contributes nothing (the filtered array
+    // is empty — the common case for a text run whose only mark was the one
+    // being stripped), nothing overrides it and the unfiltered marks leak
+    // straight through unstripped.
+    const { marks: rawMarks, content: rawContent, ...rest } = node;
+    const marks = rawMarks?.filter((mark) => mark.type !== markName);
+    const content = rawContent?.map(strip);
     return {
-      ...node,
-      ...(marks !== undefined ? { marks } : {}),
+      ...rest,
+      // Omit the key entirely when filtering leaves nothing, rather than
+      // keeping `marks: []` — ProseMirror's own Node#toJSON never emits an
+      // empty marks array either, so leaving one in here made a freshly
+      // stripped doc structurally unequal (per docsEqual) to the identical
+      // content coming back from a live editor's getJSON() a moment later,
+      // spuriously creating a no-op revision on save-then-publish.
+      ...(marks !== undefined && marks.length > 0 ? { marks } : {}),
       ...(content !== undefined ? { content } : {}),
     };
   }
