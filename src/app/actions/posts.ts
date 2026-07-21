@@ -11,6 +11,7 @@ import { stripMarkFromDoc } from "@/lib/tiptap-schema";
 import { docsEqual } from "@/lib/diff";
 import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
+import { ModerationPolicy } from "@/generated/prisma/enums";
 import type { JSONContent } from "@tiptap/core";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
@@ -264,6 +265,65 @@ export async function deletePost(postId: string): Promise<void> {
 
 export async function restorePost(postId: string): Promise<void> {
   await setPostDeleted(postId, false);
+}
+
+export async function updatePostModerationPolicy(postId: string, moderationPolicy: ModerationPolicy): Promise<void> {
+  await requireEditableSession(postId);
+  if (!Object.values(ModerationPolicy).includes(moderationPolicy)) {
+    throw new Error("Invalid moderation policy.");
+  }
+  await prisma.post.update({ where: { id: postId }, data: { moderationPolicy } });
+  revalidatePath(`/posts/${postId}/edit`);
+}
+
+// Adds/removes a single PostAuthor row rather than replacing the whole set,
+// so toggling one checkbox can't clobber another editor's concurrent change
+// to a different author. New rows go after the current max bylineOrder,
+// preserving the existing byline order instead of reshuffling it.
+export async function updatePostAuthor(postId: string, userId: string, included: boolean): Promise<void> {
+  await requireEditableSession(postId);
+
+  if (included) {
+    const existing = await prisma.postAuthor.findUnique({ where: { postId_userId: { postId, userId } } });
+    if (existing) return;
+    const maxOrder = await prisma.postAuthor.aggregate({ where: { postId }, _max: { bylineOrder: true } });
+    await prisma.postAuthor.create({
+      data: { postId, userId, bylineOrder: (maxOrder._max.bylineOrder ?? -1) + 1 },
+    });
+  } else {
+    const count = await prisma.postAuthor.count({ where: { postId } });
+    if (count <= 1) {
+      throw new Error("A post must have at least one author.");
+    }
+    await prisma.postAuthor.delete({ where: { postId_userId: { postId, userId } } }).catch(() => {});
+  }
+
+  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath("/posts");
+}
+
+// Reassigns bylineOrder to match orderedUserIds' sequence (0-indexed), for
+// drag-and-drop reordering in the settings panel. orderedUserIds must be
+// exactly the post's current author set — a mismatch means the author list
+// changed (e.g. another editor's concurrent toggle) since the drag started,
+// so this bails rather than silently dropping/duplicating a row.
+export async function updatePostAuthorOrder(postId: string, orderedUserIds: string[]): Promise<void> {
+  await requireEditableSession(postId);
+
+  const current = await prisma.postAuthor.findMany({ where: { postId }, select: { userId: true } });
+  const currentIds = new Set(current.map((a) => a.userId));
+  if (orderedUserIds.length !== currentIds.size || orderedUserIds.some((id) => !currentIds.has(id))) {
+    throw new Error("Author list changed — please retry.");
+  }
+
+  await prisma.$transaction(
+    orderedUserIds.map((userId, bylineOrder) =>
+      prisma.postAuthor.update({ where: { postId_userId: { postId, userId } }, data: { bylineOrder } }),
+    ),
+  );
+
+  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath("/posts");
 }
 
 export async function restoreRevision(

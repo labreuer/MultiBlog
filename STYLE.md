@@ -4,7 +4,7 @@ This documents what's actually been decided/established in the codebase, not an
 aspirational design system. Most of the app (admin table, editor, moderation queue,
 history views) is still plainly-styled inline React `style` objects with no unifying
 palette — that's fine and not a gap to close. The conventions below are the ones that
-are real (used more than once, or deliberately chosen) as of 2026-07-20.
+are real (used more than once, or deliberately chosen) as of 2026-07-21.
 
 ## Approach: inline styles by default, CSS Modules for anything stateful
 
@@ -19,6 +19,7 @@ where media queries or pseudo-classes (`:hover`, `:focus`) are needed** — plai
 | `app/page.module.css`, `app/authors/[id]/page.module.css`, `app/[slug]/page.module.css` | `:hover`-only underline on post-title links |
 | `components/CommentSection.module.css`, `CommentNode.module.css`, `CommentForm.module.css` | none needed a pseudo-class directly, but were pulled into modules alongside `QuoteThreadHeader` for consistency when that pass happened (see git history 2026-07-20) |
 | `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values; `.arrowActive`/`.barActive` also read `--thread-color` |
+| `components/PostSettingsPanel.module.css` | same state-dependent-class rationale as `QuoteThreadHeader` — `.draggableRow`/`.dragOver` toggle on drag state, `.checkboxRow` conditionally combines them; no pseudo-class/media-query is used, but juggling three conditional classes per row as inline `style` objects would be worse than the module |
 
 Numeric constants that also drive non-CSS geometry (e.g. `QuoteThreadHeader`'s
 `HEAD_WIDTH`/`HEAD_HEIGHT`, used in both the SVG `viewBox` and a CSS `width`) stay as
@@ -55,7 +56,9 @@ value that two systems depend on invites drift.
 | Quote highlight background / pulse | `color-mix(in srgb, var(--thread-color, #999) 25%, transparent)`, pulses to 55% | `prose.module.css` |
 | Comment-form buttons | `#333` (Post comment) / `#666` (Cancel) | `CommentForm.module.css` `.submit`/`.cancel` |
 | Error text | `crimson` | form validation errors |
+| Danger/delete action | `#c00` (text/border, no fill) | `PostsTable.tsx`/`UsersTable.tsx` delete icon buttons, `PostSettingsPanel.module.css` `.deleteButton` — consistent across every soft-delete control in the admin/editor UI |
 | Diff view: insertion / deletion | `#0a5` on `#d4f7d4` / `#c00` on `#fbdada` | `history/[revisionNumber]/page.tsx` — not part of the palette above, ad hoc and only used there |
+| Drag-over highlight | `#eef4ff` background, `1px dashed #88a` outline | `PostSettingsPanel.module.css` `.dragOver` — ad hoc, only reordering UI so far |
 
 Quote-thread coloring was originally one fixed muted amber (`#b8935a`, itself toned down
 from an earlier, more saturated `#fff3b0`/`#d4a017` — see git history), the same for every
@@ -106,3 +109,24 @@ by design, not by accident.
   set with `em` (not `rem`) so the badge scales with whichever heading it's next to —
   see the em-vs-rem gotcha in CLAUDE.md — but centering itself is flexbox's job now,
   not font metrics.
+- **Headerless label/value table** (`PostSettingsPanel.module.css` `.detailsTable`, added
+  2026-07-21): a plain `<table>` with no `<thead>`, one `<tr>` per field, label in the
+  first `<td>` (`white-space: nowrap`, right-padded) and the value/control in the
+  second. Used when several label+value rows need their values to start at a common
+  x-position — flexbox rows (`.fieldRow`, tried first) only align a *single* row's own
+  label/value pair, not siblings' columns against each other.
+- **Buttons sized to match an adjacent input's box model**: `PostEditor.module.css`
+  `.actionButton` matches `.changelogInput`'s `padding`/`font-size`/`box-sizing` rather
+  than setting an explicit `height` — a `<button>` and `<input>` with the same font-size,
+  padding, and (default 1px) border compute the same rendered height without one, and an
+  explicit height on a flex/inline sibling is brittle across zoom levels and font
+  fallbacks in a way matching the box model isn't.
+- **Symmetric whitespace above/below a block**: match the block's own `margin-top` to
+  whatever's providing space below it, rather than leaving the reset's implicit 0 above
+  and a sibling's `margin-top` below. `.revisionNote`'s `margin-top: 12px` was added to
+  equal `PostSettingsPanel`'s `.details { margin-top: 12px }` sitting right after it.
+- **Native `<details>`/`<summary>` for a collapsible panel** (`PostSettingsPanel.tsx`):
+  no custom open/close state, animation, or ARIA wiring needed — the browser provides
+  keyboard support and the `toggle` event for free. Reach for a JS-driven collapse only
+  when `<details>`'s default (no open/close animation, can't be controlled purely by
+  external state without an effect syncing `open`) doesn't fit.

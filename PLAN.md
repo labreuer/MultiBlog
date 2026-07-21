@@ -222,6 +222,41 @@ the checkbox was intentionally hiding. Toggling the checkbox by hand calls `rout
 the reveal-on-delete path does not, since the row's own delete action already refreshes the
 table to pick up its new state.
 
+### 3d. Per-post settings panel (in the editor)
+
+**Decided:** rather than only managing moderation policy, authors, and deletion from the
+`/posts` admin table (§3c), the editor itself (`/posts/[id]/edit`) has a collapsible
+"Settings" panel (`PostSettingsPanel.tsx`) for per-post knobs that don't belong on the main
+editing surface. Built natively via `<details>`/`<summary>` rather than hand-rolled
+open/close state — see STYLE.md.
+
+- **Moderation policy override**: a `<select>` of `ModerationPolicy` (INHERIT/ALWAYS/AUTO,
+  same enum/semantics as §6), saved immediately via `updatePostModerationPolicy`
+  (`src/app/actions/posts.ts`), gated by the same `canUserEditPost` check as saving/
+  publishing.
+- **Author management**: a checkbox list of every ADMIN/EDITOR/AUTHOR user.
+  `updatePostAuthor` adds/removes a single `PostAuthor` row per toggle (rather than
+  replacing the whole set), so two editors toggling different authors concurrently can't
+  clobber each other; removing the last remaining author is refused. The list sorts
+  checked-first by `bylineOrder`, computed once on mount and deliberately **not**
+  live-resorted as checkboxes toggle, so a row doesn't jump elsewhere in the list mid-edit.
+  Checked rows are drag-and-droppable (native HTML5 DnD, no library) to reorder the byline;
+  both a drag-drop and an add/remove call `updatePostAuthorOrder`, which renumbers every
+  checked author's `bylineOrder` to match the checkbox list's current on-screen order — so
+  `bylineOrder` always reflects what's visible rather than new authors simply appending to
+  the end.
+- **Soft delete/restore**: a Delete/Undelete button reusing the same `deletePost`/
+  `restorePost` actions as the `/posts` table (§3c). Deleting from the editor disables every
+  other editing control on the page — title, toolbar, editor content, save/publish/schedule,
+  changelog, and the panel's own moderation-policy/author controls — via a `deleted` boolean
+  threaded down from `PostEditor`; undeleting re-enables them. The edit page's own post
+  lookup uses `prismaIncludingDeleted` rather than the ordinarily soft-delete-filtered
+  `prisma` client (§4) — otherwise a freshly-deleted post would 404 on refresh instead of
+  showing the Undelete affordance.
+- **Created/published timestamps**: shown read-only (`Date.toString()`) alongside the above,
+  in a headerless label/value table — see STYLE.md's "Headerless label/value table" layout
+  pattern.
+
 ---
 
 ## 4. Data model

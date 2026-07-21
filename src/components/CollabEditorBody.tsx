@@ -28,6 +28,7 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  editable?: boolean;
   onEditorReady: (editor: Editor | null) => void;
   onAuthorStats?: (stats: AuthorStat[]) => void;
 };
@@ -57,6 +58,7 @@ export default function CollabEditorBody({
   userId,
   userName,
   userColor,
+  editable = true,
   onEditorReady,
   onAuthorStats,
 }: Props) {
@@ -93,6 +95,13 @@ export default function CollabEditorBody({
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
+  // useEditor's `editable` option is only read at construction time, not
+  // reactive — toggling it later (e.g. after a soft delete) requires calling
+  // setEditable directly.
+  useEffect(() => {
+    editor?.setEditable(editable);
+  }, [editor, editable]);
+
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -121,24 +130,35 @@ export default function CollabEditorBody({
   return (
     <div className={styles.editorFrame}>
       <AuthorHighlightStyles colors={authorColors} />
-      <Toolbar editor={editor} />
+      <Toolbar editor={editor} disabled={!editable} />
       <EditorContent editor={editor} className={`${styles.editorContent} ${proseStyles.prose}`} />
     </div>
   );
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
+function Toolbar({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
   return (
     <div className={styles.toolbar}>
-      <button type="button" className={styles.toolbarButton} onClick={() => editor.chain().focus().toggleBold().run()}>
+      <button
+        type="button"
+        className={styles.toolbarButton}
+        disabled={disabled}
+        onClick={() => editor.chain().focus().toggleBold().run()}
+      >
         Bold
       </button>
-      <button type="button" className={styles.toolbarButton} onClick={() => editor.chain().focus().toggleItalic().run()}>
+      <button
+        type="button"
+        className={styles.toolbarButton}
+        disabled={disabled}
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+      >
         Italic
       </button>
       <button
         type="button"
         className={styles.toolbarButton}
+        disabled={disabled}
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
       >
         H2
@@ -146,6 +166,7 @@ function Toolbar({ editor }: { editor: Editor }) {
       <button
         type="button"
         className={styles.toolbarButton}
+        disabled={disabled}
         onClick={() => editor.chain().focus().toggleBulletList().run()}
       >
         Bullets
@@ -153,14 +174,16 @@ function Toolbar({ editor }: { editor: Editor }) {
       <button
         type="button"
         className={styles.toolbarButton}
+        disabled={disabled}
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
       >
         Numbered
       </button>
-      <QuoteControls editor={editor} />
+      <QuoteControls editor={editor} disabled={disabled} />
       <button
         type="button"
         className={styles.toolbarButton}
+        disabled={disabled}
         onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
       >
         Clear formatting

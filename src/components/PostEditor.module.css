@@ -52,7 +52,12 @@
   border-radius: 4px;
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  /* flex-shrink: 0 — the settings panel below can expand and push the
+     container's total content past the available viewport height; this
+     keeps the editor pinned at its own natural size instead of shrinking to
+     make room, so a page-level scrollbar appears in that case (see
+     .container's overflow note) rather than the editor visibly resizing. */
+  flex: 1 0 auto;
   min-height: 0;
 }
 
@@ -191,6 +196,12 @@
   box-sizing: border-box;
 }
 
+.actionButton {
+  padding: 6px 7px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
 .statusMessage {
   color: green;
 }
@@ -200,8 +211,9 @@
 }
 
 .revisionNote {
+  margin-top: 12px;
   color: #666;
-  font-size: 0.9rem;
+  font-size: 1rem;
 }
 
 @media (max-width: 480px) {

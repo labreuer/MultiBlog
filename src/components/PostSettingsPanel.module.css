@@ -1,0 +1,94 @@
+.details {
+  margin-top: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
+.summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+
+.body {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.detailsTable {
+  border-collapse: collapse;
+}
+
+.detailsTable td {
+  padding: 2px 0;
+}
+
+.detailsTable td:first-child {
+  padding-right: 12px;
+  white-space: nowrap;
+}
+
+.policySelect {
+  width: auto;
+}
+
+.checkboxList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.draggableRow {
+  cursor: grab;
+}
+
+.dragHandle {
+  color: #999;
+  cursor: grab;
+}
+
+.dragOver {
+  background: #eef4ff;
+  outline: 1px dashed #88a;
+}
+
+.roleTag {
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.errorMessage {
+  color: crimson;
+}
+
+.deleteButton {
+  align-self: flex-start;
+  padding: 6px 10px;
+  color: #c00;
+  border-color: #c00;
+}

@@ -9,7 +9,7 @@ import styles from "./PostEditor.module.css";
 // add or remove a level regardless of current nesting — toggleBlockquote
 // can't do that, since toggling while already inside a quote unwraps it
 // rather than nesting deeper.
-export default function QuoteControls({ editor }: { editor: Editor }) {
+export default function QuoteControls({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -36,6 +36,7 @@ export default function QuoteControls({ editor }: { editor: Editor }) {
       <button
         type="button"
         className={styles.toolbarButton}
+        disabled={disabled}
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
       >
         Quote
@@ -46,11 +47,12 @@ export default function QuoteControls({ editor }: { editor: Editor }) {
         aria-label="Quote depth options"
         aria-haspopup="menu"
         aria-expanded={open}
+        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
       >
         ▼
       </button>
-      {open && (
+      {open && !disabled && (
         <div className={styles.quoteMenu} role="menu">
           <button
             type="button"

@@ -11,7 +11,9 @@ import { extractText, diffText } from "@/lib/diff";
 import { toPlainJSON } from "@/lib/tiptap-schema";
 import { perfMeasure } from "@/lib/perf-monitor";
 import type { PostStatus } from "@/lib/post-status";
+import type { ModerationPolicy } from "@/generated/prisma/enums";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
+import PostSettingsPanel, { type EligibleUser } from "./PostSettingsPanel";
 import styles from "./PostEditor.module.css";
 
 type Props = {
@@ -26,6 +28,11 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  moderationPolicy: ModerationPolicy;
+  createdAt: Date;
+  authorIds: string[];
+  eligibleUsers: EligibleUser[];
+  initialDeleted: boolean;
 };
 
 // Formats a Date as the local-time value a <input type="datetime-local">
@@ -70,9 +77,15 @@ export default function PostEditor({
   userId,
   userName,
   userColor,
+  moderationPolicy,
+  createdAt,
+  authorIds,
+  eligibleUsers,
+  initialDeleted,
 }: Props) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
+  const [deleted, setDeleted] = useState(initialDeleted);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [changelog, setChangelog] = useState("");
@@ -179,7 +192,7 @@ export default function PostEditor({
         const doc = toPlainJSON(editor.getJSON());
         const result = await saveDraft(postId, title, doc);
         clearAuthorHighlights(editor);
-        setStatus(result.created ? `Saved as revision #${result.revisionNumber}` : `No changes since revision #${result.revisionNumber}`);
+        if (!result.created) setStatus(`No changes since revision #${result.revisionNumber}`);
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to save.");
@@ -193,9 +206,8 @@ export default function PostEditor({
     startTransition(async () => {
       try {
         const doc = toPlainJSON(editor.getJSON());
-        const result = await publishPost(postId, title, doc, changelog);
+        await publishPost(postId, title, doc, changelog);
         clearAuthorHighlights(editor);
-        setStatus(result.created ? `Published as revision #${result.revisionNumber}` : `Published (no changes since revision #${result.revisionNumber})`);
         setChangelog("");
         router.refresh();
       } catch (e) {
@@ -209,7 +221,7 @@ export default function PostEditor({
     startTransition(async () => {
       try {
         await unpublishPost(postId);
-        setStatus(postStatus === "scheduled" ? "Schedule canceled" : "Unpublished");
+        if (postStatus === "scheduled") setStatus("Schedule canceled");
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to unpublish.");
@@ -264,6 +276,7 @@ export default function PostEditor({
         onChange={(e) => setTitle(e.target.value)}
         aria-label="Title"
         className={styles.titleInput}
+        disabled={deleted}
       />
       <p className={styles.statusLine}>
         {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
@@ -300,6 +313,7 @@ export default function PostEditor({
           userId={userId}
           userName={userName}
           userColor={userColor}
+          editable={!deleted}
           onEditorReady={setEditor}
           onAuthorStats={setAuthorStats}
         />
@@ -307,7 +321,12 @@ export default function PostEditor({
         <p>Connecting to live editor…</p>
       )}
       <div className={styles.actionsRow}>
-        <button type="button" onClick={handleSaveDraft} disabled={pending || !editor}>
+        <button
+          type="button"
+          onClick={handleSaveDraft}
+          disabled={pending || !editor || deleted}
+          className={styles.actionButton}
+        >
           Save draft
         </button>
         <input
@@ -315,12 +334,18 @@ export default function PostEditor({
           value={changelog}
           onChange={(e) => setChangelog(e.target.value)}
           className={styles.changelogInput}
+          disabled={deleted}
         />
-        <button type="button" onClick={handlePublish} disabled={pending || !editor}>
+        <button
+          type="button"
+          onClick={handlePublish}
+          disabled={pending || !editor || deleted}
+          className={styles.actionButton}
+        >
           Publish
         </button>
         {postStatus !== "draft" && (
-          <button type="button" onClick={handleUnpublish} disabled={pending}>
+          <button type="button" onClick={handleUnpublish} disabled={pending || deleted} className={styles.actionButton}>
             {postStatus === "scheduled" ? "Cancel schedule" : "Unpublish"}
           </button>
         )}
@@ -331,8 +356,14 @@ export default function PostEditor({
               aria-label="Schedule for"
               value={scheduleInput}
               onChange={(e) => setScheduleInput(e.target.value)}
+              disabled={deleted}
             />
-            <button type="button" onClick={handleSchedule} disabled={pending || !editor || !scheduleInput}>
+            <button
+              type="button"
+              onClick={handleSchedule}
+              disabled={pending || !editor || !scheduleInput || deleted}
+              className={styles.actionButton}
+            >
               {postStatus === "scheduled" ? "Reschedule" : "Schedule"}
             </button>
           </>
@@ -342,7 +373,9 @@ export default function PostEditor({
       {error && <p className={styles.errorMessage}>{error}</p>}
       <p className={styles.revisionNote}>
         {postStatus === "published" ? (
-          <Link href={`/${slug}`}>Published revision #{publishedRevisionNumber}</Link>
+          <Link href={`/${slug}`} style={{ fontWeight: "bold" }}>
+            Published revision #{publishedRevisionNumber}
+          </Link>
         ) : postStatus === "scheduled" && publishedAt ? (
           `Scheduled for ${publishedAt.toLocaleString()}`
         ) : (
@@ -352,6 +385,16 @@ export default function PostEditor({
         {showViewingClause && <>{hasRevisionDiff ? "EDITED" : `Currently viewing revision #${revisionNumber}`}. </>}
         <Link href={`/posts/${postId}/live-history`}>Scrub live history</Link>
       </p>
+      <PostSettingsPanel
+        postId={postId}
+        moderationPolicy={moderationPolicy}
+        createdAt={createdAt}
+        publishedAt={publishedAt}
+        authorIds={authorIds}
+        eligibleUsers={eligibleUsers}
+        deleted={deleted}
+        onDeletedChange={setDeleted}
+      />
     </div>
   );
 }
