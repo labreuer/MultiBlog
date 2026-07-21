@@ -1,0 +1,13 @@
+@keyframes rowSavedPulse {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: #d3f9d8;
+  }
+}
+
+.savedPulse {
+  animation: rowSavedPulse 1s ease-in-out;
+}

@@ -11,6 +11,10 @@ export function canEditAnyPost(role: Role): boolean {
   return role === "ADMIN" || role === "EDITOR";
 }
 
+export function isAdmin(role: Role): boolean {
+  return role === "ADMIN";
+}
+
 export async function canUserEditPost(userId: string, role: Role, postId: string): Promise<boolean> {
   if (canEditAnyPost(role)) {
     return true;

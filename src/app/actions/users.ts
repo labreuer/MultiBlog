@@ -1,0 +1,63 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { isAdmin } from "@/lib/authz";
+import { Role, ModerationPolicy } from "@/generated/prisma/enums";
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+async function requireAdmin(): Promise<string> {
+  const session = await auth();
+  if (!session?.user || !isAdmin(session.user.role)) {
+    throw new Error("You don't have permission to manage users.");
+  }
+  return session.user.id;
+}
+
+export async function updateUserRole(userId: string, role: Role): Promise<void> {
+  const adminId = await requireAdmin();
+  if (!Object.values(Role).includes(role)) {
+    throw new Error("Invalid role.");
+  }
+  if (adminId === userId && role !== Role.ADMIN) {
+    throw new Error("You can't remove your own admin role.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { role } });
+  revalidatePath("/users");
+}
+
+export async function updateUserModerationPolicy(userId: string, moderationPolicy: ModerationPolicy): Promise<void> {
+  await requireAdmin();
+  if (!Object.values(ModerationPolicy).includes(moderationPolicy)) {
+    throw new Error("Invalid moderation policy.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { moderationPolicy } });
+  revalidatePath("/users");
+}
+
+export async function updateUserColor(userId: string, color: string): Promise<void> {
+  await requireAdmin();
+  if (!HEX_COLOR_RE.test(color)) {
+    throw new Error("Invalid color.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { color } });
+  revalidatePath("/users");
+}
+
+export async function updateUserName(userId: string, name: string): Promise<void> {
+  await requireAdmin();
+  await prisma.user.update({ where: { id: userId }, data: { name: name.trim() || null } });
+  revalidatePath("/users");
+}
+
+export async function updateUserAdminInitials(userId: string, adminInitials: string): Promise<void> {
+  await requireAdmin();
+  const trimmed = adminInitials.trim();
+  if (!trimmed) {
+    throw new Error("Initials can't be empty.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { adminInitials: trimmed } });
+  revalidatePath("/users");
+}

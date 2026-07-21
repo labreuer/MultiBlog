@@ -84,6 +84,55 @@ logged-in — see §6).
 This raises the ops footprint (a second long-running service + websocket proxying — see §7),
 which is the main cost of doing it now rather than later.
 
+### 3b. User management (`/users`)
+
+**Decided:** an ADMIN-only page for managing every `User` account directly, distinct from
+the per-post author/role concerns above — no schema changes needed, since it's a UI +
+server-actions layer over the existing `users` table (§4).
+
+**Access:** gated by `isAdmin(role)` (`src/lib/authz.ts`) — same shape as `/posts`'s
+`canManagePosts` gate: redirect to sign-in if unauthenticated, an inline "doesn't have
+permission" message for a signed-in non-admin. Linked from `SiteHeader` and `/dashboard`
+alongside "Manage Posts", admin-only.
+
+**Table** (`UsersTable.tsx`), one row per user: `id`, `name`, `email`, `adminInitials`,
+`role`, `image`, `moderationPolicy`, `color`, `createdAt`, a link to that user's published
+posts (via the existing `/authors/[id]` page, blank if they have none), and a `comments`
+placeholder column reserved for future comment-management UI (no data wired up yet).
+Sorting reuses `useSortableRows` (shared with `PostsTable`) on the textual/status columns —
+`role` sorts by privilege order (ADMIN > EDITOR > AUTHOR > COMMENTER), not alphabetically —
+plus the same client-side date-format dropdown as `PostsTable`. Unlike `PostsTable`, there's
+no search box.
+
+**Email verification is shown as color, not text**: dark green (`#0a5`) with a tooltip
+showing the verification date if `emailVerified` is set, dark red (`#c00`) with no tooltip
+otherwise.
+
+**Editable in place:** `name`, `adminInitials`, `role`, `moderationPolicy`, and `color`,
+each independently backed by its own server action (`src/app/actions/users.ts`), admin-
+gated and validated server-side regardless of what the client UI allows (a client can call
+a server action directly, bypassing whatever the `<select>`/`<input>` options suggest). No
+create- or delete-user flow yet.
+
+- Text fields (`name`, `adminInitials`) save on blur or Enter, not per keystroke.
+  `adminInitials` is required (schema: non-nullable) — enforced both client-side (instant
+  revert + inline error, no round-trip) and server-side; `name` is nullable, and an emptied
+  field saves as `null`.
+- `role` and `moderationPolicy` are `<select>` dropdowns that save immediately on change —
+  a discrete choice needs no debouncing.
+- `color` is a native color picker that saves on the DOM's `change` event, not React's
+  `onChange`: React wires `onChange` to the continuous `input` event for this element type,
+  which fires on every drag movement and every keystroke in the picker's own hex field,
+  while `change` fires exactly once, when the picker closes.
+- **Self-lockout guard:** `updateUserRole` refuses to let an admin change *their own* role
+  away from ADMIN, so a single admin can't accidentally lock themselves out. It does not
+  guard against the last remaining admin among several being demoted by someone else.
+
+**Save feedback:** a successful edit pulses the whole row light green
+(`UsersTable.module.css`'s `rowSavedPulse` keyframe, `#d3f9d8` fading to transparent, ~1s),
+triggered imperatively via a per-row DOM ref rather than React state so a second save on the
+same row mid-pulse restarts the animation instead of no-op'ing.
+
 ---
 
 ## 4. Data model

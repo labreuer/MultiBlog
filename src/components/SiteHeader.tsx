@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
-import { canManagePosts } from "@/lib/authz";
+import { canManagePosts, isAdmin } from "@/lib/authz";
 
 export default async function SiteHeader() {
   const session = await auth();
@@ -25,6 +25,14 @@ export default async function SiteHeader() {
               |
             </span>
             <Link href="/posts">Manage Posts</Link>
+          </>
+        )}
+        {session?.user && isAdmin(session.user.role) && (
+          <>
+            <span aria-hidden="true" style={{ color: "#ccc" }}>
+              |
+            </span>
+            <Link href="/users">Manage Users</Link>
           </>
         )}
       </div>

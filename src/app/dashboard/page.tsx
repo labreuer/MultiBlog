@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
-import { canManagePosts } from "@/lib/authz";
+import { canManagePosts, isAdmin } from "@/lib/authz";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -17,6 +17,11 @@ export default async function DashboardPage() {
       {canManagePosts(session.user.role) && (
         <p>
           <Link href="/posts">Manage posts</Link>
+        </p>
+      )}
+      {isAdmin(session.user.role) && (
+        <p>
+          <Link href="/users">Manage users</Link>
         </p>
       )}
       <form
