@@ -178,6 +178,11 @@ function compareNullableDatesAlwaysLast(a: Date | null, b: Date | null, dir: "as
 const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid #ddd" };
 const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
 const sortableTh: React.CSSProperties = { ...th, cursor: "pointer", userSelect: "none" };
+// Prevents a date string's hyphens, or a space in a multi-word value/header
+// (e.g. "Created at", a person's full name), from being treated as a
+// line-break opportunity in a narrow column.
+const nowrapTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
+const nowrapSortableTh: React.CSSProperties = { ...sortableTh, whiteSpace: "nowrap" };
 
 function compareByKey(key: SortKey, a: PostRow, b: PostRow, dir: "asc" | "desc"): number {
   switch (key) {
@@ -292,13 +297,13 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
             <th style={sortableTh} onClick={(e) => handleSort("ahead", e.ctrlKey)}>
               Revisions{sortIndicator("ahead")}
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("editor", e.ctrlKey)}>
+            <th style={nowrapSortableTh} onClick={(e) => handleSort("editor", e.ctrlKey)}>
               Last edit by{sortIndicator("editor")}
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("lastEdit", e.ctrlKey)}>
+            <th style={nowrapSortableTh} onClick={(e) => handleSort("lastEdit", e.ctrlKey)}>
               Last edit at{sortIndicator("lastEdit")}
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
+            <th style={nowrapSortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
               Created at{sortIndicator("created")}
             </th>
             <th style={th}></th>
@@ -311,7 +316,7 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
                 <Link href={`/posts/${row.id}/edit`}>{row.title}</Link>
               </td>
               <td style={td}>{row.authors}</td>
-              <td style={td}>
+              <td style={nowrapTd}>
                 {row.status === "published" && row.publishedAt ? (
                   <Link href={`/${row.slug}`}>{formatDate(row.publishedAt, dateFormat)}</Link>
                 ) : row.status === "scheduled" && row.publishedAt ? (
@@ -334,9 +339,9 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
               <td style={td}>
                 <Link href={`/posts/${row.id}/history`}>{row.ahead === 0 ? "current" : `+${row.ahead}`}</Link>
               </td>
-              <td style={td}>{row.lastEditorName}</td>
-              <td style={td}>{row.lastEditAt ? formatDate(row.lastEditAt, dateFormat) : ""}</td>
-              <td style={td}>{formatDate(row.createdAt, dateFormat)}</td>
+              <td style={nowrapTd}>{row.lastEditorName}</td>
+              <td style={nowrapTd}>{row.lastEditAt ? formatDate(row.lastEditAt, dateFormat) : ""}</td>
+              <td style={nowrapTd}>{formatDate(row.createdAt, dateFormat)}</td>
               <td style={td}>
                 <DeleteCell postId={row.id} deleted={row.deleted} onDeleted={revealRow} />
               </td>

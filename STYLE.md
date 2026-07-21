@@ -115,6 +115,17 @@ by design, not by accident.
   second. Used when several label+value rows need their values to start at a common
   x-position — flexbox rows (`.fieldRow`, tried first) only align a *single* row's own
   label/value pair, not siblings' columns against each other.
+- **`white-space: nowrap` on narrow auto-sized table columns** (`PostsTable.tsx`'s
+  `nowrapTd`/`nowrapSortableTh`, added 2026-07-21): a plain `<table>` with no fixed column
+  widths shrinks a column until its content wraps, and the browser's default line-breaking
+  treats both a space (any multi-word header/value, e.g. "Created at", "Luke Breuer") and a
+  hyphen (a `yyyy-MM-dd` date) as valid break points — so a 9-column admin table routinely
+  splits a date or a name across two lines well before it's actually out of room. `nowrapTd`/
+  `nowrapSortableTh` (`{ ...td, whiteSpace: "nowrap" }` / same for `sortableTh`) force the
+  column to claim whatever width its content needs instead; applied per-column, not
+  table-wide, so free-text columns (Title) stay wrappable. Different rationale from the
+  headerless label/value table's `nowrap` above — that one aligns a label's own single-line
+  width, this one stops content from breaking at all.
 - **Buttons sized to match an adjacent input's box model**: `PostEditor.module.css`
   `.actionButton` matches `.changelogInput`'s `padding`/`font-size`/`box-sizing` rather
   than setting an explicit `height` — a `<button>` and `<input>` with the same font-size,
