@@ -13,6 +13,7 @@ const RESERVED_SLUGS = new Set([
   "search",
   "sign-in",
   "sign-up",
+  "users",
 ]);
 
 export function slugify(title: string): string {
