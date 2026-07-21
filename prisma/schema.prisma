@@ -55,6 +55,8 @@ model User {
   color            String            @default("#5b8cff")
   adminInitials    String
   createdAt        DateTime          @default(now())
+  deletedByUserId  String?
+  deletedAt        DateTime?
 
   accounts             Account[]
   sessions             Session[]
@@ -65,6 +67,9 @@ model User {
   commentStatusChanges Comment[]            @relation("CommentStatusChangedBy")
   commentDeletions     Comment[]            @relation("CommentDeletedBy")
   publicationEvents    PostPublicationEvent[] @relation("PublicationEventActor")
+  deletedBy            User?                @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
+  deletedUsers         User[]               @relation("UserDeletedBy")
+  postDeletions        Post[]               @relation("PostDeletedBy")
 }
 
 // Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
@@ -122,6 +127,8 @@ model Post {
   moderationPolicy  ModerationPolicy @default(INHERIT)
   createdAt         DateTime   @default(now())
   publishedAt       DateTime?  // may be in the future — see below
+  deletedByUserId   String?
+  deletedAt         DateTime?
 
   // publishRevisionId is set immediately by both an immediate publish and a
   // *scheduled* one — visibility is gated by publishedAt vs now(), a pure
@@ -135,6 +142,7 @@ model Post {
   collabUpdates   PostCollabUpdate[]
   threads         CommentThread[]
   publicationEvents PostPublicationEvent[]
+  deletedBy         User?            @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
 }
 
 model PostAuthor {

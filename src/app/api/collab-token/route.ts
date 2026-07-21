@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
 import { signCollabToken } from "@/lib/collab-token";
+import { nonDeletedPostWhere } from "@/lib/post-status";
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -16,7 +17,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "postId is required" }, { status: 400 });
   }
 
-  const post = await prisma.post.findUnique({ where: { id: postId }, select: { id: true } });
+  const post = await prisma.post.findUnique({
+    where: { id: postId, ...nonDeletedPostWhere() },
+    select: { id: true },
+  });
   if (!post) {
     return NextResponse.json({ error: "Post not found" }, { status: 404 });
   }

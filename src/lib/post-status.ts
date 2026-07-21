@@ -18,5 +18,18 @@ export function derivePostStatus(post: {
 // scheduled-but-not-yet-due post (which already has publishRevisionId set)
 // would leak through before its publishedAt arrives.
 export function publishedPostWhere(): Prisma.PostWhereInput {
-  return { publishRevisionId: { not: null }, publishedAt: { lte: new Date() } };
+  return { publishRevisionId: { not: null }, publishedAt: { lte: new Date() }, deletedByUserId: null };
+}
+
+// The soft-delete gate alone, for queries (drafts, owner-only views, admin
+// tooling) that fetch posts regardless of publish status but must still
+// exclude soft-deleted ones.
+//
+// Narrower return type than Prisma.PostWhereInput on purpose: that wide,
+// all-optional interface pollutes the type of whatever it's spread into
+// (e.g. `{ id, ...nonDeletedPostWhere() }` for a findUnique) because every
+// field it declares, including `id`, resurfaces in the merged object type —
+// even though only deletedByUserId is ever actually set at runtime.
+export function nonDeletedPostWhere(): { deletedByUserId: null } {
+  return { deletedByUserId: null };
 }

@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
-import { derivePostStatus } from "@/lib/post-status";
+import { derivePostStatus, nonDeletedPostWhere } from "@/lib/post-status";
 import PostEditor from "@/components/PostEditor";
 
 export default async function EditPostPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,7 +13,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   }
 
   const post = await prisma.post.findUnique({
-    where: { id },
+    where: { id, ...nonDeletedPostWhere() },
     include: {
       authors: { select: { userId: true } },
       publishRevision: { select: { revisionNumber: true } },

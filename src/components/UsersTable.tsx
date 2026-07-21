@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { IconTrash, IconTrashOff } from "@tabler/icons-react";
 import { useSortableRows } from "@/lib/use-sortable-rows";
+import { useShowDeletedRows } from "@/lib/use-show-deleted";
 import {
   updateUserRole,
   updateUserModerationPolicy,
   updateUserColor,
   updateUserName,
   updateUserAdminInitials,
+  deleteUser,
+  restoreUser,
 } from "@/app/actions/users";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
 import styles from "./UsersTable.module.css";
@@ -26,6 +30,7 @@ export type UserRow = {
   image: string | null;
   createdAt: Date;
   postCount: number;
+  deleted: boolean;
 };
 
 const DATE_FORMATS = ["yyyy-MM-dd HH:mm", "yyyy-MM-dd", "M/d/yyyy h:mm", "M/d/yyyy"] as const;
@@ -324,11 +329,74 @@ function ColorCell({ userId, color, onSaved }: { userId: string; color: string; 
   );
 }
 
+function DeleteCell({
+  userId,
+  deleted,
+  onSaved,
+  onDeleted,
+}: {
+  userId: string;
+  deleted: boolean;
+  onSaved: () => void;
+  onDeleted: (userId: string) => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const handle = () => {
+    setError(null);
+    startTransition(async () => {
+      try {
+        if (deleted) {
+          await restoreUser(userId);
+        } else {
+          await deleteUser(userId);
+          onDeleted(userId);
+        }
+        onSaved();
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to update user.");
+      }
+    });
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handle}
+        disabled={pending}
+        aria-label={deleted ? "Restore user" : "Delete user"}
+        title={deleted ? "Restore user" : "Delete user"}
+        style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: deleted ? "#666" : "#c00" }}
+      >
+        {deleted ? <IconTrashOff size={16} /> : <IconTrash size={16} />}
+      </button>
+      {error && <div style={{ color: "crimson", fontSize: "0.8rem" }}>{error}</div>}
+    </>
+  );
+}
+
 export default function UsersTable({ rows }: { rows: UserRow[] }) {
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const { showDeleted, toggle: toggleShowDeleted } = useShowDeletedRows("users-show-deleted-rows");
+  // Ids of rows deleted during this visit, kept visible independent of the
+  // showDeleted toggle — deleting one row shouldn't suddenly surface every
+  // *other* already-deleted row that showDeleted is intentionally hiding.
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
 
-  const { sortedRows, handleSort, sortState } = useSortableRows(rows, compareByKey);
+  function revealRow(id: string) {
+    setRevealedIds((prev) => new Set(prev).add(id));
+  }
+
+  const filteredRows = useMemo(
+    () => rows.filter((row) => showDeleted || !row.deleted || revealedIds.has(row.id)),
+    [rows, showDeleted, revealedIds],
+  );
+  const { sortedRows, handleSort, sortState } = useSortableRows(filteredRows, compareByKey);
 
   // Re-triggers the CSS pulse animation on a row even if it's already mid-
   // pulse (e.g. two fields on the same row saved in quick succession) —
@@ -387,6 +455,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
             Posts{sortIndicator("posts")}
           </th>
           <th style={th}>Comments</th>
+          <th style={th}></th>
         </tr>
       </thead>
       <tbody>
@@ -400,7 +469,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
                 else rowRefs.current.delete(row.id);
               }}
               onAnimationEnd={(e) => e.currentTarget.classList.remove(styles.savedPulse)}
-              style={{ borderBottom: "1px solid #eee" }}
+              style={{ borderBottom: "1px solid #eee", opacity: row.deleted ? 0.5 : 1 }}
             >
               <td style={td}>{row.id}</td>
               <td style={td}>
@@ -442,13 +511,16 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
               <td style={td}>{formatDate(row.createdAt, dateFormat)}</td>
               <td style={td}>{row.postCount > 0 ? <Link href={`/authors/${row.id}`}>posts</Link> : ""}</td>
               <td style={td}></td>
+              <td style={td}>
+                <DeleteCell userId={row.id} deleted={row.deleted} onSaved={onSaved} onDeleted={revealRow} />
+              </td>
             </tr>
           );
         })}
       </tbody>
       <tfoot>
         <tr>
-          <td colSpan={11} style={{ paddingTop: 12 }}>
+          <td colSpan={12} style={{ paddingTop: 12 }}>
             <label>
               Date format:{" "}
               <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as DateFormat)}>
@@ -458,6 +530,18 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
                   </option>
                 ))}
               </select>
+            </label>
+          </td>
+        </tr>
+        <tr>
+          <td colSpan={12} style={{ paddingTop: 8 }}>
+            <label>
+              <input
+                type="checkbox"
+                checked={showDeleted}
+                onChange={(e) => toggleShowDeleted(e.target.checked)}
+              />{" "}
+              Show deleted rows
             </label>
           </td>
         </tr>

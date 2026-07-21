@@ -35,6 +35,7 @@ export default async function UsersPage() {
     image: user.image,
     createdAt: user.createdAt,
     postCount: user._count.postAuthors,
+    deleted: user.deletedByUserId !== null,
   }));
 
   return (

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
+import { nonDeletedPostWhere } from "@/lib/post-status";
 import { extractText, diffText } from "@/lib/diff";
 import RestoreRevisionButton from "@/components/RestoreRevisionButton";
 
@@ -20,7 +21,7 @@ export default async function RevisionDiffPage({
   }
 
   const post = await prisma.post.findUnique({
-    where: { id },
+    where: { id, ...nonDeletedPostWhere() },
     include: { authors: { select: { userId: true } } },
   });
   if (!post || !Number.isInteger(revisionNumber)) {

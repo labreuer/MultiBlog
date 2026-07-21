@@ -112,18 +112,20 @@ which is the main cost of doing it now rather than later.
 ### 3b. User management (`/users`)
 
 **Decided:** an ADMIN-only page for managing every `User` account directly, distinct from
-the per-post author/role concerns above — no schema changes needed, since it's a UI +
-server-actions layer over the existing `users` table (§4).
+the per-post author/role concerns above — no schema changes needed beyond the soft-delete
+columns shared with `posts` (§4), since it's otherwise a UI + server-actions layer over the
+existing `users` table.
 
 **Access:** gated by `isAdmin(role)` (`src/lib/authz.ts`) — same shape as `/posts`'s
-`canManagePosts` gate: redirect to sign-in if unauthenticated, an inline "doesn't have
+`canManagePosts` gate (§3c): redirect to sign-in if unauthenticated, an inline "doesn't have
 permission" message for a signed-in non-admin. Linked from `SiteHeader` and `/dashboard`
 alongside "Manage Posts", admin-only.
 
 **Table** (`UsersTable.tsx`), one row per user: `id`, `name`, `email`, `adminInitials`,
 `role`, `image`, `moderationPolicy`, `color`, `createdAt`, a link to that user's published
-posts (via the existing `/authors/[id]` page, blank if they have none), and a `comments`
-placeholder column reserved for future comment-management UI (no data wired up yet).
+posts (via the existing `/authors/[id]` page, blank if they have none), a `comments`
+placeholder column reserved for future comment-management UI (no data wired up yet), and a
+trailing unlabeled delete/restore icon column (below).
 Sorting reuses `useSortableRows` (shared with `PostsTable`) on the textual/status columns —
 `role` sorts by privilege order (ADMIN > EDITOR > AUTHOR > COMMENTER), not alphabetically —
 plus the same client-side date-format dropdown as `PostsTable`. Unlike `PostsTable`, there's
@@ -137,7 +139,7 @@ otherwise.
 each independently backed by its own server action (`src/app/actions/users.ts`), admin-
 gated and validated server-side regardless of what the client UI allows (a client can call
 a server action directly, bypassing whatever the `<select>`/`<input>` options suggest). No
-create- or delete-user flow yet.
+create-user flow yet; delete is soft and restorable (below).
 
 - Text fields (`name`, `adminInitials`) save on blur or Enter, not per keystroke.
   `adminInitials` is required (schema: non-nullable) — enforced both client-side (instant
@@ -152,11 +154,73 @@ create- or delete-user flow yet.
 - **Self-lockout guard:** `updateUserRole` refuses to let an admin change *their own* role
   away from ADMIN, so a single admin can't accidentally lock themselves out. It does not
   guard against the last remaining admin among several being demoted by someone else.
+- **Soft delete/restore:** the same trailing icon column, delete/restore action shape, and
+  shared "Show deleted rows" checkbox mechanism as `/posts` (§3c — see there for the general
+  design: dimmed-not-removed row, per-visit `revealedIds` reveal instead of the checkbox
+  auto-checking, the hydration-mismatch reason it must default unchecked). `deleteUser`/
+  `restoreUser` (`src/app/actions/users.ts`) are ADMIN-only (`requireAdmin`) and, like the
+  role guard above, refuse to let an admin delete *their own* account — unconditionally here,
+  since unlike a role change there's no harmless variant of deleting yourself.
 
 **Save feedback:** a successful edit pulses the whole row light green
 (`UsersTable.module.css`'s `rowSavedPulse` keyframe, `#d3f9d8` fading to transparent, ~1s),
 triggered imperatively via a per-row DOM ref rather than React state so a second save on the
 same row mid-pulse restarts the animation instead of no-op'ing.
+
+### 3c. Post management (`/posts`)
+
+**Decided:** an admin/editor/author table for managing every `Post` — not the editor itself
+(§3a), but the list-and-triage view: what's published/scheduled/draft, how many comments are
+pending, how far a draft has diverged from what's live, and (soft) deleting a post without
+losing it.
+
+**Access:** gated by `canManagePosts(role)` (ADMIN/EDITOR/AUTHOR, `src/lib/authz.ts`) —
+redirect to sign-in if unauthenticated, an inline "doesn't have permission" message for a
+signed-in role that can't manage posts. An AUTHOR sees only posts they're a byline author on
+(`authors: { some: { userId } }`); ADMIN/EDITOR (`canEditAnyPost`) see every post. Linked from
+`SiteHeader` as "Manage Posts."
+
+**Table** (`PostsTable.tsx`), one row per post: Title (→ editor), Author(s) (byline
+`adminInitials`, `", "`-joined in `bylineOrder`), Published (→ public post, blank if
+unpublished; a scheduled-but-not-yet-due post shows its target date with a countdown
+tooltip), Comments (approved count, with a "(in moderation N)" link to that post's moderation
+queue when there's anything pending), Revisions ("+N" ahead of the published revision, or
+"current" when they match, → history), Last edit by/at, Created at, and a trailing unlabeled
+delete/restore icon column (below).
+
+**Sorting & search**: column headers sort the table client-side via the shared
+`useSortableRows` hook (also used by `UsersTable`, §3b) — a plain click sorts by just that
+column, Ctrl-click adds it as a secondary/tertiary key without disturbing already-sorted
+columns' positions (shown via a superscript priority number next to the ▲/▼). A label-less
+search box above the table live-filters by title (case-insensitive substring, same
+"hobby-scale, no index" approach as the public `/search`), width-matched to the Title column,
+applied ahead of the active sort so an already-chosen sort stays applied to the filtered set
+— no "no results" message for an empty match set, the table just renders no rows. A
+client-side date-format dropdown (`yyyy-MM-dd` default, three alternates) re-renders every
+date in the table immediately.
+
+**Soft delete/restore**: the trailing column's `IconTrash`/`IconTrashOff`
+(`@tabler/icons-react`) toggle button, no confirmation dialog — the action is its own undo.
+`deletePost`/`restorePost` (`src/app/actions/posts.ts`) reuse the same `canUserEditPost` gate
+as the editor itself: you can delete what you can edit. A deleted row stays in the table
+(dimmed, icon swapped to "restore") instead of disappearing, so undoing a mis-click is one
+more click in place rather than a trip elsewhere.
+
+**"Show deleted rows" checkbox**: defaults unchecked, persisted per-tab in `sessionStorage`
+(`src/lib/use-show-deleted.ts`, shared with `UsersTable`, §3b). Must default to `false`
+unconditionally rather than read `sessionStorage` inside the initial `useState`, or the value
+computed during SSR (always `false` — no `window` on the server) can disagree with the
+client's hydration render (which does have `window` and may see an already-persisted
+`true`), producing a genuine content-mismatch hydration error, not just a lint nitpick — the
+persisted value is applied one render later instead, from a `useEffect` after mount, once
+hydration has already committed against the matching `false` state. Deleting a row while the
+checkbox is unchecked keeps just that row visible via a separate per-visit `revealedIds` set
+(row ids deleted during the current visit), rather than flipping the shared checkbox: the
+checkbox is a pure, honest "show every deleted row" toggle the user controls directly, so
+deleting one row can't have the side effect of un-hiding every *other* already-deleted row
+the checkbox was intentionally hiding. Toggling the checkbox by hand calls `router.refresh()`;
+the reveal-on-delete path does not, since the row's own delete action already refreshes the
+table to pick up its new state.
 
 ---
 
@@ -167,12 +231,14 @@ users            id, email, name, password_hash | oauth, role, created_at,
                  color                                           -- author-highlight/caret color
                  admin_initials(non-null string)                 -- byline shorthand, §10 item 11
                  moderation_policy('inherit'|'always'|'auto')   -- per-author override
+                 deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §3b
 posts            id, slug, title, publish_revision_id,
                  created_at, published_at (may be future),       -- no status column, no schedule
                                                                    -- column (§10 item 12): visible iff
                                                                    -- publish_revision_id is set AND
                                                                    -- published_at <= now()
                  moderation_policy('inherit'|'always'|'auto')   -- per-post override
+                 deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §3c
 post_authors     post_id, user_id, byline_order                 -- manual byline, decoupled
 revisions        id, post_id, revision_number, doc JSONB (ProseMirror),
                  title, editor_id, changelog, created_at         -- IMMUTABLE
@@ -192,7 +258,8 @@ comment_threads  id, post_id, anchored_revision_id,
 comments         id, thread_id, parent_comment_id NULL,
                  commenter_id, body JSONB,
                  status(pending|approved|spam|deleted),
-                 created_at, edited_at
+                 created_at, edited_at,
+                 deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §10 item 15
 ```
 
 Notes:
@@ -221,6 +288,14 @@ Notes:
 - A **thread** is the unit anchored to a quote; **comments** form the reply tree inside it.
 - **Commenter identity** (§6): a `commenter` is keyed by account (`user_id`) when logged in,
   otherwise by email. `approved_count` and `force_moderate` drive the trust model.
+- **Soft delete** (`deleted_by_user_id`/`deleted_at`, both nullable): the same two-column
+  pattern now covers `comments` (§10 item 15, first), `users` (§3b), and `posts` (§3c). Every
+  read query for `Post`/`User` excludes soft-deleted rows via `nonDeletedPostWhere()`/
+  `nonDeletedUserWhere()` (`src/lib/post-status.ts`/`user-status.ts`) — folded directly into
+  `publishedPostWhere()` for the public-facing gate, applied standalone everywhere else
+  (drafts, owner-only views, auth, admin tooling) — except the `/posts` and `/users` admin
+  tables themselves, which intentionally fetch every row, deleted or not, so a deleted one
+  can be restored (§3c/§3b).
 
 ---
 
@@ -463,14 +538,9 @@ Git history carries per-step detail.
       Sign out" when signed in, "Log in / Sign up" otherwise, plus a "Manage Posts" link (any
       `canManagePosts` role — ADMIN/EDITOR/AUTHOR) to `/posts`.
     - **Admin posts table** (`/posts`, `PostsTable.tsx`): rebuilt from a bulleted list into a
-      table — Title (→ editor), Published (→ public post, blank if unpublished), Comments
-      (approved count, with a "(in moderation N)" link to that post's moderation queue when
-      there's anything pending), Revisions ("+N" ahead of the published revision, or
-      "current" when they match, → history), Last edit by/at, Created at. Column headers sort
-      the table client-side; a plain click sorts by just that column, Ctrl-click adds it as a
-      secondary/tertiary key without disturbing already-sorted columns' positions (shown via
-      a superscript priority number next to the ▲/▼). A date-format dropdown (`yyyy-MM-dd`
-      default, three alternates) re-renders every date in the table immediately, client-side.
+      table. Now documented in §3c, along with item 11's Author(s)-column/search follow-ups
+      below, once `/users` got the equivalent architecture section and `/posts` warranted one
+      to match.
     - **Editor status line** (`PostEditor.tsx`): replaced the old fixed "Currently viewing
       revision #N" with "`{Published revision #N (linked to the live post) | Unpublished}`.
       `{EDITED | Currently viewing revision #M}`." — the second clause disappears entirely
@@ -505,19 +575,11 @@ Git history carries per-step detail.
       first-letter-of-first-word + first-letter-of-last-word from the name given at sign-up
       (e.g. "Alice Wonderland" → "AW"), falling back to the first two characters of the email
       if no name was given.
-    - **Author(s) column** (`/posts`): each post's authors, `adminInitials` joined with
-      `", "` in `bylineOrder` — verified against real data that the join order tracks
-      `bylineOrder`, not insertion order.
-    - **Posts-table search**: a label-less textbox above the table, live-filtering by title
-      (case-insensitive substring, same "hobby-scale, no index" approach as `/search`) ahead
-      of the existing sort, so an active sort stays applied to the filtered set. Width-matched
-      to the Title column and top/left-margined to line up with it — see the
-      `ResizeObserver`/`getBoundingClientRect` gotcha in CLAUDE.md. No "no results" message
-      for an empty match set; the table just renders no rows.
-    - **Also fixed**: the "Published" column's null-sort — blank (unpublished) rows now stay
-      pinned to the bottom in *both* sort directions. Previously they only sorted last on
-      ascending; descending flipped them to the top, since the shared null-handling was
-      subject to the same direction-negation as the actual date comparison.
+    - **Author(s) column, posts-table search, and a null-sort fix** (`/posts`): also now
+      documented in §3c (search) and its Table bullet (Author(s) column); the null-sort fix —
+      blank (unpublished) rows pinned to the bottom in *both* sort directions, not just
+      ascending — is folded into `PostsTable.tsx` without a standalone note, since it was a
+      bugfix to the sort comparator rather than a design decision.
 
 12. **Publish mechanics rework** — no-op revision skip, unpublish, scheduled
     publishing, and dropping the `status` column entirely.

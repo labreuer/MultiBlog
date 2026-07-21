@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { nonDeletedUserWhere } from "@/lib/user-status";
 
 // Looks up display name + color for a set of user ids — used to render
 // author-highlight marks (which only store an authorId) and collab carets.
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
   }
 
   const users = await prisma.user.findMany({
-    where: { id: { in: ids } },
+    where: { id: { in: ids }, ...nonDeletedUserWhere() },
     select: { id: true, name: true, email: true, color: true },
   });
 

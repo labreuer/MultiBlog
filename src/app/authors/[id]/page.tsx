@@ -6,13 +6,17 @@ import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { getPostEditStatus } from "@/lib/post-edit-status";
 import { publishedPostWhere } from "@/lib/post-status";
+import { nonDeletedUserWhere } from "@/lib/user-status";
 import PostEditBadge from "@/components/PostEditBadge";
 import styles from "./page.module.css";
 
 export const revalidate = 60;
 
 async function getAuthorWithPosts(id: string) {
-  const user = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true } });
+  const user = await prisma.user.findUnique({
+    where: { id, ...nonDeletedUserWhere() },
+    select: { id: true, name: true },
+  });
   if (!user) {
     return null;
   }

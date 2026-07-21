@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { IconTrash, IconTrashOff } from "@tabler/icons-react";
 import { useSortableRows } from "@/lib/use-sortable-rows";
+import { useShowDeletedRows } from "@/lib/use-show-deleted";
+import { deletePost, restorePost } from "@/app/actions/posts";
 
 export type PostRow = {
   id: string;
@@ -17,7 +21,55 @@ export type PostRow = {
   lastEditAt: Date | null;
   approved: number;
   pending: number;
+  deleted: boolean;
 };
+
+function DeleteCell({
+  postId,
+  deleted,
+  onDeleted,
+}: {
+  postId: string;
+  deleted: boolean;
+  onDeleted: (postId: string) => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const handle = () => {
+    setError(null);
+    startTransition(async () => {
+      try {
+        if (deleted) {
+          await restorePost(postId);
+        } else {
+          await deletePost(postId);
+          onDeleted(postId);
+        }
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to update post.");
+      }
+    });
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handle}
+        disabled={pending}
+        aria-label={deleted ? "Restore post" : "Delete post"}
+        title={deleted ? "Restore post" : "Delete post"}
+        style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: deleted ? "#666" : "#c00" }}
+      >
+        {deleted ? <IconTrashOff size={16} /> : <IconTrash size={16} />}
+      </button>
+      {error && <div style={{ color: "crimson", fontSize: "0.8rem" }}>{error}</div>}
+    </>
+  );
+}
 
 const DATE_FORMATS = ["yyyy-MM-dd HH:mm", "yyyy-MM-dd", "M/d/yyyy h:mm", "M/d/yyyy"] as const;
 type DateFormat = (typeof DATE_FORMATS)[number];
@@ -156,6 +208,15 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
   const [searchText, setSearchText] = useState("");
   const [titleWidth, setTitleWidth] = useState<number | null>(null);
   const titleThRef = useRef<HTMLTableCellElement>(null);
+  const { showDeleted, toggle: toggleShowDeleted } = useShowDeletedRows("posts-show-deleted-rows");
+  // Ids of rows deleted during this visit, kept visible independent of the
+  // showDeleted toggle — deleting one row shouldn't suddenly surface every
+  // *other* already-deleted row that showDeleted is intentionally hiding.
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+
+  function revealRow(id: string) {
+    setRevealedIds((prev) => new Set(prev).add(id));
+  }
 
   useEffect(() => {
     const el = titleThRef.current;
@@ -171,9 +232,12 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
 
   const filteredRows = useMemo(() => {
     const needle = searchText.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter((row) => row.title.toLowerCase().includes(needle));
-  }, [rows, searchText]);
+    return rows.filter(
+      (row) =>
+        (showDeleted || !row.deleted || revealedIds.has(row.id)) &&
+        (!needle || row.title.toLowerCase().includes(needle)),
+    );
+  }, [rows, searchText, showDeleted, revealedIds]);
 
   const { sortedRows, handleSort, sortState } = useSortableRows(filteredRows, compareByKey);
 
@@ -237,11 +301,12 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
             <th style={sortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
               Created at{sortIndicator("created")}
             </th>
+            <th style={th}></th>
           </tr>
         </thead>
         <tbody>
           {sortedRows.map((row) => (
-            <tr key={row.id} style={{ borderBottom: "1px solid #eee" }}>
+            <tr key={row.id} style={{ borderBottom: "1px solid #eee", opacity: row.deleted ? 0.5 : 1 }}>
               <td style={td}>
                 <Link href={`/posts/${row.id}/edit`}>{row.title}</Link>
               </td>
@@ -272,6 +337,9 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
               <td style={td}>{row.lastEditorName}</td>
               <td style={td}>{row.lastEditAt ? formatDate(row.lastEditAt, dateFormat) : ""}</td>
               <td style={td}>{formatDate(row.createdAt, dateFormat)}</td>
+              <td style={td}>
+                <DeleteCell postId={row.id} deleted={row.deleted} onDeleted={revealRow} />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -286,6 +354,16 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
               </option>
             ))}
           </select>
+        </label>
+      </p>
+      <p style={{ marginTop: 8 }}>
+        <label>
+          <input
+            type="checkbox"
+            checked={showDeleted}
+            onChange={(e) => toggleShowDeleted(e.target.checked)}
+          />{" "}
+          Show deleted rows
         </label>
       </p>
     </>

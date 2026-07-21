@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
+import { nonDeletedPostWhere } from "@/lib/post-status";
 import ModerateCommentButtons from "@/components/ModerateCommentButtons";
 
 export default async function ModerateCommentsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -12,7 +13,10 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
     redirect("/sign-in");
   }
 
-  const post = await prisma.post.findUnique({ where: { id }, select: { id: true, title: true } });
+  const post = await prisma.post.findUnique({
+    where: { id, ...nonDeletedPostWhere() },
+    select: { id: true, title: true },
+  });
   if (!post) {
     notFound();
   }

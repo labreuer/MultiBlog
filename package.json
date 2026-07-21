@@ -19,6 +19,7 @@
     "@hocuspocus/server": "^4.3.0",
     "@hocuspocus/transformer": "^4.3.0",
     "@prisma/client": "^6.19.3",
+    "@tabler/icons-react": "^3.45.0",
     "@tiptap/core": "^3.28.0",
     "@tiptap/extension-collaboration": "^3.28.0",
     "@tiptap/extension-collaboration-caret": "^3.28.0",

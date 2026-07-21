@@ -61,3 +61,21 @@ export async function updateUserAdminInitials(userId: string, adminInitials: str
   await prisma.user.update({ where: { id: userId }, data: { adminInitials: trimmed } });
   revalidatePath("/users");
 }
+
+// Soft delete/restore double as each other's undo — no confirmation dialog;
+// the row stays visible with the icon swapped, so a mis-click is one more
+// click to reverse instead of a modal to dismiss.
+export async function deleteUser(userId: string): Promise<void> {
+  const adminId = await requireAdmin();
+  if (adminId === userId) {
+    throw new Error("You can't delete your own account.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { deletedByUserId: adminId, deletedAt: new Date() } });
+  revalidatePath("/users");
+}
+
+export async function restoreUser(userId: string): Promise<void> {
+  await requireAdmin();
+  await prisma.user.update({ where: { id: userId }, data: { deletedByUserId: null, deletedAt: null } });
+  revalidatePath("/users");
+}

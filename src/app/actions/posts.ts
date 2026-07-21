@@ -9,7 +9,7 @@ import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { remapThreadsToRevision } from "@/lib/anchor-remap";
 import { stripMarkFromDoc } from "@/lib/tiptap-schema";
 import { docsEqual } from "@/lib/diff";
-import { derivePostStatus } from "@/lib/post-status";
+import { derivePostStatus, nonDeletedPostWhere } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 
@@ -21,7 +21,7 @@ async function requireEditableSession(postId: string) {
     redirect("/sign-in");
   }
 
-  const post = await prisma.post.findUnique({ where: { id: postId } });
+  const post = await prisma.post.findUnique({ where: { id: postId, ...nonDeletedPostWhere() } });
   if (!post) {
     throw new Error("Post not found.");
   }
@@ -229,6 +229,39 @@ export async function unpublishPost(postId: string): Promise<void> {
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
   revalidatePath(`/${post.slug}`);
+}
+
+// Soft delete/restore double as each other's undo — no confirmation dialog;
+// the row stays visible in the admin table with the icon swapped, so a
+// mis-click is one more click to reverse instead of a modal to dismiss.
+// Reuses the same edit permission as the rest of the post actions rather
+// than requireEditableSession, since that helper's nonDeletedPostWhere()
+// gate would make an already-deleted post unfindable and restore impossible.
+async function setPostDeleted(postId: string, deleted: boolean): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+  const post = await prisma.post.findUnique({ where: { id: postId } });
+  if (!post) {
+    throw new Error("Post not found.");
+  }
+  if (!(await canUserEditPost(session.user.id, session.user.role, postId))) {
+    throw new Error("You don't have permission to delete this post.");
+  }
+  await prisma.post.update({
+    where: { id: postId },
+    data: deleted ? { deletedByUserId: session.user.id, deletedAt: new Date() } : { deletedByUserId: null, deletedAt: null },
+  });
+  revalidatePath("/posts");
+}
+
+export async function deletePost(postId: string): Promise<void> {
+  await setPostDeleted(postId, true);
+}
+
+export async function restorePost(postId: string): Promise<void> {
+  await setPostDeleted(postId, false);
 }
 
 export async function restoreRevision(

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
+import { nonDeletedPostWhere } from "@/lib/post-status";
 import LiveHistoryViewer from "@/components/LiveHistoryViewer";
 
 export default async function LiveHistoryPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,7 +14,7 @@ export default async function LiveHistoryPage({ params }: { params: Promise<{ id
   }
 
   const post = await prisma.post.findUnique({
-    where: { id },
+    where: { id, ...nonDeletedPostWhere() },
     include: { authors: { select: { userId: true } } },
   });
   if (!post) {

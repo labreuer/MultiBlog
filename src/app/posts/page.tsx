@@ -77,6 +77,7 @@ export default async function PostsPage() {
       lastEditAt: latest?.createdAt ?? null,
       approved,
       pending,
+      deleted: post.deletedByUserId !== null,
     };
   });
 
