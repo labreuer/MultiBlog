@@ -34,6 +34,10 @@ export default async function SiteHeader() {
               |
             </span>
             <Link href="/users">Manage Users</Link>
+            <span aria-hidden="true" style={{ color: "#ccc" }}>
+              |
+            </span>
+            <Link href="/site-settings">Site Settings</Link>
           </>
         )}
       </div>

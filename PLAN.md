@@ -528,6 +528,24 @@ Resolution order for a new comment: if the commenter is logged in as an `ADMIN` 
 skipping spam-checking entirely. Else if `force_moderate` → queue. Else if trusted
 (`approved_count >= threshold`) → publish. Else apply the cascade policy.
 
+**`trust_threshold` is inert whenever a comment's resolved cascade policy is `auto`.** The
+trust check runs *before* the cascade (above), but an untrusted commenter who fails it still
+falls through to the cascade — and if that resolves to `auto`, they publish immediately
+anyway, threshold or no. The threshold only ever changes an outcome for a comment whose
+resolved policy is `always`: that's the one case where a trusted commenter (publish) and an
+untrusted one (queued) actually diverge. So `trust_threshold`'s de facto value is 0 for any
+comment resolving to `auto` (aside from `force_moderate`, which still queues regardless of
+trust) — raising or lowering it changes nothing until something in the cascade — site
+default, an author override, or a post override — resolves to `always` at least some of the
+time.
+
+**Editing site-level settings.** `defaultModerationPolicy` and `trustThreshold` (the
+`site_settings` singleton, §4) are editable by an ADMIN at `/site-settings`
+(`SiteSettingsTable.tsx`, `actions/site-settings.ts`) — a policy `<select>` and a threshold
+number input, each admin-gated and saving on change/blur like `/users` (§3b). That page also
+lists `site-config.ts`'s build-time constants (e.g. `SITE_TITLE`) read-only, since those apply
+site-wide too but change only via a deploy, not from the DB.
+
 **Hardening:** sanitize all comment bodies; restrict the comment editor to a safe schema
 (no raw HTML/scripts; links get `rel="nofollow noopener"`). Rate-limit by IP and by
 commenter. Consider Akismet given anonymous commenting is allowed.
@@ -895,39 +913,3 @@ Git history carries per-step detail.
 - The home and author pages' `revalidate = 60` ISR caching is now a no-op — item 10's edit
   badge made both pages call `auth()`, which Next.js treats as inherently dynamic. Not fixed;
   see CACHING.md's 2026-07-20 entry for why and a possible client-side-split fix.
-
----
-
-## 11. Site-wide configuration: `site-config.ts` vs `SiteSettings`
-
-Two mechanisms hold values that apply to the whole site rather than one post/user, and which
-one a new value belongs in is a deliberate choice, not an arbitrary one.
-
-**`src/lib/site-config.ts`** — plain exported constants (currently just `SITE_TITLE`), read at
-module load. Consumed directly in `layout.tsx` (`<title>`/metadata), `SiteHeader.tsx`, and
-`rss.xml/route.ts`. Cheap and synchronous everywhere it's used, but a change only reaches
-production via a new deploy (a dev-server restart, or just HMR, locally) — there's no admin UI
-for it, and there can't sensibly be one: writing to the file at runtime doesn't work on most
-deploy targets (read-only/ephemeral filesystems) and wouldn't propagate across multiple server
-instances even where it did.
-
-**`SiteSettings`** (§4's `site_settings` singleton row, `id=1`) — currently
-`defaultModerationPolicy` and `trustThreshold` (§6), read via `getSiteSettings()`
-(`src/lib/site-settings.ts`) inside comment-submission/moderation code, which is already
-async/server-side. No admin UI writes to it yet, so today it's a DB-stored constant in
-practice — the same effective runtime-editability as `site-config.ts`, just fetched with a
-query instead of an import. The moment a settings UI exists, this becomes genuinely editable
-from the website without a deploy.
-
-**The dividing line:** a value belongs in `site-config.ts` if (a) nobody but a deploying
-developer needs to change it, and (b) it's read on render-critical/every-page paths, where an
-added DB query or an ISR-caching interaction (CACHING.md) would cost something real. It belongs
-in `SiteSettings` if it's operational/admin-tunable data — something you'd plausibly want to
-change in response to live conditions, like a spam wave — and its read sites are already
-narrow, server-side, and async, so a query there is free-ish. A value can move from one to the
-other later; moving `SITE_TITLE` into `SiteSettings` would need the column added, every read
-site switched to a cached `getSiteSettings()` call, an admin-gated write action, and
-`revalidatePath`/`revalidateTag` on write so ISR-cached pages notice the change.
-
-Not yet built: an admin UI for either existing `SiteSettings` field, despite the columns and
-read helper already existing.
