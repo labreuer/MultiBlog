@@ -289,13 +289,19 @@ Notes:
 - **Commenter identity** (§6): a `commenter` is keyed by account (`user_id`) when logged in,
   otherwise by email. `approved_count` and `force_moderate` drive the trust model.
 - **Soft delete** (`deleted_by_user_id`/`deleted_at`, both nullable): the same two-column
-  pattern now covers `comments` (§10 item 15, first), `users` (§3b), and `posts` (§3c). Every
-  read query for `Post`/`User` excludes soft-deleted rows via `nonDeletedPostWhere()`/
-  `nonDeletedUserWhere()` (`src/lib/post-status.ts`/`user-status.ts`) — folded directly into
-  `publishedPostWhere()` for the public-facing gate, applied standalone everywhere else
-  (drafts, owner-only views, auth, admin tooling) — except the `/posts` and `/users` admin
-  tables themselves, which intentionally fetch every row, deleted or not, so a deleted one
-  can be restored (§3c/§3b).
+  pattern now covers `comments` (§10 item 15, first), `users` (§3b), and `posts` (§3c). Rather
+  than every read site having to remember its own filter, `src/lib/prisma.ts`'s `prisma`
+  export is a Prisma Client Extension that auto-excludes soft-deleted `Post`/`User` rows from
+  every read operation (`findMany`/`findFirst`/`findUnique`/`count`/`aggregate`/`groupBy`) —
+  a query site can't leak a deleted row just by forgetting a manual filter. Write operations
+  pass through untouched (restoring a row means writing to one the filter would otherwise
+  hide from a read). A second, unextended `prismaIncludingDeleted` export exists for the
+  handful of call sites that must see soft-deleted rows on purpose: the `/posts`/`/users`
+  admin tables (need to list a deleted row to restore it, §3c/§3b), the delete/restore
+  actions' own existence checks, and the slug/email uniqueness checks in `uniqueSlug`/
+  `signUp` (slug and email stay DB-unique even for a soft-deleted row, so silently treating
+  one as free would just trade a friendly "already exists" error for a raw constraint
+  violation at create time).
 
 ---
 

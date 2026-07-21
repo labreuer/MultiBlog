@@ -3,13 +3,13 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { uniqueSlug } from "@/lib/slug";
 import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { remapThreadsToRevision } from "@/lib/anchor-remap";
 import { stripMarkFromDoc } from "@/lib/tiptap-schema";
 import { docsEqual } from "@/lib/diff";
-import { derivePostStatus, nonDeletedPostWhere } from "@/lib/post-status";
+import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 
@@ -21,7 +21,7 @@ async function requireEditableSession(postId: string) {
     redirect("/sign-in");
   }
 
-  const post = await prisma.post.findUnique({ where: { id: postId, ...nonDeletedPostWhere() } });
+  const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post) {
     throw new Error("Post not found.");
   }
@@ -81,7 +81,7 @@ export async function createPostAction(
 // depends on the result, so it takes a transaction client rather than the
 // module-level `prisma`.
 async function resolveRevision(
-  tx: Prisma.TransactionClient,
+  tx: TransactionClient,
   postId: string,
   title: string,
   doc: Prisma.InputJsonValue,
@@ -235,14 +235,16 @@ export async function unpublishPost(postId: string): Promise<void> {
 // the row stays visible in the admin table with the icon swapped, so a
 // mis-click is one more click to reverse instead of a modal to dismiss.
 // Reuses the same edit permission as the rest of the post actions rather
-// than requireEditableSession, since that helper's nonDeletedPostWhere()
-// gate would make an already-deleted post unfindable and restore impossible.
+// than requireEditableSession, since that helper goes through the ordinary
+// (soft-delete-filtered) `prisma` client and would make an already-deleted
+// post unfindable, restore impossible. The existence check below
+// deliberately uses `prismaIncludingDeleted` instead.
 async function setPostDeleted(postId: string, deleted: boolean): Promise<void> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
-  const post = await prisma.post.findUnique({ where: { id: postId } });
+  const post = await prismaIncludingDeleted.post.findUnique({ where: { id: postId } });
   if (!post) {
     throw new Error("Post not found.");
   }

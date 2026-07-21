@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
 import { signCollabToken } from "@/lib/collab-token";
-import { nonDeletedPostWhere } from "@/lib/post-status";
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -18,7 +17,7 @@ export async function POST(request: Request) {
   }
 
   const post = await prisma.post.findUnique({
-    where: { id: postId, ...nonDeletedPostWhere() },
+    where: { id: postId },
     select: { id: true },
   });
   if (!post) {

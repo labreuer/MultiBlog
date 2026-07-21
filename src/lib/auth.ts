@@ -22,7 +22,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const user = await prisma.user.findUnique({ where: { email, deletedByUserId: null } });
+        const user = await prisma.user.findUnique({ where: { email } });
         if (!user?.passwordHash) {
           return null;
         }

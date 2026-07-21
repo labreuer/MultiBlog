@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
 import { derivePostStatus } from "@/lib/post-status";
 import PostsTable from "@/components/PostsTable";
@@ -20,7 +20,7 @@ export default async function PostsPage() {
     );
   }
 
-  const posts = await prisma.post.findMany({
+  const posts = await prismaIncludingDeleted.post.findMany({
     where: canEditAnyPost(session.user.role)
       ? undefined
       : { authors: { some: { userId: session.user.id } } },

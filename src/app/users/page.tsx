@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { prismaIncludingDeleted } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
 import UsersTable from "@/components/UsersTable";
 
@@ -18,7 +18,7 @@ export default async function UsersPage() {
     );
   }
 
-  const users = await prisma.user.findMany({
+  const users = await prismaIncludingDeleted.user.findMany({
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { postAuthors: true } } },
   });

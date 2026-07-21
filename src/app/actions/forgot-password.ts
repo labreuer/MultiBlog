@@ -3,7 +3,6 @@
 import { prisma } from "@/lib/prisma";
 import { generateResetToken } from "@/lib/tokens";
 import { sendMail } from "@/lib/mail";
-import { nonDeletedUserWhere } from "@/lib/user-status";
 
 export type ForgotPasswordState = { message?: string; error?: string };
 
@@ -19,7 +18,7 @@ export async function requestPasswordReset(
     return { error: "Email is required." };
   }
 
-  const user = await prisma.user.findUnique({ where: { email, ...nonDeletedUserWhere() } });
+  const user = await prisma.user.findUnique({ where: { email } });
   if (user?.passwordHash) {
     const { raw, hash } = generateResetToken();
 

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
-import { derivePostStatus, nonDeletedPostWhere } from "@/lib/post-status";
+import { derivePostStatus } from "@/lib/post-status";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
 import { getClientIp } from "@/lib/request-ip";
@@ -64,7 +64,7 @@ export async function submitComment(
   }
 
   const post = await prisma.post.findUnique({
-    where: { id: postId, ...nonDeletedPostWhere() },
+    where: { id: postId },
     include: {
       authors: { include: { user: { select: { moderationPolicy: true } } } },
     },
