@@ -34,6 +34,10 @@ async function create(authorEmail: string, title: string) {
     data: {
       slug,
       title,
+      // Overrides the site/author moderation cascade so comments posted on
+      // this throwaway post always auto-approve — one less manual step when
+      // testing comment features.
+      moderationPolicy: "AUTO",
       authors: { create: { userId: author.id, bylineOrder: 0 } },
       revisions: {
         create: {

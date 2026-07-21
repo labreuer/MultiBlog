@@ -45,6 +45,12 @@ async function create(email: string, name: string | null) {
       adminInitials: deriveInitials(name, email),
     },
   });
+  // Pre-trusted (well past any reasonable trustThreshold) so comments this
+  // account posts always auto-approve regardless of the site/post
+  // moderation cascade — one less manual step when testing comment features.
+  await prisma.commenter.create({
+    data: { userId: user.id, email: user.email, displayName: name ?? user.email, approvedCount: 100 },
+  });
   console.log(`Created ADMIN ${user.email} (id=${user.id}), password: ${TEST_PASSWORD}`);
 }
 
@@ -54,6 +60,11 @@ async function del(email: string) {
     console.log(`${email} does not exist, nothing to do.`);
     return;
   }
+  // Deleting the user alone would only null out the Commenter row's userId
+  // (an optional FK), leaving an orphaned row keyed to this email — which
+  // blocks `create` from ever reusing this email again (Commenter.email is
+  // unique) and made a real throwaway-account collision during testing.
+  await prisma.commenter.deleteMany({ where: { email } });
   await prisma.user.delete({ where: { email } });
   console.log(`Deleted ${email} (was role=${existing.role}).`);
 }
