@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { QuoteHighlight, type QuoteHighlightThread } from "@/lib/quote-highlight-extension";
+import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
 import CommentForm from "./CommentForm";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -51,6 +52,7 @@ export default function AnnotatableArticle({ postId, doc, threads, userName, sta
           const color = threads.find((t) => t.id === threadId)?.color ?? "#999";
           targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
           targets.forEach((target) => flashHighlight(target, color));
+          activatePseudoBordersForThread(threadId, color);
         },
       }),
     ],

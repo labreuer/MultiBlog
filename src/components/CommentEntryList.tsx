@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import CommentNode, { hasNonDeletedDescendant, type CommentNodeData } from "./CommentNode";
 import QuoteThreadHeader from "./QuoteThreadHeader";
+import { activatePseudoBorderForHash } from "@/lib/pseudo-border";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 
 export type CommentEntry = {
@@ -27,6 +28,16 @@ type Props = {
 
 export default function CommentEntryList({ entries, postId, userName, viewerId, isAdmin }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
+
+  // Puts a pseudo-border next to whatever comment the page loaded pointing
+  // at (its timestamp permalink hash), and keeps it in sync as the hash
+  // changes from clicking other permalinks on the same page.
+  useEffect(() => {
+    activatePseudoBorderForHash(window.location.hash.slice(1));
+    const onHashChange = () => activatePseudoBorderForHash(window.location.hash.slice(1));
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   const sorted = [...entries].sort((a, b) => {
     if (sortMode === "quoteIndex") {
@@ -60,7 +71,12 @@ export default function CommentEntryList({ entries, postId, userName, viewerId, 
           // data-thread-id (not id) since sorting can scatter a thread's entries
           // apart, and every one of them needs to be reachable — AnnotatableArticle's
           // onIndicatorClick uses querySelectorAll to scroll to and flash all of them.
-          <div key={entry.root.id} data-thread-id={entry.threadId} style={{ marginTop: 24 }}>
+          <div
+            key={entry.root.id}
+            data-thread-id={entry.threadId}
+            data-thread-color={entry.color}
+            style={{ marginTop: 24 }}
+          >
             {entry.quotedText && !rootRendersNothing && (
               <QuoteThreadHeader
                 threadId={entry.threadId}

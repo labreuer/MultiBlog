@@ -87,9 +87,11 @@ export default function CommentNode({ comment, postId, userName, viewerId, isAdm
   return (
     <div className={`${styles.node} ${depth > 0 ? styles.nested : ""}`}>
       {isDeleted ? (
-        <div className={styles.deleted}>[deleted]</div>
+        <div className={styles.deleted} data-comment-id={comment.id}>
+          [deleted]
+        </div>
       ) : (
-        <div>
+        <div data-comment-id={comment.id}>
           <p className={styles.meta}>
             <span className={styles.name}>{comment.displayName}</span>
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>

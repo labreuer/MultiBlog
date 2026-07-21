@@ -324,7 +324,7 @@ calls are tuning (trust threshold, email verification) and can change anytime.
 
 ---
 
-## 10. Implementation progress (as of 2026-07-20)
+## 10. Implementation progress (as of 2026-07-21)
 
 Steps 1–8 of §8 are built and verified locally. Nothing is deployed — the deployment work
 from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev box.
@@ -663,6 +663,33 @@ Git history carries per-step detail.
       highlighted-but-commentless passage once nothing was left under it.
     - **`/posts` comment counts** (item 13's table) also skip `deletedByUserId !== null`
       comments when tallying approved/pending, added alongside the schema fields above.
+
+16. **Comment pseudo-borders** — clicking an inline quote bubble (or loading/following a
+    comment permalink) now also leaves a persistent colored bar in the left margin of the
+    Comments `<section>`, vertically aligned to the relevant comment's own div, alongside the
+    existing transient flash/pulse rather than replacing it.
+    - `src/lib/pseudo-border.ts`: a small imperative DOM module, in the same spirit as
+      `AnnotatableArticle`'s `flashHighlight` and `QuoteThreadHeader`'s `jumpToQuote` — reads
+      real element positions via `getBoundingClientRect()` and inserts/removes plain
+      `<div>`s tagged `data-pseudo-border`, rather than routing through React state, since the
+      two trigger sites (`AnnotatableArticle`, `CommentEntryList`) sit in separate component
+      trees with no shared parent to hold that state.
+    - Positioned 2px wide, 2px to the left of the Comments `<section>`'s own left edge (now
+      `data-comment-section`, `position: relative`) — it stands in for a `border-left` that
+      can't be drawn on the target comment's own div directly, since the whole point is
+      moving it outside that (possibly deeply nested) div's box instead of indenting into it.
+    - Bubble click (`AnnotatableArticle`'s `onIndicatorClick`): one bar per matching thread
+      entry's root comment (a thread can have multiple roots), colored with the thread's
+      already-computed color (item 13). Clears every existing bar first.
+    - `#bookmark` (the item 14 permalink hash): `CommentEntryList` activates the matching
+      comment's bar on mount and on every `hashchange`, clearing first each time (down to zero
+      once the hash stops matching anything). Locates the comment by matching the timestamp
+      anchor to its nearest ancestor `[data-comment-id]` (added to `CommentNode` on both the
+      live and `[deleted]` render branches), and reads that entry's color off a
+      `data-thread-color` attribute on the surrounding thread wrapper.
+    - Deliberately has no animation and no repositioning on scroll/resize, unlike the existing
+      flash/pulse effects — matches the "stays put" ask, and nothing else in this area handles
+      resize either.
 
 **Deliberate deviations from §2–§6**
 

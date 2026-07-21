@@ -79,7 +79,7 @@ export default async function CommentSection({ postId }: { postId: string }) {
   ];
 
   return (
-    <section className={styles.section}>
+    <section className={styles.section} data-comment-section>
       <h2 className={styles.heading}>Comments</h2>
       <CommentForm postId={postId} userName={userName} />
 
