@@ -80,6 +80,13 @@ logged-in — see §6).
   working-session state, not content — stripped before anything reaches `revisions.doc`.
 - **Auth:** the Hocuspocus `onConnect`/`onAuthenticate` hook validates the user's session
   (via Auth.js token) and checks they may edit that post before joining the room.
+- **`next.config.ts`: `serverExternalPackages: ["yjs"]`.** Next's server compiler builds
+  separate bundles per layer (RSC, SSR); without this, each layer gets its own copy of
+  yjs's module scope, which trips yjs's own globalThis double-import guard
+  ("Yjs was already imported...", [yjs#438](https://github.com/yjs/yjs/issues/438)) even
+  though only one yjs version is installed. Marking it external makes every server-side
+  layer resolve it through Node's own `require` cache instead. Doesn't affect the browser
+  bundle.
 
 This raises the ops footprint (a second long-running service + websocket proxying — see §7),
 which is the main cost of doing it now rather than later.
