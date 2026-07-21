@@ -50,25 +50,38 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   `read_page` / `javascript_tool` measurements (bounding rects, computed styles) instead.
 - The browser pane's console buffer accumulates across navigations; for a clean error
   check, open a fresh tab.
-- For a throwaway ADMIN account (most manual testing — e.g. exercising publish/
-  unpublish/schedule), use `npx tsx scripts/test-admin.ts create [email] [name]`
-  (defaults to `test-admin@example.com`; password is always `testpass123`) and
-  `... delete [email]` when done — one command each way instead of sign-up +
-  psql-promote + psql-delete. Restricted to `@example.com` addresses, so it
-  can't touch a real account even by mistake.
+- For a throwaway user account (most manual testing — e.g. exercising publish/
+  unpublish/schedule, or role-gated actions), use `npx tsx scripts/test-user.ts
+  create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|COMMENTER] [--trusted]
+  [--force-moderate]` (defaults to `test-admin@example.com` and role `ADMIN`;
+  password is always `testpass123`) and `... delete [email]` when done — one
+  command each way instead of sign-up + psql-promote + psql-delete.
+  `--trusted`/`--force-moderate` each create a `Commenter` row for the new
+  user (`approvedCount: 100` / `forceModerate: true`, can combine both) so
+  comment-trust/moderation tests skip a manual DB step; omit both to leave
+  the user without a pre-existing `Commenter` row. Restricted to
+  `@example.com` addresses, so it can't touch a real account even by
+  mistake.
 - To verify a concurrent-editing feature specifically, you need **two** such
   accounts signed in in separate browser tabs at once — run `create` twice
   with different emails, and delete both (plus any throwaway `Post` row) when
   done.
 - For throwaway posts (content to publish/unpublish/schedule, or a copy of
   real content for perf testing per below), use `npx tsx scripts/test-post.ts
-  create [authorEmail] [title]` and `... delete [slugOrId]` instead of a
-  manual DB script each time. `create` requires an existing `@example.com`
-  author (make one with `test-admin.ts create` first); `delete` refuses any
-  post that has a non-`@example.com` author. Delete the post before deleting
-  its author — once a post's only author is gone, "no authors" is
-  indistinguishable from a real post that lost its author some other way, so
-  `delete` refuses those too.
+  create [authorEmail] [--policy=INHERIT|AUTO|ALWAYS] [--publish] [title]` and
+  `... delete [slugOrId]` instead of a manual DB script each time. `create`
+  requires an existing `@example.com` author (make one with `test-user.ts
+  create` first); defaults to `moderationPolicy=AUTO` and a draft, same as
+  before — pass `--policy=` to test the cascade/an override, and `--publish`
+  to skip the separate "set publishRevisionId/publishedAt" step a moderation
+  or comment-status test usually needs. `delete` refuses any post that has a
+  non-`@example.com` author. Delete the post before deleting its author —
+  once a post's only author is gone, "no authors" is indistinguishable from a
+  real post that lost its author some other way, so `delete` refuses those
+  too.
+- To inspect a post's comments (status, commenter, timestamp) without a
+  one-off `psql SELECT`, use `npx tsx scripts/test-comment.ts list
+  [slugOrId]`.
 - Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` are baked
   into the session cookie once at sign-in and never re-read from the DB on later requests.
   Deleting a throwaway `User` row mid-session does **not** sign them out or revoke their
