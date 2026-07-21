@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSortableRows } from "@/lib/use-sortable-rows";
 
 export type PostRow = {
   id: string;
@@ -126,8 +127,6 @@ const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid 
 const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
 const sortableTh: React.CSSProperties = { ...th, cursor: "pointer", userSelect: "none" };
 
-type SortColumn = { key: SortKey; dir: "asc" | "desc" };
-
 function compareByKey(key: SortKey, a: PostRow, b: PostRow, dir: "asc" | "desc"): number {
   switch (key) {
     case "title":
@@ -154,7 +153,6 @@ function compareByKey(key: SortKey, a: PostRow, b: PostRow, dir: "asc" | "desc")
 
 export default function PostsTable({ rows }: { rows: PostRow[] }) {
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
-  const [sortColumns, setSortColumns] = useState<SortColumn[]>([]);
   const [searchText, setSearchText] = useState("");
   const [titleWidth, setTitleWidth] = useState<number | null>(null);
   const titleThRef = useRef<HTMLTableCellElement>(null);
@@ -171,53 +169,25 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
     return () => observer.disconnect();
   }, []);
 
-  function handleSort(key: SortKey, addToSort: boolean) {
-    setSortColumns((prev) => {
-      const idx = prev.findIndex((c) => c.key === key);
-      if (addToSort) {
-        if (idx === -1) {
-          return [...prev, { key, dir: "asc" }];
-        }
-        const next = [...prev];
-        next[idx] = { key, dir: next[idx].dir === "asc" ? "desc" : "asc" };
-        return next;
-      }
-      if (prev.length === 1 && idx === 0) {
-        return [{ key, dir: prev[0].dir === "asc" ? "desc" : "asc" }];
-      }
-      return [{ key, dir: "asc" }];
-    });
-  }
-
-  function sortIndicator(key: SortKey) {
-    const idx = sortColumns.findIndex((c) => c.key === key);
-    if (idx === -1) return null;
-    return (
-      <>
-        {" "}
-        {sortColumns[idx].dir === "asc" ? "▲" : "▼"}
-        {idx > 0 && <sup>{idx + 1}</sup>}
-      </>
-    );
-  }
-
   const filteredRows = useMemo(() => {
     const needle = searchText.trim().toLowerCase();
     if (!needle) return rows;
     return rows.filter((row) => row.title.toLowerCase().includes(needle));
   }, [rows, searchText]);
 
-  const sortedRows = useMemo(() => {
-    if (sortColumns.length === 0) return filteredRows;
-    const sorted = [...filteredRows].sort((a, b) => {
-      for (const { key, dir } of sortColumns) {
-        const cmp = compareByKey(key, a, b, dir);
-        if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
-      }
-      return 0;
-    });
-    return sorted;
-  }, [filteredRows, sortColumns]);
+  const { sortedRows, handleSort, sortState } = useSortableRows(filteredRows, compareByKey);
+
+  function sortIndicator(key: SortKey) {
+    const state = sortState(key);
+    if (!state) return null;
+    return (
+      <>
+        {" "}
+        {state.dir === "asc" ? "▲" : "▼"}
+        {state.priority > 1 && <sup>{state.priority}</sup>}
+      </>
+    );
+  }
 
   if (rows.length === 0) {
     return <p>No posts yet.</p>;
