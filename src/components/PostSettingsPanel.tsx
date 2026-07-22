@@ -11,15 +11,8 @@ import {
   restorePost,
 } from "@/app/actions/posts";
 import { ModerationPolicy, type Role } from "@/generated/prisma/enums";
+import { formatDate } from "@/lib/format-date";
 import styles from "./PostSettingsPanel.module.css";
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function formatRevisionDate(date: Date): string {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
 
 export type EligibleUser = {
   id: string;
@@ -289,7 +282,7 @@ export default function PostSettingsPanel({
                 <td>{revision.title}</td>
                 <td>{revision.editorName}</td>
                 <td>{revision.changelog ?? ""}</td>
-                <td>{formatRevisionDate(revision.createdAt)}</td>
+                <td>{formatDate(revision.createdAt, "yyyy-MM-dd HH:mm")}</td>
               </tr>
             ))}
           </tbody>

@@ -7,6 +7,7 @@ import { IconTrash, IconTrashOff } from "@tabler/icons-react";
 import { useSortableRows } from "@/lib/use-sortable-rows";
 import { useShowDeletedRows } from "@/lib/use-show-deleted";
 import { deletePost, restorePost } from "@/app/actions/posts";
+import { DATE_FORMATS, type DateFormat, formatDate } from "@/lib/format-date";
 
 export type PostRow = {
   id: string;
@@ -71,9 +72,6 @@ function DeleteCell({
   );
 }
 
-const DATE_FORMATS = ["yyyy-MM-dd HH:mm", "yyyy-MM-dd", "M/d/yyyy h:mm", "M/d/yyyy"] as const;
-type DateFormat = (typeof DATE_FORMATS)[number];
-
 // Calendar-aware breakdown (not a flat 365.25-day-year approximation) of the
 // time remaining until `target`, dropping leading zero-valued units — years/
 // months/days only appear if non-zero, hours+minutes always appear together
@@ -124,33 +122,6 @@ function formatCountdown(target: Date): string {
   parts.push(`${hours}h${minutes}m`);
 
   return parts.join(" ");
-}
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function formatDate(date: Date, format: DateFormat): string {
-  const yyyy = date.getFullYear();
-  const MM = pad2(date.getMonth() + 1);
-  const dd = pad2(date.getDate());
-  const M = date.getMonth() + 1;
-  const d = date.getDate();
-  const HH = pad2(date.getHours());
-  const mm = pad2(date.getMinutes());
-  let h = date.getHours() % 12;
-  if (h === 0) h = 12;
-
-  switch (format) {
-    case "yyyy-MM-dd HH:mm":
-      return `${yyyy}-${MM}-${dd} ${HH}:${mm}`;
-    case "yyyy-MM-dd":
-      return `${yyyy}-${MM}-${dd}`;
-    case "M/d/yyyy h:mm":
-      return `${M}/${d}/${yyyy} ${h}:${mm}`;
-    case "M/d/yyyy":
-      return `${M}/${d}/${yyyy}`;
-  }
 }
 
 type SortKey = "title" | "authors" | "published" | "comments" | "ahead" | "editor" | "lastEdit" | "created" | "deleted";

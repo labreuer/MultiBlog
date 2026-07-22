@@ -10,7 +10,7 @@ import { resolveCommentStatus } from "@/lib/moderation";
 import { getClientIp } from "@/lib/request-ip";
 import { isCommentRateLimited } from "@/lib/rate-limit";
 import { checkSpam } from "@/lib/spam-check";
-import type { CommentStatus } from "@/generated/prisma/enums";
+import type { CommentStatus, Role } from "@/generated/prisma/enums";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -177,12 +177,7 @@ export async function submitComment(
   return { status };
 }
 
-export async function moderateComment(commentId: string, action: "approve" | "spam"): Promise<void> {
-  const session = await auth();
-  if (!session?.user) {
-    throw new Error("Unauthorized.");
-  }
-
+async function moderateOne(userId: string, role: Role, commentId: string, action: "approve" | "spam" | "pend") {
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
     include: { thread: { include: { post: { select: { id: true, slug: true } } } } },
@@ -191,15 +186,15 @@ export async function moderateComment(commentId: string, action: "approve" | "sp
     throw new Error("Comment not found.");
   }
 
-  const allowed = await canUserEditPost(session.user.id, session.user.role, comment.thread.post.id);
+  const allowed = await canUserEditPost(userId, role, comment.thread.post.id);
   if (!allowed) {
     throw new Error("You don't have permission to moderate this comment.");
   }
 
-  const newStatus: CommentStatus = action === "approve" ? "APPROVED" : "SPAM";
+  const newStatus: CommentStatus = action === "approve" ? "APPROVED" : action === "spam" ? "SPAM" : "PENDING";
   await prisma.comment.update({
     where: { id: commentId },
-    data: { status: newStatus, statusChangedById: session.user.id, statusChangedAt: new Date() },
+    data: { status: newStatus, statusChangedById: userId, statusChangedAt: new Date() },
   });
 
   if (newStatus === "APPROVED" && comment.status !== "APPROVED") {
@@ -209,8 +204,77 @@ export async function moderateComment(commentId: string, action: "approve" | "sp
     });
   }
 
-  revalidatePath(`/${comment.thread.post.slug}`);
-  revalidatePath(`/posts/${comment.thread.post.id}/comments`);
+  return comment.thread.post;
+}
+
+async function deleteOne(userId: string, role: Role, commentId: string) {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    include: {
+      commenter: { select: { userId: true } },
+      thread: { select: { post: { select: { id: true, slug: true } } } },
+    },
+  });
+  if (!comment) {
+    throw new Error("Comment not found.");
+  }
+
+  const isOwnComment = comment.commenter.userId === userId;
+  if (role !== "ADMIN" && !isOwnComment) {
+    throw new Error("You don't have permission to delete this comment.");
+  }
+
+  await prisma.comment.update({
+    where: { id: commentId },
+    data: { deletedByUserId: userId, deletedAt: new Date() },
+  });
+
+  return comment.thread.post;
+}
+
+async function restoreOne(userId: string, role: Role, commentId: string) {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    include: { thread: { select: { post: { select: { id: true, slug: true } } } } },
+  });
+  if (!comment) {
+    throw new Error("Comment not found.");
+  }
+
+  const allowed = await canUserEditPost(userId, role, comment.thread.post.id);
+  if (!allowed) {
+    throw new Error("You don't have permission to restore this comment.");
+  }
+
+  await prisma.comment.update({
+    where: { id: commentId },
+    data: { deletedByUserId: null, deletedAt: null },
+  });
+
+  return comment.thread.post;
+}
+
+// Revalidates the public post page (comment visibility) and its per-post
+// moderation queue for every distinct post touched by a batch — a bulk
+// action can span comments from several posts at once.
+function revalidateTouchedPosts(posts: { id: string; slug: string }[]) {
+  const seen = new Set<string>();
+  for (const post of posts) {
+    if (seen.has(post.id)) continue;
+    seen.add(post.id);
+    revalidatePath(`/${post.slug}`);
+    revalidatePath(`/posts/${post.id}/comments`);
+  }
+  revalidatePath("/comments");
+}
+
+export async function moderateComment(commentId: string, action: "approve" | "spam" | "pend"): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+  const post = await moderateOne(session.user.id, session.user.role, commentId, action);
+  revalidateTouchedPosts([post]);
 }
 
 export async function deleteComment(commentId: string): Promise<void> {
@@ -218,27 +282,45 @@ export async function deleteComment(commentId: string): Promise<void> {
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
+  const post = await deleteOne(session.user.id, session.user.role, commentId);
+  revalidateTouchedPosts([post]);
+}
 
-  const comment = await prisma.comment.findUnique({
-    where: { id: commentId },
-    include: {
-      commenter: { select: { userId: true } },
-      thread: { select: { post: { select: { slug: true } } } },
-    },
-  });
-  if (!comment) {
-    throw new Error("Comment not found.");
+export async function restoreComment(commentId: string): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
   }
+  const post = await restoreOne(session.user.id, session.user.role, commentId);
+  revalidateTouchedPosts([post]);
+}
 
-  const isOwnComment = comment.commenter.userId === session.user.id;
-  if (session.user.role !== "ADMIN" && !isOwnComment) {
-    throw new Error("You don't have permission to delete this comment.");
+export async function bulkModerateComments(commentIds: string[], action: "approve" | "spam" | "pend"): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
   }
+  const { id: userId, role } = session.user;
+  const posts = await Promise.all(commentIds.map((id) => moderateOne(userId, role, id, action)));
+  revalidateTouchedPosts(posts);
+}
 
-  await prisma.comment.update({
-    where: { id: commentId },
-    data: { deletedByUserId: session.user.id, deletedAt: new Date() },
-  });
+export async function bulkDeleteComments(commentIds: string[]): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+  const { id: userId, role } = session.user;
+  const posts = await Promise.all(commentIds.map((id) => deleteOne(userId, role, id)));
+  revalidateTouchedPosts(posts);
+}
 
-  revalidatePath(`/${comment.thread.post.slug}`);
+export async function bulkRestoreComments(commentIds: string[]): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+  const { id: userId, role } = session.user;
+  const posts = await Promise.all(commentIds.map((id) => restoreOne(userId, role, id)));
+  revalidateTouchedPosts(posts);
 }
