@@ -16,8 +16,16 @@ export const DEFAULT_PAGE_SIZE: PageSize = 25;
 // per-commenter aggregate over comments outside the current filter, not a
 // plain column, so sorting by it server-side would need a correlated
 // subquery per row rather than a plain `orderBy`. Left display-only for now.
-export type CommentsSortKey = "post" | "commenter" | "status" | "threadStatus" | "created" | "statusChanged";
-const SORT_KEYS: readonly CommentsSortKey[] = ["post", "commenter", "status", "threadStatus", "created", "statusChanged"];
+export type CommentsSortKey = "post" | "commenter" | "status" | "threadStatus" | "created" | "statusChanged" | "deleted";
+const SORT_KEYS: readonly CommentsSortKey[] = [
+  "post",
+  "commenter",
+  "status",
+  "threadStatus",
+  "created",
+  "statusChanged",
+  "deleted",
+];
 export const DEFAULT_SORT: SortColumn<CommentsSortKey>[] = [{ key: "created", dir: "desc" }];
 
 export type CommentsFilters = {

@@ -57,6 +57,12 @@ function buildOrderBy(sort: SortColumn<CommentsSortKey>[]): Prisma.CommentOrderB
         return { createdAt: dir };
       case "statusChanged":
         return { statusChangedAt: dir };
+      case "deleted":
+        // deletedByUserId is null for a non-deleted comment — order nulls
+        // (not-deleted) first when ascending, last when descending, to
+        // match the client-side compareByKey convention PostsTable/
+        // UsersTable use for their own "deleted" sort key.
+        return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
     }
   });
 }

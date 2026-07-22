@@ -43,6 +43,26 @@ export type CommentRow = {
   commenterCounts: { submitted: number; inModeration: number; spam: number };
 };
 
+// Matches each status's text color to its moderation button's *hover* color
+// (CommentsTable.module.css's .approve/.pend/.spam :hover rules), not its
+// resting color — the resting fills are too pale to read well as text.
+function statusTextClass(status: CommentStatus): string {
+  switch (status) {
+    case "APPROVED":
+      return styles.statusApproved;
+    case "PENDING":
+      return styles.statusPending;
+    case "SPAM":
+      return styles.statusSpam;
+    default:
+      // CommentStatus.DELETED exists in the schema but is unused in
+      // practice — soft-deletion is tracked via deletedByUserId, not this
+      // enum (see STATUS_OPTIONS, which omits it). No corresponding
+      // moderation button/hover color to match.
+      return "";
+  }
+}
+
 function MultiSelectDropdown<T extends string>({
   label,
   options,
@@ -413,7 +433,7 @@ export default function CommentsTable({
             <th className={adminStyles.headerCell}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Select all rows" />
             </th>
-            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("post", e.ctrlKey)}>
+            <th className={`${adminStyles.sortableHeaderCell} ${styles.postColumn}`} onClick={(e) => handleSort("post", e.ctrlKey)}>
               Post{sortIndicator("post")}
             </th>
             <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("commenter", e.ctrlKey)}>
@@ -429,12 +449,30 @@ export default function CommentsTable({
             <th className={adminStyles.nowrapSortableHeaderCell} onClick={(e) => handleSort("created", e.ctrlKey)}>
               Created at{sortIndicator("created")}
             </th>
-            <th className={adminStyles.nowrapSortableHeaderCell} onClick={(e) => handleSort("statusChanged", e.ctrlKey)}>
-              Status changed{sortIndicator("statusChanged")}
+            <th
+              className={adminStyles.nowrapSortableHeaderCell}
+              onClick={(e) => handleSort("statusChanged", e.ctrlKey)}
+              title="Last moderation change"
+            >
+              Changed at{sortIndicator("statusChanged")}
             </th>
             <th className={adminStyles.headerCell}>Commenter activity</th>
             <th className={adminStyles.headerCell}>Action</th>
-            <th className={adminStyles.headerCell}></th>
+            <th className={adminStyles.headerCell}>
+              {/* padding/border/background match DeleteCell's button exactly, so
+                  the icon's left edge lines up with the row icons below it —
+                  same alignment fix as PostsTable/UsersTable. */}
+              <button
+                type="button"
+                onClick={(e) => handleSort("deleted", e.ctrlKey)}
+                aria-label="Sort by deleted status"
+                title="Sort by deleted status"
+                className={adminStyles.iconButton}
+              >
+                <IconTrash size={16} color="#000" style={{ verticalAlign: "middle" }} />
+                {sortIndicator("deleted")}
+              </button>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -464,7 +502,7 @@ export default function CommentsTable({
               <td className={adminStyles.cell} style={{ maxWidth: 320 }}>
                 {row.bodyText}
               </td>
-              <td className={adminStyles.cell}>{row.status}</td>
+              <td className={`${adminStyles.cell} ${statusTextClass(row.status)}`}>{row.status}</td>
               <td className={adminStyles.cell}>{row.threadStatus}</td>
               <td className={adminStyles.nowrapCell}>{formatDate(row.createdAt, dateFormat)}</td>
               <td className={adminStyles.nowrapCell}>{row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}</td>

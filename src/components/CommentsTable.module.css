@@ -3,6 +3,15 @@
   min-width: 240px;
 }
 
+/* In a table-layout: auto table (the default) with the table itself at
+   width: 100%, a column that's the only one carrying an explicit width
+   claims whatever space the other (naturally-sized) columns don't need,
+   rather than the leftover space being distributed arbitrarily. */
+.postColumn {
+  width: 100%;
+  min-width: 12em;
+}
+
 .approve {
   background-color: #d4f5d4;
 }
@@ -25,6 +34,18 @@
 
 .spam:hover:not(:disabled) {
   background-color: #ee9c9c;
+}
+
+.statusApproved {
+  color: #0a5;
+}
+
+.statusPending {
+  color: #8a6d00;
+}
+
+.statusSpam {
+  color: #c00;
 }
 
 .bulkToolbar {

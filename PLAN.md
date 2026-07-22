@@ -630,7 +630,11 @@ is the site-wide counterpart: every comment across every post the signed-in user
   visit-local overlay, `CommentsTable`'s `revealedRows`) until the next real navigation even
   though the following server refetch would otherwise drop it — the same UX `PostsTable`/
   `UsersTable` give a just-deleted row, just achieved without their sessionStorage-backed
-  `useShowDeletedRows`, since here `deleted` already lives in the querystring.
+  `useShowDeletedRows`, since here `deleted` already lives in the querystring. That column's
+  header is the same sortable black `IconTrash` control as `PostsTable`/`UsersTable` (§3c) —
+  server-side here (`deleted` as a `CommentsSortKey`, ordering by `deletedByUserId` with
+  explicit `nulls: "first"`/`"last"` to keep not-deleted rows first when ascending, matching
+  the other two tables' client-side sort convention for the same column).
 - **Bulk actions**: a row-checkbox column (scoped to the current page only — cross-page
   "select all N matching rows" is deliberately unresolved for now) feeds a toolbar that
   appears once anything is selected, mirroring the per-row Action column: Approve/Pend/
