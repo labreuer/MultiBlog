@@ -5,7 +5,7 @@ CREATE TYPE "Role" AS ENUM ('ADMIN', 'EDITOR', 'AUTHOR', 'COMMENTER');
 CREATE TYPE "ModerationPolicy" AS ENUM ('INHERIT', 'ALWAYS', 'AUTO');
 
 -- CreateEnum
-CREATE TYPE "PostStatus" AS ENUM ('DRAFT', 'PUBLISHED', 'ARCHIVED');
+CREATE TYPE "PublicationEventType" AS ENUM ('PUBLISHED', 'UNPUBLISHED', 'SCHEDULED', 'SCHEDULE_CANCELED');
 
 -- CreateEnum
 CREATE TYPE "ThreadStatus" AS ENUM ('ACTIVE', 'DETACHED', 'RESOLVED');
@@ -17,15 +17,30 @@ CREATE TYPE "CommentStatus" AS ENUM ('PENDING', 'APPROVED', 'SPAM', 'DELETED');
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
     "emailVerified" TIMESTAMP(3),
     "name" TEXT,
     "image" TEXT,
     "passwordHash" TEXT,
     "role" "Role" NOT NULL DEFAULT 'COMMENTER',
     "moderationPolicy" "ModerationPolicy" NOT NULL DEFAULT 'INHERIT',
+    "color" TEXT NOT NULL DEFAULT '#5b8cff',
+    "adminInitials" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deletedByUserId" TEXT,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "UserSlugHistory" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UserSlugHistory_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -64,17 +79,39 @@ CREATE TABLE "VerificationToken" (
 );
 
 -- CreateTable
+CREATE TABLE "PasswordResetToken" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PasswordResetToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Post" (
     "id" TEXT NOT NULL,
     "slug" TEXT NOT NULL,
     "title" TEXT NOT NULL,
-    "status" "PostStatus" NOT NULL DEFAULT 'DRAFT',
-    "currentRevisionId" TEXT,
+    "publishRevisionId" TEXT,
     "moderationPolicy" "ModerationPolicy" NOT NULL DEFAULT 'INHERIT',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "publishedAt" TIMESTAMP(3),
+    "deletedByUserId" TEXT,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Post_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PostSlugHistory" (
+    "id" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PostSlugHistory_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -101,12 +138,35 @@ CREATE TABLE "Revision" (
 );
 
 -- CreateTable
+CREATE TABLE "PostPublicationEvent" (
+    "id" TEXT NOT NULL,
+    "postId" TEXT NOT NULL,
+    "type" "PublicationEventType" NOT NULL,
+    "revisionId" TEXT,
+    "scheduledFor" TIMESTAMP(3),
+    "actorId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PostPublicationEvent_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "PostCollab" (
     "postId" TEXT NOT NULL,
     "ydoc" BYTEA NOT NULL,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "PostCollab_pkey" PRIMARY KEY ("postId")
+);
+
+-- CreateTable
+CREATE TABLE "PostCollabUpdate" (
+    "id" BIGSERIAL NOT NULL,
+    "postId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "update" BYTEA NOT NULL,
+
+    CONSTRAINT "PostCollabUpdate_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -152,14 +212,28 @@ CREATE TABLE "Comment" (
     "commenterId" TEXT NOT NULL,
     "body" JSONB NOT NULL,
     "status" "CommentStatus" NOT NULL DEFAULT 'PENDING',
+    "ipAddress" TEXT,
+    "statusChangedById" TEXT,
+    "statusChangedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "editedAt" TIMESTAMP(3),
+    "deletedByUserId" TEXT,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Comment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_slug_key" ON "User"("slug");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "UserSlugHistory_slug_key" ON "UserSlugHistory"("slug");
+
+-- CreateIndex
+CREATE INDEX "UserSlugHistory_userId_idx" ON "UserSlugHistory"("userId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Account_provider_providerAccountId_key" ON "Account"("provider", "providerAccountId");
@@ -174,13 +248,28 @@ CREATE UNIQUE INDEX "VerificationToken_token_key" ON "VerificationToken"("token"
 CREATE UNIQUE INDEX "VerificationToken_identifier_token_key" ON "VerificationToken"("identifier", "token");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "PasswordResetToken_tokenHash_key" ON "PasswordResetToken"("tokenHash");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Post_slug_key" ON "Post"("slug");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Post_currentRevisionId_key" ON "Post"("currentRevisionId");
+CREATE UNIQUE INDEX "Post_publishRevisionId_key" ON "Post"("publishRevisionId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PostSlugHistory_slug_key" ON "PostSlugHistory"("slug");
+
+-- CreateIndex
+CREATE INDEX "PostSlugHistory_postId_idx" ON "PostSlugHistory"("postId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Revision_postId_revisionNumber_key" ON "Revision"("postId", "revisionNumber");
+
+-- CreateIndex
+CREATE INDEX "PostPublicationEvent_postId_createdAt_idx" ON "PostPublicationEvent"("postId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "PostCollabUpdate_postId_id_idx" ON "PostCollabUpdate"("postId", "id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Commenter_userId_key" ON "Commenter"("userId");
@@ -189,13 +278,28 @@ CREATE UNIQUE INDEX "Commenter_userId_key" ON "Commenter"("userId");
 CREATE UNIQUE INDEX "Commenter_email_key" ON "Commenter"("email");
 
 -- AddForeignKey
+ALTER TABLE "User" ADD CONSTRAINT "User_deletedByUserId_fkey" FOREIGN KEY ("deletedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserSlugHistory" ADD CONSTRAINT "UserSlugHistory_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Account" ADD CONSTRAINT "Account_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Session" ADD CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Post" ADD CONSTRAINT "Post_currentRevisionId_fkey" FOREIGN KEY ("currentRevisionId") REFERENCES "Revision"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PasswordResetToken" ADD CONSTRAINT "PasswordResetToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Post" ADD CONSTRAINT "Post_publishRevisionId_fkey" FOREIGN KEY ("publishRevisionId") REFERENCES "Revision"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Post" ADD CONSTRAINT "Post_deletedByUserId_fkey" FOREIGN KEY ("deletedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PostSlugHistory" ADD CONSTRAINT "PostSlugHistory_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PostAuthor" ADD CONSTRAINT "PostAuthor_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -210,7 +314,19 @@ ALTER TABLE "Revision" ADD CONSTRAINT "Revision_postId_fkey" FOREIGN KEY ("postI
 ALTER TABLE "Revision" ADD CONSTRAINT "Revision_editorId_fkey" FOREIGN KEY ("editorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "PostPublicationEvent" ADD CONSTRAINT "PostPublicationEvent_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PostPublicationEvent" ADD CONSTRAINT "PostPublicationEvent_revisionId_fkey" FOREIGN KEY ("revisionId") REFERENCES "Revision"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PostPublicationEvent" ADD CONSTRAINT "PostPublicationEvent_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "PostCollab" ADD CONSTRAINT "PostCollab_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PostCollabUpdate" ADD CONSTRAINT "PostCollabUpdate_postId_fkey" FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Commenter" ADD CONSTRAINT "Commenter_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -229,3 +345,9 @@ ALTER TABLE "Comment" ADD CONSTRAINT "Comment_parentCommentId_fkey" FOREIGN KEY 
 
 -- AddForeignKey
 ALTER TABLE "Comment" ADD CONSTRAINT "Comment_commenterId_fkey" FOREIGN KEY ("commenterId") REFERENCES "Commenter"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Comment" ADD CONSTRAINT "Comment_statusChangedById_fkey" FOREIGN KEY ("statusChangedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Comment" ADD CONSTRAINT "Comment_deletedByUserId_fkey" FOREIGN KEY ("deletedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
