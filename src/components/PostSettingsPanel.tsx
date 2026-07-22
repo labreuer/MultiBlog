@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   updatePostModerationPolicy,
   updatePostAuthor,
@@ -241,6 +242,12 @@ export default function PostSettingsPanel({
                     </option>
                   ))}
                 </select>
+              </td>
+            </tr>
+            <tr>
+              <td className={styles.label}>Url</td>
+              <td>
+                <Link href={`/posts/${postId}/slug`}>Change…</Link>
               </td>
             </tr>
             <tr>

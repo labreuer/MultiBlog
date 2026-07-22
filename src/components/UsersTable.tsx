@@ -463,6 +463,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
           </th>
           <th style={th}>Comments</th>
           <th style={th}></th>
+          <th style={th}></th>
         </tr>
       </thead>
       <tbody>
@@ -518,6 +519,9 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
               <td style={td}>{row.postCount > 0 ? <Link href={`/authors/${row.slug}`}>posts</Link> : ""}</td>
               <td style={td}></td>
               <td style={td}>
+                <Link href={`/users/${row.id}/slug`}>url</Link>
+              </td>
+              <td style={td}>
                 <DeleteCell userId={row.id} deleted={row.deleted} onSaved={onSaved} onDeleted={revealRow} />
               </td>
             </tr>
@@ -526,7 +530,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
       </tbody>
       <tfoot>
         <tr>
-          <td colSpan={11} style={{ paddingTop: 12 }}>
+          <td colSpan={12} style={{ paddingTop: 12 }}>
             <label>
               Date format:{" "}
               <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as DateFormat)}>
@@ -540,7 +544,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
           </td>
         </tr>
         <tr>
-          <td colSpan={11} style={{ paddingTop: 8 }}>
+          <td colSpan={12} style={{ paddingTop: 8 }}>
             <label>
               <input
                 type="checkbox"

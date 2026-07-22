@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
-import { changeUserSlug } from "@/lib/user-slug";
+import { changeUserSlug, revertUserSlug as revertUserSlugInDb } from "@/lib/user-slug";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -72,7 +72,33 @@ export async function updateUserSlug(userId: string, newSlug: string): Promise<{
   const slug = await changeUserSlug(userId, newSlug);
 
   revalidatePath("/users");
+  revalidatePath(`/users/${userId}/slug`);
   revalidatePath(`/authors/${user.slug}`);
+  revalidatePath(`/authors/${slug}`);
+  return { slug };
+}
+
+// Deleted by its slug value (globally unique) rather than a history row id —
+// scoped to userId too so a delete call can't remove another user's entry
+// even by guessing/reusing a slug string.
+export async function deleteUserSlugHistory(userId: string, slug: string): Promise<void> {
+  await requireAdmin();
+  await prisma.userSlugHistory.deleteMany({ where: { userId, slug } });
+  revalidatePath(`/users/${userId}/slug`);
+}
+
+export async function revertUserSlug(userId: string): Promise<{ slug: string }> {
+  await requireAdmin();
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { slug: true } });
+  if (!user) {
+    throw new Error("User not found.");
+  }
+  const oldSlug = user.slug;
+  const slug = await revertUserSlugInDb(userId);
+
+  revalidatePath("/users");
+  revalidatePath(`/users/${userId}/slug`);
+  revalidatePath(`/authors/${oldSlug}`);
   revalidatePath(`/authors/${slug}`);
   return { slug };
 }

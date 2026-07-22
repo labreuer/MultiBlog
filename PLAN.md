@@ -490,9 +490,22 @@ renamed after creation, with the old slug preserved as a redirect source rather 
 - **Reserved top-level slugs** (`RESERVED_SLUGS`, `src/lib/slug.ts`) only apply to post
   slugs — `/[slug]` is a top-level route; author slugs live under the nested `/authors/[slug]`,
   with no sibling static routes to collide with.
-- No settings-panel UI yet for either rename path — `updatePostSlug`/`updateUserSlug`
-  (`src/app/actions/posts.ts`/`users.ts`) are admin/editor-gated actions with nothing calling
-  them from the UI.
+- **Management UI**: `/posts/[id]/slug` and `/users/[id]/slug` (`SlugManager.tsx`, shared by
+  both entity types), linked from `PostSettingsPanel`'s "Url" row and `UsersTable`'s "url"
+  column. Saving commits immediately — no confirm/cancel gate; the safety net is a one-click
+  **Revert** button on the most recent past-slugs row instead (`revertPostSlug`/
+  `revertUserSlug`), matching the app's existing no-confirm-dialog-the-action-is-its-own-undo
+  convention (§3b/§3c). A revert consuming a history row younger than
+  `REVERT_DISCARD_WINDOW_MS` (60 min, `src/lib/slug.ts`) leaves no trace at all rather than
+  recording the abandoned slug.
+- **Auto-generated preview**: the management page also shows what `uniquePostSlug`/
+  `uniqueUserSlug` would produce today from the entity's title/name — an optional
+  `excludePostId`/`excludeUserId` param keeps the entity's own current reservation from
+  spuriously colliding with itself — noting a match or offering a one-click "Use this url"
+  button on mismatch.
+- **UI terminology**: every user-facing label/message says "url", not "slug" (users find it
+  more comprehensible) — schema columns, functions, files, and routes are still named `slug`
+  throughout; only display text changed.
 
 ---
 

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
-import { uniquePostSlug, changePostSlug } from "@/lib/post-slug";
+import { uniquePostSlug, changePostSlug, revertPostSlug as revertPostSlugInDb } from "@/lib/post-slug";
 import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { remapThreadsToRevision } from "@/lib/anchor-remap";
 import { stripMarkFromDoc } from "@/lib/tiptap-schema";
@@ -282,6 +282,29 @@ export async function updatePostSlug(postId: string, newSlug: string): Promise<{
   const slug = await changePostSlug(postId, newSlug);
 
   revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/posts/${postId}/slug`);
+  revalidatePath("/posts");
+  revalidatePath(`/${oldSlug}`);
+  revalidatePath(`/${slug}`);
+  return { slug };
+}
+
+// Deleted by its slug value (globally unique) rather than a history row id —
+// scoped to postId too so a delete call can't remove another post's entry
+// even by guessing/reusing a slug string.
+export async function deletePostSlugHistory(postId: string, slug: string): Promise<void> {
+  await requireEditableSession(postId);
+  await prisma.postSlugHistory.deleteMany({ where: { postId, slug } });
+  revalidatePath(`/posts/${postId}/slug`);
+}
+
+export async function revertPostSlug(postId: string): Promise<{ slug: string }> {
+  const { post } = await requireEditableSession(postId);
+  const oldSlug = post.slug;
+  const slug = await revertPostSlugInDb(postId);
+
+  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/posts/${postId}/slug`);
   revalidatePath("/posts");
   revalidatePath(`/${oldSlug}`);
   revalidatePath(`/${slug}`);

@@ -8,7 +8,6 @@
 // Usage:
 //   npx tsx scripts/test-post.ts create <authorEmail> [--policy=INHERIT|AUTO|ALWAYS] [--publish] [title]
 //   npx tsx scripts/test-post.ts delete <slugOrId>
-//   npx tsx scripts/test-post.ts set-slug <slugOrId> <newSlug>
 // authorEmail must be an existing @example.com user — create one first with
 // scripts/test-user.ts create. title defaults to "Test post <timestamp>".
 // --policy overrides the default AUTO moderation policy (e.g. ALWAYS, to
@@ -20,14 +19,12 @@
 // Delete posts before deleting their author with test-user.ts delete —
 // once a post's only author is gone, "no authors" is indistinguishable from
 // a real post that lost its author some other way, so delete refuses it.
-// set-slug changes a post's slug via the same changePostSlug() path the
-// updatePostSlug server action uses, recording the old slug in
-// PostSlugHistory — for exercising the [slug]/page.tsx redirect fallback
-// without going through the (nonexistent) settings-panel UI.
+// To change a post's slug (or inspect/prune its PostSlugHistory), see
+// scripts/test-slug.ts instead.
 
 import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
-import { uniquePostSlug, changePostSlug } from "../src/lib/post-slug";
+import { uniquePostSlug } from "../src/lib/post-slug";
 import { ModerationPolicy } from "../src/generated/prisma/enums";
 
 const SAFE_EMAIL = /^[\w.+-]+@example\.com$/i;
@@ -125,33 +122,6 @@ async function del(slugOrId: string) {
   console.log(`Deleted post "${post.title}" (id=${post.id}, slug=${post.slug}).`);
 }
 
-async function setSlug(slugOrId: string, newSlug: string) {
-  const post = await prisma.post.findFirst({
-    where: { OR: [{ id: slugOrId }, { slug: slugOrId }] },
-    include: { authors: { include: { user: true } } },
-  });
-  if (!post) {
-    console.error(`${slugOrId} does not exist.`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const unsafeAuthors = post.authors.filter((a) => !SAFE_EMAIL.test(a.user.email));
-  if (post.authors.length === 0 || unsafeAuthors.length > 0) {
-    console.error(
-      `Refusing to modify "${post.title}" (id=${post.id}) — it has ${
-        post.authors.length === 0 ? "no authors" : `a non-@example.com author (${unsafeAuthors[0].user.email})`
-      }.`,
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  const oldSlug = post.slug;
-  const slug = await changePostSlug(post.id, newSlug);
-  console.log(`Changed slug for "${post.title}" (id=${post.id}) from "${oldSlug}" to "${slug}".`);
-}
-
 async function main() {
   const [cmd, arg2, ...rest] = process.argv.slice(2);
 
@@ -175,16 +145,8 @@ async function main() {
       return;
     }
     await del(arg2);
-  } else if (cmd === "set-slug") {
-    const [newSlug] = rest;
-    if (!arg2 || !newSlug) {
-      console.error("Usage: npx tsx scripts/test-post.ts set-slug <slugOrId> <newSlug>");
-      process.exitCode = 1;
-      return;
-    }
-    await setSlug(arg2, newSlug);
   } else {
-    console.error("Usage: npx tsx scripts/test-post.ts <create|delete|set-slug> ...");
+    console.error("Usage: npx tsx scripts/test-post.ts <create|delete> ...");
     process.exitCode = 1;
   }
 }
