@@ -1,0 +1,31 @@
+# MultiBlog — nginx server block for the Next.js app. See DEPLOY.md §7.
+# Copy to /etc/nginx/sites-available/, symlink into sites-enabled/, then:
+#   sudo nginx -t && sudo systemctl reload nginx
+# Replace <app-host> and the TLS lines with your hostname / your SSL method.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <app-host>;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name <app-host>;
+
+    # --- TLS: replace with your certs / your SSL method ---
+    ssl_certificate     /etc/ssl/<app-host>/fullchain.pem;
+    ssl_certificate_key /etc/ssl/<app-host>/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost
+    }
+}

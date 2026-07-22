@@ -284,6 +284,9 @@ deps would break the collab service and future migrations.
 
 ## 6. systemd units
 
+Both are provided ready-to-copy in `deploy/multiblog-web.service` and
+`deploy/multiblog-collab.service`.
+
 `/etc/systemd/system/multiblog-web.service`:
 
 ```ini
@@ -343,7 +346,9 @@ used nvm in §2d, swap the `ExecStart` paths per that caveat.)
 
 App on the main host, collab on a subdomain (cleanest for the WebSocket read-timeout/upgrade
 rules). You terminate TLS with your own certs — plug the proxy blocks below into whatever
-`server { listen 443 ssl; ... }` your cert setup provides.
+`server { listen 443 ssl; ... }` your cert setup provides. Full server-block templates (with
+the HTTP→HTTPS redirect and TLS placeholders) are in `deploy/nginx-app.conf.sample` and
+`deploy/nginx-collab.conf.sample`.
 
 **App** (`<app-host>`):
 
@@ -426,6 +431,7 @@ npm run build                      # re-inline NEXT_PUBLIC_* if any changed
 sudo systemctl restart multiblog-web multiblog-collab
 ```
 
-Wrap this in a short `deploy.sh` once the flow is proven. No zero-downtime story is needed at
-hobby scale — the restart blip is seconds. (Docker Compose remains an easy later upgrade for
+These steps are packaged as `deploy/deploy.sh` (run it from `/srv/multiblog` as `deploy`). No
+zero-downtime story is needed at hobby scale — the restart blip is seconds. (Docker Compose
+remains an easy later upgrade for
 reproducibility, per PLAN.md §7.)
