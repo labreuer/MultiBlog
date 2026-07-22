@@ -2,8 +2,10 @@
 
 Concrete, self-managed deployment onto a **fresh Linode running Ubuntu 26.04 LTS**, built
 from nothing: OS provisioning, a non-root user, firewall, and installs of Node, Postgres,
-and nginx, then the app itself. nginx is the reverse proxy; SSL is handled externally (your
-certs / your termination). No containers, no external spam service, no email provider.
+and nginx, then the app itself. nginx is the reverse proxy; TLS is a free single-domain
+Let's Encrypt cert via certbot (§7a). Collab runs **path-based** under `/collab` on the app
+host, so there's just one hostname and one cert. No containers, no external spam service, no
+email provider.
 
 Scope of this first deploy: provision the box, stand up two Node services (Next.js app +
 Hocuspocus collab) behind nginx, create one Postgres database, apply migrations, seed one
@@ -15,17 +17,19 @@ real admin.
 
 ```
                         ┌──────────── Linode (Ubuntu 26.04) ─────────┐
-   Internet ── 443 ──▶ nginx ──▶ 127.0.0.1:3000  next start   (systemd)│
-              (TLS,        │  ──▶ 127.0.0.1:1234  hocuspocus  (systemd) │  (ws upgrade)
-           your certs)     │                                            │
+   Internet ── 443 ──▶ nginx ─ /       ─▶ 127.0.0.1:3000  next start  (systemd)│
+              (TLS,        │   /collab  ─▶ 127.0.0.1:1234  hocuspocus (systemd) │ (ws upgrade)
+          LE certbot)      │                                            │
                            └──▶ 127.0.0.1:5432  postgres (localhost only)┘
 ```
 
-- App and collab are **separate long-running processes**, each its own systemd unit.
+- App and collab are **separate long-running processes**, each its own systemd unit, both
+  proxied under a **single hostname** — the app at `/`, collab at `/collab`.
 - Postgres binds to localhost; nothing but nginx (80/443) and SSH (22) is exposed.
 - The collab port (1234) is **never** opened on the firewall — nginx proxies WebSocket
-  traffic to it. Browsers connect to `wss://<collab-host>` and nginx upgrades to the
-  local ws.
+  traffic to it. Browsers connect to `wss://<app-host>/collab` and nginx upgrades to the
+  local ws. The Hocuspocus document id travels in-band, so the `/collab` path prefix needs
+  no rewriting.
 
 ---
 
@@ -87,8 +91,8 @@ insert with `role: "ADMIN"`. Guard on existing email so a re-run is a harmless n
   unchanged on 24.04.
 - Pick a region and a small plan (hobby scale — a 1–2 GB shared instance is plenty; the two
   Node services + Postgres are light). Add SSH keys during creation if you can.
-- Point DNS: an `A`/`AAAA` record for `<app-host>` (and `<collab-host>` if you use the
-  subdomain option in §7) at the Linode's IP.
+- Point DNS: an `A`/`AAAA` record for `<app-host>` at the Linode's IP. (Just the one name —
+  collab shares this host under `/collab`, §7.)
 
 ### 2b. Initial setup & hardening
 
@@ -229,7 +233,7 @@ AUTH_URL="https://<app-host>"               # §1a
 
 APP_URL="https://<app-host>"                # absolute links (reset links, RSS)
 COLLAB_PORT=1234
-NEXT_PUBLIC_COLLAB_URL="wss://<collab-host>"   # see note below
+NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"   # path-based; see note below
 ```
 
 > **`NEXT_PUBLIC_COLLAB_URL` is baked into the client bundle at `npm run build`.** It's a
@@ -344,13 +348,11 @@ used nvm in §2d, swap the `ExecStart` paths per that caveat.)
 
 ## 7. nginx
 
-App on the main host, collab on a subdomain (cleanest for the WebSocket read-timeout/upgrade
-rules). You terminate TLS with your own certs — plug the proxy blocks below into whatever
-`server { listen 443 ssl; ... }` your cert setup provides. Full server-block templates (with
-the HTTP→HTTPS redirect and TLS placeholders) are in `deploy/nginx-app.conf.sample` and
-`deploy/nginx-collab.conf.sample`.
+One server block on `<app-host>`: the app at `/`, collab under `/collab`. The full template
+— HTTP→HTTPS redirect, TLS lines (filled by certbot, §7a), both `location`s — is in
+`deploy/nginx-app.conf.sample`. The two proxy blocks:
 
-**App** (`<app-host>`):
+**App** (`location /`):
 
 ```nginx
 location / {
@@ -369,10 +371,10 @@ correct https callback URLs. Also forward `X-Real-IP`/`X-Forwarded-For` because
 the limiter sees the real client IP, not `127.0.0.1`, once behind nginx (it may need to read
 the forwarded header rather than the socket peer).
 
-**Collab** (`<collab-host>`) — WebSocket upgrade + long read timeout:
+**Collab** (`location /collab`) — WebSocket upgrade + long read timeout:
 
 ```nginx
-location / {
+location /collab {
     proxy_pass http://127.0.0.1:1234;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -383,12 +385,48 @@ location / {
 }
 ```
 
+No path rewrite is needed: `HocuspocusProvider` opens the socket at exactly
+`NEXT_PUBLIC_COLLAB_URL` (`wss://<app-host>/collab`) and sends the document id (the post id)
+in-band, not in the URL — so nginx just has to hand `/collab` to `:1234` untouched.
+
 Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
 
-If you'd rather avoid a second cert/subdomain, proxy a path like `/collab/` on the app host
-to `127.0.0.1:1234` with the same upgrade headers, and set
-`NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"`. Subdomain is simpler for the timeout
-rules; path-based saves a cert. Either is fine.
+> **Alternative (not used here): a separate collab subdomain.** If you ever want collab on
+> its own host (`collab.<domain>`) — e.g. to tune its timeouts in isolation — give it its own
+> `server {}` with `location /` → `:1234`, add a DNS record and a cert covering that name (a
+> 2-name SAN cert or a wildcard), and set `NEXT_PUBLIC_COLLAB_URL="wss://<collab-host>"`.
+> Path-based is simpler and single-cert, so it's the default.
+
+---
+
+## 7a. TLS certificate (Let's Encrypt via certbot)
+
+A free, auto-renewing single-domain cert — path-based means one hostname, so no wildcard and
+no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot certonly --nginx -d <app-host>       # issues the cert; leaves nginx config to you
+```
+
+This writes `/etc/letsencrypt/live/<app-host>/fullchain.pem` and `privkey.pem` — exactly the
+paths the `ssl_certificate`/`ssl_certificate_key` lines in `deploy/nginx-app.conf.sample`
+already point at. (`certbot --nginx` without `certonly` would instead rewrite the server
+block itself — fine too, but then the sample's TLS lines are managed by certbot rather than
+by you.)
+
+Renewal is automatic: the certbot package installs a systemd timer. Ensure nginx reloads on
+renew and verify the whole path:
+
+```bash
+echo 'sudo systemctl reload nginx' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+sudo certbot renew --dry-run
+```
+
+`ssl_certificate` must be the **fullchain** (leaf + intermediates), which is what the path
+above gives you — a leaf-only file breaks chain-building for some clients. The private key
+stays root-owned and out of the repo (the sample only carries the path, no key material).
 
 ---
 

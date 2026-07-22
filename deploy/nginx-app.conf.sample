@@ -1,7 +1,8 @@
-# MultiBlog — nginx server block for the Next.js app. See DEPLOY.md §7.
+# MultiBlog — single nginx server block: app at /, collab websocket at /collab.
+# See DEPLOY.md §7 (proxy config) and §7a (the Let's Encrypt cert).
 # Copy to /etc/nginx/sites-available/, symlink into sites-enabled/, then:
 #   sudo nginx -t && sudo systemctl reload nginx
-# Replace <app-host> and the TLS lines with your hostname / your SSL method.
+# Replace <app-host> throughout with your hostname.
 
 server {
     listen 80;
@@ -16,10 +17,11 @@ server {
     http2 on;
     server_name <app-host>;
 
-    # --- TLS: replace with your certs / your SSL method ---
-    ssl_certificate     /etc/ssl/<app-host>/fullchain.pem;
-    ssl_certificate_key /etc/ssl/<app-host>/privkey.pem;
+    # TLS — issued by `certbot certonly --nginx -d <app-host>` (DEPLOY.md §7a).
+    ssl_certificate     /etc/letsencrypt/live/<app-host>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<app-host>/privkey.pem;
 
+    # Next.js app
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -27,5 +29,17 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost
+    }
+
+    # Hocuspocus collab websocket. The document id travels in-band (not in the
+    # URL), so /collab is proxied untouched — no prefix rewrite needed.
+    location /collab {
+        proxy_pass http://127.0.0.1:1234;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;      # keep idle editing sockets alive
+        proxy_send_timeout 3600s;
     }
 }
