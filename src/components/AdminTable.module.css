@@ -1,10 +1,62 @@
+.cell {
+  padding: 6px 12px;
+  vertical-align: top;
+}
+
+.headerCell {
+  padding: 6px 12px;
+  border-bottom: 2px solid #ddd;
+}
+
+.sortableHeaderCell {
+  padding: 6px 12px;
+  border-bottom: 2px solid #ddd;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nowrapCell {
+  padding: 6px 12px;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.nowrapSortableHeaderCell {
+  padding: 6px 12px;
+  border-bottom: 2px solid #ddd;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
 .table {
+  width: 100%;
+  border-collapse: collapse;
   margin-top: 1em;
   margin-bottom: 1em;
 }
 
-.paginationBar {
-  margin-bottom: 2em;
+.row {
+  border-bottom: 1px solid #eee;
+}
+
+.rowDeleted {
+  opacity: 0.5;
+}
+
+.iconButton {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.iconButtonDanger {
+  color: #c00;
+}
+
+.iconButtonMuted {
+  color: #666;
 }
 
 .emptyRow {
@@ -17,26 +69,56 @@
   padding: 2px;
 }
 
-.approve {
-  background-color: #d4f5d4;
+.dateFormatRow {
+  margin-top: 12px;
 }
 
-.approve:hover:not(:disabled) {
-  background-color: #9fdf9f;
+.showDeletedRow {
+  margin-top: 8px;
 }
 
-.pend {
-  background-color: #faf3c0;
+.filterRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
-.pend:hover:not(:disabled) {
-  background-color: #e8d873;
+.dropdownWrapper {
+  display: inline-block;
+  position: relative;
 }
 
-.spam {
-  background-color: #f8d4d4;
+.dropdownSummary {
+  cursor: pointer;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  list-style: none;
 }
 
-.spam:hover:not(:disabled) {
-  background-color: #ee9c9c;
+.dropdownPanel {
+  position: absolute;
+  z-index: 1;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px;
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.dropdownOption {
+  display: block;
+  padding: 2px 0;
+}
+
+.paginationBar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  margin-bottom: 2em;
 }

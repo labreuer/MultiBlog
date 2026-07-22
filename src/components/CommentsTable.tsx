@@ -23,7 +23,8 @@ import {
   bulkRestoreComments,
 } from "@/app/actions/comments";
 import type { CommentStatus, ThreadStatus } from "@/generated/prisma/enums";
-import styles from "./AdminTable.module.css";
+import adminStyles from "./AdminTable.module.css";
+import styles from "./CommentsTable.module.css";
 
 export type CommentRow = {
   id: string;
@@ -41,14 +42,6 @@ export type CommentRow = {
   deleted: boolean;
   commenterCounts: { submitted: number; inModeration: number; spam: number };
 };
-
-const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid #ddd" };
-const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
-const sortableTh: React.CSSProperties = { ...th, cursor: "pointer", userSelect: "none" };
-const nowrapTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
-const nowrapSortableTh: React.CSSProperties = { ...sortableTh, whiteSpace: "nowrap" };
-const helpTh: React.CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #ccc" };
-const helpTd: React.CSSProperties = { padding: "4px 8px", verticalAlign: "top", borderBottom: "1px solid #eee" };
 
 function MultiSelectDropdown<T extends string>({
   label,
@@ -79,27 +72,16 @@ function MultiSelectDropdown<T extends string>({
   }, []);
 
   return (
-    <details ref={detailsRef} style={{ display: "inline-block", position: "relative" }}>
-      <summary style={{ cursor: "pointer", padding: "6px 10px", border: "1px solid #ccc", borderRadius: 4, listStyle: "none" }}>
+    <details ref={detailsRef} className={adminStyles.dropdownWrapper}>
+      <summary className={adminStyles.dropdownSummary}>
         {label}: {summary}
       </summary>
-      <div
-        style={{
-          position: "absolute",
-          zIndex: 1,
-          background: "white",
-          border: "1px solid #ccc",
-          borderRadius: 4,
-          padding: 8,
-          marginTop: 4,
-          whiteSpace: "nowrap",
-        }}
-      >
-        <label style={{ display: "block", padding: "2px 0" }}>
+      <div className={adminStyles.dropdownPanel}>
+        <label className={adminStyles.dropdownOption}>
           <input type="checkbox" checked={selected === "ALL"} onChange={() => onChange("ALL")} /> All
         </label>
         {options.map((option) => (
-          <label key={option} style={{ display: "block", padding: "2px 0" }}>
+          <label key={option} className={adminStyles.dropdownOption}>
             <input
               type="checkbox"
               checked={selected !== "ALL" && selected.has(option)}
@@ -133,7 +115,7 @@ function ActionCell({ comment, disabled }: { comment: CommentRow; disabled: bool
         type="button"
         onClick={() => handle("approve")}
         disabled={disabled || pending || comment.status === "APPROVED"}
-        className={`${styles.actionButton} ${styles.approve}`}
+        className={`${adminStyles.actionButton} ${styles.approve}`}
       >
         Approve
       </button>
@@ -141,7 +123,7 @@ function ActionCell({ comment, disabled }: { comment: CommentRow; disabled: bool
         type="button"
         onClick={() => handle("pend")}
         disabled={disabled || pending || comment.status === "PENDING"}
-        className={`${styles.actionButton} ${styles.pend}`}
+        className={`${adminStyles.actionButton} ${styles.pend}`}
       >
         Pend
       </button>
@@ -149,7 +131,7 @@ function ActionCell({ comment, disabled }: { comment: CommentRow; disabled: bool
         type="button"
         onClick={() => handle("spam")}
         disabled={disabled || pending || comment.status === "SPAM"}
-        className={`${styles.actionButton} ${styles.spam}`}
+        className={`${adminStyles.actionButton} ${styles.spam}`}
       >
         Spam
       </button>
@@ -193,7 +175,7 @@ function DeleteCell({
         disabled={pending}
         aria-label={comment.deleted ? "Restore comment" : "Delete comment"}
         title={comment.deleted ? "Restore comment" : "Delete comment"}
-        style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: comment.deleted ? "#666" : "#c00" }}
+        className={`${adminStyles.iconButton} ${comment.deleted ? adminStyles.iconButtonMuted : adminStyles.iconButtonDanger}`}
       >
         {comment.deleted ? <IconTrashOff size={16} /> : <IconTrash size={16} />}
       </button>
@@ -201,6 +183,8 @@ function DeleteCell({
     </>
   );
 }
+
+type SortKey = CommentsSortKey;
 
 export default function CommentsTable({
   rows,
@@ -265,11 +249,11 @@ export default function CommentsTable({
     searchDebounceRef.current = setTimeout(() => updateFilters({ q: value }), 400);
   }
 
-  function handleSort(key: CommentsSortKey, addToSort: boolean) {
+  function handleSort(key: SortKey, addToSort: boolean) {
     updateFilters({ sort: nextSortColumns(filters.sort, key, addToSort) });
   }
 
-  function sortIndicator(key: CommentsSortKey) {
+  function sortIndicator(key: SortKey) {
     const idx = filters.sort.findIndex((c) => c.key === key);
     if (idx === -1) return null;
     return (
@@ -349,14 +333,14 @@ export default function CommentsTable({
 
   return (
     <>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+      <div className={adminStyles.filterRow}>
         <input
           type="search"
           value={searchDraft}
           onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Search comment or commenter …"
           aria-label="Search comments"
-          style={{ padding: "6px 12px", minWidth: 240 }}
+          className={styles.searchInput}
         />
         <MultiSelectDropdown
           label="Status"
@@ -373,24 +357,13 @@ export default function CommentsTable({
       </div>
 
       {selectedIds.size > 0 && (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            background: "#f5f5f5",
-            border: "1px solid #ddd",
-            borderRadius: 4,
-            padding: "8px 12px",
-            marginBottom: 8,
-          }}
-        >
+        <div className={styles.bulkToolbar}>
           <span>{selectedIds.size} selected</span>
           <button
             type="button"
             disabled={bulkPending}
             onClick={() => runBulk("approve")}
-            className={`${styles.actionButton} ${styles.approve}`}
+            className={`${adminStyles.actionButton} ${styles.approve}`}
           >
             Approve
           </button>
@@ -398,7 +371,7 @@ export default function CommentsTable({
             type="button"
             disabled={bulkPending}
             onClick={() => runBulk("pend")}
-            className={`${styles.actionButton} ${styles.pend}`}
+            className={`${adminStyles.actionButton} ${styles.pend}`}
           >
             Pend
           </button>
@@ -406,7 +379,7 @@ export default function CommentsTable({
             type="button"
             disabled={bulkPending}
             onClick={() => runBulk("spam")}
-            className={`${styles.actionButton} ${styles.spam}`}
+            className={`${adminStyles.actionButton} ${styles.spam}`}
           >
             Spam
           </button>
@@ -416,7 +389,7 @@ export default function CommentsTable({
             onClick={() => runBulk("delete")}
             aria-label="Delete selected"
             title="Delete selected"
-            style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: "#c00", marginLeft: "4em" }}
+            className={`${adminStyles.iconButton} ${adminStyles.iconButtonDanger} ${styles.bulkDeleteSpacing}`}
           >
             <IconTrash size={16} />
           </button>
@@ -426,7 +399,7 @@ export default function CommentsTable({
             onClick={() => runBulk("restore")}
             aria-label="Restore selected"
             title="Restore selected"
-            style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: "#666" }}
+            className={`${adminStyles.iconButton} ${adminStyles.iconButtonMuted}`}
           >
             <IconTrashOff size={16} />
           </button>
@@ -434,47 +407,47 @@ export default function CommentsTable({
         </div>
       )}
 
-      <table style={{ width: "100%", borderCollapse: "collapse" }} className={styles.table}>
+      <table className={adminStyles.table}>
         <thead>
           <tr style={{ textAlign: "left" }}>
-            <th style={th}>
+            <th className={adminStyles.headerCell}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Select all rows" />
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("post", e.ctrlKey)}>
+            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("post", e.ctrlKey)}>
               Post{sortIndicator("post")}
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("commenter", e.ctrlKey)}>
+            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("commenter", e.ctrlKey)}>
               Commenter{sortIndicator("commenter")}
             </th>
-            <th style={th}>Comment</th>
-            <th style={sortableTh} onClick={(e) => handleSort("status", e.ctrlKey)}>
+            <th className={adminStyles.headerCell}>Comment</th>
+            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("status", e.ctrlKey)}>
               Status{sortIndicator("status")}
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("threadStatus", e.ctrlKey)}>
+            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("threadStatus", e.ctrlKey)}>
               Thread{sortIndicator("threadStatus")}
             </th>
-            <th style={nowrapSortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
+            <th className={adminStyles.nowrapSortableHeaderCell} onClick={(e) => handleSort("created", e.ctrlKey)}>
               Created at{sortIndicator("created")}
             </th>
-            <th style={nowrapSortableTh} onClick={(e) => handleSort("statusChanged", e.ctrlKey)}>
+            <th className={adminStyles.nowrapSortableHeaderCell} onClick={(e) => handleSort("statusChanged", e.ctrlKey)}>
               Status changed{sortIndicator("statusChanged")}
             </th>
-            <th style={th}>Commenter activity</th>
-            <th style={th}>Action</th>
-            <th style={th}></th>
+            <th className={adminStyles.headerCell}>Commenter activity</th>
+            <th className={adminStyles.headerCell}>Action</th>
+            <th className={adminStyles.headerCell}></th>
           </tr>
         </thead>
         <tbody>
           {displayRows.length === 0 && (
             <tr>
-              <td colSpan={11} style={td} className={styles.emptyRow}>
+              <td colSpan={11} className={`${adminStyles.cell} ${adminStyles.emptyRow}`}>
                 (no comments matching the criteria)
               </td>
             </tr>
           )}
           {displayRows.map((row) => (
-            <tr key={row.id} style={{ borderBottom: "1px solid #eee", opacity: row.deleted ? 0.5 : 1 }}>
-              <td style={td}>
+            <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
+              <td className={adminStyles.cell}>
                 <input
                   type="checkbox"
                   checked={selectedIds.has(row.id)}
@@ -482,24 +455,26 @@ export default function CommentsTable({
                   aria-label={`Select comment from ${row.commenterName}`}
                 />
               </td>
-              <td style={td}>
+              <td className={adminStyles.cell}>
                 <Link href={`/posts/${row.postId}/comments`}>{row.postTitle}</Link>
               </td>
-              <td style={td}>
+              <td className={adminStyles.cell}>
                 {row.commenterName} <span style={{ color: "#666" }}>({row.commenterEmail})</span>
               </td>
-              <td style={{ ...td, maxWidth: 320 }}>{row.bodyText}</td>
-              <td style={td}>{row.status}</td>
-              <td style={td}>{row.threadStatus}</td>
-              <td style={nowrapTd}>{formatDate(row.createdAt, dateFormat)}</td>
-              <td style={nowrapTd}>{row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}</td>
-              <td style={nowrapTd}>
+              <td className={adminStyles.cell} style={{ maxWidth: 320 }}>
+                {row.bodyText}
+              </td>
+              <td className={adminStyles.cell}>{row.status}</td>
+              <td className={adminStyles.cell}>{row.threadStatus}</td>
+              <td className={adminStyles.nowrapCell}>{formatDate(row.createdAt, dateFormat)}</td>
+              <td className={adminStyles.nowrapCell}>{row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}</td>
+              <td className={adminStyles.nowrapCell}>
                 {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
               </td>
-              <td style={td}>
+              <td className={adminStyles.cell}>
                 <ActionCell comment={row} disabled={row.deleted} />
               </td>
-              <td style={td}>
+              <td className={adminStyles.cell}>
                 <DeleteCell comment={row} onDeleted={revealRow} />
               </td>
             </tr>
@@ -507,7 +482,7 @@ export default function CommentsTable({
         </tbody>
       </table>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }} className={styles.paginationBar}>
+      <div className={adminStyles.paginationBar}>
         <label>
           Rows per page:{" "}
           <select value={filters.pageSize} onChange={(e) => updateFilters({ pageSize: Number(e.target.value) as CommentsFilters["pageSize"] })}>
@@ -534,7 +509,7 @@ export default function CommentsTable({
         </button>
       </div>
 
-      <p style={{ marginTop: 12 }}>
+      <p className={adminStyles.dateFormatRow}>
         <label>
           Date format:{" "}
           <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as DateFormat)}>
@@ -546,7 +521,7 @@ export default function CommentsTable({
           </select>
         </label>
       </p>
-      <p style={{ marginTop: 8 }}>
+      <p className={adminStyles.showDeletedRow}>
         <label>
           <input
             type="checkbox"
@@ -557,86 +532,86 @@ export default function CommentsTable({
         </label>
       </p>
 
-      <details style={{ marginTop: "1em", marginBottom: "1em", border: "1px solid #ddd", borderRadius: 4, padding: "8px 12px" }}>
-        <summary style={{ cursor: "pointer", fontWeight: "bold" }}>Help: filtering &amp; the URL</summary>
-        <div style={{ marginTop: 8, fontSize: "0.9rem", color: "#333" }}>
+      <details className={styles.helpPanel}>
+        <summary className={styles.helpSummary}>Help: filtering &amp; the URL</summary>
+        <div className={styles.helpBody}>
           <p>The filters below are mirrored into the page&apos;s querystring, so a filtered view can be bookmarked or shared.</p>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+          <table className={styles.helpTable}>
             <thead>
               <tr style={{ textAlign: "left" }}>
-                <th style={helpTh}>Param</th>
-                <th style={helpTh}>Meaning</th>
-                <th style={helpTh}>Control</th>
+                <th className={styles.helpHeaderCell}>Param</th>
+                <th className={styles.helpHeaderCell}>Meaning</th>
+                <th className={styles.helpHeaderCell}>Control</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>status</code>
                 </td>
-                <td style={helpTd}>Comma-separated {STATUS_OPTIONS.join(", ")}; omitted means all.</td>
-                <td style={helpTd}>Status dropdown</td>
+                <td className={styles.helpCell}>Comma-separated {STATUS_OPTIONS.join(", ")}; omitted means all.</td>
+                <td className={styles.helpCell}>Status dropdown</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>threadStatus</code>
                 </td>
-                <td style={helpTd}>Comma-separated {THREAD_STATUS_OPTIONS.join(", ")}; omitted means all.</td>
-                <td style={helpTd}>Thread status dropdown</td>
+                <td className={styles.helpCell}>Comma-separated {THREAD_STATUS_OPTIONS.join(", ")}; omitted means all.</td>
+                <td className={styles.helpCell}>Thread status dropdown</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>deleted</code>
                 </td>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>1</code> to include deleted comments; omitted hides them.
                 </td>
-                <td style={helpTd}>Show deleted rows checkbox</td>
+                <td className={styles.helpCell}>Show deleted rows checkbox</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>q</code>
                 </td>
-                <td style={helpTd}>Free-text search over the comment body and commenter name/email.</td>
-                <td style={helpTd}>Search box</td>
+                <td className={styles.helpCell}>Free-text search over the comment body and commenter name/email.</td>
+                <td className={styles.helpCell}>Search box</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>page</code> / <code>pageSize</code>
                 </td>
-                <td style={helpTd}>1-indexed page number, and rows per page ({PAGE_SIZE_OPTIONS.join(", ")}).</td>
-                <td style={helpTd}>Prev/Next and rows-per-page dropdown</td>
+                <td className={styles.helpCell}>1-indexed page number, and rows per page ({PAGE_SIZE_OPTIONS.join(", ")}).</td>
+                <td className={styles.helpCell}>Prev/Next and rows-per-page dropdown</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>sort</code>
                 </td>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   Comma-separated <code>key:asc</code>/<code>key:desc</code> pairs; ctrl-click a column to add it as a
                   secondary sort key.
                 </td>
-                <td style={helpTd}>Click a column header</td>
+                <td className={styles.helpCell}>Click a column header</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>post</code>
                 </td>
-                <td style={helpTd}>A post id; shows only that post&apos;s comments.</td>
-                <td style={helpTd}>Deep link only — edit the URL</td>
+                <td className={styles.helpCell}>A post id; shows only that post&apos;s comments.</td>
+                <td className={styles.helpCell}>Deep link only — edit the URL</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>author</code>
                 </td>
-                <td style={helpTd}>A user id; shows only comments on posts that user is credited as an author of.</td>
-                <td style={helpTd}>Deep link only — edit the URL</td>
+                <td className={styles.helpCell}>A user id; shows only comments on posts that user is credited as an author of.</td>
+                <td className={styles.helpCell}>Deep link only — edit the URL</td>
               </tr>
               <tr>
-                <td style={helpTd}>
+                <td className={styles.helpCell}>
                   <code>commenter</code>
                 </td>
-                <td style={helpTd}>A commenter id; shows only that person&apos;s comments.</td>
-                <td style={helpTd}>Deep link only — edit the URL</td>
+                <td className={styles.helpCell}>A commenter id; shows only that person&apos;s comments.</td>
+                <td className={styles.helpCell}>Deep link only — edit the URL</td>
               </tr>
             </tbody>
           </table>
