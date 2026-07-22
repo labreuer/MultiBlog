@@ -124,9 +124,11 @@ alongside "Manage Posts", admin-only.
 
 **Table** (`UsersTable.tsx`), one row per user: `name`, `email`, `adminInitials`, `role`,
 `image`, `moderationPolicy`, `color`, `createdAt`, a link to that user's published posts (via
-the existing `/authors/[id]` page, blank if they have none), a `comments` placeholder column
-reserved for future comment-management UI (no data wired up yet), and a trailing unlabeled
-delete/restore icon column (below). No `id` column — nothing on the page needs a user's raw
+the existing `/authors/[slug]` page, blank if they have none), a `comments` placeholder column
+reserved for future comment-management UI (no data wired up yet), a link to that user's
+slug-management page (`/users/[id]/slug`, §4a), and a trailing delete/restore icon column whose
+header is the same sortable black-`IconTrash` control as `PostsTable`'s (§3c). No `id` column
+— nothing on the page needs a user's raw
 id visible, and `NameCell`/`DeleteCell` etc. already thread `row.id` through as a prop rather
 than reading it off the DOM. `name` has a `minWidth` (double its previous rendered width, added
 2026-07-21) since it's the column most likely to need room for a longer value; `createdAt` is
@@ -210,7 +212,11 @@ date in the table immediately.
 `deletePost`/`restorePost` (`src/app/actions/posts.ts`) reuse the same `canUserEditPost` gate
 as the editor itself: you can delete what you can edit. A deleted row stays in the table
 (dimmed, icon swapped to "restore") instead of disappearing, so undoing a mis-click is one
-more click in place rather than a trip elsewhere.
+more click in place rather than a trip elsewhere. The column's header is itself a black
+`IconTrash` (deliberately not the row buttons' red — a neutral sort control, not a destructive
+one) wrapped in a button matching `DeleteCell`'s own padding/border/background, so its icon's
+left edge lines up with the row icons below it; clicking it sorts by deleted status like any
+other column (same `UsersTable`, §3b).
 
 **"Show deleted rows" checkbox**: defaults unchecked, persisted per-tab in `sessionStorage`
 (`src/lib/use-show-deleted.ts`, shared with `UsersTable`, §3b). Must default to `false`

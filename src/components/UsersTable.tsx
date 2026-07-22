@@ -64,7 +64,7 @@ function formatDate(date: Date, format: DateFormat): string {
   }
 }
 
-type SortKey = "name" | "email" | "adminInitials" | "role" | "moderationPolicy" | "posts" | "createdAt";
+type SortKey = "name" | "email" | "adminInitials" | "role" | "moderationPolicy" | "posts" | "createdAt" | "deleted";
 
 // Schema declaration order (Role enum) is already privilege order, so reuse
 // it for sorting rather than falling back to alphabetical.
@@ -86,6 +86,8 @@ function compareByKey(key: SortKey, a: UserRow, b: UserRow): number {
       return a.postCount - b.postCount;
     case "createdAt":
       return a.createdAt.getTime() - b.createdAt.getTime();
+    case "deleted":
+      return a.deleted === b.deleted ? 0 : a.deleted ? 1 : -1;
   }
 }
 
@@ -463,7 +465,21 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
           </th>
           <th style={th}>Comments</th>
           <th style={th}></th>
-          <th style={th}></th>
+          <th style={th}>
+            {/* padding/border/background match DeleteCell's button exactly, so
+                the icon's left edge lines up with the row icons below it —
+                see the horizontal-alignment fix in this file's history. */}
+            <button
+              type="button"
+              onClick={(e) => handleSort("deleted", e.ctrlKey)}
+              aria-label="Sort by deleted status"
+              title="Sort by deleted status"
+              style={{ background: "none", border: "none", padding: 4, cursor: "pointer" }}
+            >
+              <IconTrash size={16} color="#000" style={{ verticalAlign: "middle" }} />
+              {sortIndicator("deleted")}
+            </button>
+          </th>
         </tr>
       </thead>
       <tbody>

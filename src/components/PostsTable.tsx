@@ -153,7 +153,7 @@ function formatDate(date: Date, format: DateFormat): string {
   }
 }
 
-type SortKey = "title" | "authors" | "published" | "comments" | "ahead" | "editor" | "lastEdit" | "created";
+type SortKey = "title" | "authors" | "published" | "comments" | "ahead" | "editor" | "lastEdit" | "created" | "deleted";
 
 function compareNullableDates(a: Date | null, b: Date | null): number {
   if (a === null && b === null) return 0;
@@ -205,6 +205,8 @@ function compareByKey(key: SortKey, a: PostRow, b: PostRow, dir: "asc" | "desc")
       return a.approved - b.approved;
     case "created":
       return a.createdAt.getTime() - b.createdAt.getTime();
+    case "deleted":
+      return a.deleted === b.deleted ? 0 : a.deleted ? 1 : -1;
   }
 }
 
@@ -306,7 +308,21 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
             <th style={nowrapSortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
               Created at{sortIndicator("created")}
             </th>
-            <th style={th}></th>
+            <th style={th}>
+              {/* padding/border/background match DeleteCell's button exactly, so
+                  the icon's left edge lines up with the row icons below it —
+                  see the horizontal-alignment fix in this file's history. */}
+              <button
+                type="button"
+                onClick={(e) => handleSort("deleted", e.ctrlKey)}
+                aria-label="Sort by deleted status"
+                title="Sort by deleted status"
+                style={{ background: "none", border: "none", padding: 4, cursor: "pointer" }}
+              >
+                <IconTrash size={16} color="#000" style={{ verticalAlign: "middle" }} />
+                {sortIndicator("deleted")}
+              </button>
+            </th>
           </tr>
         </thead>
         <tbody>
