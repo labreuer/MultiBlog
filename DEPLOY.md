@@ -220,6 +220,20 @@ free -h                                                       # confirm Swap: 2.
 Swap only has to cover the build; steady-state runtime stays comfortably under 1 GB. (If you
 later resize to a ≥2 GB plan, the swap is harmless to leave in place.)
 
+> **Swap alone isn't enough — confirmed on a real 1 GB Nanode.** `next build`'s TypeScript
+> step still crashed with `JavaScript heap out of memory` even with the swap above active and
+> almost entirely free. That error is V8 hitting **its own internal heap ceiling**, not an
+> OS-level OOM-kill — V8 auto-sizes that ceiling from physical RAM alone and ignores swap, so
+> on a ~956 MB box the default lands too low to get through the build regardless of how much
+> swap is sitting idle. Fix: explicitly raise the ceiling so V8 actually reaches into the
+> swap:
+> ```bash
+> NODE_OPTIONS="--max-old-space-size=3072" npm run build
+> ```
+> 3072 MB fits inside the ~3.4 GB combined RAM+swap with headroom left for Postgres/nginx/
+> sshd. The build runs slower once it's actually swapping, but completes. This applies to
+> every build on this box, not just the first — `deploy/deploy.sh` sets it already (§10).
+
 ---
 
 ## 3. Create the database + role
@@ -306,8 +320,8 @@ npx prisma migrate deploy
 npx tsx scripts/create-admin.ts labreuer@gmail.com "Luke Breuer" LB '<password>'
 
 # 7. Build the Next app  (NEXT_PUBLIC_COLLAB_URL must already be set — see §4 note;
-#    on the 1 GB Nanode this OOMs without the swap from §2h)
-npm run build
+#    on the 1 GB Nanode, swap alone isn't enough — see the NODE_OPTIONS note in §2h)
+NODE_OPTIONS="--max-old-space-size=3072" npm run build
 
 # 8. Install & start the systemd units (§6), configure nginx (§7), then verify (§8)
 ```

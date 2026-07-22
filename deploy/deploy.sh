@@ -28,7 +28,10 @@ echo "==> Applying migrations"
 npx prisma migrate deploy
 
 echo "==> Building Next.js app"
-npm run build
+# On a 1 GB Nanode, V8 auto-sizes its heap ceiling from physical RAM alone
+# (ignores swap), so the default is too low to get through the build even
+# with swap free. Raise it explicitly. See DEPLOY.md §2h.
+NODE_OPTIONS="--max-old-space-size=3072" npm run build
 
 echo "==> Restarting services"
 sudo systemctl restart multiblog-web multiblog-collab
