@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { IconTrash, IconTrashOff } from "@tabler/icons-react";
-import { useSortableRows } from "@/lib/use-sortable-rows";
+import { nextSortColumns } from "@/lib/use-sortable-rows";
 import { DATE_FORMATS, type DateFormat, formatDate } from "@/lib/format-date";
+import {
+  STATUS_OPTIONS,
+  THREAD_STATUS_OPTIONS,
+  PAGE_SIZE_OPTIONS,
+  type CommentsFilters,
+  type CommentsSortKey,
+  buildCommentsQueryString,
+} from "@/lib/comments-query";
 import {
   moderateComment,
   deleteComment,
@@ -34,9 +41,6 @@ export type CommentRow = {
   commenterCounts: { submitted: number; inModeration: number; spam: number };
 };
 
-const STATUS_OPTIONS: CommentStatus[] = ["PENDING", "APPROVED", "SPAM"];
-const THREAD_STATUS_OPTIONS: ThreadStatus[] = ["ACTIVE", "DETACHED", "RESOLVED"];
-
 const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid #ddd" };
 const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
 const sortableTh: React.CSSProperties = { ...th, cursor: "pointer", userSelect: "none" };
@@ -44,15 +48,6 @@ const nowrapTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
 const nowrapSortableTh: React.CSSProperties = { ...sortableTh, whiteSpace: "nowrap" };
 const helpTh: React.CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #ccc" };
 const helpTd: React.CSSProperties = { padding: "4px 8px", verticalAlign: "top", borderBottom: "1px solid #eee" };
-
-// Selection is either "every option" (the ALL checkbox, the default — no
-// querystring param) or an explicit subset. Unchecking every individual
-// option snaps back to ALL rather than leaving an unusable empty selection.
-function parseSetParam<T extends string>(value: string | null, all: readonly T[]): Set<T> | "ALL" {
-  if (!value) return "ALL";
-  const parts = value.split(",").filter((p): p is T => (all as readonly string[]).includes(p as T));
-  return parts.length > 0 ? new Set(parts) : "ALL";
-}
 
 function MultiSelectDropdown<T extends string>({
   label,
@@ -136,7 +131,7 @@ function DeleteCell({
   onDeleted,
 }: {
   comment: CommentRow;
-  onDeleted: (id: string) => void;
+  onDeleted: (row: CommentRow) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -150,7 +145,7 @@ function DeleteCell({
           await restoreComment(comment.id);
         } else {
           await deleteComment(comment.id);
-          onDeleted(comment.id);
+          onDeleted(comment);
         }
         router.refresh();
       } catch (e) {
@@ -176,127 +171,107 @@ function DeleteCell({
   );
 }
 
-type SortKey = "post" | "commenter" | "status" | "threadStatus" | "created" | "statusChanged" | "counts";
-
-function compareNullableDates(a: Date | null, b: Date | null): number {
-  if (a === null && b === null) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return a.getTime() - b.getTime();
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- signature required by useSortableRows; no key here needs the direction
-function compareByKey(key: SortKey, a: CommentRow, b: CommentRow, dir: "asc" | "desc"): number {
-  switch (key) {
-    case "post":
-      return a.postTitle.localeCompare(b.postTitle);
-    case "commenter":
-      return a.commenterName.localeCompare(b.commenterName);
-    case "status":
-      return a.status.localeCompare(b.status);
-    case "threadStatus":
-      return a.threadStatus.localeCompare(b.threadStatus);
-    case "created":
-      return a.createdAt.getTime() - b.createdAt.getTime();
-    case "statusChanged":
-      return compareNullableDates(a.statusChangedAt, b.statusChangedAt);
-    case "counts":
-      return a.commenterCounts.submitted - b.commenterCounts.submitted;
-  }
-}
-
-export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
+export default function CommentsTable({
+  rows,
+  totalCount,
+  filters,
+}: {
+  rows: CommentRow[];
+  totalCount: number;
+  filters: CommentsFilters;
+}) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
-  const [searchText, setSearchText] = useState("");
-  const [status, setStatus] = useState<Set<CommentStatus> | "ALL">("ALL");
-  const [threadStatus, setThreadStatus] = useState<Set<ThreadStatus> | "ALL">("ALL");
-  const [showDeleted, setShowDeleted] = useState(false);
+  const [searchDraft, setSearchDraft] = useState(filters.q);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+  // Rows deleted (or bulk-deleted) during this visit are kept visible —
+  // deleting one row shouldn't yank it out of view when `deleted` isn't
+  // shown, since the server refetch that follows won't include it anymore.
+  // Cleared whenever the URL's querystring actually changes (a real
+  // filter/sort/page navigation), but not by the same-URL refresh a
+  // delete/restore/moderate action triggers.
+  const [revealedRows, setRevealedRows] = useState<Map<string, CommentRow>>(new Map());
   const [bulkPending, setBulkPending] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
-  const initializedFromUrl = useRef(false);
+  const prevSearchParamsRef = useRef(searchParams.toString());
 
-  // Read initial filter state from the URL once, after mount — matches
-  // useShowDeletedRows's pattern (see src/lib/use-show-deleted.ts): SSR has
-  // no access to browser-only state here either, so seeding from
-  // searchParams in the initializer would risk a hydration mismatch if this
-  // page is ever server-rendered with a query string already attached.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing initial value from the URL (an external system); see use-show-deleted.ts
-    setSearchText(searchParams.get("q") ?? "");
-    setStatus(parseSetParam(searchParams.get("status"), STATUS_OPTIONS));
-    setThreadStatus(parseSetParam(searchParams.get("threadStatus"), THREAD_STATUS_OPTIONS));
-    setShowDeleted(searchParams.get("deleted") === "1");
-    initializedFromUrl.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount only, like useShowDeletedRows
-  }, []);
+    const current = searchParams.toString();
+    if (prevSearchParamsRef.current !== current) {
+      prevSearchParamsRef.current = current;
+      setRevealedRows(new Map());
+    }
+  }, [searchParams]);
 
-  // Mirrors the filter UI into the URL via the plain history API (not
-  // next/navigation's router) so the page never re-fetches from the server —
-  // every filter here only narrows rows already loaded into `rows`.
+  // Keeps the search box in sync when `filters.q` changes for a reason other
+  // than this component's own debounced navigation (e.g. browser back/
+  // forward, or a deep link with ?q= already set) — a no-op the rest of the
+  // time, since by then searchDraft already equals filters.q.
   useEffect(() => {
-    if (!initializedFromUrl.current) return;
-    const params = new URLSearchParams();
-    if (searchText.trim()) params.set("q", searchText.trim());
-    if (status !== "ALL") params.set("status", [...status].join(","));
-    if (threadStatus !== "ALL") params.set("threadStatus", [...threadStatus].join(","));
-    if (showDeleted) params.set("deleted", "1");
-    const qs = params.toString();
-    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-    window.history.replaceState(null, "", url);
-  }, [searchText, status, threadStatus, showDeleted]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from the URL (an external system), see above
+    setSearchDraft(filters.q);
+  }, [filters.q]);
 
-  function revealRow(id: string) {
-    setRevealedIds((prev) => new Set(prev).add(id));
+  function navigate(partial: Partial<CommentsFilters>) {
+    const nextFilters: CommentsFilters = { ...filters, ...partial };
+    const qs = buildCommentsQueryString(nextFilters, searchParams);
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  const filteredRows = useMemo(() => {
-    const needle = searchText.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (!showDeleted && row.deleted && !revealedIds.has(row.id)) return false;
-      if (status !== "ALL" && !status.has(row.status)) return false;
-      if (threadStatus !== "ALL" && !threadStatus.has(row.threadStatus)) return false;
-      if (
-        needle &&
-        !row.bodyText.toLowerCase().includes(needle) &&
-        !row.commenterName.toLowerCase().includes(needle) &&
-        !row.commenterEmail.toLowerCase().includes(needle)
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [rows, searchText, status, threadStatus, showDeleted, revealedIds]);
+  // Any filter/sort/page-size change resets to page 1; only Prev/Next
+  // (which call `navigate` directly) are meant to change just the page.
+  function updateFilters(partial: Partial<CommentsFilters>) {
+    navigate({ page: 1, ...partial });
+  }
 
-  const { sortedRows, handleSort, sortState } = useSortableRows(filteredRows, compareByKey);
+  function handleSearchChange(value: string) {
+    setSearchDraft(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => updateFilters({ q: value }), 400);
+  }
 
-  function sortIndicator(key: SortKey) {
-    const state = sortState(key);
-    if (!state) return null;
+  function handleSort(key: CommentsSortKey, addToSort: boolean) {
+    updateFilters({ sort: nextSortColumns(filters.sort, key, addToSort) });
+  }
+
+  function sortIndicator(key: CommentsSortKey) {
+    const idx = filters.sort.findIndex((c) => c.key === key);
+    if (idx === -1) return null;
     return (
       <>
         {" "}
-        {state.dir === "asc" ? "▲" : "▼"}
-        {state.priority > 1 && <sup>{state.priority}</sup>}
+        {filters.sort[idx].dir === "asc" ? "▲" : "▼"}
+        {idx > 0 && <sup>{idx + 1}</sup>}
       </>
     );
   }
 
-  const visibleIds = useMemo(() => new Set(sortedRows.map((r) => r.id)), [sortedRows]);
-  const allVisibleSelected = sortedRows.length > 0 && sortedRows.every((r) => selectedIds.has(r.id));
+  function revealRow(row: CommentRow) {
+    setRevealedRows((prev) => new Map(prev).set(row.id, { ...row, deleted: true }));
+  }
+
+  const displayRows = useMemo(() => {
+    const overlayOnly = [...revealedRows.values()].filter((r) => !rows.some((row) => row.id === r.id));
+    return [...rows, ...overlayOnly];
+  }, [rows, revealedRows]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / filters.pageSize));
+  const currentPage = Math.min(filters.page, totalPages);
+
+  const allVisibleSelected = displayRows.length > 0 && displayRows.every((r) => selectedIds.has(r.id));
 
   function toggleSelectAll() {
     setSelectedIds((prev) => {
       if (allVisibleSelected) {
         const next = new Set(prev);
-        for (const id of visibleIds) next.delete(id);
+        for (const row of displayRows) next.delete(row.id);
         return next;
       }
-      return new Set([...prev, ...visibleIds]);
+      return new Set([...prev, ...displayRows.map((r) => r.id)]);
     });
   }
 
@@ -311,12 +286,11 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
 
   async function runBulk(action: "approve" | "spam" | "delete" | "restore") {
     setBulkError(null);
-    const selected = sortedRows.filter((r) => selectedIds.has(r.id));
-    const targetIds =
-      action === "restore"
-        ? selected.filter((r) => r.deleted).map((r) => r.id)
-        : selected.filter((r) => !r.deleted).map((r) => r.id);
-    if (targetIds.length === 0) return;
+    const selected = displayRows.filter((r) => selectedIds.has(r.id));
+    const targetRows =
+      action === "restore" ? selected.filter((r) => r.deleted) : selected.filter((r) => !r.deleted);
+    if (targetRows.length === 0) return;
+    const targetIds = targetRows.map((r) => r.id);
 
     setBulkPending(true);
     try {
@@ -326,7 +300,11 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
       else await bulkRestoreComments(targetIds);
 
       if (action === "delete") {
-        setRevealedIds((prev) => new Set([...prev, ...targetIds]));
+        setRevealedRows((prev) => {
+          const next = new Map(prev);
+          for (const row of targetRows) next.set(row.id, { ...row, deleted: true });
+          return next;
+        });
       }
       setSelectedIds(new Set());
       router.refresh();
@@ -337,7 +315,7 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
     }
   }
 
-  if (rows.length === 0) {
+  if (totalCount === 0 && displayRows.length === 0) {
     return <p>No comments yet.</p>;
   }
 
@@ -388,6 +366,23 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
               </tr>
               <tr>
                 <td style={helpTd}>
+                  <code>page</code> / <code>pageSize</code>
+                </td>
+                <td style={helpTd}>1-indexed page number, and rows per page ({PAGE_SIZE_OPTIONS.join(", ")}).</td>
+                <td style={helpTd}>Prev/Next and rows-per-page dropdown</td>
+              </tr>
+              <tr>
+                <td style={helpTd}>
+                  <code>sort</code>
+                </td>
+                <td style={helpTd}>
+                  Comma-separated <code>key:asc</code>/<code>key:desc</code> pairs; ctrl-click a column to add it as a
+                  secondary sort key.
+                </td>
+                <td style={helpTd}>Click a column header</td>
+              </tr>
+              <tr>
+                <td style={helpTd}>
                   <code>post</code>
                 </td>
                 <td style={helpTd}>A post id; shows only that post&apos;s comments.</td>
@@ -412,7 +407,7 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
           <p style={{ marginTop: 8 }}>
             The <strong>Commenter activity</strong> column reads {"{submitted} / {in moderation} / {spam}"} — counts of
             that commenter&apos;s non-deleted comments visible on this page (an author only sees counts scoped to their
-            own posts).
+            own posts), independent of the current status/thread-status/search filters.
           </p>
         </div>
       </details>
@@ -420,18 +415,23 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
         <input
           type="search"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
+          value={searchDraft}
+          onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Search comment or commenter …"
           aria-label="Search comments"
           style={{ padding: "6px 12px", minWidth: 240 }}
         />
-        <MultiSelectDropdown label="Status" options={STATUS_OPTIONS} selected={status} onChange={setStatus} />
+        <MultiSelectDropdown
+          label="Status"
+          options={STATUS_OPTIONS}
+          selected={filters.status}
+          onChange={(next) => updateFilters({ status: next })}
+        />
         <MultiSelectDropdown
           label="Thread status"
           options={THREAD_STATUS_OPTIONS}
-          selected={threadStatus}
-          onChange={setThreadStatus}
+          selected={filters.threadStatus}
+          onChange={(next) => updateFilters({ threadStatus: next })}
         />
       </div>
 
@@ -490,15 +490,13 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
             <th style={nowrapSortableTh} onClick={(e) => handleSort("statusChanged", e.ctrlKey)}>
               Status changed{sortIndicator("statusChanged")}
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("counts", e.ctrlKey)}>
-              Commenter activity{sortIndicator("counts")}
-            </th>
+            <th style={th}>Commenter activity</th>
             <th style={th}>Action</th>
             <th style={th}></th>
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map((row) => (
+          {displayRows.map((row) => (
             <tr key={row.id} style={{ borderBottom: "1px solid #eee", opacity: row.deleted ? 0.5 : 1 }}>
               <td style={td}>
                 <input
@@ -533,6 +531,33 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
         </tbody>
       </table>
 
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+        <label>
+          Rows per page:{" "}
+          <select value={filters.pageSize} onChange={(e) => updateFilters({ pageSize: Number(e.target.value) as CommentsFilters["pageSize"] })}>
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span>
+          {totalCount === 0
+            ? "0 comments"
+            : `${(currentPage - 1) * filters.pageSize + 1}–${Math.min(currentPage * filters.pageSize, totalCount)} of ${totalCount}`}
+        </span>
+        <button type="button" onClick={() => navigate({ page: currentPage - 1 })} disabled={currentPage <= 1}>
+          ◀ Prev
+        </button>
+        <span>
+          Page {currentPage} of {totalPages}
+        </span>
+        <button type="button" onClick={() => navigate({ page: currentPage + 1 })} disabled={currentPage >= totalPages}>
+          Next ▶
+        </button>
+      </div>
+
       <p style={{ marginTop: 12 }}>
         <label>
           Date format:{" "}
@@ -547,8 +572,12 @@ export default function CommentsTable({ rows }: { rows: CommentRow[] }) {
       </p>
       <p style={{ marginTop: 8 }}>
         <label>
-          <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} /> Show deleted
-          rows
+          <input
+            type="checkbox"
+            checked={filters.deleted}
+            onChange={(e) => updateFilters({ deleted: e.target.checked })}
+          />{" "}
+          Show deleted rows
         </label>
       </p>
     </>

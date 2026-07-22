@@ -3,31 +3,61 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
 import type { Prisma } from "@/generated/prisma/client";
+import { parseCommentsFilters, type CommentsSortKey } from "@/lib/comments-query";
+import type { SortColumn } from "@/lib/use-sortable-rows";
 import CommentsTable from "@/components/CommentsTable";
 
 // Deep-link-only filters (no dedicated dropdown yet — see the page's Help
 // section): ?post=<postId>, ?author=<userId>, ?commenter=<commenterId>.
 // Combined with whatever role-based post scoping already applies below.
-function parseDeepLinkWhere(searchParams: Record<string, string | string[] | undefined>): Prisma.CommentWhereInput {
+function parseDeepLinkWhere(searchParams: URLSearchParams): Prisma.CommentWhereInput {
   const where: Prisma.CommentWhereInput = {};
-  const post = searchParams.post;
-  const author = searchParams.author;
-  const commenter = searchParams.commenter;
+  const post = searchParams.get("post");
+  const author = searchParams.get("author");
+  const commenter = searchParams.get("commenter");
 
   const threadWhere: Prisma.CommentThreadWhereInput = {};
-  if (typeof post === "string" && post) {
-    threadWhere.postId = post;
-  }
-  if (typeof author === "string" && author) {
-    threadWhere.post = { authors: { some: { userId: author } } };
-  }
+  if (post) threadWhere.postId = post;
+  if (author) threadWhere.post = { authors: { some: { userId: author } } };
   if (Object.keys(threadWhere).length > 0) {
     where.thread = threadWhere;
   }
-  if (typeof commenter === "string" && commenter) {
-    where.commenterId = commenter;
+  if (commenter) where.commenterId = commenter;
+  return where;
+}
+
+function buildFilterWhere(filters: ReturnType<typeof parseCommentsFilters>): Prisma.CommentWhereInput {
+  const where: Prisma.CommentWhereInput = {};
+  if (filters.status !== "ALL") where.status = { in: [...filters.status] };
+  if (filters.threadStatus !== "ALL") where.thread = { status: { in: [...filters.threadStatus] } };
+  if (!filters.deleted) where.deletedByUserId = null;
+  if (filters.q) {
+    where.OR = [
+      { body: { path: ["text"], string_contains: filters.q, mode: "insensitive" } },
+      { commenter: { displayName: { contains: filters.q, mode: "insensitive" } } },
+      { commenter: { email: { contains: filters.q, mode: "insensitive" } } },
+    ];
   }
   return where;
+}
+
+function buildOrderBy(sort: SortColumn<CommentsSortKey>[]): Prisma.CommentOrderByWithRelationInput[] {
+  return sort.map(({ key, dir }): Prisma.CommentOrderByWithRelationInput => {
+    switch (key) {
+      case "status":
+        return { status: dir };
+      case "threadStatus":
+        return { thread: { status: dir } };
+      case "post":
+        return { thread: { post: { title: dir } } };
+      case "commenter":
+        return { commenter: { displayName: dir } };
+      case "created":
+        return { createdAt: dir };
+      case "statusChanged":
+        return { statusChangedAt: dir };
+    }
+  });
 }
 
 export default async function CommentsPage({
@@ -49,38 +79,60 @@ export default async function CommentsPage({
   }
 
   const resolvedSearchParams = await searchParams;
-  const scopeWhere: Prisma.CommentWhereInput = canEditAnyPost(session.user.role)
-    ? {}
-    : { thread: { post: { authors: { some: { userId: session.user.id } } } } };
-  const deepLinkWhere = parseDeepLinkWhere(resolvedSearchParams);
+  const flatParams: Record<string, string> = {};
+  for (const [key, value] of Object.entries(resolvedSearchParams)) {
+    if (typeof value === "string") flatParams[key] = value;
+    else if (Array.isArray(value) && value.length > 0) flatParams[key] = value[0];
+  }
+  const urlSearchParams = new URLSearchParams(flatParams);
+  const filters = parseCommentsFilters(urlSearchParams);
 
-  const comments = await prisma.comment.findMany({
-    where: { AND: [scopeWhere, deepLinkWhere] },
-    orderBy: { createdAt: "desc" },
-    include: {
-      commenter: { select: { id: true, displayName: true, email: true } },
-      thread: {
-        select: {
-          id: true,
-          status: true,
-          quotedText: true,
-          post: { select: { id: true, slug: true, title: true } },
+  // `baseWhere` is "everything this user could ever see here" (role scope +
+  // deep links); `filterWhere` layers the UI filters on top of it. Kept
+  // separate because the commenter-activity counts below are meant to
+  // summarize a commenter's overall activity within what this user can see,
+  // not just activity matching today's status/threadStatus/search filters.
+  const baseWhere: Prisma.CommentWhereInput = {
+    AND: [
+      canEditAnyPost(session.user.role) ? {} : { thread: { post: { authors: { some: { userId: session.user.id } } } } },
+      parseDeepLinkWhere(urlSearchParams),
+    ],
+  };
+  const where: Prisma.CommentWhereInput = { AND: [baseWhere, buildFilterWhere(filters)] };
+  const orderBy = buildOrderBy(filters.sort);
+
+  const [comments, totalCount, countRows] = await Promise.all([
+    prisma.comment.findMany({
+      where,
+      orderBy,
+      take: filters.pageSize,
+      skip: (filters.page - 1) * filters.pageSize,
+      include: {
+        commenter: { select: { id: true, displayName: true, email: true } },
+        thread: {
+          select: {
+            id: true,
+            status: true,
+            quotedText: true,
+            post: { select: { id: true, slug: true, title: true } },
+          },
         },
       },
-    },
-  });
+    }),
+    prisma.comment.count({ where }),
+    prisma.comment.findMany({
+      where: { AND: [baseWhere, { deletedByUserId: null }] },
+      select: { commenterId: true, status: true },
+    }),
+  ]);
 
-  // Per-commenter counts, scoped to the same visible set of comments as the
-  // table itself (an AUTHOR shouldn't learn a commenter's activity on posts
-  // they can't see).
   const counts = new Map<string, { submitted: number; inModeration: number; spam: number }>();
-  for (const comment of comments) {
-    if (comment.deletedByUserId !== null) continue;
-    const entry = counts.get(comment.commenterId) ?? { submitted: 0, inModeration: 0, spam: 0 };
-    if (comment.status === "APPROVED") entry.submitted++;
-    else if (comment.status === "PENDING") entry.inModeration++;
-    else if (comment.status === "SPAM") entry.spam++;
-    counts.set(comment.commenterId, entry);
+  for (const row of countRows) {
+    const entry = counts.get(row.commenterId) ?? { submitted: 0, inModeration: 0, spam: 0 };
+    if (row.status === "APPROVED") entry.submitted++;
+    else if (row.status === "PENDING") entry.inModeration++;
+    else if (row.status === "SPAM") entry.spam++;
+    counts.set(row.commenterId, entry);
   }
 
   const rows = comments.map((comment) => {
@@ -106,7 +158,7 @@ export default async function CommentsPage({
   return (
     <main style={{ maxWidth: 1200, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Comments</h1>
-      <CommentsTable rows={rows} />
+      <CommentsTable rows={rows} totalCount={totalCount} filters={filters} />
     </main>
   );
 }

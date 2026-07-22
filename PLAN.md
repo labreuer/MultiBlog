@@ -561,25 +561,43 @@ is the site-wide counterpart: every comment across every post the signed-in user
 (all of them for ADMIN/EDITOR, own-authored posts only for AUTHOR — mirrors `/posts`'s own
 `canEditAnyPost` gate), filterable and actionable in bulk.
 
-- **Filters** mirror into the querystring via the plain `history` API (not the Next.js
-  router), since every filter only narrows rows already fetched — so no server round-trip,
-  and a filtered view is still bookmarkable/shareable. `status` and `threadStatus` are
-  multi-select dropdowns (with an "All" option); `deleted` and `q` (free-text over comment
-  body + commenter name/email) round out the four filters with UI. `post`, `author`, and
-  `commenter` work as deep-link-only querystring filters (applied server-side, no dropdown
-  yet) — e.g. for a future "moderate this author's comments" link.
+- **Filtering, sorting & pagination all happen server-side** (`comments-query.ts` is the one
+  place that knows the querystring shape — `status`, `threadStatus`, `deleted`, `q`, `page`,
+  `pageSize`, `sort` — shared by the server page, which turns it into a Prisma `where` /
+  `orderBy` / `take`+`skip`, and the client table, which parses it for display and
+  re-serializes it on change). Changing any control calls `router.replace()` with a new
+  querystring — a real navigation, not a client-side re-filter of an already-downloaded
+  array — so a comment volume beyond dev-DB size doesn't ship every row to the browser on
+  every load. `status` and `threadStatus` are multi-select dropdowns (with an "All" option);
+  `deleted`, `q` (free-text over comment body + commenter name/email, debounced 400ms so
+  typing doesn't fire a query per keystroke), `page`, and `pageSize` (10/25/50/100) round out
+  the filters with UI. `post`, `author`, and `commenter` remain deep-link-only querystring
+  filters (applied server-side, no dropdown yet) — e.g. for a future "moderate this author's
+  comments" link. Column headers sort server-side too, including ctrl-click multi-column sort
+  (`nextSortColumns`, factored out of `useSortableRows` so this URL-driven sort state could
+  reuse the same click/ctrl-click toggle semantics as `PostsTable`/`UsersTable`'s local-state
+  version) — except the commenter-activity column (see below), which stays display-only since
+  sorting by it would need a correlated subquery per row rather than a plain `orderBy`.
 - **Row actions**, one "Action" column: Approve / Pend / Spam (`moderateComment`, extended
   to accept `"pend"` alongside the existing `"approve"`/`"spam"`, mapping to
   `CommentStatus.PENDING`) plus a delete/restore toggle identical in spirit to `/posts`'s
-  soft-delete column (`deleteComment`/`restoreComment`).
-- **Bulk actions**: a row-checkbox column feeds a toolbar (Approve/Mark spam/Delete/Restore
-  selected) that appears once anything is selected, backed by batched server actions
-  (`bulkModerateComments`, `bulkDeleteComments`, `bulkRestoreComments`) — each silently skips
-  rows the action doesn't apply to (e.g. bulk-approve skips already-deleted rows) rather than
-  erroring on a mixed selection.
-- **Commenter activity column** reads `{submitted} / {in moderation} / {spam}` — counts of
-  that commenter's non-deleted comments, scoped to the same visible set as the table itself
-  (so an AUTHOR's view never leaks a commenter's activity on posts they can't manage).
+  soft-delete column (`deleteComment`/`restoreComment`). A deleted row stays visible (with a
+  visit-local overlay, `CommentsTable`'s `revealedRows`) until the next real navigation even
+  though the following server refetch would otherwise drop it — the same UX `PostsTable`/
+  `UsersTable` give a just-deleted row, just achieved without their sessionStorage-backed
+  `useShowDeletedRows`, since here `deleted` already lives in the querystring.
+- **Bulk actions**: a row-checkbox column (scoped to the current page only — cross-page
+  "select all N matching rows" is deliberately unresolved for now) feeds a toolbar
+  (Approve/Mark spam/Delete/Restore selected) that appears once anything is selected, backed
+  by batched server actions (`bulkModerateComments`, `bulkDeleteComments`,
+  `bulkRestoreComments`) — each silently skips rows the action doesn't apply to (e.g.
+  bulk-approve skips already-deleted rows) rather than erroring on a mixed selection.
+- **Commenter activity column** reads `{submitted} / {in moderation} / {spam}` — a separate,
+  lightweight (`commenterId`/`status` only) query scoped to role + deep-link filters but
+  *not* the status/threadStatus/deleted/q filters, so the counts summarize a commenter's
+  overall activity within what this user can see rather than just what the current filtered
+  page happens to show (an AUTHOR still never sees a commenter's activity on posts they can't
+  manage, since the role scope still applies).
 
 ---
 
