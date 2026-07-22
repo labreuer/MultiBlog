@@ -568,7 +568,8 @@ is the site-wide counterpart: every comment across every post the signed-in user
   re-serializes it on change). Changing any control calls `router.replace()` with a new
   querystring — a real navigation, not a client-side re-filter of an already-downloaded
   array — so a comment volume beyond dev-DB size doesn't ship every row to the browser on
-  every load. `status` and `threadStatus` are multi-select dropdowns (with an "All" option);
+  every load. `status` and `threadStatus` are multi-select dropdowns (with an "All" option,
+  closing on an outside click since `<details>` alone doesn't do that);
   `deleted`, `q` (free-text over comment body + commenter name/email, debounced 400ms so
   typing doesn't fire a query per keystroke), `page`, and `pageSize` (10/25/50/100) round out
   the filters with UI. `post`, `author`, and `commenter` remain deep-link-only querystring
@@ -587,11 +588,15 @@ is the site-wide counterpart: every comment across every post the signed-in user
   `UsersTable` give a just-deleted row, just achieved without their sessionStorage-backed
   `useShowDeletedRows`, since here `deleted` already lives in the querystring.
 - **Bulk actions**: a row-checkbox column (scoped to the current page only — cross-page
-  "select all N matching rows" is deliberately unresolved for now) feeds a toolbar
-  (Approve/Mark spam/Delete/Restore selected) that appears once anything is selected, backed
-  by batched server actions (`bulkModerateComments`, `bulkDeleteComments`,
-  `bulkRestoreComments`) — each silently skips rows the action doesn't apply to (e.g.
-  bulk-approve skips already-deleted rows) rather than erroring on a mixed selection.
+  "select all N matching rows" is deliberately unresolved for now) feeds a toolbar that
+  appears once anything is selected, mirroring the per-row Action column: Approve/Pend/
+  Spam styled identically (same `AdminTable.module.css` classes), then a delete icon
+  (`IconTrash`, `margin-left: 4em` to set it apart from the three moderation actions) and
+  a restore icon (`IconTrashOff`) styled like the table's own delete/restore toggle.
+  Backed by batched server actions (`bulkModerateComments` — now also taking `"pend"` —
+  `bulkDeleteComments`, `bulkRestoreComments`) — each silently skips rows the action
+  doesn't apply to (e.g. bulk-approve skips already-deleted rows) rather than erroring on
+  a mixed selection.
 - **Commenter activity column** reads `{submitted} / {in moderation} / {spam}` — a separate,
   lightweight (`commenterId`/`status` only) query scoped to role + deep-link filters but
   *not* the status/threadStatus/deleted/q filters, so the counts summarize a commenter's

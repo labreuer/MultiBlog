@@ -6,11 +6,29 @@ history views) is still plainly-styled inline React `style` objects with no unif
 palette — that's fine and not a gap to close. The conventions below are the ones that
 are real (used more than once, or deliberately chosen) as of 2026-07-21.
 
-## Approach: inline styles by default, CSS Modules for anything stateful
+## Approach: CSS Modules by default, inline styles only for genuinely dynamic values
 
-Per CLAUDE.md's Conventions section: **inline styles are the norm; CSS Modules only
-where media queries or pseudo-classes (`:hover`, `:focus`) are needed** — plain
-`style={{...}}` can't express those. Existing modules and why each needed one:
+This previously said the reverse (inline as the norm, a stylesheet only once a
+pseudo-class or media query forced the issue) and credited that policy to CLAUDE.md's
+Conventions section, which doesn't actually say that — CLAUDE.md only points here for
+"CSS Modules vs. inline," it doesn't prescribe a default. Inline-first also isn't
+standard practice: it skips the cascade, can't be shared or deduped by the bundler, and
+loses the pseudo-class/media-query runway immediately, as the exceptions below show.
+**Default to a CSS Module (co-located; same name as the component/page, unless it's
+meant to be shared across several — see `AdminTable.module.css` below); reserve inline
+`style={{...}}` for values that are genuinely computed per-instance** — a color read
+from data, a measured width — not for fixed rules.
+
+Most of the existing surface (admin tables, editor, moderation queue, history views)
+still carries inline styles written under the old policy and isn't being migrated
+retroactively just for this — that's a separate, larger cleanup, not a correction to
+make in passing. `components/AdminTable.module.css` and `app/comments/page.module.css`
+are the first modules created under the corrected default (not pseudo-class/media-query
+driven, unlike everything below); the rest predate it. `AdminTable.module.css` is
+named for the shared concept (styling common to the admin tables — `PostsTable`,
+`UsersTable`, `CommentsTable`) rather than after one component, even though `CommentsTable`
+is currently its only consumer — see the TODO at the bottom before assuming it already
+applies everywhere that name suggests:
 
 | File | Needs a stylesheet for |
 |---|---|
@@ -59,6 +77,7 @@ value that two systems depend on invites drift.
 | Danger/delete action | `#c00` (text/border, no fill) | `PostsTable.tsx`/`UsersTable.tsx` delete icon buttons, `PostSettingsPanel.module.css` `.deleteButton` — consistent across every soft-delete control in the admin/editor UI |
 | Diff view: insertion / deletion | `#0a5` on `#d4f7d4` / `#c00` on `#fbdada` | `history/[revisionNumber]/page.tsx` — not part of the palette above, ad hoc and only used there |
 | Drag-over highlight | `#eef4ff` background, `1px dashed #88a` outline | `PostSettingsPanel.module.css` `.dragOver` — ad hoc, only reordering UI so far |
+| Moderation action buttons (Approve / Pend / Spam) | light fill per action — `#d4f5d4` / `#faf3c0` / `#f8d4d4` — with a shared `1px solid #999` border and `2px` padding | `AdminTable.module.css` `.approve`/`.pend`/`.spam` + shared `.actionButton`, used by `ActionCell` — same neutral-gray border on all three so the fill color alone (not the border) carries the meaning |
 
 Quote-thread coloring was originally one fixed muted amber (`#b8935a`, itself toned down
 from an earlier, more saturated `#fff3b0`/`#d4a017` — see git history), the same for every
@@ -117,7 +136,8 @@ by design, not by accident.
   label/value pair, not siblings' columns against each other.
 - **`white-space: nowrap` on narrow auto-sized table columns** (`PostsTable.tsx`'s
   `nowrapTd`/`nowrapSortableTh`, added 2026-07-21; the same pair independently added to
-  `UsersTable.tsx` for its `createdAt` column): a plain `<table>` with no fixed column
+  `UsersTable.tsx` for its `createdAt` column, and again to `CommentsTable.tsx` for its
+  Created-at/Status-changed columns): a plain `<table>` with no fixed column
   widths shrinks a column until its content wraps, and the browser's default line-breaking
   treats both a space (any multi-word header/value, e.g. "Created at", "Luke Breuer") and a
   hyphen (a `yyyy-MM-dd` date) as valid break points — so a 9-column admin table routinely
@@ -142,3 +162,49 @@ by design, not by accident.
   keyboard support and the `toggle` event for free. Reach for a JS-driven collapse only
   when `<details>`'s default (no open/close animation, can't be controlled purely by
   external state without an effect syncing `open`) doesn't fit.
+- **Multi-select filter dropdown** (`CommentsTable.tsx`'s `MultiSelectDropdown`, used for
+  `status`/`threadStatus`): also a bare `<details>`/`<summary>`, styled as a bordered pill
+  (`1px solid #ccc`, `border-radius: 4`) with the current selection summarized in the
+  `<summary>` text itself rather than a separate label. `<details>` doesn't close on an
+  outside click on its own, so a `mousedown` listener on `document` sets `.open = false`
+  directly on a ref to the element whenever the click target falls outside it — the one
+  piece of state here not left to the browser, since nothing else needs to react to
+  open/closed.
+- **Centered empty-state row inside a table** (`CommentsTable.tsx`, "no comments matching
+  the criteria"): a single `<tr>` with one `<td colSpan={<column count>}>` — `.emptyRow`
+  in `AdminTable.module.css` supplies `text-align: center` and `#666` (the standard
+  secondary/meta color above); the `<td>`'s own padding/vertical-align still comes from
+  the shared inline `td` style object. Keeps the table's header and column widths in
+  place instead of swapping the whole table out for a `<p>`, so filters/sort/pagination
+  controls around it stay usable while the result set is empty.
+- **Page-level breathing room** (`/comments`): the `<h1>` gets `margin-bottom: 1em`
+  (`.heading` in `app/comments/page.module.css`) and the main comments table gets
+  `margin-top: 1em` / `margin-bottom: 1em` (`.table` in `AdminTable.module.css`) —
+  plain fixed spacing around the two biggest visual blocks on the page, not tied to any
+  sibling's own margin the way the "symmetric whitespace" pattern above is.
+
+## TODO
+
+- **Migrate `PostsTable.tsx` and `UsersTable.tsx` onto `AdminTable.module.css`.** Despite
+  the name, it's only wired into `CommentsTable.tsx` today — a deliberate scoping
+  decision (see the Approach section above), not yet a real shared abstraction. Bringing
+  the other two admin tables onto it means reconciling real differences, not just
+  swapping imports:
+  - `PostsTable`'s `<table>` has no margin at all (the spacing comes from the search
+    input above it); `UsersTable`'s has `margin-top: 1em` but no `margin-bottom`;
+    `AdminTable.module.css`'s `.table` currently has both. Pick one convention.
+  - **Inspect `<tfoot>` usage before copying either one.** `UsersTable` wraps its
+    date-format/show-deleted controls in `<tfoot><tr><td colSpan={11}>`;
+    `PostsTable` (and `CommentsTable`, following it) uses plain sibling `<p>`/`<div>`
+    elements after `</table>` instead. These aren't equivalent — figure out which is
+    actually right (semantically, `<tfoot>` is meant for summary rows *of the table's
+    own data*, not unrelated controls like a page-size dropdown) rather than
+    defaulting to whichever two of the three tables currently agree.
+  - Neither table has the "always render headers, centered empty-row" behavior
+    `CommentsTable` has (`.emptyRow`) — both still bail out to a bare `<p>No
+    posts/users yet.</p>` before the table renders at all. Decide whether that's worth
+    changing for consistency, or left alone as a deliberate difference (nothing forces
+    all three tables to handle "no rows" identically).
+  - `PostsTable`/`UsersTable` have no pagination (`.paginationBar`) or moderation-style
+    multi-action buttons (`.actionButton`/`.approve`/`.pend`/`.spam`) — those classes
+    would stay comments-only regardless.

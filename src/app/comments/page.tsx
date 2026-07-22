@@ -6,6 +6,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { parseCommentsFilters, type CommentsSortKey } from "@/lib/comments-query";
 import type { SortColumn } from "@/lib/use-sortable-rows";
 import CommentsTable from "@/components/CommentsTable";
+import styles from "./page.module.css";
 
 // Deep-link-only filters (no dedicated dropdown yet — see the page's Help
 // section): ?post=<postId>, ?author=<userId>, ?commenter=<commenterId>.
@@ -157,7 +158,7 @@ export default async function CommentsPage({
 
   return (
     <main style={{ maxWidth: 1200, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Comments</h1>
+      <h1 className={styles.heading}>Comments</h1>
       <CommentsTable rows={rows} totalCount={totalCount} filters={filters} />
     </main>
   );

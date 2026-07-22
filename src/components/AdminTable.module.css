@@ -1,0 +1,42 @@
+.table {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+.paginationBar {
+  margin-bottom: 2em;
+}
+
+.emptyRow {
+  text-align: center;
+  color: #666;
+}
+
+.actionButton {
+  border: 1px solid #999;
+  padding: 2px;
+}
+
+.approve {
+  background-color: #d4f5d4;
+}
+
+.approve:hover:not(:disabled) {
+  background-color: #9fdf9f;
+}
+
+.pend {
+  background-color: #faf3c0;
+}
+
+.pend:hover:not(:disabled) {
+  background-color: #e8d873;
+}
+
+.spam {
+  background-color: #f8d4d4;
+}
+
+.spam:hover:not(:disabled) {
+  background-color: #ee9c9c;
+}

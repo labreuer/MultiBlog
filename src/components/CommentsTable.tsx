@@ -23,6 +23,7 @@ import {
   bulkRestoreComments,
 } from "@/app/actions/comments";
 import type { CommentStatus, ThreadStatus } from "@/generated/prisma/enums";
+import styles from "./AdminTable.module.css";
 
 export type CommentRow = {
   id: string;
@@ -61,9 +62,24 @@ function MultiSelectDropdown<T extends string>({
   onChange: (next: Set<T> | "ALL") => void;
 }) {
   const summary = selected === "ALL" ? "All" : options.filter((o) => selected.has(o)).join(", ") || "All";
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+
+  // <details> has no native "close on outside click" behavior — only
+  // toggles via its own <summary>. Set .open directly on the DOM node
+  // (rather than lifting it into React state) since nothing else here needs
+  // to react to open/closed.
+  useEffect(() => {
+    function handlePointerDown(e: MouseEvent) {
+      if (detailsRef.current && !detailsRef.current.contains(e.target as Node)) {
+        detailsRef.current.open = false;
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
 
   return (
-    <details style={{ display: "inline-block", position: "relative" }}>
+    <details ref={detailsRef} style={{ display: "inline-block", position: "relative" }}>
       <summary style={{ cursor: "pointer", padding: "6px 10px", border: "1px solid #ccc", borderRadius: 4, listStyle: "none" }}>
         {label}: {summary}
       </summary>
@@ -113,13 +129,28 @@ function ActionCell({ comment, disabled }: { comment: CommentRow; disabled: bool
   };
   return (
     <div style={{ display: "flex", gap: 4 }}>
-      <button type="button" onClick={() => handle("approve")} disabled={disabled || pending || comment.status === "APPROVED"}>
+      <button
+        type="button"
+        onClick={() => handle("approve")}
+        disabled={disabled || pending || comment.status === "APPROVED"}
+        className={`${styles.actionButton} ${styles.approve}`}
+      >
         Approve
       </button>
-      <button type="button" onClick={() => handle("pend")} disabled={disabled || pending || comment.status === "PENDING"}>
+      <button
+        type="button"
+        onClick={() => handle("pend")}
+        disabled={disabled || pending || comment.status === "PENDING"}
+        className={`${styles.actionButton} ${styles.pend}`}
+      >
         Pend
       </button>
-      <button type="button" onClick={() => handle("spam")} disabled={disabled || pending || comment.status === "SPAM"}>
+      <button
+        type="button"
+        onClick={() => handle("spam")}
+        disabled={disabled || pending || comment.status === "SPAM"}
+        className={`${styles.actionButton} ${styles.spam}`}
+      >
         Spam
       </button>
     </div>
@@ -284,7 +315,7 @@ export default function CommentsTable({
     });
   }
 
-  async function runBulk(action: "approve" | "spam" | "delete" | "restore") {
+  async function runBulk(action: "approve" | "pend" | "spam" | "delete" | "restore") {
     setBulkError(null);
     const selected = displayRows.filter((r) => selectedIds.has(r.id));
     const targetRows =
@@ -295,6 +326,7 @@ export default function CommentsTable({
     setBulkPending(true);
     try {
       if (action === "approve") await bulkModerateComments(targetIds, "approve");
+      else if (action === "pend") await bulkModerateComments(targetIds, "pend");
       else if (action === "spam") await bulkModerateComments(targetIds, "spam");
       else if (action === "delete") await bulkDeleteComments(targetIds);
       else await bulkRestoreComments(targetIds);
@@ -315,12 +347,216 @@ export default function CommentsTable({
     }
   }
 
-  if (totalCount === 0 && displayRows.length === 0) {
-    return <p>No comments yet.</p>;
-  }
-
   return (
     <>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+        <input
+          type="search"
+          value={searchDraft}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="Search comment or commenter …"
+          aria-label="Search comments"
+          style={{ padding: "6px 12px", minWidth: 240 }}
+        />
+        <MultiSelectDropdown
+          label="Status"
+          options={STATUS_OPTIONS}
+          selected={filters.status}
+          onChange={(next) => updateFilters({ status: next })}
+        />
+        <MultiSelectDropdown
+          label="Thread status"
+          options={THREAD_STATUS_OPTIONS}
+          selected={filters.threadStatus}
+          onChange={(next) => updateFilters({ threadStatus: next })}
+        />
+      </div>
+
+      {selectedIds.size > 0 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            background: "#f5f5f5",
+            border: "1px solid #ddd",
+            borderRadius: 4,
+            padding: "8px 12px",
+            marginBottom: 8,
+          }}
+        >
+          <span>{selectedIds.size} selected</span>
+          <button
+            type="button"
+            disabled={bulkPending}
+            onClick={() => runBulk("approve")}
+            className={`${styles.actionButton} ${styles.approve}`}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            disabled={bulkPending}
+            onClick={() => runBulk("pend")}
+            className={`${styles.actionButton} ${styles.pend}`}
+          >
+            Pend
+          </button>
+          <button
+            type="button"
+            disabled={bulkPending}
+            onClick={() => runBulk("spam")}
+            className={`${styles.actionButton} ${styles.spam}`}
+          >
+            Spam
+          </button>
+          <button
+            type="button"
+            disabled={bulkPending}
+            onClick={() => runBulk("delete")}
+            aria-label="Delete selected"
+            title="Delete selected"
+            style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: "#c00", marginLeft: "4em" }}
+          >
+            <IconTrash size={16} />
+          </button>
+          <button
+            type="button"
+            disabled={bulkPending}
+            onClick={() => runBulk("restore")}
+            aria-label="Restore selected"
+            title="Restore selected"
+            style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: "#666" }}
+          >
+            <IconTrashOff size={16} />
+          </button>
+          {bulkError && <span style={{ color: "crimson" }}>{bulkError}</span>}
+        </div>
+      )}
+
+      <table style={{ width: "100%", borderCollapse: "collapse" }} className={styles.table}>
+        <thead>
+          <tr style={{ textAlign: "left" }}>
+            <th style={th}>
+              <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Select all rows" />
+            </th>
+            <th style={sortableTh} onClick={(e) => handleSort("post", e.ctrlKey)}>
+              Post{sortIndicator("post")}
+            </th>
+            <th style={sortableTh} onClick={(e) => handleSort("commenter", e.ctrlKey)}>
+              Commenter{sortIndicator("commenter")}
+            </th>
+            <th style={th}>Comment</th>
+            <th style={sortableTh} onClick={(e) => handleSort("status", e.ctrlKey)}>
+              Status{sortIndicator("status")}
+            </th>
+            <th style={sortableTh} onClick={(e) => handleSort("threadStatus", e.ctrlKey)}>
+              Thread{sortIndicator("threadStatus")}
+            </th>
+            <th style={nowrapSortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
+              Created at{sortIndicator("created")}
+            </th>
+            <th style={nowrapSortableTh} onClick={(e) => handleSort("statusChanged", e.ctrlKey)}>
+              Status changed{sortIndicator("statusChanged")}
+            </th>
+            <th style={th}>Commenter activity</th>
+            <th style={th}>Action</th>
+            <th style={th}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {displayRows.length === 0 && (
+            <tr>
+              <td colSpan={11} style={td} className={styles.emptyRow}>
+                (no comments matching the criteria)
+              </td>
+            </tr>
+          )}
+          {displayRows.map((row) => (
+            <tr key={row.id} style={{ borderBottom: "1px solid #eee", opacity: row.deleted ? 0.5 : 1 }}>
+              <td style={td}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(row.id)}
+                  onChange={() => toggleRow(row.id)}
+                  aria-label={`Select comment from ${row.commenterName}`}
+                />
+              </td>
+              <td style={td}>
+                <Link href={`/posts/${row.postId}/comments`}>{row.postTitle}</Link>
+              </td>
+              <td style={td}>
+                {row.commenterName} <span style={{ color: "#666" }}>({row.commenterEmail})</span>
+              </td>
+              <td style={{ ...td, maxWidth: 320 }}>{row.bodyText}</td>
+              <td style={td}>{row.status}</td>
+              <td style={td}>{row.threadStatus}</td>
+              <td style={nowrapTd}>{formatDate(row.createdAt, dateFormat)}</td>
+              <td style={nowrapTd}>{row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}</td>
+              <td style={nowrapTd}>
+                {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
+              </td>
+              <td style={td}>
+                <ActionCell comment={row} disabled={row.deleted} />
+              </td>
+              <td style={td}>
+                <DeleteCell comment={row} onDeleted={revealRow} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }} className={styles.paginationBar}>
+        <label>
+          Rows per page:{" "}
+          <select value={filters.pageSize} onChange={(e) => updateFilters({ pageSize: Number(e.target.value) as CommentsFilters["pageSize"] })}>
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span>
+          {totalCount === 0
+            ? "0 comments"
+            : `${(currentPage - 1) * filters.pageSize + 1}–${Math.min(currentPage * filters.pageSize, totalCount)} of ${totalCount}`}
+        </span>
+        <button type="button" onClick={() => navigate({ page: currentPage - 1 })} disabled={currentPage <= 1}>
+          ◀ Prev
+        </button>
+        <span>
+          Page {currentPage} of {totalPages}
+        </span>
+        <button type="button" onClick={() => navigate({ page: currentPage + 1 })} disabled={currentPage >= totalPages}>
+          Next ▶
+        </button>
+      </div>
+
+      <p style={{ marginTop: 12 }}>
+        <label>
+          Date format:{" "}
+          <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as DateFormat)}>
+            {DATE_FORMATS.map((format) => (
+              <option key={format} value={format}>
+                {format}
+              </option>
+            ))}
+          </select>
+        </label>
+      </p>
+      <p style={{ marginTop: 8 }}>
+        <label>
+          <input
+            type="checkbox"
+            checked={filters.deleted}
+            onChange={(e) => updateFilters({ deleted: e.target.checked })}
+          />{" "}
+          Show deleted rows
+        </label>
+      </p>
+
       <details style={{ marginTop: "1em", marginBottom: "1em", border: "1px solid #ddd", borderRadius: 4, padding: "8px 12px" }}>
         <summary style={{ cursor: "pointer", fontWeight: "bold" }}>Help: filtering &amp; the URL</summary>
         <div style={{ marginTop: 8, fontSize: "0.9rem", color: "#333" }}>
@@ -411,175 +647,6 @@ export default function CommentsTable({
           </p>
         </div>
       </details>
-
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-        <input
-          type="search"
-          value={searchDraft}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder="Search comment or commenter …"
-          aria-label="Search comments"
-          style={{ padding: "6px 12px", minWidth: 240 }}
-        />
-        <MultiSelectDropdown
-          label="Status"
-          options={STATUS_OPTIONS}
-          selected={filters.status}
-          onChange={(next) => updateFilters({ status: next })}
-        />
-        <MultiSelectDropdown
-          label="Thread status"
-          options={THREAD_STATUS_OPTIONS}
-          selected={filters.threadStatus}
-          onChange={(next) => updateFilters({ threadStatus: next })}
-        />
-      </div>
-
-      {selectedIds.size > 0 && (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            background: "#f5f5f5",
-            border: "1px solid #ddd",
-            borderRadius: 4,
-            padding: "8px 12px",
-            marginBottom: 8,
-          }}
-        >
-          <span>{selectedIds.size} selected</span>
-          <button type="button" disabled={bulkPending} onClick={() => runBulk("approve")}>
-            Approve selected
-          </button>
-          <button type="button" disabled={bulkPending} onClick={() => runBulk("spam")}>
-            Mark spam selected
-          </button>
-          <button type="button" disabled={bulkPending} onClick={() => runBulk("delete")}>
-            Delete selected
-          </button>
-          <button type="button" disabled={bulkPending} onClick={() => runBulk("restore")}>
-            Restore selected
-          </button>
-          {bulkError && <span style={{ color: "crimson" }}>{bulkError}</span>}
-        </div>
-      )}
-
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ textAlign: "left" }}>
-            <th style={th}>
-              <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Select all rows" />
-            </th>
-            <th style={sortableTh} onClick={(e) => handleSort("post", e.ctrlKey)}>
-              Post{sortIndicator("post")}
-            </th>
-            <th style={sortableTh} onClick={(e) => handleSort("commenter", e.ctrlKey)}>
-              Commenter{sortIndicator("commenter")}
-            </th>
-            <th style={th}>Comment</th>
-            <th style={sortableTh} onClick={(e) => handleSort("status", e.ctrlKey)}>
-              Status{sortIndicator("status")}
-            </th>
-            <th style={sortableTh} onClick={(e) => handleSort("threadStatus", e.ctrlKey)}>
-              Thread{sortIndicator("threadStatus")}
-            </th>
-            <th style={nowrapSortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
-              Created at{sortIndicator("created")}
-            </th>
-            <th style={nowrapSortableTh} onClick={(e) => handleSort("statusChanged", e.ctrlKey)}>
-              Status changed{sortIndicator("statusChanged")}
-            </th>
-            <th style={th}>Commenter activity</th>
-            <th style={th}>Action</th>
-            <th style={th}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {displayRows.map((row) => (
-            <tr key={row.id} style={{ borderBottom: "1px solid #eee", opacity: row.deleted ? 0.5 : 1 }}>
-              <td style={td}>
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(row.id)}
-                  onChange={() => toggleRow(row.id)}
-                  aria-label={`Select comment from ${row.commenterName}`}
-                />
-              </td>
-              <td style={td}>
-                <Link href={`/posts/${row.postId}/comments`}>{row.postTitle}</Link>
-              </td>
-              <td style={td}>
-                {row.commenterName} <span style={{ color: "#666" }}>({row.commenterEmail})</span>
-              </td>
-              <td style={{ ...td, maxWidth: 320 }}>{row.bodyText}</td>
-              <td style={td}>{row.status}</td>
-              <td style={td}>{row.threadStatus}</td>
-              <td style={nowrapTd}>{formatDate(row.createdAt, dateFormat)}</td>
-              <td style={nowrapTd}>{row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}</td>
-              <td style={nowrapTd}>
-                {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
-              </td>
-              <td style={td}>
-                <ActionCell comment={row} disabled={row.deleted} />
-              </td>
-              <td style={td}>
-                <DeleteCell comment={row} onDeleted={revealRow} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
-        <label>
-          Rows per page:{" "}
-          <select value={filters.pageSize} onChange={(e) => updateFilters({ pageSize: Number(e.target.value) as CommentsFilters["pageSize"] })}>
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span>
-          {totalCount === 0
-            ? "0 comments"
-            : `${(currentPage - 1) * filters.pageSize + 1}–${Math.min(currentPage * filters.pageSize, totalCount)} of ${totalCount}`}
-        </span>
-        <button type="button" onClick={() => navigate({ page: currentPage - 1 })} disabled={currentPage <= 1}>
-          ◀ Prev
-        </button>
-        <span>
-          Page {currentPage} of {totalPages}
-        </span>
-        <button type="button" onClick={() => navigate({ page: currentPage + 1 })} disabled={currentPage >= totalPages}>
-          Next ▶
-        </button>
-      </div>
-
-      <p style={{ marginTop: 12 }}>
-        <label>
-          Date format:{" "}
-          <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as DateFormat)}>
-            {DATE_FORMATS.map((format) => (
-              <option key={format} value={format}>
-                {format}
-              </option>
-            ))}
-          </select>
-        </label>
-      </p>
-      <p style={{ marginTop: 8 }}>
-        <label>
-          <input
-            type="checkbox"
-            checked={filters.deleted}
-            onChange={(e) => updateFilters({ deleted: e.target.checked })}
-          />{" "}
-          Show deleted rows
-        </label>
-      </p>
     </>
   );
 }
