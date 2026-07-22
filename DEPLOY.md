@@ -89,8 +89,9 @@ insert with `role: "ADMIN"`. Guard on existing email so a re-run is a harmless n
 - **Image: Ubuntu 26.04 LTS.** If Linode's image list doesn't offer it yet, or its default
   Node is older than 20 (checked in §2d), fall back to **24.04 LTS** — every step below works
   unchanged on 24.04.
-- Pick a region and a small plan (hobby scale — a 1–2 GB shared instance is plenty; the two
-  Node services + Postgres are light). Add SSH keys during creation if you can.
+- Plan: a **1 GB Nanode** is fine at runtime (the two Node services + Postgres are light),
+  but 1 GB is not enough for `next build` — you **must** add swap (§2h) or the build gets
+  OOM-killed. Add SSH keys during creation if you can.
 - Point DNS: an `A`/`AAAA` record for `<app-host>` at the Linode's IP. (Just the one name —
   collab shares this host under `/collab`, §7.)
 
@@ -193,6 +194,23 @@ sudo mkdir -p /srv/multiblog
 sudo chown deploy:deploy /srv/multiblog
 ```
 
+### 2h. Swap (required on the 1 GB Nanode)
+
+`next build` peaks well above 1 GB of RAM; on a 1 GB instance it will be OOM-killed partway
+through with no useful error. Add 2 GB of swap once, up front:
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab   # persist across reboots
+free -h                                                       # confirm Swap: 2.0Gi
+```
+
+Swap only has to cover the build; steady-state runtime stays comfortably under 1 GB. (If you
+later resize to a ≥2 GB plan, the swap is harmless to leave in place.)
+
 ---
 
 ## 3. Create the database + role
@@ -214,6 +232,11 @@ Connection string for the app:
 ```
 DATABASE_URL="postgresql://multiblog:<strong-password>@127.0.0.1:5432/multiblog?schema=public"
 ```
+
+> **Keep the password URL-safe.** It's embedded in `DATABASE_URL`, so a password containing
+> `@ : / ? # %` will mis-parse the connection string (e.g. a `@` looks like the host
+> delimiter). Use an alphanumeric password — `openssl rand -hex 24` is a good source — or
+> URL-encode any reserved characters.
 
 Quick sanity check: `psql "postgresql://multiblog:<pw>@127.0.0.1:5432/multiblog" -c '\conninfo'`.
 
@@ -273,7 +296,8 @@ npx prisma migrate deploy
 # 6. Seed the first admin (§1c)
 npx tsx scripts/create-admin.ts labreuer@gmail.com "Luke Breuer" LB '<password>'
 
-# 7. Build the Next app  (NEXT_PUBLIC_COLLAB_URL must already be set — see §4 note)
+# 7. Build the Next app  (NEXT_PUBLIC_COLLAB_URL must already be set — see §4 note;
+#    on the 1 GB Nanode this OOMs without the swap from §2h)
 npm run build
 
 # 8. Install & start the systemd units (§6), configure nginx (§7), then verify (§8)
@@ -366,10 +390,11 @@ location / {
 ```
 
 `X-Forwarded-Proto`/`Host` must be forwarded or NextAuth (with `trustHost`) can't build
-correct https callback URLs. Also forward `X-Real-IP`/`X-Forwarded-For` because
-`submitComment` records the commenter IP for rate-limiting (`src/lib/rate-limit.ts`) — verify
-the limiter sees the real client IP, not `127.0.0.1`, once behind nginx (it may need to read
-the forwarded header rather than the socket peer).
+correct https callback URLs. The `X-Real-IP`/`X-Forwarded-For` headers matter too:
+`submitComment` records the commenter IP for rate-limiting, and `getClientIp()`
+(`src/lib/request-ip.ts`) already reads `X-Forwarded-For` then `X-Real-IP` — so with the two
+headers set above, the limiter sees the real client IP rather than `127.0.0.1`. Nothing to
+change in the app; just don't drop those headers.
 
 **Collab** (`location /collab`) — WebSocket upgrade + long read timeout:
 
@@ -404,16 +429,39 @@ Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
 A free, auto-renewing single-domain cert — path-based means one hostname, so no wildcard and
 no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
 
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot certonly --nginx -d <app-host>       # issues the cert; leaves nginx config to you
-```
+> **Order matters — chicken-and-egg.** `deploy/nginx-app.conf.sample` listens on 443 and
+> references `/etc/letsencrypt/live/<app-host>/…pem`, which **do not exist until certbot
+> runs**. If you enable that config first, `nginx -t` fails on the missing cert and nginx
+> won't start. So issue the cert *before* installing the 443 block. Prerequisites: DNS for
+> `<app-host>` already resolves to this box, and port 80 is open (§2c).
 
-This writes `/etc/letsencrypt/live/<app-host>/fullchain.pem` and `privkey.pem` — exactly the
-paths the `ssl_certificate`/`ssl_certificate_key` lines in `deploy/nginx-app.conf.sample`
-already point at. (`certbot --nginx` without `certonly` would instead rewrite the server
-block itself — fine too, but then the sample's TLS lines are managed by certbot rather than
-by you.)
+1. **Bootstrap nginx with an HTTP-only block** so certbot has something to serve the
+   challenge from. Put this in `/etc/nginx/sites-available/multiblog` (symlink into
+   `sites-enabled/`), `sudo nginx -t && sudo systemctl reload nginx`:
+
+   ```nginx
+   server {
+       listen 80;
+       server_name <app-host>;
+       root /var/www/html;   # anything; certbot only needs to answer /.well-known/…
+   }
+   ```
+
+2. **Issue the cert:**
+
+   ```bash
+   sudo apt install -y certbot python3-certbot-nginx
+   sudo certbot certonly --nginx -d <app-host>
+   ```
+
+3. **Swap in the real config** — replace that file's contents with
+   `deploy/nginx-app.conf.sample` (edited for `<app-host>`), then `sudo nginx -t &&
+   sudo systemctl reload nginx`. The 443 block now finds the cert.
+
+Step 2 writes `/etc/letsencrypt/live/<app-host>/fullchain.pem` and `privkey.pem` — exactly
+the paths the sample's `ssl_certificate`/`ssl_certificate_key` lines point at. (Alternatively
+`certbot --nginx` *without* `certonly` rewrites the server block for you in one shot — fine
+too, but then certbot owns the TLS lines instead of the sample, and you'd skip step 3.)
 
 Renewal is automatic: the certbot package installs a systemd timer. Ensure nginx reloads on
 renew and verify the whole path:
