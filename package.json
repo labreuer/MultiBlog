@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "collab": "tsx watch server/collab.ts",
+    "collab:prod": "tsx server/collab.ts",
     "dev:all": "concurrently -n web,collab -c blue,magenta \"npm:dev\" \"npm:collab\"",
     "stop:all": "pwsh -NoProfile -File scripts/stop-dev.ps1",
     "test-user": "tsx scripts/test-user.ts"
