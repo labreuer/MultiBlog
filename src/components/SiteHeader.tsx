@@ -26,6 +26,10 @@ export default async function SiteHeader() {
               |
             </span>
             <Link href="/posts">Manage Posts</Link>
+            <span aria-hidden="true" style={{ color: "#ccc" }}>
+              |
+            </span>
+            <Link href="/comments">Manage Comments</Link>
           </>
         )}
         {session?.user && isAdmin(session.user.role) && (

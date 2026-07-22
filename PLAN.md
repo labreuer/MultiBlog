@@ -555,6 +555,32 @@ site-wide too but change only via a deploy, not from the DB.
 (no raw HTML/scripts; links get `rel="nofollow noopener"`). Rate-limit by IP and by
 commenter. Consider Akismet given anonymous commenting is allowed.
 
+**Cross-post moderation (`/comments`, `CommentsTable.tsx`, built).** The per-post moderation
+queue (`/posts/[id]/comments`) only ever shows one post's `PENDING` comments. `/comments`
+is the site-wide counterpart: every comment across every post the signed-in user can manage
+(all of them for ADMIN/EDITOR, own-authored posts only for AUTHOR — mirrors `/posts`'s own
+`canEditAnyPost` gate), filterable and actionable in bulk.
+
+- **Filters** mirror into the querystring via the plain `history` API (not the Next.js
+  router), since every filter only narrows rows already fetched — so no server round-trip,
+  and a filtered view is still bookmarkable/shareable. `status` and `threadStatus` are
+  multi-select dropdowns (with an "All" option); `deleted` and `q` (free-text over comment
+  body + commenter name/email) round out the four filters with UI. `post`, `author`, and
+  `commenter` work as deep-link-only querystring filters (applied server-side, no dropdown
+  yet) — e.g. for a future "moderate this author's comments" link.
+- **Row actions**, one "Action" column: Approve / Pend / Spam (`moderateComment`, extended
+  to accept `"pend"` alongside the existing `"approve"`/`"spam"`, mapping to
+  `CommentStatus.PENDING`) plus a delete/restore toggle identical in spirit to `/posts`'s
+  soft-delete column (`deleteComment`/`restoreComment`).
+- **Bulk actions**: a row-checkbox column feeds a toolbar (Approve/Mark spam/Delete/Restore
+  selected) that appears once anything is selected, backed by batched server actions
+  (`bulkModerateComments`, `bulkDeleteComments`, `bulkRestoreComments`) — each silently skips
+  rows the action doesn't apply to (e.g. bulk-approve skips already-deleted rows) rather than
+  erroring on a mixed selection.
+- **Commenter activity column** reads `{submitted} / {in moderation} / {spam}` — counts of
+  that commenter's non-deleted comments, scoped to the same visible set as the table itself
+  (so an AUTHOR's view never leaks a commenter's activity on posts they can't manage).
+
 ---
 
 ## 7. Deployment on Linode/Ubuntu

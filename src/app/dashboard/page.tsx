@@ -19,6 +19,11 @@ export default async function DashboardPage() {
           <Link href="/posts">Manage posts</Link>
         </p>
       )}
+      {canManagePosts(session.user.role) && (
+        <p>
+          <Link href="/comments">Manage comments</Link>
+        </p>
+      )}
       {isAdmin(session.user.role) && (
         <p>
           <Link href="/users">Manage users</Link>
