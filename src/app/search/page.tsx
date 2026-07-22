@@ -24,7 +24,7 @@ export default async function SearchPage({
           publishRevision: { select: { title: true, doc: true } },
           authors: {
             orderBy: { bylineOrder: "asc" },
-            include: { user: { select: { name: true } } },
+            include: { user: { select: { name: true, slug: true } } },
           },
           revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { createdAt: true } },
           collab: { select: { updatedAt: true } },
@@ -75,7 +75,7 @@ export default async function SearchPage({
                   {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>
-                  <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, name: a.user.name }))} />
+                  <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
                   {post.publishedAt?.toLocaleDateString()}
                 </p>
                 <p>

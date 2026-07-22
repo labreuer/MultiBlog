@@ -46,6 +46,7 @@ enum CommentStatus {
 model User {
   id               String            @id @default(cuid())
   email            String            @unique
+  slug             String            @unique
   emailVerified    DateTime?
   name             String?
   image            String?
@@ -70,6 +71,21 @@ model User {
   deletedBy            User?                @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
   deletedUsers         User[]               @relation("UserDeletedBy")
   postDeletions        Post[]               @relation("PostDeletedBy")
+  slugHistory          UserSlugHistory[]
+}
+
+// Redirect sources for a user's past slugs — same shape as PostSlugHistory,
+// kept as its own table rather than a shared polymorphic one since Prisma
+// has no real polymorphic relation support (see PostSlugHistory's comment).
+model UserSlugHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
@@ -143,6 +159,24 @@ model Post {
   threads         CommentThread[]
   publicationEvents PostPublicationEvent[]
   deletedBy         User?            @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
+  slugHistory       PostSlugHistory[]
+}
+
+// Redirect sources for a post's past slugs — one row per slug the post has
+// ever moved away from. [slug]/page.tsx falls back here on a live-slug miss
+// so old links/bookmarks 301 to the post's current slug instead of 404ing.
+// slug carries its own @unique (not @@unique([postId, slug])): a slug must
+// be globally free to be claimed as *anyone's* current or historical slug —
+// see slugInUse in src/lib/slug.ts.
+model PostSlugHistory {
+  id        String   @id @default(cuid())
+  postId    String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
 }
 
 model PostAuthor {

@@ -16,7 +16,7 @@ if (process.env.NODE_ENV !== "production") {
 //   list a deleted row in order to offer restoring it;
 // - setPostDeleted's existence check (restoring a post means finding it
 //   *despite* it being deleted);
-// - uniqueSlug/signUp's uniqueness checks — slug/email stay DB-unique
+// - uniquePostSlug/uniqueUserSlug/signUp's uniqueness checks — slug/email stay DB-unique
 //   even for a soft-deleted row, so pretending one is free would just
 //   trade a friendly "already exists" error for a raw P2002 at create
 //   time (see the CLAUDE.md-adjacent note in post-status.ts's history).

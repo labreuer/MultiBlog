@@ -20,6 +20,7 @@ import styles from "./UsersTable.module.css";
 
 export type UserRow = {
   id: string;
+  slug: string;
   name: string | null;
   email: string;
   emailVerified: Date | null;
@@ -514,7 +515,7 @@ export default function UsersTable({ rows }: { rows: UserRow[] }) {
                 <ColorCell userId={row.id} color={row.color} onSaved={onSaved} />
               </td>
               <td style={nowrapTd}>{formatDate(row.createdAt, dateFormat)}</td>
-              <td style={td}>{row.postCount > 0 ? <Link href={`/authors/${row.id}`}>posts</Link> : ""}</td>
+              <td style={td}>{row.postCount > 0 ? <Link href={`/authors/${row.slug}`}>posts</Link> : ""}</td>
               <td style={td}></td>
               <td style={td}>
                 <DeleteCell userId={row.id} deleted={row.deleted} onSaved={onSaved} onDeleted={revealRow} />

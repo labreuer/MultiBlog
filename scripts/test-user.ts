@@ -18,6 +18,7 @@ import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { prisma } from "../src/lib/prisma";
 import { colorForSeed } from "../src/lib/author-colors";
+import { uniqueUserSlug } from "../src/lib/user-slug";
 import { Role } from "../src/generated/prisma/enums";
 
 const SAFE_EMAIL = /^[\w.+-]+@example\.com$/i;
@@ -76,9 +77,11 @@ async function create(email: string, name: string | null, role: Role, trusted: b
   }
 
   const passwordHash = await bcrypt.hash(TEST_PASSWORD, 12);
+  const slug = await uniqueUserSlug(name, email);
   const user = await prisma.user.create({
     data: {
       email,
+      slug,
       name,
       passwordHash,
       role,

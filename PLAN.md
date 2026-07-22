@@ -464,10 +464,35 @@ Notes:
   hide from a read). A second, unextended `prismaIncludingDeleted` export exists for the
   handful of call sites that must see soft-deleted rows on purpose: the `/posts`/`/users`
   admin tables (need to list a deleted row to restore it, §3c/§3b), the delete/restore
-  actions' own existence checks, and the slug/email uniqueness checks in `uniqueSlug`/
-  `signUp` (slug and email stay DB-unique even for a soft-deleted row, so silently treating
-  one as free would just trade a friendly "already exists" error for a raw constraint
-  violation at create time).
+  actions' own existence checks, and the slug/email uniqueness checks in `uniquePostSlug`/
+  `uniqueUserSlug`/`signUp` (slug and email stay DB-unique even for a soft-deleted row, so
+  silently treating one as free would just trade a friendly "already exists" error for a raw
+  constraint violation at create time).
+
+### 4a. Mutable slugs
+
+**Decided:** both `posts.slug` and `users.slug` (author-page slugs, `/authors/[slug]`) can be
+renamed after creation, with the old slug preserved as a redirect source rather than left to
+404.
+
+- **One history table per entity**, not a shared polymorphic one — `PostSlugHistory`/
+  `UserSlugHistory` (§4), each `{ slug @unique, <entity>Id, createdAt }`, `onDelete: Cascade`.
+  Prisma has no real polymorphic-relation support, so a shared table would trade referential
+  integrity for marginal duplication savings.
+- **Uniqueness spans live + historical slugs**: `uniquePostSlug`/`changePostSlug`
+  (`src/lib/post-slug.ts`) and `uniqueUserSlug`/`changeUserSlug` (`src/lib/user-slug.ts`)
+  reject a candidate that's any entity's current slug *or* sitting in its history — otherwise
+  a rename could steal a slug still redirecting an old link to someone else.
+- **Redirect fallback**: `[slug]/page.tsx` and `authors/[slug]/page.tsx` each fall back to
+  their history table on a live-slug miss and `permanentRedirect()` (308) to the entity's
+  current slug — only if it's still live (published post; non-soft-deleted user), so a
+  history entry for something since unpublished/deleted still 404s.
+- **Reserved top-level slugs** (`RESERVED_SLUGS`, `src/lib/slug.ts`) only apply to post
+  slugs — `/[slug]` is a top-level route; author slugs live under the nested `/authors/[slug]`,
+  with no sibling static routes to collide with.
+- No settings-panel UI yet for either rename path — `updatePostSlug`/`updateUserSlug`
+  (`src/app/actions/posts.ts`/`users.ts`) are admin/editor-gated actions with nothing calling
+  them from the UI.
 
 ---
 
@@ -684,7 +709,7 @@ Git history carries per-step detail.
      justifies one. Search box lives in `SiteHeader`.
    - **RSS** (`/rss.xml`, a literal-named route-handler folder): last 30 published posts,
      RSS 2.0. Discovery `<link>` added via `layout.tsx`'s `metadata.alternates`.
-   - **Author pages** (`/authors/[id]`): a user's name + their published posts, linked from
+   - **Author pages** (`/authors/[slug]`): a user's name + their published posts, linked from
      every byline (home, search, and article pages now share one `AuthorByline` component
      instead of three copies of comma-joining logic). `authors`, `search`, and `rss.xml`
      added to the reserved-slug list (`src/lib/slug.ts`) so a post title can't shadow them.

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
+import { changeUserSlug } from "@/lib/user-slug";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -60,6 +61,20 @@ export async function updateUserAdminInitials(userId: string, adminInitials: str
   }
   await prisma.user.update({ where: { id: userId }, data: { adminInitials: trimmed } });
   revalidatePath("/users");
+}
+
+export async function updateUserSlug(userId: string, newSlug: string): Promise<{ slug: string }> {
+  await requireAdmin();
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { slug: true } });
+  if (!user) {
+    throw new Error("User not found.");
+  }
+  const slug = await changeUserSlug(userId, newSlug);
+
+  revalidatePath("/users");
+  revalidatePath(`/authors/${user.slug}`);
+  revalidatePath(`/authors/${slug}`);
+  return { slug };
 }
 
 // Soft delete/restore double as each other's undo — no confirmation dialog;

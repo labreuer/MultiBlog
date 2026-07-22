@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
-import { uniqueSlug } from "@/lib/slug";
+import { uniquePostSlug, changePostSlug } from "@/lib/post-slug";
 import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { remapThreadsToRevision } from "@/lib/anchor-remap";
 import { stripMarkFromDoc } from "@/lib/tiptap-schema";
@@ -54,7 +54,7 @@ export async function createPostAction(
   }
   const trimmedTitle = title.trim();
 
-  const slug = await uniqueSlug(trimmedTitle);
+  const slug = await uniquePostSlug(trimmedTitle);
   const post = await prisma.post.create({
     data: {
       slug,
@@ -274,6 +274,18 @@ export async function updatePostModerationPolicy(postId: string, moderationPolic
   }
   await prisma.post.update({ where: { id: postId }, data: { moderationPolicy } });
   revalidatePath(`/posts/${postId}/edit`);
+}
+
+export async function updatePostSlug(postId: string, newSlug: string): Promise<{ slug: string }> {
+  const { post } = await requireEditableSession(postId);
+  const oldSlug = post.slug;
+  const slug = await changePostSlug(postId, newSlug);
+
+  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath("/posts");
+  revalidatePath(`/${oldSlug}`);
+  revalidatePath(`/${slug}`);
+  return { slug };
 }
 
 // Adds/removes a single PostAuthor row rather than replacing the whole set,

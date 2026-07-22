@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
@@ -26,7 +26,7 @@ async function getPublishedPost(slug: string) {
       publishRevision: true,
       authors: {
         orderBy: { bylineOrder: "asc" },
-        include: { user: { select: { name: true } } },
+        include: { user: { select: { name: true, slug: true } } },
       },
       revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { createdAt: true } },
       collab: { select: { updatedAt: true } },
@@ -58,10 +58,30 @@ export async function generateMetadata({
   };
 }
 
+// Falls back to PostSlugHistory when `slug` isn't any post's current slug —
+// old links/bookmarks 301 to wherever that post lives now instead of 404ing.
+// Only redirects to a post that's actually published; a history entry for a
+// since-unpublished (or soft-deleted) post falls through to notFound() same
+// as today.
+async function resolveRedirectSlug(slug: string): Promise<string | null> {
+  // Relation filters on a nested Post aren't covered by src/lib/prisma.ts's
+  // soft-delete extension (that only wraps top-level post/user operations),
+  // so deletedByUserId is checked explicitly here alongside publishedPostWhere.
+  const entry = await prisma.postSlugHistory.findFirst({
+    where: { slug, post: { ...publishedPostWhere(), deletedByUserId: null } },
+    select: { post: { select: { slug: true } } },
+  });
+  return entry?.post.slug ?? null;
+}
+
 export default async function PublicPostPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const post = await getPublishedPost(slug);
   if (!post?.publishRevision) {
+    const redirectSlug = await resolveRedirectSlug(slug);
+    if (redirectSlug) {
+      permanentRedirect(`/${redirectSlug}`);
+    }
     notFound();
   }
 
@@ -95,7 +115,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
           {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
         </h1>
         <p className={styles.byline}>
-          <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, name: a.user.name }))} />
+          <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
           {post.publishedAt?.toLocaleDateString()}
         </p>
         <AnnotatableArticle

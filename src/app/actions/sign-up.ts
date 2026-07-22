@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { colorForSeed } from "@/lib/author-colors";
+import { uniqueUserSlug } from "@/lib/user-slug";
 
 export type SignUpState = { error?: string };
 
@@ -36,9 +37,11 @@ export async function signUp(_prevState: SignUpState, formData: FormData): Promi
 
   const trimmedName = typeof name === "string" && name ? name : null;
   const passwordHash = await bcrypt.hash(password, 12);
+  const slug = await uniqueUserSlug(trimmedName, email);
   await prismaIncludingDeleted.user.create({
     data: {
       email,
+      slug,
       name: trimmedName,
       passwordHash,
       color: colorForSeed(email),

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -11,9 +11,9 @@ import styles from "./page.module.css";
 
 export const revalidate = 60;
 
-async function getAuthorWithPosts(id: string) {
+async function getAuthorWithPosts(slug: string) {
   const user = await prisma.user.findUnique({
-    where: { id },
+    where: { slug },
     select: { id: true, name: true },
   });
   if (!user) {
@@ -21,7 +21,7 @@ async function getAuthorWithPosts(id: string) {
   }
 
   const posts = await prisma.post.findMany({
-    where: { ...publishedPostWhere(), authors: { some: { userId: id } } },
+    where: { ...publishedPostWhere(), authors: { some: { userId: user.id } } },
     orderBy: { publishedAt: "desc" },
     include: {
       publishRevision: { select: { title: true, doc: true } },
@@ -34,20 +34,37 @@ async function getAuthorWithPosts(id: string) {
   return { user, posts };
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  const { id } = await params;
-  const author = await getAuthorWithPosts(id);
+// Falls back to UserSlugHistory when `slug` isn't any user's current slug —
+// old author links 301 to wherever that user lives now instead of 404ing.
+// Mirrors [slug]/page.tsx's resolveRedirectSlug for posts; the nested `user`
+// filter needs its own deletedByUserId check since src/lib/prisma.ts's
+// soft-delete extension only wraps top-level user/post operations.
+async function resolveRedirectSlug(slug: string): Promise<string | null> {
+  const entry = await prisma.userSlugHistory.findFirst({
+    where: { slug, user: { deletedByUserId: null } },
+    select: { user: { select: { slug: true } } },
+  });
+  return entry?.user.slug ?? null;
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const author = await getAuthorWithPosts(slug);
   if (!author) {
     return {};
   }
   return { title: author.user.name ?? "Author" };
 }
 
-export default async function AuthorPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export default async function AuthorPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   const session = await auth();
-  const author = await getAuthorWithPosts(id);
+  const author = await getAuthorWithPosts(slug);
   if (!author) {
+    const redirectSlug = await resolveRedirectSlug(slug);
+    if (redirectSlug) {
+      permanentRedirect(`/authors/${redirectSlug}`);
+    }
     notFound();
   }
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-type Author = { userId: string; name: string | null };
+type Author = { userId: string; slug: string; name: string | null };
 
 // Shared by every place a post's byline is rendered (home, search, article
 // pages) so the "By A, B — " formatting and author-page links can't drift.
@@ -16,7 +16,7 @@ export default function AuthorByline({ authors }: { authors: Author[] }) {
       {named.map((author, i) => (
         <span key={author.userId}>
           {i > 0 && ", "}
-          <Link href={`/authors/${author.userId}`}>{author.name}</Link>
+          <Link href={`/authors/${author.slug}`}>{author.name}</Link>
         </span>
       ))}
       {" — "}

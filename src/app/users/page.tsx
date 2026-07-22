@@ -25,6 +25,7 @@ export default async function UsersPage() {
 
   const rows = users.map((user) => ({
     id: user.id,
+    slug: user.slug,
     name: user.name,
     email: user.email,
     emailVerified: user.emailVerified,
