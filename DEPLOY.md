@@ -147,6 +147,15 @@ apt-cache policy nodejs
 
 - **If the candidate is ≥ 20:** `sudo apt install -y nodejs npm`, then verify `node -v` and
   `npm -v`.
+  > **Confirmed on 26.04: `nodejs` and `npm` are independently-versioned apt packages, and
+  > `npm` lags badly** — `nodejs` at 22.22.1 pairs with `npm` 9.2.0, when Node 22 should
+  > bundle npm ~10.9.x. `/usr/bin/npm` is still the right binary (no PATH-shadowing — `/bin`
+  > is the merged-usr symlink to `/usr/bin`), it's just stale. Fix it in place:
+  > ```bash
+  > sudo npm install -g npm@10
+  > hash -r
+  > npm -v      # expect 10.x
+  > ```
 - **If it's older, or 26.04's repo Node is missing:** install NodeSource's Node 22 LTS *if it
   publishes a 26.04 repo* (`curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -`
   then `sudo apt install -y nodejs`). NodeSource often lags a just-released LTS — if it 404s
