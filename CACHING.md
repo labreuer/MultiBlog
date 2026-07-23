@@ -36,3 +36,28 @@ post list itself statically generated/ISR'd, and fetch each post's edit
 status client-side (or via a small per-page server action) after the static
 shell loads — at the cost of the badge popping in slightly after the rest of
 the page rather than being present in the initial HTML.
+
+## 2026-07-23 — Fixed: this was a production crash, not just lost caching
+
+The entry above undersold the severity. It treated `auth()` forcing a route dynamic as
+purely "loses the shared cache" — true for the home and author pages, which have no
+`generateStaticParams`. But `src/app/[slug]/page.tsx` **does** call `generateStaticParams()`
+(PLAN.md §10 item 4), and a route that's both eligible for static generation *and* calls a
+dynamic API during that attempt doesn't gracefully fall back to per-request rendering — it
+throws `DYNAMIC_SERVER_USAGE`, a hard error. That only surfaces under a real `next build`/
+`next start` (`next dev` doesn't enforce the static/dynamic split the same way), which is why
+it went unnoticed until the first production deploy: every published post page 500'd.
+
+Fixed by moving every viewer-identity-dependent read off the server entirely — `SiteHeader`,
+`PostEditBadge`, `CommentForm`, `CommentNode`, and `CommentSection` no longer call `auth()`
+anywhere in their render path. A `SessionProvider` (root layout) backs `useSession()` calls
+at each of those leaf components instead — the client-side split this file proposed above,
+now actually done. `src/lib/role-checks.ts` was split out of `authz.ts` (which imports
+Prisma) so these client components can import the pure `canEditAnyPost`/`isAdmin`/
+`canManagePosts` checks without risking Prisma in the browser bundle.
+
+Result: `/`, `/[slug]`, and `/authors/[slug]` are all genuinely static/ISR/SSG again —
+confirmed via `next build`'s route summary (`/` and `/[slug]` both show prerendered) and a
+full `next start` pass with a clean console. The UX cost this entry predicted is real: the
+edit badge and comment-form name prefill now pop in a moment after the rest of the page,
+once the client-side session fetch resolves, instead of being present in the initial HTML.

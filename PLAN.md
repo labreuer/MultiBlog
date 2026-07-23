@@ -957,6 +957,22 @@ Git history carries per-step detail.
     - Deliberately has no animation and no repositioning on scroll/resize, unlike the existing
       flash/pulse effects — matches the "stays put" ask, and nothing else in this area handles
       resize either.
+17. **Fixed: `auth()` in an ISR'd page was crashing production, not just losing cache** — the
+    first real deploy (a fresh Ubuntu 26.04 Linode, §7) 500'd on every published post. The
+    known gap this item replaces (below) had undersold the severity as "home/author pages
+    lose their shared cache": `src/app/[slug]/page.tsx` also calls `generateStaticParams()`
+    (item 4), and a route that's both eligible for static generation *and* calls a dynamic
+    API (`auth()` reads cookies) during that attempt doesn't fall back to per-request
+    rendering — it throws `DYNAMIC_SERVER_USAGE`, a hard error. `next dev` never enforces
+    this the same way `next build`/`next start` does, so nothing caught it before a real
+    production build. Fixed by moving every viewer-identity-dependent read off the server:
+    `SiteHeader`, `PostEditBadge`, `CommentForm`, `CommentNode`, and `CommentSection` no
+    longer call `auth()` anywhere in their render path; a new `SessionProvider` (root layout)
+    backs a `useSession()` call at each of those components instead, restoring real
+    static/ISR/SSG rendering on `/`, `/[slug]`, and `/authors/[slug]`. `src/lib/role-checks.ts`
+    was split out of `authz.ts` (which imports Prisma) so client components can import the
+    pure `canEditAnyPost`/`isAdmin`/`canManagePosts` checks without risking Prisma landing in
+    the browser bundle. See CACHING.md's 2026-07-23 entry.
 
 **Deliberate deviations from §2–§6**
 
@@ -1012,6 +1028,5 @@ Git history carries per-step detail.
   computation above is the one measurable new cost, and scales worse than linearly with
   content length (~16x slower at 5x length) — see PERFORMANCE.md's 2026-07-19 benchmark
   entry for methodology and numbers.
-- The home and author pages' `revalidate = 60` ISR caching is now a no-op — item 10's edit
-  badge made both pages call `auth()`, which Next.js treats as inherently dynamic. Not fixed;
-  see CACHING.md's 2026-07-20 entry for why and a possible client-side-split fix.
+- ~~The home and author pages' `revalidate = 60` ISR caching is now a no-op...~~ **Fixed by
+  item 17** — see CACHING.md's 2026-07-23 entry.

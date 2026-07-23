@@ -1,8 +1,6 @@
 import Link from "next/link";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
-import { getPostEditStatus } from "@/lib/post-edit-status";
 import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
 import PostEditBadge from "@/components/PostEditBadge";
@@ -12,7 +10,6 @@ export default async function SearchPage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
-  const session = await auth();
   const { q } = await searchParams;
   const query = q?.trim() ?? "";
 
@@ -66,13 +63,17 @@ export default async function SearchPage({
         ) : (
           results.map(({ post, text }) => {
             const excerpt = text.slice(0, 200);
-            const editStatus = getPostEditStatus(session?.user, post);
 
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
                 <h2>
                   <Link href={`/${post.slug}`}>{post.publishRevision?.title ?? post.title}</Link>
-                  {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
+                  <PostEditBadge
+                    postId={post.id}
+                    authorUserIds={post.authors.map((a) => a.userId)}
+                    latestRevisionAt={post.revisions[0]?.createdAt.toISOString() ?? null}
+                    collabUpdatedAt={post.collab?.updatedAt.toISOString() ?? null}
+                  />
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>
                   <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />

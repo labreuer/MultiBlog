@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import CommentForm from "./CommentForm";
 import { deleteComment } from "@/app/actions/comments";
 import styles from "./CommentNode.module.css";
@@ -19,9 +20,6 @@ export type CommentNodeData = {
 type Props = {
   comment: CommentNodeData;
   postId: string;
-  userName: string | null;
-  viewerId: string | null;
-  isAdmin: boolean;
   depth?: number;
 };
 
@@ -45,8 +43,11 @@ export function hasNonDeletedDescendant(comment: CommentNodeData): boolean {
   return comment.replies.some((reply) => reply.deletedByUserId === null || hasNonDeletedDescendant(reply));
 }
 
-export default function CommentNode({ comment, postId, userName, viewerId, isAdmin, depth = 0 }: Props) {
+export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   const router = useRouter();
+  const { data: session } = useSession();
+  const viewerId = session?.user?.id ?? null;
+  const isAdmin = session?.user?.role === "ADMIN";
   const [replying, setReplying] = useState(false);
   const [posted, setPosted] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -134,23 +135,10 @@ export default function CommentNode({ comment, postId, userName, viewerId, isAdm
         </div>
       )}
       {replying && !posted && (
-        <CommentForm
-          postId={postId}
-          parentCommentId={comment.id}
-          userName={userName}
-          onPosted={() => setPosted(true)}
-        />
+        <CommentForm postId={postId} parentCommentId={comment.id} onPosted={() => setPosted(true)} />
       )}
       {comment.replies.map((reply) => (
-        <CommentNode
-          key={reply.id}
-          comment={reply}
-          postId={postId}
-          userName={userName}
-          viewerId={viewerId}
-          isAdmin={isAdmin}
-          depth={depth + 1}
-        />
+        <CommentNode key={reply.id} comment={reply} postId={postId} depth={depth + 1} />
       ))}
     </div>
   );

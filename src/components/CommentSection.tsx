@@ -1,4 +1,3 @@
-import { auth } from "@/lib/auth";
 import { getPostThreadsWithApprovedComments, getDetachedThreadContext } from "@/lib/comment-data";
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
@@ -34,11 +33,6 @@ function buildTree(
 }
 
 export default async function CommentSection({ postId }: { postId: string }) {
-  const session = await auth();
-  const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
-  const viewerId = session?.user?.id ?? null;
-  const isAdmin = session?.user?.role === "ADMIN";
-
   const threads = await getPostThreadsWithApprovedComments(postId);
   const generalThread = threads.find((t) => t.quotedText === "");
   const quoteThreads = threads.filter((t) => t.quotedText !== "");
@@ -81,18 +75,12 @@ export default async function CommentSection({ postId }: { postId: string }) {
   return (
     <section className={styles.section} data-comment-section>
       <h2 className={styles.heading}>Comments</h2>
-      <CommentForm postId={postId} userName={userName} />
+      <CommentForm postId={postId} />
 
       {threads.length === 0 ? (
         <p className={styles.empty}>No comments yet.</p>
       ) : (
-        <CommentEntryList
-          entries={entries}
-          postId={postId}
-          userName={userName}
-          viewerId={viewerId}
-          isAdmin={isAdmin}
-        />
+        <CommentEntryList entries={entries} postId={postId} />
       )}
     </section>
   );

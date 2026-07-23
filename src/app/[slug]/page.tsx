@@ -3,12 +3,10 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
 import { renderToReactElement } from "@tiptap/static-renderer";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { getPostThreadsWithApprovedComments } from "@/lib/comment-data";
-import { getPostEditStatus } from "@/lib/post-edit-status";
 import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
@@ -85,10 +83,6 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
     notFound();
   }
 
-  const session = await auth();
-  const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
-  const editStatus = getPostEditStatus(session?.user, post);
-
   const doc = post.publishRevision.doc as JSONContent;
   const staticContent = renderToReactElement({ content: doc, extensions: contentExtensions });
 
@@ -112,7 +106,12 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
       <main className={styles.main}>
         <h1 className={styles.title}>
           {post.publishRevision.title}
-          {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
+          <PostEditBadge
+            postId={post.id}
+            authorUserIds={post.authors.map((a) => a.userId)}
+            latestRevisionAt={post.revisions[0]?.createdAt.toISOString() ?? null}
+            collabUpdatedAt={post.collab?.updatedAt.toISOString() ?? null}
+          />
         </h1>
         <p className={styles.byline}>
           <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
@@ -122,7 +121,6 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
           postId={post.id}
           doc={doc}
           threads={quoteHighlights}
-          userName={userName}
           staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
         />
         <CommentSection postId={post.id} />

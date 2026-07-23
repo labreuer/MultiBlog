@@ -1,10 +1,12 @@
+"use client";
+
 import Link from "next/link";
-import { auth, signOut } from "@/lib/auth";
-import { canManagePosts, isAdmin } from "@/lib/authz";
+import { useSession, signOut } from "next-auth/react";
+import { canManagePosts, isAdmin } from "@/lib/role-checks";
 import { SITE_TITLE } from "@/lib/site-config";
 
-export default async function SiteHeader() {
-  const session = await auth();
+export default function SiteHeader() {
+  const { data: session } = useSession();
 
   return (
     <header
@@ -53,28 +55,21 @@ export default async function SiteHeader() {
           <>
             <Link href="/dashboard">{session.user.name ?? session.user.email}</Link>{" "}
             /{" "}
-            <form
-              action={async () => {
-                "use server";
-                await signOut({ redirectTo: "/" });
+            <button
+              type="button"
+              onClick={() => signOut({ redirectTo: "/" })}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                font: "inherit",
+                color: "inherit",
+                textDecoration: "underline",
+                cursor: "pointer",
               }}
-              style={{ display: "inline" }}
             >
-              <button
-                type="submit"
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 0,
-                  font: "inherit",
-                  color: "inherit",
-                  textDecoration: "underline",
-                  cursor: "pointer",
-                }}
-              >
-                Sign out
-              </button>
-            </form>
+              Sign out
+            </button>
           </>
         ) : (
           <>

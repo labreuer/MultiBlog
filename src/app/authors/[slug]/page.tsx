@@ -1,10 +1,8 @@
 import Link from "next/link";
 import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
-import { getPostEditStatus } from "@/lib/post-edit-status";
 import { publishedPostWhere } from "@/lib/post-status";
 import PostEditBadge from "@/components/PostEditBadge";
 import styles from "./page.module.css";
@@ -58,7 +56,6 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function AuthorPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const session = await auth();
   const author = await getAuthorWithPosts(slug);
   if (!author) {
     const redirectSlug = await resolveRedirectSlug(slug);
@@ -77,14 +74,18 @@ export default async function AuthorPage({ params }: { params: Promise<{ slug: s
         ) : (
           author.posts.map((post) => {
             const excerpt = post.publishRevision ? extractText(post.publishRevision.doc).slice(0, 200) : "";
-            const editStatus = getPostEditStatus(session?.user, post);
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
                 <h2 className={styles.postHeading}>
                   <Link href={`/${post.slug}`} className={styles.titleLink}>
                     {post.publishRevision?.title ?? post.title}
                   </Link>
-                  {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
+                  <PostEditBadge
+                    postId={post.id}
+                    authorUserIds={post.authors.map((a) => a.userId)}
+                    latestRevisionAt={post.revisions[0]?.createdAt.toISOString() ?? null}
+                    collabUpdatedAt={post.collab?.updatedAt.toISOString() ?? null}
+                  />
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>{post.publishedAt?.toLocaleDateString()}</p>
                 <p>

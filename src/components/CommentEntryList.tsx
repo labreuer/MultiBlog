@@ -21,12 +21,9 @@ type SortMode = "datetime" | "quoteIndex";
 type Props = {
   entries: CommentEntry[];
   postId: string;
-  userName: string | null;
-  viewerId: string | null;
-  isAdmin: boolean;
 };
 
-export default function CommentEntryList({ entries, postId, userName, viewerId, isAdmin }: Props) {
+export default function CommentEntryList({ entries, postId }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
 
   // Puts a pseudo-border next to whatever comment the page loaded pointing
@@ -86,13 +83,7 @@ export default function CommentEntryList({ entries, postId, userName, viewerId, 
                 color={entry.color}
               />
             )}
-            <CommentNode
-              comment={entry.root}
-              postId={postId}
-              userName={userName}
-              viewerId={viewerId}
-              isAdmin={isAdmin}
-            />
+            <CommentNode comment={entry.root} postId={postId} />
           </div>
         );
       })}

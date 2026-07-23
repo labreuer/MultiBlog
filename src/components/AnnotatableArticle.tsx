@@ -20,7 +20,6 @@ type Props = {
   postId: string;
   doc: JSONContent;
   threads: QuoteHighlightThread[];
-  userName: string | null;
   staticContent: ReactNode;
 };
 
@@ -36,7 +35,7 @@ function flashHighlight(element: HTMLElement, color: string) {
   }, 1000);
 }
 
-export default function AnnotatableArticle({ postId, doc, threads, userName, staticContent }: Props) {
+export default function AnnotatableArticle({ postId, doc, threads, staticContent }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -127,7 +126,6 @@ export default function AnnotatableArticle({ postId, doc, threads, userName, sta
           </p>
           <CommentForm
             postId={postId}
-            userName={userName}
             anchorFrom={pending.from}
             anchorTo={pending.to}
             quotedText={pending.quotedText}

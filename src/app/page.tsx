@@ -1,8 +1,6 @@
 import Link from "next/link";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
-import { getPostEditStatus } from "@/lib/post-edit-status";
 import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
 import PostEditBadge from "@/components/PostEditBadge";
@@ -11,7 +9,6 @@ import styles from "./page.module.css";
 export const revalidate = 60;
 
 export default async function Home() {
-  const session = await auth();
   const posts = await prisma.post.findMany({
     where: publishedPostWhere(),
     orderBy: { publishedAt: "desc" },
@@ -34,7 +31,6 @@ export default async function Home() {
         ) : (
           posts.map((post) => {
             const excerpt = post.publishRevision ? extractText(post.publishRevision.doc).slice(0, 200) : "";
-            const editStatus = getPostEditStatus(session?.user, post);
 
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
@@ -42,7 +38,12 @@ export default async function Home() {
                   <Link href={`/${post.slug}`} className={styles.titleLink}>
                     {post.publishRevision?.title ?? post.title}
                   </Link>
-                  {editStatus.canEdit && <PostEditBadge postId={post.id} hasPendingEdits={editStatus.hasPendingEdits} />}
+                  <PostEditBadge
+                    postId={post.id}
+                    authorUserIds={post.authors.map((a) => a.userId)}
+                    latestRevisionAt={post.revisions[0]?.createdAt.toISOString() ?? null}
+                    collabUpdatedAt={post.collab?.updatedAt.toISOString() ?? null}
+                  />
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>
                   <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />

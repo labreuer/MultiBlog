@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
 import styles from "./CommentForm.module.css";
 
@@ -9,7 +10,6 @@ const initialState: SubmitCommentState = {};
 type Props = {
   postId: string;
   parentCommentId?: string;
-  userName: string | null;
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
@@ -20,13 +20,14 @@ type Props = {
 export default function CommentForm({
   postId,
   parentCommentId,
-  userName,
   anchorFrom,
   anchorTo,
   quotedText,
   onPosted,
   onCancel,
 }: Props) {
+  const { data: session } = useSession();
+  const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
   useEffect(() => {
