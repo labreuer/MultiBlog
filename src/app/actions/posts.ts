@@ -16,6 +16,21 @@ import type { JSONContent } from "@tiptap/core";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
+// Publish/unpublish change what publishedPostWhere() returns, which is what
+// the home page, author pages, and the post's own page are built from — all
+// three need revalidating, not just the admin-facing /posts list.
+async function revalidatePublicPaths(postId: string, slug: string) {
+  const authors = await prisma.postAuthor.findMany({
+    where: { postId },
+    select: { user: { select: { slug: true } } },
+  });
+  revalidatePath("/");
+  revalidatePath(`/${slug}`);
+  for (const { user } of authors) {
+    revalidatePath(`/authors/${user.slug}`);
+  }
+}
+
 async function requireEditableSession(postId: string) {
   const session = await auth();
   if (!session?.user) {
@@ -154,6 +169,7 @@ export async function publishPost(
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
+  await revalidatePublicPaths(postId, post.slug);
   return { revisionNumber: revision.revisionNumber, created: revision.created };
 }
 
@@ -229,7 +245,7 @@ export async function unpublishPost(postId: string): Promise<void> {
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
-  revalidatePath(`/${post.slug}`);
+  await revalidatePublicPaths(postId, post.slug);
 }
 
 // Soft delete/restore double as each other's undo — no confirmation dialog;

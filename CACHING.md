@@ -61,3 +61,20 @@ confirmed via `next build`'s route summary (`/` and `/[slug]` both show prerende
 full `next start` pass with a clean console. The UX cost this entry predicted is real: the
 edit badge and comment-form name prefill now pop in a moment after the rest of the page,
 once the client-side session fetch resolves, instead of being present in the initial HTML.
+
+## 2026-07-23 — publish/unpublish weren't revalidating the pages they changed
+
+Restoring real ISR above (entry directly above) meant `/`, `/[slug]`, and `/authors/[slug]`
+went back to being cached with `revalidate = 60` instead of rendering fresh per request. But
+`publishPost`/`unpublishPost` (`src/app/actions/posts.ts`) only ever called `revalidatePath`
+for the *admin* surfaces (`/posts/[id]/edit`, `/posts/[id]/history`, `/posts`) — never for the
+public pages whose `publishedPostWhere()` query result the action had just changed. A newly
+published post wouldn't appear on `/` or its authors' `/authors/[slug]` pages, and an
+unpublished post wouldn't disappear from them, until the next background revalidation (up to
+60s later, and only then on the next request after that). `unpublishPost` alone happened to
+revalidate the post's own `/${slug}` page; `publishPost` didn't even do that.
+
+Fixed by adding a shared `revalidatePublicPaths(postId, slug)` helper that both actions call:
+revalidates `/`, `/${slug}`, and `/authors/${authorSlug}` for every author on the post.
+`schedulePost` doesn't need it — a scheduled post isn't in `publishedPostWhere()`'s result yet,
+so there's nothing on those pages to invalidate.
