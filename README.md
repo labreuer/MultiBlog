@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MultiBlog
 
-## Getting Started
+A multi-author blog with post revisions, real-time collaborative editing, and
+quote-anchored comments. See [PLAN.md](PLAN.md) for the full architecture and
+design rationale.
 
-First, run the development server:
+## Prerequisites
+
+- Node.js 20+
+- PostgreSQL 14+
+
+## Setup
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Create a database and point `.env` at it — `.env` is never committed and
+   needs:
+
+   ```
+   DATABASE_URL="postgresql://user:password@localhost:5432/multiblog?schema=public"
+   AUTH_SECRET="<openssl rand -base64 32>"
+   APP_URL="http://localhost:3000"
+   COLLAB_PORT=1234
+   NEXT_PUBLIC_COLLAB_URL="ws://localhost:1234"
+   ```
+
+3. Generate the Prisma client and apply migrations:
+
+   ```bash
+   npx prisma generate
+   npx prisma migrate dev
+   ```
+
+## Running
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev:all
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Runs the Next.js app (`:3000`) and the Hocuspocus real-time collab server
+(`:1234`) together via `concurrently` — one `Ctrl+C` stops both. Individually:
+`npm run dev` (web only) or `npm run collab` (collab only). `npm run
+stop:all` stops a `dev:all` you started elsewhere.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Checks
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npx tsc --noEmit   # typecheck
+npx eslint .       # lint
+```
 
-## Learn More
+No test suite yet.
 
-To learn more about Next.js, take a look at the following resources:
+## Documentation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [PLAN.md](PLAN.md) — architecture, design decisions, and build progress.
+- [DEPLOY.md](DEPLOY.md) — deploying to a self-managed Linode/Ubuntu box.
+- [CACHING.md](CACHING.md) — caching behavior and trade-offs (ISR, etc.).
+- [PERFORMANCE.md](PERFORMANCE.md) — performance findings and the opt-in
+  perf-logging tool.
+- [STYLE.md](STYLE.md) — styling conventions (colors, typography, CSS Modules
+  vs. inline).
+- [TIPTAP.md](TIPTAP.md) — TipTap/ProseMirror gotchas.
+- [CLAUDE.md](CLAUDE.md) — notes for AI coding agents working in this repo.
