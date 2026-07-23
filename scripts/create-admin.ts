@@ -11,7 +11,7 @@
 // Usage:
 //   npx tsx scripts/create-admin.ts <email> <name> <adminInitials> <password>
 // name may contain spaces — quote it. Example:
-//   npx tsx scripts/create-admin.ts labreuer@gmail.com "Luke Breuer" LB 's3cret'
+//   npx tsx scripts/create-admin.ts admin@example.com "Jane Doe" JD 's3cret'
 
 import "dotenv/config";
 import bcrypt from "bcryptjs";
@@ -25,7 +25,7 @@ async function main() {
   if (!email || !name || !adminInitials || !password) {
     console.error(
       "Usage: npx tsx scripts/create-admin.ts <email> <name> <adminInitials> <password>\n" +
-        '  (name may contain spaces — quote it, e.g. "Luke Breuer")',
+        '  (name may contain spaces — quote it, e.g. "Jane Doe")',
     );
     process.exitCode = 1;
     return;

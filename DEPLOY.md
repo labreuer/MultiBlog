@@ -16,11 +16,14 @@ real admin.
 ## 0. Topology
 
 ```
-                        ┌──────────── Linode (Ubuntu 26.04) ─────────┐
-   Internet ── 443 ──▶ nginx ─ /       ─▶ 127.0.0.1:3000  next start  (systemd)│
-              (TLS,        │   /collab  ─▶ 127.0.0.1:1234  hocuspocus (systemd) │ (ws upgrade)
-          LE certbot)      │                                            │
-                           └──▶ 127.0.0.1:5432  postgres (localhost only)┘
+                    ┌─ Linode (Ubuntu 26.04) ──────────────────────────────────────
+                    │
+  Internet ─443/TLS─┼─▶ nginx ─┬─ /       ─▶ 127.0.0.1:3000  next start  (systemd)
+   (Let's Encrypt)  │          └─ /collab ─▶ 127.0.0.1:1234  hocuspocus  (systemd)
+                    │
+                    │   next start + hocuspocus ─▶ 127.0.0.1:5432  postgres (local)
+                    │
+                    └──────────────────────────────────────────────────────────────
 ```
 
 - App and collab are **separate long-running processes**, each its own systemd unit, both
@@ -30,55 +33,6 @@ real admin.
   traffic to it. Browsers connect to `wss://<app-host>/collab` and nginx upgrades to the
   local ws. The Hocuspocus document id travels in-band, so the `/collab` path prefix needs
   no rewriting.
-
----
-
-## 1. Three code/config changes needed *before* the first deploy
-
-These are real gaps in the current tree, not just ops steps. Each is small; do them (on the
-`deploy-prep` branch) before building.
-
-### 1a. NextAuth must trust the proxy host
-
-`src/lib/auth.ts` (NextAuth v5) runs behind nginx, so the incoming `Host`/`X-Forwarded-*`
-headers come from the proxy. Without `trustHost`, v5 refuses to honor them in production and
-sign-in redirects/callbacks break. Set it via env (preferred) — add to the prod `.env`:
-
-```
-AUTH_TRUST_HOST=true
-AUTH_URL=https://<app-host>        # canonical https origin
-```
-
-(Alternatively `trustHost: true` in the `NextAuth({...})` config — env is cleaner so the
-same code runs unchanged in dev.)
-
-### 1b. A production start command for the collab server
-
-`npm run collab` is `tsx watch server/collab.ts` — dev-only (file watching, restarts on
-change). Production should run it once, no watcher. Add to `package.json`:
-
-```json
-"collab:prod": "tsx server/collab.ts"
-```
-
-The systemd unit (§6) invokes this. `tsx` is a runtime dependency here (it's what runs the
-TS collab entrypoint), so it stays installed on the server — do **not** prune devDeps below
-what `collab:prod` needs (see §5 note).
-
-### 1c. A way to create the real admin
-
-`scripts/test-user.ts` refuses anything but `@example.com`, so it can't create
-`labreuer@gmail.com`. A fresh prod DB has **no users** and nothing in the UI creates the
-first admin. A `User` needs `email`, `slug`, `adminInitials`, `passwordHash`, and
-`role = ADMIN` set explicitly (the rest default). Add a tiny one-off, e.g.
-`scripts/create-admin.ts`, run once with `npx tsx` on the server:
-
-```
-npx tsx scripts/create-admin.ts <email> <name> <adminInitials> <password>
-```
-
-It should `bcrypt.hash` the password, generate a unique slug (reuse `uniqueUserSlug`), and
-insert with `role: "ADMIN"`. Guard on existing email so a re-run is a harmless no-op.
 
 ---
 
@@ -135,6 +89,18 @@ sudo ufw status
 ```
 
 Do **not** open 1234 or 5432 — both stay localhost-only behind nginx / the loopback.
+
+> **Also check for a Linode Cloud Firewall — this is separate from `ufw`.** It's a
+> network-level firewall configured in the Linode Cloud Manager (your Linode → **Network**,
+> or the **Firewalls** section), and if one is attached without inbound rules for 80/443 it
+> **silently drops** that traffic *before* it ever reaches the box. `ufw` on the instance
+> looks correct, the services are up, yet outside connections **time out** (not "refused").
+> This cost the first deploy ~2 hours: certbot failed with `Timeout during connect (likely
+> firewall problem)` and the site was unreachable from the internet despite everything on the
+> box being right. Either add inbound TCP 80/443 (`0.0.0.0/0`, `::/0`) rules to the Cloud
+> Firewall, or detach it and rely on `ufw`. A quick way to tell it apart from a
+> box-local problem: from any other machine, `curl -sv --max-time 8 http://<box-ip>/` — a
+> hang/timeout points upstream (Cloud Firewall), a connection *refused* points at the box.
 
 ### 2d. Install Node 20+
 
@@ -274,13 +240,20 @@ Quick sanity check: `psql "postgresql://multiblog:<pw>@127.0.0.1:5432/multiblog"
 DATABASE_URL="postgresql://multiblog:<pw>@127.0.0.1:5432/multiblog?schema=public"
 
 AUTH_SECRET="<openssl rand -base64 32>"     # generate FRESH — do not reuse the dev secret
-AUTH_TRUST_HOST=true                        # §1a
-AUTH_URL="https://<app-host>"               # §1a
+AUTH_TRUST_HOST=true
+AUTH_URL="https://<app-host>"               # canonical https origin
 
 APP_URL="https://<app-host>"                # absolute links (reset links, RSS)
 COLLAB_PORT=1234
 NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"   # path-based; see note below
 ```
+
+> **`AUTH_TRUST_HOST`/`AUTH_URL` are required behind a reverse proxy.** `src/lib/auth.ts`
+> (NextAuth v5) sees the incoming request via nginx, so the `Host`/`X-Forwarded-*` headers
+> come from the proxy, not the original client connection. Without `trustHost`, v5 refuses to
+> honor those headers in production and sign-in redirects/callbacks break. Setting it via env
+> (rather than `trustHost: true` in the `NextAuth({...})` config) means the same code runs
+> unchanged in dev, where it's not needed.
 
 > **`NEXT_PUBLIC_COLLAB_URL` is baked into the client bundle at `npm run build`.** It's a
 > `NEXT_PUBLIC_` var, inlined at build time (used in `PostEditor.tsx` and
@@ -302,7 +275,7 @@ and collab services **must share the same value** — both units point at this o
 As `deploy`, in `/srv/multiblog`:
 
 ```bash
-# 1. Get the code (the branch with the §1 changes)
+# 1. Get the code
 git clone <repo> .            # or rsync the tree up
 
 # 2. Install deps (need dev deps: prisma CLI, tsx, typescript are all build/runtime here)
@@ -316,8 +289,10 @@ npx prisma generate
 # 5. Apply migrations to the fresh DB  (deploy, NOT dev)
 npx prisma migrate deploy
 
-# 6. Seed the first admin (§1c)
-npx tsx scripts/create-admin.ts labreuer@gmail.com "Luke Breuer" LB '<password>'
+# 6. Seed the first admin — a fresh DB has no users and nothing in the UI creates
+#    the first one; scripts/test-user.ts refuses non-@example.com addresses, so it
+#    can't do this either (see that script's own header comment for details)
+npx tsx scripts/create-admin.ts <email> "<Your Name>" <initials> '<password>'
 
 # 7. Build the Next app  (NEXT_PUBLIC_COLLAB_URL must already be set — see §4 note;
 #    on the 1 GB Nanode, swap alone isn't enough — see the NODE_OPTIONS note in §2h)
@@ -328,8 +303,17 @@ NODE_OPTIONS="--max-old-space-size=3072" npm run build
 
 Note on `npm ci` vs `npm ci --omit=dev`: **use the full install.** `prisma`, `tsx`, and
 `typescript` live in devDependencies but are needed at deploy/runtime here — `prisma migrate
-deploy`/`generate`, and `tsx` actually *runs* the collab server in prod (§1b). Pruning dev
+deploy`/`generate`, and `tsx` actually *runs* the collab server in prod (§6). Pruning dev
 deps would break the collab service and future migrations.
+
+> **Pre-flight: run a production build+start locally before deploying.** `next dev` does not
+> enforce Next.js's static/dynamic-rendering split, so a whole class of errors only appears
+> under `next build`/`next start` — e.g. calling a dynamic API (`auth()`, which reads cookies)
+> inside a statically-generated route throws `DYNAMIC_SERVER_USAGE` at build/serve time but
+> renders fine in dev. The first deploy 500'd on every post page for exactly this reason.
+> `npm run build && npm start` on your dev machine (with the prod-style `.env` values, since
+> `next start` also enforces `AUTH_TRUST_HOST`/`AUTH_URL`) catches it before it reaches a live
+> page.
 
 ---
 
@@ -391,6 +375,13 @@ sudo systemctl enable --now multiblog-web multiblog-collab
 (`next start` reads `PORT`; the collab server reads `COLLAB_PORT` from the env file. If you
 used nvm in §2d, swap the `ExecStart` paths per that caveat.)
 
+> **Why `collab:prod` and not `npm run collab`.** The dev script (`tsx watch
+> server/collab.ts`) restarts on every file change — fine locally, wrong for a long-running
+> service. `collab:prod` (`tsx server/collab.ts`, in `package.json`) runs it once, no
+> watcher. `tsx` is a runtime dependency here — it's what actually executes the TS
+> entrypoint — so it must stay installed on the server; don't prune devDeps below what this
+> needs (§5's `npm ci` note).
+
 ---
 
 ## 7. nginx
@@ -408,7 +399,7 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;   # required for §1a trustHost
+    proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost (§4)
 }
 ```
 
@@ -456,11 +447,13 @@ no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
 > references `/etc/letsencrypt/live/<app-host>/…pem`, which **do not exist until certbot
 > runs**. If you enable that config first, `nginx -t` fails on the missing cert and nginx
 > won't start. So issue the cert *before* installing the 443 block. Prerequisites: DNS for
-> `<app-host>` already resolves to this box, and port 80 is open (§2c).
+> `<app-host>` already resolves to this box, and port 80 is reachable **from the internet** —
+> which means *both* `ufw` and any Linode Cloud Firewall allow it (§2c). A Cloud Firewall
+> silently dropping 80 is a common cause of certbot's `Timeout during connect`.
 
 1. **Bootstrap nginx with an HTTP-only block** so certbot has something to serve the
-   challenge from. Put this in `/etc/nginx/sites-available/multiblog` (symlink into
-   `sites-enabled/`), `sudo nginx -t && sudo systemctl reload nginx`:
+   challenge from. Write this to `/etc/nginx/sites-available/multiblog`, enable it, and
+   remove the stock default site so its `default_server` can't shadow it:
 
    ```nginx
    server {
@@ -468,6 +461,11 @@ no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
        server_name <app-host>;
        root /var/www/html;   # anything; certbot only needs to answer /.well-known/…
    }
+   ```
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/multiblog /etc/nginx/sites-enabled/
+   sudo rm -f /etc/nginx/sites-enabled/default
+   sudo nginx -t && sudo systemctl reload nginx
    ```
 
 2. **Issue the cert:**
@@ -509,7 +507,12 @@ stays root-owned and out of the repo (the sample only carries the path, no key m
 - Sign in as the seeded admin — confirms auth + `trustHost` + DB.
 - Open a post editor, type — confirms the collab WebSocket (`wss://`) connects (status line
   goes 🟢 Live). If it stays 🟡/🔴, check the collab unit logs and nginx upgrade headers.
-- Publish a post, hit its public `/[slug]` — confirms the ISR rendering path.
+- Publish a post and load its public `/[slug]` — **do this specifically**, not just the home
+  page: it's the statically-generated (SSG) page class, and the one most likely to expose a
+  build/runtime split issue that `next dev` never showed. A server exception here renders a
+  *generic* error page while the service stays `active`, so a 500 is easy to miss — if the
+  page errors, the real cause (e.g. `DYNAMIC_SERVER_USAGE`) is in `journalctl -u
+  multiblog-web`. Don't take a running service as proof the page rendered.
 
 ---
 
