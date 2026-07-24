@@ -381,10 +381,16 @@ export default function PostEditor({
       {status && <p className={styles.statusMessage}>{status}</p>}
       {error && <p className={styles.errorMessage}>{error}</p>}
       <p className={styles.revisionNote}>
+        {/* The published-post link is deliberately a plain <a>, not <Link>: a client-side
+            navigation can serve that route from the browser's Router Cache, which
+            revalidatePath (server-side only) can't purge — Next advertises
+            x-nextjs-stale-time: 300 for these prerendered pages, so just-published edits
+            stayed invisible here for up to 5 minutes. A hard navigation bypasses that
+            cache and shows exactly what a visitor gets. */}
         {postStatus === "published" ? (
-          <Link href={`/${slug}`} style={{ fontWeight: "bold" }} onClick={() => router.refresh()}>
+          <a href={`/${slug}`} style={{ fontWeight: "bold" }}>
             Published revision #{publishedRevisionNumber}
-          </Link>
+          </a>
         ) : postStatus === "scheduled" && publishedAt ? (
           `Scheduled for ${publishedAt.toLocaleString()}`
         ) : (

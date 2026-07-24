@@ -78,3 +78,71 @@ Fixed by adding a shared `revalidatePublicPaths(postId, slug)` helper that both 
 revalidates `/`, `/${slug}`, and `/authors/${authorSlug}` for every author on the post.
 `schedulePost` doesn't need it — a scheduled post isn't in `publishedPostWhere()`'s result yet,
 so there's nothing on those pages to invalidate.
+
+## 2026-07-24 — `revalidatePath` fixed the server, but the *browser* still served stale
+
+The entry above made the server side correct, and it is: publish a change, then request the
+page, and you get the new content on the first hit. But an author who published an edit and
+then clicked the editor's **"Published revision #N"** link still saw the old version — in the
+same tab, seconds after publishing. Reloading fixed it. So the staleness lived entirely on
+the client.
+
+`revalidatePath` only reaches Next's *server-side* Full Route Cache. It cannot touch the
+browser's **client-side Router Cache**, which holds RSC payloads per tab for routes that tab
+has already visited or prefetched. Our public pages are prerendered, and Next tells the
+browser how long it may reuse them:
+
+```
+x-nextjs-cache: HIT | STALE | MISS   ← server-side Full Route Cache state
+x-nextjs-prerender: 1                ← this route is prerendered/ISR
+x-nextjs-stale-time: 300             ← client Router Cache may reuse for 5 minutes
+Cache-Control: s-maxage=60, stale-while-revalidate=31535940
+```
+
+Those headers are the fastest way to tell the two layers apart, and need no instrumentation —
+`curl -sSI https://<host>/<slug>` answers "is the *server* stale?" directly. If the server
+says it has fresh content but the browser shows old, the Router Cache is the only thing left
+holding it. Note there is no `max-age`, and nginx is a pure pass-through (no `proxy_cache` in
+`deploy/nginx-app.conf.sample`), so neither the browser's HTTP cache nor a CDN is ever
+involved — those two layers are the whole story.
+
+**Fixed** by making that one link a plain `<a>` instead of `<Link>`
+(`src/components/PostEditor.tsx`). A hard navigation bypasses the Router Cache entirely and
+loads the page the way an actual visitor would — which is what "view my published post"
+should mean anyway. Confirmed working on production.
+
+Two things worth knowing before touching this again:
+
+- **`router.refresh()` in the link's `onClick` does not work**, and was tried first.
+  `router.refresh()` refetches the route you are *currently* on — here, the editor — not the
+  one you are navigating to, and it races the navigation besides. It looks plausible in a
+  diff and does nothing.
+- **A local `next build` + `next start` did not reproduce the bug**, across three probes:
+  soft-navigating from `/` after a publish, the same but with the tab having already visited
+  the post page (so a 300s entry existed), and a `stale-while-revalidate` probe (5 sequential
+  requests after publish gave `MISS` with fresh content, then `HIT` — server behaving
+  correctly). The local build otherwise matches production exactly, including all four headers
+  above. So local prod-mode is the right place to test *most* caching behavior, but this
+  particular symptom only ever showed on the real deployment — don't take a local pass as
+  proof.
+
+Still unverified: the home page, `/authors/[slug]`, and the `/posts` admin table all link to
+post pages with plain `<Link>`, so the same Router Cache staleness is possible there in
+principle. It never reproduced locally and hasn't been observed in production, so it's left
+alone rather than pre-emptively converted — but it's the first place to look if "I published
+and still see the old version" resurfaces from a different entry point.
+
+### Testing production caching locally
+
+`next dev` does not enforce the static/dynamic split or the Full Route Cache, so caching bugs
+are invisible there. Production is a single `next start` behind a pass-through nginx — no CDN,
+no cluster — so a local production build is a faithful reproduction:
+
+```
+npm run build
+```
+
+then run the `web-prod` entry in `.claude/launch.json` (port 3001, so it doesn't collide with
+`dev:all` on 3000). That entry shells through `pwsh` to set `AUTH_TRUST_HOST`/`AUTH_URL`,
+because NextAuth rejects `localhost:3001` with `UntrustedHost` under `next start` — the same
+enforcement DEPLOY.md §5 warns about.

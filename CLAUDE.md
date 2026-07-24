@@ -13,7 +13,13 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 - `npm run stop:all` — stops a `dev:all` you (Claude) started, in one command instead of a
   netstat/parent-trace/taskkill dance across several. Verifies the port owner's command line
   actually mentions this repo before touching anything (see `scripts/stop-dev.ps1`).
-- `.claude/launch.json` defines `web` and `collab` for the preview tool.
+- `.claude/launch.json` defines `web`, `collab`, and `web-prod` for the preview tool.
+  `web-prod` runs `next start` on :3001 (so it can coexist with a `dev:all` on :3000) against
+  whatever `npm run build` last produced — use it for anything caching-related, since
+  `next dev` doesn't enforce the static/dynamic split or the Full Route Cache. It shells
+  through `pwsh` to set `AUTH_TRUST_HOST`/`AUTH_URL`, without which NextAuth rejects
+  `localhost:3001` as an `UntrustedHost` under `next start`. See CACHING.md's
+  2026-07-24 entry.
 - The user often runs `dev:all` themselves. If port 3000 is held by a non-preview node
   process, don't kill it — open the browser pane directly on http://localhost:3000.
 
@@ -48,6 +54,20 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 - Verify changes live in the browser pane before reporting them done.
 - The `computer` screenshot action reliably times out in this environment — verify with
   `read_page` / `javascript_tool` measurements (bounding rects, computed styles) instead.
+  Coordinate-based clicks are collateral damage: `computer` refuses `left_click` with a
+  `coordinate` until a screenshot has cached the viewport dimensions, so coordinates are
+  never an available fallback here.
+- `computer`'s `ref`-based clicks can silently no-op on the editor's action buttons — the
+  call reports success and nothing happens (seen repeatedly on Publish in `PostEditor`).
+  When a click appears to do nothing, drive it from `javascript_tool` instead:
+  `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Publish').click()`
+  dispatches a real React-visible click and works every time. Same for the
+  `Published revision #N` link. Confirm the result via `get_page_text` rather than assuming.
+- To set the editor's content in one shot (rather than the per-character benchmark loop
+  below), focus `.tiptap`, select its contents with a `Range`, then
+  `document.execCommand('insertText', false, "…")` — collapsing the range first appends,
+  leaving it selected replaces. Wrap it in an IIFE: `javascript_tool` reuses one scope
+  across calls, so a bare `const t = …` fails with "already declared" on the second call.
 - The browser pane's console buffer accumulates across navigations; for a clean error
   check, open a fresh tab.
 - For a throwaway user account (most manual testing — e.g. exercising publish/
