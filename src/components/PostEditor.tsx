@@ -382,7 +382,7 @@ export default function PostEditor({
       {error && <p className={styles.errorMessage}>{error}</p>}
       <p className={styles.revisionNote}>
         {postStatus === "published" ? (
-          <Link href={`/${slug}`} style={{ fontWeight: "bold" }}>
+          <Link href={`/${slug}`} style={{ fontWeight: "bold" }} onClick={() => router.refresh()}>
             Published revision #{publishedRevisionNumber}
           </Link>
         ) : postStatus === "scheduled" && publishedAt ? (
