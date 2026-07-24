@@ -31,10 +31,11 @@ echo "==> Building Next.js app"
 # On a 1 GB Nanode, V8 auto-sizes its heap ceiling from physical RAM alone
 # (ignores swap), so the default is too low to get through the build even
 # with swap free. Raise it explicitly. See DEPLOY.md §2h.
-NODE_OPTIONS="--max-old-space-size=3072" npm run build
+time NODE_OPTIONS="--max-old-space-size=3072" npm run build
 
 echo "==> Restarting services"
 sudo systemctl restart multiblog-web multiblog-collab
 
 echo "==> Done."
 systemctl --no-pager status multiblog-web multiblog-collab | sed -n '1,12p'
+echo "==> Total deploy time: ${SECONDS}s"
