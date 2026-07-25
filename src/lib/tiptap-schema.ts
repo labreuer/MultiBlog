@@ -37,6 +37,11 @@ export const authorHighlightExtensions = [...contentExtensions, AuthorHighlight]
 // same reason as contentExtensions above: three consumers, one definition.
 export const titleExtensions = [Document.extend({ content: "paragraph" }), Paragraph, Text];
 
+// The title schema as a plain prosemirror-model Schema — the title-fragment
+// counterpart of pmSchema, for code that builds a title doc outside a live
+// editor (server/collab.ts's restore endpoint).
+export const pmTitleSchema = getSchema(titleExtensions);
+
 // titleExtensions plus the author-highlight mark — the title editor and
 // anything rendering the working Yjs session's title. Mirrors
 // authorHighlightExtensions/contentExtensions: the mark never reaches

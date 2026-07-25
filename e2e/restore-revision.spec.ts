@@ -95,10 +95,50 @@ test.describe("restoring an old revision", () => {
 
     // Restore only ever creates a draft revision (PLAN.md §10), so publishing
     // is a required second step — but it must publish the *restored* content.
+    //
+    // The revision number is pinned rather than matched loosely: the link
+    // already reads "#2" from the earlier publish, so /#\d+/ would match
+    // instantly and let the navigation below abort the in-flight publish. #3
+    // is the restore's own draft revision — the editor's content equals it
+    // exactly, so resolveRevision's no-op path reuses it instead of creating a
+    // fourth.
     await page.getByRole("button", { name: "Publish", exact: true }).click();
-    await expect(page.getByRole("link", { name: /Published revision #\d+/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Published revision #3" })).toBeVisible();
 
     await page.goto(`/${publishedPost.slug}`);
     await expect(page.getByText(ADDITION)).toHaveCount(0);
+  });
+
+  // The reason the restore goes through the running collab server rather than
+  // clearing PostCollab and letting onLoadDocument re-seed: a co-author with
+  // the editor already open never triggers a document load, and would happily
+  // re-flush the pre-restore content over the top of the restore.
+  test("reaches a co-author who already has the editor open, without a reload", async ({
+    page,
+    draftPost,
+    secondUser,
+  }) => {
+    const { page: otherPage } = await secondUser();
+
+    await page.goto(`/posts/${draftPost.id}/edit`);
+    await otherPage.goto(`/posts/${draftPost.id}/edit`);
+    await waitForCollabReady(page);
+    await waitForCollabReady(otherPage);
+
+    await bodyEditor(page).click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type(` ${ADDITION}`);
+    await expect(bodyEditor(otherPage)).toContainText(ADDITION);
+    await page.getByRole("button", { name: "Save draft" }).click();
+    await expect.poll(async () => (await getRevisions(draftPost.id)).length).toBe(2);
+
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.goto(`/posts/${draftPost.id}/history/1`);
+    await page.getByRole("button", { name: "Restore revision #1" }).click();
+    await page.waitForURL(`**/posts/${draftPost.id}/edit`);
+
+    // otherPage has not navigated or reloaded at any point.
+    await expect(bodyEditor(otherPage)).not.toContainText(ADDITION);
+    await expect(bodyEditor(otherPage)).toContainText(draftPost.bodyText);
   });
 });

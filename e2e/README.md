@@ -29,7 +29,8 @@ Other entry points: `npm run e2e:ui` (watch mode with a time-travel debugger),
 4. The `cleanup` teardown project sweeps any leftover `e2e-*@example.com` users,
    `E2E …` posts and orphaned commenters.
 
-The whole suite runs in roughly 25 seconds on 3 workers.
+The whole suite runs in roughly 50 seconds on 2 workers — see the worker-count
+note below before raising that.
 
 ## Fixtures
 
@@ -74,6 +75,20 @@ the admin account.
   branch as an edit *inside* the quote; reaching the `mappedTo > mappedFrom`
   guard takes deleting past the quote's boundary. `quote-anchoring.spec.ts`
   covers both, and its header records the exact mapped positions.
+- **Use `gotoOk(page, path)` rather than asserting on `response.status()`.** A
+  bare status assertion reports only the number, and when Playwright reuses an
+  already-running dev server that server's console output isn't captured
+  either — so a 500 tells you nothing. `gotoOk` puts the response body in the
+  failure message, which is how the flake below was finally identified.
+- **Don't raise `workers` above 2.** Three overloads the dev server rather than
+  the machine, and the failures look like app bugs but aren't: a public page
+  500ing with next-auth's `useSession must be wrapped in a <SessionProvider />`
+  during SSR (the root layout *does* wrap `{children}`, and next-auth guards
+  that throw so it can't fire in production), and server actions arriving with
+  truncated bodies — `Unexpected end of JSON input` on `/posts/[id]/edit`,
+  which leaves the clicked action silently not applied. Neither reproduces in
+  isolation. Measured: ~1 failed run in 3.5 at three workers, 0 in 8 at two,
+  for the same ~50s wall clock, because the dev server is the bottleneck.
 - **Two users means two browser contexts**, which `secondUser()` handles. Don't
   reach for two tabs: they share a cookie jar, and the second sign-in silently
   re-authenticates the first (the same trap CLAUDE.md documents for the browser

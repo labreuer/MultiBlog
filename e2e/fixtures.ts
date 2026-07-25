@@ -150,6 +150,23 @@ export function titleEditor(page: Page) {
 }
 
 /**
+ * Navigates and asserts a 200, surfacing the response body when it isn't one.
+ *
+ * A bare `expect(response.status()).toBe(200)` reports only the number, which
+ * is useless for a server-rendered 500 — the reason is in the body, and when
+ * Playwright reuses an already-running dev server its console output isn't
+ * captured either.
+ */
+export async function gotoOk(page: Page, path: string): Promise<void> {
+  const response = await page.goto(path);
+  const status = response?.status();
+  if (status !== 200) {
+    const body = (await response?.text().catch(() => ""))?.slice(0, 3000) ?? "";
+    throw new Error(`GET ${path} returned ${status}, expected 200. Response body:\n${body}`);
+  }
+}
+
+/**
  * Text as a reader actually sees it on a public post page.
  *
  * AnnotatableArticle keeps two copies of the body in the DOM — a server-

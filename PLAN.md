@@ -1100,6 +1100,34 @@ Git history carries per-step detail.
       the collab process**. Found by the fixture teardown, but not a test artifact — a
       hard-delete in production would do the same. Every other error still propagates.
 
+19. **Fixed: restoring an old revision never reached the live document** — found by writing
+    item 18's `restore-revision.spec.ts`. `restoreRevision` wrote a new Revision row carrying
+    the old content and updated `Post.title`, and stopped there. But the editor renders the
+    collab Y.Doc, and `onLoadDocument` re-seeds that from a revision *only* when no
+    `PostCollab` row exists — which stops being true the moment a post is edited once. So the
+    author was dropped back into the editor still looking at the content they meant to
+    discard, and the next Publish snapshotted `editor.getJSON()`, silently undoing the
+    restore. The revision row made history *look* right, which is what made it hard to see.
+    - **Fixed by writing through the running collab server.** A new `onRequest` handler in
+      `server/collab.ts` (`POST /admin/replace-doc`, path shared via `src/lib/collab-admin.ts`
+      so the two ends can't drift) opens a `DirectConnection` and replaces the `default` and
+      `title` fragments; `restoreRevision` calls it after its transaction. Authorization
+      reuses the existing short-lived collab JWT — the action mints one only after
+      `requireEditableSession`, so a valid token naming the document is the credential, the
+      same contract `onAuthenticate` already uses.
+    - **Why not just delete the `PostCollab` row and let `onLoadDocument` re-seed:** a
+      document with a connected editor stays loaded in the collab server's memory, so
+      `onLoadDocument` never runs again and that client simply re-flushes its old state over
+      the restore. Going through the running server is also what makes the restore reach a
+      co-author who already has the editor open — covered by a test that asserts exactly
+      that, with no reload on the second client.
+    - Both fragments are written with y-prosemirror's `prosemirrorToYXmlFragment`, which
+      diffs against what's there and emits only the differing ops, using the live document's
+      own clientID. Merging in an update built from a separately-created `Y.Doc` would risk
+      the clientID collision `onLoadDocument`'s title-seeding comment already warns about.
+      `y-prosemirror` was promoted to a direct dependency (pinned to the version already in
+      the tree via TipTap, so there's still exactly one copy of it and of `yjs`).
+
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
@@ -1124,7 +1152,19 @@ Git history carries per-step detail.
   so there's no HTML to sanitize until rich comments happen.
 - `restoreRevision` (history page) creates a new revision row but doesn't publish it —
   the author still has to hit Publish afterward, which is when remapping runs. Not a gap
-  particular to step 7; that's just what "restore" has always meant here (§8 step 2).
+  particular to step 7; that's just what "restore" has always meant here (§8 step 2). Since
+  item 19 that Publish does at least publish the *restored* content; before it, the second
+  step silently republished whatever the live document still held.
+- **`next dev` gets unreliable under concurrent load**, which the e2e suite ran into before
+  its worker count was tuned down. Two distinct symptoms, neither reproducible in isolation
+  and neither an app defect: a public page 500ing with `useSession must be wrapped in a
+  <SessionProvider />` thrown from `CommentForm` during SSR (the root layout does wrap
+  `{children}`, and next-auth guards that throw so it cannot fire in production), and server
+  actions arriving with truncated bodies — `Unexpected end of JSON input` on
+  `/posts/[id]/edit`, leaving the clicked action silently unapplied. Measured at roughly one
+  failed run in 3.5 with three Playwright workers versus none in eight with two, at identical
+  wall-clock time. Worth knowing beyond the tests: it's a ceiling on how much concurrent
+  traffic a dev server can be trusted to serve correctly, and says nothing about production.
 - The "quoted-text position" sort in the comment list compares `anchorFrom` across threads
   that may be anchored to *different* revisions (an active thread's position is in the
   current doc's coordinates; a detached thread's is frozen in an old revision's) — so sort

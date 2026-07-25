@@ -1,4 +1,4 @@
-import { test, expect, bodyEditor, visibleText, waitForCollabReady } from "./fixtures";
+import { test, expect, bodyEditor, gotoOk, visibleText, waitForCollabReady } from "./fixtures";
 
 // "Publish" without `exact` also matches the Unpublish button.
 const PUBLISH = { name: "Publish", exact: true } as const;
@@ -12,8 +12,7 @@ test.describe("publish / unpublish", () => {
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByRole("link", { name: /Published revision #\d+/ })).toBeVisible();
 
-    const response = await page.goto(`/${draftPost.slug}`);
-    expect(response?.status()).toBe(200);
+    await gotoOk(page, `/${draftPost.slug}`);
     await expect(page.getByRole("heading", { level: 1 })).toContainText(draftPost.title);
     await expect(visibleText(page, draftPost.bodyText)).toBeVisible();
   });
@@ -28,12 +27,15 @@ test.describe("publish / unpublish", () => {
     await bodyEditor(page).click();
     await page.keyboard.press("End");
     await page.keyboard.type(` ${addition}`);
+    // Asserted before EDITED so a failure distinguishes "the keystrokes never
+    // landed" from "the debounced diff never reported them" — this test has
+    // flaked here under full-suite load.
+    await expect(bodyEditor(page)).toContainText(addition);
     // The status line's diff counter is debounced (see REVISION_DIFF_DEBOUNCE_MS);
     // waiting on it confirms the edit actually landed in the doc.
     await expect(page.getByText("EDITED")).toBeVisible();
 
-    let response = await page.goto(`/${draftPost.slug}`);
-    expect(response?.status()).toBe(200);
+    await gotoOk(page, `/${draftPost.slug}`);
     await expect(page.getByText(addition)).toHaveCount(0);
 
     await page.goto(`/posts/${draftPost.id}/edit`);
@@ -41,8 +43,7 @@ test.describe("publish / unpublish", () => {
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByRole("link", { name: /Published revision #2/ })).toBeVisible();
 
-    response = await page.goto(`/${draftPost.slug}`);
-    expect(response?.status()).toBe(200);
+    await gotoOk(page, `/${draftPost.slug}`);
     await expect(visibleText(page, addition)).toBeVisible();
   });
 

@@ -1,10 +1,13 @@
 import "dotenv/config";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import * as Y from "yjs";
-import { Server } from "@hocuspocus/server";
+import { Server, type Hocuspocus } from "@hocuspocus/server";
 import { TiptapTransformer } from "@hocuspocus/transformer";
+import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import { prisma } from "../src/lib/prisma";
 import { verifyCollabToken } from "../src/lib/collab-token";
-import { contentExtensions } from "../src/lib/tiptap-schema";
+import { contentExtensions, pmSchema, pmTitleSchema } from "../src/lib/tiptap-schema";
+import { REPLACE_DOC_PATH } from "../src/lib/collab-admin";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 const PORT = Number(process.env.COLLAB_PORT ?? 1234);
@@ -25,6 +28,81 @@ async function ignoreMissingPost(documentName: string, write: () => Promise<unkn
   }
 }
 
+function readJsonBody(request: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    request.on("data", (chunk) => {
+      raw += chunk;
+      // The only caller posts one revision's document; anything larger is a
+      // mistake or an attack, and shouldn't be buffered indefinitely.
+      if (raw.length > 5_000_000) reject(new Error("Request body too large."));
+    });
+    request.on("end", () => {
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error("Malformed JSON body."));
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+function send(response: ServerResponse, status: number, message: string): void {
+  response.writeHead(status, { "Content-Type": "text/plain" });
+  response.end(message);
+}
+
+/**
+ * Replaces a document's body and title fragments with the posted content, and
+ * broadcasts to everyone connected — see src/lib/collab-admin.ts for why a
+ * restore has to come through here rather than just writing a Revision row.
+ *
+ * Both fragments are written with y-prosemirror's prosemirrorToYXmlFragment,
+ * which diffs against what's already there and emits only the differing ops.
+ * That matters for the same reason onLoadDocument builds the title by hand:
+ * merging in an update from a separately-created Y.Doc risks a clientID
+ * collision with overlapping clocks, whereas this writes using the live
+ * document's own clientID.
+ */
+async function handleReplaceDoc(request: IncomingMessage, response: ServerResponse, instance: Hocuspocus) {
+  const body = (await readJsonBody(request)) as Partial<ReplaceDocBody>;
+  const { token, postId, doc, title } = body;
+  if (typeof token !== "string" || typeof postId !== "string" || typeof title !== "string" || !doc) {
+    send(response, 400, "Expected token, postId, doc and title.");
+    return;
+  }
+
+  const payload = await verifyCollabToken(token).catch(() => null);
+  if (!payload || payload.postId !== postId) {
+    // The token is minted by the server action only after it has checked that
+    // this user may edit this post, so a valid token naming this document is
+    // the authorization — same contract as onAuthenticate above.
+    send(response, 403, "Invalid or mismatched collab token.");
+    return;
+  }
+
+  const connection = await instance.openDirectConnection(postId);
+  try {
+    await connection.transact((document) => {
+      prosemirrorToYXmlFragment(pmSchema.nodeFromJSON(doc), document.getXmlFragment("default"));
+      prosemirrorToYXmlFragment(
+        pmTitleSchema.nodeFromJSON({
+          type: "doc",
+          content: [{ type: "paragraph", ...(title ? { content: [{ type: "text", text: title }] } : {}) }],
+        }),
+        document.getXmlFragment("title"),
+      );
+    });
+  } finally {
+    await connection.disconnect();
+  }
+
+  send(response, 204, "");
+}
+
+type ReplaceDocBody = { token: string; postId: string; doc: object; title: string };
+
 const server = new Server({
   port: PORT,
 
@@ -37,6 +115,25 @@ const server = new Server({
       throw new Error("Token does not match this document.");
     }
     return { userId: payload.sub, role: payload.role };
+  },
+
+  // Hocuspocus serves plain HTTP on the same port as the websocket. Its
+  // convention for "I handled this request" is to reject with a *falsy* value
+  // (its request handler rethrows anything truthy and otherwise stops), which
+  // is what keeps the default "Welcome to Hocuspocus!" 200 from also being
+  // written. Anything that isn't our one endpoint returns normally and falls
+  // through to that default.
+  async onRequest({ request, response, instance }) {
+    if (request.method !== "POST" || !request.url?.startsWith(REPLACE_DOC_PATH)) {
+      return;
+    }
+    try {
+      await handleReplaceDoc(request, response, instance);
+    } catch (err) {
+      console.error("[collab] replace-doc failed:", err);
+      send(response, 500, err instanceof Error ? err.message : "Failed to replace document.");
+    }
+    return Promise.reject();
   },
 
   async onLoadDocument({ documentName, document }) {

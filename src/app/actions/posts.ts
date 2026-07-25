@@ -7,6 +7,7 @@ import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/pr
 import { uniquePostSlug, changePostSlug, revertPostSlug as revertPostSlugInDb } from "@/lib/post-slug";
 import { canManagePosts, canUserEditPost } from "@/lib/authz";
 import { remapThreadsToRevision } from "@/lib/anchor-remap";
+import { replaceCollabDoc } from "@/lib/collab-admin";
 import { stripMarkFromDoc } from "@/lib/tiptap-schema";
 import { docsEqual } from "@/lib/diff";
 import { derivePostStatus } from "@/lib/post-status";
@@ -432,6 +433,20 @@ export async function restoreRevision(
     }),
     prisma.post.update({ where: { id: postId }, data: { title: source.title } }),
   ]);
+
+  // Writing the revision row is only half of a restore. The editor renders the
+  // live collab document, which onLoadDocument re-seeds from a revision *only*
+  // when no PostCollab row exists — false for any post that's been edited once
+  // — so without this the author lands back in the editor still looking at the
+  // content they meant to discard, and the next Publish snapshots that,
+  // silently undoing the restore. See src/lib/collab-admin.ts.
+  await replaceCollabDoc({
+    postId,
+    userId: session.user.id,
+    role: session.user.role,
+    doc: source.doc as JSONContent,
+    title: source.title,
+  });
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);

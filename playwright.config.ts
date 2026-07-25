@@ -14,7 +14,15 @@ export default defineConfig({
   // cross-file interference is limited to the per-IP comment rate limit — see
   // the note in e2e/README.md before writing a test that posts via the form.
   fullyParallel: false,
-  workers: process.env.CI ? 1 : 3,
+  // Two, not three. Three workers overload the *dev server*, not the machine:
+  // measured symptoms were a public page 500ing with next-auth's
+  // "useSession must be wrapped in a <SessionProvider />" during SSR, and
+  // server actions arriving with truncated bodies ("Unexpected end of JSON
+  // input" on /posts/[id]/edit), neither reproducible in isolation and neither
+  // an app defect. Failure rate was roughly 1 full run in 3.5 at three
+  // workers, 0 in 8 at two — for the same ~50s wall clock, because the dev
+  // server is the bottleneck rather than the parallelism.
+  workers: process.env.CI ? 1 : 2,
   forbidOnly: !!process.env.CI,
   // No local retries on purpose: a retry that turns a red run green hides
   // exactly the collab/WS timing regressions this suite exists to catch.
