@@ -9,7 +9,10 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
-  engine: "classic",
+  // No `engine` key: Prisma 7 dropped the classic query engine in favour of
+  // driver adapters, and the option no longer exists on the config type. The
+  // runtime connection now comes from PrismaPg in src/lib/prisma.ts; this
+  // `datasource` is still needed, but only for the CLI's migrate/introspect.
   datasource: {
     url: env("DATABASE_URL"),
   },

@@ -25,7 +25,8 @@
     "@hocuspocus/provider": "^4.3.0",
     "@hocuspocus/server": "^4.3.0",
     "@hocuspocus/transformer": "^4.3.0",
-    "@prisma/client": "^6.19.3",
+    "@prisma/adapter-pg": "^7.9.0",
+    "@prisma/client": "^7.9.0",
     "@tabler/icons-react": "^3.45.0",
     "@tiptap/core": "^3.29.0",
     "@tiptap/extension-collaboration": "^3.29.0",
@@ -56,7 +57,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
-    "prisma": "^6.19.3",
+    "prisma": "^7.9.0",
     "tsx": "^4.23.0",
     "typescript": "^5"
   },
