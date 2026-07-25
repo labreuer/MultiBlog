@@ -40,9 +40,10 @@ real admin.
 
 ### 2a. Create the instance
 
-- **Image: Ubuntu 26.04 LTS.** If Linode's image list doesn't offer it yet, or its default
-  Node is older than 20 (checked in §2d), fall back to **24.04 LTS** — every step below works
-  unchanged on 24.04.
+- **Image: Ubuntu 26.04 LTS.** If Linode's image list doesn't offer it yet, fall back to
+  **24.04 LTS** — every step below works unchanged on 24.04. The distro's own Node version
+  doesn't matter either way: §2d installs Node 24 from NodeSource, whose repo is
+  distro-agnostic.
 - Plan: a **1 GB Nanode** is fine at runtime (the two Node services + Postgres are light),
   but 1 GB is not enough for `next build` — you **must** add swap (§2h) or the build gets
   OOM-killed. Add SSH keys during creation if you can.
@@ -102,42 +103,98 @@ Do **not** open 1234 or 5432 — both stay localhost-only behind nginx / the loo
 > box-local problem: from any other machine, `curl -sv --max-time 8 http://<box-ip>/` — a
 > hang/timeout points upstream (Cloud Firewall), a connection *refused* points at the box.
 
-### 2d. Install Node 20+
+### 2d. Install Node 24 (NodeSource)
 
-A brand-new LTS ships a recent Node in its own repo, and the distro package is system-wide
-(`/usr/bin`, which is what the systemd units in §6 expect). Check it first:
+**Use NodeSource. Do not `apt install nodejs npm`.** Confirmed on a real 26.04 box: the
+distro path leaves you unable to move off it later (see the recovery box below), and the
+one-word `npm` in that command is what causes the damage.
+
+Node 24 (Krypton) over 26.04's own 22.22.1: Node 22 has been in maintenance-only since
+2025-10-21 and goes EOL 2027-04-30, while 24 is EOL 2028-04-30 — a full extra year for a
+one-time install. Every dependency in `package.json` is satisfied by 24, and the newer
+toolchain (Prisma 7, ESLint 10) requires ≥ 24 outright.
 
 ```bash
-apt-cache policy nodejs
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt install -y nodejs
 ```
 
-- **If the candidate is ≥ 20:** `sudo apt install -y nodejs npm`, then verify `node -v` and
-  `npm -v`.
-  > **Confirmed on 26.04: `nodejs` and `npm` are independently-versioned apt packages, and
-  > `npm` lags badly** — `nodejs` at 22.22.1 pairs with `npm` 9.2.0, when Node 22 should
-  > bundle npm ~10.9.x. `/usr/bin/npm` is still the right binary (no PATH-shadowing — `/bin`
-  > is the merged-usr symlink to `/usr/bin`), it's just stale. Fix it in place:
-  > ```bash
-  > sudo npm install -g npm@10
-  > hash -r
-  > npm -v      # expect 10.x
-  > ```
-- **If it's older, or 26.04's repo Node is missing:** install NodeSource's Node 22 LTS *if it
-  publishes a 26.04 repo* (`curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -`
-  then `sudo apt install -y nodejs`). NodeSource often lags a just-released LTS — if it 404s
-  on the 26.04 codename, use **nvm** instead:
-  ```bash
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-  # re-open the shell, then:
-  nvm install --lts    # 22.x
-  ```
-  > **nvm caveat for systemd:** nvm installs Node under the user's home, not `/usr/bin`. If
-  > you go the nvm route, the §6 unit files must use the absolute nvm path in `ExecStart`
-  > (e.g. `/home/deploy/.nvm/versions/node/v22.x.x/bin/npm`) and set `Environment=PATH=` to
-  > include that `bin`. A system-wide install (distro/NodeSource) keeps the `/usr/bin/npm`
-  > units below valid — prefer it if available.
+NodeSource now serves a **distro-agnostic `nodistro` repo** — there is no per-codename
+repo to lag behind a just-released Ubuntu, so 26.04 works the same as any other release.
+Its `nodejs` package declares `Provides: npm` and bundles a matching npm (24.18.0 ships
+npm 11.16.0), so npm is never separately versioned and never stale. It installs
+system-wide to `/usr/bin/node` and `/usr/bin/npm`, which is exactly what the §6 units
+expect.
 
-The app needs Node 20+; **Node 22 LTS is the sweet spot** — don't feel pinned to exactly 20.
+Verify — check the **paths**, not just the versions:
+
+```bash
+node -v && npm -v && which -a node npm
+```
+
+Expect `v24.x`, npm `11.x`, and both resolving under `/usr/bin`.
+
+> **If `npm` resolves to `/usr/local/bin/npm`, stop and fix it.** `/usr/local/bin` precedes
+> `/usr/bin` on `PATH`, so a hand-installed npm there silently shadows NodeSource's — and
+> since `/usr/local` is not dpkg-managed, `apt` will never touch it. Every future
+> `apt upgrade nodejs` installs a `/usr/bin/npm` that stays masked. The tell is a version
+> mismatch with the Node you just installed: npm 10.9.8 alongside Node 24.18.0 means the
+> npm came from a Node 22.23.1 era, not from this install.
+>
+> This is the residue of the old distro-first instructions, which told you to
+> `sudo npm install -g npm@10` to paper over the distro's stale npm. **Never hand-install
+> npm globally on this box** — NodeSource's bundled one is always correct.
+>
+> Confirm NodeSource's npm is present *before* deleting anything, or you'll be left with no
+> npm at all:
+> ```bash
+> /usr/bin/npm -v && dpkg -S /usr/bin/npm      # expect 11.x, owned by `nodejs`
+> ls -la /usr/local/bin/ /usr/local/lib/node_modules/
+> ```
+> If that listing holds only npm/npx, remove just those — do not blanket-delete
+> `/usr/local/lib/node_modules`, which is also where any other global CLI would live:
+> ```bash
+> sudo rm -f /usr/local/bin/npm /usr/local/bin/npx
+> sudo rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npx
+> hash -r                                       # bash caches resolved paths; without this
+> which -a npm && npm -v                        # your shell still points at the deleted one
+> ```
+
+> **Recovery: `libnode127 Conflicts nodejs-legacy`.** If the box already has the distro
+> stack (from an earlier `apt install -y nodejs npm`), installing NodeSource fails with
+> `Unable to satisfy dependencies` and a wall of `node-* : Depends: nodejs:any` lines. The
+> cause is in the last three lines of that error: NodeSource's `nodejs` declares
+> `Provides: nodejs-legacy`, Ubuntu's `libnode127` declares `Conflicts: nodejs-legacy`, and
+> `libnode127` underpins every packaged `node-*` library on the box. apt is right — the two
+> stacks cannot coexist.
+>
+> Take the services down first; purging removes `/usr/bin/node` and nginx will 502 in the gap:
+> ```bash
+> sudo systemctl stop multiblog-web multiblog-collab
+> dpkg -l | grep -E 'nodejs|npm|libnode|^ii  node-' > ~/node-packages-before.txt
+> sudo apt purge libnode127        # NOT -y — read the cascade first
+> ```
+> Purging `libnode127` cascades to the whole distro JS stack: `nodejs`, `npm`, ~60 `node-*`
+> packages, plus `eslint`/`webpack`/`terser`. That is the correct set to lose — none of it is
+> used by MultiBlog, which gets its entire toolchain from `node_modules`. **Read the list
+> before confirming**; anything proposed *outside* that JS cluster means something else on
+> the box is wired into the distro Node, and you should stop.
+> ```bash
+> sudo apt autoremove --purge
+> sudo apt install -y nodejs
+> ```
+> Then re-run the `/usr/local` check above — a purge does not remove it — and rebuild
+> `node_modules` from scratch, since what's there was installed under the old Node/npm:
+> ```bash
+> cd /srv/multiblog && rm -rf node_modules .next && npm ci
+> ```
+> Resume at §5 step 4 (`npx prisma generate`) and restart the units when the build succeeds.
+
+> **nvm is the last resort, not an equal option.** It installs Node under the user's home
+> rather than `/usr/bin`, so the §6 units need absolute `ExecStart` paths (e.g.
+> `/home/deploy/.nvm/versions/node/v24.x.x/bin/npm`) plus `Environment=PATH=` including that
+> `bin` — and every `nvm install` thereafter silently invalidates them. NodeSource keeps the
+> units correct as written; prefer it.
 
 ### 2e. Install Postgres
 
@@ -314,6 +371,23 @@ Note on `npm ci` vs `npm ci --omit=dev`: **use the full install.** `prisma`, `ts
 deploy`/`generate`, and `tsx` actually *runs* the collab server in prod (§6). Pruning dev
 deps would break the collab service and future migrations.
 
+> **Install scripts are pre-approved in `package.json`; a warning here means something
+> changed.** npm 11.16 (bundled with Node 24) reports dependencies whose install hooks you
+> haven't reviewed. The field is **advisory** in 11.16 — the scripts run either way — but a
+> future npm release flips it to blocking, so `package.json` carries an `allowScripts` block
+> approving the four this project needs: `@prisma/engines` (query-engine binaries), `esbuild`
+> (the platform binary `tsx` needs, without which the collab service won't start), `prisma`,
+> and `unrs-resolver`. A clean `npm ci` should print no `allow-scripts` warnings at all.
+>
+> Approvals are **pinned to exact versions**, so any dependency bump that changes one of
+> those four re-triggers the warning by design — that is the prompt to re-review, not a
+> fault. Re-approve **in the repo and commit it**, never with `npm approve-scripts` on the
+> box: `deploy.sh` starts with `git pull`, so a server-side edit to `package.json` becomes a
+> merge conflict on the next deploy.
+>
+> Client generation never depended on any of this — step 4 above runs `npx prisma generate`
+> explicitly rather than relying on a postinstall hook.
+
 > **Pre-flight: run a production build+start locally before deploying.** `next dev` does not
 > enforce Next.js's static/dynamic-rendering split, so a whole class of errors only appears
 > under `next build`/`next start` — e.g. calling a dynamic API (`auth()`, which reads cookies)
@@ -392,8 +466,9 @@ sudo visudo -cf /etc/sudoers.d/multiblog    # validate syntax before it's truste
 sudo chmod 440 /etc/sudoers.d/multiblog
 ```
 
-(`next start` reads `PORT`; the collab server reads `COLLAB_PORT` from the env file. If you
-used nvm in §2d, swap the `ExecStart` paths per that caveat.)
+(`next start` reads `PORT`; the collab server reads `COLLAB_PORT` from the env file. The
+`/usr/bin/npm` paths above assume the NodeSource install in §2d — if you fell back to nvm,
+swap them per that caveat.)
 
 > **Why `collab:prod` and not `npm run collab`.** The dev script (`tsx watch
 > server/collab.ts`) restarts on every file change — fine locally, wrong for a long-running

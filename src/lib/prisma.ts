@@ -1,10 +1,25 @@
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-const client = globalForPrisma.prisma ?? new PrismaClient();
+// Prisma 7 removed the classic query engine: the client no longer reads the
+// datasource URL itself, and every connection goes through a driver adapter
+// we construct. `prisma.config.ts`'s `datasource` block still exists, but it
+// only feeds the CLI's migrate/introspect — nothing at runtime reads it, so
+// the URL has to be handed over explicitly here.
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not set — src/lib/prisma.ts cannot build a driver adapter without it.");
+}
+
+// Reusing the cached client across dev HMR reloads matters more under the
+// adapter than it did before: each PrismaClient now owns a real pg connection
+// pool, so a fresh one per reload leaks pools rather than just re-wrapping an
+// engine process.
+const client = globalForPrisma.prisma ?? new PrismaClient({ adapter: new PrismaPg(connectionString) });
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = client;

@@ -55,6 +55,16 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 ### Automated
 
 - Typecheck `npx tsc --noEmit`; lint `npx eslint .`.
+- **ESLint stays on 9 and TypeScript on 5 — both are gated on `eslint-config-next`,
+  not on us.** `npm outdated` offers eslint 10 and typescript 7; neither works yet.
+  eslint 10 removed `context.getFilename()`, which `eslint-plugin-react` still calls, so
+  `npx eslint .` dies with `contextOrFilename.getFilename is not a function` before
+  linting anything ([eslint-plugin-react#4018](https://github.com/jsx-eslint/eslint-plugin-react/issues/4018),
+  a dup of #3977). `eslint-plugin-import`/`-react`/`-jsx-a11y` all cap their `eslint`
+  peer at `^9` and are pulled in by `eslint-config-next`, so this is not overridable.
+  typescript 7 is blocked separately by `typescript-eslint`'s `<6.1.0` peer. Both
+  unblock when Next ships a refreshed lint config — recheck then, not before.
+  Taking eslint 10 *would* drop the `brace-expansion` audit count from 9 to 6.
 - `npm run e2e` — Playwright end-to-end suite (~20s), covering publish/unpublish,
   comment moderation, and two-author live collab. **Prefer it to driving the browser
   pane by hand** for anything it already covers, and for anything worth covering: one
@@ -63,6 +73,17 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   create and delete their own throwaway users/posts, and it reuses a `dev:all` you
   already have running rather than starting (or killing) its own. Full details,
   fixtures, and the gotchas that bite when writing new specs: [e2e/README.md](e2e/README.md).
+- **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.**
+  Symptom: the server logs `✓ Ready`, serves `/` fine, then prints
+  `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs
+  indefinitely and every spec dies in `auth.setup.ts` with `page.goto: net::ERR_ABORTED`
+  or a 60s timeout. It reads exactly like an auth regression and isn't one; the same
+  commit passes a full run once `.next` is gone. `rm -rf .next` is the whole fix
+  (`Remove-Item -Recurse -Force .next`). Playwright kills the dev server it started at
+  the end of a run, so this is most likely on the run *after* a suite that started its
+  own — i.e. when you're bisecting a dependency bump and least want a phantom failure.
+  Check `.next/dev/logs/next-development.log` for a `Compiling …` line with no matching
+  completion before blaming your changes.
 
 ### Driving the browser pane
 
