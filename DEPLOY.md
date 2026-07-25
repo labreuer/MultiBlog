@@ -380,6 +380,18 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now multiblog-web multiblog-collab
 ```
 
+Redeploys (§10, `deploy/deploy.sh`) restart these units via `sudo systemctl restart`. `deploy`'s
+plain `sudo` group membership (§2b) still prompts for a password for that, which breaks a
+non-interactive redeploy — grant a **NOPASSWD** rule scoped to exactly this one command
+(never a blanket `NOPASSWD: ALL`):
+
+```bash
+echo 'deploy ALL=(root) NOPASSWD: /bin/systemctl restart multiblog-web multiblog-collab' \
+  | sudo tee /etc/sudoers.d/multiblog
+sudo visudo -cf /etc/sudoers.d/multiblog    # validate syntax before it's trusted
+sudo chmod 440 /etc/sudoers.d/multiblog
+```
+
 (`next start` reads `PORT`; the collab server reads `COLLAB_PORT` from the env file. If you
 used nvm in §2d, swap the `ExecStart` paths per that caveat.)
 

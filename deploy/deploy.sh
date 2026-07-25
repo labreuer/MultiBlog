@@ -8,9 +8,10 @@
 # automatically (next build loads .env; prisma loads it via prisma.config.ts),
 # so no manual export is needed here.
 #
-# The systemctl restart needs passwordless sudo for these two units, e.g. a
-# /etc/sudoers.d/multiblog line:
-#   deploy ALL=(root) NOPASSWD: /bin/systemctl restart multiblog-web multiblog-collab
+# The systemctl restart below needs passwordless sudo for these two units —
+# `deploy`'s plain sudo-group membership alone still prompts for a password,
+# which breaks this non-interactive run. See DEPLOY.md §6 for the one-time
+# /etc/sudoers.d/multiblog NOPASSWD grant this depends on.
 set -euo pipefail
 
 cd /srv/multiblog
