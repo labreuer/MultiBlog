@@ -88,12 +88,20 @@
   border-radius: 4px;
   display: flex;
   flex-direction: column;
-  /* flex-shrink: 0 — the settings panel below can expand and push the
-     container's total content past the available viewport height; this
-     keeps the editor pinned at its own natural size instead of shrinking to
-     make room, so a page-level scrollbar appears in that case (see
-     .container's overflow note) rather than the editor visibly resizing. */
-  flex: 1 0 auto;
+  /* Shrinks together with .editorContent's own 300px floor below — including
+     when the *settings panel* further down grows (e.g. expanding the
+     revisions table): the whole editor collapses toward that floor first,
+     keeping Save/Publish/Schedule in view, and only once .editorContent is
+     already at its floor does the page fall back to scrolling past
+     everything below the editor (see .container's overflow note above for
+     the same floor-then-scroll mechanism one level up).
+     flex-shrink was briefly 0 here so the settings panel's growth wouldn't
+     visibly shrink the editor — but flex-shrink: 0 pins a flex item at its
+     full *content* size regardless of what's demanding the room, so it also
+     pinned the editor at full document height for any sufficiently long
+     post, pushing Publish off-screen entirely instead of scrolling inside
+     the editor. That's strictly worse than the resize this was avoiding. */
+  flex: 1 1 auto;
   min-height: 0;
 }
 
