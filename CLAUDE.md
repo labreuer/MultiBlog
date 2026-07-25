@@ -63,6 +63,17 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   create and delete their own throwaway users/posts, and it reuses a `dev:all` you
   already have running rather than starting (or killing) its own. Full details,
   fixtures, and the gotchas that bite when writing new specs: [e2e/README.md](e2e/README.md).
+- **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.**
+  Symptom: the server logs `✓ Ready`, serves `/` fine, then prints
+  `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs
+  indefinitely and every spec dies in `auth.setup.ts` with `page.goto: net::ERR_ABORTED`
+  or a 60s timeout. It reads exactly like an auth regression and isn't one; the same
+  commit passes a full run once `.next` is gone. `rm -rf .next` is the whole fix
+  (`Remove-Item -Recurse -Force .next`). Playwright kills the dev server it started at
+  the end of a run, so this is most likely on the run *after* a suite that started its
+  own — i.e. when you're bisecting a dependency bump and least want a phantom failure.
+  Check `.next/dev/logs/next-development.log` for a `Compiling …` line with no matching
+  completion before blaming your changes.
 
 ### Driving the browser pane
 
