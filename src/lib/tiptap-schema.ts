@@ -1,4 +1,7 @@
 import StarterKit from "@tiptap/starter-kit";
+import Document from "@tiptap/extension-document";
+import Paragraph from "@tiptap/extension-paragraph";
+import Text from "@tiptap/extension-text";
 import { getSchema, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
@@ -20,6 +23,26 @@ export const pmSchema = getSchema(contentExtensions);
 // contentExtensions (without this mark) stays the schema for public/historic
 // content and can't drift from it.
 export const authorHighlightExtensions = [...contentExtensions, AuthorHighlight];
+
+// The schema for a post's *title*, which lives in its own Yjs fragment
+// ("title") of the same Y.Doc as the body rather than as a node inside the
+// body doc — a node at position 0 would shift every body position, and
+// CommentThread.anchorFrom/anchorTo (see anchor-remap.ts) are absolute
+// positions. Deliberately not StarterKit: `content: "paragraph"` (exactly
+// one, not `block+`) makes a second block structurally impossible, so
+// neither Enter nor a multi-line paste can turn a title into two lines, and
+// no marks are registered so a title can't carry bold/links/etc.
+//
+// Shared with the Hocuspocus seeding step and LiveHistoryViewer's replay,
+// same reason as contentExtensions above: three consumers, one definition.
+export const titleExtensions = [Document.extend({ content: "paragraph" }), Paragraph, Text];
+
+// titleExtensions plus the author-highlight mark — the title editor and
+// anything rendering the working Yjs session's title. Mirrors
+// authorHighlightExtensions/contentExtensions: the mark never reaches
+// revisions.title (a plain string column, extracted as text on save), so
+// titleExtensions alone stays the schema for saved titles.
+export const titleAuthorHighlightExtensions = [...titleExtensions, AuthorHighlight];
 
 // ProseMirror builds every non-empty node/mark `attrs` object via
 // `Object.create(null)` (computeAttrs, prosemirror-model), and Node/Mark#toJSON

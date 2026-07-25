@@ -5,7 +5,11 @@ import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { renderToReactElement } from "@tiptap/static-renderer";
-import { authorHighlightExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
+import {
+  authorHighlightExtensions,
+  collectMarkAttrValues,
+  titleAuthorHighlightExtensions,
+} from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import proseStyles from "@/styles/prose.module.css";
@@ -95,21 +99,47 @@ export default function LiveHistoryViewer({ postId }: { postId: string }) {
     for (const entry of log.slice(0, effectivePosition + 1)) {
       Y.applyUpdate(scratch, entry.bytes);
     }
-    const json = TiptapTransformer.extensions(authorHighlightExtensions).fromYdoc(scratch, "default");
+    const body = TiptapTransformer.extensions(authorHighlightExtensions).fromYdoc(scratch, "default");
+    // The title is a second fragment of the same doc (see titleExtensions),
+    // so it replays from this same log for free. Absent when the log's first
+    // (full-state) entry predates the title fragment — i.e. a session already
+    // in flight when the title moved into the Yjs doc, which self-heals on the
+    // next save, since that resets the log.
+    const title =
+      scratch.getXmlFragment("title").length > 0
+        ? TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(scratch, "title")
+        : null;
     scratch.destroy();
-    return json;
+    return { body, title };
   }, [log, effectivePosition]);
 
-  const authorIds = useMemo(
-    () => (replayed ? collectMarkAttrValues(replayed, "authorHighlight", "authorId") : []),
-    [replayed],
-  );
+  // Union across both fragments, so someone who has only touched the title
+  // still gets their color fetched.
+  const authorIds = useMemo(() => {
+    if (!replayed) return [];
+    const ids = new Set(collectMarkAttrValues(replayed.body, "authorHighlight", "authorId"));
+    if (replayed.title) {
+      for (const id of collectMarkAttrValues(replayed.title, "authorHighlight", "authorId")) {
+        ids.add(id);
+      }
+    }
+    return Array.from(ids);
+  }, [replayed]);
   const authorColors = useAuthorColors(authorIds);
 
   const content = useMemo(() => {
     if (!replayed) return null;
     try {
-      return renderToReactElement({ content: replayed, extensions: authorHighlightExtensions });
+      return renderToReactElement({ content: replayed.body, extensions: authorHighlightExtensions });
+    } catch {
+      return null;
+    }
+  }, [replayed]);
+
+  const titleContent = useMemo(() => {
+    if (!replayed?.title) return null;
+    try {
+      return renderToReactElement({ content: replayed.title, extensions: titleAuthorHighlightExtensions });
     } catch {
       return null;
     }
@@ -155,6 +185,12 @@ export default function LiveHistoryViewer({ postId }: { postId: string }) {
           </p>
           <AuthorHighlightStyles colors={authorColors} />
           <div className={proseStyles.prose} style={{ border: "1px solid #ddd", borderRadius: 4, padding: "1rem" }}>
+            {/* The title replays alongside the body rather than being shown
+                from the DB, so scrubbing back shows the title as of that
+                moment too — including who changed it. */}
+            {titleContent && (
+              <div style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "0.75rem" }}>{titleContent}</div>
+            )}
             {content ?? <p style={{ color: "#999" }}>Nothing to show yet.</p>}
           </div>
         </>

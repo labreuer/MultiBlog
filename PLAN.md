@@ -324,7 +324,11 @@ noted in §3a:
   last revision" controls how much CRDT history is ever kept around. The viewer fetches that
   log, replays prefixes of it into a scratch `Y.Doc` for the scrub slider, and taps a second,
   otherwise-unused `HocuspocusProvider` connection purely to keep appending new updates as
-  they arrive live.
+  they arrive live. Replays **both** fragments of that doc — `"default"` (body) and `"title"`
+  (see the title field below) — so scrubbing back shows the title as of that moment, colored by
+  whoever changed it, rather than today's title from the DB. The title is absent (rendered as
+  nothing) for a log whose first full-state entry predates the title fragment; that self-heals
+  on the next save, which resets the log.
 - **Collaborator cursors**: shown as a thin colored bar rather than `CollaborationCaret`'s
   default always-visible name label (`renderCaret` in `CollabEditorBody.tsx`) — the name
   shows in a CSS `:hover`-only tooltip instead. The local user's own cursor is unaffected
@@ -336,7 +340,10 @@ noted in §3a:
   last saved revision, via the existing word-level `diffText`) and `(Name: +N, ...)` per
   contributing/connected author (`collectAuthorHighlightStats`, `src/lib/tiptap-schema.ts`).
   Both figures are debounced ~400ms rather than recomputed per keystroke — see
-  PERFORMANCE.md, which also has a real before/after benchmark of this branch's cost.
+  PERFORMANCE.md, which also has a real before/after benchmark of this branch's cost. Both come
+  from the **body** editor only: title edits are deliberately excluded from `(+X −Y)` and from
+  the per-author counts, since a title change is already signalled separately (TITLE CHANGED and
+  the divergence border below) and mixing it into a word-level content diff would misreport it.
 - `.revisionNote` — shows "`{Published revision #N (bold, linked to the live post) |
   Scheduled for {date} | Unpublished}`. `{EDITED[, TITLE CHANGED] | Currently viewing
   revision #M}`." — the second clause
@@ -348,10 +355,63 @@ noted in §3a:
   the published revision number from the DB) and live on undo back to a clean state (the
   existing debounced revision-diff, already recomputed on every editor `update` event).
 
-**Title-divergence indicator:** the title `<input>` gets a persistent 2px `#ffd800` border
+**Title field** (`CollabTitleField.tsx`): the title is *not* a plain `<input>` backed by React
+state, and not a hidden node inside the body doc either. It's a second Yjs fragment (`"title"`)
+of the **same `Y.Doc`** as the body, driven by its own minimal TipTap editor
+(`titleExtensions` in `src/lib/tiptap-schema.ts`: `Document.extend({ content: "paragraph" })` +
+`Paragraph` + `Text`, no StarterKit, no marks besides `authorHighlight`). Consequences:
+
+- It rides the existing Hocuspocus connection, `PostCollab.ydoc` persistence, and
+  `PostCollabUpdate` replay log, so two editors share one title (rather than each holding a
+  private string where last-save-wins) and live-history scrubbing gets title attribution for
+  free.
+- Body positions are untouched, which is why it isn't a node in the body doc: a node at
+  position 0 would shift every position, and `CommentThread.anchorFrom`/`anchorTo`
+  (`anchor-remap.ts`) are absolute. It also keeps the title out of `contentExtensions`, the
+  schema shared with the public renderer.
+- `content: "paragraph"` (exactly one, not `block+`) makes a second block structurally
+  impossible, so neither Enter (also an explicit keymap no-op) nor a multi-line paste can turn
+  a title into two lines.
+- **No `CollaborationCaret`**: the extension has no per-field awareness key, so a second
+  instance on the same provider would write the same `awareness.cursor` as the body's and render
+  remote positions against the wrong fragment. Title text still syncs live; only remote carets
+  are absent there.
+- Seeded/backfilled server-side in `onLoadDocument` (`server/collab.ts`) from the latest
+  revision's title — for a fresh doc *and* for any `PostCollab` row written before the title
+  moved into the Yjs doc. Built directly on the live `Y.Doc` rather than merging a second
+  `TiptapTransformer.toYdoc` result, which would risk a clientID collision.
+- `Revision.title`/`Post.title` are unchanged plain string columns. `Revision.title` is still
+  written only by `resolveRevision` on save/publish/schedule — the fragment is the *working*
+  title, that column the *saved, attributable* one. `Post.title` has a second writer now (see
+  below): it's no longer purely "whatever the last save/publish/schedule stamped." `PostEditor`'s
+  `title` state is a mirror of the field, fed by an `onTitleChange` callback, trimmed on the way
+  to the server and rejected when empty (easier to reach in a contenteditable than in an
+  `<input>`).
+- **Debounced background autosave of `Post.title` alone** (`updatePostTitle`,
+  `src/app/actions/posts.ts`): ~1s after typing settles, `PostEditor` writes the trimmed title
+  straight to `Post.title`, independent of Save/Publish/Schedule. Deliberately touches only that
+  column — never `Revision`, never `publishRevisionId` — so it can't create a revision for an
+  unreviewed keystroke and can't move what a reader currently sees (that's still exclusively
+  `publishRevision.title`, stamped only by an explicit publish). This is *why* it's safe to fire
+  off a keystroke rather than a save: the two things a title-write could otherwise damage — the
+  revision history and the published page — are both untouched by construction. Every tab with
+  the title fragment synced runs this independently; since they're all converging on the same
+  eventual text, redundant writes across tabs are harmless. Gated on `providerSynced` like the
+  save buttons, and a `lastPersistedTitleRef` skips re-sending a title `Post.title` already has —
+  which also means an explicit Save/Publish/Schedule (which stamps the same column itself)
+  cancels any pending autosave rather than racing it.
+- **Gated on the collab handshake.** Both title comparisons below are gated on
+  `providerSynced && title !== ""` (`titleComparable`): before the provider syncs, the fragment
+  is locally empty, which would light up TITLE CHANGED and the divergence border on every load.
+  `Collaboration`'s own `onFirstRender` is *not* a sufficient signal — with the collab server
+  unreachable it fires immediately against the still-empty fragment. Save/publish/schedule are
+  gated on `providerSynced` alone (Unpublish isn't — it sends no content), which also closes a
+  pre-existing hole where saving mid-handshake would persist the empty *body*.
+
+**Title-divergence indicator:** the title field gets a persistent 2px `#ffd800` border
 whenever its live value differs from the currently *published* title (`publishedTitle`,
 `null` unless `postStatus === "published"`) — a separate check from TITLE CHANGED above,
-which compares against the last-*saved* title rather than the published one. The input has a
+which compares against the last-*saved* title rather than the published one. The field has a
 2px transparent border by default (rather than none) so the color swap doesn't shift layout.
 
 **Settings panel:** rather than only managing moderation policy, authors, and deletion from
@@ -413,12 +473,21 @@ posts            id, slug, title, publish_revision_id,
                  deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §3c
 post_authors     post_id, user_id, byline_order                 -- manual byline, decoupled
 revisions        id, post_id, revision_number, doc JSONB (ProseMirror),
-                 title, editor_id, changelog, created_at         -- IMMUTABLE
+                 title, editor_id, changelog, created_at         -- IMMUTABLE. title is the
+                                                                   -- *saved* title; the working
+                                                                   -- one is a Yjs fragment (§3d).
+                                                                   -- posts.title also gets a
+                                                                   -- debounced write straight off
+                                                                   -- that fragment (§3d), so it's
+                                                                   -- no longer purely "whatever
+                                                                   -- the last save/publish wrote"
 post_publication_events id, post_id, type(published|unpublished|   -- audit log of publish/unpublish/
                  scheduled|schedule_canceled), revision_id NULL,   -- schedule transitions (§10 item 12) —
                  scheduled_for NULL, actor_id NULL, created_at      -- needed once those transitions can
                                                                      -- happen without a new revision
-post_collab      post_id, ydoc BYTEA, updated_at                 -- live Yjs state (working draft)
+post_collab      post_id, ydoc BYTEA, updated_at                 -- live Yjs state (working draft):
+                                                                  -- two fragments, "default"
+                                                                  -- (body) + "title" (§3d)
 post_collab_updates id, post_id, created_at, update BYTEA        -- raw Yjs update log, since
                                                                   -- last revision only (§10 item 9)
 site_settings    id(singleton), default_moderation_policy, trust_threshold(int, e.g. 3), ...

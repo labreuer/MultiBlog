@@ -21,6 +21,13 @@
   min-height: 0;
 }
 
+/* Styles a contenteditable (CollabTitleField's EditorContent wrapper), not an
+   <input> — the title is a collaborative Yjs field so it can be attributed and
+   scrubbed like the body. Everything below the nowrap/line-height pair is
+   carried over unchanged from when this was an <input>. Dropping the UA input
+   background is deliberate: in light mode a white input on the white page
+   background was already invisible, and matching .editorContent's transparent
+   background is what keeps the two surfaces consistent in dark mode. */
 .titleInput {
   font-size: clamp(1.1rem, 4vw, 1.5rem);
   width: 100%;
@@ -31,6 +38,27 @@
   /* 2px transparent by default (rather than no border) so switching to
      .titleChanged only swaps the color, not the box's rendered size. */
   border: 2px solid transparent;
+  cursor: text;
+  /* An empty title must still be a full line tall and clickable, which a
+     collapsed contenteditable wouldn't be. */
+  line-height: 1.4;
+  min-height: 1.4em;
+}
+
+/* A title is one line by schema (titleExtensions' `content: "paragraph"`), so
+   a long one scrolls sideways rather than wrapping into a second visual line
+   the schema says can't exist. */
+.titleInput :global(.tiptap) {
+  white-space: nowrap;
+  overflow-x: auto;
+  outline: none;
+}
+
+/* Stands in for the `:disabled` greying an <input> got for free — used while
+   the post is soft-deleted, and for the pre-connection placeholder. */
+.titleInputDisabled {
+  color: #666;
+  cursor: default;
 }
 
 /* Persists as long as the title differs from what's currently published. */

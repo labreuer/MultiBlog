@@ -122,7 +122,19 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 - To A/B a performance change against actual history rather than guessing: confirm
   `git status` is clean, `git checkout <old-commit>`, stop/restart `dev:all` (checkout
   doesn't hot-reload cleanly across many files — the collab server especially needs a real
-  restart), measure, then `git checkout <branch-name>` and restart again.
+  restart), measure, then `git checkout <branch-name>` and restart again. With uncommitted
+  work, `git stash push -u` / `git stash pop` does the same job without needing a commit.
+- **Restarting the collab server while an editor tab is still open can duplicate a post's
+  content.** `onLoadDocument` seeds the doc from the latest revision whenever no `PostCollab`
+  row exists — and a killed server may never have flushed one (`onStoreDocument` is
+  debounced), so the restarted server seeds a *second* copy, with fresh Yjs client ids, into a
+  doc the reconnecting client already holds seeded content for. Yjs merges rather than
+  deduplicates, and the post shows every paragraph twice. It's pre-existing (nothing to do
+  with the title fragment) and only bites during dev restarts. Before restarting `collab`,
+  navigate open editor tabs away; if it already happened, `DELETE FROM "PostCollabUpdate"` +
+  `DELETE FROM "PostCollab"` for that post, restart collab again (the doubled doc is still in
+  the old process's memory), then reload — it re-seeds cleanly from the revision, which was
+  never touched.
 - For performance/stress testing at a realistic content size, copy the target content into
   a throwaway post rather than editing the real one directly — removes any risk from a
   botched restore step.
@@ -137,9 +149,30 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   `body.scrollTop`, when checking scroll behavior.
 - TipTap v3's StarterKit already bundles Link and undo/redo: never add
   `@tiptap/extension-link` separately, and pass `undoRedo: false` when combining with the
-  Collaboration extension.
+  Collaboration extension. `@tiptap/extension-document`/`-paragraph`/`-text` *are* declared
+  deps, which isn't a violation of that: they're for the **title** editor
+  (`CollabTitleField.tsx`), which registers no StarterKit at all, so nothing is double-
+  registered. Pin them to the same exact version as `@tiptap/core` when installing —
+  `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0` exactly, and npm
+  fails the install.
 - The TipTap schema is shared by the editor, Hocuspocus doc-seeding, and public rendering
-  via `src/lib/tiptap-schema.ts` — change it only there so the three can't drift.
+  via `src/lib/tiptap-schema.ts` — change it only there so the three can't drift. It holds
+  *two* schemas: `contentExtensions` (post body) and `titleExtensions` (the title, a separate
+  Yjs fragment — see PLAN.md §3d).
+- `CollaborationCaret` has no per-field awareness key: every instance writes
+  `awareness.cursor`. Two of them on one provider (e.g. body + title editors sharing a
+  `Y.Doc`) therefore render each other's positions against the wrong fragment. Only the body
+  editor gets one; the title field syncs text without remote carets.
+- The `Collaboration` extension's `onFirstRender` is **not** "the doc has synced": with the
+  collab server unreachable it fires right away against the still-empty fragment, so anything
+  that treats empty-means-empty (a title-changed comparison, a save) sees "" as real content.
+  `HocuspocusProvider`'s own `onSynced` is the signal for that — see `providerSynced` in
+  `PostEditor.tsx`. `onFirstRender` also fires *during* `useEditor`'s render, so calling a
+  parent `setState` from it trips React's "state update on a component that hasn't mounted
+  yet"; report upward from an effect instead (`CollabTitleField.tsx`).
+- `document.querySelector('.tiptap')` now matches the **title** editor first — the body editor
+  is `querySelectorAll('.tiptap')[1]`. Relevant to the editing-latency benchmark and
+  content-setting recipes above, which target `.tiptap`.
 - ProseMirror drops custom attributes where inline decorations overlap; the quote-highlight
   extension pre-splits ranges into non-overlapping segments (`data-thread-ids`, plural).
 - `authorHighlight` marks (per-author color-coding, `src/lib/author-highlight-extension.ts`)

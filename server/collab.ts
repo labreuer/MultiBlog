@@ -25,17 +25,41 @@ const server = new Server({
 
   async onLoadDocument({ documentName, document }) {
     const existing = await prisma.postCollab.findUnique({ where: { postId: documentName } });
-    if (existing) {
-      Y.applyUpdate(document, existing.ydoc);
-      return;
-    }
-
     const latestRevision = await prisma.revision.findFirst({
       where: { postId: documentName },
       orderBy: { revisionNumber: "desc" },
     });
-    const seedYdoc = TiptapTransformer.toYdoc(latestRevision?.doc ?? EMPTY_DOC, "default", contentExtensions);
-    Y.applyUpdate(document, Y.encodeStateAsUpdate(seedYdoc));
+
+    if (existing) {
+      Y.applyUpdate(document, existing.ydoc);
+    } else {
+      const seedYdoc = TiptapTransformer.toYdoc(latestRevision?.doc ?? EMPTY_DOC, "default", contentExtensions);
+      Y.applyUpdate(document, Y.encodeStateAsUpdate(seedYdoc));
+    }
+
+    // The title is a second fragment of this same doc rather than a node
+    // inside "default" — see titleExtensions (src/lib/tiptap-schema.ts) for
+    // why. It's seeded here for a fresh doc *and* backfilled for any
+    // PostCollab row written before the title moved into the Yjs doc, which
+    // is why this runs outside the branch above.
+    //
+    // Built directly on `document` rather than via TiptapTransformer.toYdoc +
+    // applyUpdate: merging a second, independently-created Y.Doc's update in
+    // risks a clientID collision with overlapping clocks, whereas writing here
+    // uses this document's own clientID.
+    //
+    // Note this also re-seeds a title that's been emptied to nothing. That's
+    // intended — a title is required at creation and empty is invalid
+    // everywhere downstream (slug generation, listings, the public <h1>).
+    const titleFragment = document.getXmlFragment("title");
+    if (titleFragment.length === 0) {
+      const title = latestRevision?.title ?? "";
+      const paragraph = new Y.XmlElement("paragraph");
+      if (title) {
+        paragraph.insert(0, [new Y.XmlText(title)]);
+      }
+      titleFragment.insert(0, [paragraph]);
+    }
   },
 
   async onStoreDocument({ documentName, document }) {

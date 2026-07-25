@@ -116,6 +116,28 @@ async function resolveRevision(
   return { id: revision.id, revisionNumber, created: true };
 }
 
+// Debounced from the title field's onTitleChange (see PostEditor.tsx) —
+// roughly once per second while a title is settling, well before any
+// explicit Save/Publish/Schedule. Deliberately touches only `Post.title`,
+// never `Revision` or `publishRevisionId`: the *saved* and *published* titles
+// are still written exclusively by the transaction inside
+// saveDraft/publishPost/schedulePost, so an in-progress, unreviewed keystroke
+// can never move what a reader currently sees, and never grows the revision
+// history on its own.
+//
+// No revalidatePath: every page that shows Post.title (the /posts admin
+// table, /posts/[id]/history, etc.) requires auth() and is therefore already
+// dynamically rendered on every request (see CACHING.md) — there's no Full
+// Route Cache entry here to invalidate. Deliberately no router.refresh()
+// either; this runs silently in the background rather than interrupting
+// typing with a re-render.
+export async function updatePostTitle(postId: string, title: string): Promise<void> {
+  await requireEditableSession(postId);
+  const trimmed = title.trim();
+  if (!trimmed) return;
+  await prisma.post.update({ where: { id: postId }, data: { title: trimmed } });
+}
+
 export async function saveDraft(
   postId: string,
   title: string,

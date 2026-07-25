@@ -181,3 +181,103 @@ above): `server/collab.ts`'s per-update `count()` query, and
 
 **Bottom line:** editing itself hasn't slowed down. The revision-diff status
 line is the one place with real, measurable, super-linear cost.
+
+## 2026-07-24 — Second TipTap editor for the title: A/B against the same-day baseline
+
+**Prompt:** "What are the performance implications of having a second TipTap
+editor in the page, even if it's using the same ydoc?" → "yes, run the A/B
+benchmark and record it in PERFORMANCE.md"
+
+**Change under test:** the post title moved from a controlled React `<input>`
+(plain `useState` in `PostEditor`) to its own TipTap editor bound to a second
+Yjs fragment (`"title"`) of the *same* `Y.Doc` as the body — see
+`CollabTitleField.tsx` and PLAN.md §3d. Two `EditorView`s on the page instead
+of one.
+
+**Method:** working tree vs. `master` at `a96ebff`, via `git stash push -u` /
+`git stash pop`, with both dev servers restarted for each side (not an
+estimate). Two throwaway posts held a copy of a real post's content — 3,796
+chars / 17 paragraphs ("small") and 18,038 chars / 89 paragraphs ("large") —
+so the real post was never opened. Content was byte-identical on both sides
+(verified by character count before and after every run).
+
+- **Body latency**: 50 warm-up + 300 timed `execCommand('insertText')` calls
+  at the end of the body, `performance.now()` per call, then 350
+  `execCommand('delete')` to restore. 3 runs per cell.
+- **Title latency**: 20 warm-up + 100 timed keystrokes. On baseline that's a
+  native-setter `value` write + `input` event (what React sees from real
+  typing); on the new side it's `execCommand('insertText')` in the title's
+  contenteditable.
+- **Title burst**: because the contenteditable path can defer React work
+  *outside* the timed call while the controlled `<input>` did it
+  synchronously, per-call timing alone could flatter the new side. The burst
+  metric times 100 keystrokes end-to-end plus a settle window and divides by
+  100, so deferred renders are counted. It confirms the per-call figures
+  rather than contradicting them.
+
+**Results — body typing** (mean of 3 runs; p95 range across runs):
+
+| Content | Baseline `a96ebff` | With title editor |
+|---|---|---|
+| 3.8k chars | 0.22ms / p95 0.3–0.4ms | 0.24ms / p95 0.3–0.4ms |
+| 18.0k chars | 0.25ms / p95 0.4–0.5ms | 0.26ms / p95 0.4ms |
+
+Body typing is unchanged: +0.02–0.03ms per keystroke, at the edge of the
+0.1ms `performance.now()` granularity and well inside run-to-run spread. This
+is the cell that was actually in question. y-prosemirror attaches its
+expensive listener per *fragment* (`type.observeDeep`, y-tiptap.js:830), so
+body edits never run the title binding's `_typeChanged`; what it *does*
+attach per **document** is `beforeAllTransactions` (y-tiptap.js:828), whose
+handler computes `getRelativeSelection` over its own binding's state. That
+means every body keystroke now also runs that hook for the title binding —
+but scoped to a one-paragraph fragment, which is why it doesn't show up here.
+
+**Results — title typing** (per-call mean; burst = ms/char including settle):
+
+| Content | Baseline (`<input>`) | Title editor |
+|---|---|---|
+| 3.8k chars | 2.1ms / p95 4.0–5.6ms | 0.19ms / p95 0.2–0.4ms |
+| 3.8k chars, burst | 1.87ms/char | 0.38ms/char |
+| 18.0k chars | 2.5ms / p95 4.4–7.4ms | 0.16ms / p95 0.2–0.3ms |
+| 18.0k chars, burst | 2.14ms/char | 0.30ms/char |
+
+Title typing got **~5–11x faster**, which was not the expected direction. The
+cause isn't Yjs — it's that the old `<input>` was a *controlled* React input:
+every character ran `setTitle` synchronously inside the event dispatch, which
+re-rendered all of `PostEditor` including `PostSettingsPanel`'s revision
+table, and got worse with body size (2.1ms → 2.5ms) even though the body
+wasn't involved. The contenteditable is uncontrolled: ProseMirror updates the
+DOM itself and the mirrored `setTitle` re-render no longer sits in the typing
+path. The burst numbers confirm the win survives counting deferred work.
+
+**Costs this benchmark does not capture**, all per-title-keystroke and all
+new:
+
+- Each title keystroke is now a Yjs update, so it hits `server/collab.ts`'s
+  `onChange` — including the per-update `postCollabUpdate.count()` already
+  flagged as `O(n)` per keystroke / `O(n²)` per unsaved session in the
+  2026-07-19 entry above. Retitling a post now feeds that counter; it
+  previously cost nothing server-side until save.
+- `collectAuthorHighlightStats` runs undebounced on each title keystroke
+  (deliberate — one paragraph — but inconsistent with the body's 400ms
+  debounce).
+- `CollabTitleField` and `CollabEditorBody` each own a `useAuthorColors`
+  cache, so an author appearing in both fragments can be fetched twice from
+  `/api/users/colors` on load.
+
+**Bottom line:** a second editor on the shared `Y.Doc` costs nothing
+measurable on body typing, and title typing is several times faster than the
+controlled `<input>` it replaced. The real new costs are server-side
+(per-keystroke update logging), not in the editor.
+
+**Measurement notes for whoever runs this next**
+
+- The first baseline pass measured body-large at 0.36–0.43ms; a second pass
+  after a fresh server restart measured 0.25ms for the identical code and
+  content. The first pass was contaminated by Next dev-server compile work
+  right after startup. **Load the page, then discard a first run** before
+  recording anything.
+- `requestAnimationFrame` never fires and `setTimeout` is throttled while the
+  Browser pane is hidden, which silently turns any rAF-based settle into a
+  30s tool timeout. Use a `MessageChannel` round-trip instead — it's also
+  what React's own scheduler uses.

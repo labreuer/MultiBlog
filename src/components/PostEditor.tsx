@@ -6,13 +6,14 @@ import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
-import { saveDraft, publishPost, unpublishPost, schedulePost } from "@/app/actions/posts";
+import { saveDraft, publishPost, unpublishPost, schedulePost, updatePostTitle } from "@/app/actions/posts";
 import { extractText, diffText } from "@/lib/diff";
 import { toPlainJSON } from "@/lib/tiptap-schema";
 import { perfMeasure } from "@/lib/perf-monitor";
 import type { PostStatus } from "@/lib/post-status";
 import type { ModerationPolicy } from "@/generated/prisma/enums";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
+import CollabTitleField from "./CollabTitleField";
 import PostSettingsPanel, { type EligibleUser, type RevisionRow } from "./PostSettingsPanel";
 import styles from "./PostEditor.module.css";
 
@@ -55,6 +56,11 @@ type DisplayAuthor = { authorId: string; name: string; color: string; chars: num
 // LCS; debouncing keeps it off the per-keystroke path.
 const REVISION_DIFF_DEBOUNCE_MS = 400;
 
+// Longer than the revision-diff/author-stats debounces above: those are local
+// recomputations, this is a network write, so it's fine (and better, fewer
+// requests) to wait a bit longer for typing to actually settle.
+const TITLE_AUTOSAVE_DEBOUNCE_MS = 1000;
+
 // Author-highlight marks live in the working Yjs doc, not in the saved
 // revision — but nothing else ever removes them, so without this they'd
 // keep accumulating across every future revision instead of reflecting only
@@ -90,7 +96,12 @@ export default function PostEditor({
   revisions,
 }: Props) {
   const router = useRouter();
+  // A mirror of the collaborative title field's text, not the source of truth
+  // for it — the title lives in the "title" fragment of the same Y.Doc as the
+  // body (see CollabTitleField). Seeded from the last saved revision so the
+  // first render matches what the fragment is about to sync in.
   const [title, setTitle] = useState(initialTitle);
+  const [providerSynced, setProviderSynced] = useState(false);
   const [deleted, setDeleted] = useState(initialDeleted);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,9 +114,16 @@ export default function PostEditor({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [connectedAuthors, setConnectedAuthors] = useState<ConnectedAuthor[]>([]);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [titleEditor, setTitleEditor] = useState<Editor | null>(null);
   const [authorStats, setAuthorStats] = useState<AuthorStat[]>([]);
   const [revisionDiff, setRevisionDiff] = useState<RevisionDiff | null>(null);
   const diffDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleAutosaveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks what's actually in Post.title right now (as far as this tab knows),
+  // so the autosave effect below can skip firing when the live title already
+  // matches it — both on ordinary settling and right after an explicit
+  // Save/Publish/Schedule, which stamps the same column itself.
+  const lastPersistedTitleRef = useRef(initialTitle);
 
   const lastRevisionText = useMemo(
     () => (lastRevisionDoc == null ? "" : extractText(lastRevisionDoc)),
@@ -139,6 +157,13 @@ export default function PostEditor({
           document: ydoc,
           token,
           onStatus: ({ status: s }) => setConnectionStatus(s),
+          // Not the same signal as the title editor's own first render: with
+          // the collab server unreachable, Collaboration happily renders the
+          // still-empty fragment and fires onFirstRender straight away. Only
+          // once the provider has synced is an empty title actually empty
+          // rather than not-yet-arrived. Never reset on a later disconnect —
+          // the doc's content is in hand locally from then on.
+          onSynced: () => setProviderSynced(true),
           onAuthenticationFailed: ({ reason }) => setError(`Live editing unavailable: ${reason}`),
           onAwarenessUpdate: ({ states }) => {
             // Keyed by user id (not name, and not excluding the local user) so
@@ -190,14 +215,79 @@ export default function PostEditor({
     };
   }, [editor, lastRevisionText]);
 
+  // Debounced background write of Post.title alone — see updatePostTitle
+  // (src/app/actions/posts.ts) for why that's safe to do off a keystroke
+  // rather than an explicit save: it never touches Revision or
+  // publishRevisionId, so it can't move what's published or grow the
+  // revision history. Gated on providerSynced for the same reason the save
+  // buttons are (src/components/PostEditor.tsx's `providerSynced` comment
+  // above) — before that, `title` is the still-empty fragment, not a real
+  // edit. Every tab with the title fragment synced runs this independently;
+  // since they're all converging on the same eventual text, redundant writes
+  // from multiple open tabs are harmless, just extra idempotent requests.
+  useEffect(() => {
+    if (!providerSynced || deleted) return;
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === lastPersistedTitleRef.current) return;
+
+    titleAutosaveDebounceRef.current = setTimeout(() => {
+      updatePostTitle(postId, trimmed)
+        .then(() => {
+          lastPersistedTitleRef.current = trimmed;
+        })
+        .catch(() => {
+          // Best-effort: a failure here just delays the admin listing/history
+          // heading catching up. The next successful Save/Publish/Schedule
+          // stamps Post.title itself regardless, so nothing is lost.
+        });
+    }, TITLE_AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (titleAutosaveDebounceRef.current) clearTimeout(titleAutosaveDebounceRef.current);
+    };
+  }, [title, providerSynced, deleted, postId]);
+
+  // Trimmed only on the way to the server, never written back into the title
+  // field — rewriting the field's own text would be a synced edit, landing in
+  // every other editor's title mid-keystroke. Empty is rejected here because
+  // a contenteditable makes select-all-delete easy, and everything downstream
+  // (slug generation, listings, the public <h1>) assumes a real title.
+  const resolveTitle = (): string | null => {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setError("Title is required.");
+      return null;
+    }
+    return trimmed;
+  };
+
+  // Both the title and the body carry authorHighlight marks, and both need
+  // resetting to "since the last revision" once that revision exists.
+  const clearEditHighlights = () => {
+    if (editor) clearAuthorHighlights(editor);
+    if (titleEditor) clearAuthorHighlights(titleEditor);
+  };
+
+  // Called after any explicit save that just stamped `trimmedTitle` into
+  // Post.title itself, so the debounce effect above doesn't redundantly
+  // repeat that write a moment later — and so a pending autosave that was
+  // mid-flight for an *older* title can't land afterward and clobber it.
+  const noteTitlePersisted = (trimmedTitle: string) => {
+    if (titleAutosaveDebounceRef.current) clearTimeout(titleAutosaveDebounceRef.current);
+    lastPersistedTitleRef.current = trimmedTitle;
+  };
+
   const handleSaveDraft = () => {
     if (!editor) return;
+    const trimmedTitle = resolveTitle();
+    if (trimmedTitle === null) return;
     setError(null);
     startTransition(async () => {
       try {
         const doc = toPlainJSON(editor.getJSON());
-        const result = await saveDraft(postId, title, doc);
-        clearAuthorHighlights(editor);
+        const result = await saveDraft(postId, trimmedTitle, doc);
+        noteTitlePersisted(trimmedTitle);
+        clearEditHighlights();
         if (!result.created) setStatus(`No changes since revision #${result.revisionNumber}`);
         router.refresh();
       } catch (e) {
@@ -208,12 +298,15 @@ export default function PostEditor({
 
   const handlePublish = () => {
     if (!editor) return;
+    const trimmedTitle = resolveTitle();
+    if (trimmedTitle === null) return;
     setError(null);
     startTransition(async () => {
       try {
         const doc = toPlainJSON(editor.getJSON());
-        await publishPost(postId, title, doc, changelog);
-        clearAuthorHighlights(editor);
+        await publishPost(postId, trimmedTitle, doc, changelog);
+        noteTitlePersisted(trimmedTitle);
+        clearEditHighlights();
         setChangelog("");
         router.refresh();
       } catch (e) {
@@ -237,12 +330,15 @@ export default function PostEditor({
 
   const handleSchedule = () => {
     if (!editor || !scheduleInput) return;
+    const trimmedTitle = resolveTitle();
+    if (trimmedTitle === null) return;
     setError(null);
     startTransition(async () => {
       try {
         const doc = toPlainJSON(editor.getJSON());
-        const result = await schedulePost(postId, title, doc, new Date(scheduleInput), changelog);
-        clearAuthorHighlights(editor);
+        const result = await schedulePost(postId, trimmedTitle, doc, new Date(scheduleInput), changelog);
+        noteTitlePersisted(trimmedTitle);
+        clearEditHighlights();
         setStatus(`Scheduled revision #${result.revisionNumber}`);
         setChangelog("");
         router.refresh();
@@ -253,8 +349,17 @@ export default function PostEditor({
   };
 
   const hasRevisionDiff = !!revisionDiff && (revisionDiff.added > 0 || revisionDiff.removed > 0);
-  const hasTitleChanged = title !== initialTitle;
-  const titleDivergesFromPublished = publishedTitle !== null && title !== publishedTitle;
+  // Both title comparisons wait on the "title" fragment having synced *and*
+  // arriving non-empty. Either check alone is insufficient: before sync
+  // `title` reads as "" (the empty fragment), which would light up TITLE
+  // CHANGED and the divergence border on every load; and the provider reports
+  // synced a beat before y-prosemirror has rendered that state into the
+  // editor. An empty title is never a real one anyway — it's rejected on save
+  // and re-seeded server-side (see server/collab.ts) — so treating it as
+  // "nothing to compare yet" costs nothing.
+  const titleComparable = providerSynced && title !== "";
+  const hasTitleChanged = titleComparable && title !== initialTitle;
+  const titleDivergesFromPublished = titleComparable && publishedTitle !== null && title !== publishedTitle;
   const isAtPublished = publishedRevisionNumber !== null && revisionNumber === publishedRevisionNumber;
   const showViewingClause = hasRevisionDiff || hasTitleChanged || !isAtPublished;
   const editedLabel = [hasRevisionDiff && "EDITED", hasTitleChanged && "TITLE CHANGED"].filter(Boolean).join(", ");
@@ -280,13 +385,21 @@ export default function PostEditor({
 
   return (
     <div className={styles.container}>
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        aria-label="Title"
-        className={`${styles.titleInput} ${titleDivergesFromPublished ? styles.titleChanged : ""}`}
-        disabled={deleted}
-      />
+      {provider ? (
+        <CollabTitleField
+          ydoc={ydoc}
+          userId={userId}
+          userName={userName}
+          userColor={userColor}
+          editable={!deleted}
+          className={`${styles.titleInput} ${titleDivergesFromPublished ? styles.titleChanged : ""} ${deleted ? styles.titleInputDisabled : ""}`}
+          onTitleChange={setTitle}
+          onEditorReady={setTitleEditor}
+        />
+      ) : (
+        // Same shape as the live field so connecting doesn't shift the layout.
+        <div className={`${styles.titleInput} ${styles.titleInputDisabled}`}>{title}</div>
+      )}
       <p className={styles.statusLine}>
         {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
         {(hasRevisionDiff || displayAuthors.length > 0) && " "}
@@ -329,11 +442,15 @@ export default function PostEditor({
       ) : (
         <p>Connecting to live editor…</p>
       )}
+      {/* Everything that writes content is gated on providerSynced: before the
+          collab handshake completes, both the title fragment and the body doc
+          are still empty locally, so a save would persist that emptiness over
+          the real content. (Unpublish sends no content, so it stays enabled.) */}
       <div className={styles.actionsRow}>
         <button
           type="button"
           onClick={handleSaveDraft}
-          disabled={pending || !editor || deleted}
+          disabled={pending || !editor || !providerSynced || deleted}
           className={styles.actionButton}
         >
           Save draft
@@ -348,7 +465,7 @@ export default function PostEditor({
         <button
           type="button"
           onClick={handlePublish}
-          disabled={pending || !editor || deleted}
+          disabled={pending || !editor || !providerSynced || deleted}
           className={styles.actionButton}
         >
           Publish
@@ -370,7 +487,7 @@ export default function PostEditor({
             <button
               type="button"
               onClick={handleSchedule}
-              disabled={pending || !editor || !scheduleInput || deleted}
+              disabled={pending || !editor || !providerSynced || !scheduleInput || deleted}
               className={styles.actionButton}
             >
               {postStatus === "scheduled" ? "Reschedule" : "Schedule"}
