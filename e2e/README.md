@@ -2,8 +2,8 @@
 
 Playwright, driving the real app against the real local Postgres. Covers the
 flows that otherwise get re-verified by hand every session: publish/unpublish,
-comment moderation, two-author live collaboration, and quote anchoring across
-revisions.
+comment moderation, two-author live collaboration, quote anchoring across
+revisions, and restoring an old revision.
 
 ```bash
 npm run e2e
@@ -75,6 +75,14 @@ the admin account.
   branch as an edit *inside* the quote; reaching the `mappedTo > mappedFrom`
   guard takes deleting past the quote's boundary. `quote-anchoring.spec.ts`
   covers both, and its header records the exact mapped positions.
+- **A DETACHED thread can reattach on a later publish**, if the article's text
+  at its frozen anchor matches its `quotedText` again — most directly, restoring
+  the exact revision it was frozen against and publishing that restore
+  (item 20, PLAN.md §10). `quote-anchoring.spec.ts`'s last test drives that
+  full loop: quote → invalidate → detach → restore → publish → assert ACTIVE
+  again on the public page. Before item 20, `remapThreadsToRevision` excluded
+  DETACHED from its query entirely, so this never happened no matter what a
+  later revision said.
 - **Use `gotoOk(page, path)` rather than asserting on `response.status()`.** A
   bare status assertion reports only the number, and when Playwright reuses an
   already-running dev server that server's console output isn't captured

@@ -28,7 +28,7 @@ import {
   QUOTE_FROM,
   QUOTE_TO,
 } from "./fixtures";
-import { getLatestRevisionId, getThread } from "./db";
+import { getLatestRevisionId, getThread, getRevisions } from "./db";
 
 const PUBLISH = { name: "Publish", exact: true } as const;
 const DETACHED_NOTICE = "This quote was edited or removed in a later revision of the article.";
@@ -174,5 +174,54 @@ test.describe("quote anchoring across revisions", () => {
     await page.goto(`/${quotedPost.slug}`);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
     await expect(visibleText(page, DETACHED_NOTICE)).toBeVisible();
+  });
+
+  // Restoring the exact revision a DETACHED thread was frozen against, then
+  // publishing that restore, brings the quoted text verbatim back into the
+  // article — the article is now byte-for-byte what it was when the thread
+  // was last ACTIVE. A reader has every reason to expect the highlight and
+  // notice to reflect that.
+  //
+  // remapThreadsToRevision (src/lib/anchor-remap.ts) doesn't do this: its
+  // query is `where: { status: "ACTIVE" }`, so a DETACHED thread is excluded
+  // from every future publish's remap, permanently — there is no path back to
+  // ACTIVE once a thread leaves it, no matter what the article says later.
+  // This reproduces that with the exact restore flow PLAN.md §10 describes.
+  test("restoring the revision a detached quote was frozen against reattaches it on publish", async ({
+    page,
+    quotedPost,
+  }) => {
+    await page.goto(`/posts/${quotedPost.id}/edit`);
+    await waitForCollabReady(page);
+
+    await deleteTextInBody(page, "fox ");
+    await expect(bodyEditor(page)).toContainText("The quick brown jumps over");
+    await expect(page.getByText("EDITED")).toBeVisible();
+    await republish(page, quotedPost.id);
+    await expect.poll(async () => (await getThread(quotedPost.threadId))?.status).toBe("DETACHED");
+
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.goto(`/posts/${quotedPost.id}/history/1`);
+    await page.getByRole("button", { name: "Restore revision #1" }).click();
+    await page.waitForURL(`**/posts/${quotedPost.id}/edit`);
+    await waitForCollabReady(page);
+    await expect(bodyEditor(page)).toContainText(QUOTED_BODY);
+
+    // The restored draft's content is byte-for-byte revision #1's, so
+    // resolveRevision's no-op check reuses that draft rather than minting a
+    // new revision — "Published revision #3", not #4.
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("link", { name: "Published revision #3" })).toBeVisible();
+    expect((await getRevisions(quotedPost.id))[2].text).toContain(QUOTED_BODY);
+
+    await expect.poll(async () => (await getThread(quotedPost.threadId))?.status).toBe("ACTIVE");
+    expect(await getThread(quotedPost.threadId)).toMatchObject({
+      anchorFrom: QUOTE_FROM,
+      anchorTo: QUOTE_TO,
+    });
+
+    await page.goto(`/${quotedPost.slug}`);
+    await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
+    await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
   });
 });

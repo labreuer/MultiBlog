@@ -1128,6 +1128,27 @@ Git history carries per-step detail.
       `y-prosemirror` was promoted to a direct dependency (pinned to the version already in
       the tree via TipTap, so there's still exactly one copy of it and of `yjs`).
 
+20. **Fixed: a DETACHED quote thread could never reattach, even to text identical to what it
+    was anchored against** — found via a test written specifically for this scenario: quote
+    something, publish an edit that invalidates it (thread goes DETACHED, item 7), restore
+    the earlier revision (item 19) and publish that restore, reload the public page. The
+    article was now byte-for-byte what it was when the thread was last ACTIVE, and the
+    thread stayed DETACHED anyway. `remapThreadsToRevision`'s query
+    (`src/lib/anchor-remap.ts`) was `where: { status: "ACTIVE" }` — DETACHED was a terminal
+    state, excluded from every future publish's remap, permanently, regardless of what a
+    later revision said.
+    - **Fix**: the query now includes `DETACHED` alongside `ACTIVE`. A DETACHED thread stays
+      frozen at the revision it was last valid against (nothing else ever touches those
+      fields while it's detached — see below), so it's still grouped and re-diffed by that
+      same frozen revision on every later publish, same mechanism as an ACTIVE thread's
+      remap. If the diff finds the quoted text again, it goes back to ACTIVE with a fresh
+      anchor into the new revision, same as it would have on first publish.
+    - **A DETACHED thread that's still not found writes nothing** — the loop now skips the
+      update entirely for that case, rather than writing `{ status: "DETACHED" }` over
+      already-DETACHED fields. Purely to avoid a repeated no-op write on every future publish
+      for as long as a post keeps a stale detached thread; behavior is identical either way,
+      since `CommentThread` has no `updatedAt` for the no-op to have disturbed.
+
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
@@ -1196,7 +1217,7 @@ Git history carries per-step detail.
   entry for methodology and numbers.
 - ~~The home and author pages' `revalidate = 60` ISR caching is now a no-op...~~ **Fixed by
   item 17** — see CACHING.md's 2026-07-23 entry.
-- The e2e suite (item 18) covers four flows, not the app. Roles/authz, the admin tables,
+- The e2e suite (item 18) covers five flows, not the app. Roles/authz, the admin tables,
   scheduled publishing, soft deletion, and live history have no specs yet. Nothing runs it
   automatically either: there's no CI (nothing is deployed, per the first gap above), so it
   only runs when someone types `npm run e2e`.
