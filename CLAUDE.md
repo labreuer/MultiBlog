@@ -55,6 +55,16 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 ### Automated
 
 - Typecheck `npx tsc --noEmit`; lint `npx eslint .`.
+- **ESLint stays on 9 and TypeScript on 5 — both are gated on `eslint-config-next`,
+  not on us.** `npm outdated` offers eslint 10 and typescript 7; neither works yet.
+  eslint 10 removed `context.getFilename()`, which `eslint-plugin-react` still calls, so
+  `npx eslint .` dies with `contextOrFilename.getFilename is not a function` before
+  linting anything ([eslint-plugin-react#4018](https://github.com/jsx-eslint/eslint-plugin-react/issues/4018),
+  a dup of #3977). `eslint-plugin-import`/`-react`/`-jsx-a11y` all cap their `eslint`
+  peer at `^9` and are pulled in by `eslint-config-next`, so this is not overridable.
+  typescript 7 is blocked separately by `typescript-eslint`'s `<6.1.0` peer. Both
+  unblock when Next ships a refreshed lint config — recheck then, not before.
+  Taking eslint 10 *would* drop the `brace-expansion` audit count from 9 to 6.
 - `npm run e2e` — Playwright end-to-end suite (~20s), covering publish/unpublish,
   comment moderation, and two-author live collab. **Prefer it to driving the browser
   pane by hand** for anything it already covers, and for anything worth covering: one
