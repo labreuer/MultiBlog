@@ -246,6 +246,8 @@ AUTH_URL="https://<app-host>"               # canonical https origin
 APP_URL="https://<app-host>"                # absolute links (reset links, RSS)
 COLLAB_PORT=1234
 NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"   # path-based; see note below
+
+NEXT_PUBLIC_SITE_TITLE="<your blog's real name>"   # optional — omit to keep "MultiBlog"
 ```
 
 > **`AUTH_TRUST_HOST`/`AUTH_URL` are required behind a reverse proxy.** `src/lib/auth.ts`
@@ -259,7 +261,13 @@ NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"   # path-based; see note below
 > `NEXT_PUBLIC_` var, inlined at build time (used in `PostEditor.tsx` and
 > `LiveHistoryViewer.tsx`). It **must** be set to the final `wss://` URL *before* you build —
 > changing it later requires a rebuild, not just a service restart. Same discipline for
-> anything else `NEXT_PUBLIC_`.
+> anything else `NEXT_PUBLIC_`, including `NEXT_PUBLIC_SITE_TITLE` below.
+
+`NEXT_PUBLIC_SITE_TITLE` (`src/lib/site-config.ts`) is the only optional var above — it's
+deliberately env-sourced rather than hardcoded so a real deployment's title lives in this
+gitignored file instead of a tracked one (a `git pull` on the server can't revert it). Leave
+it unset to keep the "MultiBlog" default. Like `NEXT_PUBLIC_COLLAB_URL`, changing it later
+needs a rebuild (§5 step 7), not just a service restart.
 
 No email provider is wired (`sendMail()` is a logging stub), so password-reset emails aren't
 actually sent — the reset link just gets logged. `APP_URL` still matters for the RSS feed's

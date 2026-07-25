@@ -39,7 +39,9 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   it with `npx tsx that-file.ts` from the project root; delete the file afterward.
 - Dev account `labreuer@gmail.com` has role ADMIN.
 - `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`,
-  `NEXT_PUBLIC_COLLAB_URL`.
+  `NEXT_PUBLIC_COLLAB_URL`. Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
+  `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
+  deployment's title survives `git pull` instead of living in a tracked file.
 - Adding a **required** (non-nullable, no `@default`) column to a table that already has
   rows: `prisma migrate dev` normally prompts interactively for how to backfill existing
   rows, which doesn't work non-interactively. Instead, add the field nullable first and

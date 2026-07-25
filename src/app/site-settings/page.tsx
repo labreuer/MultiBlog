@@ -12,7 +12,9 @@ import SiteSettingsTable, { type ConfigRow } from "@/components/SiteSettingsTabl
 // rather than per-row fields.
 const CONFIG_LOCATION = "src/lib/site-config.ts";
 const CONFIG_TO_CHANGE =
-  "Edit the constant, then deploy (or restart the dev server locally; HMR often picks it up without one).";
+  "Edit the constant (or, for SITE_TITLE, set NEXT_PUBLIC_SITE_TITLE in .env instead so it " +
+  "survives a git pull), then deploy — or restart the dev server locally; HMR often picks it " +
+  "up without one.";
 const CONFIG_ROWS: ConfigRow[] = [{ name: "SITE_TITLE", value: SITE_TITLE }];
 
 export default async function SiteSettingsPage() {
