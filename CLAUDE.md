@@ -50,13 +50,32 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 
 ## Checks & verification
 
-- Typecheck `npx tsc --noEmit`; lint `npx eslint .`. No test suite yet.
-- Verify changes live in the browser pane before reporting them done.
+### Automated
+
+- Typecheck `npx tsc --noEmit`; lint `npx eslint .`.
+- `npm run e2e` — Playwright end-to-end suite (~20s), covering publish/unpublish,
+  comment moderation, and two-author live collab. **Prefer it to driving the browser
+  pane by hand** for anything it already covers, and for anything worth covering: one
+  command replaces a dozen `read_page`/click round trips, and a spec can do the setup
+  *and* the `boundingBox()`/`getComputedStyle` measurement in one process. Fixtures
+  create and delete their own throwaway users/posts, and it reuses a `dev:all` you
+  already have running rather than starting (or killing) its own. Full details,
+  fixtures, and the gotchas that bite when writing new specs: [e2e/README.md](e2e/README.md).
+
+### Driving the browser pane
+
+Everything in this subsection is **browser-pane behavior specifically**. None of it
+applies under Playwright — which is half the reason to prefer `npm run e2e` for
+anything repeatable.
+
+- Verify changes live in the pane before reporting them done — for behavior the suite
+  doesn't cover, or when you need to *look* at something rather than assert on it.
 - The `computer` screenshot action reliably times out in this environment — verify with
   `read_page` / `javascript_tool` measurements (bounding rects, computed styles) instead.
   Coordinate-based clicks are collateral damage: `computer` refuses `left_click` with a
   `coordinate` until a screenshot has cached the viewport dimensions, so coordinates are
-  never an available fallback here.
+  never an available fallback here. If you genuinely need an image, `page.screenshot()`
+  in a throwaway spec produces one.
 - `computer`'s `ref`-based clicks can silently no-op on the editor's action buttons — the
   call reports success and nothing happens (seen repeatedly on Publish in `PostEditor`).
   When a click appears to do nothing, drive it from `javascript_tool` instead:
@@ -70,38 +89,6 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   across calls, so a bare `const t = …` fails with "already declared" on the second call.
 - The browser pane's console buffer accumulates across navigations; for a clean error
   check, open a fresh tab.
-- For a throwaway user account (most manual testing — e.g. exercising publish/
-  unpublish/schedule, or role-gated actions), use `npx tsx scripts/test-user.ts
-  create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|COMMENTER] [--trusted]
-  [--force-moderate]` (defaults to `test-admin@example.com` and role `ADMIN`;
-  password is always `testpass123`) and `... delete [email]` when done — one
-  command each way instead of sign-up + psql-promote + psql-delete.
-  `--trusted`/`--force-moderate` each create a `Commenter` row for the new
-  user (`approvedCount: 100` / `forceModerate: true`, can combine both) so
-  comment-trust/moderation tests skip a manual DB step; omit both to leave
-  the user without a pre-existing `Commenter` row. Restricted to
-  `@example.com` addresses, so it can't touch a real account even by
-  mistake.
-- To verify a concurrent-editing feature specifically, you need **two** such
-  accounts signed in in separate browser tabs at once — run `create` twice
-  with different emails, and delete both (plus any throwaway `Post` row) when
-  done.
-- For throwaway posts (content to publish/unpublish/schedule, or a copy of
-  real content for perf testing per below), use `npx tsx scripts/test-post.ts
-  create [authorEmail] [--policy=INHERIT|AUTO|ALWAYS] [--publish] [title]` and
-  `... delete [slugOrId]` instead of a manual DB script each time. `create`
-  requires an existing `@example.com` author (make one with `test-user.ts
-  create` first); defaults to `moderationPolicy=AUTO` and a draft, same as
-  before — pass `--policy=` to test the cascade/an override, and `--publish`
-  to skip the separate "set publishRevisionId/publishedAt" step a moderation
-  or comment-status test usually needs. `delete` refuses any post that has a
-  non-`@example.com` author. Delete the post before deleting its author —
-  once a post's only author is gone, "no authors" is indistinguishable from a
-  real post that lost its author some other way, so `delete` refuses those
-  too.
-- To inspect a post's comments (status, commenter, timestamp) without a
-  one-off `psql SELECT`, use `npx tsx scripts/test-comment.ts list
-  [slugOrId]`.
 - Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` are baked
   into the session cookie once at sign-in and never re-read from the DB on later requests.
   Deleting a throwaway `User` row mid-session does **not** sign them out or revoke their
@@ -112,18 +99,49 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   tab A silently becomes that second user too the next time it does a fresh navigation —
   an already-loaded tab's live WS connection/React state keeps its original identity only
   until you reload or navigate it. Do each test user's sign-in in its own tab, and only
-  reload a tab when you actually mean to switch who it's authenticated as.
+  reload a tab when you actually mean to switch who it's authenticated as. This is why
+  anything concurrent (two authors editing one post) belongs in a spec instead: Playwright
+  gives each identity its own `browser.newContext()`, with its own jar — see the
+  `secondUser()` fixture and `e2e/collab.spec.ts`.
+
+### Throwaway test data
+
+- `scripts/test-user.ts` (create/delete accounts of any role, optionally with a
+  `Commenter` row for trust/moderation states), `scripts/test-post.ts` (create/delete
+  posts, draft or published, with a moderation policy), `scripts/test-comment.ts`
+  (list a post's comments and their statuses). Each script's header comment documents
+  its own flags — read that rather than a copy here, which is what will go stale.
+  Defaults worth knowing without opening anything: `test-admin@example.com`, role
+  `ADMIN`, password always `testpass123`.
+- All three refuse to touch anything but `@example.com` accounts and posts authored
+  solely by them, so they can't reach real data by mistake. Delete a post *before* its
+  author: once a post's only author is gone, "no authors" is indistinguishable from a
+  real post that lost its author some other way, so `delete` refuses it.
+- The e2e suite needs none of this — its fixtures create and clean up their own rows
+  (`e2e/db-worker.ts`, same `@example.com` guard), and a teardown project sweeps
+  whatever a crashed run left behind.
+
+### Performance measurement
+
 - For editing-latency benchmarks, `document.execCommand('insertText', false, char)` in a
   loop inside the editor's `.tiptap` element, timed with `performance.now()` per call, drives
   a real ProseMirror transaction through the normal path (mark-tagging, Yjs sync,
   decorations) without OS input-pipeline noise — reproducible enough for relative
   before/after comparisons. `execCommand('delete', false)` undoes it the same way,
-  character-for-character, to restore test content afterward.
+  character-for-character, to restore test content afterward. The same loop runs inside
+  `page.evaluate` in a spec, which is one command rather than a per-keystroke drive
+  through the pane, and can print its numbers straight to stdout.
+- For performance/stress testing at a realistic content size, copy the target content into
+  a throwaway post rather than editing the real one directly — removes any risk from a
+  botched restore step.
 - To A/B a performance change against actual history rather than guessing: confirm
   `git status` is clean, `git checkout <old-commit>`, stop/restart `dev:all` (checkout
   doesn't hot-reload cleanly across many files — the collab server especially needs a real
   restart), measure, then `git checkout <branch-name>` and restart again. With uncommitted
   work, `git stash push -u` / `git stash pop` does the same job without needing a commit.
+
+### Restarting the collab server
+
 - **Restarting the collab server while an editor tab is still open can duplicate a post's
   content.** `onLoadDocument` seeds the doc from the latest revision whenever no `PostCollab`
   row exists — and a killed server may never have flushed one (`onStoreDocument` is
@@ -135,9 +153,10 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   `DELETE FROM "PostCollab"` for that post, restart collab again (the doubled doc is still in
   the old process's memory), then reload — it re-seeds cleanly from the revision, which was
   never touched.
-- For performance/stress testing at a realistic content size, copy the target content into
-  a throwaway post rather than editing the real one directly — removes any risk from a
-  botched restore step.
+- `npm run e2e` is a second way to trigger the above, not just a deliberate restart: if
+  nothing is listening on :1234 it starts `npm run collab` itself and stops it when the run
+  ends. Narrow in practice — with `dev:all` already up it reuses that and restarts nothing —
+  but don't run the suite with an editor tab open against a collab server you didn't start.
 
 ## Gotchas
 
@@ -172,7 +191,9 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
   yet"; report upward from an effect instead (`CollabTitleField.tsx`).
 - `document.querySelector('.tiptap')` now matches the **title** editor first — the body editor
   is `querySelectorAll('.tiptap')[1]`. Relevant to the editing-latency benchmark and
-  content-setting recipes above, which target `.tiptap`.
+  content-setting recipes above, which target `.tiptap`. Both editors also carry an
+  `aria-label` (`Title` / `Post body`) on their contenteditable, which is what the e2e
+  suite keys off instead of DOM order.
 - ProseMirror drops custom attributes where inline decorations overlap; the quote-highlight
   extension pre-splits ranges into non-overlapping segments (`data-thread-ids`, plural).
 - `authorHighlight` marks (per-author color-coding, `src/lib/author-highlight-extension.ts`)

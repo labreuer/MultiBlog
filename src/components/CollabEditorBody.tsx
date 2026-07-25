@@ -77,6 +77,11 @@ export default function CollabEditorBody({
       }),
       AuthorHighlight.configure({ getAuthorId: () => userId }),
     ],
+    // Matches the title field's own aria-label/role. Two contenteditables
+    // share this page, and without distinct accessible names the only thing
+    // telling them apart is DOM order — which is what the e2e suite would
+    // otherwise have to key off (see CLAUDE.md's `.tiptap` ordering note).
+    editorProps: { attributes: { "aria-label": "Post body", role: "textbox" } },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);

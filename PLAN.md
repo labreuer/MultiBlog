@@ -781,7 +781,7 @@ calls are tuning (trust threshold, email verification) and can change anytime.
 
 ---
 
-## 10. Implementation progress (as of 2026-07-21)
+## 10. Implementation progress (as of 2026-07-25)
 
 Steps 1–8 of §8 are built and verified locally. Nothing is deployed — the deployment work
 from §7 (and step 1's "prove ops early") has not happened; everything runs on the dev box.
@@ -1043,6 +1043,63 @@ Git history carries per-step detail.
     pure `canEditAnyPost`/`isAdmin`/`canManagePosts` checks without risking Prisma landing in
     the browser bundle. See CACHING.md's 2026-07-23 entry.
 
+18. **Playwright end-to-end suite** (`npm run e2e`) — the project's first automated tests,
+    beyond §8 and unplanned. Motivated by cost, not coverage: verifying a change by hand
+    through the browser pane costs a dozen `read_page`/click round trips per flow and repeats
+    the sign-in every session, and the three flows below were being re-driven manually over
+    and over. The whole suite runs in ~20s. Written-up detail — fixtures, helpers, and the
+    traps that bite when adding specs — lives in `e2e/README.md`; only the decisions are here.
+    - **Scope**: `publish.spec.ts` (publish → public slug, edits invisible until republish,
+      unpublish → 404), `moderation.spec.ts` (pending comment hidden until approved, approved
+      → spam re-hides, plus one real form submission), `collab.spec.ts` (two authors on one
+      post: body sync both ways, the title fragment syncing without leaking into the body,
+      and a save by one clearing the other's EDITED badge), and `quote-anchoring.spec.ts`
+      (item 7 / §5, below). The collab spec is the one that most justifies the suite — the
+      browser pane's tabs share a cookie jar, so "two users at once" is a manual balancing
+      act there, while Playwright gives each identity its own `browser.newContext()`.
+    - **Quote anchoring across revisions now has coverage** (`quote-anchoring.spec.ts`), the
+      §1 "genuinely hard part" and previously the most expensive thing to re-verify by hand.
+      Four cases against a fixed one-paragraph body, with anchors asserted as literal
+      ProseMirror positions: an edit entirely *before* the quote shifts both anchors by the
+      inserted length and keeps the thread ACTIVE against the new revision; deleting a word
+      inside the quote detaches it; deleting the quoted words detaches it; deleting past the
+      quote's trailing boundary detaches it. Each detach case also asserts the anchor stays
+      frozen at the revision it was last valid against, and that the public page drops the
+      inline highlight while still listing the thread with its notice.
+      - **Worth recording, because it's counterintuitive**: deleting exactly the quoted text
+        does **not** collapse the anchor range. `recreateTransform` diffs at character level,
+        so removing `"brown fox jumps "` still maps the range to 11..12 — the quote's end
+        pairs with the `"o"` of the following `"over"`. That case therefore detaches on the
+        `quotedText` comparison, the same branch as an edit inside the quote; only deleting
+        past the boundary (`"brown fox jumps over "`) actually reaches `mappedTo == mappedFrom`.
+        The first draft of the spec asserted the wrong mechanism in a comment while still
+        passing, which is what prompted checking the mapping directly.
+    - **Auth is paid once.** A `setup` project signs `e2e-admin@example.com` in through the
+      real form and writes the cookie jar to `e2e/.auth/admin.json`; every test starts from
+      that `storageState`. A matching `cleanup` teardown project sweeps `e2e-*@example.com`
+      users, "E2E …" posts and orphaned commenters that a crashed run left behind.
+    - **`webServer` reuses a running `dev:all` unconditionally** (not just outside CI) — the
+      CLAUDE.md rule that a dev server we didn't start isn't ours to kill applies to the test
+      runner too. It starts (and stops) its own web+collab pair only when nothing is listening.
+    - **The DB helpers run in a `tsx` child process**, not in-process: Playwright's TypeScript
+      loader compiles to CommonJS and `require`s the result, but `src/generated/prisma/client.ts`
+      uses `import.meta.url`, which has no CJS equivalent — the transform leaves ESM syntax in
+      its own CJS output and Node dies with `exports is not defined`. `e2e/db-worker.ts` holds
+      the Prisma calls under `tsx` (the same reason `scripts/*.ts` already run that way);
+      `e2e/db.ts` is a JSON-over-stdio client, one child per Playwright worker so the ~1.5s
+      startup is amortized. Converting the project to `"type": "module"` would also fix it and
+      was rejected as far too large a change for one test runner's import of one generated file.
+      Both halves keep the `@example.com`-only guard `scripts/test-user.ts` uses.
+    - **Two source changes it forced.** (a) `CollabEditorBody`'s contenteditable gained
+      `aria-label="Post body"`, mirroring the title field's existing one — without distinct
+      accessible names the only thing separating the two editors is DOM order, the `.tiptap`
+      fragility CLAUDE.md already warns about. (b) `server/collab.ts`'s two persistence hooks
+      now swallow Prisma's `P2003` specifically: deleting a post while its Yjs doc is still
+      loaded made `onStoreDocument`/`onChange` throw a foreign-key violation, and since
+      Hocuspocus doesn't catch what its hooks throw, the rejection was unhandled and **killed
+      the collab process**. Found by the fixture teardown, but not a test artifact — a
+      hard-delete in production would do the same. Every other error still propagates.
+
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
@@ -1099,3 +1156,12 @@ Git history carries per-step detail.
   entry for methodology and numbers.
 - ~~The home and author pages' `revalidate = 60` ISR caching is now a no-op...~~ **Fixed by
   item 17** — see CACHING.md's 2026-07-23 entry.
+- The e2e suite (item 18) covers four flows, not the app. Roles/authz, the admin tables,
+  scheduled publishing, soft deletion, and live history have no specs yet. Nothing runs it
+  automatically either: there's no CI (nothing is deployed, per the first gap above), so it
+  only runs when someone types `npm run e2e`.
+- Comment-submission coverage is capped by the app's own rate limit (5 per IP per 10 minutes,
+  `src/lib/rate-limit.ts`) — every Playwright worker shares 127.0.0.1, so specs insert
+  comments directly via Prisma and exactly one exercises the real form. A future spec that
+  needs several genuine submissions would have to make the limit configurable, or reset the
+  window between tests.

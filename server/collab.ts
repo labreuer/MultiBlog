@@ -9,6 +9,22 @@ import { contentExtensions } from "../src/lib/tiptap-schema";
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 const PORT = Number(process.env.COLLAB_PORT ?? 1234);
 
+// Prisma's foreign-key-violation code.
+const FK_VIOLATION = "P2003";
+
+function isMissingPostError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: string }).code === FK_VIOLATION;
+}
+
+async function ignoreMissingPost(documentName: string, write: () => Promise<unknown>): Promise<void> {
+  try {
+    await write();
+  } catch (err) {
+    if (!isMissingPostError(err)) throw err;
+    console.warn(`[collab] post ${documentName} no longer exists; dropping its pending collab write.`);
+  }
+}
+
 const server = new Server({
   port: PORT,
 
@@ -62,13 +78,22 @@ const server = new Server({
     }
   },
 
+  // Both persistence hooks below write rows whose postId is a foreign key to
+  // Post. If the post is hard-deleted while its doc is still loaded in memory,
+  // the write fails with P2003 — and because Hocuspocus doesn't catch what its
+  // hooks throw, the rejection is unhandled and takes the whole collab process
+  // down with it. There is nothing useful to persist for a post that no longer
+  // exists, so treat that one error as "the document outlived its post" and
+  // let the doc go. Every other error still propagates.
   async onStoreDocument({ documentName, document }) {
     const state = Buffer.from(Y.encodeStateAsUpdate(document));
-    await prisma.postCollab.upsert({
-      where: { postId: documentName },
-      create: { postId: documentName, ydoc: state },
-      update: { ydoc: state },
-    });
+    await ignoreMissingPost(documentName, () =>
+      prisma.postCollab.upsert({
+        where: { postId: documentName },
+        create: { postId: documentName, ydoc: state },
+        update: { ydoc: state },
+      }),
+    );
   },
 
   // Append-only log of raw updates for the current (unpublished) session —
@@ -89,9 +114,11 @@ const server = new Server({
   async onChange({ documentName, document, update }) {
     const existingCount = await prisma.postCollabUpdate.count({ where: { postId: documentName } });
     const toStore = existingCount === 0 ? Y.encodeStateAsUpdate(document) : update;
-    await prisma.postCollabUpdate.create({
-      data: { postId: documentName, update: Buffer.from(toStore) },
-    });
+    await ignoreMissingPost(documentName, () =>
+      prisma.postCollabUpdate.create({
+        data: { postId: documentName, update: Buffer.from(toStore) },
+      }),
+    );
   },
 });
 

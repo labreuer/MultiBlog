@@ -12,7 +12,22 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Playwright's own output.
+    "playwright-report/**",
+    "test-results/**",
   ]),
+  {
+    // Playwright signals "this fixture depends on nothing" with an empty
+    // destructuring pattern — it parses the parameter to work out the
+    // dependency graph, so there's no non-empty form to substitute.
+    files: ["e2e/**/*.ts"],
+    rules: {
+      "no-empty-pattern": "off",
+      // A Playwright fixture's second parameter is conventionally named `use`,
+      // which the React plugin mistakes for React 19's `use` hook.
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
