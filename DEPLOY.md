@@ -371,20 +371,22 @@ Note on `npm ci` vs `npm ci --omit=dev`: **use the full install.** `prisma`, `ts
 deploy`/`generate`, and `tsx` actually *runs* the collab server in prod (§6). Pruning dev
 deps would break the collab service and future migrations.
 
-> **`npm ci` warns about unreviewed install scripts — currently harmless, eventually not.**
-> npm 11.16 (bundled with Node 24) prints `allow-scripts` warnings for the six packages here
-> with install hooks (`@prisma/client`, `@prisma/engines`, `prisma`, `esbuild`, `sharp`,
-> `unrs-resolver`). In 11.16 the `allowScripts` field is **advisory** — the scripts still
-> run, npm just reports that you haven't reviewed them — so the deploy is unaffected today.
-> A future npm release flips this to blocking, and two of those matter when it does:
-> `@prisma/engines` (query-engine binaries) and `esbuild` (the platform binary `tsx` needs,
-> without which the collab service won't start). Client generation is already safe either
-> way — step 4 above runs `npx prisma generate` explicitly rather than relying on
-> `@prisma/client`'s postinstall hook.
+> **Install scripts are pre-approved in `package.json`; a warning here means something
+> changed.** npm 11.16 (bundled with Node 24) reports dependencies whose install hooks you
+> haven't reviewed. The field is **advisory** in 11.16 — the scripts run either way — but a
+> future npm release flips it to blocking, so `package.json` carries an `allowScripts` block
+> approving the four this project needs: `@prisma/engines` (query-engine binaries), `esbuild`
+> (the platform binary `tsx` needs, without which the collab service won't start), `prisma`,
+> and `unrs-resolver`. A clean `npm ci` should print no `allow-scripts` warnings at all.
 >
-> The fix is an `allowScripts` block in `package.json`, added **in the repo and committed** —
-> not via `npm approve-scripts` on the box, since `deploy.sh` starts with `git pull` and a
-> server-side edit to `package.json` becomes a merge conflict on the next deploy.
+> Approvals are **pinned to exact versions**, so any dependency bump that changes one of
+> those four re-triggers the warning by design — that is the prompt to re-review, not a
+> fault. Re-approve **in the repo and commit it**, never with `npm approve-scripts` on the
+> box: `deploy.sh` starts with `git pull`, so a server-side edit to `package.json` becomes a
+> merge conflict on the next deploy.
+>
+> Client generation never depended on any of this — step 4 above runs `npx prisma generate`
+> explicitly rather than relying on a postinstall hook.
 
 > **Pre-flight: run a production build+start locally before deploying.** `next dev` does not
 > enforce Next.js's static/dynamic-rendering split, so a whole class of errors only appears
