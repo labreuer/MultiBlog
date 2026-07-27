@@ -481,70 +481,20 @@ swap them per that caveat.)
 
 ## 7. nginx
 
-One server block on `<app-host>`: the app at `/`, collab under `/collab`. The full template
-— HTTP→HTTPS redirect, TLS lines (filled by certbot, §7a), both `location`s — is in
-`deploy/nginx-app.conf.sample`. The two proxy blocks:
+One server block per host: the app at `/`, collab under `/collab`, TLS via a free
+single-domain Let's Encrypt cert — path-based collab means one hostname, so no wildcard and
+no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough). The full config matches
+`deploy/nginx-app.conf.sample`.
 
-**App** (`location /`):
+> **Order matters — chicken-and-egg.** The full config (§7b) listens on 443 and references
+> `/etc/letsencrypt/live/<app-host>/…pem`, which **do not exist until certbot runs**. Enable
+> that config first and `nginx -t` fails on the missing cert, so nginx won't start — issue
+> the cert *before* installing the 443 block. Prerequisites: DNS for `<app-host>` already
+> resolves to this box, and port 80 is reachable **from the internet** — which means *both*
+> `ufw` and any Linode Cloud Firewall allow it (§2c). A Cloud Firewall silently dropping 80 is
+> a common cause of certbot's `Timeout during connect`.
 
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost (§4)
-}
-```
-
-`X-Forwarded-Proto`/`Host` must be forwarded or NextAuth (with `trustHost`) can't build
-correct https callback URLs. The `X-Real-IP`/`X-Forwarded-For` headers matter too:
-`submitComment` records the commenter IP for rate-limiting, and `getClientIp()`
-(`src/lib/request-ip.ts`) already reads `X-Forwarded-For` then `X-Real-IP` — so with the two
-headers set above, the limiter sees the real client IP rather than `127.0.0.1`. Nothing to
-change in the app; just don't drop those headers.
-
-**Collab** (`location /collab`) — WebSocket upgrade + long read timeout:
-
-```nginx
-location /collab {
-    proxy_pass http://127.0.0.1:1234;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_read_timeout 3600s;      # keep idle editing sockets alive
-    proxy_send_timeout 3600s;
-}
-```
-
-No path rewrite is needed: `HocuspocusProvider` opens the socket at exactly
-`NEXT_PUBLIC_COLLAB_URL` (`wss://<app-host>/collab`) and sends the document id (the post id)
-in-band, not in the URL — so nginx just has to hand `/collab` to `:1234` untouched.
-
-Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
-
-> **Alternative (not used here): a separate collab subdomain.** If you ever want collab on
-> its own host (`collab.<domain>`) — e.g. to tune its timeouts in isolation — give it its own
-> `server {}` with `location /` → `:1234`, add a DNS record and a cert covering that name (a
-> 2-name SAN cert or a wildcard), and set `NEXT_PUBLIC_COLLAB_URL="wss://<collab-host>"`.
-> Path-based is simpler and single-cert, so it's the default.
-
----
-
-## 7a. TLS certificate (Let's Encrypt via certbot)
-
-A free, auto-renewing single-domain cert — path-based means one hostname, so no wildcard and
-no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
-
-> **Order matters — chicken-and-egg.** `deploy/nginx-app.conf.sample` listens on 443 and
-> references `/etc/letsencrypt/live/<app-host>/…pem`, which **do not exist until certbot
-> runs**. If you enable that config first, `nginx -t` fails on the missing cert and nginx
-> won't start. So issue the cert *before* installing the 443 block. Prerequisites: DNS for
-> `<app-host>` already resolves to this box, and port 80 is reachable **from the internet** —
-> which means *both* `ufw` and any Linode Cloud Firewall allow it (§2c). A Cloud Firewall
-> silently dropping 80 is a common cause of certbot's `Timeout during connect`.
+### 7a. Bootstrap nginx and issue the cert
 
 1. **Bootstrap nginx with an HTTP-only block** so certbot has something to serve the
    challenge from. Write this to `/etc/nginx/sites-available/multiblog`, enable it, and
@@ -553,6 +503,7 @@ no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
    ```nginx
    server {
        listen 80;
+       listen [::]:80;
        server_name <app-host>;
        root /var/www/html;   # anything; certbot only needs to answer /.well-known/…
    }
@@ -563,6 +514,14 @@ no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
    sudo nginx -t && sudo systemctl reload nginx
    ```
 
+   > **Both `listen` lines matter, even on a first deploy.** If this box ever gets a second
+   > site (another subdomain, its own bootstrap block) and that block is missing
+   > `listen [::]:80;`, IPv6 traffic for it has no listener of its own and silently falls
+   > through to whichever *other* enabled block does claim `[::]:80` instead — a working
+   > connection to the wrong site, not an error, which is far harder to spot than a refused
+   > one. It shows up as certbot's HTTP-01 check 404ing (via the other site's redirect-to-https)
+   > even though this block's `server_name` and IPv4 config are completely correct.
+
 2. **Issue the cert:**
 
    ```bash
@@ -570,14 +529,14 @@ no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough).
    sudo certbot certonly --nginx -d <app-host>
    ```
 
-3. **Swap in the real config** — replace that file's contents with
-   `deploy/nginx-app.conf.sample` (edited for `<app-host>`), then `sudo nginx -t &&
-   sudo systemctl reload nginx`. The 443 block now finds the cert.
+3. **Swap in the real config** — replace that file's contents with the full config below
+   (§7b, edited for `<app-host>`), then `sudo nginx -t && sudo systemctl reload nginx`. The
+   443 block now finds the cert.
 
 Step 2 writes `/etc/letsencrypt/live/<app-host>/fullchain.pem` and `privkey.pem` — exactly
-the paths the sample's `ssl_certificate`/`ssl_certificate_key` lines point at. (Alternatively
-`certbot --nginx` *without* `certonly` rewrites the server block for you in one shot — fine
-too, but then certbot owns the TLS lines instead of the sample, and you'd skip step 3.)
+the paths the config below points at. (Alternatively `certbot --nginx` *without* `certonly`
+rewrites the server block for you in one shot — fine too, but then certbot owns the TLS
+lines instead of this file, and you'd skip step 3.)
 
 Renewal is automatic: the certbot package installs a systemd timer. Ensure nginx reloads on
 renew and verify the whole path:
@@ -590,7 +549,74 @@ sudo certbot renew --dry-run
 
 `ssl_certificate` must be the **fullchain** (leaf + intermediates), which is what the path
 above gives you — a leaf-only file breaks chain-building for some clients. The private key
-stays root-owned and out of the repo (the sample only carries the path, no key material).
+stays root-owned and out of the repo (the config below only carries the path, no key
+material).
+
+### 7b. The full config
+
+`/etc/nginx/sites-available/multiblog` (same path as the bootstrap block in §7a — this
+replaces it), matching `deploy/nginx-app.conf.sample`:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <app-host>;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name <app-host>;
+
+    # TLS — issued by `certbot certonly --nginx -d <app-host>` (§7a above).
+    ssl_certificate     /etc/letsencrypt/live/<app-host>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<app-host>/privkey.pem;
+
+    # Next.js app
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost (§4)
+    }
+
+    # Hocuspocus collab websocket. The document id travels in-band (not in the
+    # URL), so /collab is proxied untouched — no prefix rewrite needed.
+    location /collab {
+        proxy_pass http://127.0.0.1:1234;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;      # keep idle editing sockets alive
+        proxy_send_timeout 3600s;
+    }
+}
+```
+
+`X-Forwarded-Proto`/`Host` must be forwarded or NextAuth (with `trustHost`) can't build
+correct https callback URLs. The `X-Real-IP`/`X-Forwarded-For` headers matter too:
+`submitComment` records the commenter IP for rate-limiting, and `getClientIp()`
+(`src/lib/request-ip.ts`) already reads `X-Forwarded-For` then `X-Real-IP` — so with the two
+headers set above, the limiter sees the real client IP rather than `127.0.0.1`. Nothing to
+change in the app; just don't drop those headers.
+
+No path rewrite is needed for collab: `HocuspocusProvider` opens the socket at exactly
+`NEXT_PUBLIC_COLLAB_URL` (`wss://<app-host>/collab`) and sends the document id (the post id)
+in-band, not in the URL — so nginx just has to hand `/collab` to `:1234` untouched.
+
+Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
+
+> **Alternative (not used here): a separate collab subdomain.** If you ever want collab on
+> its own host (`collab.<domain>`) — e.g. to tune its timeouts in isolation — give it its own
+> `server {}` with `location /` → `:1234`, add a DNS record and a cert covering that name (a
+> 2-name SAN cert or a wildcard), and set `NEXT_PUBLIC_COLLAB_URL="wss://<collab-host>"`.
+> Path-based is simpler and single-cert, so it's the default.
 
 ---
 
@@ -642,3 +668,46 @@ These steps are packaged as `deploy/deploy.sh` (run it from `/srv/multiblog` as 
 zero-downtime story is needed at hobby scale — the restart blip is seconds. (Docker Compose
 remains an easy later upgrade for
 reproducibility, per PLAN.md §7.)
+
+---
+
+## 11. Running a second instance on the same box
+
+Node, Postgres, nginx, ufw, swap, and certbot are all shared, host-level installs (§2b-§2h) —
+none of that repeats. Everything else is **per instance** and needs its own copy, because
+`NEXT_PUBLIC_COLLAB_URL` (and any other `NEXT_PUBLIC_*`) is baked into the build at compile
+time (§4), so two hostnames can never share one build:
+
+| Per-instance                          | First instance value(s)              |
+|----------------------------------------|--------------------------------------|
+| App directory                          | `/srv/multiblog`                     |
+| Postgres role + database               | `multiblog` / `multiblog`            |
+| Web port / collab port                 | `3000` / `1234`                      |
+| systemd unit names                     | `multiblog-web` / `multiblog-collab` |
+| nginx `server_name` + server block(s)  | `<app-host>`                         |
+| TLS cert (`certbot -d <host>`)         | one per hostname                     |
+| `/etc/sudoers.d/*` NOPASSWD grant      | scoped to that instance's unit names |
+| `.env` (own `AUTH_SECRET`, DB, ports, URLs) | —                                |
+| Backup cron entry                      | —                                    |
+
+Follow §2g-§10 again with a new directory, DB name, port pair, unit names, and hostname —
+`deploy/deploy.sh` needs no edits and no env vars: it derives `WEB_UNIT`/`COLLAB_UNIT` from
+its own directory's name (`/srv/uniblog` → `uniblog-web`/`uniblog-collab`), so naming the
+directory after the instance is what makes the table above self-consistent. Only set
+`WEB_UNIT`/`COLLAB_UNIT` explicitly if a unit's name won't match its directory (see the
+script's own header comment). Before picking ports, confirm they're actually free
+(`ss -ltnp`), since `3000`/`1234` are already taken.
+
+> **A mixed-case database name needs quoting or Postgres silently lowercases it.**
+> `CREATE DATABASE SomeName` folds the unquoted identifier to `somename` — connecting to
+> `.../SomeName` afterward then fails with "database does not exist". `CREATE DATABASE
+> "SomeName"` preserves the case. Once created that way, referencing it in `DATABASE_URL` or
+> `psql -d SomeName` works fine unquoted — connection parameters are passed literally, not
+> parsed as SQL identifiers, so folding only bites at `CREATE DATABASE` time.
+
+> **RAM is the real constraint on a small instance, not any of the above.** A second full
+> stack means two `next start` processes, two Hocuspocus processes, and two more Postgres
+> backends running concurrently — steady-state, not just at build time. The 1 GB Nanode
+> swap math in §2h was sized for *one* instance's build; check `free -h` under normal load
+> once both are up, and consider resizing the plan rather than trusting swap to absorb a
+> second instance indefinitely.
