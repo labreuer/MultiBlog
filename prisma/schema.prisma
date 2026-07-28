@@ -17,12 +17,16 @@ enum Role {
   EDITOR
   AUTHOR
   COMMENTER
+
+  @@map("role")
 }
 
 enum ModerationPolicy {
   INHERIT
   ALWAYS
   AUTO
+
+  @@map("moderation_policy")
 }
 
 enum PublicationEventType {
@@ -30,12 +34,16 @@ enum PublicationEventType {
   UNPUBLISHED
   SCHEDULED
   SCHEDULE_CANCELED
+
+  @@map("publication_event_type")
 }
 
 enum ThreadStatus {
   ACTIVE
   DETACHED
   RESOLVED
+
+  @@map("thread_status")
 }
 
 enum CommentStatus {
@@ -43,23 +51,25 @@ enum CommentStatus {
   APPROVED
   SPAM
   DELETED
+
+  @@map("comment_status")
 }
 
 model User {
   id               String            @id @default(cuid())
   email            String            @unique
   slug             String            @unique
-  emailVerified    DateTime?
+  emailVerified    DateTime?         @map("email_verified")
   name             String?
   image            String?
-  passwordHash     String?
+  passwordHash     String?           @map("password_hash")
   role             Role              @default(COMMENTER)
-  moderationPolicy ModerationPolicy  @default(INHERIT)
+  moderationPolicy ModerationPolicy  @default(INHERIT) @map("moderation_policy")
   color            String            @default("#5b8cff")
-  adminInitials    String
-  createdAt        DateTime          @default(now())
-  deletedByUserId  String?
-  deletedAt        DateTime?
+  adminInitials    String            @map("admin_initials")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  deletedByUserId  String?           @map("deleted_by_user_id")
+  deletedAt        DateTime?         @map("deleted_at")
 
   accounts             Account[]
   sessions             Session[]
@@ -74,6 +84,8 @@ model User {
   deletedUsers         User[]               @relation("UserDeletedBy")
   postDeletions        Post[]               @relation("PostDeletedBy")
   slugHistory          UserSlugHistory[]
+
+  @@map("user")
 }
 
 // Redirect sources for a user's past slugs — same shape as PostSlugHistory,
@@ -81,22 +93,23 @@ model User {
 // has no real polymorphic relation support (see PostSlugHistory's comment).
 model UserSlugHistory {
   id        String   @id @default(cuid())
-  userId    String
+  userId    String   @map("user_id")
   slug      String   @unique
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@map("user_slug_history")
 }
 
 // Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
 model Account {
   id                String  @id @default(cuid())
-  userId            String
+  userId            String  @map("user_id")
   type              String
   provider          String
-  providerAccountId String
+  providerAccountId String  @map("provider_account_id")
   refresh_token     String? @db.Text
   access_token      String? @db.Text
   expires_at        Int?
@@ -108,15 +121,18 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@map("account")
 }
 
 model Session {
   id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
   expires      DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
 }
 
 model VerificationToken {
@@ -125,28 +141,31 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+  @@map("verification_token")
 }
 
 model PasswordResetToken {
   id        String   @id @default(cuid())
-  userId    String
-  tokenHash String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_token")
 }
 
 model Post {
   id                String     @id @default(cuid())
   slug              String     @unique
   title             String
-  publishRevisionId String?    @unique
-  moderationPolicy  ModerationPolicy @default(INHERIT)
-  createdAt         DateTime   @default(now())
-  publishedAt       DateTime?  // may be in the future — see below
-  deletedByUserId   String?
-  deletedAt         DateTime?
+  publishRevisionId String?    @unique @map("publish_revision_id")
+  moderationPolicy  ModerationPolicy @default(INHERIT) @map("moderation_policy")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  publishedAt       DateTime?  @map("published_at") // may be in the future — see below
+  deletedByUserId   String?    @map("deleted_by_user_id")
+  deletedAt         DateTime?  @map("deleted_at")
 
   // publishRevisionId is set immediately by both an immediate publish and a
   // *scheduled* one — visibility is gated by publishedAt vs now(), a pure
@@ -162,6 +181,8 @@ model Post {
   publicationEvents PostPublicationEvent[]
   deletedBy         User?            @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory       PostSlugHistory[]
+
+  @@map("post")
 }
 
 // Redirect sources for a post's past slugs — one row per slug the post has
@@ -172,35 +193,37 @@ model Post {
 // see slugInUse in src/lib/slug.ts.
 model PostSlugHistory {
   id        String   @id @default(cuid())
-  postId    String
+  postId    String   @map("post_id")
   slug      String   @unique
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId])
+  @@map("post_slug_history")
 }
 
 model PostAuthor {
-  postId      String
-  userId      String
-  bylineOrder Int
+  postId      String @map("post_id")
+  userId      String @map("user_id")
+  bylineOrder Int    @map("byline_order")
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([postId, userId])
+  @@map("post_author")
 }
 
 model Revision {
   id             String   @id @default(cuid())
-  postId         String
-  revisionNumber Int
+  postId         String   @map("post_id")
+  revisionNumber Int      @map("revision_number")
   doc            Json
   title          String
-  editorId       String?
+  editorId       String?  @map("editor_id")
   changelog      String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime @default(now()) @map("created_at")
 
   post              Post                   @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade)
   editor            User?                  @relation("RevisionEditor", fields: [editorId], references: [id])
@@ -209,6 +232,7 @@ model Revision {
   publicationEvents PostPublicationEvent[]
 
   @@unique([postId, revisionNumber])
+  @@map("revision")
 }
 
 // Append-only audit log of publish/unpublish/schedule transitions. Needed
@@ -217,26 +241,29 @@ model Revision {
 // answer "when did this go live/offline" — see PLAN.md §10.
 model PostPublicationEvent {
   id           String               @id @default(cuid())
-  postId       String
+  postId       String               @map("post_id")
   type         PublicationEventType
-  revisionId   String?              // the revision that went (or would go) live; null for UNPUBLISHED/SCHEDULE_CANCELED
-  scheduledFor DateTime?            // only set for SCHEDULED events
-  actorId      String?              // null = system (the due-schedule sweep)
-  createdAt    DateTime             @default(now())
+  revisionId   String?              @map("revision_id") // the revision that went (or would go) live; null for UNPUBLISHED/SCHEDULE_CANCELED
+  scheduledFor DateTime?            @map("scheduled_for") // only set for SCHEDULED events
+  actorId      String?              @map("actor_id") // null = system (the due-schedule sweep)
+  createdAt    DateTime             @default(now()) @map("created_at")
 
   post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
   revision Revision? @relation(fields: [revisionId], references: [id])
   actor    User?     @relation("PublicationEventActor", fields: [actorId], references: [id])
 
   @@index([postId, createdAt])
+  @@map("post_publication_event")
 }
 
 model PostCollab {
-  postId    String   @id
+  postId    String   @id @map("post_id")
   ydoc      Bytes
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@map("post_collab")
 }
 
 // Append-only log of raw Yjs updates for a post's current (unpublished) collab
@@ -245,62 +272,69 @@ model PostCollab {
 // working-session state, not part of the immutable revision history.
 model PostCollabUpdate {
   id        BigInt   @id @default(autoincrement())
-  postId    String
-  createdAt DateTime @default(now())
+  postId    String   @map("post_id")
+  createdAt DateTime @default(now()) @map("created_at")
   update    Bytes
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId, id])
+  @@map("post_collab_update")
 }
 
 model SiteSettings {
   id                      Int               @id @default(1)
-  defaultModerationPolicy ModerationPolicy  @default(ALWAYS)
-  trustThreshold          Int               @default(3)
+  defaultModerationPolicy ModerationPolicy  @default(ALWAYS) @map("default_moderation_policy")
+  trustThreshold          Int               @default(3) @map("trust_threshold")
+
+  @@map("site_settings")
 }
 
 model Commenter {
   id            String  @id @default(cuid())
-  userId        String? @unique
+  userId        String? @unique @map("user_id")
   email         String  @unique
-  displayName   String
-  approvedCount Int     @default(0)
-  forceModerate Boolean @default(false)
+  displayName   String  @map("display_name")
+  approvedCount Int     @default(0) @map("approved_count")
+  forceModerate Boolean @default(false) @map("force_moderate")
 
   user     User?     @relation(fields: [userId], references: [id])
   comments Comment[]
+
+  @@map("commenter")
 }
 
 model CommentThread {
   id                 String       @id @default(cuid())
-  postId             String
-  anchoredRevisionId String
-  anchorFrom         Int
-  anchorTo           Int
-  quotedText         String
+  postId             String       @map("post_id")
+  anchoredRevisionId String       @map("anchored_revision_id")
+  anchorFrom         Int          @map("anchor_from")
+  anchorTo           Int          @map("anchor_to")
+  quotedText         String       @map("quoted_text")
   status             ThreadStatus @default(ACTIVE)
-  createdAt          DateTime     @default(now())
+  createdAt          DateTime     @default(now()) @map("created_at")
 
   post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
   revision Revision  @relation(fields: [anchoredRevisionId], references: [id])
   comments Comment[]
+
+  @@map("comment_thread")
 }
 
 model Comment {
   id                String        @id @default(cuid())
-  threadId          String
-  parentCommentId   String?
-  commenterId       String
+  threadId          String        @map("thread_id")
+  parentCommentId   String?       @map("parent_comment_id")
+  commenterId       String        @map("commenter_id")
   body              Json
   status            CommentStatus @default(PENDING)
-  ipAddress         String?
-  statusChangedById String?
-  statusChangedAt   DateTime?
-  createdAt         DateTime      @default(now())
-  editedAt          DateTime?
-  deletedByUserId   String?
-  deletedAt         DateTime?
+  ipAddress         String?       @map("ip_address")
+  statusChangedById String?       @map("status_changed_by_id")
+  statusChangedAt   DateTime?     @map("status_changed_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  editedAt          DateTime?     @map("edited_at")
+  deletedByUserId   String?       @map("deleted_by_user_id")
+  deletedAt         DateTime?     @map("deleted_at")
 
   thread          CommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   parent          Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
@@ -308,4 +342,6 @@ model Comment {
   commenter       Commenter     @relation(fields: [commenterId], references: [id])
   statusChangedBy User?         @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
   deletedBy       User?         @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
+
+  @@map("comment")
 }

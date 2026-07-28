@@ -50,8 +50,8 @@ See §5 for the full mechanism.
 ## 3. Roles & "multi-author"
 
 **Decided:** a post can have multiple authors, and the **listed byline is decoupled from
-who actually edited.** `post_authors` is a manual byline list (chosen from user accounts,
-so author pages work); edit attribution lives separately in `revisions.editor_id`. You can
+who actually edited.** `post_author` is a manual byline list (chosen from user accounts,
+so author pages work); edit attribution lives separately in `revision.editor_id`. You can
 credit three co-authors on a post even if only one of them touched a given revision, and
 vice-versa.
 
@@ -69,15 +69,15 @@ logged-in — see §6).
 - **Live state vs. revisions:** the live document is a Yjs doc, persisted as Yjs updates
   (binary) so a reconnecting client resumes mid-edit. This is **separate** from the
   immutable revision history. **Publishing snapshots the current ProseMirror doc into a new
-  `revisions` row** (§4); the Yjs update log is the working state between publishes.
+  `revision` row** (§4); the Yjs update log is the working state between publishes.
 - **Awareness:** Yjs "awareness" gives presence (who's in the doc, cursors/selections) for
   free — useful even with the byline being separate from edit attribution.
-- **Attribution:** `revisions.editor_id` at publish records who pressed publish.
+- **Attribution:** `revision.editor_id` at publish records who pressed publish.
   Finer-grained credit — colored per-author highlighting of contributions *since the last
   revision*, Etherpad-style (§3d) — layers on top via an inline `authorHighlight` mark
   carrying the author's `User.color`, applied to newly-typed text and cleared (a real,
   synced transaction) on every save so it always reflects only what's new. It's
-  working-session state, not content — stripped before anything reaches `revisions.doc`.
+  working-session state, not content — stripped before anything reaches `revision.doc`.
 - **Auth:** the Hocuspocus `onConnect`/`onAuthenticate` hook validates the user's session
   (via Auth.js token) and checks they may edit that post before joining the room.
 - **`next.config.ts`: `serverExternalPackages: ["yjs"]`.** Next's server compiler builds
@@ -114,8 +114,8 @@ mechanics built on top of this transport layer.
 
 **Decided:** an ADMIN-only page for managing every `User` account directly, distinct from
 the per-post author/role concerns above — no schema changes needed beyond the soft-delete
-columns shared with `posts` (§4), since it's otherwise a UI + server-actions layer over the
-existing `users` table.
+columns shared with `post` (§4), since it's otherwise a UI + server-actions layer over the
+existing `user` table.
 
 **Access:** gated by `isAdmin(role)` (`src/lib/authz.ts`) — same shape as `/posts`'s
 `canManagePosts` gate (§3c): redirect to sign-in if unauthenticated, an inline "doesn't have
@@ -314,13 +314,13 @@ noted in §3a:
   mark, so a color lookup is one small API call away (`/api/users/colors`) rather than schema
   data. Cleared on every save (`removeMark` transaction in `PostEditor.tsx`) so highlighting
   always reflects only "since the last revision," not the post's whole life — see the
-  CLAUDE.md gotcha. Stripped (`stripMarkFromDoc`) before anything reaches `revisions.doc`;
+  CLAUDE.md gotcha. Stripped (`stripMarkFromDoc`) before anything reaches `revision.doc`;
   `contentExtensions` (the shared editor/seed/render schema) never has to know the mark
   exists.
 - **Live-scrubbable history** (`/posts/[id]/live-history`, `LiveHistoryViewer.tsx`):
   read-only, and stays live-connected rather than being a one-time snapshot. Hocuspocus's
   `onChange` hook (`server/collab.ts`) appends every raw Yjs update to a new
-  `post_collab_updates` row, reset whenever a revision is saved — bounding it to "since the
+  `post_collab_update` row, reset whenever a revision is saved — bounding it to "since the
   last revision" controls how much CRDT history is ever kept around. The viewer fetches that
   log, replays prefixes of it into a scratch `Y.Doc` for the scrub slider, and taps a second,
   otherwise-unused `HocuspocusProvider` connection purely to keep appending new updates as
@@ -458,45 +458,55 @@ STYLE.md.
 
 ## 4. Data model
 
+**Naming:** the database is snake_case — table and column names below are literal, not
+pseudocode — while the Prisma client stays camelCase (`schema.prisma`'s `@map`/`@@map` on
+every model and field bridge the two). Table names are singular (`user`, not `users`)
+throughout, including any future `doc*` tables — except `site_settings`, which stays plural
+despite being a singleton, since "the site setting" reads oddly and "settings" is the natural
+English plural regardless of row count. Enum *type* names (`Role`, `ModerationPolicy`, ...)
+are also snake_case here (`role`, `moderation_policy`), unlike the Auth.js adapter's own
+already-snake_case fields (`refresh_token`, `access_token`, ...), which keep their names on
+both sides since `@auth/prisma-adapter` writes them by name.
+
 ```
-users            id, email, name, password_hash | oauth, role, created_at,
+user             id, email, name, password_hash | oauth, role, created_at,
                  color                                           -- author-highlight/caret color
                  admin_initials(non-null string)                 -- byline shorthand, §10 item 11
                  moderation_policy('inherit'|'always'|'auto')   -- per-author override
                  deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §3b
-posts            id, slug, title, publish_revision_id,
+post             id, slug, title, publish_revision_id,
                  created_at, published_at (may be future),       -- no status column, no schedule
                                                                    -- column (§10 item 12): visible iff
                                                                    -- publish_revision_id is set AND
                                                                    -- published_at <= now()
                  moderation_policy('inherit'|'always'|'auto')   -- per-post override
                  deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §3c
-post_authors     post_id, user_id, byline_order                 -- manual byline, decoupled
-revisions        id, post_id, revision_number, doc JSONB (ProseMirror),
+post_author      post_id, user_id, byline_order                 -- manual byline, decoupled
+revision         id, post_id, revision_number, doc JSONB (ProseMirror),
                  title, editor_id, changelog, created_at         -- IMMUTABLE. title is the
                                                                    -- *saved* title; the working
                                                                    -- one is a Yjs fragment (§3d).
-                                                                   -- posts.title also gets a
+                                                                   -- post.title also gets a
                                                                    -- debounced write straight off
                                                                    -- that fragment (§3d), so it's
                                                                    -- no longer purely "whatever
                                                                    -- the last save/publish wrote"
-post_publication_events id, post_id, type(published|unpublished|   -- audit log of publish/unpublish/
+post_publication_event id, post_id, type(published|unpublished|   -- audit log of publish/unpublish/
                  scheduled|schedule_canceled), revision_id NULL,   -- schedule transitions (§10 item 12) —
                  scheduled_for NULL, actor_id NULL, created_at      -- needed once those transitions can
                                                                      -- happen without a new revision
 post_collab      post_id, ydoc BYTEA, updated_at                 -- live Yjs state (working draft):
                                                                   -- two fragments, "default"
                                                                   -- (body) + "title" (§3d)
-post_collab_updates id, post_id, created_at, update BYTEA        -- raw Yjs update log, since
+post_collab_update id, post_id, created_at, update BYTEA         -- raw Yjs update log, since
                                                                   -- last revision only (§10 item 9)
 site_settings    id(singleton), default_moderation_policy, trust_threshold(int, e.g. 3), ...
-commenters       id, user_id NULL, email, display_name,          -- identity for a commenter
+commenter        id, user_id NULL, email, display_name,          -- identity for a commenter
                  approved_count(int), force_moderate(bool)        -- per-commenter override
-comment_threads  id, post_id, anchored_revision_id,
+comment_thread   id, post_id, anchored_revision_id,
                  anchor_from int, anchor_to int, quoted_text,
                  status(active|detached|resolved), created_at
-comments         id, thread_id, parent_comment_id NULL,
+comment          id, thread_id, parent_comment_id NULL,
                  commenter_id, body JSONB,
                  status(pending|approved|spam|deleted),
                  created_at, edited_at,
@@ -517,11 +527,11 @@ Notes:
 - **Revisions are append-only.** Publishing creates a new row; nothing is overwritten.
   "Restore version N" = copy doc N into a new revision. Diff view between any two revisions
   via `prosemirror-changeset`. `editor_id` records who made the revision — separate from the
-  `post_authors` byline.
+  `post_author` byline.
 - **Drafts / working state** live in `post_collab.ydoc` (the live Yjs document), persisted
   by Hocuspocus. Edits never pollute revision history; only an explicit **publish** snapshots
-  the current doc into a `revisions` row.
-- **`post_collab_updates`** is an append-only log of raw Yjs updates for the *current*
+  the current doc into a `revision` row.
+- **`post_collab_update`** is an append-only log of raw Yjs updates for the *current*
   session only — reset (rows deleted) every time a revision is saved, so it never grows past
   "since the last revision" regardless of how long a post has existed (§10 item 9).
 - **Comment tree**: `parent_comment_id` self-reference; render the tree with one recursive
@@ -530,7 +540,7 @@ Notes:
 - **Commenter identity** (§6): a `commenter` is keyed by account (`user_id`) when logged in,
   otherwise by email. `approved_count` and `force_moderate` drive the trust model.
 - **Soft delete** (`deleted_by_user_id`/`deleted_at`, both nullable): the same two-column
-  pattern now covers `comments` (§10 item 15, first), `users` (§3b), and `posts` (§3c). Rather
+  pattern now covers `comment` (§10 item 15, first), `user` (§3b), and `post` (§3c). Rather
   than every read site having to remember its own filter, `src/lib/prisma.ts`'s `prisma`
   export is a Prisma Client Extension that auto-excludes soft-deleted `Post`/`User` rows from
   every read operation (`findMany`/`findFirst`/`findUnique`/`count`/`aggregate`/`groupBy`) —
@@ -546,7 +556,7 @@ Notes:
 
 ### 4a. Mutable slugs
 
-**Decided:** both `posts.slug` and `users.slug` (author-page slugs, `/authors/[slug]`) can be
+**Decided:** both `post.slug` and `user.slug` (author-page slugs, `/authors/[slug]`) can be
 renamed after creation, with the old slug preserved as a redirect source rather than left to
 404.
 
@@ -760,8 +770,8 @@ and **anchor remapping across revisions (steps 6–7)**.
 ## 9. Decisions & remaining questions
 
 **Settled**
-- Multi-author: posts carry a manual byline (`post_authors`) decoupled from edit
-  attribution (`revisions.editor_id`) (§3).
+- Multi-author: posts carry a manual byline (`post_author`) decoupled from edit
+  attribution (`revision.editor_id`) (§3).
 - Concurrency: **real-time collaborative editing in v1** via Yjs + Hocuspocus; live state in
   `post_collab.ydoc`, snapshot to a revision on publish (§3a).
 - Commenting identity: name+email minimum, login allowed (§6).
@@ -806,7 +816,7 @@ Git history carries per-step detail.
    `@tiptap/static-renderer` (`generateHTML` needs a DOM and fails server-side).
 5. **Tree comments** — Disqus-style identity (name+email or session), three-level moderation
    cascade + trust threshold per §6, moderation queue at `/posts/[id]/comments`. Beyond
-   plan: `comments` also records submitter IP and who/when last changed its status.
+   plan: `comment` also records submitter IP and who/when last changed its status.
 6. **Quote anchoring** — the article server-renders statically for SEO, then swaps to a
    read-only ProseMirror view after hydration (progressive enhancement). Decoration
    highlights + count badges per §5; selection → floating comment form capturing real PM
