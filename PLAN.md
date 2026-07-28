@@ -1236,3 +1236,269 @@ Git history carries per-step detail.
   comments directly via Prisma and exactly one exercises the real form. A future spec that
   needs several genuine submissions would have to make the limit configurable, or reset the
   window between tests.
+
+## 11. Ydoc persistence — a parallel stack (planned, 2026-07-28; not yet built)
+
+The working Yjs document currently lives in two post-shaped tables: `post_collab` (a
+whole-document blob, upserted on a debounce) and `post_collab_update` (an append-only delta
+log, **truncated on every save**). Both carry a `post_id` foreign key to `post`, and
+`server/collab.ts` writes them directly. Four problems, three of them already documented:
+
+- **Re-seeding duplicates content.** `onLoadDocument` seeds a fresh doc from the latest
+  revision whenever no `post_collab` row exists — and that row is only written by the
+  *debounced* `onStoreDocument`, so a collab server killed before the debounce fires re-seeds
+  a second, structurally distinct copy into a doc reconnecting clients already hold. Yjs
+  merges rather than dedupes, so every paragraph appears twice (see the "Restarting the collab
+  server" gotcha in CLAUDE.md).
+- **The foreign key is a crash surface.** Deleting a post while its doc is loaded makes both
+  persistence hooks throw `P2003`, and Hocuspocus doesn't catch what its hooks throw, so the
+  rejection takes the whole collab process down. `ignoreMissingPost` (item 20 above) is a
+  narrow band-aid around one error code.
+- **The typing path runs an `O(n)` query per keystroke** — `postCollabUpdate.count()` before
+  every insert, to decide full-state vs. delta; `O(n²)` over a session (PERFORMANCE.md).
+- **No client-side durability.** Nothing survives a closed tab or an unreachable server beyond
+  what the collab process happens to be holding in memory.
+
+The replacement is built as a **fully parallel stack**, proved on a dedicated `/ydoc-debug`
+page, and cut over to posts later as a separate change. Three new tables keyed purely by the
+Hocuspocus `documentName`, a new store module, new hooks, `y-indexeddb` on the client, and
+server-written clientID→user attribution. The log is never truncated on save — only,
+optionally, up to a snapshot — and snapshots are ours to construct rather than Hocuspocus's.
+
+**The hard constraint: nothing that presently exists may touch the new tables.** Post editing
+stays on `post_collab`/`post_collab_update`, byte-for-byte. `PostEditor.tsx`,
+`LiveHistoryViewer.tsx`, `PostEditBadge.tsx`, `src/app/actions/posts.ts` and
+`src/lib/collab-token.ts` are not modified at all; `server/collab.ts` gains only dispatch.
+Everything new lives in new files. That isolation is the point: it lets the design be proved
+against real editing without putting a single existing flow at risk, and it makes the cutover
+a reviewable change of its own rather than a big-bang rewrite.
+
+**`gc: true` stays.** It is already Hocuspocus's default (`yDocOptions`, `defaultConfiguration`
+in `@hocuspocus/server`), but §11d states it explicitly so it reads as a decision. The
+consequence — both already true today — is that comment anchors remain absolute ProseMirror
+positions (§5) rather than Yjs relative positions, and the stored blob remains a *derived*
+value that nothing anchors into. Moving to `gc: false` later would invert that: anchors would
+name item IDs *inside* the stored document, so re-seeding from a revision would build a
+structurally new doc and dangle every anchor.
+
+### 11a. Naming, and what routes a document to the new stack
+
+`ydoc.id` **is** the Hocuspocus `documentName`, and new-stack documents are named
+`ydoc:<cuid>`. Post documents are bare cuids, so the prefix is an unambiguous, zero-query
+routing key — no "does a Post row exist" lookup on every cold open. `src/lib/ydoc-names.ts`
+holds the prefix constant, `isYdocDocument(name)`, and the snapshot endpoint's path, shared
+between web and collab server exactly the way `src/lib/collab-admin.ts` already shares
+`REPLACE_DOC_PATH`.
+
+Throwaway test documents use `ydoc:test-<cuid>`, and both `scripts/test-ydoc.ts` and the e2e
+teardown refuse to delete anything that doesn't match — the same containment convention as the
+`@example.com` guard in `scripts/test-user.ts` and `e2e/db-worker.ts`.
+
+### 11b. Schema, and the two invariants it rests on
+
+Three models in `prisma/schema.prisma`, snake_case-mapped like the rest. No relation to `Post`;
+the only outward foreign key in the whole set is `ydoc_snapshot.user_id → user`:
+
+```
+ydoc          id                    -- the Hocuspocus documentName
+              ydoc BYTEA            -- encodeStateAsUpdate; the O(1) cold-open path
+              state_vector BYTEA
+              created_at            -- doubles as the lineage stamp (§11e)
+              updated_at
+
+ydoc_update   id BIGSERIAL, ydoc_id, update BYTEA, created_at
+              -- NEVER truncated on save. First row per ydoc is a full state; the rest deltas.
+
+ydoc_snapshot id, ydoc_id, ydoc BYTEA, state_vector BYTEA,
+              last_ydoc_update_id   -- high-water mark in ydoc_update
+              user_id NULL          -- null = system-triggered
+              created_at
+```
+
+The one line this adds to an existing model is a `ydocSnapshots` back-relation on `User` — no
+column, no behavior. Migration `add_ydoc_tables`.
+
+Everything downstream depends on two invariants:
+
+1. **Row #1 of `ydoc_update` for a document is a full state; every later row is a plain
+   delta.** Written once, at document creation, in the same transaction as the `ydoc` row.
+   The old table decides this per-keystroke with a `count()`, because its log gets truncated
+   on every save and so has no stable row #1; this one never does, so the decision is made
+   once and the append path is `O(1)`.
+2. **The replay base is derivable, so truncation is safe.** `minId = MIN(ydoc_update.id)` for
+   the document; the base is the newest `ydoc_snapshot` with `last_ydoc_update_id < minId`, or
+   — when there is none — row #1 itself. Nothing truncates yet, but every reader resolves the
+   base this way from day one, so switching truncation on later is a no-op for callers rather
+   than a migration of every read site.
+
+### 11c. `server/ydoc-store.ts` — the only code that touches the three tables
+
+Generic by construction: it takes a `documentName` and bytes, and knows nothing about posts,
+revisions, or authz. That is what "the ydocs don't know about anything else in the DB" buys —
+the store is reusable for any Yjs document the app grows later, not just post bodies.
+
+```
+load(id)                       -> { ydoc, stateVector, createdAt } | null | Unavailable
+createIfAbsent(id, ydoc, sv)   -> { won: true } | { won: false, existing }
+appendUpdate(id, update)       -> queued, serialized per document
+storeState(id, ydoc, sv)       -> blob + state_vector + updated_at
+createSnapshot(id, ydoc, sv, lastUpdateId, userId)
+resolveReplayBase(id)          -> { snapshot } | { firstUpdateId }        (invariant 2)
+```
+
+Three things it has to get right:
+
+- **`createIfAbsent` is the anti-duplication primitive.** It creates the `ydoc` row and the
+  full-state `ydoc_update` row #1 in one transaction; on `P2002` it re-reads and returns the
+  *winner's* blob. The caller then applies the winner's bytes to the live document and discards
+  its own losing seed. Two processes racing a cold open therefore converge on one lineage
+  instead of merging two — which is the root cause of the doubling gotcha, addressed
+  structurally rather than by warning people not to restart the server.
+- **Appends are serialized per document** by a promise chain, so `BIGSERIAL` order always
+  matches emission order. Concurrent `create` calls would otherwise interleave ids against
+  causal order and quietly break replay.
+- **Nothing throws into a Hocuspocus hook.** Every method runs through an error classifier:
+  `P2003` (now reachable only via `ydoc_update.ydoc_id`, if the `ydoc` row is deleted underneath
+  a loaded document, or `ydoc_snapshot.user_id`) → log, drop the write, mark the document
+  non-persisting; connection-class errors (`P1001`/`P1002`/`P1008`/`P1017`,
+  `PrismaClientInitializationError`, `ECONNREFUSED`) → trip a circuit breaker for a few seconds
+  so a down Postgres isn't hammered once per keystroke; anything else → log and drop. This
+  generalizes `ignoreMissingPost` from "one error code, two call sites" to "the store cannot
+  take the process down."
+
+**Degraded mode.** Per-document `{ persisted: boolean }` state, plus a `YDOC_PERSISTENCE=off`
+env switch that swaps in a `NullYdocStore` whose every method is a logged no-op. If `load()`
+comes back unavailable the document is marked non-persisting **for its whole in-memory
+lifetime**: it is not seeded (seeding against unknown stored state is precisely how you get two
+lineages), and the write methods become no-ops logged once per document rather than once per
+update. Clients still connect and edit, and because of `y-indexeddb` the first client to
+reconnect repopulates the server document from its own local copy — the same lineage, so the
+merge is correct rather than duplicating. The stickiness is deliberate: a document that came up
+unseeded must never later overwrite a real `ydoc` row. It retries on the next cold open, once
+the last client disconnects and Hocuspocus unloads it.
+
+### 11d. Hocuspocus wiring, and clientID → user_id
+
+All new behavior lives in `server/ydoc-hooks.ts`. `server/collab.ts` gains only dispatch: a
+one-line `isYdocDocument(documentName)` guard at the top of `onLoadDocument`, `onChange` and
+`onStoreDocument`, one branch in `onAuthenticate`, one more `onRequest` branch for the snapshot
+endpoint, a new `onAwarenessUpdate` that returns immediately for non-ydoc documents, and the
+explicit `yDocOptions: { gc: true, gcFilter: () => true }`.
+
+**Auth.** `src/lib/collab-token.ts` is untouched; a parallel `src/lib/ydoc-token.ts` defines
+`YdocTokenPayload { sub, documentName, role }`, signed with the same `AUTH_SECRET` and the same
+2-minute expiry. `onAuthenticate` picks the verifier by prefix.
+
+**Loading** reads the row and applies it; on `Unavailable` it marks the document degraded and
+returns an empty doc; on a miss it calls `createIfAbsent` with an empty state and applies
+whichever blob won. There is deliberately **no revision fallback** — that coupling is exactly
+what these tables exist to shed. In practice the row always already exists, because the script
+and the `/ydoc-debug` "New document" button both create it (row #1 included) before anyone
+connects; the auto-create is just the forgiving path for a connection to a name nobody made,
+and an empty seed has no content to duplicate.
+
+**`onChange`** is one call to `appendUpdate` — no `count()`, because invariant 1 was settled at
+creation. **`onStoreDocument`** writes the blob and state vector.
+
+**Snapshots go through the running collab server** (`POST /admin/ydoc-snapshot`, beside the
+existing replace-doc handler), never from the stored blob in Next: the blob is debounce-stale
+relative to the log, so a `last_ydoc_update_id` computed against it could sit *ahead* of what
+the blob actually contains, and truncating to it would lose updates. Order is what makes it
+safe — read `MAX(ydoc_update.id)` **first**, then encode the live document. That guarantees
+`blob ⊇ everything ≤ lastId`; anything landing in between shows up after `lastId` and survives
+a truncation. The error is in the safe direction by construction.
+
+**clientID → user_id lives in the document**, as a top-level `Y.Map`
+(`document.getMap("clients")`, `String(clientID) → userId`). Top-level, so the `"default"` and
+`"title"` fragments are untouched; it replays with history, survives cold opens, needs no fourth
+table, and holds only an opaque id string — so the `ydoc` tables still reference nothing.
+
+It is written **server-side**, on edit only, from payload fields Hocuspocus already provides:
+`onAwarenessUpdate` gives `{ added, connection }`, which is a connection's self-reported Yjs
+`clientID` — cached in memory as `socketId → clientID`. That binding, not the update bytes, is
+the reliable one: a reconnecting client's SyncStep2 can carry structs authored by *other*
+clients, so attributing everything in an update to its sender would mislabel them. Then the
+first time a connection produces a doc-changing `onChange`, the map gets
+`clients.set(String(clientID), context.userId)` **if absent** — `context.userId` coming from
+`onAuthenticate`, so it is the authenticated identity rather than a client-supplied claim.
+Presence alone never writes anything: you are added when you *edit*. (The server's own write
+produces an `onChange` with no `connection`, so it is skipped and the loop converges.)
+
+This is complementary to, not a replacement for, the `authorHighlight` mark (§3d): that
+attributes individual characters and is stripped before a revision is written; this attributes a
+whole client session and stays in the document.
+
+### 11e. The client: `y-indexeddb`, and two different duplication bugs
+
+`y-indexeddb` is added for `/ydoc-debug`'s editor only; `PostEditor.tsx` is untouched. There
+are two distinct duplication bugs in play, and they need different fixes.
+
+**Multiple `IndexeddbPersistence` instances on one `Y.Doc`**
+([y-indexeddb#25](https://github.com/yjs/y-indexeddb/issues/25)) — each instance re-persists the
+others' updates, because the library's guard only excludes *itself* as an origin. React
+StrictMode's double-invoked effects are exactly how you end up with two. Fixed in
+`src/lib/ydoc-persistence.ts` by a module-level `WeakMap<Y.Doc, { persistence, refs }>`, so
+attaching twice returns the same instance and bumps a refcount, and detaching only destroys at
+zero.
+
+**A stale local copy merging into a re-seeded server document** — the one that actually
+corrupts content. It is the client-side twin of the restart-doubling gotcha, and worse, because
+IndexedDB makes it survive a fresh tab. Fixed by keying the local store on document *lineage*
+rather than name: `ydoc:<documentName>:<ydoc.created_at epoch ms>`. `created_at` changes only if
+the `ydoc` row is recreated — precisely when the server has built a structurally new document —
+so a re-seed lands in a *different* local store and there is nothing to merge. Stale stores for
+the same name are swept on attach via `indexedDB.databases()`, guarded because Firefox doesn't
+implement it (in which case they are merely orphaned, which is harmless).
+
+The lineage has to be known *before* connecting, which is why `POST /api/ydoc/[id]/token`
+returns `{ token, lineage }` — it is already doing a Postgres round-trip to authorize, and the
+`ydoc` row is guaranteed to exist by then (§11d), so the lineage is never null. Caching it in
+`localStorage` to skip that round-trip was considered and rejected: it would let a
+stale-lineage store merge into the live document *before* the mismatch could be detected, which
+is the bug, not a race around it.
+
+Unchanged and load-bearing: **the client never seeds content.** Seeding is server-side only.
+
+### 11f. `/ydoc-debug`
+
+An ADMIN-gated page in the same shape as `/site-settings`, existing to make every claim above
+observable rather than to ship a user-facing feature.
+
+- A dropdown of the ten most recently updated `ydoc` rows, first auto-selected.
+- **Read-only by default**: decode the blob into a scratch `Y.Doc`, run it through
+  `TiptapTransformer` + `@tiptap/static-renderer` exactly as `LiveHistoryViewer` does, wrapped
+  in a `try/catch` so a document that isn't TipTap-compatible renders an error message instead
+  of blowing up the page. The `"title"` fragment renders alongside when present, and so does the
+  `clients` map — the point being that you can watch it stay empty while you only *look* at a
+  document, and fill the moment you type. The render helper is copied into
+  `src/lib/ydoc-render.ts` rather than refactored out of `LiveHistoryViewer`, which is off-limits
+  under the isolation constraint; deduplicating the two is part of the cutover.
+- A **"Switch to editing"** toggle that mounts a `HocuspocusProvider` plus the existing
+  `CollabEditorBody`, used unmodified (its toolbar and `QuoteControls` are purely editor-local,
+  with no post coupling).
+- A **Refresh** section showing the single `ydoc` row, the `ydoc_update` count and its last ten
+  rows, and every `ydoc_snapshot` row — plus a **Snapshot** button that takes one and refreshes
+  in place.
+
+Fixtures come from both directions: `scripts/test-ydoc.ts` (create/list/delete, with
+`--from-post` to build a document from a real revision so there is genuine TipTap content, and
+`--garbage` to exercise the error path) and an on-page "New document" button for a quick empty
+one.
+
+### 11g. Verification
+
+The suite (`e2e/ydoc-debug.spec.ts`, with `db-worker.ts` helpers and a `ydoc:test-*` teardown
+sweep) asserts the invariants rather than the UI: creating a document writes the `ydoc` row and
+**exactly one** `ydoc_update` row before anyone connects; opening the page read-only adds no
+rows and leaves `clients` empty, while typing one character adds rows and exactly one `clients`
+entry; replaying row #1 plus deltas into a scratch `Y.Doc` reproduces the editor's text with
+each paragraph appearing once; a snapshot's `last_ydoc_update_id` never exceeds
+`MAX(ydoc_update.id)`. The isolation constraint gets its own assertion — editing a post must
+leave all three new tables empty — and the existing specs must pass unchanged.
+
+What the suite can't reach is checked by hand: restarting `collab` with the tab open and
+confirming content appears once (the case that doubles on the post path today); running with
+`YDOC_PERSISTENCE=off` and with Postgres stopped mid-session, confirming the process survives
+and logs once per document rather than once per keystroke; deleting a `ydoc` row underneath a
+live editor to exercise the `P2003` path; and killing `collab` mid-typing to confirm the local
+IndexedDB edits sync back up once, not twice.
