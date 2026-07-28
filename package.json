@@ -15,7 +15,8 @@
     "dev:all": "concurrently -n web,collab -c blue,magenta \"npm:dev\" \"npm:collab\"",
     "stop:all": "pwsh -NoProfile -File scripts/stop-dev.ps1",
     "test-user": "tsx scripts/test-user.ts",
-    "e2e": "playwright test",
+    "check-ports": "pwsh -NoProfile -File scripts/check-ports.ps1",
+    "e2e": "npm run check-ports && playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
   },
