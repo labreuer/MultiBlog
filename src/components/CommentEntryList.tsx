@@ -52,7 +52,7 @@ export default function CommentEntryList({ entries, target }: Props) {
         <label style={{ fontSize: "0.85rem", color: "#555" }}>
           Sort by:{" "}
           <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
-            <option value="datetime">Comment date</option>
+            <option value="datetime">{target.kind === "doc" ? "Annotation date" : "Comment date"}</option>
             <option value="quoteIndex">Quoted text position</option>
           </select>
         </label>

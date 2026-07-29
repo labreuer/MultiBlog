@@ -87,11 +87,11 @@ export default async function CommentSection({ target }: { target: CommentTarget
 
   return (
     <section className={styles.section} data-comment-section>
-      <h2 className={styles.heading}>Comments</h2>
+      <h2 className={styles.heading}>{target.kind === "doc" ? "Annotations" : "Comments"}</h2>
       <CommentForm target={target} />
 
       {threads.length === 0 ? (
-        <p className={styles.empty}>No comments yet.</p>
+        <p className={styles.empty}>{target.kind === "doc" ? "No annotations yet." : "No comments yet."}</p>
       ) : (
         <CommentEntryList entries={entries} target={target} />
       )}

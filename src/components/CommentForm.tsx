@@ -72,7 +72,15 @@ export default function CommentForm({
       )}
       <textarea
         name="body"
-        placeholder={userName ? `Commenting as ${userName}` : "Write a comment..."}
+        placeholder={
+          target.kind === "doc"
+            ? userName
+              ? `Annotating as ${userName}`
+              : "Write an annotation..."
+            : userName
+              ? `Commenting as ${userName}`
+              : "Write a comment..."
+        }
         required
         rows={3}
         className={`${styles.field} ${styles.textarea}`}
@@ -84,7 +92,13 @@ export default function CommentForm({
           disabled={pending}
           className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
         >
-          {pending ? "Posting..." : "Post comment"}
+          {target.kind === "doc"
+            ? pending
+              ? "Annotating..."
+              : "Post annotation"
+            : pending
+              ? "Posting..."
+              : "Post comment"}
         </button>
         {onCancel && (
           <button type="button" onClick={onCancel} className={styles.cancel}>

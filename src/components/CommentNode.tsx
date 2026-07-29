@@ -82,7 +82,9 @@ export default function CommentNode({ comment, target, depth = 0 }: Props) {
         setJustDeleted(true);
         router.refresh();
       } catch (e) {
-        setDeleteError(e instanceof Error ? e.message : "Failed to delete comment.");
+        setDeleteError(
+          e instanceof Error ? e.message : target.kind === "doc" ? "Failed to delete annotation." : "Failed to delete comment.",
+        );
       }
     });
   };

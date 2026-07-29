@@ -129,8 +129,8 @@ test.describe("annotations", () => {
     await selectTextInBody(readerPage, QUOTED_TEXT);
 
     const popup = readerPage.getByTestId("annotation-popup");
-    await popup.getByPlaceholder(/Commenting as/).fill("Why this bit specifically?");
-    await popup.getByRole("button", { name: "Post comment" }).click();
+    await popup.getByPlaceholder(/Annotating as/).fill("Why this bit specifically?");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
 
     await expect(readerPage.getByText("Why this bit specifically?")).toBeVisible();
     await expect
@@ -165,8 +165,8 @@ test.describe("annotations", () => {
     await expect(readerPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
     await selectTextInBody(readerPage, QUOTED_TEXT);
     const popup = readerPage.getByTestId("annotation-popup");
-    await popup.getByPlaceholder(/Commenting as/).fill("This quote is about to disappear.");
-    await popup.getByRole("button", { name: "Post comment" }).click();
+    await popup.getByPlaceholder(/Annotating as/).fill("This quote is about to disappear.");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
     await expect
       .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.anchored)
       .toBe(true);

@@ -30,10 +30,10 @@ export async function submitAnnotation(
     return { error: "Missing doc." };
   }
   if (typeof body !== "string" || !body.trim()) {
-    return { error: "Comment can't be empty." };
+    return { error: "Annotation can't be empty." };
   }
   if (body.length > MAX_BODY_LENGTH) {
-    return { error: `Comment is too long (max ${MAX_BODY_LENGTH} characters).` };
+    return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
 
   const session = await auth();
