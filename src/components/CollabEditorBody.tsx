@@ -8,6 +8,7 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
+import { Annotation } from "@/lib/annotation-extension";
 import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
@@ -76,6 +77,10 @@ export default function CollabEditorBody({
         render: renderCaret,
       }),
       AuthorHighlight.configure({ getAuthorId: () => userId }),
+      // Registers the mark type so a doc's annotation marks sync/render
+      // correctly here too (PLAN.md §12i) — posts never get one applied,
+      // and an unused mark type in the schema costs nothing.
+      Annotation,
     ],
     // Matches the title field's own aria-label/role. Two contenteditables
     // share this page, and without distinct accessible names the only thing

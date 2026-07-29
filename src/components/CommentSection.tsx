@@ -1,4 +1,9 @@
-import { getPostThreadsWithApprovedComments, getDetachedThreadContext } from "@/lib/comment-data";
+import {
+  getPostThreadsWithApprovedComments,
+  getDocAnnotationsAsThreads,
+  getDetachedThreadContext,
+  type CommentTarget,
+} from "@/lib/comment-data";
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
 import { type CommentNodeData } from "./CommentNode";
@@ -32,17 +37,25 @@ function buildTree(
   return roots;
 }
 
-export default async function CommentSection({ postId }: { postId: string }) {
-  const threads = await getPostThreadsWithApprovedComments(postId);
-  const generalThread = threads.find((t) => t.quotedText === "");
+export default async function CommentSection({ target }: { target: CommentTarget }) {
+  const threads = target.kind === "post" ? await getPostThreadsWithApprovedComments(target.id) : await getDocAnnotationsAsThreads(target.id);
   const quoteThreads = threads.filter((t) => t.quotedText !== "");
+  // A post has at most one general thread (found-or-created keyed on
+  // quotedText: "", src/app/actions/comments.ts) — but a doc can have many
+  // "" entries (every annotation whose mark is gone, §12h, plus any
+  // genuinely general one), so every one of them renders, not just the
+  // first. Filtering here rather than finding is a no-op for posts and
+  // correct for docs.
+  const generalThreads = threads.filter((t) => t.quotedText === "");
 
   const detachedContextByThread = new Map<string, string | null>();
   for (const thread of quoteThreads) {
-    if (thread.status === "DETACHED") {
+    // Never true for a doc-sourced thread (§12i) — annotations don't use
+    // DETACHED, so this stays post-only without an explicit target check.
+    if (thread.status === "DETACHED" && thread.anchoredRevisionId !== null) {
       detachedContextByThread.set(
         thread.id,
-        await getDetachedThreadContext(thread.anchoredRevisionId, thread.anchorFrom, thread.anchorTo),
+        await getDetachedThreadContext(thread.anchoredRevisionId, thread.anchorFrom!, thread.anchorTo!),
       );
     }
   }
@@ -59,28 +72,28 @@ export default async function CommentSection({ postId }: { postId: string }) {
         root,
       })),
     ),
-    ...(generalThread
-      ? buildTree(generalThread.comments).map((root) => ({
-          threadId: generalThread.id,
-          quotedText: "",
-          anchorFrom: null,
-          status: generalThread.status,
-          context: null,
-          color: generalThread.color,
-          root,
-        }))
-      : []),
+    ...generalThreads.flatMap((generalThread) =>
+      buildTree(generalThread.comments).map((root) => ({
+        threadId: generalThread.id,
+        quotedText: "",
+        anchorFrom: null,
+        status: generalThread.status,
+        context: null,
+        color: generalThread.color,
+        root,
+      })),
+    ),
   ];
 
   return (
     <section className={styles.section} data-comment-section>
       <h2 className={styles.heading}>Comments</h2>
-      <CommentForm postId={postId} />
+      <CommentForm target={target} />
 
       {threads.length === 0 ? (
         <p className={styles.empty}>No comments yet.</p>
       ) : (
-        <CommentEntryList entries={entries} postId={postId} />
+        <CommentEntryList entries={entries} target={target} />
       )}
     </section>
   );

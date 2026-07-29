@@ -6,11 +6,14 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canUserReadDoc } from "@/lib/doc-authz";
-import { authorHighlightExtensions } from "@/lib/tiptap-schema";
+import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import LiveDocBody from "@/components/LiveDocBody";
+import CommentSection from "@/components/CommentSection";
 import proseStyles from "@/styles/prose.module.css";
+
+const EMPTY_DOC: JSONContent = { type: "doc", content: [{ type: "paragraph" }] };
 
 // Inherently dynamic (per-user gated, and the decode-from-ydoc fallback
 // below is a live decode) — no generateStaticParams, and none should be
@@ -50,9 +53,14 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
     );
   }
 
+  // bodyJSON seeds LiveDocBody's editor so its first paint is identical to
+  // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
+  // what's shown until that editor reports ready.
+  let bodyJSON: JSONContent = EMPTY_DOC;
   let staticBody;
   if (doc.proseJson) {
-    staticBody = renderToReactElement({ content: doc.proseJson as JSONContent, extensions: authorHighlightExtensions });
+    bodyJSON = doc.proseJson as JSONContent;
+    staticBody = renderToReactElement({ content: bodyJSON, extensions: docContentExtensions });
   } else {
     // decode-from-ydoc fallback (§12d) — prose_json is still null because no
     // store debounce has fired yet, e.g. a doc that was created but never
@@ -62,14 +70,24 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
     const scratch = new Y.Doc();
     if (row) Y.applyUpdate(scratch, row.ydoc);
     const result = renderYdocDoc(scratch);
-    staticBody = result.ok ? result.body : <p style={{ color: "crimson" }}>{result.error}</p>;
+    if (result.ok) {
+      bodyJSON = result.bodyJSON;
+      staticBody = result.body;
+    } else {
+      staticBody = <p style={{ color: "crimson" }}>{result.error}</p>;
+    }
     scratch.destroy();
   }
 
   return (
     <main style={{ maxWidth: 800, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>{doc.title}</h1>
-      <LiveDocBody docId={doc.id} staticBody={<div className={proseStyles.prose}>{staticBody}</div>} />
+      <LiveDocBody
+        docId={doc.id}
+        initialBodyJSON={bodyJSON}
+        staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
+      />
+      <CommentSection target={{ kind: "doc", id: doc.id }} />
     </main>
   );
 }

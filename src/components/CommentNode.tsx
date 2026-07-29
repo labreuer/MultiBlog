@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import CommentForm from "./CommentForm";
 import { deleteComment } from "@/app/actions/comments";
+import { deleteAnnotation } from "@/app/actions/annotations";
+import type { CommentTarget } from "@/lib/comment-data";
 import styles from "./CommentNode.module.css";
 
 export type CommentNodeData = {
@@ -19,7 +21,7 @@ export type CommentNodeData = {
 
 type Props = {
   comment: CommentNodeData;
-  postId: string;
+  target: CommentTarget;
   depth?: number;
 };
 
@@ -43,7 +45,7 @@ export function hasNonDeletedDescendant(comment: CommentNodeData): boolean {
   return comment.replies.some((reply) => reply.deletedByUserId === null || hasNonDeletedDescendant(reply));
 }
 
-export default function CommentNode({ comment, postId, depth = 0 }: Props) {
+export default function CommentNode({ comment, target, depth = 0 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
@@ -76,7 +78,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
     setDeleteError(null);
     startDeleteTransition(async () => {
       try {
-        await deleteComment(comment.id);
+        await (target.kind === "post" ? deleteComment(comment.id) : deleteAnnotation(comment.id));
         setJustDeleted(true);
         router.refresh();
       } catch (e) {
@@ -135,10 +137,10 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
         </div>
       )}
       {replying && !posted && (
-        <CommentForm postId={postId} parentCommentId={comment.id} onPosted={() => setPosted(true)} />
+        <CommentForm target={target} parentCommentId={comment.id} onPosted={() => setPosted(true)} />
       )}
       {comment.replies.map((reply) => (
-        <CommentNode key={reply.id} comment={reply} postId={postId} depth={depth + 1} />
+        <CommentNode key={reply.id} comment={reply} target={target} depth={depth + 1} />
       ))}
     </div>
   );

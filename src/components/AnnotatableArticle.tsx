@@ -125,7 +125,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
             {pending.quotedText.length > 80 ? `${pending.quotedText.slice(0, 80)}…` : pending.quotedText}”
           </p>
           <CommentForm
-            postId={postId}
+            target={{ kind: "post", id: postId }}
             anchorFrom={pending.from}
             anchorTo={pending.to}
             quotedText={pending.quotedText}

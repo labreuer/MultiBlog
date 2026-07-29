@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import type * as Y from "yjs";
+import type { JSONContent } from "@tiptap/core";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { renderToReactElement } from "@tiptap/static-renderer";
-import { authorHighlightExtensions, titleAuthorHighlightExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { docContentExtensions, titleAuthorHighlightExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
 
 // Renders an already-materialized Y.Doc the way LiveHistoryViewer renders a
 // replayed one (src/components/LiveHistoryViewer.tsx) — but tolerant of a
@@ -19,6 +20,7 @@ import { authorHighlightExtensions, titleAuthorHighlightExtensions, collectMarkA
 export type YdocRenderResult =
   | {
       ok: true;
+      bodyJSON: JSONContent;
       body: ReactNode;
       title: ReactNode;
       authorIds: string[];
@@ -28,7 +30,7 @@ export type YdocRenderResult =
 
 export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
   try {
-    const bodyJSON = TiptapTransformer.extensions(authorHighlightExtensions).fromYdoc(doc, "default");
+    const bodyJSON = TiptapTransformer.extensions(docContentExtensions).fromYdoc(doc, "default");
     const titleFragment = doc.getXmlFragment("title");
     const titleJSON =
       titleFragment.length > 0
@@ -47,7 +49,8 @@ export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
 
     return {
       ok: true,
-      body: renderToReactElement({ content: bodyJSON, extensions: authorHighlightExtensions }),
+      bodyJSON,
+      body: renderToReactElement({ content: bodyJSON, extensions: docContentExtensions }),
       title: titleJSON ? renderToReactElement({ content: titleJSON, extensions: titleAuthorHighlightExtensions }) : null,
       authorIds: Array.from(authorIds),
       clients,

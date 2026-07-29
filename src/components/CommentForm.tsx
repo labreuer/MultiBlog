@@ -3,12 +3,14 @@
 import { useActionState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
+import { submitAnnotation } from "@/app/actions/annotations";
+import type { CommentTarget } from "@/lib/comment-data";
 import styles from "./CommentForm.module.css";
 
 const initialState: SubmitCommentState = {};
 
 type Props = {
-  postId: string;
+  target: CommentTarget;
   parentCommentId?: string;
   anchorFrom?: number;
   anchorTo?: number;
@@ -18,7 +20,7 @@ type Props = {
 };
 
 export default function CommentForm({
-  postId,
+  target,
   parentCommentId,
   anchorFrom,
   anchorTo,
@@ -28,7 +30,14 @@ export default function CommentForm({
 }: Props) {
   const { data: session } = useSession();
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
-  const [state, formAction, pending] = useActionState(submitComment, initialState);
+  // target.kind is fixed for this component instance's whole lifetime (set
+  // once by its parent, never toggled in place), so this ternary is a
+  // stable action reference across re-renders — exactly what useActionState
+  // expects. submitAnnotation returns the same SubmitCommentState shape
+  // (§12i: an annotation is "inserted immediately visible", the same
+  // meaning CommentForm's APPROVED branch below already has).
+  const action = target.kind === "post" ? submitComment : submitAnnotation;
+  const [state, formAction, pending] = useActionState(action, initialState);
 
   useEffect(() => {
     if (state.status === "APPROVED") {
@@ -46,7 +55,7 @@ export default function CommentForm({
 
   return (
     <form action={formAction} className={styles.form}>
-      <input type="hidden" name="postId" value={postId} />
+      <input type="hidden" name={target.kind === "post" ? "postId" : "docId"} value={target.id} />
       {parentCommentId && <input type="hidden" name="parentCommentId" value={parentCommentId} />}
       {anchorFrom !== undefined && anchorTo !== undefined && quotedText && (
         <>

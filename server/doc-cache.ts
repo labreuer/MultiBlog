@@ -1,6 +1,6 @@
 import type * as Y from "yjs";
 import { TiptapTransformer } from "@hocuspocus/transformer";
-import { authorHighlightExtensions, titleAuthorHighlightExtensions } from "../src/lib/tiptap-schema";
+import { docContentExtensions, titleAuthorHighlightExtensions } from "../src/lib/tiptap-schema";
 import { extractText } from "../src/lib/diff";
 import { docIdFromYdocId } from "../src/lib/ydoc-names";
 import { prisma } from "../src/lib/prisma";
@@ -22,7 +22,7 @@ export async function updateDocCache(ydocId: string, document: Y.Doc): Promise<v
   let bodyJSON: unknown;
   let titleText: string;
   try {
-    bodyJSON = TiptapTransformer.extensions(authorHighlightExtensions).fromYdoc(document, "default");
+    bodyJSON = TiptapTransformer.extensions(docContentExtensions).fromYdoc(document, "default");
     const titleFragment = document.getXmlFragment("title");
     const titleJSON =
       titleFragment.length > 0 ? TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(document, "title") : null;

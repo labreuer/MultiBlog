@@ -95,8 +95,12 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
     .filter((t) => t.quotedText !== "" && t.status === "ACTIVE" && t.comments.some((c) => c.deletedByUserId === null))
     .map((t) => ({
       id: t.id,
-      from: t.anchorFrom,
-      to: t.anchorTo,
+      // Never null here: getPostThreadsWithApprovedComments always supplies
+      // real offsets for a quote thread — anchorFrom/anchorTo are nullable
+      // on the shared ThreadWithComments type only because a doc annotation
+      // (PLAN.md §12i) has no equivalent stored offset.
+      from: t.anchorFrom!,
+      to: t.anchorTo!,
       count: t.comments.filter((c) => c.deletedByUserId === null).length,
       color: t.color,
     }));
@@ -123,7 +127,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
           threads={quoteHighlights}
           staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
         />
-        <CommentSection postId={post.id} />
+        <CommentSection target={{ kind: "post", id: post.id }} />
         <p>
           <Link href="/">← Back to all posts</Link>
         </p>

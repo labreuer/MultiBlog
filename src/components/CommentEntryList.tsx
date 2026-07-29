@@ -5,6 +5,7 @@ import CommentNode, { hasNonDeletedDescendant, type CommentNodeData } from "./Co
 import QuoteThreadHeader from "./QuoteThreadHeader";
 import { activatePseudoBorderForHash } from "@/lib/pseudo-border";
 import type { ThreadStatus } from "@/generated/prisma/enums";
+import type { CommentTarget } from "@/lib/comment-data";
 
 export type CommentEntry = {
   threadId: string;
@@ -20,10 +21,10 @@ type SortMode = "datetime" | "quoteIndex";
 
 type Props = {
   entries: CommentEntry[];
-  postId: string;
+  target: CommentTarget;
 };
 
-export default function CommentEntryList({ entries, postId }: Props) {
+export default function CommentEntryList({ entries, target }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
 
   // Puts a pseudo-border next to whatever comment the page loaded pointing
@@ -83,7 +84,7 @@ export default function CommentEntryList({ entries, postId }: Props) {
                 color={entry.color}
               />
             )}
-            <CommentNode comment={entry.root} postId={postId} />
+            <CommentNode comment={entry.root} target={target} />
           </div>
         );
       })}

@@ -48,3 +48,6 @@ export function ydocIdForDoc(docId: string): string {
 export function docIdFromYdocId(ydocId: string): string | null {
   return ydocId.startsWith(YDOC_PREFIX) ? ydocId.slice(YDOC_PREFIX.length) : null;
 }
+
+/** Path the collab server's onRequest hook listens on for §12i's annotation-mark endpoint. */
+export const ANNOTATION_MARK_PATH = "/admin/annotation-mark";
