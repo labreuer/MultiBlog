@@ -13,9 +13,9 @@ import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
+import EditorToolbar from "./EditorToolbar";
 import styles from "./PostEditor.module.css";
 import proseStyles from "@/styles/prose.module.css";
-import QuoteControls from "./QuoteControls";
 
 // See PERFORMANCE.md — walking the whole document for author-mark stats is
 // O(document size); debouncing keeps it off the per-keystroke path.
@@ -140,64 +140,8 @@ export default function CollabEditorBody({
   return (
     <div className={styles.editorFrame}>
       <AuthorHighlightStyles colors={authorColors} />
-      <Toolbar editor={editor} disabled={!editable} />
+      <EditorToolbar editor={editor} disabled={!editable} />
       <EditorContent editor={editor} className={`${styles.editorContent} ${proseStyles.prose}`} />
-    </div>
-  );
-}
-
-function Toolbar({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
-  return (
-    <div className={styles.toolbar}>
-      <button
-        type="button"
-        className={styles.toolbarButton}
-        disabled={disabled}
-        onClick={() => editor.chain().focus().toggleBold().run()}
-      >
-        Bold
-      </button>
-      <button
-        type="button"
-        className={styles.toolbarButton}
-        disabled={disabled}
-        onClick={() => editor.chain().focus().toggleItalic().run()}
-      >
-        Italic
-      </button>
-      <button
-        type="button"
-        className={styles.toolbarButton}
-        disabled={disabled}
-        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-      >
-        H2
-      </button>
-      <button
-        type="button"
-        className={styles.toolbarButton}
-        disabled={disabled}
-        onClick={() => editor.chain().focus().toggleBulletList().run()}
-      >
-        Bullets
-      </button>
-      <button
-        type="button"
-        className={styles.toolbarButton}
-        disabled={disabled}
-        onClick={() => editor.chain().focus().toggleOrderedList().run()}
-      >
-        Numbered
-      </button>
-      <QuoteControls editor={editor} disabled={disabled} />
-      <button
-        type="button"
-        className={styles.toolbarButton}
-        disabled={disabled}
-        onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
-      >
-        Clear formatting
-      </button>
     </div>
   );
 }

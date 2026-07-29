@@ -1,27 +1,40 @@
-import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
-import AnnotationComposer from "./AnnotationComposer";
+import { renderToReactElement } from "@tiptap/static-renderer";
+import { getDocAnnotationsAsThreads, type AnnotationComment } from "@/lib/annotation-data";
+import { annotationContentExtensions } from "@/lib/tiptap-schema";
+import NewAnnotationComposer from "./NewAnnotationComposer";
 import AnnotationList, { type AnnotationEntry } from "./AnnotationList";
 import { type AnnotationNodeData } from "./AnnotationNode";
 import AnnotationColorStyles from "./AnnotationColorStyles";
 import styles from "./AnnotationSection.module.css";
 
-function buildTree(
-  flat: {
-    id: string;
-    parentAnnotationId: string | null;
-    displayName: string;
-    bodyText: string;
-    createdAt: string;
-    deletedByUserId: string | null;
-    commenterUserId: string | null;
-  }[],
-): AnnotationNodeData[] {
+// A static rendering of the annotation's ydoc cache — the same
+// @tiptap/static-renderer call the doc reading view already uses for its
+// own body (app/doc/[slug]/page.tsx), never a live editor for a comment
+// that isn't currently open in one (PLAN.md §13j Phase 2).
+function renderBody(a: AnnotationComment) {
+  if (!a.proseJson) return a.bodyText;
+  try {
+    return renderToReactElement({ content: a.proseJson, extensions: annotationContentExtensions });
+  } catch {
+    return a.bodyText;
+  }
+}
+
+function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
   const byId = new Map<string, AnnotationNodeData>();
-  for (const a of flat) {
-    byId.set(a.id, { ...a, replies: [] });
+  for (const a of comments) {
+    byId.set(a.id, {
+      id: a.id,
+      displayName: a.displayName,
+      body: renderBody(a),
+      createdAt: a.createdAt,
+      deletedByUserId: a.deletedByUserId,
+      commenterUserId: a.commenterUserId,
+      replies: [],
+    });
   }
   const roots: AnnotationNodeData[] = [];
-  for (const a of flat) {
+  for (const a of comments) {
     const node = byId.get(a.id)!;
     const parent = a.parentAnnotationId ? byId.get(a.parentAnnotationId) : undefined;
     if (parent) {
@@ -77,7 +90,7 @@ export default async function AnnotationSection({ docId }: { docId: string }) {
           annotation authorship) is fine. */}
       <AnnotationColorStyles colors={Object.fromEntries(quoteThreads.map((t) => [t.id, t.color]))} />
       <h2 className={styles.heading}>Annotations</h2>
-      <AnnotationComposer docId={docId} />
+      <NewAnnotationComposer docId={docId} />
 
       {threads.length === 0 ? (
         <p className={styles.empty}>No annotations yet.</p>

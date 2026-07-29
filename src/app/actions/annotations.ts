@@ -116,6 +116,144 @@ export async function submitAnnotation(
   return { status: "APPROVED" };
 }
 
+// PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
+// editor to before a single keystroke lands, so opening one (the bottom
+// composer, or Reply) creates a DRAFT eagerly: invisible to every other
+// reader (annotation-data.ts's getDocAnnotationsAsThreads excludes another
+// user's DRAFT rows outright) and carrying no inline mark until posted
+// (applyAnnotationMark is only ever called from postAnnotation below, never
+// from here). Seeded with an empty paragraph, same shape seedAnnotationYdoc
+// already produces for real content.
+export async function createDraftAnnotation(
+  docId: string,
+  parentAnnotationId?: string,
+): Promise<{ id: string } | { error: string }> {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: "You must be signed in to annotate a doc." };
+  }
+
+  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { id: true, visibility: true } });
+  if (!doc) {
+    return { error: "Doc not found." };
+  }
+  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
+    return { error: "You don't have permission to annotate this doc." };
+  }
+
+  let parentId: string | null = null;
+  if (parentAnnotationId) {
+    const parent = await prisma.annotation.findUnique({ where: { id: parentAnnotationId }, select: { docId: true } });
+    if (!parent || parent.docId !== docId) {
+      return { error: "Invalid reply target." };
+    }
+    parentId = parentAnnotationId;
+  }
+
+  const seed = seedAnnotationYdoc("");
+  const annotation = await prisma.annotation.create({
+    data: {
+      docId,
+      parentAnnotationId: parentId,
+      userId: session.user.id,
+      proseJson: seed.proseJson as Prisma.InputJsonValue,
+      bodyText: "",
+      status: "DRAFT",
+    },
+  });
+  await ydocStore.createIfAbsent(ydocIdForAnnotation(annotation.id), seed.ydoc, seed.stateVector);
+
+  return { id: annotation.id };
+}
+
+// Flips a DRAFT to LIVE — the live ydoc editor (AnnotationBody) has already
+// been writing the real content in via the collab server the whole time
+// (server/annotation-cache.ts's store debounce keeps proseJson/bodyText
+// current), so this only changes visibility and, for a root annotation with
+// a captured selection, applies the mark (row-first-mark-second, same
+// ordering §12i's original submitAnnotation established — a mark naming a
+// still-DRAFT row would be visible-but-unreadable to anyone who resolved it
+// before this update commits).
+export async function postAnnotation(opts: {
+  annotationId: string;
+  anchorFrom?: number;
+  anchorTo?: number;
+  quotedText?: string;
+}): Promise<{ error?: string }> {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: "Unauthorized." };
+  }
+
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: opts.annotationId },
+    select: { id: true, docId: true, userId: true, parentAnnotationId: true, status: true },
+  });
+  if (!annotation) {
+    return { error: "Annotation not found." };
+  }
+  if (annotation.userId !== session.user.id) {
+    return { error: "You don't have permission to post this annotation." };
+  }
+  if (annotation.status !== "DRAFT") {
+    return { error: "This annotation has already been posted." };
+  }
+
+  await prisma.annotation.update({ where: { id: annotation.id }, data: { status: "LIVE" } });
+
+  // Only a root annotation ever carries a mark — a reply is just a comment
+  // in the thread, anchored nowhere of its own (PLAN.md §12i).
+  if (
+    annotation.parentAnnotationId === null &&
+    typeof opts.anchorFrom === "number" &&
+    typeof opts.anchorTo === "number" &&
+    opts.quotedText &&
+    opts.anchorTo > opts.anchorFrom
+  ) {
+    await applyAnnotationMark({
+      docId: annotation.docId,
+      userId: session.user.id,
+      role: session.user.role,
+      annotationId: annotation.id,
+      from: opts.anchorFrom,
+      to: opts.anchorTo,
+      quotedText: opts.quotedText,
+    });
+    // No branch on the result — same reasoning as submitAnnotation above:
+    // whether or not the mark landed, LIVE is already correct either way.
+  }
+
+  revalidatePath(`/doc/${annotation.docId}`);
+  return {};
+}
+
+// Cancel on a not-yet-posted composer — discards the row and its ydoc
+// outright rather than leaving an empty (or abandoned-mid-thought) DRAFT
+// behind forever. Silently no-ops on a row that's already gone (e.g. a
+// second Cancel click racing the first) rather than erroring.
+export async function discardDraftAnnotation(annotationId: string): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { userId: true, status: true, docId: true },
+  });
+  if (!annotation) {
+    return;
+  }
+  if (annotation.userId !== session.user.id) {
+    throw new Error("You don't have permission to discard this draft.");
+  }
+  if (annotation.status !== "DRAFT") {
+    throw new Error("This annotation has already been posted.");
+  }
+  await prisma.annotation.delete({ where: { id: annotationId } });
+  await prisma.ydoc.deleteMany({ where: { id: ydocIdForAnnotation(annotationId) } });
+  revalidatePath(`/doc/${annotation.docId}`);
+}
+
 async function requireOwnOrAdmin(annotationId: string) {
   const session = await auth();
   if (!session?.user) {

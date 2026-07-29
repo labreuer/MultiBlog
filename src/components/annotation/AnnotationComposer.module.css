@@ -59,3 +59,12 @@
   color: #fff;
   cursor: pointer;
 }
+
+/* NewAnnotationComposer's collapsed trigger — reuses .field's box but reads
+   as a placeholder-text button rather than an actual textarea. */
+.placeholder {
+  width: 100%;
+  text-align: left;
+  color: #999;
+  cursor: text;
+}

@@ -1,16 +1,20 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import AnnotationComposer from "./AnnotationComposer";
-import { deleteAnnotation } from "@/app/actions/annotations";
+import LiveAnnotationComposer from "./LiveAnnotationComposer";
+import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
 import styles from "./AnnotationNode.module.css";
 
 export type AnnotationNodeData = {
   id: string;
   displayName: string;
-  bodyText: string;
+  // Rendered server-side from proseJson (PLAN.md §13j Phase 2) — a static
+  // rendering, same @tiptap/static-renderer call the doc reading view
+  // already uses, not a live editor. Only an actively-open composer
+  // (LiveAnnotationComposer) is ever connected to an annotation's ydoc.
+  body: ReactNode;
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
@@ -50,7 +54,14 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
   const isAdmin = session?.user?.role === "ADMIN";
-  const [replying, setReplying] = useState(false);
+  // A reply's own DRAFT id, once "Reply" has created one (PLAN.md §13j
+  // Phase 2) — null means the reply composer isn't open. Unlike the old
+  // plain-textarea CommentForm, there's no separate "replying" boolean:
+  // LiveAnnotationComposer needs a real row to connect to before it can
+  // render anything, so "open" and "has a draft id" are the same state.
+  const [replyDraftId, setReplyDraftId] = useState<string | null>(null);
+  const [replyPending, startReplyTransition] = useTransition();
+  const [replyError, setReplyError] = useState<string | null>(null);
   const [posted, setPosted] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -87,6 +98,18 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
     });
   };
 
+  const openReply = () => {
+    setReplyError(null);
+    startReplyTransition(async () => {
+      const result = await createDraftAnnotation(docId, annotation.id);
+      if ("error" in result) {
+        setReplyError(result.error);
+        return;
+      }
+      setReplyDraftId(result.id);
+    });
+  };
+
   return (
     <div className={`${styles.node} ${depth > 0 ? styles.nested : ""}`}>
       {isDeleted ? (
@@ -101,12 +124,13 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
               {new Date(annotation.createdAt).toLocaleString()}
             </a>
           </p>
-          <p>{annotation.bodyText}</p>
-          {!posted && (
-            <button type="button" onClick={() => setReplying((r) => !r)} className={styles.replyButton}>
-              {replying ? "Cancel" : "Reply"}
+          <div>{annotation.body}</div>
+          {!posted && !replyDraftId && (
+            <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
+              {replyPending ? "Opening…" : "Reply"}
             </button>
           )}
+          {replyError && <p className={styles.error}>{replyError}</p>}
           {canDelete && !confirmingDelete && (
             <button
               type="button"
@@ -136,8 +160,15 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
           {deleteError && <p className={styles.error}>{deleteError}</p>}
         </div>
       )}
-      {replying && !posted && (
-        <AnnotationComposer docId={docId} parentAnnotationId={annotation.id} onPosted={() => setPosted(true)} />
+      {replyDraftId && !posted && (
+        <LiveAnnotationComposer
+          annotationId={replyDraftId}
+          onPosted={() => {
+            setPosted(true);
+            setReplyDraftId(null);
+          }}
+          onCancel={() => setReplyDraftId(null)}
+        />
       )}
       {annotation.replies.map((reply) => (
         <AnnotationNode key={reply.id} annotation={reply} docId={docId} depth={depth + 1} />

@@ -16,6 +16,11 @@ export type AnnotationComment = {
   parentAnnotationId: string | null;
   displayName: string;
   bodyText: string;
+  // The rich body, straight from the annotation's own ydoc cache (§13a) —
+  // null only for a DRAFT that was created but never reached a store
+  // debounce (e.g. abandoned mid-open), in which case bodyText/proseJson
+  // are still their creation-time empty-paragraph values.
+  proseJson: JSONContent | null;
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
@@ -43,15 +48,22 @@ export type AnnotationThread = {
 // built very differently since there's no separate thread table: a root
 // annotation (parentAnnotationId null) *is* the thread, and every reply —
 // including a reply-of-a-reply — is grouped under it by walking
-// parentAnnotationId pointers back to their root. No status filter:
-// annotations are never moderated, so every row is eligible (deleted ones
-// still fetched, so AnnotationNode can render "[deleted]" for one with live
-// replies).
+// parentAnnotationId pointers back to their root. No moderation filter:
+// annotations are never moderated, so every non-DRAFT row is eligible
+// (deleted ones still fetched, so AnnotationNode can render "[deleted]" for
+// one with live replies).
+//
+// PLAN.md §13d — a DRAFT annotation (still being composed, no inline mark)
+// is excluded outright, including from its own author: a draft's only
+// visible surface is the open composer itself (LiveAnnotationComposer),
+// which the client already holds a direct connection to and needs no
+// server round-trip to "see." Rendering it a second time here, read-only,
+// would just duplicate what the open composer is already showing.
 export async function getDocAnnotationsAsThreads(docId: string): Promise<AnnotationThread[]> {
   const [doc, annotations] = await Promise.all([
     prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } }),
     prisma.annotation.findMany({
-      where: { docId },
+      where: { docId, status: { not: "DRAFT" } },
       orderBy: { createdAt: "asc" },
       include: { user: { select: { name: true, email: true, color: true } } },
     }),
@@ -96,6 +108,7 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
         parentAnnotationId: a.parentAnnotationId,
         displayName: a.user.name ?? a.user.email,
         bodyText: a.bodyText,
+        proseJson: a.proseJson as JSONContent | null,
         createdAt: a.createdAt.toISOString(),
         deletedByUserId: a.deletedByUserId,
         commenterUserId: a.userId,
