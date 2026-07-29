@@ -15,11 +15,14 @@ export type ThreadComment = {
 
 export type ThreadWithComments = {
   id: string;
-  anchorFrom: number;
-  anchorTo: number;
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  // "" means "renders in the general-discussion bucket, no QuoteThreadHeader"
+  // — a post has at most one such thread (found-or-created keyed on
+  // quotedText: "", src/app/actions/comments.ts).
   quotedText: string;
   status: ThreadStatus;
-  anchoredRevisionId: string;
+  anchoredRevisionId: string | null;
   comments: ThreadComment[];
   // The thread's own color, not any one comment's — shared by every reply
   // in the thread (the highlight/bubble/arrow are per-thread UI, not

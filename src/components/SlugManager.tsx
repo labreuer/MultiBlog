@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { updatePostSlug, deletePostSlugHistory, revertPostSlug } from "@/app/actions/posts";
 import { updateUserSlug, deleteUserSlugHistory, revertUserSlug } from "@/app/actions/users";
+import { updateDocSlug, deleteDocSlugHistory, revertDocSlug } from "@/app/actions/docs";
 import { REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 
 export type SlugHistoryRow = { slug: string; createdAt: string };
 
 type Props = {
-  entityType: "post" | "user";
+  entityType: "post" | "user" | "doc";
   entityId: string;
   currentSlug: string;
   // What uniquePostSlug/uniqueUserSlug would produce from this entity's
@@ -66,7 +67,11 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
     startTransition(async () => {
       try {
         const result =
-          entityType === "post" ? await updatePostSlug(entityId, newSlugValue) : await updateUserSlug(entityId, newSlugValue);
+          entityType === "post"
+            ? await updatePostSlug(entityId, newSlugValue)
+            : entityType === "doc"
+              ? await updateDocSlug(entityId, newSlugValue)
+              : await updateUserSlug(entityId, newSlugValue);
         setSlug(result.slug);
         setRows((prev) => [...prev, { slug: oldSlug, createdAt: new Date().toISOString() }]);
         setEditing(false);
@@ -103,7 +108,12 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
       : true;
     startTransition(async () => {
       try {
-        const result = entityType === "post" ? await revertPostSlug(entityId) : await revertUserSlug(entityId);
+        const result =
+          entityType === "post"
+            ? await revertPostSlug(entityId)
+            : entityType === "doc"
+              ? await revertDocSlug(entityId)
+              : await revertUserSlug(entityId);
         setSlug(result.slug);
         setRows((prev) =>
           keepReplacementRow
@@ -123,6 +133,8 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
       try {
         if (entityType === "post") {
           await deletePostSlugHistory(entityId, historySlug);
+        } else if (entityType === "doc") {
+          await deleteDocSlugHistory(entityId, historySlug);
         } else {
           await deleteUserSlugHistory(entityId, historySlug);
         }

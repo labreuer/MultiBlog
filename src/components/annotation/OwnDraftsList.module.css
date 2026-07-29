@@ -1,0 +1,44 @@
+.wrapper {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.heading {
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.list {
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.9rem;
+}
+
+.preview {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #444;
+}
+
+.editButton {
+  font: inherit;
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  color: #333;
+  cursor: pointer;
+  text-decoration: underline;
+  flex-shrink: 0;
+}

@@ -1,0 +1,50 @@
+.bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--background);
+  border-top: 1px solid #ccc;
+  padding: 0.5rem 1rem;
+  z-index: 10;
+}
+
+/* Matches the reading view's own <main> width (page.tsx) so the scrubber
+   lines up under the post instead of spanning the full viewport. */
+.inner {
+  width: 800px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.slider {
+  width: 100%;
+  display: block;
+  margin: 0;
+}
+
+/* The unloaded state (DocScrubBar's "idle"/"loading") — nothing has been
+   fetched yet, so nothing about this slider's position means anything. */
+.sliderGrayed {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.positionLine,
+.loadingLine {
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.positionLine {
+  color: #666;
+}
+
+.loadingLine {
+  color: #999;
+}
+
+.error {
+  color: crimson;
+  font-size: 0.85rem;
+}

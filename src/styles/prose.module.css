@@ -91,3 +91,47 @@
     background-color: color-mix(in srgb, var(--thread-color, #999) 55%, transparent);
   }
 }
+
+/* A doc annotation's anchor (PLAN.md §12i) — a mark in the document itself,
+   not a decoration, so this rule is all that's needed to render it: a click
+   target for jumping to the comment, plus a highlight colored by its
+   author — the same --thread-color convention quote-highlight uses above,
+   set per annotation id by AnnotationColorStyles.tsx (CommentSection.tsx)
+   rather than inline on the mark itself. The amber fallback is what shows
+   before that <style> tag has anything to say (e.g. a degraded annotation
+   never gets a rule at all, though it also has no mark left to paint) —
+   previously the only color this rule had. Applies equally in the live
+   editor (ProseMirror renders the mark's own renderHTML) and the reading
+   view, though only the reading view (CommentSection) currently supplies
+   real author colors — see AnnotationColorStyles.tsx. */
+.prose :global(.annotation-highlight) {
+  background: color-mix(in srgb, var(--thread-color, #ffc800) 28%, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.prose :global(.annotation-highlight.pulse) {
+  animation: annotationHighlightPulse 0.6s ease-in-out 2;
+}
+
+@keyframes annotationHighlightPulse {
+  0%,
+  100% {
+    background-color: color-mix(in srgb, var(--thread-color, #ffc800) 28%, transparent);
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--thread-color, #ffc800) 55%, transparent);
+  }
+}
+
+/* The selection currently being composed into an inline annotation popover
+   (PLAN.md §13f) — a decoration (pending-annotation-extension.ts), not a
+   mark, so it never touches the document and disappears the moment the
+   popup closes. Colored by the composing user's own color, not an
+   annotation's (there isn't one yet); a dashed underline rather than a
+   background wash keeps it visually distinct from .annotation-highlight's
+   already-posted look. */
+.prose :global(.pending-annotation) {
+  background: color-mix(in srgb, var(--thread-color, #999) 18%, transparent);
+  border-bottom: 2px dashed var(--thread-color, #999);
+}

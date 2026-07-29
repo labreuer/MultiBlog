@@ -16,13 +16,18 @@ enum Role {
   ADMIN
   EDITOR
   AUTHOR
+  AUTHORIZED
   COMMENTER
+
+  @@map("role")
 }
 
 enum ModerationPolicy {
   INHERIT
   ALWAYS
   AUTO
+
+  @@map("moderation_policy")
 }
 
 enum PublicationEventType {
@@ -30,12 +35,16 @@ enum PublicationEventType {
   UNPUBLISHED
   SCHEDULED
   SCHEDULE_CANCELED
+
+  @@map("publication_event_type")
 }
 
 enum ThreadStatus {
   ACTIVE
   DETACHED
   RESOLVED
+
+  @@map("thread_status")
 }
 
 enum CommentStatus {
@@ -43,23 +52,47 @@ enum CommentStatus {
   APPROVED
   SPAM
   DELETED
+
+  @@map("comment_status")
+}
+
+// PLAN.md §12e — PRIVATE is byline authors plus ADMIN/EDITOR; SHARED is
+// anyone with canViewDocs. No "unlisted" tier: with role gating underneath,
+// it would have no threat model left to address.
+enum DocVisibility {
+  PRIVATE
+  SHARED
+
+  @@map("doc_visibility")
+}
+
+// PLAN.md §13d — an annotation's visibility/notification axis, orthogonal to
+// moderation (annotations are never moderated, §12c). DRAFT never carries an
+// inline mark and notifies nobody; LIVE is the ordinary posted state; RAISED
+// is LIVE plus the doc's byline authors have been emailed.
+enum AnnotationStatus {
+  DRAFT
+  LIVE
+  RAISED
+
+  @@map("annotation_status")
 }
 
 model User {
   id               String            @id @default(cuid())
   email            String            @unique
   slug             String            @unique
-  emailVerified    DateTime?
+  emailVerified    DateTime?         @map("email_verified")
   name             String?
   image            String?
-  passwordHash     String?
+  passwordHash     String?           @map("password_hash")
   role             Role              @default(COMMENTER)
-  moderationPolicy ModerationPolicy  @default(INHERIT)
+  moderationPolicy ModerationPolicy  @default(INHERIT) @map("moderation_policy")
   color            String            @default("#5b8cff")
-  adminInitials    String
-  createdAt        DateTime          @default(now())
-  deletedByUserId  String?
-  deletedAt        DateTime?
+  adminInitials    String            @map("admin_initials")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  deletedByUserId  String?           @map("deleted_by_user_id")
+  deletedAt        DateTime?         @map("deleted_at")
 
   accounts             Account[]
   sessions             Session[]
@@ -74,6 +107,13 @@ model User {
   deletedUsers         User[]               @relation("UserDeletedBy")
   postDeletions        Post[]               @relation("PostDeletedBy")
   slugHistory          UserSlugHistory[]
+  ydocSnapshots        YdocSnapshot[]       @relation("YdocSnapshotUser")
+  docAuthors           DocAuthor[]
+  docDeletions         Doc[]                @relation("DocDeletedBy")
+  annotations          Annotation[]         @relation("AnnotationAuthor")
+  annotationDeletions  Annotation[]         @relation("AnnotationDeletedBy")
+
+  @@map("user")
 }
 
 // Redirect sources for a user's past slugs — same shape as PostSlugHistory,
@@ -81,22 +121,23 @@ model User {
 // has no real polymorphic relation support (see PostSlugHistory's comment).
 model UserSlugHistory {
   id        String   @id @default(cuid())
-  userId    String
+  userId    String   @map("user_id")
   slug      String   @unique
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@map("user_slug_history")
 }
 
 // Auth.js (NextAuth) Prisma adapter models — used for OAuth account linking.
 model Account {
   id                String  @id @default(cuid())
-  userId            String
+  userId            String  @map("user_id")
   type              String
   provider          String
-  providerAccountId String
+  providerAccountId String  @map("provider_account_id")
   refresh_token     String? @db.Text
   access_token      String? @db.Text
   expires_at        Int?
@@ -108,15 +149,18 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@map("account")
 }
 
 model Session {
   id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
   expires      DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
 }
 
 model VerificationToken {
@@ -125,28 +169,31 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+  @@map("verification_token")
 }
 
 model PasswordResetToken {
   id        String   @id @default(cuid())
-  userId    String
-  tokenHash String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_token")
 }
 
 model Post {
   id                String     @id @default(cuid())
   slug              String     @unique
   title             String
-  publishRevisionId String?    @unique
-  moderationPolicy  ModerationPolicy @default(INHERIT)
-  createdAt         DateTime   @default(now())
-  publishedAt       DateTime?  // may be in the future — see below
-  deletedByUserId   String?
-  deletedAt         DateTime?
+  publishRevisionId String?    @unique @map("publish_revision_id")
+  moderationPolicy  ModerationPolicy @default(INHERIT) @map("moderation_policy")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  publishedAt       DateTime?  @map("published_at") // may be in the future — see below
+  deletedByUserId   String?    @map("deleted_by_user_id")
+  deletedAt         DateTime?  @map("deleted_at")
 
   // publishRevisionId is set immediately by both an immediate publish and a
   // *scheduled* one — visibility is gated by publishedAt vs now(), a pure
@@ -162,6 +209,8 @@ model Post {
   publicationEvents PostPublicationEvent[]
   deletedBy         User?            @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory       PostSlugHistory[]
+
+  @@map("post")
 }
 
 // Redirect sources for a post's past slugs — one row per slug the post has
@@ -172,35 +221,37 @@ model Post {
 // see slugInUse in src/lib/slug.ts.
 model PostSlugHistory {
   id        String   @id @default(cuid())
-  postId    String
+  postId    String   @map("post_id")
   slug      String   @unique
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId])
+  @@map("post_slug_history")
 }
 
 model PostAuthor {
-  postId      String
-  userId      String
-  bylineOrder Int
+  postId      String @map("post_id")
+  userId      String @map("user_id")
+  bylineOrder Int    @map("byline_order")
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([postId, userId])
+  @@map("post_author")
 }
 
 model Revision {
   id             String   @id @default(cuid())
-  postId         String
-  revisionNumber Int
+  postId         String   @map("post_id")
+  revisionNumber Int      @map("revision_number")
   doc            Json
   title          String
-  editorId       String?
+  editorId       String?  @map("editor_id")
   changelog      String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime @default(now()) @map("created_at")
 
   post              Post                   @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade)
   editor            User?                  @relation("RevisionEditor", fields: [editorId], references: [id])
@@ -209,6 +260,7 @@ model Revision {
   publicationEvents PostPublicationEvent[]
 
   @@unique([postId, revisionNumber])
+  @@map("revision")
 }
 
 // Append-only audit log of publish/unpublish/schedule transitions. Needed
@@ -217,26 +269,29 @@ model Revision {
 // answer "when did this go live/offline" — see PLAN.md §10.
 model PostPublicationEvent {
   id           String               @id @default(cuid())
-  postId       String
+  postId       String               @map("post_id")
   type         PublicationEventType
-  revisionId   String?              // the revision that went (or would go) live; null for UNPUBLISHED/SCHEDULE_CANCELED
-  scheduledFor DateTime?            // only set for SCHEDULED events
-  actorId      String?              // null = system (the due-schedule sweep)
-  createdAt    DateTime             @default(now())
+  revisionId   String?              @map("revision_id") // the revision that went (or would go) live; null for UNPUBLISHED/SCHEDULE_CANCELED
+  scheduledFor DateTime?            @map("scheduled_for") // only set for SCHEDULED events
+  actorId      String?              @map("actor_id") // null = system (the due-schedule sweep)
+  createdAt    DateTime             @default(now()) @map("created_at")
 
   post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
   revision Revision? @relation(fields: [revisionId], references: [id])
   actor    User?     @relation("PublicationEventActor", fields: [actorId], references: [id])
 
   @@index([postId, createdAt])
+  @@map("post_publication_event")
 }
 
 model PostCollab {
-  postId    String   @id
+  postId    String   @id @map("post_id")
   ydoc      Bytes
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@map("post_collab")
 }
 
 // Append-only log of raw Yjs updates for a post's current (unpublished) collab
@@ -245,62 +300,69 @@ model PostCollab {
 // working-session state, not part of the immutable revision history.
 model PostCollabUpdate {
   id        BigInt   @id @default(autoincrement())
-  postId    String
-  createdAt DateTime @default(now())
+  postId    String   @map("post_id")
+  createdAt DateTime @default(now()) @map("created_at")
   update    Bytes
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId, id])
+  @@map("post_collab_update")
 }
 
 model SiteSettings {
   id                      Int               @id @default(1)
-  defaultModerationPolicy ModerationPolicy  @default(ALWAYS)
-  trustThreshold          Int               @default(3)
+  defaultModerationPolicy ModerationPolicy  @default(ALWAYS) @map("default_moderation_policy")
+  trustThreshold          Int               @default(3) @map("trust_threshold")
+
+  @@map("site_settings")
 }
 
 model Commenter {
   id            String  @id @default(cuid())
-  userId        String? @unique
+  userId        String? @unique @map("user_id")
   email         String  @unique
-  displayName   String
-  approvedCount Int     @default(0)
-  forceModerate Boolean @default(false)
+  displayName   String  @map("display_name")
+  approvedCount Int     @default(0) @map("approved_count")
+  forceModerate Boolean @default(false) @map("force_moderate")
 
   user     User?     @relation(fields: [userId], references: [id])
   comments Comment[]
+
+  @@map("commenter")
 }
 
 model CommentThread {
   id                 String       @id @default(cuid())
-  postId             String
-  anchoredRevisionId String
-  anchorFrom         Int
-  anchorTo           Int
-  quotedText         String
+  postId             String       @map("post_id")
+  anchoredRevisionId String       @map("anchored_revision_id")
+  anchorFrom         Int          @map("anchor_from")
+  anchorTo           Int          @map("anchor_to")
+  quotedText         String       @map("quoted_text")
   status             ThreadStatus @default(ACTIVE)
-  createdAt          DateTime     @default(now())
+  createdAt          DateTime     @default(now()) @map("created_at")
 
   post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
   revision Revision  @relation(fields: [anchoredRevisionId], references: [id])
   comments Comment[]
+
+  @@map("comment_thread")
 }
 
 model Comment {
   id                String        @id @default(cuid())
-  threadId          String
-  parentCommentId   String?
-  commenterId       String
+  threadId          String        @map("thread_id")
+  parentCommentId   String?       @map("parent_comment_id")
+  commenterId       String        @map("commenter_id")
   body              Json
   status            CommentStatus @default(PENDING)
-  ipAddress         String?
-  statusChangedById String?
-  statusChangedAt   DateTime?
-  createdAt         DateTime      @default(now())
-  editedAt          DateTime?
-  deletedByUserId   String?
-  deletedAt         DateTime?
+  ipAddress         String?       @map("ip_address")
+  statusChangedById String?       @map("status_changed_by_id")
+  statusChangedAt   DateTime?     @map("status_changed_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  editedAt          DateTime?     @map("edited_at")
+  deletedByUserId   String?       @map("deleted_by_user_id")
+  deletedAt         DateTime?     @map("deleted_at")
 
   thread          CommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   parent          Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
@@ -308,4 +370,159 @@ model Comment {
   commenter       Commenter     @relation(fields: [commenterId], references: [id])
   statusChangedBy User?         @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
   deletedBy       User?         @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
+
+  @@map("comment")
+}
+
+// A living document — PLAN.md §12 — read as its current Yjs state (Doc ↔
+// Ydoc joined only by id derivation, ydocIdForDoc/docIdFromYdocId in
+// src/lib/ydoc-names.ts; deliberately no foreign key either way, since it's
+// a function of docId and cannot drift). No moderationPolicy: annotations
+// are never moderated. No publishRevisionId/publishedAt: a doc is never
+// "published at a revision" — readers see the live doc. No doc_revision
+// table yet either (§12m, held back pending review).
+//
+// title/proseJson are caches of the ydoc's "title"/"default" Yjs fragments,
+// written by server/doc-cache.ts on the collab server's store debounce
+// (§12d) — nullable because they're empty until the first store, i.e. for a
+// doc that's been created but never edited.
+model Doc {
+  id              String         @id @default(cuid())
+  slug            String         @unique
+  title           String
+  visibility      DocVisibility  @default(PRIVATE)
+  proseJson       Json?          @map("prose_json")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  deletedByUserId String?        @map("deleted_by_user_id")
+  deletedAt       DateTime?      @map("deleted_at")
+
+  authors     DocAuthor[]
+  deletedBy   User?             @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
+  slugHistory DocSlugHistory[]
+  annotations Annotation[]
+
+  @@map("doc")
+}
+
+model DocAuthor {
+  docId       String @map("doc_id")
+  userId      String @map("user_id")
+  bylineOrder Int    @map("byline_order")
+
+  doc  Doc  @relation(fields: [docId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([docId, userId])
+  @@map("doc_author")
+}
+
+// Redirect sources for a doc's past slugs — same shape/rationale as
+// PostSlugHistory. slug carries its own @unique, not @@unique([docId, slug]):
+// doc slugs are unique among docs only (a separate /doc/* namespace with no
+// shared catch-all against post slugs), enforced by docSlugInUse in
+// src/lib/doc-slug.ts rather than by this column against Post/PostSlugHistory.
+model DocSlugHistory {
+  id        String   @id @default(cuid())
+  docId     String   @map("doc_id")
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  doc Doc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@index([docId])
+  @@map("doc_slug_history")
+}
+
+// PLAN.md §12c/§12i — a root annotation (parentAnnotationId null) *is* the
+// thread; replies hang off it through the same self-FK shape
+// Comment.parentCommentId already uses. No anchor columns — the anchor is a
+// mark embedded in the doc's own ydoc (src/lib/annotation-extension.ts); no
+// quotedText — the annotated text is read from Doc.proseJson through the
+// mark, so there is nothing here that could fall out of sync with the
+// document. No moderation columns: annotations are never moderated (status
+// below is about visibility/notification, §13d, not approval).
+//
+// PLAN.md §13 — the body itself is a live ydoc (ydocIdForAnnotation(id),
+// src/lib/ydoc-names.ts), the same substrate a doc itself uses (§11).
+// proseJson/bodyText are caches of that ydoc, written by
+// server/annotation-cache.ts's store-debounce exactly the way Doc.proseJson/
+// Doc.title already are (§12d) — losing them costs a rebuild, not data. The
+// old plain-text `body` {text} column is gone: every row was backfilled onto
+// proseJson/bodyText (scripts/backfill-annotation-ydocs.ts, since deleted)
+// before this column was dropped.
+model Annotation {
+  id                 String           @id @default(cuid())
+  docId              String           @map("doc_id")
+  parentAnnotationId String?          @map("parent_annotation_id")
+  userId             String           @map("user_id")
+  proseJson          Json?            @map("prose_json")
+  bodyText           String           @default("") @map("body_text")
+  status             AnnotationStatus @default(DRAFT)
+  raisedAt           DateTime?        @map("raised_at")
+  resolvedAt         DateTime?        @map("resolved_at")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  editedAt           DateTime?        @map("edited_at")
+  deletedByUserId    String?          @map("deleted_by_user_id")
+  deletedAt          DateTime?        @map("deleted_at")
+
+  doc       Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
+  parent    Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
+  replies   Annotation[] @relation("AnnotationReplies")
+  user      User         @relation("AnnotationAuthor", fields: [userId], references: [id])
+  deletedBy User?        @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
+
+  @@index([docId])
+  @@map("annotation")
+}
+
+// A generic, standalone Yjs document store — PLAN.md §11. Keyed purely by the
+// Hocuspocus documentName (a `ydoc:`-prefixed id when routed through
+// server/ydoc-hooks.ts, see src/lib/ydoc-names.ts); no relation to Post or
+// anything else. `ydoc` is the O(1) cold-open path (Y.encodeStateAsUpdate);
+// `ydocUpdate` is the never-truncated-on-save raw update log, whose first row
+// per document is always a full state and every later row a plain delta
+// (invariant 1, PLAN.md §11b); `ydocSnapshot` is a checkpoint constructed
+// on demand, never implicitly, that lets a truncation-aware reader resolve a
+// replay base without walking the log from row 1 (invariant 2).
+model Ydoc {
+  id          String   @id
+  ydoc        Bytes
+  stateVector Bytes    @map("state_vector")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  updates   YdocUpdate[]
+  snapshots YdocSnapshot[]
+
+  @@index([updatedAt])
+  @@map("ydoc")
+}
+
+model YdocUpdate {
+  id        BigInt   @id @default(autoincrement())
+  ydocId    String   @map("ydoc_id")
+  update    Bytes
+  createdAt DateTime @default(now()) @map("created_at")
+
+  doc Ydoc @relation(fields: [ydocId], references: [id], onDelete: Cascade)
+
+  @@index([ydocId, id])
+  @@map("ydoc_update")
+}
+
+model YdocSnapshot {
+  id               String   @id @default(cuid())
+  ydocId           String   @map("ydoc_id")
+  ydoc             Bytes
+  stateVector      Bytes    @map("state_vector")
+  lastYdocUpdateId BigInt   @map("last_ydoc_update_id")
+  userId           String?  @map("user_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  doc  Ydoc  @relation(fields: [ydocId], references: [id], onDelete: Cascade)
+  user User? @relation("YdocSnapshotUser", fields: [userId], references: [id])
+
+  @@index([ydocId, lastYdocUpdateId])
+  @@map("ydoc_snapshot")
 }

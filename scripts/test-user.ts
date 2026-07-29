@@ -4,7 +4,7 @@
 // addresses so it can never touch a real account.
 //
 // Usage:
-//   npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|COMMENTER] [--trusted] [--force-moderate]
+//   npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|AUTHORIZED|COMMENTER] [--trusted] [--force-moderate]
 //   npx tsx scripts/test-user.ts delete [email]
 // email defaults to test-admin@example.com; password is always "testpass123".
 // --role defaults to ADMIN. --trusted and --force-moderate each create a
@@ -19,6 +19,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../src/lib/prisma";
 import { colorForSeed } from "../src/lib/author-colors";
 import { uniqueUserSlug } from "../src/lib/user-slug";
+import { ydocIdForAnnotation } from "../src/lib/ydoc-names";
 import { Role } from "../src/generated/prisma/enums";
 
 const SAFE_EMAIL = /^[\w.+-]+@example\.com$/i;
@@ -119,6 +120,18 @@ async function del(email: string) {
   // blocks `create` from ever reusing this email again (Commenter.email is
   // unique) and made a real throwaway-account collision during testing.
   await prisma.commenter.deleteMany({ where: { email } });
+  // annotation.user_id is ON DELETE RESTRICT (an annotation always has a
+  // real author, PLAN.md §12c) — a test user who annotated a doc would
+  // otherwise block their own deletion here. Each annotation's own ydoc row
+  // (§13a) has no FK back to it, so it has to be captured and swept before
+  // the deleteMany, same as its doc-side counterpart in test-doc.ts.
+  const annotationIds = (
+    await prisma.annotation.findMany({ where: { userId: existing.id }, select: { id: true } })
+  ).map((a) => a.id);
+  await prisma.annotation.deleteMany({ where: { userId: existing.id } });
+  if (annotationIds.length > 0) {
+    await prisma.ydoc.deleteMany({ where: { id: { in: annotationIds.map(ydocIdForAnnotation) } } });
+  }
   await prisma.user.delete({ where: { email } });
   console.log(`Deleted ${email} (was role=${existing.role}).`);
 }
@@ -144,7 +157,7 @@ async function main() {
     await del(email);
   } else {
     console.error(
-      "Usage: npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|COMMENTER] [--trusted] [--force-moderate]\n" +
+      "Usage: npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|AUTHORIZED|COMMENTER] [--trusted] [--force-moderate]\n" +
         "       npx tsx scripts/test-user.ts delete [email]",
     );
     process.exitCode = 1;

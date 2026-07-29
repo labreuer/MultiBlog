@@ -55,6 +55,8 @@ lump every table-adjacent style into one file:
 | `components/CommentSection.module.css`, `CommentNode.module.css`, `CommentForm.module.css` | none needed a pseudo-class directly, but were pulled into modules alongside `QuoteThreadHeader` for consistency when that pass happened (see git history 2026-07-20) |
 | `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values; `.arrowActive`/`.barActive` also read `--thread-color` |
 | `components/PostSettingsPanel.module.css` | same state-dependent-class rationale as `QuoteThreadHeader` — `.draggableRow`/`.dragOver` toggle on drag state, `.checkboxRow` conditionally combines them; no pseudo-class/media-query is used, but juggling three conditional classes per row as inline `style` objects would be worse than the module |
+| `app/doc/[slug]/page.module.css` | the doc reading view (PLAN.md §12n). No pseudo-class or media query — created because the alternative was a fresh set of fixed-value inline `style` objects, which the default above rules out. Also carries a state-dependent class pair (`.container` plus `.containerScrubbable`, the latter reserving room for the pinned scrub footer only when it renders), and a `.byline` mirroring `app/[slug]/page.module.css`'s rather than restating those six declarations inline |
+| `components/DocEditor.module.css`, `DocSettingsPanel.module.css` | doc-side siblings of `PostEditor.module.css`/`PostSettingsPanel.module.css` (PLAN.md §12k) — `@media` (narrow container) and the same `.draggableRow`/`.dragOver` state pair, respectively. Trimmed to only what `DocEditor`/`DocSettingsPanel` themselves need: the toolbar/editor-frame/caret rules a doc's editor also uses live in `PostEditor.module.css` still, since `CollabEditorBody` (which owns them) is reused unmodified rather than forked. `DocEditor.module.css` also gained the `[data-empty]::before` + `attr(data-placeholder)` title placeholder (PLAN.md §12n, added 2026-07-29) — the same `content: attr(...)` trick a plain `::before` rule needs, which inline `style` can't express |
 
 Numeric constants that also drive non-CSS geometry (e.g. `QuoteThreadHeader`'s
 `HEAD_WIDTH`/`HEAD_HEIGHT`, used in both the SVG `viewBox` and a CSS `width`) stay as
@@ -82,13 +84,14 @@ value that two systems depend on invites drift.
 | Post title (home/author listings) | `#000` (black), underline only on `:hover` | `page.module.css` `.titleLink` — deliberate override of the default link color |
 | Body text | `#171717` (`--foreground`) | `globals.css` |
 | Secondary/meta text (dates, bylines, empty states) | `#666` | pervasive — `page.tsx`, `search/page.tsx`, `CommentNode`, history/comments admin pages, etc. |
-| Muted/placeholder text | `#999` | detached-thread notices, collab-cursor fallback color, "nothing to show" states |
-| Light divider (between list/article rows) | `1px solid #eee` | every post-listing `<article>` (`page.tsx`, `authors/[id]/page.tsx`, `search/page.tsx`) |
+| Muted/placeholder text | `#999` | detached-thread notices, collab-cursor fallback color, "nothing to show" states, the doc editor's "Untitled" title placeholder (`DocEditor.module.css`) |
+| Light divider (between list/article rows, and under a byline) | `1px solid #eee` | every post-listing `<article>` (`page.tsx`, `authors/[id]/page.tsx`, `search/page.tsx`); also the byline rule on both reading views (`app/[slug]/page.module.css`, `app/doc/[slug]/page.module.css`) |
 | Stronger border (panels, table headers, comment-admin rows) | `1px solid #ddd` | `PostsTable.tsx`, `SiteHeader.tsx`, admin comments/history pages |
 | Nested-reply rail | `2px solid #e0e0e0` | `CommentNode.module.css` `.nested` |
 | Quote-thread marker/highlight/badge (active) | `var(--thread-color, #999)` — see note below | `QuoteThreadHeader.module.css`, `prose.module.css` `.quote-highlight`/`.quote-indicator` |
 | Quote-thread marker (detached) | `#999`, fixed (not `--thread-color`-driven) | `QuoteThreadHeader.module.css` |
 | Quote highlight background / pulse | `color-mix(in srgb, var(--thread-color, #999) 25%, transparent)`, pulses to 55% | `prose.module.css` |
+| Annotation highlight background / pulse | `rgba(255, 200, 0, 0.28)`, pulses to `0.55` alpha | `prose.module.css` `.annotation-highlight` — flat amber, not `--thread-color`-driven: unlike a quote thread, an annotation isn't multi-colored per commenter (PLAN.md §12i) |
 | Comment-form buttons | `#333` (Post comment) / `#666` (Cancel) | `CommentForm.module.css` `.submit`/`.cancel` |
 | Error text | `crimson` | form validation errors |
 | Danger/delete action | `#c00` (text/border, no fill) | `PostsTable.tsx`/`UsersTable.tsx` delete icon buttons, `PostSettingsPanel.module.css` `.deleteButton` — consistent across every soft-delete control in the admin/editor UI |

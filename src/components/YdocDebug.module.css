@@ -1,0 +1,113 @@
+.container {
+  max-width: 960px;
+  margin: 3rem auto;
+  padding: 0 1rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.intro {
+  color: #666;
+  margin-bottom: 1.5rem;
+}
+
+.controlsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.section {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.sectionHeadRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 0.75rem;
+}
+
+.buttonGroup {
+  display: flex;
+  gap: 8px;
+}
+
+.titlePreview {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 0.75rem;
+}
+
+.bodyPreview {
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.muted {
+  color: #999;
+}
+
+.error {
+  color: crimson;
+}
+
+/* ---- replay slider (PLAN.md §11f) ---- */
+
+.replay {
+  margin-bottom: 1rem;
+}
+
+/* The dots below are absolutely positioned against this, so the track and the
+   overlay share one coordinate space. */
+.sliderWrapper {
+  position: relative;
+  padding-bottom: 14px;
+}
+
+.slider {
+  width: 100%;
+  display: block;
+  margin: 0;
+}
+
+/* One per ydoc_snapshot, at its position along the log. `left` is set inline
+   (it's a computed per-instance percentage, per STYLE.md) — everything fixed
+   lives here. A range thumb's centre doesn't quite reach the track ends, so
+   dots near 0%/100% sit a few pixels off the thumb; cosmetic, and not worth
+   correcting on a debug page. */
+.snapshotDot {
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid #3366cc;
+  border-radius: 50%;
+  background: #cfe0ff;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+
+.snapshotDotActive {
+  background: #3366cc;
+}
+
+.statusLine {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 0.75rem;
+}
+
+.positionLine {
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}

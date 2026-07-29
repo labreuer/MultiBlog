@@ -34,15 +34,17 @@ function buildTree(
 
 export default async function CommentSection({ postId }: { postId: string }) {
   const threads = await getPostThreadsWithApprovedComments(postId);
-  const generalThread = threads.find((t) => t.quotedText === "");
   const quoteThreads = threads.filter((t) => t.quotedText !== "");
+  // A post has at most one general thread (found-or-created keyed on
+  // quotedText: "", src/app/actions/comments.ts).
+  const generalThread = threads.find((t) => t.quotedText === "");
 
   const detachedContextByThread = new Map<string, string | null>();
   for (const thread of quoteThreads) {
-    if (thread.status === "DETACHED") {
+    if (thread.status === "DETACHED" && thread.anchoredRevisionId !== null) {
       detachedContextByThread.set(
         thread.id,
-        await getDetachedThreadContext(thread.anchoredRevisionId, thread.anchorFrom, thread.anchorTo),
+        await getDetachedThreadContext(thread.anchoredRevisionId, thread.anchorFrom!, thread.anchorTo!),
       );
     }
   }

@@ -5,6 +5,7 @@ import Text from "@tiptap/extension-text";
 import { getSchema, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
+import { Annotation } from "./annotation-extension";
 
 // The node/mark schema used for a post's content. Shared between the
 // editor, the Hocuspocus doc-seeding step, and the public renderer so
@@ -23,6 +24,31 @@ export const pmSchema = getSchema(contentExtensions);
 // contentExtensions (without this mark) stays the schema for public/historic
 // content and can't drift from it.
 export const authorHighlightExtensions = [...contentExtensions, AuthorHighlight];
+
+// The doc-side extension set (PLAN.md §12i), beside authorHighlightExtensions
+// rather than folded into it: posts never apply the annotation mark, but an
+// unused mark type in a shared schema costs nothing, exactly as
+// authorHighlight already demonstrates for the reverse case. Used for
+// anything decoding/encoding a *doc's* ydoc: server/doc-cache.ts,
+// src/lib/ydoc-render.ts, and the doc-side live editor/reading view.
+export const docContentExtensions = [...authorHighlightExtensions, Annotation];
+
+// The plain prosemirror-model Schema counterpart of docContentExtensions —
+// for server-side code that builds/walks a doc-shaped Node outside a live
+// editor instance (server/ydoc-hooks.ts's annotation-mark endpoint), mirroring
+// pmSchema/pmTitleSchema above.
+export const pmDocContentSchema = getSchema(docContentExtensions);
+
+// The schema for an annotation's own body (PLAN.md §13b) — deliberately
+// authorHighlightExtensions alone, not docContentExtensions: an annotation
+// body can't itself carry the `annotation` anchor mark (an annotation on an
+// annotation isn't a thing this app has), and picking the wrong variant here
+// would silently let one be typed in and then vanish the moment it's
+// re-rendered through a schema that doesn't know the mark (CLAUDE.md's
+// "picking the wrong variant silently drops marks" warning, restated for a
+// third consumer).
+export const annotationContentExtensions = authorHighlightExtensions;
+export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
 
 // The schema for a post's *title*, which lives in its own Yjs fragment
 // ("title") of the same Y.Doc as the body rather than as a node inside the
@@ -113,6 +139,27 @@ export function collectMarkAttrValues(doc: JSONContent, markName: string, attrNa
     }
   });
   return Array.from(values);
+}
+
+// The doc-side counterpart of collectMarkAttrValues (PLAN.md §12i): instead
+// of collecting attribute values, concatenates the text of every run that
+// carries markName/attrName === attrValue, in document order — used to read
+// an annotation's quoted text back out of Doc.proseJson at render time,
+// since nothing stores it separately. A contiguous annotated range can be
+// split into several adjacent text nodes (different bold/italic runs, etc.),
+// but never discontiguous — it was applied as one addMark(from, to) call —
+// so concatenation in document order always reconstructs the original span.
+export function extractMarkedText(doc: JSONContent, markName: string, attrName: string, attrValue: string): string {
+  const parts: string[] = [];
+  function walk(node: JSONContent) {
+    if (node.type === "text" && node.text) {
+      const hasMark = node.marks?.some((mark) => mark.type === markName && mark.attrs?.[attrName] === attrValue);
+      if (hasMark) parts.push(node.text);
+    }
+    node.content?.forEach(walk);
+  }
+  walk(doc);
+  return parts.join("");
 }
 
 // Same idea as collectMarkAttrValues, but walks a *live* ProseMirror Node via

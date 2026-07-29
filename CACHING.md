@@ -146,3 +146,25 @@ then run the `web-prod` entry in `.claude/launch.json` (port 3001, so it doesn't
 `dev:all` on 3000). That entry shells through `pwsh` to set `AUTH_TRUST_HOST`/`AUTH_URL`,
 because NextAuth rejects `localhost:3001` with `UntrustedHost` under `next start` — the same
 enforcement DEPLOY.md §5 warns about.
+
+## 2026-07-29 — `/doc/[slug]` (PLAN.md §12) is dynamic by design, and doesn't need ISR to be cheap
+
+Unlike `/[slug]`, `/doc/[slug]` gets no `generateStaticParams` and is never a Full Route Cache
+candidate — every request calls `auth()` (per-user gating, PRIVATE vs. SHARED) and would throw
+`DYNAMIC_SERVER_USAGE` at build if it tried to be both static and dynamic (§10 item 17's bug,
+`/[slug]`'s own history). That's not a caching gap to close: a *post* page's cost without ISR
+would be a Yjs decode plus a ProseMirror render on every request, which ISR exists specifically
+to avoid paying repeatedly. A *doc* page's steady-state cost is one row read — `Doc.proseJson`
+(§12d) is a plain `JSONB` column populated by the collab server's own store debounce, so the
+expensive half (decoding the live `ydoc` blob) already happened once, off the request path,
+before any reader shows up. `renderToReactElement` over that cached JSON is the same
+per-request cost `/[slug]` pays for its own (revision-cached, not live-cached) content.
+
+The one path that's genuinely uncached is the decode-from-`ydoc` fallback for a doc that's been
+created but never stored yet (`proseJson` still `null`) — cheap in practice since it only ever
+applies to a brand-new, empty-or-near-empty document, not a large one.
+
+None of this touches the live half. `LiveDocBody` (`src/components/LiveDocBody.tsx`) opens its
+own read-only Hocuspocus connection independent of the HTTP response and re-renders in the
+browser on every synced update — a second, always-fresh path with no cache of its own to
+invalidate, the same way `AnnotatableArticle`'s live editor swap-in works for a post.

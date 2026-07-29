@@ -10,9 +10,30 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import path from "node:path";
 import readline from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import type { DbHandlers, TestUser, TestPost, ThreadState, RevisionSummary } from "./db-worker";
+import type {
+  DbHandlers,
+  TestUser,
+  TestPost,
+  ThreadState,
+  RevisionSummary,
+  TestYdoc,
+  TestYdocSnapshot,
+  TestDoc,
+  DocState,
+  AnnotationState,
+} from "./db-worker";
 
-export type { TestUser, TestPost, ThreadState, RevisionSummary } from "./db-worker";
+export type {
+  TestUser,
+  TestPost,
+  ThreadState,
+  RevisionSummary,
+  TestYdoc,
+  TestYdocSnapshot,
+  TestDoc,
+  DocState,
+  AnnotationState,
+} from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
 // stdin/stdout are pipes; stderr is inherited, hence the `null` slot.
@@ -95,6 +116,24 @@ export const createTestPost = (...args: Parameters<DbHandlers["createTestPost"]>
 export const deleteTestPost = (...args: Parameters<DbHandlers["deleteTestPost"]>): Promise<void> =>
   call("deleteTestPost", ...args);
 
+export const createTestDoc = (...args: Parameters<DbHandlers["createTestDoc"]>): Promise<TestDoc> =>
+  call("createTestDoc", ...args);
+
+export const deleteTestDoc = (...args: Parameters<DbHandlers["deleteTestDoc"]>): Promise<void> =>
+  call("deleteTestDoc", ...args);
+
+export const getDocState = (...args: Parameters<DbHandlers["getDocState"]>): Promise<DocState | null> =>
+  call("getDocState", ...args);
+
+export const countDocYdocUpdates = (...args: Parameters<DbHandlers["countDocYdocUpdates"]>): Promise<number> =>
+  call("countDocYdocUpdates", ...args);
+
+export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotationStates"]>): Promise<AnnotationState[]> =>
+  call("getAnnotationStates", ...args);
+
+export const countPostCollabRows = (...args: Parameters<DbHandlers["countPostCollabRows"]>) =>
+  call("countPostCollabRows", ...args);
+
 export const createComment = (...args: Parameters<DbHandlers["createComment"]>) => call("createComment", ...args);
 
 export const createQuoteThread = (...args: Parameters<DbHandlers["createQuoteThread"]>) =>
@@ -114,5 +153,32 @@ export const hasCollabDoc = (...args: Parameters<DbHandlers["hasCollabDoc"]>): P
 
 export const getCommentStatus = (...args: Parameters<DbHandlers["getCommentStatus"]>) =>
   call("getCommentStatus", ...args);
+
+export const createTestYdoc = (...args: Parameters<DbHandlers["createTestYdoc"]>): Promise<TestYdoc> =>
+  call("createTestYdoc", ...args);
+
+export const deleteTestYdoc = (...args: Parameters<DbHandlers["deleteTestYdoc"]>): Promise<void> =>
+  call("deleteTestYdoc", ...args);
+
+export const countYdocUpdates = (...args: Parameters<DbHandlers["countYdocUpdates"]>): Promise<number> =>
+  call("countYdocUpdates", ...args);
+
+export const getMaxYdocUpdateId = (...args: Parameters<DbHandlers["getMaxYdocUpdateId"]>): Promise<string | null> =>
+  call("getMaxYdocUpdateId", ...args);
+
+export const getYdocSnapshots = (...args: Parameters<DbHandlers["getYdocSnapshots"]>): Promise<TestYdocSnapshot[]> =>
+  call("getYdocSnapshots", ...args);
+
+export const getYdocClients = (...args: Parameters<DbHandlers["getYdocClients"]>): Promise<Record<string, string>> =>
+  call("getYdocClients", ...args);
+
+export const replayYdocText = (...args: Parameters<DbHandlers["replayYdocText"]>): Promise<string> =>
+  call("replayYdocText", ...args);
+
+export const getUserIdByEmail = (...args: Parameters<DbHandlers["getUserIdByEmail"]>): Promise<string | null> =>
+  call("getUserIdByEmail", ...args);
+
+export const countAllYdocs = (...args: Parameters<DbHandlers["countAllYdocs"]>): Promise<number> =>
+  call("countAllYdocs", ...args);
 
 export const sweepTestData = (...args: Parameters<DbHandlers["sweepTestData"]>) => call("sweepTestData", ...args);

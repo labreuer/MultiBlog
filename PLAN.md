@@ -50,8 +50,8 @@ See §5 for the full mechanism.
 ## 3. Roles & "multi-author"
 
 **Decided:** a post can have multiple authors, and the **listed byline is decoupled from
-who actually edited.** `post_authors` is a manual byline list (chosen from user accounts,
-so author pages work); edit attribution lives separately in `revisions.editor_id`. You can
+who actually edited.** `post_author` is a manual byline list (chosen from user accounts,
+so author pages work); edit attribution lives separately in `revision.editor_id`. You can
 credit three co-authors on a post even if only one of them touched a given revision, and
 vice-versa.
 
@@ -69,15 +69,15 @@ logged-in — see §6).
 - **Live state vs. revisions:** the live document is a Yjs doc, persisted as Yjs updates
   (binary) so a reconnecting client resumes mid-edit. This is **separate** from the
   immutable revision history. **Publishing snapshots the current ProseMirror doc into a new
-  `revisions` row** (§4); the Yjs update log is the working state between publishes.
+  `revision` row** (§4); the Yjs update log is the working state between publishes.
 - **Awareness:** Yjs "awareness" gives presence (who's in the doc, cursors/selections) for
   free — useful even with the byline being separate from edit attribution.
-- **Attribution:** `revisions.editor_id` at publish records who pressed publish.
+- **Attribution:** `revision.editor_id` at publish records who pressed publish.
   Finer-grained credit — colored per-author highlighting of contributions *since the last
   revision*, Etherpad-style (§3d) — layers on top via an inline `authorHighlight` mark
   carrying the author's `User.color`, applied to newly-typed text and cleared (a real,
   synced transaction) on every save so it always reflects only what's new. It's
-  working-session state, not content — stripped before anything reaches `revisions.doc`.
+  working-session state, not content — stripped before anything reaches `revision.doc`.
 - **Auth:** the Hocuspocus `onConnect`/`onAuthenticate` hook validates the user's session
   (via Auth.js token) and checks they may edit that post before joining the room.
 - **`next.config.ts`: `serverExternalPackages: ["yjs"]`.** Next's server compiler builds
@@ -114,8 +114,8 @@ mechanics built on top of this transport layer.
 
 **Decided:** an ADMIN-only page for managing every `User` account directly, distinct from
 the per-post author/role concerns above — no schema changes needed beyond the soft-delete
-columns shared with `posts` (§4), since it's otherwise a UI + server-actions layer over the
-existing `users` table.
+columns shared with `post` (§4), since it's otherwise a UI + server-actions layer over the
+existing `user` table.
 
 **Access:** gated by `isAdmin(role)` (`src/lib/authz.ts`) — same shape as `/posts`'s
 `canManagePosts` gate (§3c): redirect to sign-in if unauthenticated, an inline "doesn't have
@@ -314,13 +314,13 @@ noted in §3a:
   mark, so a color lookup is one small API call away (`/api/users/colors`) rather than schema
   data. Cleared on every save (`removeMark` transaction in `PostEditor.tsx`) so highlighting
   always reflects only "since the last revision," not the post's whole life — see the
-  CLAUDE.md gotcha. Stripped (`stripMarkFromDoc`) before anything reaches `revisions.doc`;
+  CLAUDE.md gotcha. Stripped (`stripMarkFromDoc`) before anything reaches `revision.doc`;
   `contentExtensions` (the shared editor/seed/render schema) never has to know the mark
   exists.
 - **Live-scrubbable history** (`/posts/[id]/live-history`, `LiveHistoryViewer.tsx`):
   read-only, and stays live-connected rather than being a one-time snapshot. Hocuspocus's
   `onChange` hook (`server/collab.ts`) appends every raw Yjs update to a new
-  `post_collab_updates` row, reset whenever a revision is saved — bounding it to "since the
+  `post_collab_update` row, reset whenever a revision is saved — bounding it to "since the
   last revision" controls how much CRDT history is ever kept around. The viewer fetches that
   log, replays prefixes of it into a scratch `Y.Doc` for the scrub slider, and taps a second,
   otherwise-unused `HocuspocusProvider` connection purely to keep appending new updates as
@@ -458,45 +458,55 @@ STYLE.md.
 
 ## 4. Data model
 
+**Naming:** the database is snake_case — table and column names below are literal, not
+pseudocode — while the Prisma client stays camelCase (`schema.prisma`'s `@map`/`@@map` on
+every model and field bridge the two). Table names are singular (`user`, not `users`)
+throughout, including any future `doc*` tables — except `site_settings`, which stays plural
+despite being a singleton, since "the site setting" reads oddly and "settings" is the natural
+English plural regardless of row count. Enum *type* names (`Role`, `ModerationPolicy`, ...)
+are also snake_case here (`role`, `moderation_policy`), unlike the Auth.js adapter's own
+already-snake_case fields (`refresh_token`, `access_token`, ...), which keep their names on
+both sides since `@auth/prisma-adapter` writes them by name.
+
 ```
-users            id, email, name, password_hash | oauth, role, created_at,
+user             id, email, name, password_hash | oauth, role, created_at,
                  color                                           -- author-highlight/caret color
                  admin_initials(non-null string)                 -- byline shorthand, §10 item 11
                  moderation_policy('inherit'|'always'|'auto')   -- per-author override
                  deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §3b
-posts            id, slug, title, publish_revision_id,
+post             id, slug, title, publish_revision_id,
                  created_at, published_at (may be future),       -- no status column, no schedule
                                                                    -- column (§10 item 12): visible iff
                                                                    -- publish_revision_id is set AND
                                                                    -- published_at <= now()
                  moderation_policy('inherit'|'always'|'auto')   -- per-post override
                  deleted_by_user_id NULL, deleted_at NULL         -- soft delete, §3c
-post_authors     post_id, user_id, byline_order                 -- manual byline, decoupled
-revisions        id, post_id, revision_number, doc JSONB (ProseMirror),
+post_author      post_id, user_id, byline_order                 -- manual byline, decoupled
+revision         id, post_id, revision_number, doc JSONB (ProseMirror),
                  title, editor_id, changelog, created_at         -- IMMUTABLE. title is the
                                                                    -- *saved* title; the working
                                                                    -- one is a Yjs fragment (§3d).
-                                                                   -- posts.title also gets a
+                                                                   -- post.title also gets a
                                                                    -- debounced write straight off
                                                                    -- that fragment (§3d), so it's
                                                                    -- no longer purely "whatever
                                                                    -- the last save/publish wrote"
-post_publication_events id, post_id, type(published|unpublished|   -- audit log of publish/unpublish/
+post_publication_event id, post_id, type(published|unpublished|   -- audit log of publish/unpublish/
                  scheduled|schedule_canceled), revision_id NULL,   -- schedule transitions (§10 item 12) —
                  scheduled_for NULL, actor_id NULL, created_at      -- needed once those transitions can
                                                                      -- happen without a new revision
 post_collab      post_id, ydoc BYTEA, updated_at                 -- live Yjs state (working draft):
                                                                   -- two fragments, "default"
                                                                   -- (body) + "title" (§3d)
-post_collab_updates id, post_id, created_at, update BYTEA        -- raw Yjs update log, since
+post_collab_update id, post_id, created_at, update BYTEA         -- raw Yjs update log, since
                                                                   -- last revision only (§10 item 9)
 site_settings    id(singleton), default_moderation_policy, trust_threshold(int, e.g. 3), ...
-commenters       id, user_id NULL, email, display_name,          -- identity for a commenter
+commenter        id, user_id NULL, email, display_name,          -- identity for a commenter
                  approved_count(int), force_moderate(bool)        -- per-commenter override
-comment_threads  id, post_id, anchored_revision_id,
+comment_thread   id, post_id, anchored_revision_id,
                  anchor_from int, anchor_to int, quoted_text,
                  status(active|detached|resolved), created_at
-comments         id, thread_id, parent_comment_id NULL,
+comment          id, thread_id, parent_comment_id NULL,
                  commenter_id, body JSONB,
                  status(pending|approved|spam|deleted),
                  created_at, edited_at,
@@ -517,11 +527,11 @@ Notes:
 - **Revisions are append-only.** Publishing creates a new row; nothing is overwritten.
   "Restore version N" = copy doc N into a new revision. Diff view between any two revisions
   via `prosemirror-changeset`. `editor_id` records who made the revision — separate from the
-  `post_authors` byline.
+  `post_author` byline.
 - **Drafts / working state** live in `post_collab.ydoc` (the live Yjs document), persisted
   by Hocuspocus. Edits never pollute revision history; only an explicit **publish** snapshots
-  the current doc into a `revisions` row.
-- **`post_collab_updates`** is an append-only log of raw Yjs updates for the *current*
+  the current doc into a `revision` row.
+- **`post_collab_update`** is an append-only log of raw Yjs updates for the *current*
   session only — reset (rows deleted) every time a revision is saved, so it never grows past
   "since the last revision" regardless of how long a post has existed (§10 item 9).
 - **Comment tree**: `parent_comment_id` self-reference; render the tree with one recursive
@@ -530,7 +540,7 @@ Notes:
 - **Commenter identity** (§6): a `commenter` is keyed by account (`user_id`) when logged in,
   otherwise by email. `approved_count` and `force_moderate` drive the trust model.
 - **Soft delete** (`deleted_by_user_id`/`deleted_at`, both nullable): the same two-column
-  pattern now covers `comments` (§10 item 15, first), `users` (§3b), and `posts` (§3c). Rather
+  pattern now covers `comment` (§10 item 15, first), `user` (§3b), and `post` (§3c). Rather
   than every read site having to remember its own filter, `src/lib/prisma.ts`'s `prisma`
   export is a Prisma Client Extension that auto-excludes soft-deleted `Post`/`User` rows from
   every read operation (`findMany`/`findFirst`/`findUnique`/`count`/`aggregate`/`groupBy`) —
@@ -546,7 +556,7 @@ Notes:
 
 ### 4a. Mutable slugs
 
-**Decided:** both `posts.slug` and `users.slug` (author-page slugs, `/authors/[slug]`) can be
+**Decided:** both `post.slug` and `user.slug` (author-page slugs, `/authors/[slug]`) can be
 renamed after creation, with the old slug preserved as a redirect source rather than left to
 404.
 
@@ -760,8 +770,8 @@ and **anchor remapping across revisions (steps 6–7)**.
 ## 9. Decisions & remaining questions
 
 **Settled**
-- Multi-author: posts carry a manual byline (`post_authors`) decoupled from edit
-  attribution (`revisions.editor_id`) (§3).
+- Multi-author: posts carry a manual byline (`post_author`) decoupled from edit
+  attribution (`revision.editor_id`) (§3).
 - Concurrency: **real-time collaborative editing in v1** via Yjs + Hocuspocus; live state in
   `post_collab.ydoc`, snapshot to a revision on publish (§3a).
 - Commenting identity: name+email minimum, login allowed (§6).
@@ -806,7 +816,7 @@ Git history carries per-step detail.
    `@tiptap/static-renderer` (`generateHTML` needs a DOM and fails server-side).
 5. **Tree comments** — Disqus-style identity (name+email or session), three-level moderation
    cascade + trust threshold per §6, moderation queue at `/posts/[id]/comments`. Beyond
-   plan: `comments` also records submitter IP and who/when last changed its status.
+   plan: `comment` also records submitter IP and who/when last changed its status.
 6. **Quote anchoring** — the article server-renders statically for SEO, then swaps to a
    read-only ProseMirror view after hydration (progressive enhancement). Decoration
    highlights + count badges per §5; selection → floating comment form capturing real PM
@@ -1191,11 +1201,14 @@ Git history carries per-step detail.
   current doc's coordinates; a detached thread's is frozen in an old revision's) — so sort
   order between an active and a detached entry is not meaningful. Pre-existing limitation,
   more visible now that detached threads are a real state instead of a hypothetical one.
-- The collab JWT (`signCollabToken`) expires after 2 minutes and a `HocuspocusProvider`
-  doesn't fetch a fresh one on reconnect — a long-idle editor or live-history tab can end up
-  silently stuck retrying with an expired token until the page is reloaded. Pre-existing
-  (not introduced by item 9), just newly relevant now that live-history explicitly promises
-  to "stay connected."
+- ~~The collab JWT (`signCollabToken`) expires after 2 minutes and a `HocuspocusProvider`
+  doesn't fetch a fresh one on reconnect...~~ **Fixed by §12 Phase 2** — `token` is now a
+  *function* rather than a fixed string at all four call sites (`PostEditor`,
+  `LiveHistoryViewer`, `DocEditor`, `LiveDocBody`), which Hocuspocus calls on every
+  connection attempt rather than only the first. Each one hands the already-fetched token to
+  the first call and re-mints from there, so the initial-connection error path is unchanged.
+  The doc side is what forced it (§12g: a reading view that promises to stream can't retry
+  forever on an expired token), but the fix is the same one line for posts.
 - Live-history's scrub slider is indexed by update count, not wall-clock time (each logged
   update — one per dispatch, not per keystroke, since ProseMirror/Yjs batch a whole typed
   burst into one update — is one slider step), so a long pause and a fast typing burst take
@@ -1217,12 +1230,1419 @@ Git history carries per-step detail.
   entry for methodology and numbers.
 - ~~The home and author pages' `revalidate = 60` ISR caching is now a no-op...~~ **Fixed by
   item 17** — see CACHING.md's 2026-07-23 entry.
-- The e2e suite (item 18) covers five flows, not the app. Roles/authz, the admin tables,
-  scheduled publishing, soft deletion, and live history have no specs yet. Nothing runs it
-  automatically either: there's no CI (nothing is deployed, per the first gap above), so it
-  only runs when someone types `npm run e2e`.
+- The e2e suite (item 18) covers seven flows, not the app — the original five plus the ydoc
+  stack (§11g) and docs/annotations (§12n). Roles/authz, the admin tables, scheduled
+  publishing, soft deletion, and *post* live history still have no specs; the ydoc replay
+  slider does (`ydoc-debug.spec.ts`), which is a different component over a different table.
+  Nothing runs any of it automatically either: there's no CI (nothing is deployed, per the
+  first gap above), so it only runs when someone types `npm run e2e`.
 - Comment-submission coverage is capped by the app's own rate limit (5 per IP per 10 minutes,
   `src/lib/rate-limit.ts`) — every Playwright worker shares 127.0.0.1, so specs insert
   comments directly via Prisma and exactly one exercises the real form. A future spec that
   needs several genuine submissions would have to make the limit configurable, or reset the
   window between tests.
+
+## 11. Ydoc persistence — a parallel stack (built 2026-07-28)
+
+The working Yjs document currently lives in two post-shaped tables: `post_collab` (a
+whole-document blob, upserted on a debounce) and `post_collab_update` (an append-only delta
+log, **truncated on every save**). Both carry a `post_id` foreign key to `post`, and
+`server/collab.ts` writes them directly. Four problems, three of them already documented:
+
+- **Re-seeding duplicates content.** `onLoadDocument` seeds a fresh doc from the latest
+  revision whenever no `post_collab` row exists — and that row is only written by the
+  *debounced* `onStoreDocument`, so a collab server killed before the debounce fires re-seeds
+  a second, structurally distinct copy into a doc reconnecting clients already hold. Yjs
+  merges rather than dedupes, so every paragraph appears twice (see the "Restarting the collab
+  server" gotcha in CLAUDE.md).
+- **The foreign key is a crash surface.** Deleting a post while its doc is loaded makes both
+  persistence hooks throw `P2003`, and Hocuspocus doesn't catch what its hooks throw, so the
+  rejection takes the whole collab process down. `ignoreMissingPost` (item 20 above) is a
+  narrow band-aid around one error code.
+- **The typing path runs an `O(n)` query per keystroke** — `postCollabUpdate.count()` before
+  every insert, to decide full-state vs. delta; `O(n²)` over a session (PERFORMANCE.md).
+- **No client-side durability.** Nothing survives a closed tab or an unreachable server beyond
+  what the collab process happens to be holding in memory.
+
+The replacement is built as a **fully parallel stack**, proved on a dedicated `/ydoc-debug`
+page, and cut over to posts later as a separate change. Three new tables keyed purely by the
+Hocuspocus `documentName`, a new store module, new hooks, `y-indexeddb` on the client, and
+server-written clientID→user attribution. The log is never truncated on save — only,
+optionally, up to a snapshot — and snapshots are ours to construct rather than Hocuspocus's.
+
+**The hard constraint: nothing that presently exists may touch the new tables.** Post editing
+stays on `post_collab`/`post_collab_update`, byte-for-byte. `PostEditor.tsx`,
+`LiveHistoryViewer.tsx`, `PostEditBadge.tsx`, `src/app/actions/posts.ts` and
+`src/lib/collab-token.ts` are not modified at all; `server/collab.ts` gains only dispatch.
+Everything new lives in new files. That isolation is the point: it lets the design be proved
+against real editing without putting a single existing flow at risk, and it makes the cutover
+a reviewable change of its own rather than a big-bang rewrite.
+
+**`gc: true` stays.** It is already Hocuspocus's default (`yDocOptions`, `defaultConfiguration`
+in `@hocuspocus/server`), but §11d states it explicitly so it reads as a decision. The
+consequence — both already true today — is that comment anchors remain absolute ProseMirror
+positions (§5) rather than Yjs relative positions, and the stored blob remains a *derived*
+value that nothing anchors into. Moving to `gc: false` later would invert that: anchors would
+name item IDs *inside* the stored document, so re-seeding from a revision would build a
+structurally new doc and dangle every anchor.
+
+### 11a. Naming, and what routes a document to the new stack
+
+`ydoc.id` **is** the Hocuspocus `documentName`, and new-stack documents are named
+`ydoc:<cuid>`. Post documents are bare cuids, so the prefix is an unambiguous, zero-query
+routing key — no "does a Post row exist" lookup on every cold open. `src/lib/ydoc-names.ts`
+holds the prefix constant, `isYdocDocument(name)`, and the snapshot endpoint's path, shared
+between web and collab server exactly the way `src/lib/collab-admin.ts` already shares
+`REPLACE_DOC_PATH`.
+
+Throwaway test documents use `ydoc:test-<cuid>`, and both `scripts/test-ydoc.ts` and the e2e
+teardown refuse to delete anything that doesn't match — the same containment convention as the
+`@example.com` guard in `scripts/test-user.ts` and `e2e/db-worker.ts`.
+
+### 11b. Schema, and the two invariants it rests on
+
+Three models in `prisma/schema.prisma`, snake_case-mapped like the rest. No relation to `Post`;
+the only outward foreign key in the whole set is `ydoc_snapshot.user_id → user`:
+
+```
+ydoc          id                    -- the Hocuspocus documentName
+              ydoc BYTEA            -- encodeStateAsUpdate; the O(1) cold-open path
+              state_vector BYTEA
+              created_at            -- doubles as the lineage stamp (§11e)
+              updated_at
+
+ydoc_update   id BIGSERIAL, ydoc_id, update BYTEA, created_at
+              -- NEVER truncated on save. First row per ydoc is a full state; the rest deltas.
+
+ydoc_snapshot id, ydoc_id, ydoc BYTEA, state_vector BYTEA,
+              last_ydoc_update_id   -- high-water mark in ydoc_update
+              user_id NULL          -- null = system-triggered
+              created_at
+```
+
+The one line this adds to an existing model is a `ydocSnapshots` back-relation on `User` — no
+column, no behavior. Migration `add_ydoc_tables`.
+
+Everything downstream depends on two invariants:
+
+1. **Row #1 of `ydoc_update` for a document is a full state; every later row is a plain
+   delta.** Written once, at document creation, in the same transaction as the `ydoc` row.
+   The old table decides this per-keystroke with a `count()`, because its log gets truncated
+   on every save and so has no stable row #1; this one never does, so the decision is made
+   once and the append path is `O(1)`.
+2. **The replay base is derivable, so truncation is safe.** `minId = MIN(ydoc_update.id)` for
+   the document; the base is the newest `ydoc_snapshot` with `last_ydoc_update_id < minId`, or
+   — when there is none — row #1 itself. Nothing truncates yet, but every reader resolves the
+   base this way from day one, so switching truncation on later is a no-op for callers rather
+   than a migration of every read site.
+
+### 11c. `server/ydoc-store.ts` — the only code that touches the three tables
+
+Generic by construction: it takes a `documentName` and bytes, and knows nothing about posts,
+revisions, or authz. That is what "the ydocs don't know about anything else in the DB" buys —
+the store is reusable for any Yjs document the app grows later, not just post bodies.
+
+```
+load(id)                       -> { ydoc, stateVector, createdAt } | null | Unavailable
+createIfAbsent(id, ydoc, sv)   -> { won: true } | { won: false, existing }
+appendUpdate(id, update)       -> queued, serialized per document
+storeState(id, ydoc, sv)       -> blob + state_vector + updated_at
+createSnapshot(id, ydoc, sv, lastUpdateId, userId)
+resolveReplayBase(id)          -> { snapshot } | { firstUpdateId }        (invariant 2)
+```
+
+Three things it has to get right:
+
+- **`createIfAbsent` is the anti-duplication primitive.** It creates the `ydoc` row and the
+  full-state `ydoc_update` row #1 in one transaction; on `P2002` it re-reads and returns the
+  *winner's* blob. The caller then applies the winner's bytes to the live document and discards
+  its own losing seed. Two processes racing a cold open therefore converge on one lineage
+  instead of merging two — which is the root cause of the doubling gotcha, addressed
+  structurally rather than by warning people not to restart the server.
+- **Appends are serialized per document** by a promise chain, so `BIGSERIAL` order always
+  matches emission order. Concurrent `create` calls would otherwise interleave ids against
+  causal order and quietly break replay.
+- **Nothing throws into a Hocuspocus hook.** Every method runs through an error classifier:
+  `P2003` (now reachable only via `ydoc_update.ydoc_id`, if the `ydoc` row is deleted underneath
+  a loaded document, or `ydoc_snapshot.user_id`) → log, drop the write, mark the document
+  non-persisting; connection-class errors (`P1001`/`P1002`/`P1008`/`P1017`,
+  `PrismaClientInitializationError`, `ECONNREFUSED`) → trip a circuit breaker for a few seconds
+  so a down Postgres isn't hammered once per keystroke; anything else → log and drop. This
+  generalizes `ignoreMissingPost` from "one error code, two call sites" to "the store cannot
+  take the process down."
+
+**Degraded mode.** Per-document `{ persisted: boolean }` state, plus a `YDOC_PERSISTENCE=off`
+env switch that swaps in a `NullYdocStore` whose every method is a logged no-op. If `load()`
+comes back unavailable the document is marked non-persisting **for its whole in-memory
+lifetime**: it is not seeded (seeding against unknown stored state is precisely how you get two
+lineages), and the write methods become no-ops logged once per document rather than once per
+update. Clients still connect and edit, and because of `y-indexeddb` the first client to
+reconnect repopulates the server document from its own local copy — the same lineage, so the
+merge is correct rather than duplicating. The stickiness is deliberate: a document that came up
+unseeded must never later overwrite a real `ydoc` row. It retries on the next cold open, once
+the last client disconnects and Hocuspocus unloads it.
+
+### 11d. Hocuspocus wiring, and clientID → user_id
+
+All new behavior lives in `server/ydoc-hooks.ts`. `server/collab.ts` gains only dispatch: a
+one-line `isYdocDocument(documentName)` guard at the top of `onLoadDocument`, `onChange` and
+`onStoreDocument`, one branch in `onAuthenticate`, one more `onRequest` branch for the snapshot
+endpoint, a new `onAwarenessUpdate` that returns immediately for non-ydoc documents, and the
+explicit `yDocOptions: { gc: true, gcFilter: () => true }`.
+
+**Auth.** `src/lib/collab-token.ts` is untouched; a parallel `src/lib/ydoc-token.ts` defines
+`YdocTokenPayload { sub, documentName, role }`, signed with the same `AUTH_SECRET` and the same
+2-minute expiry. `onAuthenticate` picks the verifier by prefix.
+
+**Loading** reads the row and applies it; on `Unavailable` it marks the document degraded and
+returns an empty doc; on a miss it calls `createIfAbsent` with an empty state and applies
+whichever blob won. There is deliberately **no revision fallback** — that coupling is exactly
+what these tables exist to shed. In practice the row always already exists, because the script
+and the `/ydoc-debug` "New document" button both create it (row #1 included) before anyone
+connects; the auto-create is just the forgiving path for a connection to a name nobody made,
+and an empty seed has no content to duplicate.
+
+**`onChange`** is one call to `appendUpdate` — no `count()`, because invariant 1 was settled at
+creation. **`onStoreDocument`** writes the blob and state vector.
+
+**Snapshots go through the running collab server** (`POST /admin/ydoc-snapshot`, beside the
+existing replace-doc handler), never from the stored blob in Next: the blob is debounce-stale
+relative to the log, so a `last_ydoc_update_id` computed against it could sit *ahead* of what
+the blob actually contains, and truncating to it would lose updates. Order is what makes it
+safe — read `MAX(ydoc_update.id)` **first**, then encode the live document. That guarantees
+`blob ⊇ everything ≤ lastId`; anything landing in between shows up after `lastId` and survives
+a truncation. The error is in the safe direction by construction.
+
+**clientID → user_id lives in the document**, as a top-level `Y.Map`
+(`document.getMap("clients")`, `String(clientID) → userId`). Top-level, so the `"default"` and
+`"title"` fragments are untouched; it replays with history, survives cold opens, needs no fourth
+table, and holds only an opaque id string — so the `ydoc` tables still reference nothing.
+
+It is written **server-side**, on edit only, from payload fields Hocuspocus already provides:
+`onAwarenessUpdate` gives `{ added, connection }`, which is a connection's self-reported Yjs
+`clientID` — cached in memory as `socketId → clientID`. That binding, not the update bytes, is
+the reliable one: a reconnecting client's SyncStep2 can carry structs authored by *other*
+clients, so attributing everything in an update to its sender would mislabel them. Then the
+first time a connection produces a doc-changing `onChange`, the map gets
+`clients.set(String(clientID), context.userId)` **if absent** — `context.userId` coming from
+`onAuthenticate`, so it is the authenticated identity rather than a client-supplied claim.
+Presence alone never writes anything: you are added when you *edit*. (The server's own write
+produces an `onChange` with no `connection`, so it is skipped and the loop converges.)
+
+This is complementary to, not a replacement for, the `authorHighlight` mark (§3d): that
+attributes individual characters and is stripped before a revision is written; this attributes a
+whole client session and stays in the document.
+
+### 11e. The client: `y-indexeddb`, and two different duplication bugs
+
+`y-indexeddb` is added for `/ydoc-debug`'s editor only; `PostEditor.tsx` is untouched. There
+are two distinct duplication bugs in play, and they need different fixes.
+
+**Multiple `IndexeddbPersistence` instances on one `Y.Doc`**
+([y-indexeddb#25](https://github.com/yjs/y-indexeddb/issues/25)) — each instance re-persists the
+others' updates, because the library's guard only excludes *itself* as an origin. React
+StrictMode's double-invoked effects are exactly how you end up with two. Fixed in
+`src/lib/ydoc-persistence.ts` by a module-level `WeakMap<Y.Doc, { persistence, refs }>`, so
+attaching twice returns the same instance and bumps a refcount, and detaching only destroys at
+zero.
+
+**A stale local copy merging into a re-seeded server document** — the one that actually
+corrupts content. It is the client-side twin of the restart-doubling gotcha, and worse, because
+IndexedDB makes it survive a fresh tab. Fixed by keying the local store on document *lineage*
+rather than name: `ydoc:<documentName>:<ydoc.created_at epoch ms>`. `created_at` changes only if
+the `ydoc` row is recreated — precisely when the server has built a structurally new document —
+so a re-seed lands in a *different* local store and there is nothing to merge. Stale stores for
+the same name are swept on attach via `indexedDB.databases()`, guarded because Firefox doesn't
+implement it (in which case they are merely orphaned, which is harmless).
+
+The lineage has to be known *before* connecting, which is why `POST /api/ydoc/[id]/token`
+returns `{ token, lineage }` — it is already doing a Postgres round-trip to authorize, and the
+`ydoc` row is guaranteed to exist by then (§11d), so the lineage is never null. Caching it in
+`localStorage` to skip that round-trip was considered and rejected: it would let a
+stale-lineage store merge into the live document *before* the mismatch could be detected, which
+is the bug, not a race around it.
+
+Unchanged and load-bearing: **the client never seeds content.** Seeding is server-side only.
+
+### 11f. `/ydoc-debug`
+
+An ADMIN-gated page in the same shape as `/site-settings`, existing to make every claim above
+observable rather than to ship a user-facing feature.
+
+- A dropdown of the ten most recently updated `ydoc` rows, first auto-selected.
+- **Read-only by default**: a replay slider over the update log (§11h), rendered through
+  `TiptapTransformer` + `@tiptap/static-renderer` exactly as `LiveHistoryViewer` does, wrapped
+  in a `try/catch` so a document that isn't TipTap-compatible renders an error message instead
+  of blowing up the page. The `"title"` fragment renders alongside when present, and so does the
+  `clients` map — the point being that you can watch it stay empty while you only *look* at a
+  document, and fill the moment you type. The render helper is copied into
+  `src/lib/ydoc-render.ts` rather than refactored out of `LiveHistoryViewer`, which is off-limits
+  under the isolation constraint; deduplicating the two is part of the cutover.
+- A **"Switch to editing"** toggle that mounts a `HocuspocusProvider` plus the existing
+  `CollabEditorBody`, used unmodified (its toolbar and `QuoteControls` are purely editor-local,
+  with no post coupling).
+- A **Refresh** section showing the single `ydoc` row, the `ydoc_update` count and its last ten
+  rows, and every `ydoc_snapshot` row — plus a **Snapshot** button that takes one and refreshes
+  in place.
+
+Fixtures come from both directions: `scripts/test-ydoc.ts` (create/list/delete, with
+`--from-post` to build a document from a real revision so there is genuine TipTap content, and
+`--garbage` to exercise the error path) and an on-page "New document" button for a quick empty
+one.
+
+### 11h. The replay slider — measuring what a snapshot buys
+
+The read-only view is a scrubber over `ydoc_update`, and the first thing that actually consumes
+either of §11b's invariants. It exists to *measure*, not to scrub pleasantly: it rebuilds from
+the newest `ydoc_snapshot` at or before the target position rather than from row #1, and reports
+what that cost.
+
+`GET /api/ydoc/[id]/replay` ships every update and snapshot payload once, so a scrub step
+touches no network and the reported milliseconds are Yjs replay and nothing else. (base64 is
+decoded to bytes up front for the same reason — it's a transport artifact of shipping this over
+JSON, not part of replay.) That deliberately ships the whole log in order to measure the cost of
+*not* replaying all of it; it's a debug page, and the alternative — fetching per step — would put
+network latency inside the number being compared.
+
+**Forward is fast, backward is slow, and that asymmetry is the point.** Moving forward advances
+the `Y.Doc` already in hand. Moving backward can't: Yjs updates are append-only and there is no
+un-apply, so going back means rebuilding from the base. Nothing debounces the slider, caches
+other positions, or precomputes — measured over an 882-update log with two snapshots, a full
+forward sweep applied 879 updates in 56ms total, while the same sweep backward applied 137,406
+in 852ms. The status line reports `forward`/`rebuild`, the base and its size, the resultant size
+as a signed delta, updates-since-base, updates-applied-this-step, and elapsed ms.
+
+Snapshots show up as circles on the track, and the cliff either side of one is the clearest
+single demonstration in the whole §11 stack: landing exactly on a snapshot applies **0** updates
+(0.1ms — the blob alone is the answer), while one index earlier applies 354 (2.7ms), because that
+snapshot no longer qualifies and the rebuild falls back to the previous base.
+
+Two caveats worth keeping:
+
+- The `Y.encodeStateAsUpdate` behind the size delta runs every step and is **pure
+  instrumentation**. It sits outside the timer because it isn't part of the rebuild, but it is
+  real per-step cost, and on a large document it can exceed the rebuild it reports on. The
+  millisecond figure is not this view's total step cost.
+- A snapshot's blob is guaranteed to contain everything at or below its `last_ydoc_update_id`,
+  but may contain slightly *more* — §11d reads that mark *before* encoding, deliberately, so
+  truncation stays safe. So landing exactly on a circle can show content a hair ahead of that
+  point if the snapshot was taken mid-keystroke. Near-zero in practice (snapshots are a manual
+  button press), but it's why the scrubber isn't frame-accurate at snapshot boundaries.
+
+### 11g. Verification
+
+The suite (`e2e/ydoc-debug.spec.ts`, with `db-worker.ts` helpers and a `ydoc:test-*` teardown
+sweep) asserts the invariants rather than the UI: creating a document writes the `ydoc` row and
+**exactly one** `ydoc_update` row before anyone connects; opening the page read-only adds no
+rows and leaves `clients` empty, while typing one character adds rows and exactly one `clients`
+entry; replaying row #1 plus deltas into a scratch `Y.Doc` reproduces the editor's text with
+each paragraph appearing once; a snapshot's `last_ydoc_update_id` never exceeds
+`MAX(ydoc_update.id)`. The isolation constraint gets its own assertion — editing a post must
+leave all three new tables empty — and the existing specs must pass unchanged.
+
+What the suite can't reach is checked by hand: restarting `collab` with the tab open and
+confirming content appears once (the case that doubles on the post path today); running with
+`YDOC_PERSISTENCE=off` and with Postgres stopped mid-session, confirming the process survives
+and logs once per document rather than once per keystroke; deleting a `ydoc` row underneath a
+live editor to exercise the `P2003` path; and killing `collab` mid-typing to confirm the local
+IndexedDB edits sync back up once, not twice.
+
+## 12. Docs alongside posts, on the ydoc stack
+
+**Decided:** add a **Doc** — an always-evolving living document, read as the live Yjs state
+rather than as a revision — as a *second, parallel entity* beside today's `Post`. Nothing about
+posts changes: `/[slug]`, `/posts`, publish/unpublish/schedule, `CommentThread`/`Comment`, the
+§6 moderation cascade, and §5's remap-on-publish all keep working exactly as §10 describes them.
+
+Six decisions carry the whole design:
+
+1. **The collab substrate is §11's `ydoc`/`ydoc_update`.** §11 built a store keyed purely by
+   `documentName` that references nothing and is never truncated on save. A doc is its first
+   real consumer; `/ydoc-debug` remains its debug consumer. There are no doc-specific collab
+   tables.
+2. **`doc.prose_json` caches the rendered body**, so the reading view is a row read rather than
+   a Yjs decode per request.
+3. **Annotations are located by a mark embedded in the ydoc itself**, not by positions stored
+   beside it. An anchor is therefore content: it moves with its text, merges with concurrent
+   edits, and disappears exactly when its text does. When it disappears the annotation
+   **degrades to a document-level comment** (§12h) — not lost, just no longer located.
+4. **`gc: true` everywhere.** GC cannot strand a mark, because a mark is not a pointer, so
+   anchoring costs nothing here and a doc's stored state stays bounded (§12h).
+5. **Comments on docs are annotations** — one `annotation` table, one `/annotations` browse
+   surface, and no moderation.
+6. **Nothing about checkpointing a doc is here yet**: no doc revisions, no `ydoc_snapshot` rows
+   for docs, no restore. Held back deliberately, pending review (§12m).
+
+**Posts do not move.** §12 is not the cutover. Post editing stays on `post_collab`/
+`post_collab_update` and `server/collab.ts`'s own hooks, byte for byte. §11's isolation
+constraint is relaxed in exactly one place: `src/lib/ydoc-render.ts` stops being
+`/ydoc-debug`-only and becomes the doc reading view's renderer too. Deduplicating it with
+`LiveHistoryViewer` still belongs to the cutover.
+
+Docs and posts then run side by side indefinitely. Converging them — moving post content into
+docs and retiring the post stack — is a separate decision for later and explicitly **not in
+scope**. This plan only has to keep that move cheap, which it does by giving the new tables and
+routes the names the surviving entity should end up with, so converging is a backfill rather
+than a rename.
+
+### 12a. What a doc inherits from §11 for free
+
+Everything below is already built and already verified by `e2e/ydoc-debug.spec.ts`; a doc gets it
+by being a ydoc-stack document, not by reimplementing it:
+
+- **`createIfAbsent` anti-duplication** (§11c), so two processes racing a cold open converge on
+  one lineage. CLAUDE.md's collab-restart doubling gotcha does not apply to a doc, for the reason
+  that gotcha's own text gives: the `ydoc` row is created eagerly, never lazily off a debounced
+  first edit.
+- **Nothing throws into a Hocuspocus hook** — the error classifier, the connection-class circuit
+  breaker, per-document degraded mode, `YDOC_PERSISTENCE=off`.
+- **No revision fallback in `onLoadDocument`.** For `/ydoc-debug` that was convenient; for a doc
+  it is *correct*, since there is no revision to fall back to and any seed-from-elsewhere path
+  would build a structurally new document with fresh client ids under clients that already hold
+  the old one (§12d).
+- **`y-indexeddb`, lineage-keyed** (§11e), so a doc survives a closed tab or an unreachable
+  server. `PostEditor` still has none of this.
+- **The `clients` map** (§11d): server-written clientID → `user_id`, in-document, replayed with
+  history. A doc gets session-level author attribution without a table.
+- **The replay slider** (§11h) over `ydoc_update`, which is what a doc-side live history is.
+
+**No collab renaming is needed on the post side.** `isYdocDocument` already routes by prefix and
+post documents keep their bare-cuid names, so `PostEditor`'s `name:`, `/api/collab-token`,
+`collab-token.ts`'s claim, `collab-admin.ts` and the `/admin/replace-doc` handler are all left
+alone.
+
+### 12b. Wiring a doc to a ydoc
+
+**A doc's `documentName` is derived from its id, not stored:** `ydoc.id = "ydoc:" + doc.id`, via
+`ydocIdForDoc(docId)` / `docIdFromYdocId(name)` in `src/lib/ydoc-names.ts`, beside the prefix
+constant they build on. There is **no foreign key in either direction**. The `ydoc` tables keep
+referencing nothing (§11b), routing stays a zero-query string check (§11a), and the two ids
+cannot drift because one is a function of the other.
+
+The alternative — a `doc.ydoc_id` column — was rejected on the drift argument alone: two sources
+of truth for the same fact, one of which the collab server never reads. As a *foreign* key it is
+worse still, reintroducing a cross-table constraint on the write path that §11 exists to have
+removed.
+
+**Creation is eager, in the same request.** `createDoc` writes the `doc` row and calls
+`ydocStore.createIfAbsent(ydocIdForDoc(id), …)` with an empty state — `src/app/api/ydoc/route.ts`
+already does exactly this from Next for `/ydoc-debug`'s "New document" button, so the store is
+known to be callable from the app process. That closes the window in which a connection could
+arrive before a row exists, and it is what makes §11a's eager-row property true for docs too.
+
+**Test containment comes from the doc side.** A test doc's ydoc is named `ydoc:<cuid>`, which is
+*not* under `ydoc:test-`, so `scripts/test-ydoc.ts`'s guard deliberately will not touch it. That
+is a real trap for a teardown sweep: the doc row disappears and its `ydoc` row does not.
+`scripts/test-doc.ts` (and the e2e doc fixtures) therefore delete the derived `ydoc` row along
+with the doc, and stay gated on the `@example.com`-authors-only rule the other scripts use.
+
+### 12c. Data model
+
+Additive only. Every table below is new; not one existing table is renamed, dropped, or gains a
+column. The names are chosen for the entity that should *survive* a later convergence, not for
+the one being added.
+
+```
+doc                id, slug UNIQUE, title, visibility('PRIVATE'|'SHARED'),
+                   prose_json JSONB NULL,      -- cache of the live body (§12d)
+                   created_at, updated_at,
+                   deleted_by_user_id NULL, deleted_at NULL
+                   -- no moderation_policy: annotations are never moderated
+                   -- no publish_revision_id / published_at: a doc is never "published
+                   --   at a revision"; readers see the live Yjs doc
+                   -- no doc_collab / doc_collab_update: that is ydoc/ydoc_update (§12b)
+doc_author         doc_id, user_id, byline_order
+doc_slug_history   id, doc_id, slug UNIQUE, created_at
+
+annotation         id, doc_id, parent_annotation_id NULL, user_id, body JSONB,
+                   resolved_at NULL, created_at, edited_at NULL,
+                   deleted_by_user_id NULL, deleted_at NULL
+                   -- two FKs and no third table: doc_id says which doc, and
+                   --   parent_annotation_id says which conversation. A row with
+                   --   parent null IS the thread; replies hang off it.
+                   -- no anchor columns: the anchor is a mark in the ydoc (§12i)
+                   -- no quoted_text: the annotated text is read from the document
+                   --   through the mark, so there is nothing to keep in sync
+                   -- no status: document-level-ness is derived per render (§12h)
+```
+
+**A root annotation *is* the thread.** `resolved_at` is meaningful only where
+`parent_annotation_id` is null, the ydoc mark carries a root annotation's id, and replies hang
+off it through the same self-FK shape `Comment.parent_comment_id` already uses. There is no
+separate thread row because there is nothing left for one to own: the anchor lives in the
+document, there are no doc revisions to anchor against, and there is no status. One fewer join on
+every read, and no way to produce a thread with no comments in it.
+
+**Nothing about an annotation is denormalized out of the document.** The anchor is the mark, the
+annotated text is whatever the mark currently covers, and both are read from `prose_json` in the
+one pass the reading view already makes (§12i). Nothing can fall out of sync with the document
+because nothing is a copy of it.
+
+**`doc.title` and `doc.prose_json` are both caches of Yjs fragments** — `"title"` and
+`"default"` respectively — written by the same hook at the same moment (§12d). A post keeps its
+title on the `Revision` because that is where a post's content lives; a doc has no revision, so
+the row is the only place a title can be read without decoding a blob, and slug generation,
+`/docs`, and `<title>` all need it.
+
+**Doc slugs are unique among docs only, not against post slugs.** They live in a separate
+`/doc/*` namespace with no shared catch-all, so `slugInUse` (`src/lib/slug.ts`) gains a
+*doc-scoped* twin rather than growing two more tables to check. A doc and a post may share a
+slug; they resolve to different URLs.
+
+**`RESERVED_SLUGS` grows by three:** `doc`, `docs`, `annotations`. `/docs` and `/annotations` are
+static top-level segments, so a *post* slugged either would be shadowed and unreachable — the
+same failure the set already prevents for `posts`, `users` and `ydoc-debug`.
+
+**`src/lib/prisma.ts`'s soft-delete extension needs a `doc` entry**, alongside `post` and `user`.
+Easy to miss precisely because it's the mechanism that exists so nobody has to remember the
+filter — and missing it means `/docs` and `/doc/[slug]` both start serving soft-deleted docs.
+
+**`annotation.user_id` is a plain non-null FK to `User`.** Reading a doc requires `AUTHORIZED`
+(§12e), so every annotator is a known account: there is no anonymous identity needing a stable
+handle, and nothing in `Commenter`, `spam-check.ts`, `rate-limit.ts`, `moderation.ts` or
+`SiteSettings` is involved. `resolved_at` — nullable, with one reachable transition and its
+reverse — is the only state an annotation carries.
+
+**There is no `doc_revision`.** See §12m — that is the deferred half, not an omission.
+
+### 12d. The `prose_json` cache
+
+**`ydoc` is the substrate; `prose_json` is genuinely a cache.** Worth stating in both directions,
+because the asymmetry governs what may safely be deleted:
+
+- Losing `prose_json` costs a render. It is rebuildable from `ydoc.ydoc` at any time, and the
+  reading route already contains that code as its cold-start path.
+- Losing a doc's `ydoc` row costs the doc's *history and identity*, and there is no revision to
+  re-seed from. Rebuilding a `Y.Doc` from `prose_json` would recover the prose and — because the
+  anchor is a mark, i.e. content — every annotation anchor with it, which is a real robustness
+  win over the relative-position design. What it would not recover is the update log, the
+  `clients` attribution map, and above all the *lineage*: a structurally new document with fresh
+  client ids that any client's `y-indexeddb` copy would merge rather than replace, which is the
+  doubling failure §11 exists to prevent. So CLAUDE.md's "delete the collab rows and let it
+  re-seed" repair recipe still has no doc counterpart and must not acquire one by analogy — but
+  the reason is lineage, not lost anchors.
+
+**It is written from the collab server, on the store debounce.** A new `server/doc-cache.ts` is
+called at the end of `ydocOnStoreDocument`, after `storeState`, and issues one statement:
+`UPDATE doc SET prose_json = …, title = …, updated_at = now() WHERE id = docIdFromYdocId(name)`.
+For a `/ydoc-debug` document that id matches no row and the statement affects zero — so there is
+no lookup to decide whether to write, and no doc-awareness anywhere in `server/ydoc-store.ts`,
+whose genericity is exactly what §11c bought and is worth not spending.
+
+The JSON comes from `TiptapTransformer.extensions(authorHighlightExtensions).fromYdoc(document,
+"default")` — the same call `src/lib/ydoc-render.ts` makes — so a cached render and a live decode
+cannot disagree. It is wrapped so a document that isn't TipTap-shaped logs and drops rather than
+throwing into the hook (§11c's rule).
+
+**Staleness is bounded by the store debounce**, and does not matter much: `/doc/[slug]` shows the
+last settled state, and a reader with the page open is on the WS anyway and watches it update
+(§12g). `prose_json` is NULL until the first store — a doc created and never edited — and the
+route falls back to decoding `ydoc.ydoc`, which is a two-line branch onto an existing path rather
+than a second rendering implementation.
+
+**The cache is the document, marks and all** — `authorHighlight` and the annotation mark of §12i
+both come through `fromYdoc` and are rendered rather than filtered. Nothing on the doc side ever
+rewrites the document to remove a mark: the post side's `clearAuthorHighlights` (§3d) is a
+`removeMark` transaction dispatched after a *save*, and a doc has no save to hang it on. That the
+cache and the live document agree exactly, with no transform in between, is what lets the
+degradation check in §12i read `prose_json` instead of decoding a blob.
+
+### 12e. The `AUTHORIZED` role
+
+One new enum value, added above `COMMENTER` rather than splitting it — nobody's stored role
+changes and nothing is removed. The name says what it means: someone in the system has authorized
+this user for docs, as opposed to `COMMENTER`, which means only "can comment on the public blog."
+An interim measure — granular permissions are intended later — but one that carries real weight
+in the meantime, since it is the only thing gating doc access.
+
+```
+ADMIN > EDITOR > AUTHOR > AUTHORIZED > COMMENTER
+```
+
+The hierarchy stays linear, which keeps `UsersTable`'s `ROLE_ORDER` sort and every `role ===`
+check honest; `AUTHORIZED` is strictly `COMMENTER` plus doc access. New accounts keep defaulting
+to `COMMENTER` — `signUp` sets no role, so this is purely the schema `@default`, unchanged.
+
+One new pure check joins `src/lib/role-checks.ts`, not `authz.ts`, so `SiteHeader`'s nav can
+import it without dragging Prisma into the browser bundle (§10 item 17):
+
+```ts
+export const DOC_VIEWER_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR", "AUTHORIZED"];
+export function canViewDocs(role: Role): boolean { ... }
+```
+
+**Two doc gates, easily conflated.** `canViewDocs` governs *reading and annotating* docs — every
+`SHARED` doc, for anyone at that level. It does **not** govern `/docs`, which keeps today's
+`canManagePosts`-shaped rule (`canManageDocs` + own-byline scoping for AUTHOR), so an AUTHOR
+manages only their own docs while reading everyone's. Rejection reuses the §3b/§3c pattern:
+unauthenticated redirects to sign-in, a signed-in `COMMENTER` gets the inline "doesn't have
+permission" message.
+
+**Per-doc `visibility` is `PRIVATE` | `SHARED`.** `PRIVATE` is byline authors plus ADMIN/EDITOR;
+`SHARED` is anyone with `canViewDocs`. With role gating underneath, an "unlisted" tier has no
+threat model left to address. Kept an enum so a future public tier doesn't need a boolean→enum
+migration.
+
+**The migration is one step, which is the point of not touching `COMMENTER`.** Postgres can't
+drop a value from an enum type, and `ALTER TYPE ... ADD VALUE` adds a value that **cannot be used
+in the same transaction** — which is what Prisma wraps each migration in. That's what forced
+`adminInitials` (CLAUDE.md) into two migrations, and would have forced a
+`DOC_COMMENTER`/`BLOG_COMMENTER` split into two as well. Adding `AUTHORIZED` needs none of it,
+because nothing is backfilled and nothing is dropped:
+
+```sql
+-- one hand-edited --create-only migration, nothing else in the file
+ALTER TYPE "role" ADD VALUE 'AUTHORIZED' BEFORE 'COMMENTER';
+```
+
+`BEFORE 'COMMENTER'` is cosmetic, not load-bearing — `ROLE_ORDER` is a plain TypeScript array and
+never reads the enum's ordinal position — but it keeps the database's own ordering honest for
+anyone reading it directly.
+
+Blast radius is small and already surveyed: the enum and `src/lib/role-checks.ts`. `User.role`'s
+`@default` doesn't move, `UsersTable`'s `ROLE_ORDER` gains one entry, and `scripts/test-user.ts`'s
+usage string gains one option. `updateUserRole` validates against `Object.values(Role)`
+generically and needs no edit.
+
+**Known consequence: a role change doesn't reach an existing session.** `src/lib/auth.ts` uses
+the `jwt` strategy and reads `user` only when it's present — i.e. once, at sign-in. Promoting
+someone to `AUTHORIZED` does nothing until they sign out and back in. A curiosity today; once
+promotion *is* the mechanism for granting doc access it becomes the first support question, with
+nothing broken to find. Interim fix: say so in the permission-denied message.
+
+### 12f. Routes
+
+| Route | Purpose |
+|---|---|
+| `/docs` | management table of docs, `canManageDocs` + own-byline scoping |
+| `/doc/[slug]` | the live reading view, `canViewDocs` + per-doc `visibility` — embeds §11h's replay slider (§12n) |
+| `/doc/[slug]/edit` | the editor, `canUserEditDoc` |
+| `/annotations` | annotation browse/admin (§12j) |
+
+**`/doc/[slug]` and `/doc/[id]/edit` cannot literally be two different dynamic segment names.**
+Next.js rejects `app/doc/[slug]/page.tsx` alongside `app/doc/[id]/edit/page.tsx` at build time
+("You cannot use different slug names for the same dynamic path"). The resolution is one segment —
+`app/doc/[slug]/` with `page.tsx`, `edit/page.tsx`, `slug/page.tsx` — and
+**one shared `resolveDocParam()` that accepts an id or a slug**, tried in that order. Id-first
+matters: a rename must not break a bookmarked edit URL. (A doc whose *slug* is shaped like another
+doc's cuid would resolve to the id; slugify can produce such a string in principle, and it is not
+worth guarding against.)
+
+The reading route additionally falls back to `doc_slug_history` on a live-slug miss and 301s,
+exactly as `[slug]/page.tsx` does today (§4a).
+
+**`/doc/[slug]` is inherently dynamic** — it is per-user gated — so it gets no
+`generateStaticParams`. A route eligible for static generation that also calls a dynamic API
+throws `DYNAMIC_SERVER_USAGE` at build, which is what §10 item 17 was. Needs a CACHING.md entry;
+note there that `prose_json` is what keeps a dynamic route cheap, not a Next cache.
+
+**No per-doc annotations page.** §3c's `/posts/[id]/comments` has no doc counterpart; the
+`/annotations?doc=<id>` deep link covers it.
+
+### 12g. Collab: tokens, read-only readers, and the client `Y.Doc`
+
+`server/collab.ts` and `server/ydoc-hooks.ts` need **no new dispatch** — a doc is a `ydoc:` name
+and already routes. Two additions, both small:
+
+**A doc-scoped token route.** `POST /api/ydoc/[id]/token` stays ADMIN-gated and
+`/ydoc-debug`-only. `POST /api/doc/[id]/token` is its sibling: it resolves the doc, applies doc
+authz, and mints `signYdocToken({ sub, documentName: ydocIdForDoc(id), role, readOnly })` plus the
+`lineage` the client needs before connecting (§11e). `YdocTokenPayload` gains `readOnly?: boolean`
+and `ydocOnAuthenticate` sets `connectionConfig.readOnly` from it — the only change to an existing
+ydoc file, and it needs no doc knowledge, since the token already names the document.
+
+**Read-only readers.** An editor gets a writable token; someone who merely satisfies `canViewDocs`
+on a `SHARED` doc gets `readOnly: true`. The read-only client registers **no
+`CollaborationCaret`** — awareness is a separate channel from the document, so being read-only is
+not on its own enough to keep readers out of the authors' caret list. Read-only stays meaningful
+even though such a reader can annotate, because §12i's mark is applied by the server rather than
+by their connection.
+
+**The collab-JWT reconnect gap (§10) is fixed here, for every collab surface at once.** The
+token used to expire after 2 minutes with no refetch on reconnect, so a long-idle tab would
+retry forever. `token` is a `fetchToken` *function* rather than a fixed string, so
+`HocuspocusProvider` re-mints per reconnect — `PostEditor`, `LiveDocBody`, `DocEditor` and
+`/ydoc-debug` all pass one.
+
+**The client `Y.Doc` needs nothing special.** §12h is `gc: true` on both ends, which is the
+default on both, so a bare `new Y.Doc()` is correct as written and there is no silent-failure
+mode to guard against.
+
+### 12h. `gc: true`, and what a document-level annotation is
+
+**Decision: `gc: true` everywhere, server and client.** §11d already sets
+`yDocOptions: { gc: true, gcFilter: () => true }` explicitly, and every client builds a bare
+`new Y.Doc()`, whose default is the same. Nothing has to be configured for a doc; this subsection
+exists so the choice reads as a decision rather than an accident, since GC is the one Yjs setting
+an annotation design can be wrecked by.
+
+**It costs nothing, because the anchor is content.** The design GC *would* break is anchoring by
+`Y.RelativePosition`, which names an item id:
+`createAbsolutePositionFromRelativePosition` returns `null` once that item has been collected
+into a `GC` struct rather than surviving as a tombstone, so keeping such an anchor resolvable
+means `gc: false`. §12i's mark has no such failure mode — it is not a pointer into the document,
+it *is* part of the document, so it moves with its text, merges under concurrent editing, and is
+collected only when the text it decorates is. GC never strands it.
+
+**It buys a doc that doesn't grow forever.** `gc: false` means `ydoc.ydoc` accumulates a tombstone
+per deletion for the life of the document. A post could afford that, since its life is punctuated
+by revisions; a living document's whole premise is that it never is, so the entity that most
+needs bounded growth is exactly the one that would pay most for turning GC off.
+
+**Losing the mark degrades the annotation; it does not delete it.** Delete the annotated text and
+the mark goes with it, and nothing in the document references that annotation's id any more. The
+`annotation` row still has its `doc_id`, so the annotation **becomes a document-level comment on
+that doc** — it moves out of the margin and into the doc's general discussion, and what it was
+about is whatever its body says. That is the entire defined behavior, and it is derived per render
+(§12i), not a stored state.
+
+**It is one-way, and recovery is deferred.** Retyping the same words does not restore the mark;
+re-marking is an edit somebody has to make. `ydoc_update` is never truncated (§11b), so the state
+in which the mark still existed is reconstructible — replay to before the deletion, read the
+mark's range, and you have both where the annotation lived and what it covered. That is a real
+path and the reason the log matters here, but it is **not being built now, and may never be**
+(§12m).
+
+**Never flip `gc` for a doc that has already loaded with it on.** One load with GC on collects
+tombstones permanently, so a future `gc: false` experiment is one-way per document and would have
+to be a new-docs-only decision, not a config change.
+
+### 12i. Annotations: the mark, capture, and the shared view model
+
+**An annotation is anchored by a mark in the ydoc, carrying the root annotation's id.** A new
+mark joins `src/lib/tiptap-schema.ts` — the one place the editor, Hocuspocus seeding and public
+rendering share a schema, so the three can't drift (CLAUDE.md) — as a doc-side extension set
+beside `authorHighlightExtensions`. Posts never apply it; an unused mark type in the schema costs
+nothing, exactly as `authorHighlight` already demonstrates.
+
+Two details it has to get right:
+
+- **`excludes: ""`,** so the mark does not exclude itself. ProseMirror's default is that a mark
+  type excludes its own type, which would make a second annotation over overlapping text *replace*
+  the first rather than coexist with it. Setting `excludes` empty lets several instances with
+  different `id` attrs sit on the same text, and ProseMirror splits the run into segments
+  carrying the right subsets on its own — no equivalent of the `data-thread-ids`-plural handling
+  in `quote-highlight-extension.ts` (§10 item 6) is needed, since that exists for overlapping
+  *decorations*, which marks are not.
+- **`renderHTML` emits `data-annotation-id`,** which is what carries the highlight into
+  `prose_json` and through `@tiptap/static-renderer`. The reading view therefore gets its
+  highlights from the cache with no client-side resolution step at all — the decoration builder
+  is not involved on the doc side, and neither is any per-sync re-resolution.
+
+**The mark is applied server-side, through the collab server.** `submitAnnotation` inserts the
+`annotation` row first, then asks the collab process to apply a mark carrying that id over the
+requested range — a new endpoint beside `/admin/ydoc-snapshot` and `/admin/replace-doc`, in the
+idiom §11d already established for server-authored writes into a live doc (the `clients` map).
+Three things fall out of that ordering and that placement:
+
+- **A reader can annotate without a writable connection.** Annotating is otherwise a document
+  edit, which a `readOnly` connection (§12g) cannot make — so the alternative is handing every
+  `AUTHORIZED` reader a writable socket and relying on the UI not to let them type.
+- **The failure mode is the degraded state, not a corrupt one.** Row first, mark second: if the
+  mark never lands, the annotation is document-level, which is a state the system already
+  renders. Mark-first would leave a mark naming a row that doesn't exist.
+- **The client never mints the id it marks with**, so a client cannot mark text with somebody
+  else's annotation id.
+
+**Capture, and the one place it can miss.** In the editor, the range comes from the live
+ProseMirror state and is exact. From the reading view, `AnnotatableArticle` captures the selection
+against the *cached* render, which the live document may have moved past since the last store
+(§12d) — so the request carries the selected text alongside the offsets and the server verifies
+`textBetween(from, to)` against it before marking. On a mismatch it falls back to a unique
+occurrence of that text in the live document; failing that, the annotation is created
+document-level. The selected text is a **request field only, never a column**: it exists to
+validate offsets against a document that may have moved, and once the mark is placed the document
+itself is the record of what was annotated.
+
+**Document-level-ness is derived, not stored.** `collectMarkAttrValues(prose_json, "annotation",
+"id")` (already in `tiptap-schema.ts`, already doing this for `authorHighlight`'s `authorId`) is
+one pass over JSON the reading view is holding anyway; any root annotation whose id isn't in that
+set renders in the doc's general discussion instead of the margin. §10 item 20's whole bug class —
+`DETACHED` as a terminal state nothing revisited — is structurally impossible here, since there is
+no stored state to get stuck. §5's remap-on-publish machinery is not involved at all:
+`anchor-remap.ts` and `@fellow/prosemirror-recreate-transform` stay, untouched, serving posts.
+
+**One view-model feeds the shared presentation, and this is the part to build first.**
+`src/lib/comment-data.ts` grows an annotation loader producing the same `ThreadComment`/
+`ThreadWithComments` shape the post side already renders — synthesizing a thread from a root
+annotation plus its replies, resolving each participant's color from their `User.color` (§10 item
+13), and setting capability flags (`canModerate`, `showStatus`) that an annotation leaves off. A
+`CommentTarget = { kind: "post" | "doc"; id: string }` discriminated union threads through the
+components, so `CommentNode`, `CommentEntryList`, `CommentSection`, `CommentForm`,
+`QuoteThreadHeader`, `pseudo-border.ts` and `AnnotatableArticle` each stay a single copy. Build
+the loader before the UI: retrofitting a shared shape after two renderers exist is the expensive
+order, and this one is permanent rather than a bridge to somewhere.
+
+**The shared components keep their `Comment*` names.** Tables, routes and server actions say
+*annotation*, because that is the distinction worth making in the data model and the URL space;
+the presentational components render both kinds, and the seam is `CommentTarget`, not the
+filename.
+
+`submitAnnotation` is its own server action. Eligibility is `doc.visibility === SHARED` plus
+`canViewDocs`, and the annotation is inserted immediately visible.
+
+### 12j. `/annotations`
+
+**A browse surface: everything written on docs, searchable, sortable, with deleted rows visible.**
+It is not a queue — the only action an annotation supports is deletion, and `CommentNode` already
+offers that inline. The page exists so annotations across all docs can be found at all.
+
+- **Columns:** Doc · Author (a `User`, always) · Body · Quote · Created · Edited · Deleted. The
+  Quote cell reads the annotated text out of the doc's `prose_json` via the mark, and says
+  *document-level* when there is no mark to read — which makes it the one admin surface where the
+  degraded state (§12h) is visible.
+- **Controls:** search `q`, the show-deleted toggle, pagination, multi-column sort via
+  `use-sortable-rows`, and the deep-link-only filters (`?doc=`, `?author=`, `?user=`).
+- **Actions:** Delete / Restore, ADMIN or own annotation — the same rule `CommentNode` already
+  applies inline (§10 item 15).
+- **Gate:** `canManageDocs`, with own-byline scoping for AUTHOR.
+
+Query-string parsing gets its own `annotations-query.ts`, since the option set it parses is the
+list above and nothing more. `use-sortable-rows`, `AdminTable.module.css` and the pagination
+controls are shared.
+
+### 12k. Build order
+
+Each phase leaves the app working and verifiable on its own.
+
+**Phase 0 — add the `AUTHORIZED` role (§12e).** The one-step enum addition and its small blast
+radius. `canViewDocs` has nothing to guard yet — this phase lands the role and the helper, and
+de-risks the enum change separately from everything else. Gate: `npx tsc --noEmit`,
+`npx eslint .`, `npm run e2e` green with only role-name churn in the fixtures.
+
+**Phase 1 — the Doc entity and its editor.** Schema from §12c minus the `annotation` table, the
+`prisma.ts` soft-delete entry, `RESERVED_SLUGS`, `ydocIdForDoc`/`docIdFromYdocId`, eager creation
+(§12b), `resolveDocParam`, `/docs`, `/doc/[slug]/edit`, and `POST /api/doc/[id]/token`. Docs are
+not yet readable by anyone but their managers.
+
+> `DocEditor` starts as a copy of `PostEditor`, but a small one. `PostEditor`'s 535 lines are
+> dominated by save, publish, schedule and revision machinery, none of which a doc has. What
+> carries over is provider wiring plus `CollabEditorBody` and `CollabTitleField` — close to what
+> `/ydoc-debug`'s editing mode already does — plus `attachIndexeddb` and a `DocSettingsPanel` for
+> byline and visibility. Resist factoring the two together anyway until the divergence is visible
+> rather than guessed at; the duplication is cheap enough to carry until then.
+
+**Phase 2 — the live reading view and the `prose_json` cache (§12d).** `server/doc-cache.ts`,
+`visibility` wired to `canUserReadDoc`, `/doc/[slug]` reading `prose_json` with the
+decode-from-`ydoc` fallback, the read-only Hocuspocus path, `canViewDocs` on the route and in
+`SiteHeader`'s nav, the collab-JWT reconnect fix, and the CACHING.md entry. Spec: two contexts,
+author types, reader's DOM updates with no reload; plus one asserting `prose_json` is populated
+after a store and that a fresh doc renders from the fallback.
+
+**Phase 3 — annotations (§12i).** **Do the `comment-data.ts` view-model loader first** — it
+decides whether `CommentNode`/`CommentEntryList`/`QuoteThreadHeader`/`pseudo-border.ts` stay one
+copy or quietly become two. Then the annotation mark in `tiptap-schema.ts`, the `annotation`
+table, `submitAnnotation`, the server-side mark endpoint, capture from both the editor and the
+reading view, and the derived document-level check. Spec: annotate a doc; author edits *before*
+the annotated range → the highlight tracks it with no work on our side; author deletes the
+annotated text → the annotation renders in the doc's general discussion; author retypes it →
+**stays document-level** (§12h, one-way); two overlapping annotations both survive on the shared
+run (the `excludes: ""` case); and one asserting an annotation is visible immediately and never
+appears in `/comments`.
+
+**Phase 4 — `/annotations` (§12j).**
+
+**Phase 5 — live history, support scripts, and documentation.**
+`/doc/[slug]/live-history` rehousing §11h's replay slider over the doc's `ydoc_update` — note that
+with snapshots deferred (§12m) a doc has no `ydoc_snapshot` rows, so every rebuild goes back to
+row #1, which is a performance characteristic of this phase and not a defect. Then
+`scripts/test-doc.ts` and `scripts/test-annotation.ts` (with §12b's ydoc-row cleanup), e2e doc
+fixtures and teardown, and updates to CLAUDE.md — including the §12d note that the collab-restart
+repair recipe has no doc counterpart — plus CACHING.md, STYLE.md and §10 of this document.
+
+### 12l. The carrying cost, stated plainly
+
+Running two stacks side by side is not free, and the cost is *ongoing* rather than one-off: two
+editors, two comment stacks, two admin tables. Two things it is deliberately *not*: a second
+collab-persistence pair, since docs share §11's, and a second revision table, since §12m defers
+the question. What remains buys the ability to use a living document next to a post, against real
+content, before committing to either — which is the only way the question "is a living document
+the model I want?" actually gets answered. It is the wrong trade the moment that answer is known.
+
+Three things keep a later convergence cheap, and all are worth protecting while building:
+
+- **The new tables and routes already carry the names the surviving entity should end up with**,
+  so converging is a backfill plus deleting the post stack, not a second rename.
+- **The shared comment view-model (§12i) is the seam that keeps the UI from forking**, which is
+  the one duplication that would be genuinely expensive to undo.
+- **Posts moving onto the ydoc stack stays a separate, already-scoped change**, not something
+  entangled with docs — §11 built and proved the target; §12 gives it a second consumer and
+  therefore a second confirmation that the store is general.
+
+### 12m. Deferred, with reasons
+
+- **Everything about checkpointing a doc — held back pending review of this plan.** Absent by
+  intent: a `doc_revision` table, changelogs, restore-to-a-point, `ydoc_snapshot` rows for docs
+  (and therefore any doc-side use of §11h's snapshot base), and any doc counterpart to
+  `/admin/replace-doc`. Under §12 a doc's history *is* `ydoc_update` and its present state *is*
+  `prose_json`; nothing else is claimed. Adding checkpoints later is additive — §11's snapshot
+  table and endpoint already exist and are already generic — so nothing in Phases 0–5 has to be
+  designed around the eventual answer.
+- **Recovering where an annotation used to point, once its mark is gone** (§12h) — replaying
+  `ydoc_update` back to a state that still had the mark, reading its range there, and offering to
+  re-anchor. **Later if at all**, and an ad-hoc tool if ever, not a background job. The plan's
+  defined behavior is the degraded one: the annotation becomes document-level and stays that way.
+  Worth being clear that this is the *only* thing the never-truncated log is being held for on the
+  doc side — if it never gets built, the log has still earned its place as history (§11h) and as
+  the doc's durable substrate.
+- **Converging posts onto docs**, and **carrying annotations onto post content** at that time.
+  Explicitly out of scope; §12l sketches why it stays cheap.
+- **Factoring `DocEditor` and `PostEditor` back together.** Revisit after Phase 3, once the real
+  divergence is visible rather than guessed at (§12k).
+- **Deduplicating `src/lib/ydoc-render.ts` with `LiveHistoryViewer`.** Belongs to the post cutover,
+  when there is one renderer's worth of behavior to keep rather than two.
+- **Re-reading `role` from the DB in the `jwt` callback** (§12e), rather than documenting the
+  sign-out-and-back-in workaround. Waits for the granular-permissions work that supersedes this
+  whole role scheme.
+
+### 12n. As built
+
+Built 2026-07-29, in the order §12k lays out (Phase 0 → 5), each phase gated on `npx tsc
+--noEmit`, `npx eslint .`, hand verification in the browser, and the full `npm run e2e` suite
+before moving to the next. Two deliberate deviations from the text above, both judgment calls
+made under real time constraints rather than oversights:
+
+- **`AnnotatableArticle` itself is not reused for docs.** §12i's own text says it is; in
+  practice the doc reading view (`LiveDocBody.tsx`) is a sibling component with the same
+  *interaction* shape (a plain, non-`Collaboration` `useEditor`, `editable: false`, selection
+  capture via `onSelectionUpdate`, a `staticBody`/live-editor swap identical to
+  `AnnotatableArticle`'s `ready` toggle) rather than the same file. The two content sources
+  differ enough — a single static `doc` prop for a post versus a live Hocuspocus tap that has
+  to push updates into the editor by hand (`editor.commands.setContent`) for a doc — that
+  literal reuse would have meant branching `AnnotatableArticle` on `target.kind` throughout,
+  touching a component that renders on every published post. `LiveDocBody` copies the pattern
+  instead of the file. What *is* shared exactly as §12i describes: `CommentSection`,
+  `CommentForm`, `CommentNode`, `CommentEntryList`, `QuoteThreadHeader`, and
+  `pseudo-border.ts` — all threaded through the `CommentTarget` union, none forked.
+- **Annotation capture is reading-view-only.** §12i's "in the editor, the range comes from the
+  live ProseMirror state and is exact" describes a capture path from `DocEditor` that was not
+  built — `DocEditor` has no selection-to-annotate UI. An author who wants to annotate their
+  own doc does it from `/doc/[slug]`, the same as any other `AUTHORIZED` reader; nothing stops
+  this today, and it keeps `CollabEditorBody` (shared with `PostEditor`) untouched.
+
+Smaller implementation notes worth recording against the design text above:
+
+- **`DocEditor`/`DocsTable`/`DocSettingsPanel` are simpler than their `Post*` counterparts**,
+  not just smaller — `DocsTable` is a plain sortable table without `PostsTable`'s column-
+  resize-tracking search box or per-row drag affordances, and `DocSettingsPanel` has no
+  revisions table (a doc has none). Functionally complete; less visually polished.
+- **No `canViewDocs`-gated entry in `SiteHeader`'s nav.** §12g mentions wiring it in, but
+  there is no "browse every doc I can read" route in §12f's table to link to — inventing one
+  was out of scope. What `SiteHeader` does gain, `canManageDocs`-gated: a "Docs" link plus a
+  small caret dropdown next to it holding "Annotations" — the same `<details>`/`<summary>` +
+  outside-click-to-close shape as `CommentsTable.tsx`'s `MultiSelectDropdown`
+  (`SiteHeader.module.css`), not the two flat "Manage Docs" / "Manage Annotations" links this
+  started as.
+- **The annotation-mark endpoint's fallback search** (`findQuoteOccurrences`,
+  `server/ydoc-hooks.ts`) is a plain `O(document size × quotedText length)` scan, not the
+  smarter position-mapped walk first sketched — chosen for correctness-by-construction (it
+  reuses `Node.textBetween`'s own separator handling rather than reimplementing it) at the
+  cost of not matching a quote that spans a block boundary. Acceptable for a fallback that
+  only runs when the primary offsets already missed.
+- **`annotation.user_id` is `ON DELETE RESTRICT`.** Real users are never hard-deleted in this
+  app (soft-delete only), so this is inert in production; it did surface against
+  `scripts/test-user.ts delete` and the e2e suite's `deleteTestUser`, both fixed to remove a
+  user's own annotations first — the same shape the pre-existing `Commenter`-row cleanup
+  already had.
+- **Doc creation is titleless.** `+ New doc` creates the row and drops straight into
+  `/doc/[id]/edit` with no title-collecting form in between — `createDoc`
+  (`src/app/actions/docs.ts`) writes `title: ""`, since the title is already a live
+  collaborative field (`CollabTitleField.tsx`) the editor is better at collecting than a form
+  is (`/docs/new` doesn't exist; §12f's route table never listed it). The initial slug is the
+  doc's own cuid (`Doc.id`, written in a follow-up `update` inside the same `$transaction` —
+  the id isn't known until the create resolves), so `resolveDocParam`'s id-first lookup and the
+  slug lookup return the same doc until a manual rename on `/doc/[slug]/slug`. `"Untitled"`
+  (`src/lib/doc-title.ts`'s `UNTITLED_DOC`/`docTitleOrFallback`) is a render-time fallback
+  only — applied at every server page/props boundary that shows or derives from a doc's title
+  (`/docs`, `/annotations`, the `<h1>`s on `/doc/[slug]` and `/doc/[slug]/slug`, and that
+  page's suggested "standard slug") — and is never written to the ydoc's title fragment, so it
+  can never be backspaced into `"Untitle"` and never appears when scrubbing history, on
+  `/doc/[slug]`'s embedded scrub bar (§12n) or `/ydoc-debug` (confirmed by hand: row #1 shows
+  no title at all, not the fallback). `doc.title` is an unconditional cache of the title
+  fragment, empty included —
+  `server/doc-cache.ts` writes it through on every store debounce, so clearing a doc's title
+  back out clears `Doc.title` too rather than freezing it at the last non-empty value. This
+  doesn't apply to posts: `updatePostTitle`'s "an empty title is never a real one" skip-empty
+  rule is unrelated and unchanged, since a post's title has no fragment to be authoritative
+  over.
+- **The doc reading view carries a byline, and `AuthorByline` is no longer post-only.**
+  `/doc/[slug]` lists its authors above the body the way a published post does — the same
+  `src/components/AuthorByline.tsx`, the same `#666`/`1px solid #eee` treatment as
+  `app/[slug]/page.module.css`'s `.byline`. Two deliberate differences from the post version.
+  It drops the `"By "` prefix (a `showPrefix` prop defaulting to `true`, so every post surface
+  is untouched), which makes `AuthorByline` the first thing shared across the post and doc
+  sides that is *not* threaded through the `CommentTarget` union — only the prefix differs, so
+  a boolean was enough and the union would have bought nothing. And the date is
+  `Doc.updatedAt`, not a publish date: a doc has no publish step at all (§12k), so "last
+  edited" is the only date that means anything, and `server/doc-cache.ts`'s store-debounce
+  write is what keeps it current. `toLocaleDateString()` is what renders, with the full
+  `toLocaleString()` timestamp on the `title` attribute for hover. The `<h1>` moved out of
+  `page.tsx` into `DocView.tsx` (a client component) alongside it; `docTitleOrFallback` still
+  applies server-side, now at the `initialTitle` prop boundary rather than at the element.
+  The route's own container/byline styling moved from inline `style` objects into a
+  co-located `app/doc/[slug]/page.module.css` at the same time, per STYLE.md's
+  CSS-Modules-by-default rule.
+- **`/doc/[slug]` grew its own lazy-loaded scrub bar (`DocScrubBar.tsx`), and scrubbing now
+  rewrites the live title/body in place rather than opening a separate preview — which made
+  `/doc/[slug]/live-history` (§12f, §12k Phase 5) redundant, and it's been removed.** Dragging
+  the slider calls `LiveDocBody`'s new `overrideBodyJSON` prop, which pushes the historical
+  content into the same editor the reader was already looking at (`setContent`, `emitUpdate:
+  false`) — the same mechanism the live-update tap already used, just fed a replayed state
+  instead of the current one. The title updates the same way: `DocView.tsx` now owns the
+  `<h1>` specifically so it can swap `initialTitle` for a scrubbed one, flattened from
+  `YdocRenderResult`'s new `titleJSON` field via `extractText` (the existing `title` field is
+  already-rendered JSX, useless for a plain-text `<h1>`) and passed through
+  `docTitleOrFallback` — the same "Untitled" rule, never written to the fragment, applies
+  here too. There's no "return to live" control: a real edit arriving mid-scrub simply wins
+  on the next live update, since that handler always sets the *current* content.
+
+  **Lazy by construction, not by a loading flag.** Nothing fetches or replays until the reader
+  interacts — before that, `DocScrubBar` renders one grayed-out, inert `<input>` and nothing
+  else. The first `pointerdown`/`focus` fetches `GET /api/doc/[id]/replay` and mounts the real
+  slider; only then does `useReplayScrub` (extracted from `ReplayView`, now shared by both)
+  allocate a `Y.Doc` and start replaying. Deliberately thinner than `/ydoc-debug`'s
+  `ReplayView`: no clients table, no per-step perf status line, and the "update N of M"
+  position line itself only appears once scrubbing has actually started — before that it's
+  just a slider, already sitting at the latest position. The bar's width matches the reading
+  column (not the full viewport) via `DocScrubBar.module.css`.
+
+  **`/doc/[slug]/live-history` is gone — `app/doc/[slug]/live-history/page.tsx` and
+  `DocLiveHistory.tsx` are both deleted, and `DocEditor.tsx`'s "Scrub live history" link with
+  them.** Nothing else needs it: a doc's `ydoc` row is just `ydoc:<docId>`, no different from
+  any other row in the same table, so `/ydoc-debug` (ADMIN-only, §11f) already lists it and
+  replays it with `ReplayView` unmodified — the two admin-facing tools this section is about
+  not duplicating. `GET /api/doc/[id]/replay` stays; it's what `DocScrubBar` itself calls.
+- **The reading view holds a fixed 800px width rather than shrinking to short content**, and
+  the doc editor's title field shares its border with the body editor frame below it
+  (`DocEditor.module.css`'s `.titleInput`/`.editorFrame`, the latter shared with
+  `PostEditor.module.css`) so the two read as the same kind of editable surface. On
+  `/doc/[slug]`, the title links to `/doc/[id]/edit` — styled as an ordinary hyperlink, not
+  inheriting the heading's color — whenever the viewer can edit the doc (`canUserEditDoc`); a
+  reader who can't just sees plain text.
+- **The shared `Comment*` components say "annotation," not "comment," on the doc side.**
+  `CommentSection`/`CommentForm`/`CommentNode`/`CommentEntryList` render both post comments and
+  doc annotations through the same `CommentTarget` union (§12i), and now branch their visible
+  copy on `target.kind` too — heading, empty state, placeholder, submit button, delete-failure
+  message, sort option. `submitAnnotation`'s validation errors ("Comment can't be empty.",
+  copied from `submitComment` and never updated) say "Annotation" now as well.
+- **`/docs`'s Title column links to the reading view, not straight to the editor**, with a
+  separate Edit column (right after Title) linking to `/doc/[id]/edit` only when the viewer can
+  edit that particular doc — computed per row in `page.tsx` by restating `canUserEditDoc`'s
+  logic against data the listing query already has (an AUTHOR's query is already scoped to
+  their own docs), not a per-row DB call. Clicking or hovering anywhere in the Title `<td>` —
+  not just the link text — navigates or underlines (`DocsTable.module.css`).
+- **A doc's annotation highlights are colored by their author, not a flat amber.**
+  `AnnotationColorStyles.tsx` — the same one-rule-per-id `<style>` tag technique
+  `AuthorHighlightStyles.tsx` uses for attributed body text — sets `--thread-color` per
+  annotation id from `getDocAnnotationsAsThreads`'s already-fetched `root.user.color`, and
+  `prose.module.css`'s `.annotation-highlight` reads it the same way `.quote-highlight` already
+  reads a quote thread's color. Rendered from `CommentSection.tsx`, so this only colors the
+  reading view — `DocEditor` renders no `CommentSection` (annotation capture is
+  reading-view-only, above), so its highlight stays the flat amber fallback.
+
+**Verification.** Every phase was hand-tested end to end in the browser (doc creation → live
+two-author editing → the reading view's live update with no reload → annotate → delete the
+annotated text and watch it degrade to the doc's general discussion → reply → delete-with-a-
+live-reply showing `[deleted]` → `/annotations`' search/sort/delete/restore → the live-history
+replay slider, confirmed rebuilding from row #1 every time since a doc has no snapshots yet).
+`e2e/doc.spec.ts` covers the parts of that worth pinning down as regression tests: the
+invariant-1 creation check, the doc-cache debounce reaching `Doc.title`/`proseJson` live, the
+isolation check in both directions (a doc never touches `post_collab`, a post never touches any
+ydoc-stack table — the latter already covered by `e2e/ydoc-debug.spec.ts`), the reader's
+already-open tab updating with no reload, an annotation's mark landing at the exact selected
+range, and that same annotation degrading — and never appearing on `/comments` — once its text
+is deleted. `scripts/test-doc.ts` and `scripts/test-annotation.ts` cover manual testing, same
+`@example.com`-author containment as `test-post.ts`/`test-user.ts`, `test-doc.ts delete`
+additionally removing the doc's derived `ydoc:<id>` row (§12b — nothing cascades that
+automatically). Full suite: 30/30 passing.
+
+**Two implementation details worth knowing before touching this again**, both found the hard
+way rather than designed:
+
+- **The reading view's live tap applies a Yjs update on its own connection handshake**, not
+  only on a real remote edit — and `LiveDocBody` turns every such update into an
+  `editor.commands.setContent`, which silently collapses whatever the reader had selected.
+  A selection made in the window between "editor mounted" and "provider synced once"
+  therefore vanishes before it can be annotated. `LiveDocBody` exposes a `synced` marker for
+  exactly this (there is no visible connection UI on the reading view otherwise), and
+  `e2e/doc.spec.ts`'s annotation tests wait on it. Anything else that reacts to a reader's
+  selection needs the same gate.
+- **TipTap v3's `setContent` takes an options object, not a boolean.** `setContent(json,
+  false)` — the v2 "don't emit an update" signature — is a type error now; it's
+  `setContent(json, { emitUpdate: false })`. Worth knowing because the wrong form reads as
+  obviously-correct against any pre-v3 example.
+- **A mark is `clearable` by default, and `unsetAllMarks` (the editor's "Clear formatting"
+  button) removes every clearable one.** The annotation mark had no opinion on this at first,
+  so clicking Clear formatting over annotated text silently stripped the mark along with any
+  real formatting in the selection. Fixed with `clearable: false` on the mark
+  (`annotation-extension.ts`) — `Mark.create` has this option built in for exactly this case
+  ("semantic marks that should survive clear formatting"), so no custom command was needed.
+
+### 12o. Known gaps
+
+Everything below is real and deliberate-to-defer, not broken. Distinct from §12m (deferred
+*design* decisions) — these are places where the built thing is narrower than the section
+above might read.
+
+- **`Annotation.resolvedAt` is declared and never touched.** §12c gives a root annotation a
+  nullable `resolved_at` as "the only state an annotation carries," but nothing writes it and
+  nothing reads it: there is no resolve/unresolve control anywhere, and
+  `getDocAnnotationsAsThreads` hard-codes `status: "ACTIVE"`. The column is schema-only until
+  a resolve UI exists.
+- **`Annotation.editedAt` is displayed but never written.** `/annotations` has an Edited
+  column and sorts on it, and it is always empty — there is no edit-an-annotation action.
+  (`CommentNode` offers Reply and Delete, not Edit, on both the post and doc sides.)
+- **There is no reader-facing doc index.** `/docs` is `canManageDocs`-gated management; a
+  reader with `canViewDocs` can open any `SHARED` doc they have a link to but has no route
+  that lists them, and no nav entry. §12f's route table never specified one, so this isn't a
+  regression against the plan — but it does mean docs are share-a-link-only in practice.
+- **The comment list's "Quoted text position" sort is inert on a doc.** `CommentEntryList`
+  sorts that mode by `anchorFrom`, which is null for every annotation-sourced thread (§12i:
+  a doc annotation has no stored offset), so all entries tie and fall through to the date
+  comparison. The dropdown still offers the option on `/doc/[slug]`, where it does nothing.
+  Deriving a real ordering is possible — the mark's position in `prose_json` is exactly the
+  needed number — just not built.
+- **`/annotations`' deep-link filters have no UI and no Help section.** `?doc=`, `?author=`
+  and `?user=` work and round-trip through the URL, but unlike `/comments` (which documents
+  its equivalents in an on-page Help table) nothing on `/annotations` advertises them.
+- **Nothing enforces that a doc's `ydoc` row exists.** Creation is eager on all three paths
+  (`createDocAction`, `scripts/test-doc.ts`, the e2e helper), and `ydocOnLoadDocument`'s
+  forgiving auto-create covers a connection to a name nobody made — but a `doc` row whose
+  `ydoc` row was deleted out from under it reads as an empty document rather than an error,
+  and `POST /api/doc/[id]/token` 404s on the missing lineage. Acceptable because deleting a
+  `ydoc` row by hand is exactly the thing CLAUDE.md now warns against, not a path the app
+  can reach on its own.
+
+## 13. Annotations become ydocs, with a TipTap editor of their own
+
+**Decided:** an annotation's body stops being a plain-text `Json` column and becomes its own
+collaborative document — a live Yjs document, same substrate as a doc itself (§11), with a real
+TipTap editor both inline (over the anchored text) and in a composer below the document. This
+supersedes §12i's "one view-model feeds the shared presentation" decision for the presentational
+layer: that was right when an annotation was a `<textarea>` and a post comment was a `<textarea>`,
+and stops being right once one of them is a collaborative document and the other isn't — the two
+no longer share a rendering problem, so the shared `Comment*` components are un-shared back to
+post-only and a doc gets its own `Annotation*` components. Nothing about `CommentThread`/`Comment`,
+moderation, or the post reading view changes; this section only touches the doc/annotation side.
+
+### 13a. One ydoc per annotation, not one shared ydoc per doc
+
+The alternative — a single `ydoc:doc-annotations:<docId>` holding one XmlFragment per annotation —
+was rejected for one decisive reason: **Yjs has no per-fragment ACL.** §12g hands a doc reader a
+`readOnly: true` connection specifically so they can't write the body; annotating must remain
+possible for a read-only reader, and "who may edit this annotation's live text" has to be
+enforceable per annotation, not per doc. Hocuspocus's per-connection `readOnly` flag already is
+that enforcement point (`ydocOnAuthenticate`) — one ydoc per annotation is what lets it apply.
+
+```
+ydoc.id = "ydoc:annotation:" + annotation.id
+```
+
+via `ydocIdForAnnotation` / `annotationIdFromYdocId` in `src/lib/ydoc-names.ts`, no foreign key
+either direction — the same §12b rule for docs, restated for annotations.
+
+**An annotation renders from a cache, not a live decode, for the common case.** `Annotation`
+gains `proseJson` (cache of its ydoc's `"default"` fragment) and `bodyText` (flattened plain text
+— search, `/annotations`, sort), written by the same store-debounce mechanism `doc-cache.ts`
+already uses for `Doc.proseJson`/`Doc.title`. A live `HocuspocusProvider` opens only for an
+annotation actually open in an editor right now (composing, replying, or being read live) — a
+doc with fifty annotations opens zero annotation sockets until one is clicked into.
+
+**The namespace needs two guards or it silently corrupts a doc's own cache:**
+- `docIdFromYdocId("ydoc:annotation:abc")` must return `null` — the remainder carries a further
+  namespace segment, not a bare doc id — or every annotation store-debounce runs a pointless
+  `doc.updateMany` that (today) matches zero rows by luck of id shape rather than by design.
+- `server/doc-cache.ts` and the new `server/annotation-cache.ts` each branch on their own prefix
+  at the top, rather than relying on an update matching zero rows to tell them apart.
+
+### 13b. Schema
+
+Additive, one migration (both new columns take defaults, so this is the plain case, not the
+nullable-then-required two-step CLAUDE.md documents for a required column against existing rows):
+
+```
+Annotation.proseJson   Json?    @map("prose_json")   -- cache of the annotation ydoc, §13a
+Annotation.bodyText    String   @default("") @map("body_text")  -- flattened text (extractText)
+Annotation.status      AnnotationStatus @default(DRAFT)
+Annotation.raisedAt    DateTime? @map("raised_at")   -- when authors were notified, §13d
+
+enum AnnotationStatus { DRAFT LIVE RAISED }
+```
+
+`Annotation.body` (the old `{text}` Json column) stays for one backfill pass and is then dropped
+— every current reader of it (`/annotations`' search and table, `scripts/test-annotation.ts`)
+moves to `bodyText`/`proseJson` in the same phase, so nothing reads the stale column and the new
+one simultaneously.
+
+`tiptap-schema.ts` gains a named schema for an annotation body, distinct from `docContentExtensions`
+on purpose — CLAUDE.md's "picking the wrong variant silently drops marks" warning applies here
+directly: an annotation body can't itself carry the `annotation` anchor mark, so it is
+`authorHighlightExtensions` alone, not `docContentExtensions`:
+
+```ts
+export const annotationContentExtensions = authorHighlightExtensions;
+export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
+```
+
+### 13c. Un-sharing the `Comment*` components
+
+`CommentTarget` (§12i) currently threads through five files. Reverting it is contained:
+
+| File | Change |
+|---|---|
+| `CommentForm.tsx` | drop `target`, back to a bare `postId` field; drop the `submitAnnotation` branch and every `kind === "doc"` copy string |
+| `CommentNode.tsx` | drop `target`; drop `deleteAnnotation`; "Failed to delete comment." unconditional |
+| `CommentEntryList.tsx` | drop `target`; "Comment date" unconditional |
+| `CommentSection.tsx` | back to `{ postId }`; drop `getDocAnnotationsAsThreads`, `AnnotationColorStyles`, the many-general-threads comment |
+| `comment-data.ts` | delete `CommentTarget` and `getDocAnnotationsAsThreads`; the doc-specific commentary on `anchorFrom`/`quotedText` goes with them |
+
+A new sibling tree, `src/components/annotation/`, takes over doc-side rendering:
+`AnnotationSection.tsx` (server component, the doc-side `CommentSection`), `AnnotationList.tsx`,
+`AnnotationThread.tsx`, `AnnotationNode.tsx`, `AnnotationComposer.tsx`, `AnnotationBody.tsx` (the
+live ydoc editor), `AnnotationPopover.tsx` (the inline version), and `src/lib/annotation-data.ts`
+for the loader `comment-data.ts` loses. `AnnotationColorStyles.tsx` moves under it unchanged — it
+never depended on the shared components, only on thread ids and colors.
+
+### 13d. Lifecycle: DRAFT → LIVE → RAISED
+
+Three states, one direction of travel by default, each meaningfully different from the plain
+"is it moderated" axis a post comment has (it isn't — §12c already decided annotations are never
+moderated; this axis is about visibility and notification, not approval):
+
+- **DRAFT** — visible only to its own author. Carries **no inline mark**: mark application is
+  gated on `status !== DRAFT` in the one place marks are ever applied
+  (`applyAnnotationMark`/`handleApplyAnnotationMark`), which is what makes "a private note never
+  puts an inline mark" structural rather than a rule someone has to remember to check. Notifies
+  nobody. A freshly opened composer *is* a DRAFT — creating the row and its ydoc eagerly is what
+  gives the editor something to connect to before a single keystroke lands (§13g's open
+  question about that eagerness).
+- **LIVE** — visible to every doc reader, gets its inline mark (or degrades document-level per
+  §12h, unchanged). The ordinary "posted a comment" state. Notifies nobody by itself.
+- **RAISED** — LIVE plus the doc's byline authors are emailed (`sendMail`, one call per author) and
+  `raisedAt` is stamped; the UI reflects this by showing "Authors notified <date>" wherever LIVE
+  would otherwise show nothing. Nothing observably changes about the annotation's mark or
+  visibility between LIVE and RAISED — RAISED is LIVE plus a notification that already happened.
+
+The composer's primary action is **Post** (→ LIVE). A `Keep private` toggle posts to DRAFT
+instead; a `Notify authors` checkbox posts straight to RAISED. Any DRAFT can later be posted to
+LIVE; any LIVE can later be raised. Deleting an annotation (any state) stamps `deletedAt` as
+today, additionally clears its mark (see below), and notifies nobody regardless of state.
+
+**Deleting an annotation today leaves its mark in the ydoc forever** — `deleteAnnotation` only
+ever stamps `deletedByUserId`/`deletedAt`; nothing removes the mark, so the highlight persists on
+text whose annotation is gone. Pre-existing, not introduced here, but this section's "deletion …
+never puts inline marks" requirement is what makes it visible enough to fix alongside: a new
+`POST /admin/annotation-unmark` endpoint, the exact twin of `handleApplyAnnotationMark` but calling
+`removeMark` instead of `addMark`, called from `deleteAnnotation` and from any LIVE/RAISED → DRAFT
+transition (moving an already-marked annotation back to private has to remove the mark too, for
+the same "DRAFT never has one" invariant).
+
+`sendMail` (`src/lib/mail.ts`) is a console-log stub today, not a real provider — RAISED is wired
+to call it per byline author and stamp `raisedAt` so the UI has something real to show, not an
+in-app notification inbox nobody asked for.
+
+### 13e. The formatting bar: hidden by default
+
+`CollabEditorBody.tsx`'s `Toolbar` is extracted into a shared `EditorToolbar.tsx` taking a
+tool-id list, so a doc/post body keeps its full bar and an annotation gets a reduced one (Bold,
+Italic, Bullets, Quote, Clear — no headings in a comment). An `Aa` toggle button in the annotation
+editor's footer row, next to Post/Cancel, shows/hides it; hidden by default, and the choice
+persists in `localStorage` (`multiblog.annotationToolbar`) so someone who always wants it doesn't
+re-toggle every time. Bold/italic keyboard shortcuts keep working regardless of visibility —
+they're StarterKit's, not the toolbar's.
+
+A `BubbleMenu`-over-the-selection alternative was considered and set aside for v1: zero idle
+chrome, but a bubble menu inside a popover that is itself absolutely positioned over the document
+is a z-index/flip-placement fight for a marginal gain over a toggle button. Worth revisiting once
+the popover (§13f) is stable.
+
+### 13f. Decorating the selected range while composing
+
+Selecting text to annotate loses the browser's native selection highlight the moment focus moves
+into the annotation editor. Fixed with a decoration, not a mark — decorations aren't content,
+don't sync, and never touch the doc's ydoc, unlike the `annotation` mark itself. A new
+`src/lib/pending-annotation-extension.ts`, the same shape as `quote-highlight-extension.ts`: a
+plugin holding `{ from, to } | null`, updated by a meta-tagged transaction `LiveDocBody` dispatches
+whenever the pending range changes. Colored via `--thread-color` from the *current user's own*
+color, in `prose.module.css`, consistent with the by-author annotation coloring already committed.
+
+**The trap:** `LiveDocBody`'s live tap calls `setContent` on every incoming update (§12n's own
+"two implementation details" entry), which rebuilds the doc and discards any decoration along
+with it. Each time `setContent` runs while a pending range exists, the range is re-resolved:
+verify `textBetween(from, to)` still equals the captured text; on a mismatch, fall back to a
+unique-occurrence search; failing that, drop the decoration and surface "the selected text
+changed." That is the same logic `handleApplyAnnotationMark`'s `findQuoteOccurrences` already
+implements server-side — it moves from `server/ydoc-hooks.ts` into a shared `src/lib/` module so
+both the client-side re-resolution and the server-side mark application call the same function.
+
+### 13g. Moving a draft to the bottom composer
+
+Content is never copied between the inline popover and the bottom composer — merging two
+independent Y.Doc lineages isn't a sound operation, and copying JSON across would discard
+whatever collaborative history and attribution the draft already has. Instead, "move to bottom"
+re-targets which composer slot renders a given annotation's id: same row, same ydoc, same
+provider. Since a moved draft is still DRAFT, it has no mark and lands document-level by
+construction — exactly what the bottom composer is for.
+
+"If there is already text there" means the bottom slot is occupied by a different draft, which is
+committed first — posted to LIVE, quiet, document-level, no notify — before the incoming one takes
+the slot. Unconditionally quiet because posting-as-a-side-effect-of-moving-something-else should
+never silently notify anyone.
+
+The button lives in the popover's footer beside Post/Cancel, labeled "Move to bottom ⤓".
+
+### 13h. Author highlighting: on once a second author joins, backfilled
+
+`AuthorHighlight`'s plugin already no-ops when `getAuthorId()` returns `null`
+(`author-highlight-extension.ts`), so gating it is one line —
+`AuthorHighlight.configure({ getAuthorId: () => (coAuthoring ? userId : null) })` — where
+`coAuthoring` is "this annotation's ydoc has seen ≥2 distinct user ids," read from the same
+`clients` map (§11d) a doc already maintains, with the annotation provider's own awareness as the
+live trigger that flips it mid-session.
+
+**Decided: backfilled, not left uncolored.** Text typed before the second author arrives would
+otherwise carry no mark once highlighting turns on, leaving the original author's earlier prose
+uncolored while everything after reads attributed — inconsistent in a way that reads as a bug
+rather than a deliberate boundary. The moment `attributeUpdate` (`server/ydoc-hooks.ts`) notices a
+*second* distinct user_id for a ydoc — the same code that already writes the `clients` map entry —
+it also issues one `addMark(0, size)` over the annotation's existing content, attributed to the
+original (first) author, inside the same transaction as the `clients` write. This has to happen
+exactly once per annotation and exactly there: `attributeUpdate` already is the single place that
+detects "second author," so there's no separate race to guard against, and doing it server-side
+(rather than from whichever client happens to notice) means it isn't dependent on that client
+still being connected.
+
+### 13i. Presence: showing who's editing an annotation
+
+Two awareness channels, not one, because they answer two different questions:
+
+- **Discovery**, on the doc's own provider — every reader already holds a connection to the doc's
+  ydoc via `LiveDocBody`. Each client publishes an awareness field (deliberately not named
+  `cursor`, to avoid any confusion with `CollaborationCaret`'s own field — moot here since
+  `LiveDocBody` registers no `CollaborationCaret` at all, but worth naming distinctly regardless):
+  `annotationEditing: { annotationId, user }`. Every other reader renders "● Alice is writing…"
+  beside that annotation, or a pulsing marker on the anchored text for a brand-new inline draft.
+- **Carets inside a co-edited annotation**, on that annotation's own provider — one
+  `CollaborationCaret` per annotation editor, one provider each, so the "one instance, one
+  awareness key" problem `CollaborationCaret` already has (CLAUDE.md) never arises: nothing here
+  shares a provider the way body + title editors would.
+
+**Verify before building, don't assume:** whether Hocuspocus propagates awareness over a
+`readOnly` connection. `readOnly` gates document *updates*; awareness is a separate message type
+and is expected to flow, but this hasn't been confirmed against this app's actual Hocuspocus
+version and config, and §13i's discovery channel depends on it working from a read-only doc
+connection. If it doesn't propagate, presence falls back to being visible only to people already
+connected to that specific annotation's own provider — materially weaker, and worth knowing at
+the start of Phase 5 rather than discovering it partway through.
+
+**Privacy:** a DRAFT never publishes presence — doing so would leak that a private note is being
+written to every other doc reader, defeating the point of DRAFT existing at all.
+
+### 13j. Build order
+
+Each phase leaves the app working, gated on `npx tsc --noEmit`, `npx eslint .`, and `npm run e2e`.
+
+- **Phase 0** — Un-share the `Comment*` components (§13c); stand up `Annotation*` components
+  rendering today's plain-text annotation through the existing server actions. No user-visible
+  change; posts return to their pre-§12i shape.
+- **Phase 1** — Substrate: the `ydoc:annotation:` namespace and its two guards (§13a),
+  `proseJson`/`bodyText`/`status`/`raisedAt` migration (§13b), `server/annotation-cache.ts`,
+  `POST /api/annotation/[id]/token`, eager `createIfAbsent` on annotation creation, one backfill
+  script (`scripts/backfill-annotation-ydocs.ts`, deleted after use) seeding a ydoc from each
+  existing `Annotation.body`, then dropping that column. `/annotations` moves to `bodyText`.
+  Still a `<textarea>` in the UI at the end of this phase.
+- **Phase 2** — The editor: `AnnotationBody.tsx` (Collaboration + provider + caret),
+  `EditorToolbar` extraction, hidden-by-default toolbar toggle (§13e). Read-only annotations
+  render from `proseJson`. The bottom composer ships first — it has no positioning problem.
+- **Phase 3** — The inline popover: its own component and CSS module, the pending-range
+  decoration (§13f), shared `findQuoteOccurrences`, "Move to bottom" (§13g).
+- **Phase 4** — Lifecycle: DRAFT/LIVE/RAISED, `Keep private`/`Notify authors`, the unmark
+  endpoint, quiet delete (§13d).
+- **Phase 5** — Presence: the co-authoring gate and its backfill (§13h), `annotationEditing`
+  awareness on the doc provider (§13i) — starting with the readOnly-awareness verification.
+
+**Test surfaces that break and need rewriting, not just updating:** `e2e/doc.spec.ts`'s two
+annotation tests (they drive a `<textarea>` and assert on the mark directly);
+`scripts/test-annotation.ts` (reads `body.text`); the e2e teardown, which needs the
+`ydoc:annotation:` prefix added to its cleanup guard or every test annotation leaks a `ydoc` row
+the same way §12b already warns a deleted doc's `ydoc` row can leak.
+
+### 13k. Open questions
+
+1. **Draft garbage.** Opening a composer creates a row and a ydoc row eagerly; the plan pairs
+   this with a `discardDraftAnnotation` call on close-while-empty. The alternative — stay purely
+   local until the first keystroke, then create the row and attach the provider — produces no
+   garbage but adds a promotion step to the editor's lifecycle. Eager-plus-discard is the
+   working assumption unless told otherwise.
+2. **The inline popover's position** — §13f's decoration handles the highlight; the popover's own
+   placement (the +0.5em/+0.5em nudge already applied to today's plain popover, PLAN.md's doc
+   commit history) carries forward unchanged unless the ydoc editor's different footprint (a
+   toolbar toggle, a taller editor) turns out to need its own placement pass.
+
+### 13l. As built
+
+Built 2026-07-29 through all five phases §13j lays out, each gated on `npx tsc --noEmit`,
+`npx eslint .`, the full `npm run e2e` suite, and hand verification in the browser (plus, for
+Phase 5's server-only logic, direct verification against a `Y.Doc` bypassing the network layer).
+Several deviations from the text above, all judgment calls made while building rather than
+oversights:
+
+- **DRAFT/createDraftAnnotation/postAnnotation/discardDraftAnnotation shipped in Phase 2, not
+  Phase 4.** §13j originally scoped DRAFT to Phase 4 alone. Building a live editor for content
+  that hasn't been posted yet turned out to structurally require a persisted row to attach the
+  editor to before a single keystroke lands — exactly the mechanism §13d already describes for
+  DRAFT — so there was no coherent way to build "the bottom composer becomes a live editor"
+  (Phase 2) without it. Phase 4 kept its own scope: the DRAFT/LIVE/RAISED *choice* (the
+  `Keep private` / `Post` / `Post & notify authors` select), `saveDraftAnnotation`, RAISED's
+  email, and the unmark endpoint.
+- **The inline popover is two-stage, not one.** A selection alone never creates a row — a
+  lightweight "Annotate" / "Move to bottom" / "Cancel" prompt shows first (§13f's pending
+  decoration already marks the selection, so there's no loss of feedback), and only clicking
+  "Annotate" (or "Move to bottom") calls `createDraftAnnotation`. Without this, every
+  micro-adjustment of a selection still being dragged would have spun up a fresh draft row.
+- **"Keep private" needed a way back in, so `getOwnDraftAnnotations` and `OwnDraftsList`
+  exist** — not separately planned, but a direct consequence of adding "Keep private" at all:
+  without them, a saved-private annotation would be unreachable the instant its composer
+  closed, since `getDocAnnotationsAsThreads` excludes every DRAFT unconditionally (including
+  from its own author) by design. "Edit" on an own draft reuses the exact `AnnotationMoveProvider`
+  mechanism "Move to bottom" already established, rather than inventing a second one.
+- **`/annotations` (the admin browse surface) now excludes DRAFT outright.** Not originally
+  called out in §13d's text, but a direct consequence of "a private note stays private even
+  from admins" (§13a) — without this filter, `canManageDocs` could browse everyone's private
+  notes through that surface, which the whole point of DRAFT is to prevent.
+- **A real correctness gap surfaced during testing, not designed for up front:**
+  `postAnnotation` flipping DRAFT to LIVE doesn't itself guarantee `proseJson`/`bodyText` are
+  current — those are a store-debounce cache (§12d's mechanism, reused as-is for annotations).
+  A reader opening a just-posted annotation could see stale (empty) content. Fixed with a new
+  `POST /admin/annotation-flush` (`handleFlushAnnotationCache`) that forces the write
+  immediately, called from `postAnnotation` with a short bounded retry — the flush reads the
+  *collab server's* Y.Doc, which only has what it's already received over the websocket, and a
+  keystroke immediately followed by a click can outrace that delivery on a slow connection (and
+  reliably does in an automated test with no human-typing-speed gap between typing and
+  clicking).
+- **Presence is one ambient indicator per doc, not a per-annotation anchored marker.** §13i's
+  own text imagined "a pulsing marker on the anchored text for a brand-new inline draft" — not
+  built, because a not-yet-posted annotation has no list entry and (for an inline one) no
+  guaranteed stable anchor yet to attach a marker to. `AnnotationPresenceIndicator` instead
+  renders a plain "X is writing an annotation…" line wherever `AnnotationSection` sits,
+  sourced from `DocPresenceProvider` (LiveDocBody's own read-only awareness, confirmed by
+  reading `@hocuspocus/server`'s source rather than assumed — only document *content* sync is
+  gated by `readOnly`, awareness flows over it unconditionally). Presence publishes whenever a
+  composer is open and not set to `Keep private`, which resolves §13i's "a DRAFT never
+  publishes presence" concern more precisely than status alone could: every open composer's
+  row *is* DRAFT until submit, so gating on status would have suppressed presence always,
+  defeating the feature; gating on the visibility selection's current value instead means
+  presence disappears the instant someone chooses privacy, before anyone has seen the content.
+- **Known gap, left deliberately open rather than silently scoped out:**
+  `canUserAccessAnnotationYdoc` already allows any `canUserReadDoc` reader to open a writable
+  connection to a LIVE/RAISED annotation's ydoc — which is what makes §13h's backfilled
+  highlighting meaningful at all — but no UI exposes that connection. `AnnotationNode` renders
+  every already-posted annotation as a static server-rendered body with no "Edit" affordance;
+  `Edit` only ever appears on the viewer's own DRAFT, via `OwnDraftsList`. The mechanism is
+  real and reachable (§13h's backfill was verified directly against the mark-application logic
+  itself, not through this missing UI), but co-authoring someone else's posted annotation is
+  not currently a discoverable feature.
+- **The old plain-textarea `AnnotationComposer.tsx` and `submitAnnotation` were deleted, not
+  deprecated-in-place**, once Phase 3 moved the inline popover off them — nothing else ever
+  called either afterward, so keeping them around would have been dead code with no path back
+  to it.

@@ -1,0 +1,80 @@
+.container {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem;
+  font-family: sans-serif;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* A contenteditable (CollabTitleField), not an <input> — same border as
+   .editorFrame below (shared with PostEditor.module.css) so the title reads
+   as the same kind of editable surface as the body, not a plain label. No
+   .titleChanged swap here unlike PostEditor's version: a doc has no
+   published state for the title to differ from. */
+.titleInput {
+  position: relative;
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 4px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: text;
+  line-height: 1.4;
+  min-height: 1.4em;
+}
+
+/* "Untitled", shown while the title fragment is empty — same behavior as
+   SiteHeader's search box's placeholder, gone the instant a real title
+   fragment lands. data-empty is only ever set alongside data-placeholder
+   (CollabTitleField.tsx), never a hardcoded string here. No top/left: an
+   absolutely-positioned ::before with none set keeps its normal static
+   position, which is the content-box origin — exactly where .tiptap's first
+   line starts, so it lines up with no offset to keep in sync with
+   .titleInput's own padding/border. */
+.titleInput[data-empty]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  color: #999;
+  pointer-events: none;
+}
+
+.titleInput :global(.tiptap) {
+  white-space: nowrap;
+  overflow-x: auto;
+  outline: none;
+}
+
+.titleInputDisabled {
+  color: #666;
+  cursor: default;
+}
+
+.statusLine {
+  color: #666;
+  font-size: 0.85rem;
+  flex: 0 0 auto;
+}
+
+.errorMessage {
+  color: crimson;
+}
+
+.docNote {
+  margin-top: 12px;
+  color: #666;
+  font-size: 1rem;
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 0.75rem;
+  }
+}
