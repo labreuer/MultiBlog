@@ -5,6 +5,7 @@
 export const RESERVED_SLUGS = new Set([
   "api",
   "authors",
+  "comments",
   "dashboard",
   "forgot-password",
   "posts",
