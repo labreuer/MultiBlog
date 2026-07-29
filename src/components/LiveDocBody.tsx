@@ -35,6 +35,8 @@ type Props = {
   // The viewer's own color (PLAN.md §13f), resolved server-side and passed
   // down rather than read here via useSession() — see DocView.tsx.
   userColor: string;
+  // See CollabEditorBody's identical prop — PLAN.md §14f.
+  ariaLabel?: string;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -57,7 +59,14 @@ type Props = {
 // span) applies the same way whether ProseMirror got the doc from
 // setContent here or from a live Collaboration binding in the editor —
 // no extra wiring needed beyond the CSS rule in prose.module.css.
-export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overrideBodyJSON, userColor }: Props) {
+export default function LiveDocBody({
+  docId,
+  initialBodyJSON,
+  staticBody,
+  overrideBodyJSON,
+  userColor,
+  ariaLabel = "Post body",
+}: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +101,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
     // Same aria-label CollabEditorBody's editor already carries, so the e2e
     // suite's bodyEditor() helper (e2e/fixtures.ts) and the .tiptap-ordering
     // convention (CLAUDE.md) both work for a doc's reading view for free.
-    editorProps: { attributes: { "aria-label": "Post body", role: "textbox" } },
+    editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     onCreate: () => setReady(true),
     onSelectionUpdate: ({ editor: liveEditor }) => {
       const { from, to, empty } = liveEditor.state.selection;

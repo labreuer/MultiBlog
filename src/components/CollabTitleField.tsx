@@ -26,6 +26,8 @@ type Props = {
   placeholder?: string;
   onTitleChange: (title: string) => void;
   onEditorReady: (editor: Editor | null) => void;
+  // See CollabEditorBody's identical prop — PLAN.md §14f.
+  ariaLabel?: string;
 };
 
 // Enter would otherwise attempt a splitBlock that the `content: "paragraph"`
@@ -59,6 +61,7 @@ export default function CollabTitleField({
   placeholder,
   onTitleChange,
   onEditorReady,
+  ariaLabel = "Title",
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [isEmpty, setIsEmpty] = useState(true);
@@ -70,7 +73,7 @@ export default function CollabTitleField({
       Collaboration.configure({ document: ydoc, field: "title" }),
       AuthorHighlight.configure({ getAuthorId: () => userId }),
     ],
-    editorProps: { attributes: { "aria-label": "Title", role: "textbox" } },
+    editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
   });
 

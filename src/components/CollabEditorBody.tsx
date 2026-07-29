@@ -32,6 +32,13 @@ type Props = {
   editable?: boolean;
   onEditorReady: (editor: Editor | null) => void;
   onAuthorStats?: (stats: AuthorStat[]) => void;
+  // Overrides the default accessible name — needed on /side-by-side (PLAN.md
+  // §14f), which can mount two body editors on one page and would otherwise
+  // break e2e's strict-mode `getByRole("textbox", { name: "Post body" })`
+  // locator. Read only at useEditor construction, same as editorProps
+  // generally, so a column's aria-label is fixed at mount rather than
+  // reactive.
+  ariaLabel?: string;
 };
 
 // A thin colored bar rather than the library default's always-visible name
@@ -62,6 +69,7 @@ export default function CollabEditorBody({
   editable = true,
   onEditorReady,
   onAuthorStats,
+  ariaLabel = "Post body",
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
@@ -86,7 +94,7 @@ export default function CollabEditorBody({
     // share this page, and without distinct accessible names the only thing
     // telling them apart is DOM order — which is what the e2e suite would
     // otherwise have to key off (see CLAUDE.md's `.tiptap` ordering note).
-    editorProps: { attributes: { "aria-label": "Post body", role: "textbox" } },
+    editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
