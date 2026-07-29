@@ -33,7 +33,7 @@ function buildFilterWhere(filters: ReturnType<typeof parseAnnotationsFilters>): 
   if (!filters.deleted) where.deletedByUserId = null;
   if (filters.q) {
     where.OR = [
-      { body: { path: ["text"], string_contains: filters.q, mode: "insensitive" } },
+      { bodyText: { contains: filters.q, mode: "insensitive" } },
       { doc: { title: { contains: filters.q, mode: "insensitive" } } },
       { user: { name: { contains: filters.q, mode: "insensitive" } } },
       { user: { email: { contains: filters.q, mode: "insensitive" } } },
@@ -131,7 +131,7 @@ export default async function AnnotationsPage({
       docSlug: a.doc.slug,
       docTitle: docTitleOrFallback(a.doc.title),
       authorName: a.user.name ?? a.user.email,
-      bodyText: (a.body as { text?: string } | null)?.text ?? "",
+      bodyText: a.bodyText,
       quote: isRoot && marked && proseJson ? extractMarkedText(proseJson, "annotation", "id", a.id) : "",
       isRoot,
       createdAt: a.createdAt,

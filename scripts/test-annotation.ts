@@ -41,7 +41,7 @@ async function list(slugOrId: string) {
 
   console.log(`Annotations on "${docTitleOrFallback(doc.title)}" (id=${doc.id}):`);
   for (const annotation of annotations) {
-    const text = (annotation.body as { text?: string } | null)?.text ?? "";
+    const text = annotation.bodyText;
     const preview = text.length > 60 ? `${text.slice(0, 60)}…` : text;
     const status = annotation.deletedAt ? "deleted" : "active";
     const replyNote = annotation.parentAnnotationId ? ` reply-to=${annotation.parentAnnotationId}` : "";

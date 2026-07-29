@@ -39,6 +39,17 @@ export const docContentExtensions = [...authorHighlightExtensions, Annotation];
 // pmSchema/pmTitleSchema above.
 export const pmDocContentSchema = getSchema(docContentExtensions);
 
+// The schema for an annotation's own body (PLAN.md §13b) — deliberately
+// authorHighlightExtensions alone, not docContentExtensions: an annotation
+// body can't itself carry the `annotation` anchor mark (an annotation on an
+// annotation isn't a thing this app has), and picking the wrong variant here
+// would silently let one be typed in and then vanish the moment it's
+// re-rendered through a schema that doesn't know the mark (CLAUDE.md's
+// "picking the wrong variant silently drops marks" warning, restated for a
+// third consumer).
+export const annotationContentExtensions = authorHighlightExtensions;
+export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
+
 // The schema for a post's *title*, which lives in its own Yjs fragment
 // ("title") of the same Y.Doc as the body rather than as a node inside the
 // body doc — a node at position 0 would shift every body position, and

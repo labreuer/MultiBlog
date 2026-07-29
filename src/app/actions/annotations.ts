@@ -5,6 +5,10 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { applyAnnotationMark } from "@/lib/annotation-admin";
+import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { ydocIdForAnnotation } from "@/lib/ydoc-names";
+import { ydocStore } from "../../../server/ydoc-store";
+import type { Prisma } from "@/generated/prisma/client";
 import type { SubmitCommentState } from "./comments";
 
 const MAX_BODY_LENGTH = 5000;
@@ -59,9 +63,26 @@ export async function submitAnnotation(
   }
 
   const trimmedBody = body.trim();
+  // PLAN.md §13b/§13d — every annotation posted through this still-plain-
+  // text action (Phase 1: the live ydoc editor isn't wired in until Phase 2)
+  // is a real, already-visible comment, so it's created LIVE, not the
+  // model's DRAFT default — DRAFT is reserved for a composer that's been
+  // opened but not yet posted, which this action has no path for yet.
+  const seed = seedAnnotationYdoc(trimmedBody);
   const annotation = await prisma.annotation.create({
-    data: { docId, parentAnnotationId: parentId, userId: session.user.id, body: { text: trimmedBody } },
+    data: {
+      docId,
+      parentAnnotationId: parentId,
+      userId: session.user.id,
+      proseJson: seed.proseJson as Prisma.InputJsonValue,
+      bodyText: trimmedBody,
+      status: "LIVE",
+    },
   });
+  // Eager, in the same request — mirrors createDoc's own eager
+  // ydocStore.createIfAbsent (PLAN.md §12b) so the annotation's ydoc exists
+  // before any client could try to connect to it.
+  await ydocStore.createIfAbsent(ydocIdForAnnotation(annotation.id), seed.ydoc, seed.stateVector);
 
   // Only a root annotation ever carries a mark — a reply is just a comment
   // in the thread, anchored nowhere of its own (PLAN.md §12i).

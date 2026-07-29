@@ -41,13 +41,42 @@ export const YDOC_SNAPSHOT_PATH = "/admin/ydoc-snapshot";
 // `ydoc:<cuid>` name with no owning Doc (e.g. every /ydoc-debug document)
 // simply isn't a doc's ydoc — docIdFromYdocId only says what doc id a name
 // *would* belong to, not that a Doc row with that id exists.
+//
+// Guarded against §13a's annotation sub-namespace below: a plain
+// `ydoc:<cuid>` (a doc) and `ydoc:annotation:<cuid>` (an annotation's own
+// ydoc) both start with YDOC_PREFIX, so docIdFromYdocId has to exclude the
+// latter explicitly or every annotation's store-debounce would resolve to a
+// bogus "doc id" of `annotation:<cuid>` and run a no-op-but-pointless
+// doc.updateMany on every keystroke.
 export function ydocIdForDoc(docId: string): string {
   return `${YDOC_PREFIX}${docId}`;
 }
 
 export function docIdFromYdocId(ydocId: string): string | null {
-  return ydocId.startsWith(YDOC_PREFIX) ? ydocId.slice(YDOC_PREFIX.length) : null;
+  if (!ydocId.startsWith(YDOC_PREFIX) || ydocId.startsWith(YDOC_ANNOTATION_PREFIX)) {
+    return null;
+  }
+  return ydocId.slice(YDOC_PREFIX.length);
 }
 
 /** Path the collab server's onRequest hook listens on for §12i's annotation-mark endpoint. */
 export const ANNOTATION_MARK_PATH = "/admin/annotation-mark";
+
+/** Path the collab server's onRequest hook listens on for §13d's mark-removal endpoint. */
+export const ANNOTATION_UNMARK_PATH = "/admin/annotation-unmark";
+
+// PLAN.md §13a — an annotation's own body is a ydoc too, one per Annotation
+// row (root or reply), same no-foreign-key-either-direction rule as
+// ydocIdForDoc above. A dedicated sub-namespace, not a sibling top-level
+// prefix, specifically so isYdocDocument (a single YDOC_PREFIX check) keeps
+// routing every ydoc-stack document — annotation included — to
+// server/ydoc-hooks.ts with no change there at all.
+export const YDOC_ANNOTATION_PREFIX = `${YDOC_PREFIX}annotation:`;
+
+export function ydocIdForAnnotation(annotationId: string): string {
+  return `${YDOC_ANNOTATION_PREFIX}${annotationId}`;
+}
+
+export function annotationIdFromYdocId(ydocId: string): string | null {
+  return ydocId.startsWith(YDOC_ANNOTATION_PREFIX) ? ydocId.slice(YDOC_ANNOTATION_PREFIX.length) : null;
+}

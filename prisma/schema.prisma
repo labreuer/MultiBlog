@@ -66,6 +66,18 @@ enum DocVisibility {
   @@map("doc_visibility")
 }
 
+// PLAN.md §13d — an annotation's visibility/notification axis, orthogonal to
+// moderation (annotations are never moderated, §12c). DRAFT never carries an
+// inline mark and notifies nobody; LIVE is the ordinary posted state; RAISED
+// is LIVE plus the doc's byline authors have been emailed.
+enum AnnotationStatus {
+  DRAFT
+  LIVE
+  RAISED
+
+  @@map("annotation_status")
+}
+
 model User {
   id               String            @id @default(cuid())
   email            String            @unique
@@ -428,18 +440,31 @@ model DocSlugHistory {
 // mark embedded in the doc's own ydoc (src/lib/annotation-extension.ts); no
 // quotedText — the annotated text is read from Doc.proseJson through the
 // mark, so there is nothing here that could fall out of sync with the
-// document. No status/moderation columns: annotations are never moderated.
+// document. No moderation columns: annotations are never moderated (status
+// below is about visibility/notification, §13d, not approval).
+//
+// PLAN.md §13 — the body itself is a live ydoc (ydocIdForAnnotation(id),
+// src/lib/ydoc-names.ts), the same substrate a doc itself uses (§11).
+// proseJson/bodyText are caches of that ydoc, written by
+// server/annotation-cache.ts's store-debounce exactly the way Doc.proseJson/
+// Doc.title already are (§12d) — losing them costs a rebuild, not data. The
+// old plain-text `body` {text} column is gone: every row was backfilled onto
+// proseJson/bodyText (scripts/backfill-annotation-ydocs.ts, since deleted)
+// before this column was dropped.
 model Annotation {
-  id                 String    @id @default(cuid())
-  docId              String    @map("doc_id")
-  parentAnnotationId String?   @map("parent_annotation_id")
-  userId             String    @map("user_id")
-  body               Json
-  resolvedAt         DateTime? @map("resolved_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  editedAt           DateTime? @map("edited_at")
-  deletedByUserId    String?   @map("deleted_by_user_id")
-  deletedAt          DateTime? @map("deleted_at")
+  id                 String           @id @default(cuid())
+  docId              String           @map("doc_id")
+  parentAnnotationId String?          @map("parent_annotation_id")
+  userId             String           @map("user_id")
+  proseJson          Json?            @map("prose_json")
+  bodyText           String           @default("") @map("body_text")
+  status             AnnotationStatus @default(DRAFT)
+  raisedAt           DateTime?        @map("raised_at")
+  resolvedAt         DateTime?        @map("resolved_at")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  editedAt           DateTime?        @map("edited_at")
+  deletedByUserId    String?          @map("deleted_by_user_id")
+  deletedAt          DateTime?        @map("deleted_at")
 
   doc       Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
   parent    Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])

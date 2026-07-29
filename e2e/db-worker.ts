@@ -27,7 +27,7 @@ import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { contentExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
-import { isTestYdocDocument, newTestYdocId, ydocIdForDoc } from "@/lib/ydoc-names";
+import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
 // server/ isn't under src/, but it's still part of the one tsconfig project
@@ -97,9 +97,19 @@ export async function deleteTestUser(email: string): Promise<void> {
   // optional, unlike Commenter's) — a secondUser({role: "AUTHORIZED"}) who
   // annotated a doc during the test would otherwise block their own
   // teardown. deleted_by_user_id is ON DELETE SET NULL, so only the
-  // authored side needs handling here.
+  // authored side needs handling here. Each deleted annotation's own ydoc
+  // row (§13a) has to go too, captured before the deleteMany — same "no FK
+  // means nothing cascades this" reasoning as deleteTestDoc above.
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  if (user) await prisma.annotation.deleteMany({ where: { userId: user.id } });
+  if (user) {
+    const annotationIds = (
+      await prisma.annotation.findMany({ where: { userId: user.id }, select: { id: true } })
+    ).map((a) => a.id);
+    await prisma.annotation.deleteMany({ where: { userId: user.id } });
+    if (annotationIds.length > 0) {
+      await prisma.ydoc.deleteMany({ where: { id: { in: annotationIds.map(ydocIdForAnnotation) } } });
+    }
+  }
   await prisma.user.deleteMany({ where: { email } });
 }
 
@@ -231,8 +241,17 @@ export async function deleteTestDoc(idOrSlug: string): Promise<void> {
   if (doc.authors.length === 0 || unsafe.length > 0) {
     throw new Error(`Refusing to delete doc "${doc.title}" — it has a non-throwaway (or missing) author.`);
   }
+
+  // PLAN.md §13a — captured before the delete cascades the Annotation rows
+  // away, same reason scripts/test-doc.ts's own delete does this.
+  const annotationIds = (await prisma.annotation.findMany({ where: { docId: doc.id }, select: { id: true } })).map(
+    (a) => a.id,
+  );
+
   await prisma.doc.delete({ where: { id: doc.id } });
-  await prisma.ydoc.deleteMany({ where: { id: ydocIdForDoc(doc.id) } });
+  await prisma.ydoc.deleteMany({
+    where: { id: { in: [ydocIdForDoc(doc.id), ...annotationIds.map(ydocIdForAnnotation)] } },
+  });
 }
 
 export type DocState = { title: string; proseText: string | null; visibility: DocVisibility };
@@ -277,7 +296,7 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
   return annotations.map((a) => ({
     id: a.id,
     parentAnnotationId: a.parentAnnotationId,
-    bodyText: (a.body as { text?: string } | null)?.text ?? "",
+    bodyText: a.bodyText,
     anchored: markedIds.has(a.id),
     deletedAt: a.deletedAt?.toISOString() ?? null,
   }));
@@ -538,8 +557,13 @@ export async function sweepTestData(): Promise<{ posts: number; docs: number; us
   });
   for (const doc of staleDocs) {
     if (doc.authors.length > 0) {
+      const annotationIds = (await prisma.annotation.findMany({ where: { docId: doc.id }, select: { id: true } })).map(
+        (a) => a.id,
+      );
       await prisma.doc.delete({ where: { id: doc.id } });
-      await prisma.ydoc.deleteMany({ where: { id: ydocIdForDoc(doc.id) } });
+      await prisma.ydoc.deleteMany({
+        where: { id: { in: [ydocIdForDoc(doc.id), ...annotationIds.map(ydocIdForAnnotation)] } },
+      });
     }
   }
 

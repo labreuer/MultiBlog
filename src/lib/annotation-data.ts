@@ -95,7 +95,7 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
         id: a.id,
         parentAnnotationId: a.parentAnnotationId,
         displayName: a.user.name ?? a.user.email,
-        bodyText: (a.body as { text?: string } | null)?.text ?? "",
+        bodyText: a.bodyText,
         createdAt: a.createdAt.toISOString(),
         deletedByUserId: a.deletedByUserId,
         commenterUserId: a.userId,

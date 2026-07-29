@@ -20,6 +20,7 @@ import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
 import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
 import { updateDocCache } from "./doc-cache";
+import { updateAnnotationCache } from "./annotation-cache";
 
 // Every new-stack Hocuspocus hook (PLAN.md §11d). Kept entirely separate from
 // server/collab.ts's post-document hooks — the two stacks share the process
@@ -114,8 +115,12 @@ export async function ydocOnStoreDocument({
   }
   const { ydoc, stateVector } = encodeYdocState(document);
   await ydocStore.storeState(documentName, ydoc, stateVector);
-  // PLAN.md §12d — a no-op for every non-doc ydoc (including /ydoc-debug's).
+  // PLAN.md §12d / §13a — each no-ops unless documentName is its own kind of
+  // ydoc (a doc's vs. an annotation's own namespace, mutually exclusive by
+  // construction), so both are safe to call unconditionally for every
+  // ydoc-stack document, including a bare /ydoc-debug one that matches neither.
   await updateDocCache(documentName, document);
+  await updateAnnotationCache(documentName, document);
 }
 
 // clientID -> user_id attribution (PLAN.md §11d). A connection's own Yjs

@@ -13,12 +13,13 @@
 // create also eagerly creates the doc's ydoc row (PLAN.md §12b, matching
 // what createDocAction does from the app) — the doc is immediately editable
 // without needing onLoadDocument's own forgiving-fallback path to run first.
-// delete removes both the doc row and its derived ydoc:<id> row — the two
-// tables have no foreign key between them (§12b), so nothing cascades this
-// automatically; skipping it would leak a ydoc/ydoc_update row with no
-// owning doc, which is exactly what scripts/test-ydoc.ts's own containment
-// guard exists to not have to clean up (a doc's ydoc is never ydoc:test-
-// prefixed).
+// delete removes the doc row, its derived ydoc:<id> row, and every one of
+// its annotations' own ydoc:annotation:<id> rows (§13a) — none of these
+// tables have a foreign key back to the ydoc they own (§12b/§13a), so
+// nothing cascades any of it automatically; skipping it would leak rows with
+// no owning doc/annotation, which is exactly what scripts/test-ydoc.ts's own
+// containment guard exists to not have to clean up (neither prefix is ever
+// ydoc:test-).
 // Delete docs before deleting their author with test-user.ts delete — once
 // a doc's only author is gone, "no authors" is indistinguishable from a
 // real doc that lost its author some other way, so delete refuses it.
@@ -28,7 +29,7 @@ import * as Y from "yjs";
 import { prisma } from "../src/lib/prisma";
 import { uniqueDocSlug } from "../src/lib/doc-slug";
 import { docTitleOrFallback } from "../src/lib/doc-title";
-import { ydocIdForDoc } from "../src/lib/ydoc-names";
+import { ydocIdForDoc, ydocIdForAnnotation } from "../src/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 import { DocVisibility } from "../src/generated/prisma/enums";
 
@@ -102,9 +103,22 @@ async function del(slugOrId: string) {
     return;
   }
 
+  // PLAN.md §13a — every annotation on this doc has its own ydoc row, with
+  // no FK back to the annotation (same no-foreign-key rule as doc/ydoc
+  // itself). doc.delete cascades away the Annotation rows but has no way to
+  // know about their ydocs, so those ids have to be captured first or the
+  // rows are unreachable garbage the instant the cascade fires.
+  const annotationIds = (await prisma.annotation.findMany({ where: { docId: doc.id }, select: { id: true } })).map(
+    (a) => a.id,
+  );
+
   await prisma.doc.delete({ where: { id: doc.id } });
-  await prisma.ydoc.deleteMany({ where: { id: ydocIdForDoc(doc.id) } });
-  console.log(`Deleted doc "${docTitleOrFallback(doc.title)}" (id=${doc.id}, slug=${doc.slug}) and its ydoc row.`);
+  await prisma.ydoc.deleteMany({
+    where: { id: { in: [ydocIdForDoc(doc.id), ...annotationIds.map(ydocIdForAnnotation)] } },
+  });
+  console.log(
+    `Deleted doc "${docTitleOrFallback(doc.title)}" (id=${doc.id}, slug=${doc.slug}), its ydoc row, and ${annotationIds.length} annotation ydoc row(s).`,
+  );
 }
 
 async function main() {
