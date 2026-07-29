@@ -1,16 +1,20 @@
 import type { ReactNode } from "react";
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { authorHighlightExtensions, titleAuthorHighlightExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
 
-// Decodes a single ydoc blob and renders it exactly the way LiveHistoryViewer
-// renders a replayed one (src/components/LiveHistoryViewer.tsx) — but for one
-// standalone document rather than a replay log, and tolerant of a document
-// that was never a TipTap doc to begin with (/ydoc-debug's --garbage
+// Renders an already-materialized Y.Doc the way LiveHistoryViewer renders a
+// replayed one (src/components/LiveHistoryViewer.tsx) — but tolerant of a
+// document that was never a TipTap doc to begin with (/ydoc-debug's --garbage
 // fixture, PLAN.md §11f). This logic is copied rather than extracted out of
 // LiveHistoryViewer, which the isolation constraint (PLAN.md §11) puts
 // off-limits; de-duplicating the two belongs to the eventual cutover.
+//
+// Takes a Y.Doc rather than a blob, and **never destroys it** — the replay
+// slider owns one long-lived doc that it advances across scrub steps, so
+// tearing it down here would break the next incremental step. Decoding bytes
+// into a doc is the caller's job (and, for the slider, the thing being timed).
 
 export type YdocRenderResult =
   | {
@@ -22,17 +26,13 @@ export type YdocRenderResult =
     }
   | { ok: false; error: string };
 
-export function renderYdocBlob(bytes: Uint8Array): YdocRenderResult {
-  let scratch: Y.Doc | null = null;
+export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
   try {
-    scratch = new Y.Doc();
-    Y.applyUpdate(scratch, bytes);
-
-    const bodyJSON = TiptapTransformer.extensions(authorHighlightExtensions).fromYdoc(scratch, "default");
-    const titleFragment = scratch.getXmlFragment("title");
+    const bodyJSON = TiptapTransformer.extensions(authorHighlightExtensions).fromYdoc(doc, "default");
+    const titleFragment = doc.getXmlFragment("title");
     const titleJSON =
       titleFragment.length > 0
-        ? TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(scratch, "title")
+        ? TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(doc, "title")
         : null;
 
     const authorIds = new Set(collectMarkAttrValues(bodyJSON, "authorHighlight", "authorId"));
@@ -41,7 +41,7 @@ export function renderYdocBlob(bytes: Uint8Array): YdocRenderResult {
     }
 
     const clients: Record<string, string> = {};
-    scratch.getMap<string>("clients").forEach((userId, clientId) => {
+    doc.getMap<string>("clients").forEach((userId, clientId) => {
       clients[clientId] = userId;
     });
 
@@ -53,11 +53,13 @@ export function renderYdocBlob(bytes: Uint8Array): YdocRenderResult {
       clients,
     };
   } catch (err) {
+    // Carries the complete, user-facing sentence rather than a bare reason:
+    // the replay step ahead of this one produces its own differently-worded
+    // failure ("couldn't replay…"), and a caller that prefixed both the same
+    // way would report a corrupt update log as a TipTap schema problem.
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "This document isn't TipTap-compatible.",
+      error: `This document isn't TipTap-compatible: ${err instanceof Error ? err.message : String(err)}`,
     };
-  } finally {
-    scratch?.destroy();
   }
 }

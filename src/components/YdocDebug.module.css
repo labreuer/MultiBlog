@@ -57,3 +57,57 @@
 .error {
   color: crimson;
 }
+
+/* ---- replay slider (PLAN.md §11f) ---- */
+
+.replay {
+  margin-bottom: 1rem;
+}
+
+/* The dots below are absolutely positioned against this, so the track and the
+   overlay share one coordinate space. */
+.sliderWrapper {
+  position: relative;
+  padding-bottom: 14px;
+}
+
+.slider {
+  width: 100%;
+  display: block;
+  margin: 0;
+}
+
+/* One per ydoc_snapshot, at its position along the log. `left` is set inline
+   (it's a computed per-instance percentage, per STYLE.md) — everything fixed
+   lives here. A range thumb's centre doesn't quite reach the track ends, so
+   dots near 0%/100% sit a few pixels off the thumb; cosmetic, and not worth
+   correcting on a debug page. */
+.snapshotDot {
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid #3366cc;
+  border-radius: 50%;
+  background: #cfe0ff;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+
+.snapshotDotActive {
+  background: #3366cc;
+}
+
+.statusLine {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 0.75rem;
+}
+
+.positionLine {
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}

@@ -1465,7 +1465,7 @@ An ADMIN-gated page in the same shape as `/site-settings`, existing to make ever
 observable rather than to ship a user-facing feature.
 
 - A dropdown of the ten most recently updated `ydoc` rows, first auto-selected.
-- **Read-only by default**: decode the blob into a scratch `Y.Doc`, run it through
+- **Read-only by default**: a replay slider over the update log (§11h), rendered through
   `TiptapTransformer` + `@tiptap/static-renderer` exactly as `LiveHistoryViewer` does, wrapped
   in a `try/catch` so a document that isn't TipTap-compatible renders an error message instead
   of blowing up the page. The `"title"` fragment renders alongside when present, and so does the
@@ -1484,6 +1484,45 @@ Fixtures come from both directions: `scripts/test-ydoc.ts` (create/list/delete, 
 `--from-post` to build a document from a real revision so there is genuine TipTap content, and
 `--garbage` to exercise the error path) and an on-page "New document" button for a quick empty
 one.
+
+### 11h. The replay slider — measuring what a snapshot buys
+
+The read-only view is a scrubber over `ydoc_update`, and the first thing that actually consumes
+either of §11b's invariants. It exists to *measure*, not to scrub pleasantly: it rebuilds from
+the newest `ydoc_snapshot` at or before the target position rather than from row #1, and reports
+what that cost.
+
+`GET /api/ydoc/[id]/replay` ships every update and snapshot payload once, so a scrub step
+touches no network and the reported milliseconds are Yjs replay and nothing else. (base64 is
+decoded to bytes up front for the same reason — it's a transport artifact of shipping this over
+JSON, not part of replay.) That deliberately ships the whole log in order to measure the cost of
+*not* replaying all of it; it's a debug page, and the alternative — fetching per step — would put
+network latency inside the number being compared.
+
+**Forward is fast, backward is slow, and that asymmetry is the point.** Moving forward advances
+the `Y.Doc` already in hand. Moving backward can't: Yjs updates are append-only and there is no
+un-apply, so going back means rebuilding from the base. Nothing debounces the slider, caches
+other positions, or precomputes — measured over an 882-update log with two snapshots, a full
+forward sweep applied 879 updates in 56ms total, while the same sweep backward applied 137,406
+in 852ms. The status line reports `forward`/`rebuild`, the base and its size, the resultant size
+as a signed delta, updates-since-base, updates-applied-this-step, and elapsed ms.
+
+Snapshots show up as circles on the track, and the cliff either side of one is the clearest
+single demonstration in the whole §11 stack: landing exactly on a snapshot applies **0** updates
+(0.1ms — the blob alone is the answer), while one index earlier applies 354 (2.7ms), because that
+snapshot no longer qualifies and the rebuild falls back to the previous base.
+
+Two caveats worth keeping:
+
+- The `Y.encodeStateAsUpdate` behind the size delta runs every step and is **pure
+  instrumentation**. It sits outside the timer because it isn't part of the rebuild, but it is
+  real per-step cost, and on a large document it can exceed the rebuild it reports on. The
+  millisecond figure is not this view's total step cost.
+- A snapshot's blob is guaranteed to contain everything at or below its `last_ydoc_update_id`,
+  but may contain slightly *more* — §11d reads that mark *before* encoding, deliberately, so
+  truncation stays safe. So landing exactly on a circle can show content a hair ahead of that
+  point if the snapshot was taken mid-keystroke. Near-zero in practice (snapshots are a manual
+  button press), but it's why the scrubber isn't frame-accurate at snapshot boundaries.
 
 ### 11g. Verification
 

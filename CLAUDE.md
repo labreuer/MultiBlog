@@ -316,6 +316,18 @@ anything repeatable.
   can never merge into a re-seeded one. Attach the lineage-keyed store *before* connecting,
   never cache it to attach earlier — caching would let a stale copy merge in before the
   mismatch could be detected, which is the bug this avoids, not a race around it.
+- **`/ydoc-debug`'s replay slider is deliberately unoptimized** (PLAN.md §11h) — no debounce, no
+  cache of other positions, no precompute. Backward scrubbing across a long log *is* supposed to
+  stutter: Yjs updates are append-only with no un-apply, so going back rebuilds from the nearest
+  snapshot while going forward just advances the doc already in hand. Don't "fix" it. Two things
+  to know before reading its numbers: (a) the `Y.encodeStateAsUpdate` behind the `(+N)` size
+  delta runs on every scrub step and is pure instrumentation — it's outside the timer because
+  it isn't part of the rebuild, but on a large document it can cost more than the rebuild the
+  timer reports, so the ms figure is not the per-step cost of the view; (b) forward is *not*
+  always incremental — jumping forward across a newer snapshot rebuilds from that snapshot,
+  which is both correct and cheaper than replaying the deltas in between, and is the only way a
+  snapshot earns its keep on a forward jump. The `forward`/`rebuild` marker at the head of the
+  status line is what tells the two apart.
 
 ## Conventions
 

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { renderYdocBlob, type YdocRenderResult } from "@/lib/ydoc-render";
+import { renderYdocDoc, type YdocRenderResult } from "@/lib/ydoc-render";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import CollabEditorBody from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
@@ -24,6 +24,12 @@ type DocDetail = {
   updateCount: number;
   lastUpdates: UpdateRow[];
   snapshots: SnapshotRow[];
+};
+
+// Raw payloads for the replay slider, from GET /api/ydoc/[id]/replay.
+type ReplayPayload = {
+  updates: { id: string; createdAt: string; base64: string }[];
+  snapshots: { id: string; createdAt: string; lastYdocUpdateId: string; base64: string }[];
 };
 
 type Props = {
@@ -125,43 +131,50 @@ function DocumentPanel({
   const [mode, setMode] = useState<Mode>("read");
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [renderResult, setRenderResult] = useState<YdocRenderResult | null>(null);
+  const [replay, setReplay] = useState<ReplayPayload | null>(null);
+  // Bumped on every successful replay fetch, and used as ReplayView's `key`
+  // so new data remounts it — which is how its materialized Y.Doc and scrub
+  // position get reset without an effect that has to tear them down by hand.
+  const [replayVersion, setReplayVersion] = useState(0);
   const [snapshotting, setSnapshotting] = useState(false);
 
-  const fetchDetail = useCallback(async (): Promise<DocDetail | null> => {
-    const res = await fetch(`/api/ydoc/${documentId}`);
-    if (!res.ok) {
-      setDetailError(`Failed to load document (${res.status}).`);
+  // Two endpoints, deliberately: /api/ydoc/[id] backs the Refresh tables and
+  // is small, while /replay ships every update and snapshot payload so a scrub
+  // step touches no network. Bundling them would re-download the whole log on
+  // every Refresh click.
+  const fetchAll = useCallback(async (): Promise<DocDetail | null> => {
+    const [detailRes, replayRes] = await Promise.all([
+      fetch(`/api/ydoc/${documentId}`),
+      fetch(`/api/ydoc/${documentId}/replay`),
+    ]);
+    if (!detailRes.ok) {
+      setDetailError(`Failed to load document (${detailRes.status}).`);
       setDetail(null);
       return null;
     }
-    const data = (await res.json()) as DocDetail;
+    const data = (await detailRes.json()) as DocDetail;
     setDetailError(null);
     setDetail(data);
+
+    if (replayRes.ok) {
+      setReplay((await replayRes.json()) as ReplayPayload);
+      setReplayVersion((v) => v + 1);
+    } else {
+      setDetailError(`Failed to load replay history (${replayRes.status}).`);
+    }
     return data;
   }, [documentId]);
 
-  // Re-fetches the detail payload and, in read mode, re-decodes the blob —
-  // shared by the initial load, the Refresh button, and the post-snapshot
-  // follow-up so the new snapshot row appears without a second click.
   const refresh = useCallback(async () => {
-    const data = await fetchDetail();
-    if (data && mode === "read") {
-      setRenderResult(renderYdocBlob(base64ToBytes(data.ydoc.ydocBase64)));
-    }
-  }, [mode, fetchDetail]);
+    await fetchAll();
+  }, [fetchAll]);
 
   useEffect(() => {
-    let cancelled = false;
+    // Wrapped rather than called bare so the setState calls inside fetchAll
+    // land after an await rather than synchronously in the effect body.
     (async () => {
-      const data = await fetchDetail();
-      if (!cancelled && data && mode === "read") {
-        setRenderResult(renderYdocBlob(base64ToBytes(data.ydoc.ydocBase64)));
-      }
+      await fetchAll();
     })();
-    return () => {
-      cancelled = true;
-    };
     // Only on mount for this documentId — refresh() (used by the Refresh and
     // Snapshot buttons) covers every later re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,7 +215,11 @@ function DocumentPanel({
         </div>
 
         {mode === "read" ? (
-          <ReadOnlyView renderResult={renderResult} />
+          replay ? (
+            <ReplayView key={replayVersion} replay={replay} />
+          ) : (
+            <p>Loading…</p>
+          )
         ) : (
           <EditView documentName={documentId} userId={userId} userName={userName} userColor={userColor} />
         )}
@@ -227,14 +244,271 @@ function DocumentPanel({
   );
 }
 
-function ReadOnlyView({ renderResult }: { renderResult: YdocRenderResult | null }) {
+// ---------------------------------------------------------------------------
+// Replay slider (PLAN.md §11f)
+//
+// The read-only view is a scrubber over `ydoc_update`, rebuilt from the newest
+// `ydoc_snapshot` at or before the target position rather than from row #1.
+// Its point is measurement, not a pleasant scrubbing experience: forward is
+// fast because the doc already in hand can be advanced, backward is slow
+// because Yjs updates are append-only — there is no un-apply, so going back
+// means rebuilding from the base. That asymmetry is the thing on display, and
+// nothing here debounces, caches other positions, or precomputes to hide it.
+// ---------------------------------------------------------------------------
+
+type PreparedUpdate = { id: bigint; createdAt: string; bytes: Uint8Array };
+type PreparedSnapshot = {
+  id: string;
+  createdAt: string;
+  lastYdocUpdateId: bigint;
+  bytes: Uint8Array;
+  /** Index in `updates` this snapshot sits at, for placing its dot. */
+  sliderIndex: number;
+};
+type Prepared = { updates: PreparedUpdate[]; snapshots: PreparedSnapshot[] };
+
+type ScrubStatus = {
+  mode: "forward" | "rebuild";
+  fromSnapshot: boolean;
+  baseBytes: number;
+  deltaBytes: number;
+  sinceBase: number;
+  appliedThisStep: number;
+  elapsedMs: number;
+};
+
+// base64 → bytes once, up front, so the timed section below measures Yjs
+// replay and nothing else. Base64 is a transport artifact of shipping this
+// over JSON; a real reader would fetch binary, so folding its cost into the
+// per-scrub measurement would overstate what replay actually costs.
+function prepare(replay: ReplayPayload): Prepared {
+  const updates: PreparedUpdate[] = replay.updates.map((u) => ({
+    id: BigInt(u.id),
+    createdAt: u.createdAt,
+    bytes: base64ToBytes(u.base64),
+  }));
+
+  const snapshots: PreparedSnapshot[] = replay.snapshots.map((s) => {
+    const mark = BigInt(s.lastYdocUpdateId);
+    // The update this snapshot's high-water mark names. Falls back to the
+    // last update at or below the mark if that exact row is somehow gone.
+    let sliderIndex = updates.findIndex((u) => u.id === mark);
+    if (sliderIndex === -1) {
+      sliderIndex = updates.reduce((acc, u, i) => (u.id <= mark ? i : acc), 0);
+    }
+    return { id: s.id, createdAt: s.createdAt, lastYdocUpdateId: mark, bytes: base64ToBytes(s.base64), sliderIndex };
+  });
+
+  return { updates, snapshots };
+}
+
+/**
+ * The newest snapshot at or before `index`, plus the first update index that
+ * still has to be applied on top of it. With no qualifying snapshot the base
+ * is update row #1, which invariant 1 (PLAN.md §11b) guarantees is a full
+ * state — so replaying from index 0 is always self-sufficient.
+ */
+function baseFor(prepared: Prepared, index: number): { snapshot: PreparedSnapshot | null; startIndex: number } {
+  const targetId = prepared.updates[index].id;
+
+  let snapshot: PreparedSnapshot | null = null;
+  for (const candidate of prepared.snapshots) {
+    // Ascending by lastYdocUpdateId, so the last one that still qualifies wins.
+    if (candidate.lastYdocUpdateId <= targetId) snapshot = candidate;
+    else break;
+  }
+  if (!snapshot) return { snapshot: null, startIndex: 0 };
+
+  const mark = snapshot.lastYdocUpdateId;
+  const startIndex = prepared.updates.findIndex((u) => u.id > mark);
+  // -1 means the snapshot already covers every update we have; nothing to
+  // apply on top of it.
+  return { snapshot, startIndex: startIndex === -1 ? prepared.updates.length : startIndex };
+}
+
+function formatDelta(bytes: number): string {
+  return bytes < 0 ? `−${Math.abs(bytes)}` : `+${bytes}`;
+}
+
+function ReplayView({ replay }: { replay: ReplayPayload }) {
+  const prepared = useMemo(() => prepare(replay), [replay]);
+  const total = prepared.updates.length;
+
+  // Mutable replay machinery, deliberately refs rather than state: a
+  // re-render per applyUpdate would swamp the very measurement this exists to
+  // take.
+  const docRef = useRef<Y.Doc | null>(null);
+  const baseSnapshotIdRef = useRef<string | null>(null);
+  const indexRef = useRef(-1);
+
+  const [index, setIndex] = useState(Math.max(0, total - 1));
+  const [renderResult, setRenderResult] = useState<YdocRenderResult | null>(null);
+  const [status, setStatus] = useState<ScrubStatus | null>(null);
+
+  const seek = useCallback(
+    (target: number) => {
+      if (total === 0) return;
+      const clamped = Math.min(Math.max(target, 0), total - 1);
+      const required = baseFor(prepared, clamped);
+
+      // Forward from the doc already in hand is the only incremental path Yjs
+      // allows. It's unavailable going backward, and also when a *newer*
+      // snapshot now covers the target — in which case rebuilding from that
+      // snapshot is both correct and cheaper than replaying the deltas
+      // between here and there. That second case is the only way a snapshot
+      // ever earns its keep on a forward jump.
+      const incremental =
+        docRef.current !== null &&
+        clamped >= indexRef.current &&
+        (required.snapshot?.id ?? null) === baseSnapshotIdRef.current;
+
+      let appliedThisStep = 0;
+      try {
+        const t0 = performance.now();
+        if (incremental) {
+          const doc = docRef.current!;
+          for (let i = indexRef.current + 1; i <= clamped; i++) {
+            Y.applyUpdate(doc, prepared.updates[i].bytes);
+            appliedThisStep++;
+          }
+        } else {
+          const doc = new Y.Doc();
+          if (required.snapshot) Y.applyUpdate(doc, required.snapshot.bytes);
+          for (let i = required.startIndex; i <= clamped; i++) {
+            Y.applyUpdate(doc, prepared.updates[i].bytes);
+            appliedThisStep++;
+          }
+          const previous = docRef.current;
+          docRef.current = doc;
+          baseSnapshotIdRef.current = required.snapshot?.id ?? null;
+          previous?.destroy();
+        }
+        const elapsedMs = performance.now() - t0;
+        indexRef.current = clamped;
+
+        // Outside the timer on purpose: encoding the whole document just to
+        // report its size is pure instrumentation, not part of the rebuild.
+        // It is still real per-step cost the page pays, and on a large
+        // document it can easily exceed the rebuild it's reporting on — so
+        // don't read the millisecond figure as this view's total step cost.
+        const baseBytes = required.snapshot
+          ? required.snapshot.bytes.byteLength
+          : prepared.updates[0].bytes.byteLength;
+        const resultBytes = Y.encodeStateAsUpdate(docRef.current!).byteLength;
+
+        setIndex(clamped);
+        setStatus({
+          mode: incremental ? "forward" : "rebuild",
+          fromSnapshot: required.snapshot !== null,
+          baseBytes,
+          deltaBytes: resultBytes - baseBytes,
+          sinceBase: clamped - required.startIndex + 1,
+          appliedThisStep,
+          elapsedMs,
+        });
+        setRenderResult(renderYdocDoc(docRef.current!));
+      } catch (err) {
+        // A document whose bytes aren't a valid Yjs update at all (the
+        // --garbage fixture) throws here rather than in the renderer. Reset
+        // so the next seek rebuilds from scratch instead of continuing from
+        // a half-applied doc.
+        docRef.current?.destroy();
+        docRef.current = null;
+        baseSnapshotIdRef.current = null;
+        indexRef.current = -1;
+        setIndex(clamped);
+        setStatus(null);
+        setRenderResult({
+          ok: false,
+          error: `Couldn't replay this document's updates: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    },
+    [prepared, total],
+  );
+
+  // Materialize the newest position on mount. This component is keyed by its
+  // parent on the replay-fetch version, so "mount" is also what happens after
+  // a Refresh — which is how the Y.Doc gets rebuilt against new data without
+  // a separate teardown path.
+  //
+  // set-state-in-effect is disabled deliberately rather than worked around.
+  // The materialized Y.Doc *is* an external system in the sense the rule
+  // means: a mutable non-React object whose construction is this component's
+  // entire job, and whose result has to reach React state before anything can
+  // render. The alternatives are worse — a lazy useState initializer would do
+  // the same work as a side effect during render, and under StrictMode's
+  // double invocation it would report the second (incremental, 0-update) pass
+  // as the initial measurement, which is exactly the number this view exists
+  // to show correctly.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    seek(total - 1);
+    return () => {
+      docRef.current?.destroy();
+      docRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (total === 0) {
+    return <p className={styles.muted}>This document has no update history.</p>;
+  }
+
+  const current = prepared.updates[index];
+
+  return (
+    <div>
+      <div className={styles.replay}>
+        <p className={styles.positionLine}>
+          update {index + 1} of {total} — id {current.id.toString()} —{" "}
+          {new Date(current.createdAt).toLocaleString()}
+        </p>
+        <div className={styles.sliderWrapper}>
+          <input
+            type="range"
+            className={styles.slider}
+            min={0}
+            max={total - 1}
+            value={index}
+            aria-label="Scrub through ydoc update history"
+            onChange={(e) => seek(Number(e.target.value))}
+          />
+          {prepared.snapshots.map((snapshot) => (
+            <button
+              key={snapshot.id}
+              type="button"
+              className={`${styles.snapshotDot} ${snapshot.sliderIndex === index ? styles.snapshotDotActive : ""}`}
+              style={{ left: total > 1 ? `${(snapshot.sliderIndex / (total - 1)) * 100}%` : "0%" }}
+              title={`snapshot ${snapshot.id}\n${new Date(snapshot.createdAt).toLocaleString()}\n${snapshot.bytes.byteLength} B\nthrough update ${snapshot.lastYdocUpdateId.toString()}`}
+              aria-label={`Jump to snapshot through update ${snapshot.lastYdocUpdateId.toString()}`}
+              onClick={() => seek(snapshot.sliderIndex)}
+            />
+          ))}
+        </div>
+        <p className={styles.statusLine} data-testid="replay-status">
+          {status
+            ? `${status.mode} · ${status.fromSnapshot ? "snapshot" : "base row #1"} ${status.baseBytes} B ` +
+              `(${formatDelta(status.deltaBytes)}) · ${status.sinceBase} since ` +
+              `${status.fromSnapshot ? "snapshot" : "row #1"} (${status.appliedThisStep}) · ` +
+              `${status.elapsedMs.toFixed(1)}ms`
+            : "—"}
+        </p>
+      </div>
+      <ReplayContent renderResult={renderResult} />
+    </div>
+  );
+}
+
+function ReplayContent({ renderResult }: { renderResult: YdocRenderResult | null }) {
   if (!renderResult) {
     return <p>Loading…</p>;
   }
   if (!renderResult.ok) {
-    return (
-      <p className={styles.error}>This document isn&apos;t TipTap-compatible: {renderResult.error}</p>
-    );
+    // Rendered verbatim — the producer (renderYdocDoc, or the replay step in
+    // ReplayView) supplies the whole sentence, so a corrupt update log and an
+    // un-renderable schema don't both get reported as the latter.
+    return <p className={styles.error}>{renderResult.error}</p>;
   }
 
   const clientEntries = Object.entries(renderResult.clients);
@@ -242,7 +516,7 @@ function ReadOnlyView({ renderResult }: { renderResult: YdocRenderResult | null 
   return (
     <div>
       {renderResult.title && <div className={styles.titlePreview}>{renderResult.title}</div>}
-      <div className={`${styles.bodyPreview} ${proseStyles.prose}`}>
+      <div className={`${styles.bodyPreview} ${proseStyles.prose}`} data-testid="replay-body">
         {renderResult.body ?? <p className={styles.muted}>Empty document.</p>}
       </div>
       <h3>Clients</h3>
