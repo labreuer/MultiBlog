@@ -19,14 +19,16 @@ import readline from "node:readline";
 import bcrypt from "bcryptjs";
 import * as Y from "yjs";
 import { TiptapTransformer } from "@hocuspocus/transformer";
+import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
-import { contentExtensions } from "@/lib/tiptap-schema";
-import { isTestYdocDocument, newTestYdocId } from "@/lib/ydoc-names";
-import type { Role, ModerationPolicy, CommentStatus } from "@/generated/prisma/enums";
+import { uniqueDocSlug } from "@/lib/doc-slug";
+import { contentExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { isTestYdocDocument, newTestYdocId, ydocIdForDoc } from "@/lib/ydoc-names";
+import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
 // server/ isn't under src/, but it's still part of the one tsconfig project
 // (CLAUDE.md's ydoc-store note) — same relative-import style server/collab.ts
@@ -91,6 +93,13 @@ export async function deleteTestUser(email: string): Promise<void> {
   // User alone strands a row that then blocks reusing this address — the same
   // collision scripts/test-user.ts documents.
   await prisma.commenter.deleteMany({ where: { email } });
+  // annotation.user_id is ON DELETE RESTRICT (an annotation's author is never
+  // optional, unlike Commenter's) — a secondUser({role: "AUTHORIZED"}) who
+  // annotated a doc during the test would otherwise block their own
+  // teardown. deleted_by_user_id is ON DELETE SET NULL, so only the
+  // authored side needs handling here.
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  if (user) await prisma.annotation.deleteMany({ where: { userId: user.id } });
   await prisma.user.deleteMany({ where: { email } });
 }
 
@@ -156,6 +165,128 @@ export async function deleteTestPost(idOrSlug: string): Promise<void> {
     throw new Error(`Refusing to delete post "${post.title}" — it has a non-throwaway (or missing) author.`);
   }
   await prisma.post.delete({ where: { id: post.id } });
+}
+
+// ---------------------------------------------------------------------------
+// Docs and annotations (PLAN.md §12) — same @example.com safety rail as
+// posts/users; deleteTestDoc additionally removes the doc's derived ydoc:
+// row (§12b: no FK between the two tables, so nothing cascades this).
+// ---------------------------------------------------------------------------
+
+export type TestDoc = { id: string; slug: string; title: string };
+
+/**
+ * Creates a doc the same way createDocAction does — a doc row plus an
+ * eagerly-created ydoc row (ydocStore.createIfAbsent), so it's a real
+ * invariant-1 document, not a hand-rolled shortcut around the code path
+ * under test. bodyText, if given, seeds the "default" fragment via the same
+ * TiptapTransformer.toYdoc path server/collab.ts's onLoadDocument uses to
+ * seed a post from a revision — merged into a fresh Y.Doc via
+ * encodeStateAsUpdate/applyUpdate so the seeded doc's own clientID isn't
+ * reused, mirroring the caution in that same onLoadDocument's title-seeding
+ * comment.
+ */
+export async function createTestDoc(opts: {
+  authorEmail: string;
+  title?: string;
+  visibility?: DocVisibility;
+  bodyText?: string;
+}): Promise<TestDoc> {
+  const { authorEmail, title = uniqueTitle("doc"), visibility = "PRIVATE", bodyText } = opts;
+  assertSafe(authorEmail);
+
+  const author = await prisma.user.findUnique({ where: { email: authorEmail } });
+  if (!author) throw new Error(`No such test author: ${authorEmail}`);
+
+  const doc = await prisma.doc.create({
+    data: {
+      slug: await uniqueDocSlug(title),
+      title,
+      visibility,
+      authors: { create: { userId: author.id, bylineOrder: 0 } },
+    },
+  });
+
+  const seed = new Y.Doc();
+  if (bodyText) {
+    const seeded = TiptapTransformer.toYdoc(docFromText(bodyText), "default", contentExtensions);
+    Y.applyUpdate(seed, Y.encodeStateAsUpdate(seeded));
+    seeded.destroy();
+  }
+  const { ydoc, stateVector } = encodeYdocState(seed);
+  seed.destroy();
+  await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
+
+  return { id: doc.id, slug: doc.slug, title: doc.title };
+}
+
+export async function deleteTestDoc(idOrSlug: string): Promise<void> {
+  const doc = await prisma.doc.findFirst({
+    where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    include: { authors: { include: { user: true } } },
+  });
+  if (!doc) return;
+
+  const unsafe = doc.authors.filter((a) => !SAFE_EMAIL.test(a.user.email));
+  if (doc.authors.length === 0 || unsafe.length > 0) {
+    throw new Error(`Refusing to delete doc "${doc.title}" — it has a non-throwaway (or missing) author.`);
+  }
+  await prisma.doc.delete({ where: { id: doc.id } });
+  await prisma.ydoc.deleteMany({ where: { id: ydocIdForDoc(doc.id) } });
+}
+
+export type DocState = { title: string; proseText: string | null; visibility: DocVisibility };
+
+export async function getDocState(docId: string): Promise<DocState | null> {
+  const doc = await prisma.doc.findUnique({ where: { id: docId } });
+  if (!doc) return null;
+  return {
+    title: doc.title,
+    proseText: doc.proseJson ? extractText(doc.proseJson) : null,
+    visibility: doc.visibility,
+  };
+}
+
+/** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), same check createTestYdoc's own spec makes for /ydoc-debug documents. */
+export async function countDocYdocUpdates(docId: string): Promise<number> {
+  return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
+}
+
+export type AnnotationState = {
+  id: string;
+  parentAnnotationId: string | null;
+  bodyText: string;
+  /** Only meaningful for a root (parentAnnotationId null) — see §12h/§12i. */
+  anchored: boolean;
+  deletedAt: string | null;
+};
+
+/**
+ * Every annotation on a doc, with each root's anchored/document-level state
+ * resolved the same way comment-data.ts's getDocAnnotationsAsThreads does —
+ * a mark still present in Doc.proseJson vs. not (PLAN.md §12h).
+ */
+export async function getAnnotationStates(docId: string): Promise<AnnotationState[]> {
+  const [doc, annotations] = await Promise.all([
+    prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } }),
+    prisma.annotation.findMany({ where: { docId }, orderBy: { createdAt: "asc" } }),
+  ]);
+  const proseJson = doc?.proseJson as JSONContent | null;
+  const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
+
+  return annotations.map((a) => ({
+    id: a.id,
+    parentAnnotationId: a.parentAnnotationId,
+    bodyText: (a.body as { text?: string } | null)?.text ?? "",
+    anchored: markedIds.has(a.id),
+    deletedAt: a.deletedAt?.toISOString() ?? null,
+  }));
+}
+
+/** post_collab + post_collab_update row counts — the isolation check's other direction (see ydoc-debug.spec.ts's post-side one). */
+export async function countPostCollabRows(): Promise<{ collab: number; updates: number }> {
+  const [collab, updates] = await Promise.all([prisma.postCollab.count(), prisma.postCollabUpdate.count()]);
+  return { collab, updates };
 }
 
 /**
@@ -379,10 +510,11 @@ export async function countAllYdocs(): Promise<number> {
  * Last-resort cleanup for rows a crashed or Ctrl+C'd run left behind. Scoped
  * to the suite's own naming (`e2e-*@example.com`, "E2E …" titles, `ydoc:test-`
  * ids), so it can never reach a post, account, or document that wasn't
- * created here. Posts go first: deleteTestPost refuses an authorless post,
- * which is what one becomes the moment its only author is deleted.
+ * created here. Posts and docs go first: deleteTestPost/deleteTestDoc refuse
+ * an authorless one, which is what one becomes the moment its only author
+ * is deleted.
  */
-export async function sweepTestData(): Promise<{ posts: number; users: number; ydocs: number }> {
+export async function sweepTestData(): Promise<{ posts: number; docs: number; users: number; ydocs: number }> {
   const stalePosts = await prisma.post.findMany({
     where: {
       title: { startsWith: E2E_TITLE_PREFIX },
@@ -392,6 +524,23 @@ export async function sweepTestData(): Promise<{ posts: number; users: number; y
   });
   for (const post of stalePosts) {
     if (post.authors.length > 0) await prisma.post.delete({ where: { id: post.id } });
+  }
+
+  // A doc's ydoc row is named ydoc:<docId> — not ydoc:test-<uuid> — so it
+  // isn't caught by the ydoc:test- sweep below (same trap PLAN.md §12b
+  // documents for scripts/test-doc.ts). Delete each one alongside its doc.
+  const staleDocs = await prisma.doc.findMany({
+    where: {
+      title: { startsWith: E2E_TITLE_PREFIX },
+      authors: { every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
+    },
+    select: { id: true, authors: { select: { userId: true } } },
+  });
+  for (const doc of staleDocs) {
+    if (doc.authors.length > 0) {
+      await prisma.doc.delete({ where: { id: doc.id } });
+      await prisma.ydoc.deleteMany({ where: { id: ydocIdForDoc(doc.id) } });
+    }
   }
 
   const staleUsers = await prisma.user.findMany({
@@ -407,7 +556,7 @@ export async function sweepTestData(): Promise<{ posts: number; users: number; y
 
   const staleYdocs = await prisma.ydoc.deleteMany({ where: { id: { startsWith: "ydoc:test-" } } });
 
-  return { posts: stalePosts.length, users: staleUsers.length, ydocs: staleYdocs.count };
+  return { posts: stalePosts.length, docs: staleDocs.length, users: staleUsers.length, ydocs: staleYdocs.count };
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +570,12 @@ const handlers = {
   deleteTestUser,
   createTestPost,
   deleteTestPost,
+  createTestDoc,
+  deleteTestDoc,
+  getDocState,
+  countDocYdocUpdates,
+  getAnnotationStates,
+  countPostCollabRows,
   createComment,
   createQuoteThread,
   getThread,

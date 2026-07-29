@@ -197,6 +197,18 @@ anything repeatable.
   same lineage instead of building a structurally new document from a revision. Confirmed by
   hand: restart `collab` with a `/ydoc-debug` editor tab left open and the content stays
   intact, typed-once, not doubled.
+- **A doc (PLAN.md §12) inherits that same safety, but the repair recipe above still has no
+  doc counterpart, and reaching for it by analogy would be actively wrong.** For a post,
+  `PostCollab`/`PostCollabUpdate` are disposable — losing them costs only unsaved edits since
+  the last save, because a revision always exists to re-seed from. A doc's `ydoc` row *is*
+  the doc: there is no revision, and an annotation's anchor is a mark embedded in that exact
+  row's content (§12i), not a position computed against it. Deleting `ydoc`/`ydoc_update` for
+  a doc's id and letting it re-seed doesn't recover anything — there's nothing to re-seed
+  from, and `createIfAbsent` would just build an *empty* document under that id, discarding
+  every paragraph and every annotation the doc ever had. If a doc's `ydoc` row is ever
+  genuinely corrupted, the only way back is the update log itself (`ydoc_update`, never
+  truncated) via `/ydoc-debug`'s replay slider or `/doc/[slug]/live-history` — not a delete-
+  and-restart.
 
 ## Gotchas
 

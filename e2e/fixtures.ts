@@ -8,11 +8,14 @@ import {
   TEST_PASSWORD,
   createQuoteThread,
   createTestPost,
+  createTestDoc,
   createTestUser,
   deleteTestPost,
+  deleteTestDoc,
   deleteTestUser,
   uniqueEmail,
   type TestPost,
+  type TestDoc,
   type TestUser,
 } from "./db";
 
@@ -54,6 +57,10 @@ type Fixtures = {
   publishedModeratedPost: TestPost;
   /** Published, body `QUOTED_BODY`, with one ACTIVE thread over `QUOTED_TEXT`. */
   quotedPost: QuotedPost;
+  /** A PRIVATE doc authored by the shared admin, empty. */
+  draftDoc: TestDoc;
+  /** A SHARED doc, body `QUOTED_BODY` — readable/annotatable by any AUTHORIZED+ reader. */
+  sharedDoc: TestDoc;
   /** Creates additional signed-in users on demand, cleaned up at test end. */
   secondUser: (opts?: { role?: TestUser["role"] }) => Promise<SecondUser>;
 };
@@ -120,6 +127,20 @@ export const test = base.extend<Fixtures>({
 
     await page.goto("about:blank").catch(() => {});
     await deleteTestPost(post.id);
+  },
+
+  draftDoc: async ({ page }, use) => {
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL });
+    await use(doc);
+    await page.goto("about:blank").catch(() => {});
+    await deleteTestDoc(doc.id);
+  },
+
+  sharedDoc: async ({ page }, use) => {
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: QUOTED_BODY });
+    await use(doc);
+    await page.goto("about:blank").catch(() => {});
+    await deleteTestDoc(doc.id);
   },
 
   secondUser: async ({ browser }, use) => {
@@ -218,6 +239,39 @@ export async function deleteTextInBody(page: Page, needle: string): Promise<void
 }
 
 /**
+ * Selects an exact substring in the body editor without deleting it — the
+ * doc reading view's annotation-capture trigger (LiveDocBody's
+ * onSelectionUpdate, PLAN.md §12i). A native `document.execCommand("delete")`
+ * doesn't apply here since nothing should be removed; dispatching
+ * `selectionchange` by hand is what makes TipTap's selection plugin (and so
+ * onSelectionUpdate) notice a Range built directly in the DOM, the same way
+ * deleteTextInBody's real `delete` command is what makes a Range-only
+ * approach insufficient there.
+ */
+export async function selectTextInBody(page: Page, needle: string): Promise<void> {
+  await page.evaluate((text) => {
+    const root = document.querySelector('[aria-label="Post body"]');
+    if (!root) throw new Error("Body editor not found.");
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const index = node.textContent?.indexOf(text) ?? -1;
+      if (index === -1) continue;
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + text.length);
+      const selection = window.getSelection();
+      if (!selection) throw new Error("No selection available.");
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      return;
+    }
+    throw new Error(`"${text}" not found in the body editor.`);
+  }, needle);
+}
+
+/**
  * Waits for the collab handshake, not just for the editor to render.
  *
  * PostEditor gates Save/Publish/Schedule on the provider having synced —
@@ -229,4 +283,14 @@ export async function waitForCollabReady(page: Page): Promise<void> {
   await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: 30_000 });
   // `exact` matters: without it "Publish" also matches the Unpublish button.
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeEnabled();
+}
+
+/**
+ * DocEditor's counterpart — "🟢 Live" is the same synced signal, but there's
+ * no Publish button to also check readiness against: a doc has no
+ * save/publish step at all (PLAN.md §12k), so the provider having synced is
+ * the only thing worth waiting for.
+ */
+export async function waitForDocCollabReady(page: Page): Promise<void> {
+  await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: 30_000 });
 }

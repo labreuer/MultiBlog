@@ -119,6 +119,10 @@ async function del(email: string) {
   // blocks `create` from ever reusing this email again (Commenter.email is
   // unique) and made a real throwaway-account collision during testing.
   await prisma.commenter.deleteMany({ where: { email } });
+  // annotation.user_id is ON DELETE RESTRICT (an annotation always has a
+  // real author, PLAN.md §12c) — a test user who annotated a doc would
+  // otherwise block their own deletion here.
+  await prisma.annotation.deleteMany({ where: { userId: existing.id } });
   await prisma.user.delete({ where: { email } });
   console.log(`Deleted ${email} (was role=${existing.role}).`);
 }

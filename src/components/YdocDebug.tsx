@@ -26,8 +26,12 @@ type DocDetail = {
   snapshots: SnapshotRow[];
 };
 
-// Raw payloads for the replay slider, from GET /api/ydoc/[id]/replay.
-type ReplayPayload = {
+// Raw payloads for the replay slider, from GET /api/ydoc/[id]/replay. Exported
+// (with ReplayView below) so /doc/[slug]/live-history can reuse the slider
+// as-is against GET /api/doc/[id]/replay's identically-shaped response —
+// "the replay slider is what a doc-side live history is" (PLAN.md §12a),
+// not a doc-flavored copy of it.
+export type ReplayPayload = {
   updates: { id: string; createdAt: string; base64: string }[];
   snapshots: { id: string; createdAt: string; lastYdocUpdateId: string; base64: string }[];
 };
@@ -330,7 +334,7 @@ function formatDelta(bytes: number): string {
   return bytes < 0 ? `−${Math.abs(bytes)}` : `+${bytes}`;
 }
 
-function ReplayView({ replay }: { replay: ReplayPayload }) {
+export function ReplayView({ replay }: { replay: ReplayPayload }) {
   const prepared = useMemo(() => prepare(replay), [replay]);
   const total = prepared.updates.length;
 

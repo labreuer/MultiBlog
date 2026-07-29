@@ -1237,7 +1237,7 @@ Git history carries per-step detail.
   needs several genuine submissions would have to make the limit configurable, or reset the
   window between tests.
 
-## 11. Ydoc persistence — a parallel stack (planned, 2026-07-28; not yet built)
+## 11. Ydoc persistence — a parallel stack (built 2026-07-28)
 
 The working Yjs document currently lives in two post-shaped tables: `post_collab` (a
 whole-document blob, upserted on a debounce) and `post_collab_update` (an append-only delta
@@ -1542,13 +1542,12 @@ and logs once per document rather than once per keystroke; deleting a `ydoc` row
 live editor to exercise the `P2003` path; and killing `collab` mid-typing to confirm the local
 IndexedDB edits sync back up once, not twice.
 
-## 12. Docs alongside posts, on the ydoc stack (planned, 2026-07-28; not built)
+## 12. Docs alongside posts, on the ydoc stack (built 2026-07-29 — see §12n for the as-built record)
 
 **Decided:** add a **Doc** — an always-evolving living document, read as the live Yjs state
 rather than as a revision — as a *second, parallel entity* beside today's `Post`. Nothing about
 posts changes: `/[slug]`, `/posts`, publish/unpublish/schedule, `CommentThread`/`Comment`, the
 §6 moderation cascade, and §5's remap-on-publish all keep working exactly as §10 describes them.
-Nothing in this section exists yet; §10 remains the record of what's actually built.
 
 Six decisions carry the whole design:
 
@@ -2092,3 +2091,66 @@ Three things keep a later convergence cheap, and all are worth protecting while 
 - **Re-reading `role` from the DB in the `jwt` callback** (§12e), rather than documenting the
   sign-out-and-back-in workaround. Waits for the granular-permissions work that supersedes this
   whole role scheme.
+
+### 12n. As built
+
+Built 2026-07-29, in the order §12k lays out (Phase 0 → 5), each phase gated on `npx tsc
+--noEmit`, `npx eslint .`, hand verification in the browser, and the full `npm run e2e` suite
+before moving to the next. Two deliberate deviations from the text above, both judgment calls
+made under real time constraints rather than oversights:
+
+- **`AnnotatableArticle` itself is not reused for docs.** §12i's own text says it is; in
+  practice the doc reading view (`LiveDocBody.tsx`) is a sibling component with the same
+  *interaction* shape (a plain, non-`Collaboration` `useEditor`, `editable: false`, selection
+  capture via `onSelectionUpdate`, a `staticBody`/live-editor swap identical to
+  `AnnotatableArticle`'s `ready` toggle) rather than the same file. The two content sources
+  differ enough — a single static `doc` prop for a post versus a live Hocuspocus tap that has
+  to push updates into the editor by hand (`editor.commands.setContent`) for a doc — that
+  literal reuse would have meant branching `AnnotatableArticle` on `target.kind` throughout,
+  touching a component that renders on every published post. `LiveDocBody` copies the pattern
+  instead of the file. What *is* shared exactly as §12i describes: `CommentSection`,
+  `CommentForm`, `CommentNode`, `CommentEntryList`, `QuoteThreadHeader`, and
+  `pseudo-border.ts` — all threaded through the `CommentTarget` union, none forked.
+- **Annotation capture is reading-view-only.** §12i's "in the editor, the range comes from the
+  live ProseMirror state and is exact" describes a capture path from `DocEditor` that was not
+  built — `DocEditor` has no selection-to-annotate UI. An author who wants to annotate their
+  own doc does it from `/doc/[slug]`, the same as any other `AUTHORIZED` reader; nothing stops
+  this today, and it keeps `CollabEditorBody` (shared with `PostEditor`) untouched.
+
+Smaller implementation notes worth recording against the design text above:
+
+- **`DocEditor`/`DocsTable`/`DocSettingsPanel` are simpler than their `Post*` counterparts**,
+  not just smaller — `DocsTable` is a plain sortable table without `PostsTable`'s column-
+  resize-tracking search box or per-row drag affordances, and `DocSettingsPanel` has no
+  revisions table (a doc has none). Functionally complete; less visually polished.
+- **No `canViewDocs`-gated entry in `SiteHeader`'s nav.** §12g mentions wiring it in, but
+  there is no "browse every doc I can read" route in §12f's table to link to — inventing one
+  was out of scope. `SiteHeader` does gain a `canManageDocs`-gated "Manage Docs" /
+  "Manage Annotations" pair, mirroring "Manage Posts" / "Manage Comments".
+- **The annotation-mark endpoint's fallback search** (`findQuoteOccurrences`,
+  `server/ydoc-hooks.ts`) is a plain `O(document size × quotedText length)` scan, not the
+  smarter position-mapped walk first sketched — chosen for correctness-by-construction (it
+  reuses `Node.textBetween`'s own separator handling rather than reimplementing it) at the
+  cost of not matching a quote that spans a block boundary. Acceptable for a fallback that
+  only runs when the primary offsets already missed.
+- **`annotation.user_id` is `ON DELETE RESTRICT`.** Real users are never hard-deleted in this
+  app (soft-delete only), so this is inert in production; it did surface against
+  `scripts/test-user.ts delete` and the e2e suite's `deleteTestUser`, both fixed to remove a
+  user's own annotations first — the same shape the pre-existing `Commenter`-row cleanup
+  already had.
+
+**Verification.** Every phase was hand-tested end to end in the browser (doc creation → live
+two-author editing → the reading view's live update with no reload → annotate → delete the
+annotated text and watch it degrade to the doc's general discussion → reply → delete-with-a-
+live-reply showing `[deleted]` → `/annotations`' search/sort/delete/restore → the live-history
+replay slider, confirmed rebuilding from row #1 every time since a doc has no snapshots yet).
+`e2e/doc.spec.ts` covers the parts of that worth pinning down as regression tests: the
+invariant-1 creation check, the doc-cache debounce reaching `Doc.title`/`proseJson` live, the
+isolation check in both directions (a doc never touches `post_collab`, a post never touches any
+ydoc-stack table — the latter already covered by `e2e/ydoc-debug.spec.ts`), the reader's
+already-open tab updating with no reload, an annotation's mark landing at the exact selected
+range, and that same annotation degrading — and never appearing on `/comments` — once its text
+is deleted. `scripts/test-doc.ts` and `scripts/test-annotation.ts` cover manual testing, same
+`@example.com`-author containment as `test-post.ts`/`test-user.ts`, `test-doc.ts delete`
+additionally removing the doc's derived `ydoc:<id>` row (§12b — nothing cascades that
+automatically). Full suite: 30/30 passing.

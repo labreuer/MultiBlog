@@ -47,6 +47,14 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody }: Prop
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The provider's initial handshake applies at least one Yjs update on
+  // its own — same as any later real edit — which runs the setContent
+  // call below and would silently collapse a selection made in the window
+  // between "editor mounted" and "live tap has synced once". No visible UI
+  // for this (the reading view otherwise shows no connection status at
+  // all); the marker exists so a selection can be made only once that
+  // window has passed — e2e/doc.spec.ts's annotation tests wait on it.
+  const [synced, setSynced] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const editor = useEditor({
@@ -54,6 +62,10 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody }: Prop
     content: initialBodyJSON,
     editable: false,
     immediatelyRender: false,
+    // Same aria-label CollabEditorBody's editor already carries, so the e2e
+    // suite's bodyEditor() helper (e2e/fixtures.ts) and the .tiptap-ordering
+    // convention (CLAUDE.md) both work for a doc's reading view for free.
+    editorProps: { attributes: { "aria-label": "Post body", role: "textbox" } },
     onCreate: () => setReady(true),
     onSelectionUpdate: ({ editor: liveEditor }) => {
       const { from, to, empty } = liveEditor.state.selection;
@@ -145,6 +157,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody }: Prop
           name: documentName,
           document: ydoc,
           token: fetchToken,
+          onSynced: () => setSynced(true),
         });
       } catch {
         // Read-only and best-effort: the server-rendered staticBody/initial
@@ -167,12 +180,14 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody }: Prop
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
+      {synced && <span data-testid="live-doc-synced" style={{ display: "none" }} />}
       <div style={{ display: ready ? "none" : "block" }}>{staticBody}</div>
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
       </div>
       {pending && (
         <div
+          data-testid="annotation-popup"
           style={{
             position: "absolute",
             top: pending.top + 6,
