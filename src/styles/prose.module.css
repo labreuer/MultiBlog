@@ -93,13 +93,19 @@
 }
 
 /* A doc annotation's anchor (PLAN.md §12i) — a mark in the document itself,
-   not a decoration, so this rule is all that's needed to render it: no
-   per-thread color (annotations aren't multi-colored the way quote threads
-   are), just a flat highlight plus a click target for jumping to the
-   comment. Applies equally in the live editor (ProseMirror renders the
-   mark's own renderHTML) and the reading view. */
+   not a decoration, so this rule is all that's needed to render it: a click
+   target for jumping to the comment, plus a highlight colored by its
+   author — the same --thread-color convention quote-highlight uses above,
+   set per annotation id by AnnotationColorStyles.tsx (CommentSection.tsx)
+   rather than inline on the mark itself. The amber fallback is what shows
+   before that <style> tag has anything to say (e.g. a degraded annotation
+   never gets a rule at all, though it also has no mark left to paint) —
+   previously the only color this rule had. Applies equally in the live
+   editor (ProseMirror renders the mark's own renderHTML) and the reading
+   view, though only the reading view (CommentSection) currently supplies
+   real author colors — see AnnotationColorStyles.tsx. */
 .prose :global(.annotation-highlight) {
-  background: rgba(255, 200, 0, 0.28);
+  background: color-mix(in srgb, var(--thread-color, #ffc800) 28%, transparent);
   border-radius: 2px;
   cursor: pointer;
 }
@@ -111,9 +117,9 @@
 @keyframes annotationHighlightPulse {
   0%,
   100% {
-    background-color: rgba(255, 200, 0, 0.28);
+    background-color: color-mix(in srgb, var(--thread-color, #ffc800) 28%, transparent);
   }
   50% {
-    background-color: rgba(255, 200, 0, 0.55);
+    background-color: color-mix(in srgb, var(--thread-color, #ffc800) 55%, transparent);
   }
 }

@@ -2128,8 +2128,11 @@ Smaller implementation notes worth recording against the design text above:
   revisions table (a doc has none). Functionally complete; less visually polished.
 - **No `canViewDocs`-gated entry in `SiteHeader`'s nav.** §12g mentions wiring it in, but
   there is no "browse every doc I can read" route in §12f's table to link to — inventing one
-  was out of scope. `SiteHeader` does gain a `canManageDocs`-gated "Manage Docs" /
-  "Manage Annotations" pair, mirroring "Manage Posts" / "Manage Comments".
+  was out of scope. What `SiteHeader` does gain, `canManageDocs`-gated: a "Docs" link plus a
+  small caret dropdown next to it holding "Annotations" — the same `<details>`/`<summary>` +
+  outside-click-to-close shape as `CommentsTable.tsx`'s `MultiSelectDropdown`
+  (`SiteHeader.module.css`), not the two flat "Manage Docs" / "Manage Annotations" links this
+  started as.
 - **The annotation-mark endpoint's fallback search** (`findQuoteOccurrences`,
   `server/ydoc-hooks.ts`) is a plain `O(document size × quotedText length)` scan, not the
   smarter position-mapped walk first sketched — chosen for correctness-by-construction (it
@@ -2209,6 +2212,33 @@ Smaller implementation notes worth recording against the design text above:
   any other row in the same table, so `/ydoc-debug` (ADMIN-only, §11f) already lists it and
   replays it with `ReplayView` unmodified — the two admin-facing tools this section is about
   not duplicating. `GET /api/doc/[id]/replay` stays; it's what `DocScrubBar` itself calls.
+- **The reading view holds a fixed 800px width rather than shrinking to short content**, and
+  the doc editor's title field shares its border with the body editor frame below it
+  (`DocEditor.module.css`'s `.titleInput`/`.editorFrame`, the latter shared with
+  `PostEditor.module.css`) so the two read as the same kind of editable surface. On
+  `/doc/[slug]`, the title links to `/doc/[id]/edit` — styled as an ordinary hyperlink, not
+  inheriting the heading's color — whenever the viewer can edit the doc (`canUserEditDoc`); a
+  reader who can't just sees plain text.
+- **The shared `Comment*` components say "annotation," not "comment," on the doc side.**
+  `CommentSection`/`CommentForm`/`CommentNode`/`CommentEntryList` render both post comments and
+  doc annotations through the same `CommentTarget` union (§12i), and now branch their visible
+  copy on `target.kind` too — heading, empty state, placeholder, submit button, delete-failure
+  message, sort option. `submitAnnotation`'s validation errors ("Comment can't be empty.",
+  copied from `submitComment` and never updated) say "Annotation" now as well.
+- **`/docs`'s Title column links to the reading view, not straight to the editor**, with a
+  separate Edit column (right after Title) linking to `/doc/[id]/edit` only when the viewer can
+  edit that particular doc — computed per row in `page.tsx` by restating `canUserEditDoc`'s
+  logic against data the listing query already has (an AUTHOR's query is already scoped to
+  their own docs), not a per-row DB call. Clicking or hovering anywhere in the Title `<td>` —
+  not just the link text — navigates or underlines (`DocsTable.module.css`).
+- **A doc's annotation highlights are colored by their author, not a flat amber.**
+  `AnnotationColorStyles.tsx` — the same one-rule-per-id `<style>` tag technique
+  `AuthorHighlightStyles.tsx` uses for attributed body text — sets `--thread-color` per
+  annotation id from `getDocAnnotationsAsThreads`'s already-fetched `root.user.color`, and
+  `prose.module.css`'s `.annotation-highlight` reads it the same way `.quote-highlight` already
+  reads a quote thread's color. Rendered from `CommentSection.tsx`, so this only colors the
+  reading view — `DocEditor` renders no `CommentSection` (annotation capture is
+  reading-view-only, above), so its highlight stays the flat amber fallback.
 
 **Verification.** Every phase was hand-tested end to end in the browser (doc creation → live
 two-author editing → the reading view's live update with no reload → annotate → delete the
@@ -2241,6 +2271,12 @@ way rather than designed:
   false)` — the v2 "don't emit an update" signature — is a type error now; it's
   `setContent(json, { emitUpdate: false })`. Worth knowing because the wrong form reads as
   obviously-correct against any pre-v3 example.
+- **A mark is `clearable` by default, and `unsetAllMarks` (the editor's "Clear formatting"
+  button) removes every clearable one.** The annotation mark had no opinion on this at first,
+  so clicking Clear formatting over annotated text silently stripped the mark along with any
+  real formatting in the selection. Fixed with `clearable: false` on the mark
+  (`annotation-extension.ts`) — `Mark.create` has this option built in for exactly this case
+  ("semantic marks that should survive clear formatting"), so no custom command was needed.
 
 ### 12o. Known gaps
 

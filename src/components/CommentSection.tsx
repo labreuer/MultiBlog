@@ -7,6 +7,7 @@ import {
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
 import { type CommentNodeData } from "./CommentNode";
+import AnnotationColorStyles from "./AnnotationColorStyles";
 import styles from "./CommentSection.module.css";
 
 function buildTree(
@@ -87,6 +88,15 @@ export default async function CommentSection({ target }: { target: CommentTarget
 
   return (
     <section className={styles.section} data-comment-section>
+      {/* Colors the reading/editing view's annotation highlights by their
+          author, same as AuthorHighlightStyles does for attributed body
+          text — a <style> tag's attribute-selector rules apply document-wide
+          regardless of where it sits in the tree, so rendering it here
+          (rather than up in LiveDocBody, which has no reason to know about
+          annotation authorship) is fine. */}
+      {target.kind === "doc" && (
+        <AnnotationColorStyles colors={Object.fromEntries(quoteThreads.map((t) => [t.id, t.color]))} />
+      )}
       <h2 className={styles.heading}>{target.kind === "doc" ? "Annotations" : "Comments"}</h2>
       <CommentForm target={target} />
 
