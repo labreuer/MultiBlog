@@ -9,6 +9,7 @@ import { useShowDeletedRows } from "@/lib/use-show-deleted";
 import { deleteDoc, restoreDoc } from "@/app/actions/docs";
 import { formatDate } from "@/lib/format-date";
 import type { DocVisibility } from "@/generated/prisma/enums";
+import styles from "./DocsTable.module.css";
 
 export type DocRow = {
   id: string;
@@ -18,6 +19,7 @@ export type DocRow = {
   visibility: DocVisibility;
   createdAt: Date;
   deleted: boolean;
+  canEdit: boolean;
 };
 
 type SortKey = "title" | "authors" | "visibility" | "created" | "deleted";
@@ -83,6 +85,7 @@ function DeleteCell({ docId, deleted, onDeleted }: { docId: string; deleted: boo
 }
 
 export default function DocsTable({ rows }: { rows: DocRow[] }) {
+  const router = useRouter();
   const [searchText, setSearchText] = useState("");
   const { showDeleted, toggle: toggleShowDeleted } = useShowDeletedRows("docs-show-deleted-rows");
   const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
@@ -139,6 +142,7 @@ export default function DocsTable({ rows }: { rows: DocRow[] }) {
             <th style={sortableTh} onClick={(e) => handleSort("title", e.ctrlKey)}>
               Title{sortIndicator("title")}
             </th>
+            <th style={th}>Edit</th>
             <th style={sortableTh} onClick={(e) => handleSort("authors", e.ctrlKey)}>
               Author(s){sortIndicator("authors")}
             </th>
@@ -156,9 +160,18 @@ export default function DocsTable({ rows }: { rows: DocRow[] }) {
         <tbody>
           {sortedRows.map((row) => (
             <tr key={row.id} style={{ opacity: row.deleted ? 0.6 : 1 }}>
-              <td style={td}>
-                <Link href={`/doc/${row.id}/edit`}>{row.title}</Link>
+              <td
+                style={td}
+                className={styles.titleCell}
+                onClick={(e) => {
+                  if (!(e.target instanceof Element) || !e.target.closest("a")) {
+                    router.push(`/doc/${row.id}`);
+                  }
+                }}
+              >
+                <Link href={`/doc/${row.id}`}>{row.title}</Link>
               </td>
+              <td style={td}>{row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>}</td>
               <td style={td}>{row.authors}</td>
               <td style={td}>{row.visibility}</td>
               <td style={nowrapTd}>{formatDate(row.createdAt, "yyyy-MM-dd HH:mm")}</td>

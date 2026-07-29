@@ -1,0 +1,10 @@
+/* Title <td> reads as one big link: the whole cell is clickable (handled in
+   JS) and hovering anywhere in it underlines the title text, not just the
+   text itself. */
+.titleCell {
+  cursor: pointer;
+}
+
+.titleCell:hover a {
+  text-decoration: underline;
+}

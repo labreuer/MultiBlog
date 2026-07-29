@@ -22,13 +22,14 @@ export default async function DocsPage() {
     );
   }
 
+  const canEditAny = canEditAnyPost(session.user.role);
   const docs = await prismaIncludingDeleted.doc.findMany({
-    where: canEditAnyPost(session.user.role) ? undefined : { authors: { some: { userId: session.user.id } } },
+    where: canEditAny ? undefined : { authors: { some: { userId: session.user.id } } },
     orderBy: { createdAt: "desc" },
     include: {
       authors: {
         orderBy: { bylineOrder: "asc" },
-        select: { user: { select: { adminInitials: true } } },
+        select: { userId: true, user: { select: { adminInitials: true } } },
       },
     },
   });
@@ -44,6 +45,11 @@ export default async function DocsPage() {
     visibility: doc.visibility,
     createdAt: doc.createdAt,
     deleted: doc.deletedByUserId !== null,
+    // Mirrors canUserEditDoc (src/lib/doc-authz.ts) without a per-row DB
+    // round-trip — canEditAny already decided the WHERE clause above (an
+    // AUTHOR only ever sees their own docs to begin with), so this is just
+    // that same check restated per row for the Edit column.
+    canEdit: canEditAny || doc.authors.some((a) => a.userId === session.user.id),
   }));
 
   return (
