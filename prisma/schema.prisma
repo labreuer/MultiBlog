@@ -84,6 +84,7 @@ model User {
   deletedUsers         User[]               @relation("UserDeletedBy")
   postDeletions        Post[]               @relation("PostDeletedBy")
   slugHistory          UserSlugHistory[]
+  ydocSnapshots        YdocSnapshot[]       @relation("YdocSnapshotUser")
 
   @@map("user")
 }
@@ -344,4 +345,55 @@ model Comment {
   deletedBy       User?         @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
 
   @@map("comment")
+}
+
+// A generic, standalone Yjs document store — PLAN.md §11. Keyed purely by the
+// Hocuspocus documentName (a `ydoc:`-prefixed id when routed through
+// server/ydoc-hooks.ts, see src/lib/ydoc-names.ts); no relation to Post or
+// anything else. `ydoc` is the O(1) cold-open path (Y.encodeStateAsUpdate);
+// `ydocUpdate` is the never-truncated-on-save raw update log, whose first row
+// per document is always a full state and every later row a plain delta
+// (invariant 1, PLAN.md §11b); `ydocSnapshot` is a checkpoint constructed
+// on demand, never implicitly, that lets a truncation-aware reader resolve a
+// replay base without walking the log from row 1 (invariant 2).
+model Ydoc {
+  id          String   @id
+  ydoc        Bytes
+  stateVector Bytes    @map("state_vector")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  updates   YdocUpdate[]
+  snapshots YdocSnapshot[]
+
+  @@index([updatedAt])
+  @@map("ydoc")
+}
+
+model YdocUpdate {
+  id        BigInt   @id @default(autoincrement())
+  ydocId    String   @map("ydoc_id")
+  update    Bytes
+  createdAt DateTime @default(now()) @map("created_at")
+
+  doc Ydoc @relation(fields: [ydocId], references: [id], onDelete: Cascade)
+
+  @@index([ydocId, id])
+  @@map("ydoc_update")
+}
+
+model YdocSnapshot {
+  id               String   @id @default(cuid())
+  ydocId           String   @map("ydoc_id")
+  ydoc             Bytes
+  stateVector      Bytes    @map("state_vector")
+  lastYdocUpdateId BigInt   @map("last_ydoc_update_id")
+  userId           String?  @map("user_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  doc  Ydoc  @relation(fields: [ydocId], references: [id], onDelete: Cascade)
+  user User? @relation("YdocSnapshotUser", fields: [userId], references: [id])
+
+  @@index([ydocId, lastYdocUpdateId])
+  @@map("ydoc_snapshot")
 }

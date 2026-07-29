@@ -8,6 +8,15 @@ import { prisma } from "../src/lib/prisma";
 import { verifyCollabToken } from "../src/lib/collab-token";
 import { contentExtensions, pmSchema, pmTitleSchema } from "../src/lib/tiptap-schema";
 import { REPLACE_DOC_PATH } from "../src/lib/collab-admin";
+import { isYdocDocument, YDOC_SNAPSHOT_PATH } from "../src/lib/ydoc-names";
+import {
+  ydocOnAuthenticate,
+  ydocOnAwarenessUpdate,
+  ydocOnChange,
+  ydocOnLoadDocument,
+  ydocOnStoreDocument,
+  handleYdocSnapshot,
+} from "./ydoc-hooks";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 const PORT = Number(process.env.COLLAB_PORT ?? 1234);
@@ -106,25 +115,58 @@ type ReplaceDocBody = { token: string; postId: string; doc: object; title: strin
 const server = new Server({
   port: PORT,
 
-  async onAuthenticate({ token, documentName }) {
-    const payload = await verifyCollabToken(token).catch(() => null);
-    if (!payload) {
+  // Explicit rather than inherited from Hocuspocus's own default — see
+  // PLAN.md §11's context section for what this forecloses (relative-position
+  // comment anchors) once ever turned off.
+  yDocOptions: { gc: true, gcFilter: () => true },
+
+  // Two entirely independent document stacks share this one process and port
+  // (PLAN.md §11): post documents (bare cuids, handled below exactly as
+  // before) and the new standalone ydoc stack (`ydoc:`-prefixed names,
+  // handled by server/ydoc-hooks.ts). isYdocDocument(documentName) is the
+  // only thing that tells them apart — nothing in the branches below it
+  // changes for post documents.
+  async onAuthenticate(payload) {
+    const { token, documentName } = payload;
+    if (isYdocDocument(documentName)) {
+      return ydocOnAuthenticate(payload);
+    }
+    const collabPayload = await verifyCollabToken(token).catch(() => null);
+    if (!collabPayload) {
       throw new Error("Invalid or expired collab token.");
     }
-    if (payload.postId !== documentName) {
+    if (collabPayload.postId !== documentName) {
       throw new Error("Token does not match this document.");
     }
-    return { userId: payload.sub, role: payload.role };
+    return { userId: collabPayload.sub, role: collabPayload.role };
+  },
+
+  async onAwarenessUpdate(payload) {
+    if (isYdocDocument(payload.documentName)) {
+      ydocOnAwarenessUpdate(payload);
+    }
   },
 
   // Hocuspocus serves plain HTTP on the same port as the websocket. Its
   // convention for "I handled this request" is to reject with a *falsy* value
   // (its request handler rethrows anything truthy and otherwise stops), which
   // is what keeps the default "Welcome to Hocuspocus!" 200 from also being
-  // written. Anything that isn't our one endpoint returns normally and falls
-  // through to that default.
+  // written. Anything that isn't one of our endpoints returns normally and
+  // falls through to that default.
   async onRequest({ request, response, instance }) {
-    if (request.method !== "POST" || !request.url?.startsWith(REPLACE_DOC_PATH)) {
+    if (request.method !== "POST") {
+      return;
+    }
+    if (request.url?.startsWith(YDOC_SNAPSHOT_PATH)) {
+      try {
+        await handleYdocSnapshot(request, response, instance);
+      } catch (err) {
+        console.error("[collab] ydoc-snapshot failed:", err);
+        send(response, 500, err instanceof Error ? err.message : "Failed to snapshot document.");
+      }
+      return Promise.reject();
+    }
+    if (!request.url?.startsWith(REPLACE_DOC_PATH)) {
       return;
     }
     try {
@@ -136,7 +178,11 @@ const server = new Server({
     return Promise.reject();
   },
 
-  async onLoadDocument({ documentName, document }) {
+  async onLoadDocument(payload) {
+    const { documentName, document } = payload;
+    if (isYdocDocument(documentName)) {
+      return ydocOnLoadDocument(payload);
+    }
     const existing = await prisma.postCollab.findUnique({ where: { postId: documentName } });
     const latestRevision = await prisma.revision.findFirst({
       where: { postId: documentName },
@@ -182,7 +228,11 @@ const server = new Server({
   // down with it. There is nothing useful to persist for a post that no longer
   // exists, so treat that one error as "the document outlived its post" and
   // let the doc go. Every other error still propagates.
-  async onStoreDocument({ documentName, document }) {
+  async onStoreDocument(payload) {
+    const { documentName, document } = payload;
+    if (isYdocDocument(documentName)) {
+      return ydocOnStoreDocument(payload);
+    }
     const state = Buffer.from(Y.encodeStateAsUpdate(document));
     await ignoreMissingPost(documentName, () =>
       prisma.postCollab.upsert({
@@ -208,7 +258,11 @@ const server = new Server({
   // just this one delta — it already has this change merged in, and, being
   // taken from the real live document, uses the same item ids any later
   // delta's origins will reference.
-  async onChange({ documentName, document, update }) {
+  async onChange(payload) {
+    const { documentName, document, update } = payload;
+    if (isYdocDocument(documentName)) {
+      return ydocOnChange(payload);
+    }
     const existingCount = await prisma.postCollabUpdate.count({ where: { postId: documentName } });
     const toStore = existingCount === 0 ? Y.encodeStateAsUpdate(document) : update;
     await ignoreMissingPost(documentName, () =>

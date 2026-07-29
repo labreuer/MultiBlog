@@ -15,6 +15,7 @@ export const RESERVED_SLUGS = new Set([
   "sign-up",
   "site-settings",
   "users",
+  "ydoc-debug",
 ]);
 
 // revertPostSlug/revertUserSlug use this: if the slug being abandoned by a

@@ -132,17 +132,24 @@ anything repeatable.
 - `scripts/test-user.ts` (create/delete accounts of any role, optionally with a
   `Commenter` row for trust/moderation states), `scripts/test-post.ts` (create/delete
   posts, draft or published, with a moderation policy), `scripts/test-comment.ts`
-  (list a post's comments and their statuses). Each script's header comment documents
-  its own flags — read that rather than a copy here, which is what will go stale.
-  Defaults worth knowing without opening anything: `test-admin@example.com`, role
-  `ADMIN`, password always `testpass123`.
-- All three refuse to touch anything but `@example.com` accounts and posts authored
+  (list a post's comments and their statuses), `scripts/test-ydoc.ts` (create/list/delete
+  standalone documents in the ydoc stack, PLAN.md §11 — `--from-post <id>` seeds one from
+  a real post's latest revision, `--garbage` writes bytes that aren't a valid Yjs update at
+  all, to exercise `/ydoc-debug`'s "not TipTap-compatible" error path on purpose). Each
+  script's header comment documents its own flags — read that rather than a copy here,
+  which is what will go stale. Defaults worth knowing without opening anything:
+  `test-admin@example.com`, role `ADMIN`, password always `testpass123`.
+- The first three refuse to touch anything but `@example.com` accounts and posts authored
   solely by them, so they can't reach real data by mistake. Delete a post *before* its
   author: once a post's only author is gone, "no authors" is indistinguishable from a
-  real post that lost its author some other way, so `delete` refuses it.
+  real post that lost its author some other way, so `delete` refuses it. `test-ydoc.ts`
+  uses the equivalent containment for a table with no email column: it only ever creates
+  ids under the `ydoc:test-` prefix (`src/lib/ydoc-names.ts`) and refuses to `delete`
+  anything else.
 - The e2e suite needs none of this — its fixtures create and clean up their own rows
-  (`e2e/db-worker.ts`, same `@example.com` guard), and a teardown project sweeps
-  whatever a crashed run left behind.
+  (`e2e/db-worker.ts`, same `@example.com` guard, plus the `ydoc:test-` prefix guard for
+  `e2e/ydoc-debug.spec.ts`), and a teardown project sweeps whatever a crashed run left
+  behind.
 
 ### Performance measurement
 
@@ -180,6 +187,16 @@ anything repeatable.
   nothing is listening on :1234 it starts `npm run collab` itself and stops it when the run
   ends. Narrow in practice — with `dev:all` already up it reuses that and restarts nothing —
   but don't run the suite with an editor tab open against a collab server you didn't start.
+- **The standalone ydoc stack (PLAN.md §11, `ydoc:`-prefixed documents, `/ydoc-debug`)
+  does not have this doubling problem, and it's worth knowing why**, since it's the same
+  restart and the same Hocuspocus process: `ydocOnLoadDocument` (`server/ydoc-hooks.ts`)
+  creates its `ydoc` row *eagerly*, in `createIfAbsent`'s transaction, before any client's
+  content is ever applied — never lazily off the first edit's debounced `onStoreDocument`
+  the way `PostCollab` is. There's no window where a killed server has "never gotten around
+  to" persisting a row, so a restart always finds one waiting and re-seeds from the actual
+  same lineage instead of building a structurally new document from a revision. Confirmed by
+  hand: restart `collab` with a `/ydoc-debug` editor tab left open and the content stays
+  intact, typed-once, not doubled.
 
 ## Gotchas
 
@@ -272,6 +289,33 @@ anything repeatable.
   reports by the padding, and copying that value straight into another element's CSS `width`
   (itself `box-sizing: border-box` from the global reset) makes it visibly narrower than the
   element it's supposed to match.
+- **Two independent document stacks share one Hocuspocus process and port** (PLAN.md §11):
+  ordinary post documents (bare cuid `documentName`s, `server/collab.ts`'s own hooks,
+  `post_collab`/`post_collab_update`) and the standalone ydoc stack (`ydoc:`-prefixed
+  `documentName`s, `server/ydoc-hooks.ts`, the `ydoc`/`ydoc_update`/`ydoc_snapshot` tables).
+  `isYdocDocument`/`YDOC_PREFIX` (`src/lib/ydoc-names.ts`) is the *only* thing that tells
+  them apart — every hook in `server/collab.ts` (`onLoadDocument`/`onChange`/
+  `onStoreDocument`/`onAuthenticate`/`onRequest`) starts with a one-line guard that
+  delegates to the other module for a `ydoc:` name and otherwise falls through to its
+  original, untouched body. Adding a third stack (or moving posts onto the new tables)
+  means adding a branch here, not restructuring what's already there. A ydoc-stack
+  document is never seeded from a `Revision` — that coupling is exactly what the new
+  tables exist not to have — so a `ydoc:` name nobody has explicitly created via
+  `scripts/test-ydoc.ts` or `/ydoc-debug`'s "New document" button just starts empty.
+- **`y-indexeddb`, used only by `/ydoc-debug`'s editor** (`src/lib/ydoc-persistence.ts`;
+  `PostEditor.tsx` doesn't use it — see PLAN.md §11e): never construct a second
+  `IndexeddbPersistence` for a `Y.Doc` that already has one.
+  [y-indexeddb#25](https://github.com/yjs/y-indexeddb/issues/25) — each instance re-persists
+  updates the *other* instance already wrote, because the library's own guard only excludes
+  itself as an origin, not sibling instances. `attachIndexeddb` is ref-counted per `Y.Doc`
+  (a `WeakMap`) specifically so React StrictMode's double-invoked effects can't trigger
+  this. Separately, the local IndexedDB database is keyed by the document's *lineage*
+  (`ydoc.created_at`, fetched from `/api/ydoc/[id]/token` alongside the collab token) rather
+  than by `documentName` alone — `created_at` only changes if the row is ever recreated,
+  i.e. exactly when the server has built a structurally new document, so a stale local copy
+  can never merge into a re-seeded one. Attach the lineage-keyed store *before* connecting,
+  never cache it to attach earlier — caching would let a stale copy merge in before the
+  mismatch could be detected, which is the bug this avoids, not a race around it.
 
 ## Conventions
 

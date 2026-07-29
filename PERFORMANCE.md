@@ -281,3 +281,38 @@ controlled `<input>` it replaced. The real new costs are server-side
   Browser pane is hidden, which silently turns any rAF-based settle into a
   30s tool timeout. Use a `MessageChannel` round-trip instead — it's also
   what React's own scheduler uses.
+
+## 2026-07-28 — New `ydoc_update` append path has no per-keystroke count()
+
+PLAN.md §11 built a second, fully parallel update-log table (`ydoc_update`,
+written by `server/ydoc-hooks.ts`) alongside the existing `post_collab_update`
+one — not a replacement yet, since nothing that edits a post is wired to it.
+Worth recording here because it directly resolves the first bullet of the
+2026-07-19 "known, unaddressed hot paths" entry above, just not for the table
+that entry was about.
+
+- **Post path (`post_collab_update`, unchanged):** still `1 count() + 1
+  insert` per keystroke — `prisma.postCollabUpdate.count({ where: { postId
+  } })` before every write, to decide full-state-vs-delta. `O(n)` per
+  keystroke, `O(n²)` over an unsaved session, exactly as measured before.
+- **New stack (`ydoc_update`):** `1 insert`, full stop. The full-state-vs-delta
+  decision is made exactly once, at document creation (`ydocStore.
+  createIfAbsent`'s two-row transaction — the row-#1-is-a-full-state
+  invariant, PLAN.md §11b) rather than re-derived from a count on every
+  single change. `onChange` (`ydocOnChange` in `server/ydoc-hooks.ts`) is
+  one `appendUpdate` call, serialized per document by an in-process promise
+  queue rather than a database read.
+
+The saving isn't from a smarter query (the count-based check could just as
+well be replaced by a cheaper `findFirst`-style existence probe, as the
+2026-07-19 entry already suggested) — it's from not needing to *ask* the
+database at all, because the log this table backs is never truncated on save.
+`post_collab_update`'s count-based branch only exists because that table
+*is* truncated on every save, which destroys the "row #1 is a full state"
+invariant every time and forces re-deriving it per write. Truncation was the
+cost driver, not the query shape.
+
+Not yet measured end-to-end against the same editing-latency benchmark the
+2026-07-19/07-24 entries used (no keystroke reaches this path until a post
+editor is wired to it) — the comparison above is by inspection of the two
+code paths, not a timed run.

@@ -17,13 +17,21 @@
 import "dotenv/config";
 import readline from "node:readline";
 import bcrypt from "bcryptjs";
+import * as Y from "yjs";
+import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
+import { contentExtensions } from "@/lib/tiptap-schema";
+import { isTestYdocDocument, newTestYdocId } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus } from "@/generated/prisma/enums";
 import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
+// server/ isn't under src/, but it's still part of the one tsconfig project
+// (CLAUDE.md's ydoc-store note) — same relative-import style server/collab.ts
+// itself uses for src/lib.
+import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 
 function assertSafe(email: string) {
   if (!SAFE_EMAIL.test(email)) {
@@ -279,14 +287,102 @@ export async function getCommentStatus(commentId: string): Promise<CommentStatus
   return comment?.status ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// The standalone ydoc stack (PLAN.md §11) — helpers for e2e/ydoc-debug.spec.ts.
+// Every id this creates is under the ydoc:test- prefix (src/lib/ydoc-names.ts);
+// deleteTestYdoc refuses anything else, the same containment convention
+// createTestPost/createTestUser use for @example.com / "E2E " titles.
+// ---------------------------------------------------------------------------
+
+export type TestYdoc = { id: string };
+
+/**
+ * Creates a document the same way the "New document" button on /ydoc-debug
+ * does — via ydocStore.createIfAbsent, so it's a real invariant-1 document
+ * (a `ydoc` row plus exactly one full-state `ydoc_update` row), not a
+ * hand-rolled shortcut around the code path under test.
+ */
+export async function createTestYdoc(): Promise<TestYdoc> {
+  const id = newTestYdocId();
+  const doc = new Y.Doc();
+  const { ydoc, stateVector } = encodeYdocState(doc);
+  doc.destroy();
+  await ydocStore.createIfAbsent(id, ydoc, stateVector);
+  return { id };
+}
+
+export async function deleteTestYdoc(id: string): Promise<void> {
+  if (!isTestYdocDocument(id)) {
+    throw new Error(`Refusing to delete "${id}" — the e2e helpers only touch ydoc:test- documents.`);
+  }
+  await prisma.ydoc.deleteMany({ where: { id } });
+}
+
+export async function countYdocUpdates(ydocId: string): Promise<number> {
+  return prisma.ydocUpdate.count({ where: { ydocId } });
+}
+
+// id is a global BIGSERIAL, not per-document — a snapshot's high-water mark
+// has to be compared against this, not against countYdocUpdates, which is
+// only a per-document row count and can be far smaller than the actual id.
+export async function getMaxYdocUpdateId(ydocId: string): Promise<string | null> {
+  const row = await prisma.ydocUpdate.findFirst({ where: { ydocId }, orderBy: { id: "desc" }, select: { id: true } });
+  return row ? row.id.toString() : null;
+}
+
+export type TestYdocSnapshot = { id: string; lastYdocUpdateId: string; userId: string | null };
+
+export async function getYdocSnapshots(ydocId: string): Promise<TestYdocSnapshot[]> {
+  const rows = await prisma.ydocSnapshot.findMany({ where: { ydocId }, orderBy: { createdAt: "asc" } });
+  return rows.map((r) => ({ id: r.id, lastYdocUpdateId: r.lastYdocUpdateId.toString(), userId: r.userId }));
+}
+
+export async function getYdocClients(ydocId: string): Promise<Record<string, string>> {
+  const row = await prisma.ydoc.findUnique({ where: { id: ydocId } });
+  if (!row) return {};
+  const scratch = new Y.Doc();
+  Y.applyUpdate(scratch, row.ydoc);
+  const clients: Record<string, string> = {};
+  scratch.getMap<string>("clients").forEach((userId, clientId) => {
+    clients[clientId] = userId;
+  });
+  scratch.destroy();
+  return clients;
+}
+
+/**
+ * Replays every ydoc_update row for a document from scratch and extracts its
+ * plain text — the duplication check from PLAN.md §11g: content should
+ * appear once no matter how many deltas (or full-state resets) produced it.
+ */
+export async function replayYdocText(ydocId: string): Promise<string> {
+  const rows = await prisma.ydocUpdate.findMany({ where: { ydocId }, orderBy: { id: "asc" } });
+  const scratch = new Y.Doc();
+  for (const row of rows) {
+    Y.applyUpdate(scratch, row.update);
+  }
+  const doc = TiptapTransformer.extensions(contentExtensions).fromYdoc(scratch, "default");
+  scratch.destroy();
+  return extractText(doc);
+}
+
+export async function getUserIdByEmail(email: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  return user?.id ?? null;
+}
+
+export async function countAllYdocs(): Promise<number> {
+  return prisma.ydoc.count();
+}
+
 /**
  * Last-resort cleanup for rows a crashed or Ctrl+C'd run left behind. Scoped
- * to the suite's own naming (`e2e-*@example.com`, "E2E …" titles), so it can
- * never reach a post or account that wasn't created here. Posts go first:
- * deleteTestPost refuses an authorless post, which is what one becomes the
- * moment its only author is deleted.
+ * to the suite's own naming (`e2e-*@example.com`, "E2E …" titles, `ydoc:test-`
+ * ids), so it can never reach a post, account, or document that wasn't
+ * created here. Posts go first: deleteTestPost refuses an authorless post,
+ * which is what one becomes the moment its only author is deleted.
  */
-export async function sweepTestData(): Promise<{ posts: number; users: number }> {
+export async function sweepTestData(): Promise<{ posts: number; users: number; ydocs: number }> {
   const stalePosts = await prisma.post.findMany({
     where: {
       title: { startsWith: E2E_TITLE_PREFIX },
@@ -309,7 +405,9 @@ export async function sweepTestData(): Promise<{ posts: number; users: number }>
     where: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
   });
 
-  return { posts: stalePosts.length, users: staleUsers.length };
+  const staleYdocs = await prisma.ydoc.deleteMany({ where: { id: { startsWith: "ydoc:test-" } } });
+
+  return { posts: stalePosts.length, users: staleUsers.length, ydocs: staleYdocs.count };
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +428,15 @@ const handlers = {
   hasCollabDoc,
   getLatestRevisionId,
   getCommentStatus,
+  createTestYdoc,
+  deleteTestYdoc,
+  countYdocUpdates,
+  getMaxYdocUpdateId,
+  getYdocSnapshots,
+  getYdocClients,
+  replayYdocText,
+  getUserIdByEmail,
+  countAllYdocs,
   sweepTestData,
 };
 
