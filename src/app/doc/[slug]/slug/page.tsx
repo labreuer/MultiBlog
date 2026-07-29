@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canUserEditDoc } from "@/lib/doc-authz";
 import { uniqueDocSlug } from "@/lib/doc-slug";
+import { docTitleOrFallback } from "@/lib/doc-title";
 import SlugManager from "@/components/SlugManager";
 
 export default async function DocSlugPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -32,11 +33,14 @@ export default async function DocSlugPage({ params }: { params: Promise<{ slug: 
     );
   }
 
-  const standardSlug = await uniqueDocSlug(doc.title, doc.id);
+  // Falls back to "Untitled" before deriving the suggestion — otherwise an
+  // untitled doc's standardSlug would be slugify("", "doc") -> "doc" ->
+  // reserved -> "doc-doc", which reads as a typo rather than a fallback.
+  const standardSlug = await uniqueDocSlug(docTitleOrFallback(doc.title), doc.id);
 
   return (
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Url: {doc.title}</h1>
+      <h1>Url: {docTitleOrFallback(doc.title)}</h1>
       <p style={{ marginTop: "1em", marginBottom: "2em" }}>
         <Link href={`/doc/${doc.id}/edit`}>Back to editor</Link>
       </p>

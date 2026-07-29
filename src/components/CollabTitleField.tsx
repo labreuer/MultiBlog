@@ -17,6 +17,13 @@ type Props = {
   userColor: string;
   editable?: boolean;
   className?: string;
+  // Rendered as a CSS ::before via data-placeholder/data-empty (see
+  // DocEditor.module.css) rather than the TipTap Placeholder extension —
+  // that extension lives in @tiptap/extensions, which this project doesn't
+  // install, and adding it would drag in the exact-version peer-dep pinning
+  // CLAUDE.md already warns about for the title-editor's other bare
+  // extensions. Only DocEditor passes this; PostEditor's title has none.
+  placeholder?: string;
   onTitleChange: (title: string) => void;
   onEditorReady: (editor: Editor | null) => void;
 };
@@ -49,10 +56,12 @@ export default function CollabTitleField({
   userColor,
   editable = true,
   className,
+  placeholder,
   onTitleChange,
   onEditorReady,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
+  const [isEmpty, setIsEmpty] = useState(true);
 
   const editor = useEditor({
     extensions: [
@@ -87,6 +96,7 @@ export default function CollabTitleField({
       onTitleChange(editor.getText());
       const { authorIds: ids } = collectAuthorHighlightStats(editor.state.doc, "authorHighlight", "authorId");
       setAuthorIds(ids);
+      setIsEmpty(editor.isEmpty);
     };
     report();
     editor.on("update", report);
@@ -115,7 +125,12 @@ export default function CollabTitleField({
           `.author-highlight[data-author-id]` rules — and it's what colors a
           contributor who has touched only the title. */}
       <AuthorHighlightStyles colors={authorColors} />
-      <EditorContent editor={editor} className={className} />
+      <EditorContent
+        editor={editor}
+        className={className}
+        data-placeholder={placeholder}
+        data-empty={placeholder && isEmpty ? "" : undefined}
+      />
     </>
   );
 }

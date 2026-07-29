@@ -37,10 +37,17 @@ export async function updateDocCache(ydocId: string, document: Y.Doc): Promise<v
       where: { id: docId },
       data: {
         proseJson: bodyJSON as Prisma.InputJsonValue,
-        // An empty title is never a real one (same rule as updatePostTitle,
-        // src/app/actions/posts.ts) — skip rather than blank out Doc.title,
-        // which is otherwise always non-empty.
-        ...(titleText ? { title: titleText } : {}),
+        // Unlike updatePostTitle's skip-empty rule (src/app/actions/posts.ts)
+        // — a post's title has no fragment behind it, so an empty string
+        // there really would mean "nothing was ever typed, don't overwrite
+        // the real title with blank." A doc's title fragment IS the title;
+        // Doc.title is only ever a cache of it (PLAN.md §12n), so an empty
+        // fragment has to write through as an empty title, not freeze the
+        // cache at whatever was last typed before it got cleared. Docs are
+        // also created with title: "" (createDoc, src/app/actions/docs.ts)
+        // and no seeded title fragment, so this runs from the first store
+        // debounce, not just on a later clear.
+        title: titleText,
       },
     });
   } catch (err) {

@@ -2143,6 +2143,26 @@ Smaller implementation notes worth recording against the design text above:
   `scripts/test-user.ts delete` and the e2e suite's `deleteTestUser`, both fixed to remove a
   user's own annotations first — the same shape the pre-existing `Commenter`-row cleanup
   already had.
+- **Doc creation is titleless.** `+ New doc` creates the row and drops straight into
+  `/doc/[id]/edit` with no title-collecting form in between — `createDoc`
+  (`src/app/actions/docs.ts`) writes `title: ""`, since the title is already a live
+  collaborative field (`CollabTitleField.tsx`) the editor is better at collecting than a form
+  is (`/docs/new` doesn't exist; §12f's route table never listed it). The initial slug is the
+  doc's own cuid (`Doc.id`, written in a follow-up `update` inside the same `$transaction` —
+  the id isn't known until the create resolves), so `resolveDocParam`'s id-first lookup and the
+  slug lookup return the same doc until a manual rename on `/doc/[slug]/slug`. `"Untitled"`
+  (`src/lib/doc-title.ts`'s `UNTITLED_DOC`/`docTitleOrFallback`) is a render-time fallback
+  only — applied at every server page/props boundary that shows or derives from a doc's title
+  (`/docs`, `/annotations`, the `<h1>`s on `/doc/[slug]`, `/doc/[slug]/live-history`,
+  `/doc/[slug]/slug`, and that page's suggested "standard slug") — and is never written to the
+  ydoc's title fragment, so it can never be backspaced into `"Untitle"` and never appears when
+  scrubbing `/doc/[slug]/live-history` (confirmed by hand: row #1 shows no title at all, not
+  the fallback). `doc.title` is an unconditional cache of the title fragment, empty included —
+  `server/doc-cache.ts` writes it through on every store debounce, so clearing a doc's title
+  back out clears `Doc.title` too rather than freezing it at the last non-empty value. This
+  doesn't apply to posts: `updatePostTitle`'s "an empty title is never a real one" skip-empty
+  rule is unrelated and unchanged, since a post's title has no fragment to be authoritative
+  over.
 
 **Verification.** Every phase was hand-tested end to end in the browser (doc creation → live
 two-author editing → the reading view's live update with no reload → annotate → delete the

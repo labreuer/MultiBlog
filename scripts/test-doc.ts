@@ -27,6 +27,7 @@ import "dotenv/config";
 import * as Y from "yjs";
 import { prisma } from "../src/lib/prisma";
 import { uniqueDocSlug } from "../src/lib/doc-slug";
+import { docTitleOrFallback } from "../src/lib/doc-title";
 import { ydocIdForDoc } from "../src/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 import { DocVisibility } from "../src/generated/prisma/enums";
@@ -93,7 +94,7 @@ async function del(slugOrId: string) {
   const unsafeAuthors = doc.authors.filter((a) => !SAFE_EMAIL.test(a.user.email));
   if (doc.authors.length === 0 || unsafeAuthors.length > 0) {
     console.error(
-      `Refusing to delete "${doc.title}" (id=${doc.id}) — it has ${
+      `Refusing to delete "${docTitleOrFallback(doc.title)}" (id=${doc.id}) — it has ${
         doc.authors.length === 0 ? "no authors" : `a non-@example.com author (${unsafeAuthors[0].user.email})`
       }.`,
     );
@@ -103,7 +104,7 @@ async function del(slugOrId: string) {
 
   await prisma.doc.delete({ where: { id: doc.id } });
   await prisma.ydoc.deleteMany({ where: { id: ydocIdForDoc(doc.id) } });
-  console.log(`Deleted doc "${doc.title}" (id=${doc.id}, slug=${doc.slug}) and its ydoc row.`);
+  console.log(`Deleted doc "${docTitleOrFallback(doc.title)}" (id=${doc.id}, slug=${doc.slug}) and its ydoc row.`);
 }
 
 async function main() {

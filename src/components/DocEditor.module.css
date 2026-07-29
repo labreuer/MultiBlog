@@ -14,6 +14,7 @@
 /* Same rationale as PostEditor.module.css's .titleInput — a contenteditable
    (CollabTitleField), not an <input>. */
 .titleInput {
+  position: relative;
   font-size: clamp(1.1rem, 4vw, 1.5rem);
   width: 100%;
   margin-bottom: 12px;
@@ -24,6 +25,21 @@
   cursor: text;
   line-height: 1.4;
   min-height: 1.4em;
+}
+
+/* "Untitled", shown while the title fragment is empty — same behavior as
+   SiteHeader's search box's placeholder, gone the instant a real title
+   fragment lands. data-empty is only ever set alongside data-placeholder
+   (CollabTitleField.tsx), never a hardcoded string here. No top/left: an
+   absolutely-positioned ::before with none set keeps its normal static
+   position, which is the content-box origin — exactly where .tiptap's first
+   line starts, so it lines up with no offset to keep in sync with
+   .titleInput's own padding/border. */
+.titleInput[data-empty]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  color: #999;
+  pointer-events: none;
 }
 
 .titleInput :global(.tiptap) {

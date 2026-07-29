@@ -63,6 +63,14 @@ type Fixtures = {
   sharedDoc: TestDoc;
   /** Creates additional signed-in users on demand, cleaned up at test end. */
   secondUser: (opts?: { role?: TestUser["role"] }) => Promise<SecondUser>;
+  /**
+   * Tracks a doc id created through the live UI (e.g. clicking "+ New doc")
+   * rather than via createTestDoc, so it still gets deleted at test end.
+   * Needed specifically because such a doc starts titleless (PLAN.md §12n)
+   * — sweepTestData's fallback matches on the "E2E " title prefix, which a
+   * doc nobody has typed a title into yet doesn't have.
+   */
+  trackCreatedDoc: (docId: string) => void;
 };
 
 export async function signIn(page: Page, email: string, password = TEST_PASSWORD): Promise<void> {
@@ -157,6 +165,15 @@ export const test = base.extend<Fixtures>({
     for (const { email, page } of created) {
       await page.context().close();
       await deleteTestUser(email);
+    }
+  },
+
+  trackCreatedDoc: async ({ page }, use) => {
+    const ids: string[] = [];
+    await use((docId) => ids.push(docId));
+    await page.goto("about:blank").catch(() => {});
+    for (const id of ids) {
+      await deleteTestDoc(id);
     }
   },
 });

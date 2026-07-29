@@ -5,6 +5,7 @@ import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
+import { UNTITLED_DOC } from "@/lib/doc-title";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
 import DocSettingsPanel, { type EligibleUser } from "./DocSettingsPanel";
@@ -134,11 +135,17 @@ export default function DocEditor({
           userColor={userColor}
           editable={!deleted}
           className={`${styles.titleInput} ${deleted ? styles.titleInputDisabled : ""}`}
+          placeholder={UNTITLED_DOC}
           onTitleChange={setTitle}
           onEditorReady={() => {}}
         />
       ) : (
-        <div className={`${styles.titleInput} ${styles.titleInputDisabled}`}>{title}</div>
+        // Same fallback text/color as the placeholder above, so the swap
+        // from this pre-connection div to the live editor doesn't flip an
+        // untitled doc's title between two different grays.
+        <div className={`${styles.titleInput} ${styles.titleInputDisabled}`}>
+          {title || <span style={{ color: "#999" }}>{UNTITLED_DOC}</span>}
+        </div>
       )}
       <p className={styles.statusLine}>
         {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}

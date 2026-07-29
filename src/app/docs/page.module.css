@@ -1,0 +1,16 @@
+/* "+ New doc" is a <button> inside a <form action={createDoc}> (PLAN.md
+   §12n) rather than a <Link>, so it needs its own styling to read as the
+   sitewide link it visually replaces (STYLE.md: default link #3366cc,
+   underline only on :hover) instead of a plain button. */
+.newDocButton {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #3366cc;
+  cursor: pointer;
+}
+
+.newDocButton:hover {
+  text-decoration: underline;
+}

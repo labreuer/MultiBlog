@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canUserReadDoc } from "@/lib/doc-authz";
+import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
@@ -81,7 +82,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
 
   return (
     <main style={{ maxWidth: 800, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>{doc.title}</h1>
+      <h1>{docTitleOrFallback(doc.title)}</h1>
       <LiveDocBody
         docId={doc.id}
         initialBodyJSON={bodyJSON}

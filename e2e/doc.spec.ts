@@ -19,6 +19,49 @@ import {
   QUOTED_TEXT,
 } from "./fixtures";
 import { countDocYdocUpdates, getDocState, getAnnotationStates, countPostCollabRows } from "./db";
+import { uniqueTitle } from "./naming";
+
+test("+ New doc creates titleless and drops straight into the editor, no title-collecting page in between", async ({
+  page,
+  trackCreatedDoc,
+}) => {
+  await page.goto("/docs");
+  await page.getByRole("button", { name: "+ New doc" }).click();
+  await page.waitForURL(/\/doc\/[^/]+\/edit$/);
+
+  const docId = page.url().match(/\/doc\/([^/]+)\/edit$/)?.[1];
+  if (!docId) throw new Error(`Couldn't extract doc id from ${page.url()}`);
+  trackCreatedDoc(docId);
+
+  await waitForDocCollabReady(page);
+
+  // Titleless (PLAN.md §12n) — the title editor is empty, and its wrapper
+  // carries the placeholder attributes CollabTitleField sets, not literal
+  // "Untitled" text (::before content isn't in the accessibility tree, so
+  // this is asserted on the attributes rather than getByText).
+  await expect(titleEditor(page)).toHaveText("");
+  const titleWrapper = page.locator("[data-empty]");
+  await expect(titleWrapper).toHaveAttribute("data-placeholder", "Untitled");
+
+  // doc.title starts empty too — not the literal word "Untitled" (that only
+  // ever appears as a render-time fallback, never stored, PLAN.md §12n).
+  expect((await getDocState(docId))?.title).toBe("");
+
+  // Typing clears the placeholder and reaches doc.title on the store
+  // debounce; clearing the title again is the regression case for
+  // doc-cache.ts no longer skipping an empty write.
+  const title = uniqueTitle("doc");
+  await titleEditor(page).click();
+  await page.keyboard.type(title);
+  await expect(titleWrapper).toHaveCount(0);
+  await expect.poll(async () => (await getDocState(docId))?.title, { timeout: 15_000 }).toBe(title);
+
+  await titleEditor(page).click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("Backspace");
+  await expect(titleWrapper).toHaveAttribute("data-placeholder", "Untitled");
+  await expect.poll(async () => (await getDocState(docId))?.title, { timeout: 15_000 }).toBe("");
+});
 
 test("creating a doc writes exactly one full-state update row", async ({ draftDoc }) => {
   expect(await countDocYdocUpdates(draftDoc.id)).toBe(1);

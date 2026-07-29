@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canUserEditDoc } from "@/lib/doc-authz";
+import { docTitleOrFallback } from "@/lib/doc-title";
 import DocLiveHistory from "@/components/DocLiveHistory";
 
 // §11h's replay slider, rehoused over a doc's own ydoc_update (PLAN.md
@@ -32,7 +33,7 @@ export default async function DocLiveHistoryPage({ params }: { params: Promise<{
 
   return (
     <main style={{ maxWidth: 800, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>History: {doc.title}</h1>
+      <h1>History: {docTitleOrFallback(doc.title)}</h1>
       <p style={{ marginTop: "1em", marginBottom: "2em" }}>
         <Link href={`/doc/${doc.id}/edit`}>Back to editor</Link>
       </p>

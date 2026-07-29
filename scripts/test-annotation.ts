@@ -16,6 +16,7 @@ import "dotenv/config";
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "../src/lib/prisma";
 import { collectMarkAttrValues, extractMarkedText } from "../src/lib/tiptap-schema";
+import { docTitleOrFallback } from "../src/lib/doc-title";
 
 async function list(slugOrId: string) {
   const doc = await prisma.doc.findFirst({ where: { OR: [{ id: slugOrId }, { slug: slugOrId }] } });
@@ -31,14 +32,14 @@ async function list(slugOrId: string) {
   });
 
   if (annotations.length === 0) {
-    console.log(`No annotations on "${doc.title}" (id=${doc.id}).`);
+    console.log(`No annotations on "${docTitleOrFallback(doc.title)}" (id=${doc.id}).`);
     return;
   }
 
   const proseJson = doc.proseJson as JSONContent | null;
   const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
 
-  console.log(`Annotations on "${doc.title}" (id=${doc.id}):`);
+  console.log(`Annotations on "${docTitleOrFallback(doc.title)}" (id=${doc.id}):`);
   for (const annotation of annotations) {
     const text = (annotation.body as { text?: string } | null)?.text ?? "";
     const preview = text.length > 60 ? `${text.slice(0, 60)}…` : text;

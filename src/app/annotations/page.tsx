@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
 import { canEditAnyPost } from "@/lib/authz";
 import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
+import { docTitleOrFallback } from "@/lib/doc-title";
 import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { parseAnnotationsFilters, type AnnotationsSortKey } from "@/lib/annotations-query";
@@ -128,7 +129,7 @@ export default async function AnnotationsPage({
       id: a.id,
       docId: a.docId,
       docSlug: a.doc.slug,
-      docTitle: a.doc.title,
+      docTitle: docTitleOrFallback(a.doc.title),
       authorName: a.user.name ?? a.user.email,
       bodyText: (a.body as { text?: string } | null)?.text ?? "",
       quote: isRoot && marked && proseJson ? extractMarkedText(proseJson, "annotation", "id", a.id) : "",

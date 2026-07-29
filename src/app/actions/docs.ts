@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import * as Y from "yjs";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
-import { uniqueDocSlug, changeDocSlug, revertDocSlug as revertDocSlugInDb } from "@/lib/doc-slug";
+import { changeDocSlug, revertDocSlug as revertDocSlugInDb } from "@/lib/doc-slug";
 import { canManageDocs, canUserEditDoc } from "@/lib/doc-authz";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
@@ -29,44 +29,53 @@ async function requireEditableDocSession(docId: string) {
   return { session, doc };
 }
 
-export type CreateDocState = { error?: string };
-
-// Eager ydoc creation (PLAN.md §12b): the ydoc row is written in the same
-// request as the doc row, closing the window in which a connection could
-// arrive before either exists. Not wrapped in one DB transaction with the
-// doc insert — the two tables share no foreign key by design (§12b) — but a
-// failure here is non-fatal: ydocOnLoadDocument's own createIfAbsent call
-// (server/ydoc-hooks.ts) is the same forgiving fallback /ydoc-debug's "New
-// document" button already relies on for a name nobody's created yet.
-export async function createDocAction(_prevState: CreateDocState, formData: FormData): Promise<CreateDocState> {
+// Docs skip the title-first form a post uses (PLAN.md §12n) — the title is a
+// live collaborative field (CollabTitleField.tsx), so asking for one before
+// the doc exists just duplicates what the editor already does better. A doc
+// is created titleless and slugged by its own id; see doc-title.ts for how
+// "Untitled" is supplied at render without ever being real content.
+//
+// No useActionState/CreateDocState here (that's gone with the /docs/new
+// form) — createDoc takes no input, so the only failure mode is the
+// canManageDocs check, which /docs already gates the button on (§12f). This
+// throw is defense in depth, not a UI-facing error path.
+export async function createDoc(): Promise<void> {
   const session = await auth();
   if (!session?.user) {
     redirect("/sign-in");
   }
   if (!canManageDocs(session.user.role)) {
-    return { error: "You don't have permission to create docs." };
+    throw new Error("You don't have permission to create docs.");
   }
 
-  const title = formData.get("title");
-  if (typeof title !== "string" || !title.trim()) {
-    return { error: "Title is required." };
-  }
-  const trimmedTitle = title.trim();
-
-  const slug = await uniqueDocSlug(trimmedTitle);
-  const doc = await prisma.doc.create({
-    data: {
-      slug,
-      title: trimmedTitle,
-      authors: { create: { userId: session.user.id, bylineOrder: 0 } },
-    },
+  // Doc.id is @default(cuid()) — unknown until the row is inserted — so the
+  // cuid-as-slug (per PLAN.md §12n) needs a second write. The throwaway slug
+  // only has to satisfy the unique constraint for the instant between the
+  // two statements; nothing ever reads it.
+  const doc = await prisma.$transaction(async (tx) => {
+    const created = await tx.doc.create({
+      data: {
+        slug: crypto.randomUUID(),
+        title: "",
+        authors: { create: { userId: session.user.id, bylineOrder: 0 } },
+      },
+    });
+    return tx.doc.update({ where: { id: created.id }, data: { slug: created.id } });
   });
 
+  // Eager ydoc creation (PLAN.md §12b): the ydoc row is written in the same
+  // request as the doc row, closing the window in which a connection could
+  // arrive before either exists. Not wrapped in the transaction above — the
+  // two tables share no foreign key by design (§12b) — but a failure here is
+  // non-fatal: ydocOnLoadDocument's own createIfAbsent call
+  // (server/ydoc-hooks.ts) is the same forgiving fallback /ydoc-debug's "New
+  // document" button already relies on for a name nobody's created yet.
   const emptyDoc = new Y.Doc();
   const { ydoc, stateVector } = encodeYdocState(emptyDoc);
   emptyDoc.destroy();
   await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
 
+  revalidatePath("/docs");
   redirect(`/doc/${doc.id}/edit`);
 }
 
