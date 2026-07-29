@@ -88,6 +88,12 @@ export default async function AnnotationsPage({
 
   const baseWhere: Prisma.AnnotationWhereInput = {
     AND: [
+      // A DRAFT annotation (PLAN.md §13d) is a private note — invisible to
+      // everyone but its own author (§13a's authz decision is explicit that
+      // this holds "even from admins"), so this admin browse surface has to
+      // exclude it outright rather than relying on canManageDocs to gate
+      // the whole page and stop there.
+      { status: { not: "DRAFT" } },
       canEditAnyPost(session.user.role) ? {} : { doc: { authors: { some: { userId: session.user.id } } } },
       parseDeepLinkWhere(urlSearchParams),
     ],

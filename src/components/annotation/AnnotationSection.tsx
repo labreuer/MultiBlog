@@ -1,7 +1,9 @@
 import { renderToReactElement } from "@tiptap/static-renderer";
-import { getDocAnnotationsAsThreads, type AnnotationComment } from "@/lib/annotation-data";
+import { auth } from "@/lib/auth";
+import { getDocAnnotationsAsThreads, getOwnDraftAnnotations, type AnnotationComment } from "@/lib/annotation-data";
 import { annotationContentExtensions } from "@/lib/tiptap-schema";
 import NewAnnotationComposer from "./NewAnnotationComposer";
+import OwnDraftsList from "./OwnDraftsList";
 import AnnotationList, { type AnnotationEntry } from "./AnnotationList";
 import { type AnnotationNodeData } from "./AnnotationNode";
 import AnnotationColorStyles from "./AnnotationColorStyles";
@@ -55,7 +57,14 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
 // general one — so every one of them renders, not just the first, unlike a
 // post's single general thread.
 export default async function AnnotationSection({ docId }: { docId: string }) {
-  const threads = await getDocAnnotationsAsThreads(docId);
+  const session = await auth();
+  const [threads, ownDrafts] = await Promise.all([
+    getDocAnnotationsAsThreads(docId),
+    // Every doc route this renders from already requires a session
+    // (canUserReadDoc) — the `?? []` is just to keep this typed without a
+    // throw, never an expected runtime path.
+    session?.user ? getOwnDraftAnnotations(docId, session.user.id) : Promise.resolve([]),
+  ]);
   const quoteThreads = threads.filter((t) => t.quotedText !== "");
   const generalThreads = threads.filter((t) => t.quotedText === "");
 
@@ -91,6 +100,7 @@ export default async function AnnotationSection({ docId }: { docId: string }) {
       <AnnotationColorStyles colors={Object.fromEntries(quoteThreads.map((t) => [t.id, t.color]))} />
       <h2 className={styles.heading}>Annotations</h2>
       <NewAnnotationComposer docId={docId} />
+      <OwnDraftsList drafts={ownDrafts} />
 
       {threads.length === 0 ? (
         <p className={styles.empty}>No annotations yet.</p>

@@ -13,6 +13,7 @@ import type {
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import { Transform } from "@tiptap/pm/transform";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
@@ -356,6 +357,88 @@ export async function handleApplyAnnotationMark(
   }
 
   send(response, 200, JSON.stringify({ applied }));
+}
+
+// Every contiguous run of text carrying markName/attrName === attrValue —
+// the live-Node counterpart of tiptap-schema.ts's extractMarkedText, walking
+// descendants() instead of a getJSON() snapshot since handleRemoveAnnotationMark
+// below needs ranges to call removeMark on, not text. A contiguous annotated
+// span can be split into several adjacent text nodes (different bold/italic
+// runs, etc.) but never discontiguous, same invariant extractMarkedText
+// already relies on — it was applied as one addMark(from, to) call.
+function findMarkRanges(node: PMNode, markName: string, attrName: string, attrValue: string): { from: number; to: number }[] {
+  const ranges: { from: number; to: number }[] = [];
+  let current: { from: number; to: number } | null = null;
+  node.descendants((child, pos) => {
+    if (!child.isText) return;
+    const hasMark = child.marks.some((mark) => mark.type.name === markName && mark.attrs[attrName] === attrValue);
+    if (hasMark) {
+      if (current && current.to === pos) {
+        current.to = pos + child.nodeSize;
+      } else {
+        if (current) ranges.push(current);
+        current = { from: pos, to: pos + child.nodeSize };
+      }
+    } else if (current) {
+      ranges.push(current);
+      current = null;
+    }
+  });
+  if (current) ranges.push(current);
+  return ranges;
+}
+
+// POST /admin/annotation-unmark (PLAN.md §13d) — the reverse of
+// handleApplyAnnotationMark: removes every mark instance carrying
+// annotationId, wherever it currently sits in the document. Deleting an
+// annotation previously left its mark in the ydoc forever (nothing had ever
+// called removeMark), so the highlight kept showing on text whose
+// annotation was gone — this is what deleteAnnotation now calls to fix
+// that, and what a LIVE/RAISED annotation moving back to DRAFT would need
+// too (not built — §13k's scope only covers delete). A no-op, not an
+// error, when the mark isn't there (already degraded, or never landed).
+export async function handleRemoveAnnotationMark(
+  request: IncomingMessage,
+  response: ServerResponse,
+  instance: Hocuspocus,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as Partial<{ token: string; documentName: string; annotationId: string }>;
+  const { token, documentName, annotationId } = body;
+  if (typeof token !== "string" || typeof documentName !== "string" || typeof annotationId !== "string") {
+    send(response, 400, "Expected token, documentName and annotationId.");
+    return;
+  }
+
+  const payload = await verifyYdocToken(token).catch(() => null);
+  if (!payload || payload.documentName !== documentName) {
+    send(response, 403, "Invalid or mismatched ydoc token.");
+    return;
+  }
+
+  const connection = await instance.openDirectConnection(documentName);
+  try {
+    await connection.transact((document) => {
+      const fragment = document.getXmlFragment("default");
+      const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(document, "default");
+      const node = pmDocContentSchema.nodeFromJSON(json);
+
+      const ranges = findMarkRanges(node, "annotation", "id", annotationId);
+      if (ranges.length === 0) {
+        return;
+      }
+
+      const markType = pmDocContentSchema.marks.annotation;
+      const tr = new Transform(node);
+      for (const range of ranges) {
+        tr.removeMark(range.from, range.to, markType.create({ id: annotationId }));
+      }
+      prosemirrorToYXmlFragment(tr.doc, fragment);
+    });
+  } finally {
+    await connection.disconnect();
+  }
+
+  send(response, 204, "");
 }
 
 function readJsonBody(request: IncomingMessage): Promise<unknown> {

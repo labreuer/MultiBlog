@@ -82,3 +82,14 @@
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* LiveAnnotationComposer's DRAFT/LIVE/RAISED choice (PLAN.md §13d). */
+.visibilitySelect {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+}

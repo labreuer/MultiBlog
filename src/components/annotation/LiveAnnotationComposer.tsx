@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import AnnotationBody from "./AnnotationBody";
-import { postAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
+import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import styles from "./AnnotationComposer.module.css";
 
 type Props = {
@@ -24,12 +24,20 @@ type Props = {
   onMoveToBottom?: () => void;
 };
 
-// PLAN.md §13j Phase 2 — the provider-connection lifecycle around
+// PLAN.md §13d — DRAFT/LIVE/RAISED as a single choice rather than two
+// independent toggles ("keep private" + "notify authors"): the three
+// outcomes are mutually exclusive (there's no such thing as a private
+// RAISED annotation), so a select reads the actual state space directly
+// instead of letting the UI express a combination that can't exist.
+type Visibility = "private" | "post" | "raise";
+
+// PLAN.md §13j Phase 2/4 — the provider-connection lifecycle around
 // AnnotationBody, mirroring DocEditor.tsx's own connect-on-mount/
 // destroy-on-unmount effect but scoped to one annotation's ydoc rather than
 // a doc's. Mounted only once a DRAFT row already exists (createDraftAnnotation,
-// called by whichever parent — the bottom composer or a reply — decided to
-// open one) — this component never creates the row itself, only connects to it.
+// called by whichever parent — the bottom composer, a reply, or "Edit" on
+// an own saved draft — decided to open one) — this component never creates
+// the row itself, only connects to it.
 export default function LiveAnnotationComposer({
   annotationId,
   anchorFrom,
@@ -44,6 +52,7 @@ export default function LiveAnnotationComposer({
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [visibility, setVisibility] = useState<Visibility>("post");
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ydoc = useMemo(() => new Y.Doc(), [annotationId]);
@@ -92,10 +101,18 @@ export default function LiveAnnotationComposer({
     };
   }, [annotationId, ydoc]);
 
-  async function handlePost() {
+  // Covers all three outcomes: posted LIVE, posted RAISED, or saved
+  // privately (still DRAFT). All three end the same way from the parent's
+  // point of view — the composer's job is done, close it — which is why
+  // this fires onPosted rather than a fourth "onSavedPrivately" callback;
+  // only discardDraftAnnotation (Cancel, below) actually removes the row.
+  async function handleSubmit() {
     setPending(true);
     setError(null);
-    const result = await postAnnotation({ annotationId, anchorFrom, anchorTo, quotedText });
+    const result =
+      visibility === "private"
+        ? await saveDraftAnnotation(annotationId)
+        : await postAnnotation({ annotationId, anchorFrom, anchorTo, quotedText, raise: visibility === "raise" });
     setPending(false);
     if (result.error) {
       setError(result.error);
@@ -117,6 +134,16 @@ export default function LiveAnnotationComposer({
     return <p className={styles.status}>{error ?? "Connecting…"}</p>;
   }
 
+  const submitLabel = pending
+    ? visibility === "private"
+      ? "Saving..."
+      : "Posting..."
+    : visibility === "private"
+      ? "Save privately"
+      : visibility === "raise"
+        ? "Post & notify authors"
+        : "Post annotation";
+
   return (
     <div>
       <AnnotationBody
@@ -129,13 +156,24 @@ export default function LiveAnnotationComposer({
       />
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.buttonRow}>
+        <select
+          value={visibility}
+          onChange={(e) => setVisibility(e.target.value as Visibility)}
+          disabled={pending}
+          className={styles.visibilitySelect}
+          aria-label="Annotation visibility"
+        >
+          <option value="private">Keep private</option>
+          <option value="post">Post</option>
+          <option value="raise">Post &amp; notify authors</option>
+        </select>
         <button
           type="button"
-          onClick={handlePost}
+          onClick={handleSubmit}
           disabled={pending}
           className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
         >
-          {pending ? "Posting..." : "Post annotation"}
+          {submitLabel}
         </button>
         {onMoveToBottom && (
           <button type="button" onClick={onMoveToBottom} className={styles.moveToBottom}>

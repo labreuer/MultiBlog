@@ -53,12 +53,12 @@ export type AnnotationThread = {
 // (deleted ones still fetched, so AnnotationNode can render "[deleted]" for
 // one with live replies).
 //
-// PLAN.md §13d — a DRAFT annotation (still being composed, no inline mark)
-// is excluded outright, including from its own author: a draft's only
-// visible surface is the open composer itself (LiveAnnotationComposer),
-// which the client already holds a direct connection to and needs no
-// server round-trip to "see." Rendering it a second time here, read-only,
-// would just duplicate what the open composer is already showing.
+// PLAN.md §13d — a DRAFT annotation (still being composed, or saved
+// "Keep private") is excluded outright, including from its own author:
+// this is the thread list every doc reader sees, and a private note has no
+// business appearing in it even for the person who wrote it. The one place
+// an author *can* find their own drafts again is getOwnDraftAnnotations
+// below, a deliberately separate, narrower query.
 export async function getDocAnnotationsAsThreads(docId: string): Promise<AnnotationThread[]> {
   const [doc, annotations] = await Promise.all([
     prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } }),
@@ -117,4 +117,27 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
   }
 
   return threads;
+}
+
+export type OwnDraft = {
+  id: string;
+  bodyText: string;
+  createdAt: string;
+};
+
+// PLAN.md §13d — "Keep private" leaves a DRAFT sitting in the DB rather
+// than discarding it (Cancel's job); this is the *only* thing that makes
+// that persistence worth anything, since getDocAnnotationsAsThreads
+// excludes DRAFT unconditionally. Scoped to docId + the caller's own
+// userId — never call this with anyone else's id (§13a: DRAFT visibility
+// is owner-only, with no admin override, and this query is the one place
+// that rule actually has to be enforced in code rather than by a mark
+// simply not existing yet).
+export async function getOwnDraftAnnotations(docId: string, userId: string): Promise<OwnDraft[]> {
+  const drafts = await prisma.annotation.findMany({
+    where: { docId, userId, status: "DRAFT" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, bodyText: true, createdAt: true },
+  });
+  return drafts.map((d) => ({ id: d.id, bodyText: d.bodyText, createdAt: d.createdAt.toISOString() }));
 }

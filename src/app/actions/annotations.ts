@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
-import { applyAnnotationMark, flushAnnotationCache } from "@/lib/annotation-admin";
+import { applyAnnotationMark, flushAnnotationCache, removeAnnotationMark } from "@/lib/annotation-admin";
+import { docTitleOrFallback } from "@/lib/doc-title";
+import { sendMail } from "@/lib/mail";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
@@ -62,19 +64,24 @@ export async function createDraftAnnotation(
   return { id: annotation.id };
 }
 
-// Flips a DRAFT to LIVE — the live ydoc editor (AnnotationBody) has already
-// been writing the real content in via the collab server the whole time
-// (server/annotation-cache.ts's store debounce keeps proseJson/bodyText
-// current), so this only changes visibility and, for a root annotation with
-// a captured selection, applies the mark (row-first-mark-second, same
-// ordering §12i's original submitAnnotation established — a mark naming a
-// still-DRAFT row would be visible-but-unreadable to anyone who resolved it
-// before this update commits).
+// Flips a DRAFT to LIVE (or RAISED — PLAN.md §13d) — the live ydoc editor
+// (AnnotationBody) has already been writing the real content in via the
+// collab server the whole time (server/annotation-cache.ts's store debounce
+// keeps proseJson/bodyText current), so this only changes visibility and,
+// for a root annotation with a captured selection, applies the mark
+// (row-first-mark-second, same ordering §12i's original submitAnnotation
+// established — a mark naming a still-DRAFT row would be
+// visible-but-unreadable to anyone who resolved it before this update
+// commits).
 export async function postAnnotation(opts: {
   annotationId: string;
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
+  // "Notify authors" (PLAN.md §13d) — RAISED is LIVE plus the doc's byline
+  // authors emailed and raisedAt stamped; nothing else about visibility or
+  // the mark differs from a plain LIVE post.
+  raise?: boolean;
 }): Promise<{ error?: string }> {
   const session = await auth();
   if (!session?.user) {
@@ -124,7 +131,10 @@ export async function postAnnotation(opts: {
     return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
 
-  await prisma.annotation.update({ where: { id: annotation.id }, data: { status: "LIVE" } });
+  await prisma.annotation.update({
+    where: { id: annotation.id },
+    data: opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" },
+  });
 
   // Only a root annotation ever carries a mark — a reply is just a comment
   // in the thread, anchored nowhere of its own (PLAN.md §12i).
@@ -148,6 +158,52 @@ export async function postAnnotation(opts: {
     // whether or not the mark landed, LIVE is already correct either way.
   }
 
+  if (opts.raise) {
+    const doc = await prisma.doc.findUnique({
+      where: { id: annotation.docId },
+      select: { title: true, slug: true, authors: { select: { user: { select: { email: true } } } } },
+    });
+    if (doc) {
+      const raisedBy = session.user.name ?? session.user.email ?? "Someone";
+      const subject = `${raisedBy} raised an annotation on "${docTitleOrFallback(doc.title)}"`;
+      const text = `${bodyText}\n\n${process.env.APP_URL ?? "http://localhost:3000"}/doc/${doc.slug}`;
+      // One recipient per byline author, not a single multi-recipient
+      // message — same reasoning src/app/actions/forgot-password.ts's own
+      // one-off sendMail call has no need to weigh, but real here: nothing
+      // ties these authors together as a group the way a Cc/To list would
+      // otherwise imply.
+      await Promise.all(doc.authors.map((a) => sendMail({ to: a.user.email, subject, text })));
+    }
+  }
+
+  revalidatePath(`/doc/${annotation.docId}`);
+  return {};
+}
+
+// "Keep private" (PLAN.md §13d) — the row is already DRAFT by default
+// (createDraftAnnotation), so there's no status to change; this just
+// forces the same flush postAnnotation does, so what was typed is actually
+// saved rather than left at whatever the last debounce happened to catch.
+export async function saveDraftAnnotation(annotationId: string): Promise<{ error?: string }> {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: "Unauthorized." };
+  }
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { userId: true, status: true, docId: true },
+  });
+  if (!annotation) {
+    return { error: "Annotation not found." };
+  }
+  if (annotation.userId !== session.user.id) {
+    return { error: "You don't have permission to save this annotation." };
+  }
+  if (annotation.status !== "DRAFT") {
+    return { error: "This annotation has already been posted." };
+  }
+
+  await flushAnnotationCache({ userId: session.user.id, role: session.user.role, annotationId });
   revalidatePath(`/doc/${annotation.docId}`);
   return {};
 }
@@ -184,7 +240,10 @@ async function requireOwnOrAdmin(annotationId: string) {
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
-  const annotation = await prisma.annotation.findUnique({ where: { id: annotationId }, select: { userId: true, docId: true } });
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { userId: true, docId: true, status: true },
+  });
   if (!annotation) {
     throw new Error("Annotation not found.");
   }
@@ -201,6 +260,16 @@ export async function deleteAnnotation(annotationId: string): Promise<void> {
     where: { id: annotationId },
     data: { deletedByUserId: session.user.id, deletedAt: new Date() },
   });
+  // A DRAFT never had a mark applied (§13d), so there's nothing to remove —
+  // skip the round trip for the common "deleting my own private note" case.
+  if (annotation.status !== "DRAFT") {
+    await removeAnnotationMark({
+      docId: annotation.docId,
+      userId: session.user.id,
+      role: session.user.role,
+      annotationId,
+    });
+  }
   revalidatePath(`/doc/${annotation.docId}`);
   revalidatePath("/annotations");
 }

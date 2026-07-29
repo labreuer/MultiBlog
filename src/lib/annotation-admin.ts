@@ -1,6 +1,12 @@
 import type { Role } from "@/generated/prisma/enums";
 import { signYdocToken } from "./ydoc-token";
-import { ydocIdForDoc, ydocIdForAnnotation, ANNOTATION_MARK_PATH, ANNOTATION_FLUSH_PATH } from "./ydoc-names";
+import {
+  ydocIdForDoc,
+  ydocIdForAnnotation,
+  ANNOTATION_MARK_PATH,
+  ANNOTATION_UNMARK_PATH,
+  ANNOTATION_FLUSH_PATH,
+} from "./ydoc-names";
 
 // Server-to-server channel from the Next app to the Hocuspocus server for
 // applying an annotation's mark to its doc's live document (PLAN.md §12i) —
@@ -60,6 +66,34 @@ export async function applyAnnotationMark(opts: {
   }
   const result = (await response.json()) as { applied: boolean };
   return result;
+}
+
+/**
+ * Removes every mark instance carrying `annotationId` from `docId`'s live
+ * document, wherever it currently sits (PLAN.md §13d) — the reverse of
+ * applyAnnotationMark, called from deleteAnnotation so a deleted
+ * annotation's highlight doesn't keep showing on text whose annotation is
+ * gone (a pre-existing gap: nothing had ever called this before §13d).
+ *
+ * Best-effort, same reasoning as flushAnnotationCache: the annotation row
+ * is already being deleted regardless of whether this succeeds, so a
+ * failure here just means a stray highlight lingers until the next edit
+ * touches that text — not worth blocking the delete over.
+ */
+export async function removeAnnotationMark(opts: { docId: string; userId: string; role: Role; annotationId: string }): Promise<void> {
+  const { docId, userId, role, annotationId } = opts;
+  const documentName = ydocIdForDoc(docId);
+  const token = await signYdocToken({ sub: userId, documentName, role });
+
+  try {
+    await fetch(`${collabHttpOrigin()}${ANNOTATION_UNMARK_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, documentName, annotationId }),
+    });
+  } catch {
+    // Best-effort — see the doc comment above.
+  }
 }
 
 /**
