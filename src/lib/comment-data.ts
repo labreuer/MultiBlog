@@ -1,15 +1,7 @@
-import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
-import { pmSchema, collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
+import { pmSchema } from "@/lib/tiptap-schema";
 import { colorForSeed } from "@/lib/author-colors";
 import type { ThreadStatus } from "@/generated/prisma/enums";
-
-// PLAN.md §12i — threads through CommentSection/CommentForm/CommentNode/
-// CommentEntryList so the same components render both a post's
-// CommentThread/Comment rows and a doc's Annotation rows. `id` is a postId
-// or a docId depending on `kind`; the components never need to know more
-// than that to route a submission/deletion to the right server action.
-export type CommentTarget = { kind: "post" | "doc"; id: string };
 
 export type ThreadComment = {
   id: string;
@@ -23,27 +15,13 @@ export type ThreadComment = {
 
 export type ThreadWithComments = {
   id: string;
-  // Nullable because a doc annotation has no stable absolute offset to sort
-  // by (§12i) — every annotation-sourced thread carries null here, which
-  // CommentEntryList already treats as "sorts last" under quote-position
-  // mode (the same fallback a post's own general thread already uses).
   anchorFrom: number | null;
   anchorTo: number | null;
   // "" means "renders in the general-discussion bucket, no QuoteThreadHeader"
-  // — the same signal a post's own unanchored thread already uses, now also
-  // covering a doc annotation whose mark is no longer in the document
-  // (§12h: it degrades into the general discussion, not a detached-with-
-  // blockquote state — there's nothing stored to show a blockquote for
-  // once the mark's gone). CommentSection renders *every* thread with ""
-  // here, not just the first — see its own comment for why that matters.
+  // — a post has at most one such thread (found-or-created keyed on
+  // quotedText: "", src/app/actions/comments.ts).
   quotedText: string;
-  // Always ACTIVE for an annotation-sourced thread: docs never use DETACHED
-  // (see quotedText above) or RESOLVED (nothing currently renders it
-  // differently from ACTIVE on the post side either).
   status: ThreadStatus;
-  // Null for a doc annotation — there is no frozen revision to fetch
-  // surrounding context from (§12h/§12m defer that); getDetachedThreadContext
-  // is simply never called for a null value.
   anchoredRevisionId: string | null;
   comments: ThreadComment[];
   // The thread's own color, not any one comment's — shared by every reply
@@ -124,76 +102,4 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         })),
       };
     });
-}
-
-// The annotation-loader half of the shared view-model (PLAN.md §12i) — same
-// return shape as getPostThreadsWithApprovedComments, built very
-// differently since there's no separate thread table: a root annotation
-// (parentAnnotationId null) *is* the thread, and every reply — including a
-// reply-of-a-reply, same nesting CommentNode already recurses through for
-// posts — is grouped under it by walking parentAnnotationId pointers back
-// to their root. No status filter: annotations are never moderated, so
-// every non-deleted-or-not row is eligible (deleted ones still fetched, same
-// as posts, so CommentNode can render "[deleted]" for one with live
-// replies).
-export async function getDocAnnotationsAsThreads(docId: string): Promise<ThreadWithComments[]> {
-  const [doc, annotations] = await Promise.all([
-    prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } }),
-    prisma.annotation.findMany({
-      where: { docId },
-      orderBy: { createdAt: "asc" },
-      include: { user: { select: { name: true, email: true, color: true } } },
-    }),
-  ]);
-
-  const proseJson = doc?.proseJson as JSONContent | null;
-  const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
-
-  const byId = new Map(annotations.map((a) => [a.id, a]));
-  function rootIdOf(annotation: (typeof annotations)[number]): string {
-    let current = annotation;
-    const seen = new Set<string>();
-    while (current.parentAnnotationId && !seen.has(current.id)) {
-      seen.add(current.id);
-      const parent = byId.get(current.parentAnnotationId);
-      if (!parent) break;
-      current = parent;
-    }
-    return current.id;
-  }
-
-  const byRoot = new Map<string, typeof annotations>();
-  for (const annotation of annotations) {
-    const rootId = rootIdOf(annotation);
-    const members = byRoot.get(rootId) ?? [];
-    members.push(annotation);
-    byRoot.set(rootId, members);
-  }
-
-  const threads: ThreadWithComments[] = [];
-  for (const [rootId, members] of byRoot) {
-    const root = byId.get(rootId);
-    if (!root) continue;
-    const quotedText = proseJson && markedIds.has(rootId) ? extractMarkedText(proseJson, "annotation", "id", rootId) : "";
-    threads.push({
-      id: rootId,
-      anchorFrom: null,
-      anchorTo: null,
-      quotedText,
-      status: "ACTIVE",
-      anchoredRevisionId: null,
-      color: root.user.color,
-      comments: members.map((a) => ({
-        id: a.id,
-        parentCommentId: a.parentAnnotationId,
-        displayName: a.user.name ?? a.user.email,
-        bodyText: (a.body as { text?: string } | null)?.text ?? "",
-        createdAt: a.createdAt.toISOString(),
-        deletedByUserId: a.deletedByUserId,
-        commenterUserId: a.userId,
-      })),
-    });
-  }
-
-  return threads;
 }

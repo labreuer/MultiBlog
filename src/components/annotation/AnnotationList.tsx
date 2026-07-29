@@ -1,34 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import CommentNode, { hasNonDeletedDescendant, type CommentNodeData } from "./CommentNode";
-import QuoteThreadHeader from "./QuoteThreadHeader";
+import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "./AnnotationNode";
+import QuoteThreadHeader from "../QuoteThreadHeader";
 import { activatePseudoBorderForHash } from "@/lib/pseudo-border";
-import type { ThreadStatus } from "@/generated/prisma/enums";
 
-export type CommentEntry = {
+export type AnnotationEntry = {
   threadId: string;
   quotedText: string;
   anchorFrom: number | null;
-  status: ThreadStatus;
-  context: string | null;
   color: string;
-  root: CommentNodeData;
+  root: AnnotationNodeData;
 };
 
 type SortMode = "datetime" | "quoteIndex";
 
 type Props = {
-  entries: CommentEntry[];
-  postId: string;
+  entries: AnnotationEntry[];
+  docId: string;
 };
 
-export default function CommentEntryList({ entries, postId }: Props) {
+// The doc-side sibling of CommentEntryList (PLAN.md §13c). QuoteThreadHeader
+// and pseudo-border.ts stay shared, unlike the rest of the Comment* tree —
+// neither was ever coupled to CommentTarget (§12i/§12n), so there's nothing
+// to un-share.
+export default function AnnotationList({ entries, docId }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
 
-  // Puts a pseudo-border next to whatever comment the page loaded pointing
-  // at (its timestamp permalink hash), and keeps it in sync as the hash
-  // changes from clicking other permalinks on the same page.
+  // Puts a pseudo-border next to whatever annotation the page loaded
+  // pointing at (its timestamp permalink hash), and keeps it in sync as the
+  // hash changes from clicking other permalinks on the same page.
   useEffect(() => {
     activatePseudoBorderForHash(window.location.hash.slice(1));
     const onHashChange = () => activatePseudoBorderForHash(window.location.hash.slice(1));
@@ -51,7 +52,7 @@ export default function CommentEntryList({ entries, postId }: Props) {
         <label style={{ fontSize: "0.85rem", color: "#555" }}>
           Sort by:{" "}
           <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
-            <option value="datetime">Comment date</option>
+            <option value="datetime">Annotation date</option>
             <option value="quoteIndex">Quoted text position</option>
           </select>
         </label>
@@ -59,15 +60,12 @@ export default function CommentEntryList({ entries, postId }: Props) {
 
       {sorted.map((entry) => {
         // A deleted root with no live descendants renders nothing (see
-        // CommentNode) — its quoted-text header would otherwise be left
-        // dangling above empty space with no comment underneath it.
+        // AnnotationNode) — its quoted-text header would otherwise be left
+        // dangling above empty space with no annotation underneath it.
         const rootRendersNothing =
           entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
 
         return (
-          // data-thread-id (not id) since sorting can scatter a thread's entries
-          // apart, and every one of them needs to be reachable — AnnotatableArticle's
-          // onIndicatorClick uses querySelectorAll to scroll to and flash all of them.
           <div
             key={entry.root.id}
             data-thread-id={entry.threadId}
@@ -78,12 +76,12 @@ export default function CommentEntryList({ entries, postId }: Props) {
               <QuoteThreadHeader
                 threadId={entry.threadId}
                 quotedText={entry.quotedText}
-                status={entry.status}
-                context={entry.context}
+                status="ACTIVE"
+                context={null}
                 color={entry.color}
               />
             )}
-            <CommentNode comment={entry.root} postId={postId} />
+            <AnnotationNode annotation={entry.root} docId={docId} />
           </div>
         );
       })}

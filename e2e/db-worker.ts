@@ -263,7 +263,7 @@ export type AnnotationState = {
 
 /**
  * Every annotation on a doc, with each root's anchored/document-level state
- * resolved the same way comment-data.ts's getDocAnnotationsAsThreads does —
+ * resolved the same way annotation-data.ts's getDocAnnotationsAsThreads does —
  * a mark still present in Doc.proseJson vs. not (PLAN.md §12h).
  */
 export async function getAnnotationStates(docId: string): Promise<AnnotationState[]> {

@@ -6,7 +6,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
-import CommentForm from "./CommentForm";
+import AnnotationPopover from "./annotation/AnnotationPopover";
 import proseStyles from "@/styles/prose.module.css";
 
 type PendingSelection = {
@@ -204,34 +204,16 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
         <EditorContent editor={editor} />
       </div>
       {pending && (
-        <div
-          data-testid="annotation-popup"
-          style={{
-            position: "absolute",
-            top: pending.top + 6,
-            left: pending.left,
-            zIndex: 20,
-            width: 280,
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            padding: 12,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-          }}
-        >
-          <p style={{ fontSize: "0.85rem", color: "#666", marginBottom: 4 }}>
-            Annotating: “
-            {pending.quotedText.length > 80 ? `${pending.quotedText.slice(0, 80)}…` : pending.quotedText}”
-          </p>
-          <CommentForm
-            target={{ kind: "doc", id: docId }}
-            anchorFrom={pending.from}
-            anchorTo={pending.to}
-            quotedText={pending.quotedText}
-            onPosted={() => setPending(null)}
-            onCancel={() => setPending(null)}
-          />
-        </div>
+        <AnnotationPopover
+          docId={docId}
+          top={pending.top}
+          left={pending.left}
+          from={pending.from}
+          to={pending.to}
+          quotedText={pending.quotedText}
+          onPosted={() => setPending(null)}
+          onCancel={() => setPending(null)}
+        />
       )}
     </div>
   );

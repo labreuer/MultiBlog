@@ -127,7 +127,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
           threads={quoteHighlights}
           staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
         />
-        <CommentSection target={{ kind: "post", id: post.id }} />
+        <CommentSection postId={post.id} />
         <p>
           <Link href="/">← Back to all posts</Link>
         </p>

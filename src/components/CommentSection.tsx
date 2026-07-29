@@ -1,13 +1,7 @@
-import {
-  getPostThreadsWithApprovedComments,
-  getDocAnnotationsAsThreads,
-  getDetachedThreadContext,
-  type CommentTarget,
-} from "@/lib/comment-data";
+import { getPostThreadsWithApprovedComments, getDetachedThreadContext } from "@/lib/comment-data";
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
 import { type CommentNodeData } from "./CommentNode";
-import AnnotationColorStyles from "./AnnotationColorStyles";
 import styles from "./CommentSection.module.css";
 
 function buildTree(
@@ -38,21 +32,15 @@ function buildTree(
   return roots;
 }
 
-export default async function CommentSection({ target }: { target: CommentTarget }) {
-  const threads = target.kind === "post" ? await getPostThreadsWithApprovedComments(target.id) : await getDocAnnotationsAsThreads(target.id);
+export default async function CommentSection({ postId }: { postId: string }) {
+  const threads = await getPostThreadsWithApprovedComments(postId);
   const quoteThreads = threads.filter((t) => t.quotedText !== "");
   // A post has at most one general thread (found-or-created keyed on
-  // quotedText: "", src/app/actions/comments.ts) — but a doc can have many
-  // "" entries (every annotation whose mark is gone, §12h, plus any
-  // genuinely general one), so every one of them renders, not just the
-  // first. Filtering here rather than finding is a no-op for posts and
-  // correct for docs.
-  const generalThreads = threads.filter((t) => t.quotedText === "");
+  // quotedText: "", src/app/actions/comments.ts).
+  const generalThread = threads.find((t) => t.quotedText === "");
 
   const detachedContextByThread = new Map<string, string | null>();
   for (const thread of quoteThreads) {
-    // Never true for a doc-sourced thread (§12i) — annotations don't use
-    // DETACHED, so this stays post-only without an explicit target check.
     if (thread.status === "DETACHED" && thread.anchoredRevisionId !== null) {
       detachedContextByThread.set(
         thread.id,
@@ -73,37 +61,28 @@ export default async function CommentSection({ target }: { target: CommentTarget
         root,
       })),
     ),
-    ...generalThreads.flatMap((generalThread) =>
-      buildTree(generalThread.comments).map((root) => ({
-        threadId: generalThread.id,
-        quotedText: "",
-        anchorFrom: null,
-        status: generalThread.status,
-        context: null,
-        color: generalThread.color,
-        root,
-      })),
-    ),
+    ...(generalThread
+      ? buildTree(generalThread.comments).map((root) => ({
+          threadId: generalThread.id,
+          quotedText: "",
+          anchorFrom: null,
+          status: generalThread.status,
+          context: null,
+          color: generalThread.color,
+          root,
+        }))
+      : []),
   ];
 
   return (
     <section className={styles.section} data-comment-section>
-      {/* Colors the reading/editing view's annotation highlights by their
-          author, same as AuthorHighlightStyles does for attributed body
-          text — a <style> tag's attribute-selector rules apply document-wide
-          regardless of where it sits in the tree, so rendering it here
-          (rather than up in LiveDocBody, which has no reason to know about
-          annotation authorship) is fine. */}
-      {target.kind === "doc" && (
-        <AnnotationColorStyles colors={Object.fromEntries(quoteThreads.map((t) => [t.id, t.color]))} />
-      )}
-      <h2 className={styles.heading}>{target.kind === "doc" ? "Annotations" : "Comments"}</h2>
-      <CommentForm target={target} />
+      <h2 className={styles.heading}>Comments</h2>
+      <CommentForm postId={postId} />
 
       {threads.length === 0 ? (
-        <p className={styles.empty}>{target.kind === "doc" ? "No annotations yet." : "No comments yet."}</p>
+        <p className={styles.empty}>No comments yet.</p>
       ) : (
-        <CommentEntryList entries={entries} target={target} />
+        <CommentEntryList entries={entries} postId={postId} />
       )}
     </section>
   );

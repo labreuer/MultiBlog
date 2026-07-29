@@ -2,14 +2,15 @@
 
 import { useActionState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
-import styles from "./CommentForm.module.css";
+import { submitAnnotation } from "@/app/actions/annotations";
+import type { SubmitCommentState } from "@/app/actions/comments";
+import styles from "./AnnotationComposer.module.css";
 
 const initialState: SubmitCommentState = {};
 
 type Props = {
-  postId: string;
-  parentCommentId?: string;
+  docId: string;
+  parentAnnotationId?: string;
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
@@ -17,9 +18,14 @@ type Props = {
   onCancel?: () => void;
 };
 
-export default function CommentForm({
-  postId,
-  parentCommentId,
+// The doc-side sibling of CommentForm (PLAN.md §13c) — un-shared from it now
+// that an annotation body is becoming its own collaborative document rather
+// than a plain textarea. Still a plain `<textarea>` posting through
+// submitAnnotation until Phase 2 replaces it with a live ydoc editor; this
+// phase only separates the component, not the interaction.
+export default function AnnotationComposer({
+  docId,
+  parentAnnotationId,
   anchorFrom,
   anchorTo,
   quotedText,
@@ -28,7 +34,7 @@ export default function CommentForm({
 }: Props) {
   const { data: session } = useSession();
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
-  const [state, formAction, pending] = useActionState(submitComment, initialState);
+  const [state, formAction, pending] = useActionState(submitAnnotation, initialState);
 
   useEffect(() => {
     if (state.status === "APPROVED") {
@@ -40,14 +46,10 @@ export default function CommentForm({
     return null;
   }
 
-  if (state.status === "PENDING") {
-    return <p className={styles.status}>Your comment is awaiting moderation.</p>;
-  }
-
   return (
     <form action={formAction} className={styles.form}>
-      <input type="hidden" name="postId" value={postId} />
-      {parentCommentId && <input type="hidden" name="parentCommentId" value={parentCommentId} />}
+      <input type="hidden" name="docId" value={docId} />
+      {parentAnnotationId && <input type="hidden" name="parentCommentId" value={parentAnnotationId} />}
       {anchorFrom !== undefined && anchorTo !== undefined && quotedText && (
         <>
           <input type="hidden" name="anchorFrom" value={anchorFrom} />
@@ -55,15 +57,9 @@ export default function CommentForm({
           <input type="hidden" name="quotedText" value={quotedText} />
         </>
       )}
-      {!userName && (
-        <>
-          <input name="name" type="text" placeholder="Name" required className={styles.field} />
-          <input name="email" type="email" placeholder="Email" required className={styles.field} />
-        </>
-      )}
       <textarea
         name="body"
-        placeholder={userName ? `Commenting as ${userName}` : "Write a comment..."}
+        placeholder={userName ? `Annotating as ${userName}` : "Write an annotation..."}
         required
         rows={3}
         className={`${styles.field} ${styles.textarea}`}
@@ -75,7 +71,7 @@ export default function CommentForm({
           disabled={pending}
           className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
         >
-          {pending ? "Posting..." : "Post comment"}
+          {pending ? "Annotating..." : "Post annotation"}
         </button>
         {onCancel && (
           <button type="button" onClick={onCancel} className={styles.cancel}>

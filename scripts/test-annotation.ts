@@ -5,7 +5,7 @@
 // ever be able to produce the document-level state, of limited value beyond
 // what already exists. Showing whether each root annotation resolves to a
 // real quote or has degraded to document-level (PLAN.md §12h) needs the
-// same collectMarkAttrValues/extractMarkedText pass comment-data.ts's
+// same collectMarkAttrValues/extractMarkedText pass annotation-data.ts's
 // getDocAnnotationsAsThreads does — reading it here rather than a one-off
 // `psql SELECT` is the whole point of this script.
 //

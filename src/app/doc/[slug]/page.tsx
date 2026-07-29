@@ -12,7 +12,7 @@ import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
-import CommentSection from "@/components/CommentSection";
+import AnnotationSection from "@/components/annotation/AnnotationSection";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -109,7 +109,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
           </p>
         }
       />
-      <CommentSection target={{ kind: "doc", id: doc.id }} />
+      <AnnotationSection docId={doc.id} />
     </main>
   );
 }
