@@ -135,3 +135,15 @@
   background: color-mix(in srgb, var(--thread-color, #999) 18%, transparent);
   border-bottom: 2px dashed var(--thread-color, #999);
 }
+
+/* PLAN.md §14f — /side-by-side suppresses annotation highlights visually,
+   never schematically: the `annotation` mark stays in the write column's
+   extension list (dropping it would strip every existing anchor out of the
+   shared ydoc the instant anyone typed), so this is a pure paint override
+   rather than a schema change. Specificity (0,3,0) beats .annotation-
+   highlight's own (0,2,0) regardless of source order, so it doesn't matter
+   which stylesheet loads last. */
+.prose.noAnnotations :global(.annotation-highlight) {
+  background: none;
+  cursor: inherit;
+}

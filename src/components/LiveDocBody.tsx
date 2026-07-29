@@ -37,6 +37,17 @@ type Props = {
   userColor: string;
   // See CollabEditorBody's identical prop — PLAN.md §14f.
   ariaLabel?: string;
+  // PLAN.md §14f — /side-by-side claims the selection gesture for doc-link
+  // creation instead of annotation (§14i adds the doc-link popover in its
+  // place; Phase 2 just suppresses this one). "none" skips both the pending-
+  // decoration tracking and AnnotationPopover entirely, so a selection on
+  // that page does nothing until the doc-link composer exists.
+  selectionUi?: "annotation" | "none";
+  // Paints over .annotation-highlight (prose.module.css's .noAnnotations)
+  // without touching the schema — the mark itself stays registered and
+  // synced regardless. See §14f for why dropping the mark type instead
+  // would be destructive.
+  suppressAnnotations?: boolean;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -66,6 +77,8 @@ export default function LiveDocBody({
   overrideBodyJSON,
   userColor,
   ariaLabel = "Post body",
+  selectionUi = "annotation",
+  suppressAnnotations = false,
 }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
@@ -104,6 +117,7 @@ export default function LiveDocBody({
     editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     onCreate: () => setReady(true),
     onSelectionUpdate: ({ editor: liveEditor }) => {
+      if (selectionUi === "none") return;
       const { from, to, empty } = liveEditor.state.selection;
       const container = containerRef.current;
       if (empty || !container) {
@@ -280,10 +294,13 @@ export default function LiveDocBody({
     <div ref={containerRef} style={{ position: "relative" }}>
       {synced && <span data-testid="live-doc-synced" style={{ display: "none" }} />}
       <div style={{ display: ready ? "none" : "block" }}>{staticBody}</div>
-      <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
+      <div
+        className={`${proseStyles.prose} ${suppressAnnotations ? proseStyles.noAnnotations : ""}`}
+        style={{ display: ready ? "block" : "none" }}
+      >
         <EditorContent editor={editor} />
       </div>
-      {pending && (
+      {selectionUi === "annotation" && pending && (
         <AnnotationPopover
           docId={docId}
           top={pending.top}
