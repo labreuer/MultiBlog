@@ -321,6 +321,17 @@ export async function deleteTestDocLinkGroup(groupId: string): Promise<void> {
   await prisma.docLinkGroup.deleteMany({ where: { id: groupId } });
 }
 
+/** Non-deleted doc_link rows for a doc — used to assert the Phase 5 creation flow wrote a real row, not just painted a decoration. */
+export async function countDocLinks(docId: string): Promise<number> {
+  return prisma.docLink.count({ where: { docId, deletedAt: null } });
+}
+
+/** groupId for every non-deleted doc_link on a doc — lets a test clean up the groups it created through the UI, which it has no id for otherwise. */
+export async function getDocLinkGroupIds(docId: string): Promise<string[]> {
+  const links = await prisma.docLink.findMany({ where: { docId, deletedAt: null }, select: { docLinkGroupId: true } });
+  return Array.from(new Set(links.map((l) => l.docLinkGroupId)));
+}
+
 export type AnnotationState = {
   id: string;
   parentAnnotationId: string | null;
@@ -650,6 +661,8 @@ const handlers = {
   countDocYdocUpdates,
   createTestDocLink,
   deleteTestDocLinkGroup,
+  countDocLinks,
+  getDocLinkGroupIds,
   getAnnotationStates,
   countPostCollabRows,
   createComment,

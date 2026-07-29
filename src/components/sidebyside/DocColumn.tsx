@@ -43,9 +43,24 @@ type Mode = "read" | "write";
 // the websocket — putting the provider inside LiveDocBody instead (as
 // /doc/[slug] does) would tear down a socket and re-mint a token on every
 // toggle.
-export default function DocColumn({ docId, initialTitle, initialBodyJSON, staticBody, side, userId, userName, userColor, docLinks }: Props) {
+export default function DocColumn({
+  docId,
+  initialTitle,
+  initialBodyJSON,
+  staticBody,
+  side,
+  userId,
+  userName,
+  userColor,
+  docLinks: initialDocLinks,
+}: Props) {
   const [mode, setMode] = useState<Mode>("read");
   const [title, setTitle] = useState(initialTitle);
+  // Seeded from the server-fetched initial set (Phase 4) and appended to
+  // locally when a link is created (Phase 5) — doc links have no live
+  // propagation channel (§14a), so this is the only way a newly created
+  // link's highlight appears without a full page reload.
+  const [docLinks, setDocLinks] = useState(initialDocLinks);
   // null until the token response arrives — distinct from false, since
   // "may this viewer write" gates whether the Edit button renders at all.
   const [readOnly, setReadOnly] = useState<boolean | null>(null);
@@ -179,11 +194,13 @@ export default function DocColumn({ docId, initialTitle, initialBodyJSON, static
               staticBody={staticBody}
               userColor={userColor}
               ariaLabel={aria.body}
-              selectionUi="none"
+              selectionUi="doclink"
               suppressAnnotations
               ydoc={ydoc}
               provider={provider}
               docLinks={docLinks}
+              activeGroupId={null}
+              onDocLinkCreated={(link) => setDocLinks((prev) => [...prev, link])}
             />
           ) : (
             // Mirrors LiveDocBody's own pre-connection fallback — shown

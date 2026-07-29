@@ -1,0 +1,59 @@
+/* Same shape as annotation/AnnotationPopover.module.css, offset per §14i
+   (0.5em right and 0.5em down from the selection's own coordinates, via a
+   transform rather than baked into top/left — those stay the selection's
+   raw coords so the transform is the only place the offset lives). */
+.popover {
+  position: absolute;
+  z-index: 20;
+  width: 260px;
+  transform: translate(0.5em, 0.5em);
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.quotedText {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.groupNote {
+  font-size: 0.8rem;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+.textInput {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 4px;
+  font: inherit;
+  resize: vertical;
+}
+
+.colorRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 8px;
+}
+
+.submit {
+  flex: 1 1 auto;
+}
+
+.error {
+  color: crimson;
+  font-size: 0.8rem;
+  margin-top: 6px;
+}

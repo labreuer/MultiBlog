@@ -3,8 +3,50 @@
 // /side-by-side/<left>/<right>. Grows phase by phase alongside §14l's build
 // order; Phase 2 covers just the page shell (both columns read-only, laid
 // out side by side, independently identifiable) and the left===right 404.
+import type { Page } from "@playwright/test";
 import { test, expect, waitForDocCollabReady, bodyEditor } from "./fixtures";
-import { ADMIN_EMAIL, createTestDoc, deleteTestDoc, createTestDocLink, deleteTestDocLinkGroup } from "./db";
+import {
+  ADMIN_EMAIL,
+  createTestDoc,
+  deleteTestDoc,
+  createTestDocLink,
+  deleteTestDocLinkGroup,
+  countDocLinks,
+  getDocLinkGroupIds,
+} from "./db";
+
+/**
+ * Selects an exact substring in a contenteditable identified by aria-label,
+ * without deleting it — the read-mode column's doc-link-creation trigger
+ * (LiveDocBody's onSelectionUpdate). Same recipe as fixtures.ts's own
+ * selectTextInBody, generalized over the label since this page's two
+ * columns don't share the default "Post body" name (§14f).
+ */
+async function selectTextByAriaLabel(page: Page, ariaLabel: string, needle: string): Promise<void> {
+  await page.evaluate(
+    ({ ariaLabel, text }) => {
+      const root = document.querySelector(`[aria-label="${ariaLabel}"]`);
+      if (!root) throw new Error(`Editor with aria-label "${ariaLabel}" not found.`);
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const index = node.textContent?.indexOf(text) ?? -1;
+        if (index === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + text.length);
+        const selection = window.getSelection();
+        if (!selection) throw new Error("No selection available.");
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+        return;
+      }
+      throw new Error(`"${text}" not found in the "${ariaLabel}" editor.`);
+    },
+    { ariaLabel, text: needle },
+  );
+}
 
 test.describe("side-by-side page shell", () => {
   test("both docs render as independent, side-by-side columns", async ({ page }) => {
@@ -197,6 +239,48 @@ test.describe("side-by-side doc-link highlights", () => {
       await page.goto("about:blank").catch(() => {});
       await editorPage.goto("about:blank").catch(() => {});
       await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+});
+
+// PLAN.md §14i/§14l Phase 5 — creating a doc link through the UI. No group
+// bar yet (that's Phase 6), so every save here creates a brand-new group;
+// the count assertion is a direct DB read rather than a "← 1  1 →" UI
+// string, which Phase 6 is what actually builds.
+test.describe("side-by-side doc-link creation", () => {
+  test("selecting text in each column and saving creates one doc link per doc", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "The quick brown fox." });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A lazy dog sleeps." });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      await expect(page.getByRole("textbox", { name: "Left doc body" })).toContainText("brown fox");
+      await expect(page.getByRole("textbox", { name: "Right doc body" })).toContainText("lazy dog");
+
+      await selectTextByAriaLabel(page, "Left doc body", "brown fox");
+      const leftPopup = page.getByTestId("doc-link-popup");
+      await expect(leftPopup).toBeVisible();
+      await expect(leftPopup).toContainText("A new doc link group will be created.");
+      await leftPopup.getByRole("button", { name: "Save" }).click();
+      await expect(leftPopup).not.toBeVisible();
+      await expect(page.locator("[data-doc-link-ids]").first()).toContainText("brown fox");
+
+      await selectTextByAriaLabel(page, "Right doc body", "lazy dog");
+      const rightPopup = page.getByTestId("doc-link-popup");
+      await expect(rightPopup).toBeVisible();
+      await rightPopup.getByRole("button", { name: "Save" }).click();
+      await expect(rightPopup).not.toBeVisible();
+
+      await expect.poll(() => countDocLinks(left.id)).toBe(1);
+      await expect.poll(() => countDocLinks(right.id)).toBe(1);
+    } finally {
+      const groupIds = [...(await getDocLinkGroupIds(left.id)), ...(await getDocLinkGroupIds(right.id))];
+      await page.goto("about:blank").catch(() => {});
+      for (const groupId of groupIds) {
+        await deleteTestDocLinkGroup(groupId);
+      }
       await deleteTestDoc(left.id);
       await deleteTestDoc(right.id);
     }

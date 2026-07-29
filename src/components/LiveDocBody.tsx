@@ -9,8 +9,9 @@ import { renderYdocDoc } from "@/lib/ydoc-render";
 import { PendingAnnotation, setPendingAnnotation } from "@/lib/pending-annotation-extension";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { DocLink, setDocLinks, type ResolvedDocLink } from "@/lib/doc-link-extension";
-import { createDocLinkResolver, type DocLinkInput } from "@/lib/doc-link-anchor";
+import { createDocLinkResolver, captureAnchor, type DocLinkInput } from "@/lib/doc-link-anchor";
 import AnnotationPopover from "./annotation/AnnotationPopover";
+import DocLinkPopover from "./sidebyside/DocLinkPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -39,12 +40,12 @@ type Props = {
   userColor: string;
   // See CollabEditorBody's identical prop — PLAN.md §14f.
   ariaLabel?: string;
-  // PLAN.md §14f — /side-by-side claims the selection gesture for doc-link
-  // creation instead of annotation (§14i adds the doc-link popover in its
-  // place; Phase 2 just suppresses this one). "none" skips both the pending-
-  // decoration tracking and AnnotationPopover entirely, so a selection on
-  // that page does nothing until the doc-link composer exists.
-  selectionUi?: "annotation" | "none";
+  // PLAN.md §14f/§14i — /side-by-side claims the selection gesture for
+  // doc-link creation instead of annotation. "doclink" shows DocLinkPopover
+  // on a selection instead of AnnotationPopover; "none" (Phase 2's original
+  // placeholder) skips both the pending-decoration tracking and any
+  // popover, and is unused now that Phase 5 wires "doclink" in.
+  selectionUi?: "annotation" | "doclink" | "none";
   // Paints over .annotation-highlight (prose.module.css's .noAnnotations)
   // without touching the schema — the mark itself stays registered and
   // synced regardless. See §14f for why dropping the mark type instead
@@ -65,8 +66,14 @@ type Props = {
   // captured at creation time. Defaults to none, so /doc/[slug] (which
   // never passes this) behaves exactly as before.
   docLinks?: DocLinkInput[];
-  // Which group's links should paint darker (§14h) — null means none.
+  // Which group's links should paint darker (§14h) — null means none. Also
+  // what a newly created link (via DocLinkPopover, §14i) joins, when set.
   activeGroupId?: string | null;
+  // Fired once DocLinkPopover successfully saves a new link — the caller
+  // (DocColumn) appends it to its own docLinks state so the new highlight
+  // appears immediately, without a page reload (doc links have no live
+  // propagation channel, §14a).
+  onDocLinkCreated?: (link: DocLinkInput) => void;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -102,6 +109,7 @@ export default function LiveDocBody({
   provider: hoistedProvider,
   docLinks = [],
   activeGroupId = null,
+  onDocLinkCreated,
 }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
@@ -443,6 +451,29 @@ export default function LiveDocBody({
           onPosted={() => {
             setPending(null);
             if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
+          }}
+          onCancel={() => {
+            setPending(null);
+            if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
+          }}
+        />
+      )}
+      {selectionUi === "doclink" && pending && editorRef.current && (
+        <DocLinkPopover
+          docId={docId}
+          top={pending.top}
+          left={pending.left}
+          // Recomputed from the live doc rather than carried on
+          // PendingSelection — before/after/blocks are only ever needed
+          // here, at the moment of creation (§14i), and captureAnchor is
+          // the single place that knows how to derive them.
+          mark={captureAnchor(editorRef.current.state.doc, pending.from, pending.to)}
+          userColor={userColor}
+          activeGroupId={activeGroupId}
+          onCreated={(link) => {
+            setPending(null);
+            if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
+            onDocLinkCreated?.(link);
           }}
           onCancel={() => {
             setPending(null);
