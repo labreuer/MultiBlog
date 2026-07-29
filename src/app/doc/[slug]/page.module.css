@@ -1,0 +1,38 @@
+/* The doc reading view's container and byline. Previously inline `style`
+   objects in page.tsx; every value here is fixed, so per STYLE.md's
+   CSS-Modules-by-default rule they belong in a module rather than a style
+   object (which is reserved for genuinely per-instance computed values). */
+
+.container {
+  /* A definite width, not `max-width`: the reading column stays 800px wide
+     for a short doc instead of shrinking to fit its content. `max-width`
+     still caps it below that on a narrow viewport. */
+  width: 800px;
+  max-width: 100%;
+  margin: 4rem auto;
+  font-family: sans-serif;
+}
+
+/* Combined with .container only when the pinned scrub footer actually
+   renders, so it never overlaps the comment section's bottom content. */
+.containerScrubbable {
+  padding-bottom: 5rem;
+}
+
+.forbidden {
+  max-width: 480px;
+  margin: 4rem auto;
+  font-family: sans-serif;
+}
+
+/* Mirrors the post reading view's own byline (app/[slug]/page.module.css's
+   .byline) — same secondary-meta color and light divider, so a doc and a
+   post read the same way below their titles. */
+.byline {
+  color: #666;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #eee;
+}

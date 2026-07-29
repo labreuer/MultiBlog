@@ -2163,6 +2163,23 @@ Smaller implementation notes worth recording against the design text above:
   doesn't apply to posts: `updatePostTitle`'s "an empty title is never a real one" skip-empty
   rule is unrelated and unchanged, since a post's title has no fragment to be authoritative
   over.
+- **The doc reading view carries a byline, and `AuthorByline` is no longer post-only.**
+  `/doc/[slug]` lists its authors above the body the way a published post does — the same
+  `src/components/AuthorByline.tsx`, the same `#666`/`1px solid #eee` treatment as
+  `app/[slug]/page.module.css`'s `.byline`. Two deliberate differences from the post version.
+  It drops the `"By "` prefix (a `showPrefix` prop defaulting to `true`, so every post surface
+  is untouched), which makes `AuthorByline` the first thing shared across the post and doc
+  sides that is *not* threaded through the `CommentTarget` union — only the prefix differs, so
+  a boolean was enough and the union would have bought nothing. And the date is
+  `Doc.updatedAt`, not a publish date: a doc has no publish step at all (§12k), so "last
+  edited" is the only date that means anything, and `server/doc-cache.ts`'s store-debounce
+  write is what keeps it current. `toLocaleDateString()` is what renders, with the full
+  `toLocaleString()` timestamp on the `title` attribute for hover. The `<h1>` moved out of
+  `page.tsx` into `DocView.tsx` (a client component) alongside it; `docTitleOrFallback` still
+  applies server-side, now at the `initialTitle` prop boundary rather than at the element.
+  The route's own container/byline styling moved from inline `style` objects into a
+  co-located `app/doc/[slug]/page.module.css` at the same time, per STYLE.md's
+  CSS-Modules-by-default rule.
 
 **Verification.** Every phase was hand-tested end to end in the browser (doc creation → live
 two-author editing → the reading view's live update with no reload → annotate → delete the

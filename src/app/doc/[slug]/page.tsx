@@ -1,5 +1,4 @@
 import { notFound, redirect } from "next/navigation";
-import Link from "next/link";
 import type { JSONContent } from "@tiptap/react";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import * as Y from "yjs";
@@ -11,9 +10,11 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
-import LiveDocBody from "@/components/LiveDocBody";
+import DocView from "@/components/DocView";
+import AuthorByline from "@/components/AuthorByline";
 import CommentSection from "@/components/CommentSection";
 import proseStyles from "@/styles/prose.module.css";
+import styles from "./page.module.css";
 
 const EMPTY_DOC: JSONContent = { type: "doc", content: [{ type: "paragraph" }] };
 
@@ -36,7 +37,11 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
     visibility: true,
     proseJson: true,
     deletedByUserId: true,
-    authors: { select: { userId: true } },
+    updatedAt: true,
+    authors: {
+      orderBy: { bylineOrder: "asc" },
+      select: { userId: true, user: { select: { slug: true, name: true } } },
+    },
   });
   // resolveDocParam uses prismaIncludingDeleted (the editor needs a deleted
   // doc to still resolve, for its Settings panel's Undelete) — the reading
@@ -48,7 +53,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
 
   if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
     return (
-      <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
+      <main className={styles.forbidden}>
         <h1>Forbidden</h1>
         <p>You don&apos;t have permission to read this doc.</p>
       </main>
@@ -84,18 +89,25 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
   }
 
   return (
-    <main style={{ width: 800, maxWidth: "100%", margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>
-        {canEdit ? (
-          <Link href={`/doc/${doc.id}/edit`}>{docTitleOrFallback(doc.title)}</Link>
-        ) : (
-          docTitleOrFallback(doc.title)
-        )}
-      </h1>
-      <LiveDocBody
+    <main className={`${styles.container} ${canEdit ? styles.containerScrubbable : ""}`}>
+      <DocView
         docId={doc.id}
+        initialTitle={docTitleOrFallback(doc.title)}
         initialBodyJSON={bodyJSON}
         staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
+        canEdit={canEdit}
+        byline={
+          <p className={styles.byline}>
+            <AuthorByline
+              authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
+              showPrefix={false}
+            />
+            {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
+                §12k), so "last edited" is the only date that means anything.
+                Short date visible, full timestamp on hover. */}
+            <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
+          </p>
+        }
       />
       <CommentSection target={{ kind: "doc", id: doc.id }} />
     </main>
