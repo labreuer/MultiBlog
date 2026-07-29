@@ -21,6 +21,14 @@ type Props = {
   docId: string;
   initialBodyJSON: JSONContent;
   staticBody: ReactNode;
+  // Set by DocScrubBar (PLAN.md §12) once the reader starts scrubbing —
+  // pushed into the editor the same way a real live update is (setContent,
+  // emitUpdate: false), so the scrub feature changes the same body a reader
+  // was just looking at rather than opening a second preview beside it. A
+  // real edit arriving mid-scrub still wins on the next live "update" event,
+  // since that handler always sets the *current* live content — there's no
+  // "return to live" control because none is needed.
+  overrideBodyJSON?: JSONContent | null;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -43,7 +51,7 @@ type Props = {
 // span) applies the same way whether ProseMirror got the doc from
 // setContent here or from a live Collaboration binding in the editor —
 // no extra wiring needed beyond the CSS rule in prose.module.css.
-export default function LiveDocBody({ docId, initialBodyJSON, staticBody }: Props) {
+export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overrideBodyJSON }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +109,16 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody }: Prop
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  // undefined (the prop's unset state) means "no scrub bar mounted yet" —
+  // deliberately distinct from null (mounted, but at the live/latest
+  // position) so this effect only ever fires once scrubbing has actually
+  // produced a historical body to show.
+  useEffect(() => {
+    if (overrideBodyJSON) {
+      editor?.commands.setContent(overrideBodyJSON, { emitUpdate: false });
+    }
+  }, [editor, overrideBodyJSON]);
 
   useEffect(() => {
     if (!pending) return;

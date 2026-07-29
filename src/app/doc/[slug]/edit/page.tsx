@@ -13,8 +13,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
   }
 
   // resolveDocParam rather than a direct query — the id-or-slug ambiguity
-  // this route shares with /doc/[slug] and /doc/[slug]/live-history
-  // (PLAN.md §12f).
+  // this route shares with /doc/[slug] and /doc/[slug]/slug (PLAN.md §12f).
   const doc = await resolveDocParam(slug, {
     id: true,
     slug: true,

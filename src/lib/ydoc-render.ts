@@ -23,6 +23,10 @@ export type YdocRenderResult =
       bodyJSON: JSONContent;
       body: ReactNode;
       title: ReactNode;
+      // Alongside `title` (already-rendered, for ReplayContent's preview) —
+      // DocScrubBar needs the raw JSON to flatten to plain text for the
+      // reading view's <h1>, which isn't a rich-text surface.
+      titleJSON: JSONContent | null;
       authorIds: string[];
       clients: Record<string, string>;
     }
@@ -52,6 +56,7 @@ export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
       bodyJSON,
       body: renderToReactElement({ content: bodyJSON, extensions: docContentExtensions }),
       title: titleJSON ? renderToReactElement({ content: titleJSON, extensions: titleAuthorHighlightExtensions }) : null,
+      titleJSON,
       authorIds: Array.from(authorIds),
       clients,
     };

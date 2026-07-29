@@ -26,11 +26,11 @@ type DocDetail = {
   snapshots: SnapshotRow[];
 };
 
-// Raw payloads for the replay slider, from GET /api/ydoc/[id]/replay. Exported
-// (with ReplayView below) so /doc/[slug]/live-history can reuse the slider
-// as-is against GET /api/doc/[id]/replay's identically-shaped response —
-// "the replay slider is what a doc-side live history is" (PLAN.md §12a),
-// not a doc-flavored copy of it.
+// Raw payloads for the replay slider, from GET /api/ydoc/[id]/replay.
+// Exported (with useReplayScrub below) so DocScrubBar.tsx can replay
+// GET /api/doc/[id]/replay's identically-shaped response — "the replay
+// slider is what a doc-side scrub bar is built from" (PLAN.md §12a), not a
+// doc-flavored copy of it.
 export type ReplayPayload = {
   updates: { id: string; createdAt: string; base64: string }[];
   snapshots: { id: string; createdAt: string; lastYdocUpdateId: string; base64: string }[];
@@ -334,7 +334,23 @@ function formatDelta(bytes: number): string {
   return bytes < 0 ? `−${Math.abs(bytes)}` : `+${bytes}`;
 }
 
-export function ReplayView({ replay }: { replay: ReplayPayload }) {
+export type ReplayScrub = {
+  total: number;
+  index: number;
+  /** The update at `index` — non-null whenever `total > 0`. */
+  current: PreparedUpdate | null;
+  status: ScrubStatus | null;
+  renderResult: YdocRenderResult | null;
+  snapshots: PreparedSnapshot[];
+  seek: (target: number) => void;
+};
+
+// The replay/seek machinery, shared by ReplayView below (unmodified UI, for
+// /ydoc-debug) and DocScrubBar.tsx's lazy-loaded, live-body-swapping
+// instance embedded in /doc/[slug]'s own reading view (PLAN.md §12) — the
+// tricky part (incremental-vs-rebuild replay, §11h) stays in exactly one
+// place either way.
+export function useReplayScrub(replay: ReplayPayload): ReplayScrub {
   const prepared = useMemo(() => prepare(replay), [replay]);
   const total = prepared.updates.length;
 
@@ -455,18 +471,30 @@ export function ReplayView({ replay }: { replay: ReplayPayload }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  return {
+    total,
+    index,
+    current: total > 0 ? prepared.updates[index] : null,
+    status,
+    renderResult,
+    snapshots: prepared.snapshots,
+    seek,
+  };
+}
+
+export function ReplayView({ replay }: { replay: ReplayPayload }) {
+  const { total, index, current, status, renderResult, snapshots, seek } = useReplayScrub(replay);
+
   if (total === 0) {
     return <p className={styles.muted}>This document has no update history.</p>;
   }
-
-  const current = prepared.updates[index];
 
   return (
     <div>
       <div className={styles.replay}>
         <p className={styles.positionLine}>
-          update {index + 1} of {total} — id {current.id.toString()} —{" "}
-          {new Date(current.createdAt).toLocaleString()}
+          update {index + 1} of {total} — id {current!.id.toString()} —{" "}
+          {new Date(current!.createdAt).toLocaleString()}
         </p>
         <div className={styles.sliderWrapper}>
           <input
@@ -478,7 +506,7 @@ export function ReplayView({ replay }: { replay: ReplayPayload }) {
             aria-label="Scrub through ydoc update history"
             onChange={(e) => seek(Number(e.target.value))}
           />
-          {prepared.snapshots.map((snapshot) => (
+          {snapshots.map((snapshot) => (
             <button
               key={snapshot.id}
               type="button"

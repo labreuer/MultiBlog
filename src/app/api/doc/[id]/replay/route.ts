@@ -5,11 +5,10 @@ import { canUserEditDoc } from "@/lib/doc-authz";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 
 // Doc-scoped sibling of /api/ydoc/[id]/replay (that route stays ADMIN-gated
-// and /ydoc-debug-only) — identically shaped response, so /doc/[slug]/
-// live-history can pass it straight into YdocDebug.tsx's exported
-// ReplayView unmodified (PLAN.md §12a/§12k). Gated on canUserEditDoc rather
-// than isAdmin: a doc's own AUTHOR should see its history without being an
-// admin.
+// and /ydoc-debug-only) — identically shaped response, consumed by
+// DocScrubBar.tsx's embedded scrub bar on /doc/[slug] (PLAN.md §12a/§12n).
+// Gated on canUserEditDoc rather than isAdmin: a doc's own AUTHOR should see
+// its history without being an admin.
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) {

@@ -174,8 +174,7 @@ export default function DocEditor({
       )}
       {error && <p className={styles.errorMessage}>{error}</p>}
       <p className={styles.docNote}>
-        <Link href={`/doc/${slug}`}>View and Annotate</Link> ·{" "}
-        <Link href={`/doc/${slug}/live-history`}>Scrub live history</Link>
+        <Link href={`/doc/${slug}`}>View and Annotate</Link>
       </p>
       <DocSettingsPanel
         docId={docId}

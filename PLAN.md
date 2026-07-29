@@ -1547,7 +1547,7 @@ and logs once per document rather than once per keystroke; deleting a `ydoc` row
 live editor to exercise the `P2003` path; and killing `collab` mid-typing to confirm the local
 IndexedDB edits sync back up once, not twice.
 
-## 12. Docs alongside posts, on the ydoc stack (built 2026-07-29 — see §12n for the as-built record)
+## 12. Docs alongside posts, on the ydoc stack
 
 **Decided:** add a **Doc** — an always-evolving living document, read as the live Yjs state
 rather than as a revision — as a *second, parallel entity* beside today's `Post`. Nothing about
@@ -1815,15 +1815,14 @@ nothing broken to find. Interim fix: say so in the permission-denied message.
 | Route | Purpose |
 |---|---|
 | `/docs` | management table of docs, `canManageDocs` + own-byline scoping |
-| `/doc/[slug]` | the live reading view, `canViewDocs` + per-doc `visibility` |
+| `/doc/[slug]` | the live reading view, `canViewDocs` + per-doc `visibility` — embeds §11h's replay slider (§12n) |
 | `/doc/[slug]/edit` | the editor, `canUserEditDoc` |
-| `/doc/[slug]/live-history` | §11h's replay slider, over this doc's `ydoc_update` |
 | `/annotations` | annotation browse/admin (§12j) |
 
 **`/doc/[slug]` and `/doc/[id]/edit` cannot literally be two different dynamic segment names.**
 Next.js rejects `app/doc/[slug]/page.tsx` alongside `app/doc/[id]/edit/page.tsx` at build time
 ("You cannot use different slug names for the same dynamic path"). The resolution is one segment —
-`app/doc/[slug]/` with `page.tsx`, `edit/page.tsx`, `live-history/page.tsx`, `slug/page.tsx` — and
+`app/doc/[slug]/` with `page.tsx`, `edit/page.tsx`, `slug/page.tsx` — and
 **one shared `resolveDocParam()` that accepts an id or a slug**, tried in that order. Id-first
 matters: a rename must not break a bookmarked edit URL. (A doc whose *slug* is shaped like another
 doc's cuid would resolve to the id; slugify can produce such a string in principle, and it is not
@@ -1859,12 +1858,11 @@ not on its own enough to keep readers out of the authors' caret list. Read-only 
 even though such a reader can annotate, because §12i's mark is applied by the server rather than
 by their connection.
 
-**Fix the collab-JWT reconnect gap here.** §10 lists it as a known gap: the token expires after
-2 minutes and `HocuspocusProvider` doesn't refetch on reconnect, so a long-idle tab retries
-forever. Passing a `fetchToken` *function* as `token` instead of a fixed string makes the provider
-re-mint per reconnect. It's a dev annoyance on the editor today and a reader-facing bug the moment
-`/doc/[slug]` promises to stream — and the same change fixes `PostEditor`, `LiveHistoryViewer` and
-`/ydoc-debug` for free.
+**The collab-JWT reconnect gap (§10) is fixed here, for every collab surface at once.** The
+token used to expire after 2 minutes with no refetch on reconnect, so a long-idle tab would
+retry forever. `token` is a `fetchToken` *function* rather than a fixed string, so
+`HocuspocusProvider` re-mints per reconnect — `PostEditor`, `LiveDocBody`, `DocEditor` and
+`/ydoc-debug` all pass one.
 
 **The client `Y.Doc` needs nothing special.** §12h is `gc: true` on both ends, which is the
 default on both, so a bare `new Y.Doc()` is correct as written and there is no silent-failure
@@ -2153,11 +2151,12 @@ Smaller implementation notes worth recording against the design text above:
   slug lookup return the same doc until a manual rename on `/doc/[slug]/slug`. `"Untitled"`
   (`src/lib/doc-title.ts`'s `UNTITLED_DOC`/`docTitleOrFallback`) is a render-time fallback
   only — applied at every server page/props boundary that shows or derives from a doc's title
-  (`/docs`, `/annotations`, the `<h1>`s on `/doc/[slug]`, `/doc/[slug]/live-history`,
-  `/doc/[slug]/slug`, and that page's suggested "standard slug") — and is never written to the
-  ydoc's title fragment, so it can never be backspaced into `"Untitle"` and never appears when
-  scrubbing `/doc/[slug]/live-history` (confirmed by hand: row #1 shows no title at all, not
-  the fallback). `doc.title` is an unconditional cache of the title fragment, empty included —
+  (`/docs`, `/annotations`, the `<h1>`s on `/doc/[slug]` and `/doc/[slug]/slug`, and that
+  page's suggested "standard slug") — and is never written to the ydoc's title fragment, so it
+  can never be backspaced into `"Untitle"` and never appears when scrubbing history, on
+  `/doc/[slug]`'s embedded scrub bar (§12n) or `/ydoc-debug` (confirmed by hand: row #1 shows
+  no title at all, not the fallback). `doc.title` is an unconditional cache of the title
+  fragment, empty included —
   `server/doc-cache.ts` writes it through on every store debounce, so clearing a doc's title
   back out clears `Doc.title` too rather than freezing it at the last non-empty value. This
   doesn't apply to posts: `updatePostTitle`'s "an empty title is never a real one" skip-empty
@@ -2180,6 +2179,36 @@ Smaller implementation notes worth recording against the design text above:
   The route's own container/byline styling moved from inline `style` objects into a
   co-located `app/doc/[slug]/page.module.css` at the same time, per STYLE.md's
   CSS-Modules-by-default rule.
+- **`/doc/[slug]` grew its own lazy-loaded scrub bar (`DocScrubBar.tsx`), and scrubbing now
+  rewrites the live title/body in place rather than opening a separate preview — which made
+  `/doc/[slug]/live-history` (§12f, §12k Phase 5) redundant, and it's been removed.** Dragging
+  the slider calls `LiveDocBody`'s new `overrideBodyJSON` prop, which pushes the historical
+  content into the same editor the reader was already looking at (`setContent`, `emitUpdate:
+  false`) — the same mechanism the live-update tap already used, just fed a replayed state
+  instead of the current one. The title updates the same way: `DocView.tsx` now owns the
+  `<h1>` specifically so it can swap `initialTitle` for a scrubbed one, flattened from
+  `YdocRenderResult`'s new `titleJSON` field via `extractText` (the existing `title` field is
+  already-rendered JSX, useless for a plain-text `<h1>`) and passed through
+  `docTitleOrFallback` — the same "Untitled" rule, never written to the fragment, applies
+  here too. There's no "return to live" control: a real edit arriving mid-scrub simply wins
+  on the next live update, since that handler always sets the *current* content.
+
+  **Lazy by construction, not by a loading flag.** Nothing fetches or replays until the reader
+  interacts — before that, `DocScrubBar` renders one grayed-out, inert `<input>` and nothing
+  else. The first `pointerdown`/`focus` fetches `GET /api/doc/[id]/replay` and mounts the real
+  slider; only then does `useReplayScrub` (extracted from `ReplayView`, now shared by both)
+  allocate a `Y.Doc` and start replaying. Deliberately thinner than `/ydoc-debug`'s
+  `ReplayView`: no clients table, no per-step perf status line, and the "update N of M"
+  position line itself only appears once scrubbing has actually started — before that it's
+  just a slider, already sitting at the latest position. The bar's width matches the reading
+  column (not the full viewport) via `DocScrubBar.module.css`.
+
+  **`/doc/[slug]/live-history` is gone — `app/doc/[slug]/live-history/page.tsx` and
+  `DocLiveHistory.tsx` are both deleted, and `DocEditor.tsx`'s "Scrub live history" link with
+  them.** Nothing else needs it: a doc's `ydoc` row is just `ydoc:<docId>`, no different from
+  any other row in the same table, so `/ydoc-debug` (ADMIN-only, §11f) already lists it and
+  replays it with `ReplayView` unmodified — the two admin-facing tools this section is about
+  not duplicating. `GET /api/doc/[id]/replay` stays; it's what `DocScrubBar` itself calls.
 
 **Verification.** Every phase was hand-tested end to end in the browser (doc creation → live
 two-author editing → the reading view's live update with no reload → annotate → delete the

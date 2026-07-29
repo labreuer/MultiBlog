@@ -216,8 +216,8 @@ anything repeatable.
   from, and `createIfAbsent` would just build an *empty* document under that id, discarding
   every paragraph and every annotation the doc ever had. If a doc's `ydoc` row is ever
   genuinely corrupted, the only way back is the update log itself (`ydoc_update`, never
-  truncated) via `/ydoc-debug`'s replay slider or `/doc/[slug]/live-history` — not a delete-
-  and-restart.
+  truncated), replayed via `/ydoc-debug` (a doc's `ydoc:<docId>` row is just another entry
+  in the same table an ADMIN can select there) — not a delete-and-restart.
 
 ## Gotchas
 
