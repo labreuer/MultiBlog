@@ -1201,11 +1201,14 @@ Git history carries per-step detail.
   current doc's coordinates; a detached thread's is frozen in an old revision's) — so sort
   order between an active and a detached entry is not meaningful. Pre-existing limitation,
   more visible now that detached threads are a real state instead of a hypothetical one.
-- The collab JWT (`signCollabToken`) expires after 2 minutes and a `HocuspocusProvider`
-  doesn't fetch a fresh one on reconnect — a long-idle editor or live-history tab can end up
-  silently stuck retrying with an expired token until the page is reloaded. Pre-existing
-  (not introduced by item 9), just newly relevant now that live-history explicitly promises
-  to "stay connected."
+- ~~The collab JWT (`signCollabToken`) expires after 2 minutes and a `HocuspocusProvider`
+  doesn't fetch a fresh one on reconnect...~~ **Fixed by §12 Phase 2** — `token` is now a
+  *function* rather than a fixed string at all four call sites (`PostEditor`,
+  `LiveHistoryViewer`, `DocEditor`, `LiveDocBody`), which Hocuspocus calls on every
+  connection attempt rather than only the first. Each one hands the already-fetched token to
+  the first call and re-mints from there, so the initial-connection error path is unchanged.
+  The doc side is what forced it (§12g: a reading view that promises to stream can't retry
+  forever on an expired token), but the fix is the same one line for posts.
 - Live-history's scrub slider is indexed by update count, not wall-clock time (each logged
   update — one per dispatch, not per keystroke, since ProseMirror/Yjs batch a whole typed
   burst into one update — is one slider step), so a long pause and a fast typing burst take
@@ -1227,10 +1230,12 @@ Git history carries per-step detail.
   entry for methodology and numbers.
 - ~~The home and author pages' `revalidate = 60` ISR caching is now a no-op...~~ **Fixed by
   item 17** — see CACHING.md's 2026-07-23 entry.
-- The e2e suite (item 18) covers five flows, not the app. Roles/authz, the admin tables,
-  scheduled publishing, soft deletion, and live history have no specs yet. Nothing runs it
-  automatically either: there's no CI (nothing is deployed, per the first gap above), so it
-  only runs when someone types `npm run e2e`.
+- The e2e suite (item 18) covers seven flows, not the app — the original five plus the ydoc
+  stack (§11g) and docs/annotations (§12n). Roles/authz, the admin tables, scheduled
+  publishing, soft deletion, and *post* live history still have no specs; the ydoc replay
+  slider does (`ydoc-debug.spec.ts`), which is a different component over a different table.
+  Nothing runs any of it automatically either: there's no CI (nothing is deployed, per the
+  first gap above), so it only runs when someone types `npm run e2e`.
 - Comment-submission coverage is capped by the app's own rate limit (5 per IP per 10 minutes,
   `src/lib/rate-limit.ts`) — every Playwright worker shares 127.0.0.1, so specs insert
   comments directly via Prisma and exactly one exercises the real form. A future spec that
@@ -2154,3 +2159,54 @@ is deleted. `scripts/test-doc.ts` and `scripts/test-annotation.ts` cover manual 
 `@example.com`-author containment as `test-post.ts`/`test-user.ts`, `test-doc.ts delete`
 additionally removing the doc's derived `ydoc:<id>` row (§12b — nothing cascades that
 automatically). Full suite: 30/30 passing.
+
+**Two implementation details worth knowing before touching this again**, both found the hard
+way rather than designed:
+
+- **The reading view's live tap applies a Yjs update on its own connection handshake**, not
+  only on a real remote edit — and `LiveDocBody` turns every such update into an
+  `editor.commands.setContent`, which silently collapses whatever the reader had selected.
+  A selection made in the window between "editor mounted" and "provider synced once"
+  therefore vanishes before it can be annotated. `LiveDocBody` exposes a `synced` marker for
+  exactly this (there is no visible connection UI on the reading view otherwise), and
+  `e2e/doc.spec.ts`'s annotation tests wait on it. Anything else that reacts to a reader's
+  selection needs the same gate.
+- **TipTap v3's `setContent` takes an options object, not a boolean.** `setContent(json,
+  false)` — the v2 "don't emit an update" signature — is a type error now; it's
+  `setContent(json, { emitUpdate: false })`. Worth knowing because the wrong form reads as
+  obviously-correct against any pre-v3 example.
+
+### 12o. Known gaps
+
+Everything below is real and deliberate-to-defer, not broken. Distinct from §12m (deferred
+*design* decisions) — these are places where the built thing is narrower than the section
+above might read.
+
+- **`Annotation.resolvedAt` is declared and never touched.** §12c gives a root annotation a
+  nullable `resolved_at` as "the only state an annotation carries," but nothing writes it and
+  nothing reads it: there is no resolve/unresolve control anywhere, and
+  `getDocAnnotationsAsThreads` hard-codes `status: "ACTIVE"`. The column is schema-only until
+  a resolve UI exists.
+- **`Annotation.editedAt` is displayed but never written.** `/annotations` has an Edited
+  column and sorts on it, and it is always empty — there is no edit-an-annotation action.
+  (`CommentNode` offers Reply and Delete, not Edit, on both the post and doc sides.)
+- **There is no reader-facing doc index.** `/docs` is `canManageDocs`-gated management; a
+  reader with `canViewDocs` can open any `SHARED` doc they have a link to but has no route
+  that lists them, and no nav entry. §12f's route table never specified one, so this isn't a
+  regression against the plan — but it does mean docs are share-a-link-only in practice.
+- **The comment list's "Quoted text position" sort is inert on a doc.** `CommentEntryList`
+  sorts that mode by `anchorFrom`, which is null for every annotation-sourced thread (§12i:
+  a doc annotation has no stored offset), so all entries tie and fall through to the date
+  comparison. The dropdown still offers the option on `/doc/[slug]`, where it does nothing.
+  Deriving a real ordering is possible — the mark's position in `prose_json` is exactly the
+  needed number — just not built.
+- **`/annotations`' deep-link filters have no UI and no Help section.** `?doc=`, `?author=`
+  and `?user=` work and round-trip through the URL, but unlike `/comments` (which documents
+  its equivalents in an on-page Help table) nothing on `/annotations` advertises them.
+- **Nothing enforces that a doc's `ydoc` row exists.** Creation is eager on all three paths
+  (`createDocAction`, `scripts/test-doc.ts`, the e2e helper), and `ydocOnLoadDocument`'s
+  forgiving auto-create covers a connection to a name nobody made — but a `doc` row whose
+  `ydoc` row was deleted out from under it reads as an empty document rather than an error,
+  and `POST /api/doc/[id]/token` 404s on the missing lineage. Acceptable because deleting a
+  `ydoc` row by hand is exactly the thing CLAUDE.md now warns against, not a path the app
+  can reach on its own.

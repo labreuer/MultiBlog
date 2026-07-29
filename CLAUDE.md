@@ -31,6 +31,15 @@ Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STY
 - Restarting the Postgres service needs an elevated shell — ask the user to do it.
 - `npx prisma generate` fails with EPERM while the dev server runs (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
+- **Adding a new model needs the dev server restarted, not just regenerated** — and the
+  failure doesn't look like a stale client. `next dev` holds the generated `PrismaClient` in
+  module memory, so after `prisma migrate dev` adds a model, the *running* server still has
+  the client from before it existed: `prisma.yourNewModel` is `undefined`, and the first
+  query dies with `TypeError: Cannot read properties of undefined (reading 'findMany')`
+  pointing at your own query line. Typecheck passes (the regenerated types on disk are
+  correct), which makes it read like a logic bug in the code you just wrote. Restarting web
+  is the whole fix. Distinct from the EPERM case above: that one is generate refusing to
+  *write*, this one is a successful write the running process never picks up.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
 - One-off DB scripts (seeding/inspecting data outside the app) can't `require()` the
@@ -226,10 +235,22 @@ anything repeatable.
   registered. Pin them to the same exact version as `@tiptap/core` when installing —
   `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0` exactly, and npm
   fails the install.
+- **TipTap v3's `setContent` takes an options object where v2 took a boolean**:
+  `editor.commands.setContent(json, { emitUpdate: false })`, not `setContent(json, false)`.
+  The v2 form is a type error (`Type 'false' has no properties in common with type
+  'SetContentOptions'`) but reads as obviously-correct against any pre-v3 example or answer,
+  so it's worth recognizing rather than re-deriving. Used by `LiveDocBody.tsx` to push live
+  Yjs updates into a non-`Collaboration` editor without re-emitting them.
 - The TipTap schema is shared by the editor, Hocuspocus doc-seeding, and public rendering
   via `src/lib/tiptap-schema.ts` — change it only there so the three can't drift. It holds
   *two* schemas: `contentExtensions` (post body) and `titleExtensions` (the title, a separate
-  Yjs fragment — see PLAN.md §3d).
+  Yjs fragment — see PLAN.md §3d). Each has mark-layered variants stacked on it rather than
+  a parallel definition, and picking the wrong one silently drops marks on
+  decode/render: body is `contentExtensions` → `authorHighlightExtensions` (working Yjs
+  session) → `docContentExtensions` (that plus the annotation mark, doc side only, PLAN.md
+  §12i); title is `titleExtensions` → `titleAuthorHighlightExtensions`. Anything decoding a
+  *doc's* ydoc wants `docContentExtensions` — `server/doc-cache.ts` and
+  `src/lib/ydoc-render.ts` both do.
 - `CollaborationCaret` has no per-field awareness key: every instance writes
   `awareness.cursor`. Two of them on one provider (e.g. body + title editors sharing a
   `Y.Doc`) therefore render each other's positions against the wrong fragment. Only the body
