@@ -68,3 +68,17 @@
   color: #999;
   cursor: text;
 }
+
+/* LiveAnnotationComposer's "Move to bottom" (PLAN.md §13g) — inline popover
+   only, so it sits between Post and Cancel rather than pushed to either
+   edge the way .cancel's margin-left: auto does. */
+.moveToBottom {
+  font: inherit;
+  font-size: 0.85rem;
+  border: none;
+  background: none;
+  color: #666;
+  padding: 3px 6px;
+  cursor: pointer;
+  text-decoration: underline;
+}

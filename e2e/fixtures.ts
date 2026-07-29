@@ -187,6 +187,11 @@ export function titleEditor(page: Page) {
   return page.getByRole("textbox", { name: "Title" });
 }
 
+/** An annotation's own live editor (AnnotationBody, PLAN.md §13j Phase 2). */
+export function annotationEditor(page: Page) {
+  return page.getByRole("textbox", { name: "Annotation body" });
+}
+
 /**
  * Navigates and asserts a 200, surfacing the response body when it isn't one.
  *

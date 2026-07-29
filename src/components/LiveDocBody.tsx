@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
+import { PendingAnnotation, setPendingAnnotation } from "@/lib/pending-annotation-extension";
+import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -29,6 +31,9 @@ type Props = {
   // since that handler always sets the *current* live content — there's no
   // "return to live" control because none is needed.
   overrideBodyJSON?: JSONContent | null;
+  // The viewer's own color (PLAN.md §13f), resolved server-side and passed
+  // down rather than read here via useSession() — see DocView.tsx.
+  userColor: string;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -51,7 +56,7 @@ type Props = {
 // span) applies the same way whether ProseMirror got the doc from
 // setContent here or from a live Collaboration binding in the editor —
 // no extra wiring needed beyond the CSS rule in prose.module.css.
-export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overrideBodyJSON }: Props) {
+export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overrideBodyJSON, userColor }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +70,20 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
   const [synced, setSynced] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Read inside the setContent-driven handlers below, which run outside
+  // React's render cycle and would otherwise close over a stale `pending`
+  // from whenever the effect/listener was first set up.
+  const pendingRef = useRef<PendingSelection | null>(null);
+  useEffect(() => {
+    pendingRef.current = pending;
+  }, [pending]);
+
   const editor = useEditor({
-    extensions: docContentExtensions,
+    // PendingAnnotation (PLAN.md §13f) is view-only — a decoration, not a
+    // node/mark type — so appending it here doesn't touch the schema
+    // docContentExtensions itself defines, and can't drift the reading
+    // view's schema from the editor's or the server's.
+    extensions: [...docContentExtensions, PendingAnnotation],
     content: initialBodyJSON,
     editable: false,
     immediatelyRender: false,
@@ -80,11 +97,13 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
       const container = containerRef.current;
       if (empty || !container) {
         setPending(null);
+        setPendingAnnotation(liveEditor.view, null);
         return;
       }
       const quotedText = liveEditor.state.doc.textBetween(from, to, " ");
       if (!quotedText.trim()) {
         setPending(null);
+        setPendingAnnotation(liveEditor.view, null);
         return;
       }
       const coords = liveEditor.view.coordsAtPos(to);
@@ -96,6 +115,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
         top: coords.bottom - containerRect.top,
         left: coords.left - containerRect.left,
       });
+      setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
     },
   });
 
@@ -110,14 +130,54 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
     editorRef.current = editor;
   }, [editor]);
 
+  // PLAN.md §13f — re-resolves the pending selection against the doc after
+  // any setContent call (a live remote update or a scrub jump), both of
+  // which can move or destroy the text a reader has selected out from under
+  // them. The decoration's own position-mapping (pending-annotation-
+  // extension.ts's `apply`) already tracks an ordinary transaction; this is
+  // the explicit fallback for the case that doesn't hold — a setContent
+  // call whose diff isn't a simple insert/delete around the selection.
+  function reresolvePending(liveEditor: Editor) {
+    const current = pendingRef.current;
+    if (!current) return;
+    const doc = liveEditor.state.doc;
+    const stillValid = current.to <= doc.content.size && doc.textBetween(current.from, current.to, " ") === current.quotedText;
+    if (stillValid) return;
+
+    const container = containerRef.current;
+    const occurrences = container ? findQuoteOccurrences(doc, current.quotedText) : [];
+    if (occurrences.length === 1 && container) {
+      const { from, to } = occurrences[0];
+      const coords = liveEditor.view.coordsAtPos(to);
+      const containerRect = container.getBoundingClientRect();
+      const next: PendingSelection = {
+        from,
+        to,
+        quotedText: current.quotedText,
+        top: coords.bottom - containerRect.top,
+        left: coords.left - containerRect.left,
+      };
+      setPending(next);
+      setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
+    } else {
+      // No unique match any more — the selected text changed underneath
+      // the reader. Close the popover rather than leave it pointing at a
+      // range that no longer means what it did.
+      setPending(null);
+      setPendingAnnotation(liveEditor.view, null);
+    }
+  }
+
   // undefined (the prop's unset state) means "no scrub bar mounted yet" —
   // deliberately distinct from null (mounted, but at the live/latest
   // position) so this effect only ever fires once scrubbing has actually
   // produced a historical body to show.
   useEffect(() => {
-    if (overrideBodyJSON) {
-      editor?.commands.setContent(overrideBodyJSON, { emitUpdate: false });
+    if (overrideBodyJSON && editor) {
+      editor.commands.setContent(overrideBodyJSON, { emitUpdate: false });
+      reresolvePending(editor);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reresolvePending closes over pendingRef/userColor, not state that should retrigger this
   }, [editor, overrideBodyJSON]);
 
   useEffect(() => {
@@ -125,6 +185,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
     const handleClick = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setPending(null);
+        if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
       }
     };
     document.addEventListener("mousedown", handleClick);
@@ -165,6 +226,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
           const result = renderYdocDoc(ydoc);
           if (result.ok) {
             editorRef.current?.commands.setContent(result.bodyJSON, { emitUpdate: false });
+            if (editorRef.current) reresolvePending(editorRef.current);
           } else {
             setError(result.error);
           }
@@ -190,6 +252,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
       instance?.destroy();
       ydoc.destroy();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reresolvePending closes over pendingRef/userColor, not state that should retrigger this connection effect
   }, [docId, ydoc]);
 
   if (error) {
@@ -211,8 +274,14 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
           from={pending.from}
           to={pending.to}
           quotedText={pending.quotedText}
-          onPosted={() => setPending(null)}
-          onCancel={() => setPending(null)}
+          onPosted={() => {
+            setPending(null);
+            if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
+          }}
+          onCancel={() => {
+            setPending(null);
+            if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
+          }}
         />
       )}
     </div>

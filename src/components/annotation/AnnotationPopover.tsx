@@ -1,7 +1,11 @@
 "use client";
 
-import AnnotationComposer from "./AnnotationComposer";
+import { useState, useTransition } from "react";
+import { createDraftAnnotation } from "@/app/actions/annotations";
+import LiveAnnotationComposer from "./LiveAnnotationComposer";
+import { useAnnotationMove } from "./annotation-move-context";
 import styles from "./AnnotationPopover.module.css";
+import composerStyles from "./AnnotationComposer.module.css";
 
 type Props = {
   docId: string;
@@ -14,27 +18,82 @@ type Props = {
   onCancel: () => void;
 };
 
-// The inline annotation popover (PLAN.md §13c) — extracted out of
-// LiveDocBody.tsx's own JSX so it can grow the pending-selection decoration
-// and the "Move to bottom" control (§13f/§13g) without bloating the reading
-// view's already-large effect-heavy component. top/left carry forward
-// unchanged from LiveDocBody's own `coords.bottom - containerRect.top` /
-// `coords.left - containerRect.left` computation — the +0.5em/+0.5em nudge
-// (PLAN.md §13k) is a separate, later pass over this same component.
+// The inline annotation popover (PLAN.md §13j Phase 3). Two stages, not one:
+// selecting text alone never creates anything — LiveDocBody's own
+// pending-selection decoration (pending-annotation-extension.ts) already
+// shows the selection is "about to be annotated" for free, so there's no
+// need to also spin up a draft row and a live editor connection on every
+// micro-adjustment of a selection someone is still dragging. A row (and its
+// ydoc) exists only once "Annotate" — or "Move to bottom", which needs one
+// too — is actually clicked.
 export default function AnnotationPopover({ docId, top, left, from, to, quotedText, onPosted, onCancel }: Props) {
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const { setMovedDraft } = useAnnotationMove();
+
+  function ensureDraft(after: (id: string) => void) {
+    setError(null);
+    startTransition(async () => {
+      const existing = draftId;
+      if (existing) {
+        after(existing);
+        return;
+      }
+      const result = await createDraftAnnotation(docId);
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setDraftId(result.id);
+      after(result.id);
+    });
+  }
+
+  function handleMoveToBottom() {
+    ensureDraft((id) => {
+      setMovedDraft({ id, anchorFrom: from, anchorTo: to, quotedText });
+      onCancel();
+    });
+  }
+
   return (
     <div data-testid="annotation-popup" className={styles.popover} style={{ top: top + 6, left }}>
       <p className={styles.quotedText}>
         Annotating: “{quotedText.length > 80 ? `${quotedText.slice(0, 80)}…` : quotedText}”
       </p>
-      <AnnotationComposer
-        docId={docId}
-        anchorFrom={from}
-        anchorTo={to}
-        quotedText={quotedText}
-        onPosted={onPosted}
-        onCancel={onCancel}
-      />
+      {draftId ? (
+        <LiveAnnotationComposer
+          annotationId={draftId}
+          anchorFrom={from}
+          anchorTo={to}
+          quotedText={quotedText}
+          onPosted={onPosted}
+          onCancel={onCancel}
+          onMoveToBottom={() => {
+            setMovedDraft({ id: draftId, anchorFrom: from, anchorTo: to, quotedText });
+            onCancel();
+          }}
+        />
+      ) : (
+        <div className={composerStyles.buttonRow}>
+          <button
+            type="button"
+            onClick={() => ensureDraft(() => {})}
+            disabled={pending}
+            className={`${composerStyles.submit} ${pending ? composerStyles.submitPending : ""}`}
+          >
+            {pending ? "Opening…" : "Annotate"}
+          </button>
+          <button type="button" onClick={handleMoveToBottom} disabled={pending} className={composerStyles.moveToBottom}>
+            Move to bottom ⤓
+          </button>
+          <button type="button" onClick={onCancel} className={composerStyles.cancel}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {error && <p className={composerStyles.error}>{error}</p>}
     </div>
   );
 }

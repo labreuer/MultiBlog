@@ -4,117 +4,13 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
-import { applyAnnotationMark } from "@/lib/annotation-admin";
+import { applyAnnotationMark, flushAnnotationCache } from "@/lib/annotation-admin";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
-import type { SubmitCommentState } from "./comments";
 
 const MAX_BODY_LENGTH = 5000;
-
-// PLAN.md §12i — the sibling of submitComment (src/app/actions/comments.ts),
-// sharing no path worth sharing once moderation, Commenter, rate limiting
-// and spam checking are absent from this side. Returns the same
-// SubmitCommentState shape CommentForm already branches on: an annotation
-// is "inserted immediately visible" (the plan's own words), which is
-// exactly what CommentForm's APPROVED case already means.
-export async function submitAnnotation(
-  _prevState: SubmitCommentState,
-  formData: FormData,
-): Promise<SubmitCommentState> {
-  const docId = formData.get("docId");
-  const parentAnnotationId = formData.get("parentCommentId");
-  const body = formData.get("body");
-  const fromRaw = formData.get("anchorFrom");
-  const toRaw = formData.get("anchorTo");
-  const quotedText = formData.get("quotedText");
-
-  if (typeof docId !== "string" || !docId) {
-    return { error: "Missing doc." };
-  }
-  if (typeof body !== "string" || !body.trim()) {
-    return { error: "Annotation can't be empty." };
-  }
-  if (body.length > MAX_BODY_LENGTH) {
-    return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
-  }
-
-  const session = await auth();
-  if (!session?.user) {
-    return { error: "You must be signed in to annotate a doc." };
-  }
-
-  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { id: true, visibility: true } });
-  if (!doc) {
-    return { error: "Doc not found." };
-  }
-  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
-    return { error: "You don't have permission to annotate this doc." };
-  }
-
-  let parentId: string | null = null;
-  if (typeof parentAnnotationId === "string" && parentAnnotationId) {
-    const parent = await prisma.annotation.findUnique({ where: { id: parentAnnotationId }, select: { docId: true } });
-    if (!parent || parent.docId !== docId) {
-      return { error: "Invalid reply target." };
-    }
-    parentId = parentAnnotationId;
-  }
-
-  const trimmedBody = body.trim();
-  // PLAN.md §13b/§13d — every annotation posted through this still-plain-
-  // text action (Phase 1: the live ydoc editor isn't wired in until Phase 2)
-  // is a real, already-visible comment, so it's created LIVE, not the
-  // model's DRAFT default — DRAFT is reserved for a composer that's been
-  // opened but not yet posted, which this action has no path for yet.
-  const seed = seedAnnotationYdoc(trimmedBody);
-  const annotation = await prisma.annotation.create({
-    data: {
-      docId,
-      parentAnnotationId: parentId,
-      userId: session.user.id,
-      proseJson: seed.proseJson as Prisma.InputJsonValue,
-      bodyText: trimmedBody,
-      status: "LIVE",
-    },
-  });
-  // Eager, in the same request — mirrors createDoc's own eager
-  // ydocStore.createIfAbsent (PLAN.md §12b) so the annotation's ydoc exists
-  // before any client could try to connect to it.
-  await ydocStore.createIfAbsent(ydocIdForAnnotation(annotation.id), seed.ydoc, seed.stateVector);
-
-  // Only a root annotation ever carries a mark — a reply is just a comment
-  // in the thread, anchored nowhere of its own (PLAN.md §12i).
-  if (
-    parentId === null &&
-    typeof fromRaw === "string" &&
-    typeof toRaw === "string" &&
-    typeof quotedText === "string" &&
-    quotedText.trim()
-  ) {
-    const from = Number(fromRaw);
-    const to = Number(toRaw);
-    if (Number.isInteger(from) && Number.isInteger(to) && to > from) {
-      await applyAnnotationMark({
-        docId,
-        userId: session.user.id,
-        role: session.user.role,
-        annotationId: annotation.id,
-        from,
-        to,
-        quotedText: quotedText.trim(),
-      });
-      // No branch on the result: whether or not the mark landed, the
-      // annotation is already correctly visible either anchored or in the
-      // doc's general discussion (§12i's "row first, mark second" — the
-      // degraded state is not a corrupt one).
-    }
-  }
-
-  revalidatePath(`/doc/${docId}`);
-  return { status: "APPROVED" };
-}
 
 // PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
 // editor to before a single keystroke lands, so opening one (the bottom
@@ -197,6 +93,35 @@ export async function postAnnotation(opts: {
   }
   if (annotation.status !== "DRAFT") {
     return { error: "This annotation has already been posted." };
+  }
+
+  // Forces the store-debounce write bodyText/proseJson normally wait for —
+  // without this, a reader who opens the annotation the instant it becomes
+  // LIVE could see whatever was cached as of the *last* debounce (for a
+  // brand-new annotation, its creation-time empty paragraph) rather than
+  // what was actually typed just now.
+  //
+  // The flush reads the *collab server's* Y.Doc, which only has what it's
+  // already received from the client over the websocket — a keystroke and
+  // an immediate click can outrace that delivery (real for a slow
+  // connection, and reliably reproducible in an automated test that types
+  // and clicks back-to-back with no human-typing-speed gap between them).
+  // A bounded retry absorbs that without adding any real delay for the
+  // overwhelming common case where the flush already sees everything.
+  let bodyText = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await flushAnnotationCache({ userId: session.user.id, role: session.user.role, annotationId: annotation.id });
+    const fresh = await prisma.annotation.findUnique({ where: { id: annotation.id }, select: { bodyText: true } });
+    bodyText = fresh?.bodyText ?? "";
+    if (bodyText.trim() || attempt === 2) break;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  if (!bodyText.trim()) {
+    return { error: "Annotation can't be empty." };
+  }
+  if (bodyText.length > MAX_BODY_LENGTH) {
+    return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
 
   await prisma.annotation.update({ where: { id: annotation.id }, data: { status: "LIVE" } });

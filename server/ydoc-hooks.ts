@@ -13,11 +13,11 @@ import type {
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import { Transform } from "@tiptap/pm/transform";
-import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
+import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
 import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
 import { updateDocCache } from "./doc-cache";
 import { updateAnnotationCache } from "./annotation-cache";
@@ -228,26 +228,52 @@ export async function handleYdocSnapshot(
   send(response, 204, "");
 }
 
-// Every from..from+quotedText.length window whose text matches quotedText
-// exactly — the fallback search PLAN.md §12i describes for when the
-// original offsets no longer land where they used to. O(document size ×
-// quotedText length): fine for an occasional annotation submission, not a
-// per-keystroke path — same "don't over-optimize a rare operation" stance
-// as the replay slider (§11h). Doesn't attempt to match across a block
-// boundary (a paragraph break costs more than one position, so a naive
-// from+len window undercounts there) — an annotated phrase spanning a
-// paragraph break simply won't be found by the fallback; it still degrades
-// to document-level rather than erroring.
-function findQuoteOccurrences(node: PMNode, quotedText: string): { from: number; to: number }[] {
-  const occurrences: { from: number; to: number }[] = [];
-  const size = node.content.size;
-  const len = quotedText.length;
-  for (let from = 0; from + len <= size; from++) {
-    if (node.textBetween(from, from + len, " ") === quotedText) {
-      occurrences.push({ from, to: from + len });
-    }
+// POST /admin/annotation-flush (PLAN.md §13j Phase 3) — forces
+// server/annotation-cache.ts's proseJson/bodyText write immediately instead
+// of waiting for onStoreDocument's next debounce, called from
+// postAnnotation right before flipping DRAFT to LIVE. Without this, a
+// reader who opens the annotation the instant it becomes visible could see
+// whatever bodyText/proseJson happened to be cached as of the *last* debounce
+// — for a brand-new annotation, that's still its creation-time empty
+// paragraph, regardless of everything typed since.
+//
+// `document` here is a Hocuspocus `Document`, which extends `Y.Doc` directly
+// (the same assumption handleYdocSnapshot's encodeYdocState(document) call
+// above already makes) — reading from it via updateAnnotationCache after
+// disconnect is safe since that's a pure in-memory decode, no connection
+// needed.
+export async function handleFlushAnnotationCache(
+  request: IncomingMessage,
+  response: ServerResponse,
+  instance: Hocuspocus,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as Partial<{ token: string; documentName: string }>;
+  const { token, documentName } = body;
+  if (typeof token !== "string" || typeof documentName !== "string") {
+    send(response, 400, "Expected token and documentName.");
+    return;
   }
-  return occurrences;
+
+  const payload = await verifyYdocToken(token).catch(() => null);
+  if (!payload || payload.documentName !== documentName) {
+    send(response, 403, "Invalid or mismatched ydoc token.");
+    return;
+  }
+
+  const connection = await instance.openDirectConnection(documentName);
+  let ydocDocument: Y.Doc | null = null;
+  try {
+    await connection.transact((document) => {
+      ydocDocument = document;
+    });
+  } finally {
+    await connection.disconnect();
+  }
+
+  if (ydocDocument) {
+    await updateAnnotationCache(documentName, ydocDocument);
+  }
+  send(response, 204, "");
 }
 
 // POST /admin/annotation-mark (PLAN.md §12i) — applies a mark carrying

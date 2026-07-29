@@ -80,3 +80,10 @@ export function ydocIdForAnnotation(annotationId: string): string {
 export function annotationIdFromYdocId(ydocId: string): string | null {
   return ydocId.startsWith(YDOC_ANNOTATION_PREFIX) ? ydocId.slice(YDOC_ANNOTATION_PREFIX.length) : null;
 }
+
+// Path the collab server's onRequest hook listens on to force
+// server/annotation-cache.ts's write immediately rather than waiting for
+// the next store debounce — postAnnotation (PLAN.md §13j Phase 3) calls
+// this before flipping DRAFT to LIVE, so a reader who opens the annotation
+// the instant it becomes visible never sees stale (pre-typing) content.
+export const ANNOTATION_FLUSH_PATH = "/admin/annotation-flush";

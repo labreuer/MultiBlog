@@ -1,6 +1,6 @@
 import type { Role } from "@/generated/prisma/enums";
 import { signYdocToken } from "./ydoc-token";
-import { ydocIdForDoc, ANNOTATION_MARK_PATH } from "./ydoc-names";
+import { ydocIdForDoc, ydocIdForAnnotation, ANNOTATION_MARK_PATH, ANNOTATION_FLUSH_PATH } from "./ydoc-names";
 
 // Server-to-server channel from the Next app to the Hocuspocus server for
 // applying an annotation's mark to its doc's live document (PLAN.md §12i) —
@@ -22,7 +22,7 @@ function collabHttpOrigin(): string {
  * Applies a mark carrying `annotationId` over [from, to) in `docId`'s live
  * document. Returns `applied: false` (not a thrown error) when the offsets
  * no longer match `quotedText` and no unique fallback occurrence exists —
- * an expected outcome the caller (submitAnnotation) already renders as a
+ * an expected outcome the caller (postAnnotation) already renders as a
  * document-level annotation, not a failure to surface.
  *
  * Throws only when the collab server itself couldn't be reached or rejected
@@ -60,4 +60,33 @@ export async function applyAnnotationMark(opts: {
   }
   const result = (await response.json()) as { applied: boolean };
   return result;
+}
+
+/**
+ * Forces server/annotation-cache.ts's proseJson/bodyText write for
+ * `annotationId` immediately rather than waiting for the next store
+ * debounce (PLAN.md §13j Phase 3) — called from postAnnotation right before
+ * flipping DRAFT to LIVE, so a reader who opens the annotation the instant
+ * it becomes visible sees what was actually typed, not whatever the cache
+ * still held as of the last debounce (for a brand-new annotation, that's
+ * its creation-time empty paragraph).
+ *
+ * Best-effort: a failure here just means the reader briefly sees stale
+ * (empty) content until the next real edit's debounce catches up — not
+ * worth blocking Post over, so this never throws.
+ */
+export async function flushAnnotationCache(opts: { userId: string; role: Role; annotationId: string }): Promise<void> {
+  const { userId, role, annotationId } = opts;
+  const documentName = ydocIdForAnnotation(annotationId);
+  const token = await signYdocToken({ sub: userId, documentName, role });
+
+  try {
+    await fetch(`${collabHttpOrigin()}${ANNOTATION_FLUSH_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, documentName }),
+    });
+  } catch {
+    // Best-effort — see the doc comment above.
+  }
 }

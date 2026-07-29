@@ -16,6 +16,12 @@ type Props = {
   quotedText?: string;
   onPosted: () => void;
   onCancel: () => void;
+  // PLAN.md §13g — present only from the inline popover, absent from the
+  // bottom composer and from a reply (neither has anywhere further to
+  // move). Clicking it hands the draft's id (and its anchor, if any) to
+  // AnnotationMoveProvider and leaves the row untouched — no post, no
+  // discard, just a different slot rendering the same connection next.
+  onMoveToBottom?: () => void;
 };
 
 // PLAN.md §13j Phase 2 — the provider-connection lifecycle around
@@ -24,7 +30,15 @@ type Props = {
 // a doc's. Mounted only once a DRAFT row already exists (createDraftAnnotation,
 // called by whichever parent — the bottom composer or a reply — decided to
 // open one) — this component never creates the row itself, only connects to it.
-export default function LiveAnnotationComposer({ annotationId, anchorFrom, anchorTo, quotedText, onPosted, onCancel }: Props) {
+export default function LiveAnnotationComposer({
+  annotationId,
+  anchorFrom,
+  anchorTo,
+  quotedText,
+  onPosted,
+  onCancel,
+  onMoveToBottom,
+}: Props) {
   const router = useRouter();
   const { data: session } = useSession();
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
@@ -123,6 +137,11 @@ export default function LiveAnnotationComposer({ annotationId, anchorFrom, ancho
         >
           {pending ? "Posting..." : "Post annotation"}
         </button>
+        {onMoveToBottom && (
+          <button type="button" onClick={onMoveToBottom} className={styles.moveToBottom}>
+            Move to bottom ⤓
+          </button>
+        )}
         <button type="button" onClick={handleCancel} className={styles.cancel}>
           Cancel
         </button>

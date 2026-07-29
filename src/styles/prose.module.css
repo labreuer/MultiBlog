@@ -123,3 +123,15 @@
     background-color: color-mix(in srgb, var(--thread-color, #ffc800) 55%, transparent);
   }
 }
+
+/* The selection currently being composed into an inline annotation popover
+   (PLAN.md §13f) — a decoration (pending-annotation-extension.ts), not a
+   mark, so it never touches the document and disappears the moment the
+   popup closes. Colored by the composing user's own color, not an
+   annotation's (there isn't one yet); a dashed underline rather than a
+   background wash keeps it visually distinct from .annotation-highlight's
+   already-posted look. */
+.prose :global(.pending-annotation) {
+  background: color-mix(in srgb, var(--thread-color, #999) 18%, transparent);
+  border-bottom: 2px dashed var(--thread-color, #999);
+}

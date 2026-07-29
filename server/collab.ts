@@ -8,7 +8,7 @@ import { prisma } from "../src/lib/prisma";
 import { verifyCollabToken } from "../src/lib/collab-token";
 import { contentExtensions, pmSchema, pmTitleSchema } from "../src/lib/tiptap-schema";
 import { REPLACE_DOC_PATH } from "../src/lib/collab-admin";
-import { isYdocDocument, YDOC_SNAPSHOT_PATH, ANNOTATION_MARK_PATH } from "../src/lib/ydoc-names";
+import { isYdocDocument, YDOC_SNAPSHOT_PATH, ANNOTATION_MARK_PATH, ANNOTATION_FLUSH_PATH } from "../src/lib/ydoc-names";
 import {
   ydocOnAuthenticate,
   ydocOnAwarenessUpdate,
@@ -17,6 +17,7 @@ import {
   ydocOnStoreDocument,
   handleYdocSnapshot,
   handleApplyAnnotationMark,
+  handleFlushAnnotationCache,
 } from "./ydoc-hooks";
 
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
@@ -173,6 +174,15 @@ const server = new Server({
       } catch (err) {
         console.error("[collab] annotation-mark failed:", err);
         send(response, 500, err instanceof Error ? err.message : "Failed to apply annotation mark.");
+      }
+      return Promise.reject();
+    }
+    if (request.url?.startsWith(ANNOTATION_FLUSH_PATH)) {
+      try {
+        await handleFlushAnnotationCache(request, response, instance);
+      } catch (err) {
+        console.error("[collab] annotation-flush failed:", err);
+        send(response, 500, err instanceof Error ? err.message : "Failed to flush annotation cache.");
       }
       return Promise.reject();
     }

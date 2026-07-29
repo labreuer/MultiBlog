@@ -13,6 +13,7 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
+import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -90,26 +91,33 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
 
   return (
     <main className={`${styles.container} ${canEdit ? styles.containerScrubbable : ""}`}>
-      <DocView
-        docId={doc.id}
-        initialTitle={docTitleOrFallback(doc.title)}
-        initialBodyJSON={bodyJSON}
-        staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
-        canEdit={canEdit}
-        byline={
-          <p className={styles.byline}>
-            <AuthorByline
-              authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
-              showPrefix={false}
-            />
-            {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
-                §12k), so "last edited" is the only date that means anything.
-                Short date visible, full timestamp on hover. */}
-            <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
-          </p>
-        }
-      />
-      <AnnotationSection docId={doc.id} />
+      {/* Wraps both trees so "Move to bottom" (PLAN.md §13g) can hand a
+          draft's id from the inline popover (inside DocView) to the bottom
+          composer (AnnotationSection) — siblings here, not parent/child, so
+          a prop can't carry it across. */}
+      <AnnotationMoveProvider>
+        <DocView
+          docId={doc.id}
+          initialTitle={docTitleOrFallback(doc.title)}
+          initialBodyJSON={bodyJSON}
+          staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
+          canEdit={canEdit}
+          userColor={session.user.color}
+          byline={
+            <p className={styles.byline}>
+              <AuthorByline
+                authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
+                showPrefix={false}
+              />
+              {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
+                  §12k), so "last edited" is the only date that means anything.
+                  Short date visible, full timestamp on hover. */}
+              <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
+            </p>
+          }
+        />
+        <AnnotationSection docId={doc.id} />
+      </AnnotationMoveProvider>
     </main>
   );
 }

@@ -11,6 +11,7 @@ import {
   expect,
   bodyEditor,
   titleEditor,
+  annotationEditor,
   deleteTextInBody,
   selectTextInBody,
   waitForDocCollabReady,
@@ -128,16 +129,25 @@ test.describe("annotations", () => {
     await expect(readerPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
     await selectTextInBody(readerPage, QUOTED_TEXT);
 
+    // PLAN.md §13j Phase 3 — the popup opens on a selection but doesn't
+    // create anything until "Annotate" is clicked (avoids spinning up a
+    // draft row on every micro-adjustment of a selection still being
+    // dragged); that's what turns it into the live editor this fills in.
     const popup = readerPage.getByTestId("annotation-popup");
-    await popup.getByPlaceholder(/Annotating as/).fill("Why this bit specifically?");
+    await popup.getByRole("button", { name: "Annotate" }).click();
+    await annotationEditor(readerPage).click();
+    await readerPage.keyboard.type("Why this bit specifically?");
     await popup.getByRole("button", { name: "Post annotation" }).click();
 
     await expect(readerPage.getByText("Why this bit specifically?")).toBeVisible();
+    // "Annotate" already created the row as a DRAFT (PLAN.md §13j Phase 2) —
+    // a row existing isn't "posted" any more, so this polls for the fully-
+    // posted state directly rather than a length check that would pass the
+    // instant the draft appeared, well before Post's own flush/mark-apply
+    // round trip (postAnnotation) has actually completed.
     await expect
-      .poll(async () => (await getAnnotationStates(sharedDoc.id)).length)
-      .toBe(1);
-    const [annotation] = await getAnnotationStates(sharedDoc.id);
-    expect(annotation).toMatchObject({ anchored: true, bodyText: "Why this bit specifically?" });
+      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0], { timeout: 15_000 })
+      .toMatchObject({ anchored: true, bodyText: "Why this bit specifically?" });
 
     // Renders through the mark, not a stored column — QuoteThreadHeader's
     // blockquote shows the exact selected text (scoped to <blockquote>,
@@ -165,7 +175,9 @@ test.describe("annotations", () => {
     await expect(readerPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
     await selectTextInBody(readerPage, QUOTED_TEXT);
     const popup = readerPage.getByTestId("annotation-popup");
-    await popup.getByPlaceholder(/Annotating as/).fill("This quote is about to disappear.");
+    await popup.getByRole("button", { name: "Annotate" }).click();
+    await annotationEditor(readerPage).click();
+    await readerPage.keyboard.type("This quote is about to disappear.");
     await popup.getByRole("button", { name: "Post annotation" }).click();
     await expect
       .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.anchored)
