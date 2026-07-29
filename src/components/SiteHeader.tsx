@@ -1,12 +1,29 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import { canManagePosts, canManageDocs, isAdmin } from "@/lib/role-checks";
 import { SITE_TITLE } from "@/lib/site-config";
+import styles from "./SiteHeader.module.css";
 
 export default function SiteHeader() {
   const { data: session } = useSession();
+  const docsMenuRef = useRef<HTMLDetailsElement>(null);
+
+  // <details> has no native "close on outside click" — same fix as
+  // CommentsTable.tsx's MultiSelectDropdown: set .open directly on the DOM
+  // node rather than lifting it into React state, since nothing else here
+  // needs to react to open/closed.
+  useEffect(() => {
+    function handlePointerDown(e: MouseEvent) {
+      if (docsMenuRef.current && !docsMenuRef.current.contains(e.target as Node)) {
+        docsMenuRef.current.open = false;
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
 
   return (
     <header
@@ -39,11 +56,17 @@ export default function SiteHeader() {
             <span aria-hidden="true" style={{ color: "#ccc" }}>
               |
             </span>
-            <Link href="/docs">Manage Docs</Link>
-            <span aria-hidden="true" style={{ color: "#ccc" }}>
-              |
+            <span className={styles.docsGroup}>
+              <Link href="/docs">Docs</Link>
+              <details ref={docsMenuRef} className={styles.dropdownWrapper}>
+                <summary className={styles.dropdownSummary} aria-label="Doc tools">
+                  ▾
+                </summary>
+                <div className={styles.dropdownPanel}>
+                  <Link href="/annotations">Annotations</Link>
+                </div>
+              </details>
             </span>
-            <Link href="/annotations">Manage Annotations</Link>
           </>
         )}
         {session?.user && isAdmin(session.user.role) && (
