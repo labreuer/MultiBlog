@@ -19,3 +19,11 @@ export function canEditAnyPost(role: Role): boolean {
 export function isAdmin(role: Role): boolean {
   return role === "ADMIN";
 }
+
+// PLAN.md §12e — governs reading and annotating a SHARED doc, not /docs
+// management (that's canManageDocs, §12k, alongside canManagePosts).
+export const DOC_VIEWER_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR", "AUTHORIZED"];
+
+export function canViewDocs(role: Role): boolean {
+  return DOC_VIEWER_ROLES.includes(role);
+}

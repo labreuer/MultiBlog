@@ -39,7 +39,7 @@ type SortKey = "name" | "email" | "adminInitials" | "role" | "moderationPolicy" 
 
 // Schema declaration order (Role enum) is already privilege order, so reuse
 // it for sorting rather than falling back to alphabetical.
-const ROLE_ORDER: Role[] = [Role.ADMIN, Role.EDITOR, Role.AUTHOR, Role.COMMENTER];
+const ROLE_ORDER: Role[] = [Role.ADMIN, Role.EDITOR, Role.AUTHOR, Role.AUTHORIZED, Role.COMMENTER];
 
 function compareByKey(key: SortKey, a: UserRow, b: UserRow): number {
   switch (key) {

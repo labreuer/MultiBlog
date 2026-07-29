@@ -16,6 +16,7 @@ enum Role {
   ADMIN
   EDITOR
   AUTHOR
+  AUTHORIZED
   COMMENTER
 
   @@map("role")

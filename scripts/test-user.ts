@@ -4,7 +4,7 @@
 // addresses so it can never touch a real account.
 //
 // Usage:
-//   npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|COMMENTER] [--trusted] [--force-moderate]
+//   npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|AUTHORIZED|COMMENTER] [--trusted] [--force-moderate]
 //   npx tsx scripts/test-user.ts delete [email]
 // email defaults to test-admin@example.com; password is always "testpass123".
 // --role defaults to ADMIN. --trusted and --force-moderate each create a
@@ -144,7 +144,7 @@ async function main() {
     await del(email);
   } else {
     console.error(
-      "Usage: npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|COMMENTER] [--trusted] [--force-moderate]\n" +
+      "Usage: npx tsx scripts/test-user.ts create [email] [name] [--role=ADMIN|EDITOR|AUTHOR|AUTHORIZED|COMMENTER] [--trusted] [--force-moderate]\n" +
         "       npx tsx scripts/test-user.ts delete [email]",
     );
     process.exitCode = 1;
