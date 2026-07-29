@@ -34,3 +34,17 @@ export function newTestYdocId(): string {
 
 /** Path the collab server's onRequest hook listens on for §11d's snapshot endpoint. */
 export const YDOC_SNAPSHOT_PATH = "/admin/ydoc-snapshot";
+
+// PLAN.md §12b — a Doc's documentName is derived from its id, never stored.
+// There is no foreign key in either direction between `doc` and `ydoc`: one
+// id is a pure function of the other, so the two tables cannot drift, and a
+// `ydoc:<cuid>` name with no owning Doc (e.g. every /ydoc-debug document)
+// simply isn't a doc's ydoc — docIdFromYdocId only says what doc id a name
+// *would* belong to, not that a Doc row with that id exists.
+export function ydocIdForDoc(docId: string): string {
+  return `${YDOC_PREFIX}${docId}`;
+}
+
+export function docIdFromYdocId(ydocId: string): string | null {
+  return ydocId.startsWith(YDOC_PREFIX) ? ydocId.slice(YDOC_PREFIX.length) : null;
+}

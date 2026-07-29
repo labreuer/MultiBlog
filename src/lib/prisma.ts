@@ -71,6 +71,9 @@ export const prisma = client.$extends({
     user: {
       $allOperations: (params) => excludeSoftDeleted(params.operation, params.args, params.query),
     },
+    doc: {
+      $allOperations: (params) => excludeSoftDeleted(params.operation, params.args, params.query),
+    },
   },
 });
 

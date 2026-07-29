@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
-import { canManagePosts, isAdmin } from "@/lib/role-checks";
+import { canManagePosts, canManageDocs, isAdmin } from "@/lib/role-checks";
 import { SITE_TITLE } from "@/lib/site-config";
 
 export default function SiteHeader() {
@@ -32,6 +32,14 @@ export default function SiteHeader() {
               |
             </span>
             <Link href="/comments">Manage Comments</Link>
+          </>
+        )}
+        {session?.user && canManageDocs(session.user.role) && (
+          <>
+            <span aria-hidden="true" style={{ color: "#ccc" }}>
+              |
+            </span>
+            <Link href="/docs">Manage Docs</Link>
           </>
         )}
         {session?.user && isAdmin(session.user.role) && (

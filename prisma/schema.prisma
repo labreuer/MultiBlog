@@ -56,6 +56,16 @@ enum CommentStatus {
   @@map("comment_status")
 }
 
+// PLAN.md §12e — PRIVATE is byline authors plus ADMIN/EDITOR; SHARED is
+// anyone with canViewDocs. No "unlisted" tier: with role gating underneath,
+// it would have no threat model left to address.
+enum DocVisibility {
+  PRIVATE
+  SHARED
+
+  @@map("doc_visibility")
+}
+
 model User {
   id               String            @id @default(cuid())
   email            String            @unique
@@ -86,6 +96,8 @@ model User {
   postDeletions        Post[]               @relation("PostDeletedBy")
   slugHistory          UserSlugHistory[]
   ydocSnapshots        YdocSnapshot[]       @relation("YdocSnapshotUser")
+  docAuthors           DocAuthor[]
+  docDeletions         Doc[]                @relation("DocDeletedBy")
 
   @@map("user")
 }
@@ -346,6 +358,65 @@ model Comment {
   deletedBy       User?         @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
 
   @@map("comment")
+}
+
+// A living document — PLAN.md §12 — read as its current Yjs state (Doc ↔
+// Ydoc joined only by id derivation, ydocIdForDoc/docIdFromYdocId in
+// src/lib/ydoc-names.ts; deliberately no foreign key either way, since it's
+// a function of docId and cannot drift). No moderationPolicy: annotations
+// are never moderated. No publishRevisionId/publishedAt: a doc is never
+// "published at a revision" — readers see the live doc. No doc_revision
+// table yet either (§12m, held back pending review).
+//
+// title/proseJson are caches of the ydoc's "title"/"default" Yjs fragments,
+// written by server/doc-cache.ts on the collab server's store debounce
+// (§12d) — nullable because they're empty until the first store, i.e. for a
+// doc that's been created but never edited.
+model Doc {
+  id              String         @id @default(cuid())
+  slug            String         @unique
+  title           String
+  visibility      DocVisibility  @default(PRIVATE)
+  proseJson       Json?          @map("prose_json")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  deletedByUserId String?        @map("deleted_by_user_id")
+  deletedAt       DateTime?      @map("deleted_at")
+
+  authors     DocAuthor[]
+  deletedBy   User?             @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
+  slugHistory DocSlugHistory[]
+
+  @@map("doc")
+}
+
+model DocAuthor {
+  docId       String @map("doc_id")
+  userId      String @map("user_id")
+  bylineOrder Int    @map("byline_order")
+
+  doc  Doc  @relation(fields: [docId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([docId, userId])
+  @@map("doc_author")
+}
+
+// Redirect sources for a doc's past slugs — same shape/rationale as
+// PostSlugHistory. slug carries its own @unique, not @@unique([docId, slug]):
+// doc slugs are unique among docs only (a separate /doc/* namespace with no
+// shared catch-all against post slugs), enforced by docSlugInUse in
+// src/lib/doc-slug.ts rather than by this column against Post/PostSlugHistory.
+model DocSlugHistory {
+  id        String   @id @default(cuid())
+  docId     String   @map("doc_id")
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  doc Doc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@index([docId])
+  @@map("doc_slug_history")
 }
 
 // A generic, standalone Yjs document store — PLAN.md §11. Keyed purely by the

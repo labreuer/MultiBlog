@@ -3,10 +3,13 @@
 // relevant to post-slug.ts today: author slugs live under the nested
 // /authors/[slug], which has no sibling static routes to collide with.
 export const RESERVED_SLUGS = new Set([
+  "annotations",
   "api",
   "authors",
   "comments",
   "dashboard",
+  "doc",
+  "docs",
   "forgot-password",
   "posts",
   "reset-password",
