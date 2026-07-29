@@ -286,3 +286,136 @@ test.describe("side-by-side doc-link creation", () => {
     }
   });
 });
+
+// PLAN.md §14h/§14l Phase 6 — the group bar in full.
+test.describe("side-by-side group bar", () => {
+  const LEFT_BODY = "The quick brown fox.";
+  const RIGHT_BODY = "A lazy dog sleeps.";
+
+  test("dropdown prefixes, the first-entry swap, and the panel", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: RIGHT_BODY });
+
+    // A two-sided group (↔) and a left-only group (←).
+    const bothSides = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+    await createTestDocLink({
+      docId: right.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: RIGHT_BODY,
+      quotedText: "lazy dog",
+      groupId: bothSides.groupId,
+    });
+    const leftOnly = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "quick brown" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      await expect(select).toBeVisible();
+
+      // Neutral first entry, and both groups present with the right prefix.
+      await expect(select.locator("option").first()).toHaveText("Doc Link Groups");
+      const options = await select.locator("option").allTextContents();
+      expect(options.some((o) => o.startsWith("↔ "))).toBe(true);
+      expect(options.some((o) => o.startsWith("← "))).toBe(true);
+      expect(options).toContain("New Doc Link Group");
+
+      // Selecting a group swaps the first entry's label and opens the panel.
+      await select.selectOption(bothSides.groupId);
+      await expect(select.locator("option").first()).toHaveText("Hide all Groups");
+      const panel = page.getByTestId("doc-link-group-panel");
+      await expect(panel).toBeVisible();
+
+      // The count line sums across both groups: 2 links land in the left
+      // doc (one from each group), 1 in the right (bothSides only).
+      await expect(page.locator("text=/←\\s*2\\s*1\\s*→/")).toBeVisible();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(bothSides.groupId);
+      await deleteTestDocLinkGroup(leftOnly.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("unchecking Display? hides the group's highlight; selecting darkens it", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`);
+      await expect(highlight.first()).toBeVisible();
+
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      await select.selectOption(link.groupId);
+      await expect(highlight.first()).toHaveClass(/doc-link-active/);
+
+      const displayCheckbox = page.getByTestId("doc-link-group-panel").getByLabel("Display?");
+      await displayCheckbox.uncheck();
+      await expect(page.locator(`[data-doc-link-ids~="${link.id}"]`)).toHaveCount(0);
+
+      await displayCheckbox.check();
+      await expect(highlight.first()).toBeVisible();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("editing the panel's name debounce-saves, and deleting the group soft-deletes its links", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+    let groupDeleted = false;
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      await select.selectOption(link.groupId);
+
+      const panel = page.getByTestId("doc-link-group-panel");
+      const nameInput = panel.getByPlaceholder("Group name");
+      await nameInput.fill("Renamed group");
+      await expect(panel.getByText("Saved")).toBeVisible({ timeout: 5_000 });
+
+      await panel.getByRole("button", { name: "Delete" }).click();
+      groupDeleted = true;
+      await expect(panel).not.toBeVisible();
+      await expect.poll(() => countDocLinks(left.id)).toBe(0);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      if (!groupDeleted) await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("New Doc Link Group creates a group on first save, with no links yet", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    let createdGroupId: string | null = null;
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      await select.selectOption({ label: "New Doc Link Group" });
+
+      const panel = page.getByTestId("doc-link-group-panel");
+      await panel.getByPlaceholder("Group name").fill("Fresh group");
+      await expect(panel.getByText("Saved")).toBeVisible({ timeout: 5_000 });
+
+      // Now present in the dropdown, proving the row was actually written.
+      await expect(select.locator("option", { hasText: "Fresh group" })).toHaveCount(1);
+      const optionValue = await select.locator("option", { hasText: "Fresh group" }).getAttribute("value");
+      createdGroupId = optionValue;
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      if (createdGroupId) await deleteTestDocLinkGroup(createdGroupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+});

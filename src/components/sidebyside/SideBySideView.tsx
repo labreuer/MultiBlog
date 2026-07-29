@@ -1,9 +1,13 @@
 "use client";
 
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { JSONContent } from "@tiptap/react";
-import type { ReactNode } from "react";
+import type { DocLinkGroupWithLinks } from "@/lib/doc-links-query";
 import type { DocLinkInput } from "@/lib/doc-link-anchor";
+import { cascadeDocLinkColor } from "@/lib/doc-link-colors";
 import DocColumn from "./DocColumn";
+import DocLinkGroupBar, { NEW_GROUP } from "./DocLinkGroupBar";
+import DocLinkGroupPanel from "./DocLinkGroupPanel";
 import styles from "./SideBySideView.module.css";
 
 export type SideBySideDoc = {
@@ -11,25 +15,170 @@ export type SideBySideDoc = {
   initialTitle: string;
   initialBodyJSON: JSONContent;
   staticBody: ReactNode;
-  docLinks: DocLinkInput[];
 };
 
 type Props = {
   left: SideBySideDoc;
   right: SideBySideDoc;
+  initialGroups: DocLinkGroupWithLinks[];
+  initialOtherDocLinksCount: number;
   userId: string;
   userName: string;
   userColor: string;
 };
 
-// PLAN.md §14f/§14h — the page shell: a group bar strip (added in Phase 6)
-// above two independently-scrolling columns, each able to switch between
-// read and write mode on its own (§14g).
-export default function SideBySideView({ left, right, userId, userName, userColor }: Props) {
-  return (
-    <div className={styles.columns}>
-      <DocColumn {...left} side="left" userId={userId} userName={userName} userColor={userColor} />
-      <DocColumn {...right} side="right" userId={userId} userName={userName} userColor={userColor} />
-    </div>
+// PLAN.md §14f/§14h — the page shell: the group bar strip above two
+// independently-scrolling columns, each able to switch between read and
+// write mode on its own (§14g). Group/link state is owned here rather than
+// per-column, because the bar (dropdown, counts, active-group darkening)
+// and both columns' highlights all have to agree on the same set — a doc
+// link created in one column has to show up in the bar's dropdown, and
+// selecting a group in the bar has to darken that group's segments in
+// *both* columns at once.
+export default function SideBySideView({ left, right, initialGroups, initialOtherDocLinksCount, userId, userName, userColor }: Props) {
+  const [groups, setGroups] = useState(initialGroups);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  // Display? — per-group opt-out, not persisted, defaulting to shown
+  // (§14h: the click-disambiguation case where no group is selected only
+  // makes sense if highlights are visible with nothing selected).
+  const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<string>>(new Set());
+  const [onlyMine, setOnlyMine] = useState(false);
+
+  const isCreatingNew = activeGroupId === NEW_GROUP;
+  const activeGroup = isCreatingNew ? null : groups.find((g) => g.id === activeGroupId) ?? null;
+
+  const docLinksFor = useMemo(
+    () => (docId: string): DocLinkInput[] => {
+      const out: DocLinkInput[] = [];
+      for (const group of groups) {
+        if (hiddenGroupIds.has(group.id)) continue;
+        for (const link of group.links) {
+          if (link.docId !== docId) continue;
+          if (onlyMine && link.userId !== userId) continue;
+          out.push({
+            id: link.id,
+            mark: link.mark,
+            groupId: group.id,
+            color: cascadeDocLinkColor(link.overrideColor, group.overrideColor, link.authorColor),
+            mine: link.userId === userId,
+          });
+        }
+      }
+      return out;
+    },
+    [groups, hiddenGroupIds, onlyMine, userId],
   );
+
+  // PLAN.md §14e — the one-shot pulse when a group becomes actively
+  // selected, reusing QuoteThreadHeader.jumpToQuote's exact pattern:
+  // scroll the first match into view, add "pulse", remove after 1200ms.
+  // data-doc-link-group-ids spans both columns, so one querySelectorAll
+  // reaches segments in either — the one place this page's shared scope
+  // over both docs actually helps.
+  useEffect(() => {
+    if (!activeGroupId || isCreatingNew) return;
+    const targets = document.querySelectorAll<HTMLElement>(`[data-doc-link-group-ids~="${activeGroupId}"]`);
+    if (targets.length === 0) return;
+    targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    targets.forEach((el) => el.classList.add("pulse"));
+    const timer = window.setTimeout(() => {
+      targets.forEach((el) => el.classList.remove("pulse"));
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [activeGroupId, isCreatingNew]);
+
+  return (
+    <>
+      <DocLinkGroupBar
+        groups={groups}
+        leftDocId={left.docId}
+        rightDocId={right.docId}
+        otherDocLinksCount={initialOtherDocLinksCount}
+        activeGroupId={isCreatingNew ? NEW_GROUP : activeGroupId}
+        onlyMine={onlyMine}
+        onSelectGroup={setActiveGroupId}
+        onHideAll={() => {
+          setHiddenGroupIds(new Set(groups.map((g) => g.id)));
+          setActiveGroupId(null);
+        }}
+        onToggleOnlyMine={setOnlyMine}
+      />
+      {(activeGroup || isCreatingNew) && (
+        <DocLinkGroupPanel
+          groupId={activeGroup?.id ?? null}
+          initialName={activeGroup?.name ?? null}
+          initialText={activeGroup?.text ?? null}
+          initialOverrideColor={activeGroup?.overrideColor ?? null}
+          visible={activeGroup ? !hiddenGroupIds.has(activeGroup.id) : true}
+          onToggleVisible={(visible) => {
+            if (!activeGroup) return;
+            setHiddenGroupIds((prev) => {
+              const next = new Set(prev);
+              if (visible) next.delete(activeGroup.id);
+              else next.add(activeGroup.id);
+              return next;
+            });
+          }}
+          onCreated={(groupId, fields) => {
+            setGroups((prev) => [...prev, { id: groupId, ...fields, userId, links: [] }]);
+            setActiveGroupId(groupId);
+          }}
+          onUpdated={(fields) => {
+            if (!activeGroup) return;
+            setGroups((prev) => prev.map((g) => (g.id === activeGroup.id ? { ...g, ...fields } : g)));
+          }}
+          onDeleted={() => {
+            if (activeGroup) setGroups((prev) => prev.filter((g) => g.id !== activeGroup.id));
+            setActiveGroupId(null);
+          }}
+        />
+      )}
+      <div className={styles.columns}>
+        <DocColumn
+          {...left}
+          side="left"
+          userId={userId}
+          userName={userName}
+          userColor={userColor}
+          docLinks={docLinksFor(left.docId)}
+          activeGroupId={activeGroupId}
+          onLinkCreated={(link) => appendLinkForDoc(left.docId, link)}
+        />
+        <DocColumn
+          {...right}
+          side="right"
+          userId={userId}
+          userName={userName}
+          userColor={userColor}
+          docLinks={docLinksFor(right.docId)}
+          activeGroupId={activeGroupId}
+          onLinkCreated={(link) => appendLinkForDoc(right.docId, link)}
+        />
+      </div>
+    </>
+  );
+
+  function appendLinkForDoc(docId: string, link: DocLinkInput) {
+    setGroups((prev) => {
+      const idx = prev.findIndex((g) => g.id === link.groupId);
+      const rawLink = {
+        id: link.id,
+        docId,
+        mark: link.mark,
+        text: null,
+        docLinkGroupId: link.groupId,
+        overrideColor: null,
+        userId,
+        authorColor: userColor,
+        createdAt: new Date(),
+      };
+      if (idx === -1) {
+        return [...prev, { id: link.groupId, name: null, text: null, overrideColor: null, userId, links: [rawLink] }];
+      }
+      const next = [...prev];
+      next[idx] = { ...next[idx], links: [...next[idx].links, rawLink] };
+      return next;
+    });
+    if (!activeGroupId) setActiveGroupId(link.groupId);
+  }
 }

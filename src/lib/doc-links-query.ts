@@ -1,7 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseDocLinkMark, type DocLinkMark, type DocLinkInput } from "@/lib/doc-link-anchor";
-import { SAFE_COLOR } from "@/lib/safe-css";
+import { cascadeDocLinkColor } from "@/lib/doc-link-colors";
 
 // PLAN.md §14 — neither DocLink nor DocLinkGroup joins the $extends
 // soft-delete filter in src/lib/prisma.ts (that covers only post/user/doc;
@@ -83,12 +83,11 @@ export function buildDocLinkInputs(groups: DocLinkGroupWithLinks[], docId: strin
   for (const group of groups) {
     for (const link of group.links) {
       if (link.docId !== docId) continue;
-      const color = link.overrideColor ?? group.overrideColor ?? link.authorColor;
       inputs.push({
         id: link.id,
         mark: link.mark,
         groupId: group.id,
-        color: SAFE_COLOR.test(color) ? color : "#999",
+        color: cascadeDocLinkColor(link.overrideColor, group.overrideColor, link.authorColor),
         mine: link.userId === viewerUserId,
       });
     }

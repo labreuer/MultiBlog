@@ -111,6 +111,16 @@ export async function deleteTestUser(email: string): Promise<void> {
     if (annotationIds.length > 0) {
       await prisma.ydoc.deleteMany({ where: { id: { in: annotationIds.map(ydocIdForAnnotation) } } });
     }
+    // doc_link.user_id and doc_link_group.user_id are the same shape of
+    // required, RESTRICT-by-default FK — and unlike annotations, PLAN.md
+    // §14b's soft delete is deletedAt-only, so a group "deleted" through
+    // the UI (updateDocLinkGroup's soft delete) still owns the row and
+    // still blocks this. Links first (a link can live in a group owned by
+    // someone else), then this user's own groups (whose onDelete: Cascade
+    // takes any remaining links in them, e.g. someone else's link inside
+    // a group this user created).
+    await prisma.docLink.deleteMany({ where: { userId: user.id } });
+    await prisma.docLinkGroup.deleteMany({ where: { userId: user.id } });
   }
   await prisma.user.deleteMany({ where: { email } });
 }

@@ -24,7 +24,13 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  // Derived by SideBySideView (Phase 6) from its own group state —
+  // filtered by Display?/"Show only my Doc Links" and colored by the
+  // cascade — rather than owned here, since the group bar needs the same
+  // set both columns paint from to stay in sync.
   docLinks: DocLinkInput[];
+  activeGroupId: string | null;
+  onLinkCreated: (link: DocLinkInput) => void;
 };
 
 const ARIA = {
@@ -52,15 +58,12 @@ export default function DocColumn({
   userId,
   userName,
   userColor,
-  docLinks: initialDocLinks,
+  docLinks,
+  activeGroupId,
+  onLinkCreated,
 }: Props) {
   const [mode, setMode] = useState<Mode>("read");
   const [title, setTitle] = useState(initialTitle);
-  // Seeded from the server-fetched initial set (Phase 4) and appended to
-  // locally when a link is created (Phase 5) — doc links have no live
-  // propagation channel (§14a), so this is the only way a newly created
-  // link's highlight appears without a full page reload.
-  const [docLinks, setDocLinks] = useState(initialDocLinks);
   // null until the token response arrives — distinct from false, since
   // "may this viewer write" gates whether the Edit button renders at all.
   const [readOnly, setReadOnly] = useState<boolean | null>(null);
@@ -199,8 +202,8 @@ export default function DocColumn({
               ydoc={ydoc}
               provider={provider}
               docLinks={docLinks}
-              activeGroupId={null}
-              onDocLinkCreated={(link) => setDocLinks((prev) => [...prev, link])}
+              activeGroupId={activeGroupId}
+              onDocLinkCreated={onLinkCreated}
             />
           ) : (
             // Mirrors LiveDocBody's own pre-connection fallback — shown

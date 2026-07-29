@@ -11,7 +11,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
-import { getDocLinkGroupsForPair, buildDocLinkInputs } from "@/lib/doc-links-query";
+import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-query";
 import SideBySideView from "@/components/sidebyside/SideBySideView";
 import styles from "./page.module.css";
 
@@ -110,6 +110,11 @@ export default async function SideBySidePage({
     loadBody(rightDoc),
     getDocLinkGroupsForPair(leftDoc.id, rightDoc.id),
   ]);
+  const otherDocLinksCount = await countOtherDocLinks(
+    groups.map((g) => g.id),
+    leftDoc.id,
+    rightDoc.id,
+  );
 
   return (
     <main className={styles.container}>
@@ -119,15 +124,15 @@ export default async function SideBySidePage({
           initialTitle: docTitleOrFallback(leftDoc.title),
           initialBodyJSON: leftBody.bodyJSON,
           staticBody: leftBody.staticBody,
-          docLinks: buildDocLinkInputs(groups, leftDoc.id, session.user.id),
         }}
         right={{
           docId: rightDoc.id,
           initialTitle: docTitleOrFallback(rightDoc.title),
           initialBodyJSON: rightBody.bodyJSON,
           staticBody: rightBody.staticBody,
-          docLinks: buildDocLinkInputs(groups, rightDoc.id, session.user.id),
         }}
+        initialGroups={groups}
+        initialOtherDocLinksCount={otherDocLinksCount}
         userId={session.user.id}
         userName={session.user.name ?? session.user.email ?? "Anonymous"}
         userColor={session.user.color}
