@@ -9,6 +9,7 @@ import { renderYdocDoc } from "@/lib/ydoc-render";
 import { PendingAnnotation, setPendingAnnotation } from "@/lib/pending-annotation-extension";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import AnnotationPopover from "./annotation/AnnotationPopover";
+import { useDocPresence } from "./annotation/doc-presence-context";
 import proseStyles from "@/styles/prose.module.css";
 
 type PendingSelection = {
@@ -69,6 +70,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
   // window has passed — e2e/doc.spec.ts's annotation tests wait on it.
   const [synced, setSynced] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { setAwareness } = useDocPresence();
 
   // Read inside the setContent-driven handlers below, which run outside
   // React's render cycle and would otherwise close over a stale `pending`
@@ -239,6 +241,11 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
           token: fetchToken,
           onSynced: () => setSynced(true),
         });
+        // PLAN.md §13i — a readOnly connection's awareness still flows
+        // freely (only document *content* updates are gated), so this same
+        // read-only tap doubles as the channel every LiveAnnotationComposer
+        // on the page publishes "someone is writing an annotation" into.
+        setAwareness(instance.awareness);
       } catch {
         // Read-only and best-effort: the server-rendered staticBody/initial
         // editor content is already showing correct (if potentially stale)
@@ -251,6 +258,7 @@ export default function LiveDocBody({ docId, initialBodyJSON, staticBody, overri
       cancelled = true;
       instance?.destroy();
       ydoc.destroy();
+      setAwareness(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reresolvePending closes over pendingRef/userColor, not state that should retrigger this connection effect
   }, [docId, ydoc]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
@@ -42,12 +42,31 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
     setToolbarVisible(window.localStorage.getItem(TOOLBAR_STORAGE_KEY) === "1");
   }, []);
 
+  // PLAN.md §13h — author highlighting stays off until a *second* distinct
+  // author shows up on this annotation's own `clients` map (§11d, the same
+  // server-written clientID -> userId attribution a doc already has). A
+  // ref, not state: AuthorHighlight.configure's getAuthorId closure is
+  // captured once at useEditor construction and never recreated, so a
+  // stale `coAuthoring` boolean captured there would never see this flip.
+  const coAuthoringRef = useRef(false);
+
+  useEffect(() => {
+    const clients = ydoc.getMap<string>("clients");
+    const update = () => {
+      coAuthoringRef.current = new Set(clients.values()).size >= 2;
+    };
+    update();
+    clients.observe(update);
+    return () => clients.unobserve(update);
+  }, [ydoc]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false }),
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({ provider, user: { id: userId, name: userName, color: userColor } }),
-      AuthorHighlight.configure({ getAuthorId: () => userId }),
+      // eslint-disable-next-line react-hooks/refs -- getAuthorId is only ever invoked from the AuthorHighlight plugin's appendTransaction, on a real ProseMirror transaction dispatch, never during React's render
+      AuthorHighlight.configure({ getAuthorId: () => (coAuthoringRef.current ? userId : null) }),
     ],
     editorProps: { attributes: { "aria-label": "Annotation body", role: "textbox" } },
     immediatelyRender: false,

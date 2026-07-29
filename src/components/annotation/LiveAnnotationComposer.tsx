@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import AnnotationBody from "./AnnotationBody";
+import { useDocPresence } from "./doc-presence-context";
 import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import styles from "./AnnotationComposer.module.css";
 
@@ -49,10 +50,30 @@ export default function LiveAnnotationComposer({
 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
+  const { awareness } = useDocPresence();
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<Visibility>("post");
+
+  const userId = session?.user?.id;
+  const userDisplayName = session?.user?.name ?? session?.user?.email ?? "Someone";
+  const userColor = session?.user?.color;
+
+  // PLAN.md §13i — publishes "someone is writing an annotation" onto the
+  // doc's own awareness (not this annotation's — that one is only visible
+  // to whoever's already connected to it) whenever this composer is open
+  // and not set to Keep private. The cleanup covers every way that stops
+  // being true: switching to private, posting, cancelling, or unmounting —
+  // all of them re-run or tear down this effect, which is what always
+  // clears the field rather than needing a separate branch for each.
+  useEffect(() => {
+    if (!awareness || !userId || visibility === "private") return;
+    awareness.setLocalStateField("annotationEditing", { annotationId, name: userDisplayName, color: userColor });
+    return () => {
+      awareness.setLocalStateField("annotationEditing", null);
+    };
+  }, [awareness, userId, userDisplayName, userColor, visibility, annotationId]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ydoc = useMemo(() => new Y.Doc(), [annotationId]);

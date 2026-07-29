@@ -17,8 +17,9 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
-import { docContentExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
+import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
 import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
+import { annotationIdFromYdocId } from "../src/lib/ydoc-names";
 import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
 import { updateDocCache } from "./doc-cache";
 import { updateAnnotationCache } from "./annotation-cache";
@@ -103,7 +104,7 @@ export async function ydocOnChange({ documentName, update, connection }: onChang
   } else {
     await ydocStore.appendUpdate(documentName, update);
   }
-  await attributeUpdate(update, connection);
+  await attributeUpdate(documentName, update, connection);
 }
 
 export async function ydocOnStoreDocument({
@@ -146,6 +147,7 @@ function getClientsMap(document: Document): Y.Map<string> {
 // overwriting an existing entry. context.userId is the identity onAuthenticate
 // verified, not anything the client asserts about itself.
 async function attributeUpdate(
+  documentName: string,
   update: Uint8Array,
   connection: Connection<YdocContext> | undefined,
 ): Promise<void> {
@@ -172,10 +174,47 @@ async function attributeUpdate(
   const key = String(clientId);
   if (clients.has(key)) return;
 
+  const isNewDistinctUser = ![...clients.values()].includes(connection.context.userId);
+
   document.transact(() => {
     if (!clients.has(key)) {
       clients.set(key, connection.context.userId);
     }
+  });
+
+  // PLAN.md §13h — the moment a *second* distinct user shows up on an
+  // annotation's own ydoc, backfill authorHighlight over everything typed
+  // so far, attributed to the original (first) author. Checked after the
+  // write above so `clients.values()` already reflects it; `=== 2` (not
+  // `>= 2`) is what makes this fire exactly once per annotation — a third,
+  // fourth, etc. co-author never re-triggers it.
+  const annotationId = annotationIdFromYdocId(documentName);
+  if (annotationId && isNewDistinctUser && new Set(clients.values()).size === 2) {
+    await backfillAnnotationHighlight(annotationId, document);
+  }
+}
+
+// PLAN.md §13h — text typed before a second author joined would otherwise
+// stay uncolored forever once AuthorHighlight turns on (its plugin only
+// tags *new* edits, PLAN.md §13h's own design note on why this reads as a
+// bug rather than a boundary). One addMark(0, size) over the annotation's
+// entire existing content, attributed to whoever created the row — the
+// annotation's own `userId` column, not a guess from the clients map,
+// which only just started tracking who else showed up.
+async function backfillAnnotationHighlight(annotationId: string, document: Document): Promise<void> {
+  const original = await prisma.annotation.findUnique({ where: { id: annotationId }, select: { userId: true } });
+  if (!original) return;
+
+  const json = TiptapTransformer.extensions(annotationContentExtensions).fromYdoc(document, "default");
+  const node = pmAnnotationContentSchema.nodeFromJSON(json);
+  if (node.content.size === 0) return;
+
+  const markType = pmAnnotationContentSchema.marks.authorHighlight;
+  const tr = new Transform(node);
+  tr.addMark(0, node.content.size, markType.create({ authorId: original.userId }));
+
+  document.transact(() => {
+    prosemirrorToYXmlFragment(tr.doc, document.getXmlFragment("default"));
   });
 }
 

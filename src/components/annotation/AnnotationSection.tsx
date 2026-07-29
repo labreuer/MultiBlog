@@ -4,6 +4,7 @@ import { getDocAnnotationsAsThreads, getOwnDraftAnnotations, type AnnotationComm
 import { annotationContentExtensions } from "@/lib/tiptap-schema";
 import NewAnnotationComposer from "./NewAnnotationComposer";
 import OwnDraftsList from "./OwnDraftsList";
+import AnnotationPresenceIndicator from "./AnnotationPresenceIndicator";
 import AnnotationList, { type AnnotationEntry } from "./AnnotationList";
 import { type AnnotationNodeData } from "./AnnotationNode";
 import AnnotationColorStyles from "./AnnotationColorStyles";
@@ -99,6 +100,7 @@ export default async function AnnotationSection({ docId }: { docId: string }) {
           annotation authorship) is fine. */}
       <AnnotationColorStyles colors={Object.fromEntries(quoteThreads.map((t) => [t.id, t.color]))} />
       <h2 className={styles.heading}>Annotations</h2>
+      <AnnotationPresenceIndicator />
       <NewAnnotationComposer docId={docId} />
       <OwnDraftsList drafts={ownDrafts} />
 

@@ -1,0 +1,20 @@
+.wrapper {
+  margin: 4px 0 8px;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-style: italic;
+  color: #666;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
