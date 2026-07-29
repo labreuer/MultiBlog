@@ -55,3 +55,71 @@ test.describe("side-by-side page shell", () => {
     }
   });
 });
+
+// PLAN.md §14g/§14l Phase 3 — the per-column read/write toggle, exercised
+// with two identities so it also proves the hoisted provider is the same
+// one a live collaborator sees through, not a private copy.
+test.describe("side-by-side read/write toggle", () => {
+  test("toggling a column to write, typing, and toggling back leaves content correct for both identities", async ({
+    page,
+    secondUser,
+  }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Left starting text." });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Right starting text." });
+    const { page: otherPage } = await secondUser();
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      await otherPage.goto(`/side-by-side/${left.id}/${right.id}`);
+
+      const leftColumn = page.locator('[data-side="left"]');
+      const leftBody = page.getByRole("textbox", { name: "Left doc body" });
+      const otherLeftBody = otherPage.getByRole("textbox", { name: "Left doc body" });
+
+      await expect(leftBody).toContainText("Left starting text.");
+
+      // Toggle to write and type.
+      await leftColumn.getByRole("button", { name: "Edit" }).click();
+      await expect(leftColumn.locator("p", { hasText: "🟢 Live" })).toBeVisible({ timeout: 30_000 });
+      await leftBody.click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" Edited live.");
+
+      // The second identity, still in read mode, sees it through the same
+      // provider — not a copy this column happens to hold privately.
+      await expect(otherLeftBody).toContainText("Edited live.");
+
+      // Toggle back to read — the hoisted-mode ydoc.off fix (§14g) is what
+      // keeps this from leaking a setContent-on-a-destroyed-editor listener
+      // on the next toggle.
+      await leftColumn.getByRole("button", { name: "Doc Links" }).click();
+      await expect(leftBody).toContainText("Left starting text. Edited live.");
+      // Not duplicated — exactly one occurrence of the edited text.
+      const bodyText = (await leftBody.textContent()) ?? "";
+      expect(bodyText.match(/Edited live\./g)?.length ?? 0).toBe(1);
+
+      // Toggle to write a second time and edit again — proves the previous
+      // toggle didn't leave a stale listener that would double-apply this
+      // update or throw against a torn-down editor.
+      await leftColumn.getByRole("button", { name: "Edit" }).click();
+      await expect(leftColumn.locator("p", { hasText: "🟢 Live" })).toBeVisible({ timeout: 30_000 });
+      await leftBody.click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" And again.");
+      await leftColumn.getByRole("button", { name: "Doc Links" }).click();
+      await expect(leftBody).toContainText("Left starting text. Edited live. And again.");
+
+      const finalText = (await leftBody.textContent()) ?? "";
+      expect(finalText.match(/And again\./g)?.length ?? 0).toBe(1);
+
+      // The right column was never touched — confirms the toggle is
+      // per-column, not page-wide.
+      await expect(page.getByRole("textbox", { name: "Right doc body" })).toContainText("Right starting text.");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await otherPage.goto("about:blank").catch(() => {});
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+});

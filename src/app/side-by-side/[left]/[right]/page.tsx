@@ -121,6 +121,8 @@ export default async function SideBySidePage({
           initialBodyJSON: rightBody.bodyJSON,
           staticBody: rightBody.staticBody,
         }}
+        userId={session.user.id}
+        userName={session.user.name ?? session.user.email ?? "Anonymous"}
         userColor={session.user.color}
       />
     </main>

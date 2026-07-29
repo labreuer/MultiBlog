@@ -48,6 +48,15 @@ type Props = {
   // synced regardless. See §14f for why dropping the mark type instead
   // would be destructive.
   suppressAnnotations?: boolean;
+  // PLAN.md §14g — hoisted mode. When a caller (DocColumn) already owns a
+  // Y.Doc and a connected provider — because the same pair also needs to
+  // support a write surface without tearing down the websocket on every
+  // toggle — it passes both here and this component skips creating (and,
+  // critically, destroying) its own. Absent, this behaves exactly as
+  // /doc/[slug] has always used it: owns and tears down its own Y.Doc and
+  // provider. Always supplied together; never toggled on one instance.
+  ydoc?: Y.Doc;
+  provider?: HocuspocusProvider;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -79,6 +88,8 @@ export default function LiveDocBody({
   ariaLabel = "Post body",
   selectionUi = "annotation",
   suppressAnnotations = false,
+  ydoc: hoistedYdoc,
+  provider: hoistedProvider,
 }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
@@ -90,7 +101,12 @@ export default function LiveDocBody({
   // for this (the reading view otherwise shows no connection status at
   // all); the marker exists so a selection can be made only once that
   // window has passed — e2e/doc.spec.ts's annotation tests wait on it.
-  const [synced, setSynced] = useState(false);
+  // Lazy initializer rather than a plain `false` — a hoisted provider
+  // (§14g) may already be synced by the time this mounts (e.g. toggling
+  // read → write → read reuses an already-connected provider), and setting
+  // state synchronously inside the effect below for that case would trip
+  // the "no setState in effect body" lint rule.
+  const [synced, setSynced] = useState(() => hoistedProvider?.isSynced ?? false);
   const containerRef = useRef<HTMLDivElement>(null);
   const { setAwareness } = useDocPresence();
 
@@ -155,6 +171,46 @@ export default function LiveDocBody({
     editorRef.current = editor;
   }, [editor]);
 
+  // Only constructed when nothing was hoisted in — see the Props comment.
+  // Declared here (rather than beside the connection effect further down)
+  // so the hoisted "sync once on mount" effect just below can reference it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ownYdoc = useMemo(() => (hoistedYdoc ? null : new Y.Doc()), [docId, hoistedYdoc]);
+  const ydoc = hoistedYdoc ?? ownYdoc!;
+
+  // PLAN.md §14g — hoisted mode's "sync once on mount" counterpart to the
+  // "update" listener registered below: the shared Y.Doc already holds
+  // every change applied while some *other* instance of this component (or
+  // the write editor) was mounted against it, so a read → write → read
+  // toggle remounts this component fresh with useEditor's `content` fixed
+  // at whatever initialBodyJSON was at first page load. This corrects that
+  // once `editor` itself exists — which useEditor doesn't guarantee is true
+  // in the same tick as this component's other effects, so it can't be
+  // folded into the connection effect below (which closes over editorRef,
+  // not editor, and races ahead of useEditor's own construction on a fresh
+  // mount with nothing like the token fetch's network delay to wait out).
+  // The queueMicrotask indirection is only there to keep this out of the
+  // "no setState synchronously in an effect body" lint rule's sights —
+  // functionally it still runs before the next paint.
+  useEffect(() => {
+    if (!hoistedProvider || !editor) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const result = renderYdocDoc(ydoc);
+      if (result.ok) {
+        editor.commands.setContent(result.bodyJSON, { emitUpdate: false });
+        reresolvePending(editor);
+      } else {
+        setError(result.error);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reresolvePending closes over pendingRef/userColor, not state that should retrigger this
+  }, [editor, hoistedProvider, ydoc]);
+
   // PLAN.md §13f — re-resolves the pending selection against the doc after
   // any setContent call (a live remote update or a scrub jump), both of
   // which can move or destroy the text a reader has selected out from under
@@ -217,10 +273,38 @@ export default function LiveDocBody({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [pending]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const ydoc = useMemo(() => new Y.Doc(), [docId]);
-
   useEffect(() => {
+    function applyUpdate() {
+      const result = renderYdocDoc(ydoc);
+      if (result.ok) {
+        editorRef.current?.commands.setContent(result.bodyJSON, { emitUpdate: false });
+        if (editorRef.current) reresolvePending(editorRef.current);
+      } else {
+        setError(result.error);
+      }
+    }
+
+    // Hoisted mode (PLAN.md §14g) — the caller (DocColumn) owns the Y.Doc
+    // and provider's connection lifecycle across read/write toggles, so
+    // this effect only wires (and, critically, un-wires) its own update
+    // listener rather than destroying either. Registering `ydoc.on` and
+    // relying on `ydoc.destroy()` to implicitly drop it — what the
+    // owned-provider branch below does — would leak a listener here, since
+    // in hoisted mode this component doesn't control when (or whether) the
+    // doc is ever destroyed: a read → write → read cycle would otherwise
+    // call setContent on an editor this instance already unmounted.
+    if (hoistedProvider) {
+      ydoc.on("update", applyUpdate);
+      const handleSynced = () => setSynced(true);
+      hoistedProvider.on("synced", handleSynced);
+      setAwareness(hoistedProvider.awareness);
+      return () => {
+        ydoc.off("update", applyUpdate);
+        hoistedProvider.off("synced", handleSynced);
+        setAwareness(null);
+      };
+    }
+
     let cancelled = false;
     let instance: HocuspocusProvider | null = null;
 
@@ -247,15 +331,7 @@ export default function LiveDocBody({
         if (cancelled) return;
         firstToken = token;
 
-        ydoc.on("update", () => {
-          const result = renderYdocDoc(ydoc);
-          if (result.ok) {
-            editorRef.current?.commands.setContent(result.bodyJSON, { emitUpdate: false });
-            if (editorRef.current) reresolvePending(editorRef.current);
-          } else {
-            setError(result.error);
-          }
-        });
+        ydoc.on("update", applyUpdate);
 
         instance = new HocuspocusProvider({
           url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
@@ -284,7 +360,7 @@ export default function LiveDocBody({
       setAwareness(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reresolvePending closes over pendingRef/userColor, not state that should retrigger this connection effect
-  }, [docId, ydoc]);
+  }, [docId, ydoc, hoistedProvider]);
 
   if (error) {
     return <p style={{ color: "crimson" }}>{error}</p>;

@@ -39,6 +39,11 @@ type Props = {
   // generally, so a column's aria-label is fixed at mount rather than
   // reactive.
   ariaLabel?: string;
+  // See LiveDocBody's identical prop — PLAN.md §14f. The write column keeps
+  // the `annotation` mark registered (dropping it would strip existing
+  // anchors the moment anyone typed) but paints over its highlight the same
+  // way the read column does.
+  suppressAnnotations?: boolean;
 };
 
 // A thin colored bar rather than the library default's always-visible name
@@ -70,6 +75,7 @@ export default function CollabEditorBody({
   onEditorReady,
   onAuthorStats,
   ariaLabel = "Post body",
+  suppressAnnotations = false,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
@@ -149,7 +155,10 @@ export default function CollabEditorBody({
     <div className={styles.editorFrame}>
       <AuthorHighlightStyles colors={authorColors} />
       <EditorToolbar editor={editor} disabled={!editable} />
-      <EditorContent editor={editor} className={`${styles.editorContent} ${proseStyles.prose}`} />
+      <EditorContent
+        editor={editor}
+        className={`${styles.editorContent} ${proseStyles.prose} ${suppressAnnotations ? proseStyles.noAnnotations : ""}`}
+      />
     </div>
   );
 }
