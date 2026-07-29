@@ -21,6 +21,7 @@ import type {
   TestDoc,
   DocState,
   AnnotationState,
+  TestDocLink,
 } from "./db-worker";
 
 export type {
@@ -33,6 +34,7 @@ export type {
   TestDoc,
   DocState,
   AnnotationState,
+  TestDocLink,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
@@ -124,6 +126,12 @@ export const deleteTestDoc = (...args: Parameters<DbHandlers["deleteTestDoc"]>):
 
 export const getDocState = (...args: Parameters<DbHandlers["getDocState"]>): Promise<DocState | null> =>
   call("getDocState", ...args);
+
+export const createTestDocLink = (...args: Parameters<DbHandlers["createTestDocLink"]>): Promise<TestDocLink> =>
+  call("createTestDocLink", ...args);
+
+export const deleteTestDocLinkGroup = (...args: Parameters<DbHandlers["deleteTestDocLinkGroup"]>): Promise<void> =>
+  call("deleteTestDocLinkGroup", ...args);
 
 export const countDocYdocUpdates = (...args: Parameters<DbHandlers["countDocYdocUpdates"]>): Promise<number> =>
   call("countDocYdocUpdates", ...args);

@@ -8,6 +8,8 @@ import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { PendingAnnotation, setPendingAnnotation } from "@/lib/pending-annotation-extension";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
+import { DocLink, setDocLinks, type ResolvedDocLink } from "@/lib/doc-link-extension";
+import { createDocLinkResolver, type DocLinkInput } from "@/lib/doc-link-anchor";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import proseStyles from "@/styles/prose.module.css";
@@ -57,6 +59,14 @@ type Props = {
   // provider. Always supplied together; never toggled on one instance.
   ydoc?: Y.Doc;
   provider?: HocuspocusProvider;
+  // PLAN.md §14e — doc links anchored to *this* doc, already carrying their
+  // cascaded color; resolved against the current document (and re-resolved
+  // on every content change) rather than trusted at whatever positions were
+  // captured at creation time. Defaults to none, so /doc/[slug] (which
+  // never passes this) behaves exactly as before.
+  docLinks?: DocLinkInput[];
+  // Which group's links should paint darker (§14h) — null means none.
+  activeGroupId?: string | null;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -90,6 +100,8 @@ export default function LiveDocBody({
   suppressAnnotations = false,
   ydoc: hoistedYdoc,
   provider: hoistedProvider,
+  docLinks = [],
+  activeGroupId = null,
 }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
@@ -118,12 +130,20 @@ export default function LiveDocBody({
     pendingRef.current = pending;
   }, [pending]);
 
+  // One resolver instance per component instance (i.e., per docId — the
+  // whole component remounts on docId change), not per render or shared
+  // page-wide: doc-link-anchor.ts's memoization is keyed on (doc identity,
+  // links identity), and a shared resolver across two columns would thrash
+  // between two unrelated docs' doc/links pairs, defeating the cache.
+  const resolverRef = useRef(createDocLinkResolver());
+
   const editor = useEditor({
     // PendingAnnotation (PLAN.md §13f) is view-only — a decoration, not a
     // node/mark type — so appending it here doesn't touch the schema
     // docContentExtensions itself defines, and can't drift the reading
-    // view's schema from the editor's or the server's.
-    extensions: [...docContentExtensions, PendingAnnotation],
+    // view's schema from the editor's or the server's. DocLink (§14e) is
+    // the same: a decoration layer, no schema change.
+    extensions: [...docContentExtensions, PendingAnnotation, DocLink],
     content: initialBodyJSON,
     editable: false,
     immediatelyRender: false,
@@ -131,7 +151,10 @@ export default function LiveDocBody({
     // suite's bodyEditor() helper (e2e/fixtures.ts) and the .tiptap-ordering
     // convention (CLAUDE.md) both work for a doc's reading view for free.
     editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
-    onCreate: () => setReady(true),
+    onCreate: ({ editor: createdEditor }) => {
+      setReady(true);
+      syncDocLinks(createdEditor);
+    },
     onSelectionUpdate: ({ editor: liveEditor }) => {
       if (selectionUi === "none") return;
       const { from, to, empty } = liveEditor.state.selection;
@@ -201,6 +224,7 @@ export default function LiveDocBody({
       if (result.ok) {
         editor.commands.setContent(result.bodyJSON, { emitUpdate: false });
         reresolvePending(editor);
+        syncDocLinks(editor);
       } else {
         setError(result.error);
       }
@@ -249,6 +273,34 @@ export default function LiveDocBody({
     }
   }
 
+  // PLAN.md §14d/§14e — the single content-change choke point for doc-link
+  // resolution: called synchronously right after every setContent, so no
+  // paint lands between the content change and the position fix.
+  // resolveDocLinks (via resolverRef) is memoized on (doc, docLinks)
+  // identity, so calling this unconditionally on every content change is
+  // cheap except on an actual doc/links change. Unanchored links are
+  // dropped here, not inside the plugin — an unanchored link paints
+  // nothing (§14d: it stays visible only in the group panel, added later).
+  function syncDocLinks(liveEditor: Editor) {
+    const resolved = resolverRef.current(liveEditor.state.doc, docLinks);
+    const links: ResolvedDocLink[] = [];
+    for (const link of docLinks) {
+      const anchor = resolved.get(link.id);
+      if (anchor?.anchored) {
+        links.push({ id: link.id, groupId: link.groupId, from: anchor.from, to: anchor.to, color: link.color, mine: link.mine });
+      }
+    }
+    setDocLinks(liveEditor.view, { links, activeGroupId });
+  }
+
+  // Re-pushes when the link set itself changes (a link created/edited/
+  // deleted, or the active group changes) without necessarily a content
+  // change — the effect above only fires from setContent call sites.
+  useEffect(() => {
+    if (editor) syncDocLinks(editor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- syncDocLinks closes over docLinks/activeGroupId, which are already this effect's real deps
+  }, [editor, docLinks, activeGroupId]);
+
   // undefined (the prop's unset state) means "no scrub bar mounted yet" —
   // deliberately distinct from null (mounted, but at the live/latest
   // position) so this effect only ever fires once scrubbing has actually
@@ -257,6 +309,7 @@ export default function LiveDocBody({
     if (overrideBodyJSON && editor) {
       editor.commands.setContent(overrideBodyJSON, { emitUpdate: false });
       reresolvePending(editor);
+      syncDocLinks(editor);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reresolvePending closes over pendingRef/userColor, not state that should retrigger this
   }, [editor, overrideBodyJSON]);
@@ -278,7 +331,10 @@ export default function LiveDocBody({
       const result = renderYdocDoc(ydoc);
       if (result.ok) {
         editorRef.current?.commands.setContent(result.bodyJSON, { emitUpdate: false });
-        if (editorRef.current) reresolvePending(editorRef.current);
+        if (editorRef.current) {
+          reresolvePending(editorRef.current);
+          syncDocLinks(editorRef.current);
+        }
       } else {
         setError(result.error);
       }

@@ -2,6 +2,7 @@
 
 import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
+import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import DocColumn from "./DocColumn";
 import styles from "./SideBySideView.module.css";
 
@@ -10,6 +11,7 @@ export type SideBySideDoc = {
   initialTitle: string;
   initialBodyJSON: JSONContent;
   staticBody: ReactNode;
+  docLinks: DocLinkInput[];
 };
 
 type Props = {

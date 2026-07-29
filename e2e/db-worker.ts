@@ -26,7 +26,9 @@ import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
-import { contentExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { contentExtensions, collectMarkAttrValues, pmDocContentSchema } from "@/lib/tiptap-schema";
+import { findQuoteOccurrences } from "@/lib/quote-occurrences";
+import { captureAnchor } from "@/lib/doc-link-anchor";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
@@ -269,6 +271,54 @@ export async function getDocState(docId: string): Promise<DocState | null> {
 /** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), same check createTestYdoc's own spec makes for /ydoc-debug documents. */
 export async function countDocYdocUpdates(docId: string): Promise<number> {
   return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
+}
+
+// ---------------------------------------------------------------------------
+// Doc links (PLAN.md §14) — a doc link's anchor is a plain JSON blob computed
+// against a doc's body text, not a live-collab mark, so unlike an annotation
+// it needs no collab connection to create. `bodyText` here must be exactly
+// what createTestDoc's own `bodyText` seeded (docFromText builds the same
+// paragraph-split JSON both times), so the anchor this computes matches what
+// the reading view actually renders. deleteTestDoc already cascades DocLink
+// rows away (onDelete: Cascade on doc_id, §14b) but not their DocLinkGroup —
+// deleteTestDocLinkGroup is the explicit cleanup for that.
+// ---------------------------------------------------------------------------
+
+export type TestDocLink = { id: string; groupId: string };
+
+export async function createTestDocLink(opts: {
+  docId: string;
+  authorEmail: string;
+  bodyText: string;
+  quotedText: string;
+  groupId?: string;
+  overrideColor?: string;
+}): Promise<TestDocLink> {
+  const { docId, authorEmail, bodyText, quotedText, groupId, overrideColor } = opts;
+  assertSafe(authorEmail);
+  const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
+
+  const node = pmDocContentSchema.nodeFromJSON(docFromText(bodyText));
+  const occurrences = findQuoteOccurrences(node, quotedText);
+  if (occurrences.length !== 1) {
+    throw new Error(`"${quotedText}" occurs ${occurrences.length} time(s) in the given bodyText — need exactly one.`);
+  }
+  const mark = captureAnchor(node, occurrences[0].from, occurrences[0].to);
+
+  const group = groupId
+    ? await prisma.docLinkGroup.findUniqueOrThrow({ where: { id: groupId } })
+    : await prisma.docLinkGroup.create({ data: { name: quotedText.slice(0, 60), userId: author.id } });
+
+  const link = await prisma.docLink.create({
+    data: { docId, mark: mark as object, docLinkGroupId: group.id, userId: author.id, overrideColor },
+  });
+
+  return { id: link.id, groupId: group.id };
+}
+
+export async function deleteTestDocLinkGroup(groupId: string): Promise<void> {
+  await prisma.docLink.deleteMany({ where: { docLinkGroupId: groupId } });
+  await prisma.docLinkGroup.deleteMany({ where: { id: groupId } });
 }
 
 export type AnnotationState = {
@@ -598,6 +648,8 @@ const handlers = {
   deleteTestDoc,
   getDocState,
   countDocYdocUpdates,
+  createTestDocLink,
+  deleteTestDocLinkGroup,
   getAnnotationStates,
   countPostCollabRows,
   createComment,

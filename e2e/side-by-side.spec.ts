@@ -3,8 +3,8 @@
 // /side-by-side/<left>/<right>. Grows phase by phase alongside §14l's build
 // order; Phase 2 covers just the page shell (both columns read-only, laid
 // out side by side, independently identifiable) and the left===right 404.
-import { test, expect } from "./fixtures";
-import { ADMIN_EMAIL, createTestDoc, deleteTestDoc } from "./db";
+import { test, expect, waitForDocCollabReady, bodyEditor } from "./fixtures";
+import { ADMIN_EMAIL, createTestDoc, deleteTestDoc, createTestDocLink, deleteTestDocLinkGroup } from "./db";
 
 test.describe("side-by-side page shell", () => {
   test("both docs render as independent, side-by-side columns", async ({ page }) => {
@@ -118,6 +118,85 @@ test.describe("side-by-side read/write toggle", () => {
     } finally {
       await page.goto("about:blank").catch(() => {});
       await otherPage.goto("about:blank").catch(() => {});
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+});
+
+// PLAN.md §14e/§14l Phase 4 — the decoration layer on the read path. Doc
+// links are seeded directly via createTestDocLink (no UI to create one yet
+// — that's Phase 5), and the assertions read the DOM's data-doc-link-ids/
+// data-doc-link-group-ids attributes the plugin sets, not visible text,
+// since a decoration's own text is identical to the surrounding prose.
+test.describe("side-by-side doc-link highlights", () => {
+  const BODY = "The quick brown fox jumps over the lazy dog.";
+
+  test("a doc link highlights its anchored text, and overlapping links share one segment", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+
+    // "quick brown" (chars 4-15) and "brown fox" (chars 10-19) overlap on
+    // "brown" — two different groups, since overlap is a per-link-range
+    // concern, not a per-group one.
+    const linkA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "quick brown" });
+    const linkB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+
+      const leftBody = page.getByRole("textbox", { name: "Left doc body" });
+      await expect(leftBody).toContainText(BODY);
+
+      // Each link's own (non-overlapping) portion carries just its own id.
+      await expect(page.locator(`[data-doc-link-ids~="${linkA.id}"]`).first()).toBeVisible();
+      await expect(page.locator(`[data-doc-link-ids~="${linkB.id}"]`).first()).toBeVisible();
+
+      // The overlapping "brown" portion is its own segment, carrying both —
+      // proof buildSegments split the ranges instead of one decoration
+      // silently winning ProseMirror's merge.
+      const overlap = page.locator(`[data-doc-link-ids~="${linkA.id}"][data-doc-link-ids~="${linkB.id}"]`);
+      await expect(overlap.first()).toBeVisible();
+      await expect(overlap.first()).toHaveText("brown");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(linkA.groupId);
+      await deleteTestDocLinkGroup(linkB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("a highlight survives a remote edit and re-finds after a shift", async ({ page, secondUser }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "brown fox jumps" });
+    const { page: editorPage } = await secondUser();
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`);
+      await expect(highlight.first()).toBeVisible();
+
+      // A genuinely remote edit — a different identity, editing through the
+      // ordinary single-doc editor, not this page — inserts text *before*
+      // the linked phrase, shifting every position after it. The stored
+      // offsets no longer point at "brown fox jumps"; only a text re-search
+      // (§14d step 2) finds it again.
+      await editorPage.goto(`/doc/${left.id}/edit`);
+      await waitForDocCollabReady(editorPage);
+      await bodyEditor(editorPage).click();
+      await editorPage.keyboard.press("Home");
+      await editorPage.keyboard.type("Prefix inserted before the quote. ");
+
+      const leftBody = page.getByRole("textbox", { name: "Left doc body" });
+      await expect(leftBody).toContainText("Prefix inserted before the quote.", { timeout: 15_000 });
+      await expect(highlight.first()).toBeVisible();
+      await expect(highlight.first()).toHaveText("brown fox jumps");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await editorPage.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
       await deleteTestDoc(left.id);
       await deleteTestDoc(right.id);
     }

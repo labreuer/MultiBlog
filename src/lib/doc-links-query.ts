@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { parseDocLinkMark, type DocLinkMark } from "@/lib/doc-link-anchor";
+import { parseDocLinkMark, type DocLinkMark, type DocLinkInput } from "@/lib/doc-link-anchor";
+import { SAFE_COLOR } from "@/lib/safe-css";
 
 // PLAN.md §14 — neither DocLink nor DocLinkGroup joins the $extends
 // soft-delete filter in src/lib/prisma.ts (that covers only post/user/doc;
@@ -15,6 +16,7 @@ export type DocLinkRow = {
   docLinkGroupId: string;
   overrideColor: string | null;
   userId: string;
+  authorColor: string;
   createdAt: Date;
 };
 
@@ -29,7 +31,7 @@ export type DocLinkGroupRow = {
 export type DocLinkGroupWithLinks = DocLinkGroupRow & { links: DocLinkRow[] };
 
 type RawGroupWithLinks = Prisma.DocLinkGroupGetPayload<{
-  include: { links: { where: { deletedAt: null } } };
+  include: { links: { where: { deletedAt: null }; include: { user: { select: { color: true } } } } };
 }>;
 
 function toDocLinkRow(link: RawGroupWithLinks["links"][number]): DocLinkRow {
@@ -41,6 +43,7 @@ function toDocLinkRow(link: RawGroupWithLinks["links"][number]): DocLinkRow {
     docLinkGroupId: link.docLinkGroupId,
     overrideColor: link.overrideColor,
     userId: link.userId,
+    authorColor: link.user.color,
     createdAt: link.createdAt,
   };
 }
@@ -57,7 +60,7 @@ export async function getDocLinkGroupsForPair(leftDocId: string, rightDocId: str
       links: { some: { docId: { in: [leftDocId, rightDocId] }, deletedAt: null } },
     },
     include: {
-      links: { where: { docId: { in: [leftDocId, rightDocId] }, deletedAt: null } },
+      links: { where: { docId: { in: [leftDocId, rightDocId] }, deletedAt: null }, include: { user: { select: { color: true } } } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -69,6 +72,28 @@ export async function getDocLinkGroupsForPair(leftDocId: string, rightDocId: str
     userId: g.userId,
     links: g.links.map(toDocLinkRow),
   }));
+}
+
+// PLAN.md §14e's color cascade: link override, then group override, then
+// the link's author's own color. Flattens getDocLinkGroupsForPair's result
+// into the per-doc, client-ready shape LiveDocBody's `docLinks` prop wants
+// — one call per column, filtered to that column's docId.
+export function buildDocLinkInputs(groups: DocLinkGroupWithLinks[], docId: string, viewerUserId: string): DocLinkInput[] {
+  const inputs: DocLinkInput[] = [];
+  for (const group of groups) {
+    for (const link of group.links) {
+      if (link.docId !== docId) continue;
+      const color = link.overrideColor ?? group.overrideColor ?? link.authorColor;
+      inputs.push({
+        id: link.id,
+        mark: link.mark,
+        groupId: group.id,
+        color: SAFE_COLOR.test(color) ? color : "#999",
+        mine: link.userId === viewerUserId,
+      });
+    }
+  }
+  return inputs;
 }
 
 // PLAN.md §14h's count line's "+Y" — links belonging to those same groups

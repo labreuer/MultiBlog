@@ -108,6 +108,14 @@ export function resolveAnchor(doc: PMNode, mark: DocLinkMark): ResolvedAnchor {
 
 export type StoredDocLink = { id: string; mark: DocLinkMark | null };
 
+// What a rendering surface (LiveDocBody, and eventually the write column)
+// needs per link to both resolve it (mark) and paint it once resolved
+// (groupId/color/mine) — the resolved from/to positions are computed at
+// render time, never stored on this type. `color` is already the final
+// three-level cascade result (§14e: link override ?? group override ??
+// author color); callers compute that once, not per resolve.
+export type DocLinkInput = StoredDocLink & { groupId: string; color: string; mine: boolean };
+
 // Memoized on (doc identity, links identity) — not an optimization but load-
 // bearing (§14d step 3): the read column calls setContent, and therefore
 // this, on every incoming remote update, and findQuoteOccurrences is

@@ -7,6 +7,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
+import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import LiveDocBody from "@/components/LiveDocBody";
 import CollabTitleField from "@/components/CollabTitleField";
@@ -23,6 +24,7 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  docLinks: DocLinkInput[];
 };
 
 const ARIA = {
@@ -41,7 +43,7 @@ type Mode = "read" | "write";
 // the websocket — putting the provider inside LiveDocBody instead (as
 // /doc/[slug] does) would tear down a socket and re-mint a token on every
 // toggle.
-export default function DocColumn({ docId, initialTitle, initialBodyJSON, staticBody, side, userId, userName, userColor }: Props) {
+export default function DocColumn({ docId, initialTitle, initialBodyJSON, staticBody, side, userId, userName, userColor, docLinks }: Props) {
   const [mode, setMode] = useState<Mode>("read");
   const [title, setTitle] = useState(initialTitle);
   // null until the token response arrives — distinct from false, since
@@ -181,6 +183,7 @@ export default function DocColumn({ docId, initialTitle, initialBodyJSON, static
               suppressAnnotations
               ydoc={ydoc}
               provider={provider}
+              docLinks={docLinks}
             />
           ) : (
             // Mirrors LiveDocBody's own pre-connection fallback — shown
