@@ -2578,3 +2578,71 @@ the same way §12b already warns a deleted doc's `ydoc` row can leak.
    placement (the +0.5em/+0.5em nudge already applied to today's plain popover, PLAN.md's doc
    commit history) carries forward unchanged unless the ydoc editor's different footprint (a
    toolbar toggle, a taller editor) turns out to need its own placement pass.
+
+### 13l. As built
+
+Built 2026-07-29 through all five phases §13j lays out, each gated on `npx tsc --noEmit`,
+`npx eslint .`, the full `npm run e2e` suite, and hand verification in the browser (plus, for
+Phase 5's server-only logic, direct verification against a `Y.Doc` bypassing the network layer).
+Several deviations from the text above, all judgment calls made while building rather than
+oversights:
+
+- **DRAFT/createDraftAnnotation/postAnnotation/discardDraftAnnotation shipped in Phase 2, not
+  Phase 4.** §13j originally scoped DRAFT to Phase 4 alone. Building a live editor for content
+  that hasn't been posted yet turned out to structurally require a persisted row to attach the
+  editor to before a single keystroke lands — exactly the mechanism §13d already describes for
+  DRAFT — so there was no coherent way to build "the bottom composer becomes a live editor"
+  (Phase 2) without it. Phase 4 kept its own scope: the DRAFT/LIVE/RAISED *choice* (the
+  `Keep private` / `Post` / `Post & notify authors` select), `saveDraftAnnotation`, RAISED's
+  email, and the unmark endpoint.
+- **The inline popover is two-stage, not one.** A selection alone never creates a row — a
+  lightweight "Annotate" / "Move to bottom" / "Cancel" prompt shows first (§13f's pending
+  decoration already marks the selection, so there's no loss of feedback), and only clicking
+  "Annotate" (or "Move to bottom") calls `createDraftAnnotation`. Without this, every
+  micro-adjustment of a selection still being dragged would have spun up a fresh draft row.
+- **"Keep private" needed a way back in, so `getOwnDraftAnnotations` and `OwnDraftsList`
+  exist** — not separately planned, but a direct consequence of adding "Keep private" at all:
+  without them, a saved-private annotation would be unreachable the instant its composer
+  closed, since `getDocAnnotationsAsThreads` excludes every DRAFT unconditionally (including
+  from its own author) by design. "Edit" on an own draft reuses the exact `AnnotationMoveProvider`
+  mechanism "Move to bottom" already established, rather than inventing a second one.
+- **`/annotations` (the admin browse surface) now excludes DRAFT outright.** Not originally
+  called out in §13d's text, but a direct consequence of "a private note stays private even
+  from admins" (§13a) — without this filter, `canManageDocs` could browse everyone's private
+  notes through that surface, which the whole point of DRAFT is to prevent.
+- **A real correctness gap surfaced during testing, not designed for up front:**
+  `postAnnotation` flipping DRAFT to LIVE doesn't itself guarantee `proseJson`/`bodyText` are
+  current — those are a store-debounce cache (§12d's mechanism, reused as-is for annotations).
+  A reader opening a just-posted annotation could see stale (empty) content. Fixed with a new
+  `POST /admin/annotation-flush` (`handleFlushAnnotationCache`) that forces the write
+  immediately, called from `postAnnotation` with a short bounded retry — the flush reads the
+  *collab server's* Y.Doc, which only has what it's already received over the websocket, and a
+  keystroke immediately followed by a click can outrace that delivery on a slow connection (and
+  reliably does in an automated test with no human-typing-speed gap between typing and
+  clicking).
+- **Presence is one ambient indicator per doc, not a per-annotation anchored marker.** §13i's
+  own text imagined "a pulsing marker on the anchored text for a brand-new inline draft" — not
+  built, because a not-yet-posted annotation has no list entry and (for an inline one) no
+  guaranteed stable anchor yet to attach a marker to. `AnnotationPresenceIndicator` instead
+  renders a plain "X is writing an annotation…" line wherever `AnnotationSection` sits,
+  sourced from `DocPresenceProvider` (LiveDocBody's own read-only awareness, confirmed by
+  reading `@hocuspocus/server`'s source rather than assumed — only document *content* sync is
+  gated by `readOnly`, awareness flows over it unconditionally). Presence publishes whenever a
+  composer is open and not set to `Keep private`, which resolves §13i's "a DRAFT never
+  publishes presence" concern more precisely than status alone could: every open composer's
+  row *is* DRAFT until submit, so gating on status would have suppressed presence always,
+  defeating the feature; gating on the visibility selection's current value instead means
+  presence disappears the instant someone chooses privacy, before anyone has seen the content.
+- **Known gap, left deliberately open rather than silently scoped out:**
+  `canUserAccessAnnotationYdoc` already allows any `canUserReadDoc` reader to open a writable
+  connection to a LIVE/RAISED annotation's ydoc — which is what makes §13h's backfilled
+  highlighting meaningful at all — but no UI exposes that connection. `AnnotationNode` renders
+  every already-posted annotation as a static server-rendered body with no "Edit" affordance;
+  `Edit` only ever appears on the viewer's own DRAFT, via `OwnDraftsList`. The mechanism is
+  real and reachable (§13h's backfill was verified directly against the mark-application logic
+  itself, not through this missing UI), but co-authoring someone else's posted annotation is
+  not currently a discoverable feature.
+- **The old plain-textarea `AnnotationComposer.tsx` and `submitAnnotation` were deleted, not
+  deprecated-in-place**, once Phase 3 moved the inline popover off them — nothing else ever
+  called either afterward, so keeping them around would have been dead code with no path back
+  to it.
