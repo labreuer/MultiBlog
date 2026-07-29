@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canUserEditDoc } from "@/lib/doc-authz";
+import { canUserEditDoc, canUserReadDoc } from "@/lib/doc-authz";
 import { signYdocToken } from "@/lib/ydoc-token";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 
 // Doc-scoped sibling of /api/ydoc/[id]/token (that route stays ADMIN-gated
-// and /ydoc-debug-only, PLAN.md §12g). Writable only for now — the readOnly
-// branch for a SHARED doc's non-editor readers lands in Phase 2 (§12d)
-// alongside the reading route that needs it.
+// and /ydoc-debug-only, PLAN.md §12g). An editor gets a writable token;
+// someone who merely satisfies canUserReadDoc gets readOnly: true — the
+// two checks are deliberately asked in that order so an editor never even
+// evaluates the read-only path.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) {
@@ -16,13 +17,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params;
-  const doc = await prisma.doc.findUnique({ where: { id }, select: { id: true } });
+  const doc = await prisma.doc.findUnique({ where: { id }, select: { id: true, visibility: true } });
   if (!doc) {
     return NextResponse.json({ error: "Doc not found" }, { status: 404 });
   }
 
-  const allowed = await canUserEditDoc(session.user.id, session.user.role, id);
-  if (!allowed) {
+  const writable = await canUserEditDoc(session.user.id, session.user.role, id);
+  const readOnly = !writable && (await canUserReadDoc(session.user.id, session.user.role, doc));
+  if (!writable && !readOnly) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -36,6 +38,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
 
-  const token = await signYdocToken({ sub: session.user.id, documentName, role: session.user.role });
-  return NextResponse.json({ token, lineage: ydocRow.createdAt.getTime(), documentName });
+  const token = await signYdocToken({
+    sub: session.user.id,
+    documentName,
+    role: session.user.role,
+    readOnly,
+  });
+  return NextResponse.json({ token, lineage: ydocRow.createdAt.getTime(), documentName, readOnly });
 }

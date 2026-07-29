@@ -17,6 +17,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
   // (PLAN.md §12f).
   const doc = await resolveDocParam(slug, {
     id: true,
+    slug: true,
     title: true,
     visibility: true,
     createdAt: true,
@@ -46,6 +47,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
   return (
     <DocEditor
       docId={doc.id}
+      slug={doc.slug}
       initialTitle={doc.title}
       visibility={doc.visibility}
       createdAt={doc.createdAt}

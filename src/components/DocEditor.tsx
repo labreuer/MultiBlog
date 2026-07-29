@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
@@ -12,6 +13,7 @@ import styles from "./DocEditor.module.css";
 
 type Props = {
   docId: string;
+  slug: string;
   initialTitle: string;
   visibility: DocVisibility;
   createdAt: Date;
@@ -35,6 +37,7 @@ type ConnectionStatus = "connecting" | "connected" | "disconnected";
 // reused unmodified, plus DocSettingsPanel for byline and visibility.
 export default function DocEditor({
   docId,
+  slug,
   initialTitle,
   visibility,
   createdAt,
@@ -60,6 +63,26 @@ export default function DocEditor({
     let instance: HocuspocusProvider | null = null;
     let detachIndexeddb: (() => void) | null = null;
 
+    // Same reconnect fix as PostEditor.tsx: `token` as a function is called
+    // on every connection attempt, not just the first, so a long-idle tab's
+    // reconnect gets a freshly-minted token instead of retrying the
+    // original 2-minute-expired one forever. The first call reuses the
+    // token already fetched below (lineage has to come from that same
+    // response before the provider is even constructed — see the
+    // attachIndexeddb call); only a later call hits the network again.
+    let firstToken: string | null = null;
+    async function fetchToken(): Promise<string> {
+      if (firstToken !== null) {
+        const t = firstToken;
+        firstToken = null;
+        return t;
+      }
+      const res = await fetch(`/api/doc/${docId}/token`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to authenticate for live editing.");
+      const { token } = (await res.json()) as { token: string };
+      return token;
+    }
+
     (async () => {
       try {
         const res = await fetch(`/api/doc/${docId}/token`, { method: "POST" });
@@ -72,6 +95,7 @@ export default function DocEditor({
           documentName: string;
         };
         if (cancelled) return;
+        firstToken = token;
 
         // Lineage has to be known before connecting — see PLAN.md §11e for why
         // attaching first (or caching the lineage) would let a stale local
@@ -82,7 +106,7 @@ export default function DocEditor({
           url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
           name: documentName,
           document: ydoc,
-          token,
+          token: fetchToken,
           onStatus: ({ status }) => setConnectionStatus(status),
           onAuthenticationFailed: ({ reason }) => setError(`Live editing unavailable: ${reason}`),
         });
@@ -142,7 +166,10 @@ export default function DocEditor({
         <p>Connecting to live editor…</p>
       )}
       {error && <p className={styles.errorMessage}>{error}</p>}
-      <p className={styles.docNote}>Docs save themselves as you type — there&apos;s no draft to publish.</p>
+      <p className={styles.docNote}>
+        Docs save themselves as you type — there&apos;s no draft to publish.{" "}
+        <Link href={`/doc/${slug}`}>View</Link>
+      </p>
       <DocSettingsPanel
         docId={docId}
         visibility={visibility}

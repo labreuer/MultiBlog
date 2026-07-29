@@ -1,0 +1,75 @@
+import { notFound, redirect } from "next/navigation";
+import type { JSONContent } from "@tiptap/react";
+import { renderToReactElement } from "@tiptap/static-renderer";
+import * as Y from "yjs";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { resolveDocParam } from "@/lib/resolve-doc-param";
+import { canUserReadDoc } from "@/lib/doc-authz";
+import { authorHighlightExtensions } from "@/lib/tiptap-schema";
+import { renderYdocDoc } from "@/lib/ydoc-render";
+import { ydocIdForDoc } from "@/lib/ydoc-names";
+import LiveDocBody from "@/components/LiveDocBody";
+import proseStyles from "@/styles/prose.module.css";
+
+// Inherently dynamic (per-user gated, and the decode-from-ydoc fallback
+// below is a live decode) — no generateStaticParams, and none should be
+// added (PLAN.md §12f: a route eligible for static generation that also
+// calls a dynamic API throws DYNAMIC_SERVER_USAGE at build, §10 item 17).
+// prose_json is what keeps this cheap, not a Next cache — see CACHING.md.
+
+export default async function PublicDocPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/sign-in");
+  }
+
+  const doc = await resolveDocParam(slug, {
+    id: true,
+    title: true,
+    visibility: true,
+    proseJson: true,
+    deletedByUserId: true,
+    authors: { select: { userId: true } },
+  });
+  // resolveDocParam uses prismaIncludingDeleted (the editor needs a deleted
+  // doc to still resolve, for its Settings panel's Undelete) — the reading
+  // route is the caller that must not show a soft-deleted doc, so it checks
+  // deletedByUserId itself rather than relying on the soft-delete extension.
+  if (!doc || doc.deletedByUserId !== null) {
+    notFound();
+  }
+
+  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
+    return (
+      <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
+        <h1>Forbidden</h1>
+        <p>You don&apos;t have permission to read this doc.</p>
+      </main>
+    );
+  }
+
+  let staticBody;
+  if (doc.proseJson) {
+    staticBody = renderToReactElement({ content: doc.proseJson as JSONContent, extensions: authorHighlightExtensions });
+  } else {
+    // decode-from-ydoc fallback (§12d) — prose_json is still null because no
+    // store debounce has fired yet, e.g. a doc that was created but never
+    // edited. A scratch Y.Doc decoded once for this render, then discarded;
+    // LiveDocBody below opens the real live connection.
+    const row = await prisma.ydoc.findUnique({ where: { id: ydocIdForDoc(doc.id) }, select: { ydoc: true } });
+    const scratch = new Y.Doc();
+    if (row) Y.applyUpdate(scratch, row.ydoc);
+    const result = renderYdocDoc(scratch);
+    staticBody = result.ok ? result.body : <p style={{ color: "crimson" }}>{result.error}</p>;
+    scratch.destroy();
+  }
+
+  return (
+    <main style={{ maxWidth: 800, margin: "4rem auto", fontFamily: "sans-serif" }}>
+      <h1>{doc.title}</h1>
+      <LiveDocBody docId={doc.id} staticBody={<div className={proseStyles.prose}>{staticBody}</div>} />
+    </main>
+  );
+}

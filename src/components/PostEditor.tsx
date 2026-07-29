@@ -138,6 +138,33 @@ export default function PostEditor({
     let cancelled = false;
     let instance: HocuspocusProvider | null = null;
 
+    // The provider's own reconnect on a dropped/idle connection never
+    // re-fetches — the token below would go on retrying with the same
+    // now-expired (2-minute) one forever (§10's known gap). Passing a
+    // function as `token` instead of a fixed string fixes that: Hocuspocus
+    // calls it on every connection attempt, not just the first. The first
+    // call reuses the token already fetched below (so the existing
+    // fetch-and-catch error UX for the *initial* connection is unchanged);
+    // only a second or later call hits the network again.
+    async function fetchToken(): Promise<string> {
+      if (firstToken !== null) {
+        const t = firstToken;
+        firstToken = null;
+        return t;
+      }
+      const res = await fetch("/api/collab-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postId }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to authenticate for live editing.");
+      }
+      const { token } = await res.json();
+      return token;
+    }
+    let firstToken: string | null = null;
+
     (async () => {
       try {
         const res = await fetch("/api/collab-token", {
@@ -150,12 +177,13 @@ export default function PostEditor({
         }
         const { token } = await res.json();
         if (cancelled) return;
+        firstToken = token;
 
         instance = new HocuspocusProvider({
           url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
           name: postId,
           document: ydoc,
-          token,
+          token: fetchToken,
           onStatus: ({ status: s }) => setConnectionStatus(s),
           // Not the same signal as the title editor's own first render: with
           // the collab server unreachable, Collaboration happily renders the

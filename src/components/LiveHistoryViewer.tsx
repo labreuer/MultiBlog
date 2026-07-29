@@ -39,6 +39,27 @@ export default function LiveHistoryViewer({ postId }: { postId: string }) {
     let provider: HocuspocusProvider | null = null;
     const liveTapDoc = new Y.Doc();
 
+    // Same reconnect fix as PostEditor.tsx: a function `token` is called by
+    // Hocuspocus on every connection attempt, not just the first, so a
+    // long-idle tab's reconnect gets a freshly-minted token instead of
+    // retrying the original 2-minute-expired one forever.
+    let firstToken: string | null = null;
+    async function fetchToken(): Promise<string> {
+      if (firstToken !== null) {
+        const t = firstToken;
+        firstToken = null;
+        return t;
+      }
+      const res = await fetch("/api/collab-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postId }),
+      });
+      if (!res.ok) throw new Error("Failed to authenticate for live history.");
+      const { token } = await res.json();
+      return token;
+    }
+
     (async () => {
       try {
         const [tokenRes, logRes] = await Promise.all([
@@ -55,6 +76,7 @@ export default function LiveHistoryViewer({ postId }: { postId: string }) {
         const { token } = await tokenRes.json();
         const { updates } = (await logRes.json()) as { updates: { ts: number; update: string }[] };
         if (cancelled) return;
+        firstToken = token;
 
         const initial = updates.map((u) => ({ ts: u.ts, bytes: base64ToBytes(u.update) }));
         setLog(initial);
@@ -64,7 +86,7 @@ export default function LiveHistoryViewer({ postId }: { postId: string }) {
           url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
           name: postId,
           document: liveTapDoc,
-          token,
+          token: fetchToken,
           onStatus: ({ status: s }) => setStatus(s),
           onAuthenticationFailed: ({ reason }) => setError(`Live updates unavailable: ${reason}`),
           onSynced: () => {

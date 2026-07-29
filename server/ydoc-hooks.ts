@@ -14,6 +14,7 @@ import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
+import { updateDocCache } from "./doc-cache";
 
 // Every new-stack Hocuspocus hook (PLAN.md §11d). Kept entirely separate from
 // server/collab.ts's post-document hooks — the two stacks share the process
@@ -31,13 +32,24 @@ const EMPTY_STATE = (() => {
   return state;
 })();
 
-export async function ydocOnAuthenticate({ token, documentName }: onAuthenticatePayload): Promise<YdocContext> {
+export async function ydocOnAuthenticate({
+  token,
+  documentName,
+  connectionConfig,
+}: onAuthenticatePayload): Promise<YdocContext> {
   const payload = await verifyYdocToken(token).catch(() => null);
   if (!payload) {
     throw new Error("Invalid or expired ydoc token.");
   }
   if (payload.documentName !== documentName) {
     throw new Error("Token does not match this document.");
+  }
+  // PLAN.md §12g — a doc reader's token carries readOnly: true; Hocuspocus
+  // itself then refuses any write this connection attempts. Every other
+  // token (including every /ydoc-debug one) leaves connectionConfig.readOnly
+  // at its default (writable).
+  if (payload.readOnly) {
+    connectionConfig.readOnly = true;
   }
   return { userId: payload.sub, role: payload.role };
 }
@@ -97,6 +109,8 @@ export async function ydocOnStoreDocument({
   }
   const { ydoc, stateVector } = encodeYdocState(document);
   await ydocStore.storeState(documentName, ydoc, stateVector);
+  // PLAN.md §12d — a no-op for every non-doc ydoc (including /ydoc-debug's).
+  await updateDocCache(documentName, document);
 }
 
 // clientID -> user_id attribution (PLAN.md §11d). A connection's own Yjs

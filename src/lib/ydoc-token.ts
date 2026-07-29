@@ -20,6 +20,10 @@ export type YdocTokenPayload = {
   sub: string;
   documentName: string;
   role: Role;
+  // PLAN.md §12g — set for a doc reader who satisfies canViewDocs on a
+  // SHARED doc but isn't an editor. Absent (not merely false) for every
+  // /ydoc-debug token, so ydocOnAuthenticate's default stays writable there.
+  readOnly?: boolean;
 };
 
 export async function signYdocToken(payload: YdocTokenPayload): Promise<string> {
@@ -32,9 +36,9 @@ export async function signYdocToken(payload: YdocTokenPayload): Promise<string> 
 
 export async function verifyYdocToken(token: string): Promise<YdocTokenPayload> {
   const { payload } = await jwtVerify(token, getSecret());
-  const { sub, documentName, role } = payload as Record<string, unknown>;
+  const { sub, documentName, role, readOnly } = payload as Record<string, unknown>;
   if (typeof sub !== "string" || typeof documentName !== "string" || typeof role !== "string") {
     throw new Error("Malformed ydoc token.");
   }
-  return { sub, documentName, role: role as Role };
+  return { sub, documentName, role: role as Role, readOnly: readOnly === true };
 }
