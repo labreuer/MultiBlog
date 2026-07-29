@@ -2312,3 +2312,269 @@ above might read.
   and `POST /api/doc/[id]/token` 404s on the missing lineage. Acceptable because deleting a
   `ydoc` row by hand is exactly the thing CLAUDE.md now warns against, not a path the app
   can reach on its own.
+
+## 13. Annotations become ydocs, with a TipTap editor of their own
+
+**Decided:** an annotation's body stops being a plain-text `Json` column and becomes its own
+collaborative document — a live Yjs document, same substrate as a doc itself (§11), with a real
+TipTap editor both inline (over the anchored text) and in a composer below the document. This
+supersedes §12i's "one view-model feeds the shared presentation" decision for the presentational
+layer: that was right when an annotation was a `<textarea>` and a post comment was a `<textarea>`,
+and stops being right once one of them is a collaborative document and the other isn't — the two
+no longer share a rendering problem, so the shared `Comment*` components are un-shared back to
+post-only and a doc gets its own `Annotation*` components. Nothing about `CommentThread`/`Comment`,
+moderation, or the post reading view changes; this section only touches the doc/annotation side.
+
+### 13a. One ydoc per annotation, not one shared ydoc per doc
+
+The alternative — a single `ydoc:doc-annotations:<docId>` holding one XmlFragment per annotation —
+was rejected for one decisive reason: **Yjs has no per-fragment ACL.** §12g hands a doc reader a
+`readOnly: true` connection specifically so they can't write the body; annotating must remain
+possible for a read-only reader, and "who may edit this annotation's live text" has to be
+enforceable per annotation, not per doc. Hocuspocus's per-connection `readOnly` flag already is
+that enforcement point (`ydocOnAuthenticate`) — one ydoc per annotation is what lets it apply.
+
+```
+ydoc.id = "ydoc:annotation:" + annotation.id
+```
+
+via `ydocIdForAnnotation` / `annotationIdFromYdocId` in `src/lib/ydoc-names.ts`, no foreign key
+either direction — the same §12b rule for docs, restated for annotations.
+
+**An annotation renders from a cache, not a live decode, for the common case.** `Annotation`
+gains `proseJson` (cache of its ydoc's `"default"` fragment) and `bodyText` (flattened plain text
+— search, `/annotations`, sort), written by the same store-debounce mechanism `doc-cache.ts`
+already uses for `Doc.proseJson`/`Doc.title`. A live `HocuspocusProvider` opens only for an
+annotation actually open in an editor right now (composing, replying, or being read live) — a
+doc with fifty annotations opens zero annotation sockets until one is clicked into.
+
+**The namespace needs two guards or it silently corrupts a doc's own cache:**
+- `docIdFromYdocId("ydoc:annotation:abc")` must return `null` — the remainder carries a further
+  namespace segment, not a bare doc id — or every annotation store-debounce runs a pointless
+  `doc.updateMany` that (today) matches zero rows by luck of id shape rather than by design.
+- `server/doc-cache.ts` and the new `server/annotation-cache.ts` each branch on their own prefix
+  at the top, rather than relying on an update matching zero rows to tell them apart.
+
+### 13b. Schema
+
+Additive, one migration (both new columns take defaults, so this is the plain case, not the
+nullable-then-required two-step CLAUDE.md documents for a required column against existing rows):
+
+```
+Annotation.proseJson   Json?    @map("prose_json")   -- cache of the annotation ydoc, §13a
+Annotation.bodyText    String   @default("") @map("body_text")  -- flattened text (extractText)
+Annotation.status      AnnotationStatus @default(DRAFT)
+Annotation.raisedAt    DateTime? @map("raised_at")   -- when authors were notified, §13d
+
+enum AnnotationStatus { DRAFT LIVE RAISED }
+```
+
+`Annotation.body` (the old `{text}` Json column) stays for one backfill pass and is then dropped
+— every current reader of it (`/annotations`' search and table, `scripts/test-annotation.ts`)
+moves to `bodyText`/`proseJson` in the same phase, so nothing reads the stale column and the new
+one simultaneously.
+
+`tiptap-schema.ts` gains a named schema for an annotation body, distinct from `docContentExtensions`
+on purpose — CLAUDE.md's "picking the wrong variant silently drops marks" warning applies here
+directly: an annotation body can't itself carry the `annotation` anchor mark, so it is
+`authorHighlightExtensions` alone, not `docContentExtensions`:
+
+```ts
+export const annotationContentExtensions = authorHighlightExtensions;
+export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
+```
+
+### 13c. Un-sharing the `Comment*` components
+
+`CommentTarget` (§12i) currently threads through five files. Reverting it is contained:
+
+| File | Change |
+|---|---|
+| `CommentForm.tsx` | drop `target`, back to a bare `postId` field; drop the `submitAnnotation` branch and every `kind === "doc"` copy string |
+| `CommentNode.tsx` | drop `target`; drop `deleteAnnotation`; "Failed to delete comment." unconditional |
+| `CommentEntryList.tsx` | drop `target`; "Comment date" unconditional |
+| `CommentSection.tsx` | back to `{ postId }`; drop `getDocAnnotationsAsThreads`, `AnnotationColorStyles`, the many-general-threads comment |
+| `comment-data.ts` | delete `CommentTarget` and `getDocAnnotationsAsThreads`; the doc-specific commentary on `anchorFrom`/`quotedText` goes with them |
+
+A new sibling tree, `src/components/annotation/`, takes over doc-side rendering:
+`AnnotationSection.tsx` (server component, the doc-side `CommentSection`), `AnnotationList.tsx`,
+`AnnotationThread.tsx`, `AnnotationNode.tsx`, `AnnotationComposer.tsx`, `AnnotationBody.tsx` (the
+live ydoc editor), `AnnotationPopover.tsx` (the inline version), and `src/lib/annotation-data.ts`
+for the loader `comment-data.ts` loses. `AnnotationColorStyles.tsx` moves under it unchanged — it
+never depended on the shared components, only on thread ids and colors.
+
+### 13d. Lifecycle: DRAFT → LIVE → RAISED
+
+Three states, one direction of travel by default, each meaningfully different from the plain
+"is it moderated" axis a post comment has (it isn't — §12c already decided annotations are never
+moderated; this axis is about visibility and notification, not approval):
+
+- **DRAFT** — visible only to its own author. Carries **no inline mark**: mark application is
+  gated on `status !== DRAFT` in the one place marks are ever applied
+  (`applyAnnotationMark`/`handleApplyAnnotationMark`), which is what makes "a private note never
+  puts an inline mark" structural rather than a rule someone has to remember to check. Notifies
+  nobody. A freshly opened composer *is* a DRAFT — creating the row and its ydoc eagerly is what
+  gives the editor something to connect to before a single keystroke lands (§13g's open
+  question about that eagerness).
+- **LIVE** — visible to every doc reader, gets its inline mark (or degrades document-level per
+  §12h, unchanged). The ordinary "posted a comment" state. Notifies nobody by itself.
+- **RAISED** — LIVE plus the doc's byline authors are emailed (`sendMail`, one call per author) and
+  `raisedAt` is stamped; the UI reflects this by showing "Authors notified <date>" wherever LIVE
+  would otherwise show nothing. Nothing observably changes about the annotation's mark or
+  visibility between LIVE and RAISED — RAISED is LIVE plus a notification that already happened.
+
+The composer's primary action is **Post** (→ LIVE). A `Keep private` toggle posts to DRAFT
+instead; a `Notify authors` checkbox posts straight to RAISED. Any DRAFT can later be posted to
+LIVE; any LIVE can later be raised. Deleting an annotation (any state) stamps `deletedAt` as
+today, additionally clears its mark (see below), and notifies nobody regardless of state.
+
+**Deleting an annotation today leaves its mark in the ydoc forever** — `deleteAnnotation` only
+ever stamps `deletedByUserId`/`deletedAt`; nothing removes the mark, so the highlight persists on
+text whose annotation is gone. Pre-existing, not introduced here, but this section's "deletion …
+never puts inline marks" requirement is what makes it visible enough to fix alongside: a new
+`POST /admin/annotation-unmark` endpoint, the exact twin of `handleApplyAnnotationMark` but calling
+`removeMark` instead of `addMark`, called from `deleteAnnotation` and from any LIVE/RAISED → DRAFT
+transition (moving an already-marked annotation back to private has to remove the mark too, for
+the same "DRAFT never has one" invariant).
+
+`sendMail` (`src/lib/mail.ts`) is a console-log stub today, not a real provider — RAISED is wired
+to call it per byline author and stamp `raisedAt` so the UI has something real to show, not an
+in-app notification inbox nobody asked for.
+
+### 13e. The formatting bar: hidden by default
+
+`CollabEditorBody.tsx`'s `Toolbar` is extracted into a shared `EditorToolbar.tsx` taking a
+tool-id list, so a doc/post body keeps its full bar and an annotation gets a reduced one (Bold,
+Italic, Bullets, Quote, Clear — no headings in a comment). An `Aa` toggle button in the annotation
+editor's footer row, next to Post/Cancel, shows/hides it; hidden by default, and the choice
+persists in `localStorage` (`multiblog.annotationToolbar`) so someone who always wants it doesn't
+re-toggle every time. Bold/italic keyboard shortcuts keep working regardless of visibility —
+they're StarterKit's, not the toolbar's.
+
+A `BubbleMenu`-over-the-selection alternative was considered and set aside for v1: zero idle
+chrome, but a bubble menu inside a popover that is itself absolutely positioned over the document
+is a z-index/flip-placement fight for a marginal gain over a toggle button. Worth revisiting once
+the popover (§13f) is stable.
+
+### 13f. Decorating the selected range while composing
+
+Selecting text to annotate loses the browser's native selection highlight the moment focus moves
+into the annotation editor. Fixed with a decoration, not a mark — decorations aren't content,
+don't sync, and never touch the doc's ydoc, unlike the `annotation` mark itself. A new
+`src/lib/pending-annotation-extension.ts`, the same shape as `quote-highlight-extension.ts`: a
+plugin holding `{ from, to } | null`, updated by a meta-tagged transaction `LiveDocBody` dispatches
+whenever the pending range changes. Colored via `--thread-color` from the *current user's own*
+color, in `prose.module.css`, consistent with the by-author annotation coloring already committed.
+
+**The trap:** `LiveDocBody`'s live tap calls `setContent` on every incoming update (§12n's own
+"two implementation details" entry), which rebuilds the doc and discards any decoration along
+with it. Each time `setContent` runs while a pending range exists, the range is re-resolved:
+verify `textBetween(from, to)` still equals the captured text; on a mismatch, fall back to a
+unique-occurrence search; failing that, drop the decoration and surface "the selected text
+changed." That is the same logic `handleApplyAnnotationMark`'s `findQuoteOccurrences` already
+implements server-side — it moves from `server/ydoc-hooks.ts` into a shared `src/lib/` module so
+both the client-side re-resolution and the server-side mark application call the same function.
+
+### 13g. Moving a draft to the bottom composer
+
+Content is never copied between the inline popover and the bottom composer — merging two
+independent Y.Doc lineages isn't a sound operation, and copying JSON across would discard
+whatever collaborative history and attribution the draft already has. Instead, "move to bottom"
+re-targets which composer slot renders a given annotation's id: same row, same ydoc, same
+provider. Since a moved draft is still DRAFT, it has no mark and lands document-level by
+construction — exactly what the bottom composer is for.
+
+"If there is already text there" means the bottom slot is occupied by a different draft, which is
+committed first — posted to LIVE, quiet, document-level, no notify — before the incoming one takes
+the slot. Unconditionally quiet because posting-as-a-side-effect-of-moving-something-else should
+never silently notify anyone.
+
+The button lives in the popover's footer beside Post/Cancel, labeled "Move to bottom ⤓".
+
+### 13h. Author highlighting: on once a second author joins, backfilled
+
+`AuthorHighlight`'s plugin already no-ops when `getAuthorId()` returns `null`
+(`author-highlight-extension.ts`), so gating it is one line —
+`AuthorHighlight.configure({ getAuthorId: () => (coAuthoring ? userId : null) })` — where
+`coAuthoring` is "this annotation's ydoc has seen ≥2 distinct user ids," read from the same
+`clients` map (§11d) a doc already maintains, with the annotation provider's own awareness as the
+live trigger that flips it mid-session.
+
+**Decided: backfilled, not left uncolored.** Text typed before the second author arrives would
+otherwise carry no mark once highlighting turns on, leaving the original author's earlier prose
+uncolored while everything after reads attributed — inconsistent in a way that reads as a bug
+rather than a deliberate boundary. The moment `attributeUpdate` (`server/ydoc-hooks.ts`) notices a
+*second* distinct user_id for a ydoc — the same code that already writes the `clients` map entry —
+it also issues one `addMark(0, size)` over the annotation's existing content, attributed to the
+original (first) author, inside the same transaction as the `clients` write. This has to happen
+exactly once per annotation and exactly there: `attributeUpdate` already is the single place that
+detects "second author," so there's no separate race to guard against, and doing it server-side
+(rather than from whichever client happens to notice) means it isn't dependent on that client
+still being connected.
+
+### 13i. Presence: showing who's editing an annotation
+
+Two awareness channels, not one, because they answer two different questions:
+
+- **Discovery**, on the doc's own provider — every reader already holds a connection to the doc's
+  ydoc via `LiveDocBody`. Each client publishes an awareness field (deliberately not named
+  `cursor`, to avoid any confusion with `CollaborationCaret`'s own field — moot here since
+  `LiveDocBody` registers no `CollaborationCaret` at all, but worth naming distinctly regardless):
+  `annotationEditing: { annotationId, user }`. Every other reader renders "● Alice is writing…"
+  beside that annotation, or a pulsing marker on the anchored text for a brand-new inline draft.
+- **Carets inside a co-edited annotation**, on that annotation's own provider — one
+  `CollaborationCaret` per annotation editor, one provider each, so the "one instance, one
+  awareness key" problem `CollaborationCaret` already has (CLAUDE.md) never arises: nothing here
+  shares a provider the way body + title editors would.
+
+**Verify before building, don't assume:** whether Hocuspocus propagates awareness over a
+`readOnly` connection. `readOnly` gates document *updates*; awareness is a separate message type
+and is expected to flow, but this hasn't been confirmed against this app's actual Hocuspocus
+version and config, and §13i's discovery channel depends on it working from a read-only doc
+connection. If it doesn't propagate, presence falls back to being visible only to people already
+connected to that specific annotation's own provider — materially weaker, and worth knowing at
+the start of Phase 5 rather than discovering it partway through.
+
+**Privacy:** a DRAFT never publishes presence — doing so would leak that a private note is being
+written to every other doc reader, defeating the point of DRAFT existing at all.
+
+### 13j. Build order
+
+Each phase leaves the app working, gated on `npx tsc --noEmit`, `npx eslint .`, and `npm run e2e`.
+
+- **Phase 0** — Un-share the `Comment*` components (§13c); stand up `Annotation*` components
+  rendering today's plain-text annotation through the existing server actions. No user-visible
+  change; posts return to their pre-§12i shape.
+- **Phase 1** — Substrate: the `ydoc:annotation:` namespace and its two guards (§13a),
+  `proseJson`/`bodyText`/`status`/`raisedAt` migration (§13b), `server/annotation-cache.ts`,
+  `POST /api/annotation/[id]/token`, eager `createIfAbsent` on annotation creation, one backfill
+  script (`scripts/backfill-annotation-ydocs.ts`, deleted after use) seeding a ydoc from each
+  existing `Annotation.body`, then dropping that column. `/annotations` moves to `bodyText`.
+  Still a `<textarea>` in the UI at the end of this phase.
+- **Phase 2** — The editor: `AnnotationBody.tsx` (Collaboration + provider + caret),
+  `EditorToolbar` extraction, hidden-by-default toolbar toggle (§13e). Read-only annotations
+  render from `proseJson`. The bottom composer ships first — it has no positioning problem.
+- **Phase 3** — The inline popover: its own component and CSS module, the pending-range
+  decoration (§13f), shared `findQuoteOccurrences`, "Move to bottom" (§13g).
+- **Phase 4** — Lifecycle: DRAFT/LIVE/RAISED, `Keep private`/`Notify authors`, the unmark
+  endpoint, quiet delete (§13d).
+- **Phase 5** — Presence: the co-authoring gate and its backfill (§13h), `annotationEditing`
+  awareness on the doc provider (§13i) — starting with the readOnly-awareness verification.
+
+**Test surfaces that break and need rewriting, not just updating:** `e2e/doc.spec.ts`'s two
+annotation tests (they drive a `<textarea>` and assert on the mark directly);
+`scripts/test-annotation.ts` (reads `body.text`); the e2e teardown, which needs the
+`ydoc:annotation:` prefix added to its cleanup guard or every test annotation leaks a `ydoc` row
+the same way §12b already warns a deleted doc's `ydoc` row can leak.
+
+### 13k. Open questions
+
+1. **Draft garbage.** Opening a composer creates a row and a ydoc row eagerly; the plan pairs
+   this with a `discardDraftAnnotation` call on close-while-empty. The alternative — stay purely
+   local until the first keystroke, then create the row and attach the provider — produces no
+   garbage but adds a promotion step to the editor's lifecycle. Eager-plus-discard is the
+   working assumption unless told otherwise.
+2. **The inline popover's position** — §13f's decoration handles the highlight; the popover's own
+   placement (the +0.5em/+0.5em nudge already applied to today's plain popover, PLAN.md's doc
+   commit history) carries forward unchanged unless the ydoc editor's different footprint (a
+   toolbar toggle, a taller editor) turns out to need its own placement pass.
