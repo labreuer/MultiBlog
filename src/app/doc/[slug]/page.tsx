@@ -1,11 +1,12 @@
 import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
 import type { JSONContent } from "@tiptap/react";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import * as Y from "yjs";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
-import { canUserReadDoc } from "@/lib/doc-authz";
+import { canUserReadDoc, canUserEditDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
@@ -54,6 +55,8 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
     );
   }
 
+  const canEdit = await canUserEditDoc(session.user.id, session.user.role, doc.id);
+
   // bodyJSON seeds LiveDocBody's editor so its first paint is identical to
   // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
   // what's shown until that editor reports ready.
@@ -81,8 +84,14 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
   }
 
   return (
-    <main style={{ maxWidth: 800, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>{docTitleOrFallback(doc.title)}</h1>
+    <main style={{ width: 800, maxWidth: "100%", margin: "4rem auto", fontFamily: "sans-serif" }}>
+      <h1>
+        {canEdit ? (
+          <Link href={`/doc/${doc.id}/edit`}>{docTitleOrFallback(doc.title)}</Link>
+        ) : (
+          docTitleOrFallback(doc.title)
+        )}
+      </h1>
       <LiveDocBody
         docId={doc.id}
         initialBodyJSON={bodyJSON}

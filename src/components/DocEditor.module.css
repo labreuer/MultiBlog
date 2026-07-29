@@ -11,8 +11,11 @@
   min-height: 0;
 }
 
-/* Same rationale as PostEditor.module.css's .titleInput — a contenteditable
-   (CollabTitleField), not an <input>. */
+/* A contenteditable (CollabTitleField), not an <input> — same border as
+   .editorFrame below (shared with PostEditor.module.css) so the title reads
+   as the same kind of editable surface as the body, not a plain label. No
+   .titleChanged swap here unlike PostEditor's version: a doc has no
+   published state for the title to differ from. */
 .titleInput {
   position: relative;
   font-size: clamp(1.1rem, 4vw, 1.5rem);
@@ -21,7 +24,8 @@
   padding: 4px;
   box-sizing: border-box;
   flex: 0 0 auto;
-  border: 2px solid transparent;
+  border: 1px solid #ccc;
+  border-radius: 4px;
   cursor: text;
   line-height: 1.4;
   min-height: 1.4em;
