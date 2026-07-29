@@ -40,6 +40,10 @@ export default function SiteHeader() {
               |
             </span>
             <Link href="/docs">Manage Docs</Link>
+            <span aria-hidden="true" style={{ color: "#ccc" }}>
+              |
+            </span>
+            <Link href="/annotations">Manage Annotations</Link>
           </>
         )}
         {session?.user && isAdmin(session.user.role) && (
