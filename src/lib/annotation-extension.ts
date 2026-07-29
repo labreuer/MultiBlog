@@ -15,6 +15,11 @@ import { Mark, mergeAttributes } from "@tiptap/core";
 export const Annotation = Mark.create({
   name: "annotation",
   excludes: "",
+  // Otherwise CollabEditorBody's "Clear formatting" toolbar button
+  // (unsetAllMarks) strips the mark right along with real formatting —
+  // the anchor is content, not styling (§12i above), and isn't the user's
+  // to remove via a formatting shortcut.
+  clearable: false,
 
   addAttributes() {
     return {
