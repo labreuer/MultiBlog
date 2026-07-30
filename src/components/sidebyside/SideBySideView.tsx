@@ -43,6 +43,10 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
   // makes sense if highlights are visible with nothing selected).
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<string>>(new Set());
   const [onlyMine, setOnlyMine] = useState(false);
+  // Show one Group at a time — restricts both columns' highlights to
+  // whichever group is active, rather than layering Display?/"Show only my
+  // Doc Links" on top of every group at once.
+  const [oneGroupAtATime, setOneGroupAtATime] = useState(false);
 
   const isCreatingNew = activeGroupId === NEW_GROUP;
   const activeGroup = isCreatingNew ? null : groups.find((g) => g.id === activeGroupId) ?? null;
@@ -63,6 +67,10 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       const out: DocLinkInput[] = [];
       for (const group of groups) {
         if (hiddenGroupIds.has(group.id)) continue;
+        // An unsaved "New Doc Link Group" draft has no links of its own —
+        // restricting to it means restricting to nothing, not falling back
+        // to showing every group.
+        if (oneGroupAtATime && activeGroupId && (isCreatingNew || group.id !== activeGroupId)) continue;
         for (const link of group.links) {
           if (link.docId !== docId) continue;
           if (onlyMine && link.userId !== userId) continue;
@@ -79,17 +87,30 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       }
       return out;
     },
-    [groups, hiddenGroupIds, onlyMine, userId],
+    [groups, hiddenGroupIds, onlyMine, userId, oneGroupAtATime, activeGroupId, isCreatingNew],
   );
+
+  // How many groups actually have something on screen right now — the same
+  // filter docLinksFor applies, collapsed to a count rather than a link
+  // list. Drives the pulse guard just below: with only one group visible,
+  // there is nothing for the pulse to distinguish it from.
+  const visibleGroupCount = groups.filter((group) => {
+    if (hiddenGroupIds.has(group.id)) return false;
+    if (oneGroupAtATime && activeGroupId && (isCreatingNew || group.id !== activeGroupId)) return false;
+    return group.links.length > 0;
+  }).length;
 
   // PLAN.md §14e — the one-shot pulse when a group becomes actively
   // selected, reusing QuoteThreadHeader.jumpToQuote's exact pattern:
   // scroll the first match into view, add "pulse", remove after 1200ms.
   // data-doc-link-group-ids spans both columns, so one querySelectorAll
   // reaches segments in either — the one place this page's shared scope
-  // over both docs actually helps.
+  // over both docs actually helps. Skipped when only one group is visible
+  // (including whenever Show one Group at a time is on) — the darkened
+  // segments are already unambiguous, so scrolling and pulsing to them adds
+  // motion without disambiguating anything.
   useEffect(() => {
-    if (!activeGroupId || isCreatingNew) return;
+    if (!activeGroupId || isCreatingNew || visibleGroupCount <= 1) return;
     const targets = document.querySelectorAll<HTMLElement>(`[data-doc-link-group-ids~="${activeGroupId}"]`);
     if (targets.length === 0) return;
     targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
@@ -98,7 +119,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       targets.forEach((el) => el.classList.remove("pulse"));
     }, 1200);
     return () => window.clearTimeout(timer);
-  }, [activeGroupId, isCreatingNew]);
+  }, [activeGroupId, isCreatingNew, visibleGroupCount]);
 
   return (
     <>
@@ -109,26 +130,14 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
         otherDocLinksCount={initialOtherDocLinksCount}
         activeGroupId={isCreatingNew ? NEW_GROUP : activeGroupId}
         onlyMine={onlyMine}
-        onSelectGroup={(id) => {
-          setActiveGroupId(id);
-          // Selecting a group you'd previously hidden should make it visible
-          // again — otherwise the panel opens and the bar highlights it while
-          // its segments in both columns stay dark, which reads as broken
-          // rather than as "you already hid this."
-          if (id && id !== NEW_GROUP) {
-            setHiddenGroupIds((prev) => {
-              if (!prev.has(id)) return prev;
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-            });
-          }
-        }}
+        oneGroupAtATime={oneGroupAtATime}
+        onSelectGroup={selectGroup}
         onHideAll={() => {
           setHiddenGroupIds(new Set(groups.map((g) => g.id)));
           setActiveGroupId(null);
         }}
         onToggleOnlyMine={setOnlyMine}
+        onToggleOneGroupAtATime={setOneGroupAtATime}
       />
       {(activeGroup || isCreatingNew) && (
         <DocLinkGroupPanel
@@ -183,6 +192,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           onLinkUpdated={updateLink}
           onLinkDeleted={deleteLink}
           onLinkColorPreview={previewLinkColor}
+          onLinkClicked={(groupId) => selectGroup(groupId)}
         />
         <DocColumn
           {...right}
@@ -196,10 +206,28 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           onLinkUpdated={updateLink}
           onLinkDeleted={deleteLink}
           onLinkColorPreview={previewLinkColor}
+          onLinkClicked={(groupId) => selectGroup(groupId)}
         />
       </div>
     </>
   );
+
+  // Shared by the bar's dropdown and a doc link's click-routing (below) —
+  // both mean "make this the active group," including un-hiding it if
+  // Display? had previously turned it off (§14h: opening a panel and
+  // darkening a group in the bar while its segments stay hidden reads as
+  // broken rather than as "you already hid this").
+  function selectGroup(id: string | null) {
+    setActiveGroupId(id);
+    if (id && id !== NEW_GROUP) {
+      setHiddenGroupIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
 
   function appendLinkForDoc(docId: string, link: DocLinkInput) {
     setGroups((prev) => {

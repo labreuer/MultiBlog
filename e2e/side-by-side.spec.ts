@@ -402,6 +402,112 @@ test.describe("side-by-side group bar", () => {
     }
   });
 
+  test("selecting a group pulses its highlight when another group is also visible", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const groupA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "The quick" });
+    const groupB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      const highlightA = page.locator(`[data-doc-link-ids~="${groupA.id}"]`).first();
+
+      // The pulse effect queries the live editor's actual decorated DOM at
+      // the instant activeGroupId changes — selecting before the read
+      // column has synced (LiveDocBody's `ready`/staticBody swap, §12g)
+      // races against decorations that don't exist yet, same class of
+      // issue CLAUDE.md's onFirstRender-isn't-synced gotcha describes for
+      // the write column.
+      await expect(page.locator('[data-side="left"] [data-testid="live-doc-synced"]')).toBeAttached();
+
+      await select.selectOption(groupA.groupId);
+      await expect(highlightA).toHaveClass(/pulse/);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(groupA.groupId);
+      await deleteTestDocLinkGroup(groupB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("selecting the only visible group does not pulse its highlight", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`).first();
+
+      await expect(page.locator('[data-side="left"] [data-testid="live-doc-synced"]')).toBeAttached();
+      await select.selectOption(link.groupId);
+      await expect(highlight).toHaveClass(/doc-link-active/);
+      // Give the pulse a moment it would need to have appeared in, then
+      // assert it never did — there is nothing else visible to distinguish
+      // this highlight from.
+      await page.waitForTimeout(300);
+      await expect(highlight).not.toHaveClass(/pulse/);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("Show one Group at a time restricts highlights to the active group, and follows a switch", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const groupA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+    const groupB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "quick brown" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      const highlightA = page.locator(`[data-doc-link-ids~="${groupA.id}"]`);
+      const highlightB = page.locator(`[data-doc-link-ids~="${groupB.id}"]`);
+
+      await expect(highlightA.first()).toBeVisible();
+      await expect(highlightB.first()).toBeVisible();
+
+      await page.getByRole("checkbox", { name: "Show one Group at a time" }).check();
+      // Neither group is active yet — the restriction only kicks in once one is.
+      await expect(highlightA.first()).toBeVisible();
+      await expect(highlightB.first()).toBeVisible();
+
+      await select.selectOption(groupA.groupId);
+      await expect(highlightA.first()).toBeVisible();
+      await expect(highlightB).toHaveCount(0);
+
+      // Switching groups follows through: A disappears, B appears.
+      await select.selectOption(groupB.groupId);
+      await expect(highlightA).toHaveCount(0);
+      await expect(highlightB.first()).toBeVisible();
+
+      // "New Doc Link Group" has no links of its own — restricting to it
+      // means restricting to nothing, not falling back to showing every
+      // group (the bug: the guard's `!isCreatingNew` used to skip the
+      // restriction entirely for this case).
+      await select.selectOption("__new__");
+      await expect(highlightA).toHaveCount(0);
+      await expect(highlightB).toHaveCount(0);
+
+      // Unchecking restores both.
+      await page.getByRole("checkbox", { name: "Show one Group at a time" }).uncheck();
+      await expect(highlightA.first()).toBeVisible();
+      await expect(highlightB.first()).toBeVisible();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(groupA.groupId);
+      await deleteTestDocLinkGroup(groupB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
   test("selecting a hidden group from the dropdown re-checks Display?", async ({ page }) => {
     const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
     const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
@@ -661,6 +767,33 @@ test.describe("side-by-side click routing", () => {
     } finally {
       await page.goto("about:blank").catch(() => {});
       await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("clicking a doc link switches the bar's active group to match", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const linkA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "quick brown" });
+    const linkB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      await expect(select).toHaveValue("__none__");
+
+      await page.locator(`[data-doc-link-ids~="${linkA.id}"]`).first().click();
+      await expect(select).toHaveValue(linkA.groupId);
+
+      // Switching to a different link (without closing the popover first)
+      // follows through to the bar too, not just the popover's own fields.
+      await page.locator(`[data-doc-link-ids~="${linkB.id}"]`).first().click();
+      await expect(select).toHaveValue(linkB.groupId);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(linkA.groupId);
+      await deleteTestDocLinkGroup(linkB.groupId);
       await deleteTestDoc(left.id);
       await deleteTestDoc(right.id);
     }

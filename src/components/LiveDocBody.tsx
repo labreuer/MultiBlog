@@ -86,6 +86,11 @@ type Props = {
   // already exists to repaint); the create-mode popover has nothing to
   // preview against yet.
   onDocLinkColorPreview?: (linkId: string, overrideColor: string | null) => void;
+  // Fired whenever a click opens a link's edit popover (directly, or via the
+  // chooser) — lets the caller (SideBySideView) switch the active group to
+  // match, the same "make this the active group" action the bar's dropdown
+  // triggers.
+  onDocLinkClicked?: (groupId: string) => void;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -125,6 +130,7 @@ export default function LiveDocBody({
   onDocLinkUpdated,
   onDocLinkDeleted,
   onDocLinkColorPreview,
+  onDocLinkClicked,
 }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
@@ -265,6 +271,7 @@ export default function LiveDocBody({
       if (candidates.length === 1) {
         setEditingLink({ link: candidates[0], top, left });
         setChooser(null);
+        onDocLinkClicked?.(candidates[0].groupId);
       } else {
         setChooser({ candidates, top, left });
         setEditingLink(null);
@@ -614,6 +621,7 @@ export default function LiveDocBody({
             const { top, left } = chooser;
             setChooser(null);
             setEditingLink({ link, top, left });
+            onDocLinkClicked?.(link.groupId);
           }}
           onCancel={() => setChooser(null)}
         />

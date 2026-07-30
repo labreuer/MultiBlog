@@ -34,6 +34,9 @@ type Props = {
   onLinkUpdated: (link: DocLinkInput) => void;
   onLinkDeleted: (linkId: string) => void;
   onLinkColorPreview: (linkId: string, overrideColor: string | null) => void;
+  // Fired when a doc link's edit popover opens via a click — switches the
+  // bar/panel to that link's group, same as picking it from the dropdown.
+  onLinkClicked: (groupId: string) => void;
 };
 
 const ARIA = {
@@ -67,6 +70,7 @@ export default function DocColumn({
   onLinkUpdated,
   onLinkDeleted,
   onLinkColorPreview,
+  onLinkClicked,
 }: Props) {
   const [mode, setMode] = useState<Mode>("read");
   const [title, setTitle] = useState(initialTitle);
@@ -213,6 +217,7 @@ export default function DocColumn({
               onDocLinkUpdated={onLinkUpdated}
               onDocLinkDeleted={onLinkDeleted}
               onDocLinkColorPreview={onLinkColorPreview}
+              onDocLinkClicked={onLinkClicked}
             />
           ) : (
             // Mirrors LiveDocBody's own pre-connection fallback — shown

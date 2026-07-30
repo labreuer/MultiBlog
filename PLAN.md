@@ -3075,6 +3075,13 @@ the first also clears `activeGroupId`. **Selecting a group also clears its own `
 Opening a panel and darkening a group in the bar while its segments stay hidden reads as broken rather
 than as "you already hid this."
 
+**`Show one Group at a time`**, beside `Show only my Doc Links`, restricts both columns' highlights to
+whichever group is active rather than darkening it among the rest; with no group active it has no
+effect (there is nothing yet to restrict to). Switching the dropdown — including via a doc link click,
+§14j — swaps which single group is shown, same as `Display?`'s per-group state does when this is off.
+A plain `docLinksFor` filter, not a second copy of `hiddenGroupIds`: no state to keep in sync, since it
+reads `activeGroupId` directly.
+
 **The count line, `← N  M → (+Y)`** — N links in the left doc, M in the right, Y in any other doc.
 *As built it sits in the bar itself, beside the dropdown, and sums across every group on the page
 rather than describing only the selected one — see §14o.* Two queries: one `findMany` over links whose
@@ -3142,6 +3149,12 @@ the push, so the plugin only ever holds ranges with real positions):
 - several, `activeGroupId` set, exactly one hit in it → open that one
 - several, `activeGroupId` set, several hits in it → chooser filtered to that group
 - several, no `activeGroupId` → chooser over all hits
+
+**Opening a link's popover — directly, or via the chooser — also makes its group the active one**,
+the same effect as picking it from the bar's dropdown (including un-hiding it, §14h). A click is
+therefore also a navigation: it answers "which group is this" without a separate lookup, and composes
+with `Show one Group at a time` to let clicking through a document step from one group's links to the
+next.
 
 The chooser shows each candidate's selected text, elided in the middle when long — first 50
 characters, `…`, last 50 — which is this section's reading of "max 50 chars either side". (The

@@ -12,9 +12,11 @@ type Props = {
   otherDocLinksCount: number;
   activeGroupId: string | null;
   onlyMine: boolean;
+  oneGroupAtATime: boolean;
   onSelectGroup: (groupId: string | null) => void;
   onHideAll: () => void;
   onToggleOnlyMine: (value: boolean) => void;
+  onToggleOneGroupAtATime: (value: boolean) => void;
 };
 
 // PLAN.md §14h — one entry per group with a link to either doc, prefixed
@@ -30,9 +32,11 @@ export default function DocLinkGroupBar({
   otherDocLinksCount,
   activeGroupId,
   onlyMine,
+  oneGroupAtATime,
   onSelectGroup,
   onHideAll,
   onToggleOnlyMine,
+  onToggleOneGroupAtATime,
 }: Props) {
   const leftCount = groups.reduce((sum, g) => sum + g.links.filter((l) => l.docId === leftDocId).length, 0);
   const rightCount = groups.reduce((sum, g) => sum + g.links.filter((l) => l.docId === rightDocId).length, 0);
@@ -72,9 +76,17 @@ export default function DocLinkGroupBar({
       <span className={styles.count}>
         ← {leftCount} {"  "} {rightCount} → {otherDocLinksCount > 0 ? `(+${otherDocLinksCount})` : ""}
       </span>
-      <label className={styles.onlyMine}>
+      <label className={styles.checkboxLabel}>
         <input type="checkbox" checked={onlyMine} onChange={(e) => onToggleOnlyMine(e.target.checked)} />
         Show only my Doc Links
+      </label>
+      <label className={styles.checkboxLabel}>
+        <input
+          type="checkbox"
+          checked={oneGroupAtATime}
+          onChange={(e) => onToggleOneGroupAtATime(e.target.checked)}
+        />
+        Show one Group at a time
       </label>
     </div>
   );

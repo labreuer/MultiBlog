@@ -14,7 +14,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.onlyMine {
+.checkboxLabel {
   display: flex;
   align-items: center;
   gap: 4px;
