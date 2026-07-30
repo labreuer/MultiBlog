@@ -1,5 +1,8 @@
+/* position:fixed, not absolute — see DocLinkPopover.module.css's .popover,
+   whose top/left (LiveDocBody.tsx) this shares the same viewport-coordinate
+   convention with. */
 .chooser {
-  position: absolute;
+  position: fixed;
   z-index: 20;
   width: 280px;
   background: #fff;

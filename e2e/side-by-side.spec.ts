@@ -932,6 +932,75 @@ test.describe("side-by-side click routing", () => {
       await deleteTestDoc(right.id);
     }
   });
+
+  test("the popup isn't clipped when it spills into the other column", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`).first();
+      await expect(highlight).toBeVisible();
+      await highlight.click();
+
+      // Regression: the popover used to be `position: absolute` inside the
+      // column's own `.scroller`, whose `overflow-y: auto` forces
+      // `overflow-x` to clip too (CSS can't have one axis visible and the
+      // other not) — a popover opened near a column's right edge got cut
+      // off at the column boundary instead of visibly overlapping the
+      // other column the way a floating popover should. Asserting the
+      // mechanism (`position: fixed`, escaping that ancestor clip) rather
+      // than the visual overflow itself, which depends on where a given
+      // quote happens to wrap relative to the viewport width and isn't
+      // reliably reproducible test-to-test.
+      const popup = page.getByTestId("doc-link-popup");
+      await expect(popup).toBeVisible();
+      await expect(popup).toHaveCSS("position", "fixed");
+      await popup.getByRole("button", { name: "Cancel" }).click();
+      await expect(popup).not.toBeVisible();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("clicking a link that switches the active group repositions its popup after the group panel shifts the layout", async ({
+    page,
+  }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    // Both on the same line, deliberately close together — clicking A opens
+    // A's popover *and* switches the active group, which opens the group
+    // panel above the columns and pushes this line down. The popover's
+    // position was measured before that shift; without a re-measure after
+    // it settles, `position: fixed`'s baked-in viewport coordinates stay
+    // pinned to the pre-shift spot and land on B instead of tracking A.
+    const linkA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "quick brown" });
+    const linkB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlightB = page.locator(`[data-doc-link-ids~="${linkB.id}"]`).first();
+      await expect(highlightB).toBeVisible();
+
+      await page.locator(`[data-doc-link-ids~="${linkA.id}"]`).first().click();
+      await expect(page.getByTestId("doc-link-group-panel")).toBeVisible();
+
+      // B's own highlight is still clickable — the popover isn't sitting on
+      // top of it after the shift.
+      await highlightB.click();
+      await expect(page.getByTestId("doc-link-popup")).toContainText("“fox”");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(linkA.groupId);
+      await deleteTestDocLinkGroup(linkB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
 });
 
 // PLAN.md §14k/§14l Phase 8 — the "Link to…" entry point.

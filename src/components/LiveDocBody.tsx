@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
@@ -139,8 +139,12 @@ export default function LiveDocBody({
   // at a time. editingLink opens the same DocLinkPopover the selection
   // flow uses, but in edit mode (a linkId is present); chooser appears
   // when a click hit more than one candidate.
-  const [editingLink, setEditingLink] = useState<{ link: DocLinkInput; top: number; left: number } | null>(null);
-  const [chooser, setChooser] = useState<{ candidates: DocLinkInput[]; top: number; left: number } | null>(null);
+  const [editingLink, setEditingLink] = useState<{ link: DocLinkInput; pos: number; top: number; left: number } | null>(
+    null,
+  );
+  const [chooser, setChooser] = useState<{ candidates: DocLinkInput[]; pos: number; top: number; left: number } | null>(
+    null,
+  );
   // The provider's initial handshake applies at least one Yjs update on
   // its own — same as any later real edit — which runs the setContent
   // call below and would silently collapse a selection made in the window
@@ -221,14 +225,18 @@ export default function LiveDocBody({
         setPendingAnnotation(liveEditor.view, null);
         return;
       }
+      // Viewport-relative, not container-relative — the popover is
+      // `position: fixed` (§14i) specifically so it isn't clipped by
+      // `.scroller`'s `overflow-y: auto` (which forces overflow-x to clip
+      // too) when a selection near a column's right edge would otherwise
+      // need to spill into the other column to stay readable.
       const coords = liveEditor.view.coordsAtPos(to);
-      const containerRect = container.getBoundingClientRect();
       setPending({
         from,
         to,
         quotedText,
-        top: coords.bottom - containerRect.top,
-        left: coords.left - containerRect.left,
+        top: coords.bottom,
+        left: coords.left,
       });
       setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
     },
@@ -255,10 +263,10 @@ export default function LiveDocBody({
       const liveEditor = editorRef.current;
       const container = containerRef.current;
       if (!liveEditor || !container) return;
+      // Viewport-relative — see the onSelectionUpdate handler above.
       const coords = liveEditor.view.coordsAtPos(pos);
-      const containerRect = container.getBoundingClientRect();
-      const top = coords.bottom - containerRect.top;
-      const left = coords.left - containerRect.left;
+      const top = coords.bottom;
+      const left = coords.left;
 
       let narrowed = hits;
       if (activeGroupId) {
@@ -269,15 +277,45 @@ export default function LiveDocBody({
       if (candidates.length === 0) return;
 
       if (candidates.length === 1) {
-        setEditingLink({ link: candidates[0], top, left });
+        setEditingLink({ link: candidates[0], pos, top, left });
         setChooser(null);
         onDocLinkClicked?.(candidates[0].groupId);
       } else {
-        setChooser({ candidates, top, left });
+        setChooser({ candidates, pos, top, left });
         setEditingLink(null);
       }
     };
   });
+
+  // A click that opens a popover here can also switch the active group
+  // (onDocLinkClicked, above) — which can open/resize the group panel
+  // above the columns and shift this column down. `pending`/`editingLink`'s
+  // top/left were measured *before* that shift (coordsAtPos is called
+  // synchronously inside the click handler, ahead of the re-render that
+  // adds the panel), so `position: fixed`'s viewport coordinates would
+  // otherwise stay pinned to the pre-shift spot — landing on whatever now
+  // occupies that vacated space instead of tracking the anchor. A
+  // `position: absolute` popover self-corrected here for free (its
+  // container moved with it); re-measuring after the shift settles is
+  // fixed's equivalent. useLayoutEffect, not useEffect, so the correction
+  // lands before the browser paints the stale position.
+  useLayoutEffect(() => {
+    const liveEditor = editorRef.current;
+    if (!liveEditor) return;
+    if (pending) {
+      const coords = liveEditor.view.coordsAtPos(pending.to);
+      if (coords.bottom !== pending.top || coords.left !== pending.left) {
+        setPending((prev) => (prev ? { ...prev, top: coords.bottom, left: coords.left } : prev));
+      }
+    }
+    if (editingLink) {
+      const coords = liveEditor.view.coordsAtPos(editingLink.pos);
+      if (coords.bottom !== editingLink.top || coords.left !== editingLink.left) {
+        setEditingLink((prev) => (prev ? { ...prev, top: coords.bottom, left: coords.left } : prev));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-measuring in response to activeGroupId's own reflow; pending/editingLink read via current value, not tracked as triggers (they're what this effect updates)
+  }, [activeGroupId]);
 
   // Only constructed when nothing was hoisted in — see the Props comment.
   // Declared here (rather than beside the connection effect further down)
@@ -338,14 +376,14 @@ export default function LiveDocBody({
     const occurrences = container ? findQuoteOccurrences(doc, current.quotedText) : [];
     if (occurrences.length === 1 && container) {
       const { from, to } = occurrences[0];
+      // Viewport-relative — see the onSelectionUpdate handler above.
       const coords = liveEditor.view.coordsAtPos(to);
-      const containerRect = container.getBoundingClientRect();
       const next: PendingSelection = {
         from,
         to,
         quotedText: current.quotedText,
-        top: coords.bottom - containerRect.top,
-        left: coords.left - containerRect.left,
+        top: coords.bottom,
+        left: coords.left,
       };
       setPending(next);
       setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
@@ -618,9 +656,9 @@ export default function LiveDocBody({
           left={chooser.left}
           candidates={chooser.candidates}
           onSelect={(link) => {
-            const { top, left } = chooser;
+            const { pos, top, left } = chooser;
             setChooser(null);
-            setEditingLink({ link, top, left });
+            setEditingLink({ link, pos, top, left });
             onDocLinkClicked?.(link.groupId);
           }}
           onCancel={() => setChooser(null)}

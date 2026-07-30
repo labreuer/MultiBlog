@@ -1,9 +1,14 @@
 /* Same shape as annotation/AnnotationPopover.module.css, offset per §14i
    (0.5em right and 0.5em down from the selection's own coordinates, via a
    transform rather than baked into top/left — those stay the selection's
-   raw coords so the transform is the only place the offset lives). */
+   raw coords so the transform is the only place the offset lives).
+   position:fixed rather than absolute — top/left are viewport coordinates
+   (LiveDocBody.tsx), not relative to the column's own scroller, so a
+   selection near a column's right edge isn't clipped by `.scroller`'s
+   overflow-y:auto (which forces overflow-x to clip too) instead of
+   spilling visibly over the other column the way a popover should. */
 .popover {
-  position: absolute;
+  position: fixed;
   z-index: 20;
   width: 260px;
   transform: translate(0.5em, 0.5em);
