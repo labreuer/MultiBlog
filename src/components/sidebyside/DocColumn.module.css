@@ -54,6 +54,7 @@
    flex avoids the question entirely. */
 .titleButton {
   flex: 0 0 auto;
+  font-size: 1.2rem;
 }
 
 .statusLine {
