@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { JSONContent } from "@tiptap/react";
-import LiveDocBody from "./LiveDocBody";
+import DocReadingBody from "./DocReadingBody";
 import DocScrubBar, { type ScrubbedState } from "./DocScrubBar";
 
 type Props = {
@@ -21,13 +21,13 @@ type Props = {
   canEdit: boolean;
   // The viewer's own color (PLAN.md §13f) — resolved server-side (page.tsx
   // already calls auth()) and threaded down rather than read from
-  // useSession() inside LiveDocBody, so the pending-selection decoration's
+  // useSession() inside DocReadingBody, so the pending-selection decoration's
   // color is stable at editor-construction time instead of racing the
   // client-side session fetch.
   userColor: string;
 };
 
-// Owns the one piece of state DocScrubBar, the title, and LiveDocBody need
+// Owns the one piece of state DocScrubBar, the title, and DocReadingBody need
 // to share: which historical title/body (if any) is currently overriding
 // the live ones. A server component (page.tsx) can't hold this itself,
 // hence the wrapper.
@@ -40,7 +40,7 @@ export default function DocView({ docId, initialTitle, initialBodyJSON, staticBo
     <>
       <h1>{canEdit ? <Link href={`/doc/${docId}/edit`}>{title}</Link> : title}</h1>
       {byline}
-      <LiveDocBody
+      <DocReadingBody
         docId={docId}
         initialBodyJSON={initialBodyJSON}
         staticBody={staticBody}

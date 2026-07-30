@@ -1,6 +1,6 @@
 // Where a selection-anchored popover sits (PLAN.md §14i). Pure and
 // client-safe, so the rule lives in exactly one place rather than being
-// re-derived at each of LiveDocBody's three measurement sites.
+// re-derived at each of the sites that used to measure independently.
 //
 // Every coordinate here is **viewport-relative** — `coordsAtPos` and
 // `getBoundingClientRect` both speak that, and it's why the popovers this

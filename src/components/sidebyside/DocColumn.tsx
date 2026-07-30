@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
-import LiveDocBody from "@/components/LiveDocBody";
+import SideBySideDocBody from "./SideBySideDocBody";
 import CollabTitleField from "@/components/CollabTitleField";
 import CollabEditorBody from "@/components/CollabEditorBody";
 import proseStyles from "@/styles/prose.module.css";
@@ -52,7 +52,7 @@ type Mode = "read" | "write";
 // taps ydoc.on("update"); the write surface needs the same Y.Doc bound
 // through Collaboration/CollaborationCaret on the same provider. Toggling
 // mode therefore unmounts/mounts only the TipTap editors underneath, never
-// the websocket — putting the provider inside LiveDocBody instead (as
+// the websocket — putting the provider inside SideBySideDocBody instead (as
 // /doc/[slug] does) would tear down a socket and re-mint a token on every
 // toggle.
 export default function DocColumn({
@@ -201,14 +201,12 @@ export default function DocColumn({
               <p>Connecting to live editor…</p>
             )
           ) : provider ? (
-            <LiveDocBody
+            <SideBySideDocBody
               docId={docId}
               initialBodyJSON={initialBodyJSON}
               staticBody={staticBody}
               userColor={userColor}
               ariaLabel={aria.body}
-              selectionUi="doclink"
-              suppressAnnotations
               ydoc={ydoc}
               provider={provider}
               docLinks={docLinks}
@@ -220,9 +218,9 @@ export default function DocColumn({
               onDocLinkClicked={onLinkClicked}
             />
           ) : (
-            // Mirrors LiveDocBody's own pre-connection fallback — shown
+            // Mirrors SideBySideDocBody's own pre-connection fallback — shown
             // until this column's provider connects, rather than mounting
-            // LiveDocBody without one (which would make it open its own,
+            // SideBySideDocBody without one (which would make it open its own,
             // separate, immediately-redundant connection — §14g).
             <div className={`${proseStyles.prose} ${proseStyles.noAnnotations}`}>{staticBody}</div>
           )}

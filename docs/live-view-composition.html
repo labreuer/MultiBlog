@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live-viewing components: before and after the split</title>
+
+<style>
+  :root {
+    --page: #eff0f3;
+    --card: #ffffff;
+    --ink: #1b1e26;
+    --muted: #5c6272;
+    --rule: #d9dbe2;
+    --rule-soft: #e7e9ee;
+
+    --rose: #b03a6b;
+    --rose-tint: #fbeef3;
+    --teal: #0e7c6b;
+    --teal-tint: #e6f4f1;
+    --slate: #47506b;
+    --slate-tint: #ecedf3;
+    --amber: #a86a0c;
+    --amber-tint: #fbf1de;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #12141a;
+      --card: #191c24;
+      --ink: #e8e9ed;
+      --muted: #98a0b3;
+      --rule: #2b2f3b;
+      --rule-soft: #23262f;
+
+      --rose: #e881ac;
+      --rose-tint: #2c1a23;
+      --teal: #46c3ac;
+      --teal-tint: #0e2620;
+      --slate: #93a3ca;
+      --slate-tint: #1b2030;
+      --amber: #dfa74e;
+      --amber-tint: #2a2113;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --page: #12141a;
+    --card: #191c24;
+    --ink: #e8e9ed;
+    --muted: #98a0b3;
+    --rule: #2b2f3b;
+    --rule-soft: #23262f;
+
+    --rose: #e881ac;
+    --rose-tint: #2c1a23;
+    --teal: #46c3ac;
+    --teal-tint: #0e2620;
+    --slate: #93a3ca;
+    --slate-tint: #1b2030;
+    --amber: #dfa74e;
+    --amber-tint: #2a2113;
+  }
+
+  :root[data-theme="light"] {
+    --page: #eff0f3;
+    --card: #ffffff;
+    --ink: #1b1e26;
+    --muted: #5c6272;
+    --rule: #d9dbe2;
+    --rule-soft: #e7e9ee;
+
+    --rose: #b03a6b;
+    --rose-tint: #fbeef3;
+    --teal: #0e7c6b;
+    --teal-tint: #e6f4f1;
+    --slate: #47506b;
+    --slate-tint: #ecedf3;
+    --amber: #a86a0c;
+    --amber-tint: #fbf1de;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: clamp(28px, 5vw, 64px) clamp(16px, 4vw, 40px) 96px;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(32px, 5vw, 56px);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  h1 {
+    font-size: clamp(30px, 4.4vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    font-weight: 660;
+    margin: 10px 0 0;
+    text-wrap: balance;
+    max-width: 20ch;
+  }
+
+  .lede {
+    margin: 16px 0 0;
+    max-width: 68ch;
+    color: var(--muted);
+    font-size: 16.5px;
+  }
+
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  code, .path { font-family: var(--mono); }
+
+  .lede code, p code, li code, td code {
+    font-size: 0.88em;
+    background: var(--slate-tint);
+    padding: 0.1em 0.36em;
+    border-radius: 3px;
+  }
+
+  header .meta-line {
+    margin: 22px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+  }
+
+  /* ---- legend ---- */
+  .legend {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 20px 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 30px;
+  }
+
+  .legend-item { display: flex; align-items: flex-start; gap: 10px; max-width: 34ch; }
+
+  .swatch {
+    width: 13px; height: 13px; border-radius: 3px;
+    margin-top: 5px; flex: 0 0 auto;
+    border: 1.5px solid;
+  }
+  .sw-rose  { border-color: var(--rose);  background: var(--rose-tint); }
+  .sw-teal  { border-color: var(--teal);  background: var(--teal-tint); }
+  .sw-slate { border-color: var(--slate); background: var(--slate-tint); }
+  .sw-amber { border-color: var(--amber); background: var(--amber-tint); }
+
+  .legend-item b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .lg-rose b  { color: var(--rose); }
+  .lg-teal b  { color: var(--teal); }
+  .lg-slate b { color: var(--slate); }
+  .lg-amber b { color: var(--amber); }
+  .legend-item span { font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+  /* ---- panels ---- */
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .panel-head {
+    padding: 22px 26px 20px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 16px;
+  }
+
+  .panel-head h2 {
+    margin: 0;
+    font-size: 21px;
+    letter-spacing: -0.015em;
+    font-weight: 640;
+  }
+
+  .stamp {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 4px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .stamp-old { color: var(--amber); border-color: var(--amber); background: var(--amber-tint); }
+  .stamp-new { color: var(--slate); border-color: var(--slate); background: var(--slate-tint); }
+
+  .panel-head p {
+    margin: 0;
+    flex: 1 1 340px;
+    font-size: 14px;
+    color: var(--muted);
+    min-width: 0;
+  }
+
+  .diagram-scroll {
+    overflow-x: auto;
+    padding: 26px 26px 10px;
+  }
+
+  svg.diagram { display: block; min-width: 940px; width: 100%; height: auto; }
+
+  /* node styling driven by tokens so both themes work */
+  .diagram text { font-family: var(--mono); }
+  .diagram .n-path { font-size: 12.5px; font-weight: 600; }
+  .diagram .n-meta { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .diagram .grp-title {
+    font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600;
+  }
+  .diagram .chip-t { font-size: 11px; }
+  .diagram .edge-label { font-size: 10.5px; }
+
+  .n-rose rect  { fill: var(--rose-tint);  stroke: var(--rose);  stroke-width: 1.6; }
+  .n-rose .n-path { fill: var(--rose); }
+  .n-rose .n-meta { fill: var(--rose); opacity: 0.78; }
+
+  .n-teal rect  { fill: var(--teal-tint);  stroke: var(--teal);  stroke-width: 1.6; }
+  .n-teal .n-path { fill: var(--teal); }
+  .n-teal .n-meta { fill: var(--teal); opacity: 0.78; }
+
+  .n-slate rect { fill: var(--slate-tint); stroke: var(--slate); stroke-width: 1.6; }
+  .n-slate .n-path { fill: var(--slate); }
+  .n-slate .n-meta { fill: var(--slate); opacity: 0.8; }
+
+  .n-amber rect { fill: var(--amber-tint); stroke: var(--amber); stroke-width: 2.2; }
+  .n-amber .n-path { fill: var(--amber); }
+  .n-amber .n-meta { fill: var(--amber); opacity: 0.85; }
+
+  .e-rose  { stroke: var(--rose);  fill: none; stroke-width: 1.8; }
+  .e-teal  { stroke: var(--teal);  fill: none; stroke-width: 1.8; }
+  .e-slate { stroke: var(--slate); fill: none; stroke-width: 1.8; }
+  .e-amber { stroke: var(--amber); fill: none; stroke-width: 2.2; }
+  .e-dash  { stroke-dasharray: 5 4; }
+
+  .lbl-rose  { fill: var(--rose); }
+  .lbl-teal  { fill: var(--teal); }
+  .lbl-slate { fill: var(--slate); }
+  .lbl-amber { fill: var(--amber); }
+
+  .grp-box { fill: none; stroke: var(--rule); stroke-width: 1.3; stroke-dasharray: 3 3; }
+  .grp-lbl { fill: var(--muted); }
+  .chip-slate rect { fill: var(--slate-tint); stroke: var(--slate); stroke-width: 1; }
+  .chip-slate text { fill: var(--slate); }
+  .chip-teal rect  { fill: var(--teal-tint);  stroke: var(--teal);  stroke-width: 1; }
+  .chip-teal text  { fill: var(--teal); }
+
+  /* ---- interaction table ---- */
+  .table-scroll { overflow-x: auto; padding: 6px 26px 26px; }
+
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 13.5px; }
+  caption {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 18px 0 10px;
+  }
+  th, td { text-align: left; padding: 9px 14px 9px 0; vertical-align: top; }
+  thead th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 8px;
+  }
+  tbody tr + tr td { border-top: 1px solid var(--rule-soft); }
+  td.who { white-space: nowrap; font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+  .who-rose  { color: var(--rose); }
+  .who-teal  { color: var(--teal); }
+  .who-slate { color: var(--slate); }
+  .who-amber { color: var(--amber); }
+  td.flow { font-family: var(--mono); font-size: 12px; }
+  td.note { color: var(--muted); }
+
+  /* ---- metrics ---- */
+  .metrics { padding: 0 26px 26px; }
+  .metrics table { min-width: 560px; }
+  .metrics td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); text-align: right; white-space: nowrap; }
+  .metrics th.num { text-align: right; }
+
+  .closing {
+    border-top: 1px solid var(--rule);
+    padding-top: 26px;
+    max-width: 72ch;
+  }
+  .closing h2 { font-size: 19px; margin: 0 0 12px; letter-spacing: -0.01em; font-weight: 640; }
+  .closing p { margin: 0 0 12px; color: var(--muted); font-size: 15px; }
+  .closing p strong { color: var(--ink); font-weight: 600; }
+
+  a { color: inherit; }
+  a:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--rose);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+</head>
+
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">MultiBlog · component composition</p>
+    <h1>The live-viewing surfaces, before and after the split</h1>
+    <p class="lede">
+      Two routes render live, collaboratively-updating doc content: the reading view at
+      <code>/doc/[slug]</code>, where selecting text offers to <strong>annotate</strong> it, and the
+      side-by-side column at <code>/side-by-side/[left]/[right]</code>, where the same gesture creates a
+      <strong>doc link</strong>. Both need the same Hocuspocus tap and the same selection handling. The
+      question each diagram answers is where that overlap was drawn.
+    </p>
+    <p class="meta-line">
+      <span>branch: extract-live-doc-engine</span>
+      <span>base: bbc5b08</span>
+      <span>staged: D src/components/LiveDocBody.tsx</span>
+      <span>unstaged: 22 files + 4 untracked</span>
+    </p>
+  </header>
+
+  <div class="legend">
+    <div class="legend-item lg-rose">
+      <span class="swatch sw-rose" aria-hidden="true"></span>
+      <span><b>Doc reading view</b>
+      Reached only from <code>/doc/[slug]</code>. Annotation surface.</span>
+    </div>
+    <div class="legend-item lg-teal">
+      <span class="swatch sw-teal" aria-hidden="true"></span>
+      <span><b>Side-by-side view</b>
+      Reached only from <code>/side-by-side/…</code>. Doc-link surface.</span>
+    </div>
+    <div class="legend-item lg-slate">
+      <span class="swatch sw-slate" aria-hidden="true"></span>
+      <span><b>Shared</b>
+      Genuinely identical for both views; one implementation.</span>
+    </div>
+    <div class="legend-item lg-amber">
+      <span class="swatch sw-amber" aria-hidden="true"></span>
+      <span><b>Conflated</b>
+      Serves both views from one unit, switched by a flag. Exists only in the old arrangement.</span>
+    </div>
+  </div>
+
+  <!-- ================= BEFORE ================= -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Before</h2>
+      <span class="stamp stamp-old">at HEAD</span>
+      <p>Both routes converge on one component. Every rose and teal path runs through the same amber box,
+         and the two views share its state.</p>
+    </div>
+
+    <div class="diagram-scroll">
+      <svg class="diagram" viewBox="0 0 1180 810" role="img"
+           aria-label="Before: both routes render LiveDocBody.tsx, a single component serving both the annotation and doc-link surfaces, switched by a selectionUi flag, with one shared pending-selection state feeding both popover families.">
+        <defs>
+          <marker id="b-ar-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--rose)"></path>
+          </marker>
+          <marker id="b-ar-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--teal)"></path>
+          </marker>
+          <marker id="b-ar-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--amber)"></path>
+          </marker>
+        </defs>
+
+        <!-- edges first, so nodes paint over their ends -->
+        <path class="e-rose" marker-end="url(#b-ar-rose)" d="M 240 84 L 240 116"></path>
+        <path class="e-teal" marker-end="url(#b-ar-teal)" d="M 950 84 L 950 116"></path>
+        <path class="e-teal" marker-end="url(#b-ar-teal)" d="M 950 172 L 950 204"></path>
+
+        <!-- into the shared component -->
+        <path class="e-rose" marker-end="url(#b-ar-rose)" d="M 240 172 L 240 272 L 340 272 L 340 298"></path>
+        <path class="e-teal" marker-end="url(#b-ar-teal)" d="M 950 260 L 950 272 L 850 272 L 850 298"></path>
+
+        <!-- out to popovers -->
+        <path class="e-rose" marker-end="url(#b-ar-rose)" d="M 340 412 L 340 444 L 245 444 L 245 468"></path>
+        <path class="e-teal" marker-end="url(#b-ar-teal)" d="M 660 412 L 660 468"></path>
+        <path class="e-teal" marker-end="url(#b-ar-teal)" d="M 850 412 L 850 444 L 950 444 L 950 468"></path>
+
+        <!-- down to libs -->
+        <path class="e-amber" marker-end="url(#b-ar-amber)" d="M 470 412 L 470 578"></path>
+
+        <!-- Row A: routes -->
+        <g class="n-rose">
+          <rect x="70" y="30" width="340" height="54" rx="6"></rect>
+          <text class="n-path" x="240" y="52" text-anchor="middle">src/app/doc/[slug]/page.tsx</text>
+          <text class="n-meta" x="240" y="70" text-anchor="middle">route</text>
+        </g>
+        <g class="n-teal">
+          <rect x="760" y="30" width="380" height="54" rx="6"></rect>
+          <text class="n-path" x="950" y="52" text-anchor="middle">src/app/side-by-side/[left]/[right]/page.tsx</text>
+          <text class="n-meta" x="950" y="70" text-anchor="middle">route</text>
+        </g>
+
+        <!-- Row B: view shells -->
+        <g class="n-rose">
+          <rect x="100" y="116" width="280" height="56" rx="6"></rect>
+          <text class="n-path" x="240" y="140" text-anchor="middle">src/components/DocView.tsx</text>
+          <text class="n-meta" x="240" y="158" text-anchor="middle">holds scrub state</text>
+        </g>
+        <g class="n-teal">
+          <rect x="800" y="116" width="300" height="56" rx="6"></rect>
+          <text class="n-path" x="950" y="140" text-anchor="middle">sidebyside/SideBySideView.tsx</text>
+          <text class="n-meta" x="950" y="158" text-anchor="middle">owns group + link state</text>
+        </g>
+
+        <!-- Row C: DocColumn -->
+        <g class="n-teal">
+          <rect x="810" y="204" width="280" height="56" rx="6"></rect>
+          <text class="n-path" x="950" y="228" text-anchor="middle">sidebyside/DocColumn.tsx</text>
+          <text class="n-meta" x="950" y="246" text-anchor="middle">one per column · read / write</text>
+        </g>
+
+        <!-- Row D: the conflated component -->
+        <g class="n-amber">
+          <rect x="250" y="298" width="680" height="114" rx="8"></rect>
+          <text class="n-path" x="590" y="326" text-anchor="middle" style="font-size:14.5px;">src/components/LiveDocBody.tsx</text>
+          <text class="n-meta" x="590" y="346" text-anchor="middle">687 lines · 17 props · switched by selectionUi</text>
+          <rect x="410" y="360" width="360" height="36" rx="5" style="stroke-dasharray:4 3;"></rect>
+          <text class="chip-t" x="590" y="383" text-anchor="middle" style="fill:var(--amber);">one `pending` state → both popover families</text>
+        </g>
+
+        <!-- Row F: popovers -->
+        <g class="n-rose">
+          <rect x="110" y="468" width="290" height="56" rx="6"></rect>
+          <text class="n-path" x="255" y="492" text-anchor="middle">annotation/AnnotationPopover</text>
+          <text class="n-meta" x="255" y="510" text-anchor="middle">reading view only</text>
+        </g>
+        <g class="n-teal">
+          <rect x="530" y="468" width="260" height="56" rx="6"></rect>
+          <text class="n-path" x="660" y="492" text-anchor="middle">sidebyside/DocLinkPopover</text>
+          <text class="n-meta" x="660" y="510" text-anchor="middle">side-by-side only</text>
+        </g>
+        <g class="n-teal">
+          <rect x="820" y="468" width="260" height="56" rx="6"></rect>
+          <text class="n-path" x="950" y="492" text-anchor="middle">sidebyside/DocLinkChooser</text>
+          <text class="n-meta" x="950" y="510" text-anchor="middle">side-by-side only</text>
+        </g>
+
+        <!-- Row G: libs -->
+        <rect class="grp-box" x="70" y="578" width="1040" height="200" rx="8"></rect>
+        <text class="grp-title grp-lbl" x="94" y="602">src/lib/ — one import list, loaded by whichever view mounts</text>
+
+        <g class="chip-slate">
+          <rect x="94" y="618" width="176" height="30" rx="4"></rect>
+          <text class="chip-t" x="182" y="638" text-anchor="middle">tiptap-schema</text>
+          <rect x="284" y="618" width="166" height="30" rx="4"></rect>
+          <text class="chip-t" x="367" y="638" text-anchor="middle">ydoc-render</text>
+          <rect x="464" y="618" width="286" height="30" rx="4"></rect>
+          <text class="chip-t" x="607" y="638" text-anchor="middle">pending-annotation-extension</text>
+          <rect x="764" y="618" width="200" height="30" rx="4"></rect>
+          <text class="chip-t" x="864" y="638" text-anchor="middle">quote-occurrences</text>
+          <rect x="94" y="660" width="196" height="30" rx="4"></rect>
+          <text class="chip-t" x="192" y="680" text-anchor="middle">popover-placement</text>
+        </g>
+
+        <g class="chip-teal">
+          <rect x="304" y="660" width="200" height="30" rx="4"></rect>
+          <text class="chip-t" x="404" y="680" text-anchor="middle">doc-link-extension</text>
+          <rect x="518" y="660" width="180" height="30" rx="4"></rect>
+          <text class="chip-t" x="608" y="680" text-anchor="middle">doc-link-anchor</text>
+        </g>
+
+        <text class="edge-label lbl-amber" x="94" y="724" style="font-size:11.5px;">
+          The two teal libs are doc-link machinery — but they sit in this one import list,
+        </text>
+        <text class="edge-label lbl-amber" x="94" y="742" style="font-size:11.5px;">
+          so the reading view pulls them in as well and never uses them.
+        </text>
+      </svg>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <caption>Interactions — before</caption>
+        <thead>
+          <tr><th scope="col">Between</th><th scope="col">What crosses</th><th scope="col">Consequence</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="who who-teal">DocColumn<br>→ LiveDocBody</td>
+            <td class="flow">selectionUi="doclink"<br>suppressAnnotations<br>ydoc, provider<br>docLinks, activeGroupId<br>onDocLink{Created,Updated,Deleted,ColorPreview,Clicked}</td>
+            <td class="note">Twelve of the seventeen props exist only for this caller. The reading view passes none of them.</td>
+          </tr>
+          <tr>
+            <td class="who who-rose">DocView<br>→ LiveDocBody</td>
+            <td class="flow">initialBodyJSON, staticBody<br>overrideBodyJSON, userColor, docId</td>
+            <td class="note">Five props. The remaining twelve default, and <code>selectionUi</code> falls back to <code>"annotation"</code>.</td>
+          </tr>
+          <tr>
+            <td class="who who-amber">pending state<br>→ both popovers</td>
+            <td class="flow">{ from, to, quotedText }<br>+ shared top/left convention</td>
+            <td class="note">One field feeds <code>AnnotationPopover</code> and <code>DocLinkPopover</code>. Moving the doc-link popover to <code>position: fixed</code> silently mispositioned annotations on <code>/doc/[slug]</code>, with every test still green.</td>
+          </tr>
+          <tr>
+            <td class="who who-amber">setContent<br>→ fixups</td>
+            <td class="flow">reresolvePending(editor)<br>syncDocLinks(editor)</td>
+            <td class="note">One choke point, visible in a single file — the clearest thing about this arrangement, and the thing the split has to work to preserve.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= AFTER ================= -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>After</h2>
+      <span class="stamp stamp-new">working tree</span>
+      <p>Rose and teal never touch. What they share is pulled out below them as two hooks, and each view
+         keeps only its own popovers and its own libs.</p>
+    </div>
+
+    <div class="diagram-scroll">
+      <svg class="diagram" viewBox="0 0 1180 880" role="img"
+           aria-label="After: each route reaches its own body component. DocReadingBody and SideBySideDocBody both use the shared hooks useLiveDocContent and useSelectionPopover, but each renders only its own popovers, and the doc-link libraries are reached only from the side-by-side surface.">
+        <defs>
+          <marker id="a-ar-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--rose)"></path>
+          </marker>
+          <marker id="a-ar-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--teal)"></path>
+          </marker>
+          <marker id="a-ar-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--slate)"></path>
+          </marker>
+        </defs>
+
+        <path class="e-rose" marker-end="url(#a-ar-rose)" d="M 240 84 L 240 116"></path>
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 950 84 L 950 116"></path>
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 950 172 L 950 204"></path>
+        <path class="e-rose" marker-end="url(#a-ar-rose)" d="M 240 172 L 240 298"></path>
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 950 260 L 950 298"></path>
+
+        <!-- bodies → shared hooks (each body reaches both) -->
+        <path class="e-rose" marker-end="url(#a-ar-rose)" d="M 200 380 L 200 402 L 400 402 L 400 438"></path>
+        <path class="e-rose" marker-end="url(#a-ar-rose)" d="M 300 380 L 300 418 L 690 418 L 690 438"></path>
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 890 380 L 890 402 L 780 402 L 780 438"></path>
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 800 380 L 800 432 L 490 432 L 490 438"></path>
+
+        <!-- bodies → their own popovers -->
+        <path class="e-rose" marker-end="url(#a-ar-rose)" d="M 130 380 L 130 576"></path>
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 980 380 L 980 540 L 700 540 L 700 576"></path>
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 1040 380 L 1040 556 L 960 556 L 960 576"></path>
+
+        <!-- hooks → shared libs -->
+        <path class="e-slate" marker-end="url(#a-ar-slate)" d="M 400 514 L 400 674"></path>
+        <path class="e-slate" marker-end="url(#a-ar-slate)" d="M 620 514 L 620 552 L 480 552 L 480 674"></path>
+
+        <!-- side-by-side body → doc-link libs only -->
+        <path class="e-teal" marker-end="url(#a-ar-teal)" d="M 1120 380 L 1120 656 L 930 656 L 930 674"></path>
+
+        <!-- Row A: routes -->
+        <g class="n-rose">
+          <rect x="70" y="30" width="340" height="54" rx="6"></rect>
+          <text class="n-path" x="240" y="52" text-anchor="middle">src/app/doc/[slug]/page.tsx</text>
+          <text class="n-meta" x="240" y="70" text-anchor="middle">route</text>
+        </g>
+        <g class="n-teal">
+          <rect x="760" y="30" width="380" height="54" rx="6"></rect>
+          <text class="n-path" x="950" y="52" text-anchor="middle">src/app/side-by-side/[left]/[right]/page.tsx</text>
+          <text class="n-meta" x="950" y="70" text-anchor="middle">route</text>
+        </g>
+
+        <!-- Row B: shells -->
+        <g class="n-rose">
+          <rect x="100" y="116" width="280" height="56" rx="6"></rect>
+          <text class="n-path" x="240" y="140" text-anchor="middle">src/components/DocView.tsx</text>
+          <text class="n-meta" x="240" y="158" text-anchor="middle">holds scrub state</text>
+        </g>
+        <g class="n-teal">
+          <rect x="800" y="116" width="300" height="56" rx="6"></rect>
+          <text class="n-path" x="950" y="140" text-anchor="middle">sidebyside/SideBySideView.tsx</text>
+          <text class="n-meta" x="950" y="158" text-anchor="middle">owns group + link state</text>
+        </g>
+
+        <!-- Row C -->
+        <g class="n-teal">
+          <rect x="810" y="204" width="280" height="56" rx="6"></rect>
+          <text class="n-path" x="950" y="228" text-anchor="middle">sidebyside/DocColumn.tsx</text>
+          <text class="n-meta" x="950" y="246" text-anchor="middle">one per column · read / write</text>
+        </g>
+
+        <!-- Row D: the two bodies -->
+        <g class="n-rose">
+          <rect x="70" y="298" width="340" height="82" rx="7"></rect>
+          <text class="n-path" x="240" y="324" text-anchor="middle" style="font-size:13.5px;">src/components/DocReadingBody.tsx</text>
+          <text class="n-meta" x="240" y="344" text-anchor="middle">56 code lines · 5 props</text>
+          <text class="n-meta" x="240" y="364" text-anchor="middle">annotates. no flag.</text>
+        </g>
+        <g class="n-teal">
+          <rect x="760" y="298" width="380" height="82" rx="7"></rect>
+          <text class="n-path" x="950" y="324" text-anchor="middle" style="font-size:13.5px;">sidebyside/SideBySideDocBody.tsx</text>
+          <text class="n-meta" x="950" y="344" text-anchor="middle">200 code lines · 14 props</text>
+          <text class="n-meta" x="950" y="364" text-anchor="middle">links. no flag.</text>
+        </g>
+
+        <!-- Row E: shared hooks -->
+        <g class="n-slate">
+          <rect x="290" y="438" width="290" height="76" rx="7"></rect>
+          <text class="n-path" x="435" y="466" text-anchor="middle">lib/use-live-doc-content.ts</text>
+          <text class="n-meta" x="435" y="486" text-anchor="middle">157 lines · the live tap</text>
+          <text class="n-meta" x="435" y="504" text-anchor="middle">connection · setContent · §14g</text>
+        </g>
+        <g class="n-slate">
+          <rect x="610" y="438" width="290" height="76" rx="7"></rect>
+          <text class="n-path" x="755" y="466" text-anchor="middle">lib/use-selection-popover.ts</text>
+          <text class="n-meta" x="755" y="486" text-anchor="middle">118 lines · the gesture</text>
+          <text class="n-meta" x="755" y="504" text-anchor="middle">pending · re-resolve · placement</text>
+        </g>
+
+        <!-- Row F: popovers -->
+        <g class="n-rose">
+          <rect x="70" y="576" width="300" height="56" rx="6"></rect>
+          <text class="n-path" x="220" y="600" text-anchor="middle">annotation/AnnotationPopover</text>
+          <text class="n-meta" x="220" y="618" text-anchor="middle">reachable only from rose</text>
+        </g>
+        <g class="n-teal">
+          <rect x="570" y="576" width="260" height="56" rx="6"></rect>
+          <text class="n-path" x="700" y="600" text-anchor="middle">sidebyside/DocLinkPopover</text>
+          <text class="n-meta" x="700" y="618" text-anchor="middle">reachable only from teal</text>
+        </g>
+        <g class="n-teal">
+          <rect x="850" y="576" width="240" height="56" rx="6"></rect>
+          <text class="n-path" x="970" y="600" text-anchor="middle">DocLinkChooser</text>
+          <text class="n-meta" x="970" y="618" text-anchor="middle">reachable only from teal</text>
+        </g>
+
+        <!-- Row G: two lib groups -->
+        <rect class="grp-box" x="70" y="674" width="620" height="164" rx="8"></rect>
+        <text class="grp-title grp-lbl" x="92" y="698">src/lib/ — reached through the shared hooks</text>
+        <g class="chip-slate">
+          <rect x="92" y="712" width="166" height="30" rx="4"></rect>
+          <text class="chip-t" x="175" y="732" text-anchor="middle">tiptap-schema</text>
+          <rect x="272" y="712" width="156" height="30" rx="4"></rect>
+          <text class="chip-t" x="350" y="732" text-anchor="middle">ydoc-render</text>
+          <rect x="442" y="712" width="226" height="30" rx="4"></rect>
+          <text class="chip-t" x="555" y="732" text-anchor="middle">pending-annotation-ext</text>
+          <rect x="92" y="754" width="190" height="30" rx="4"></rect>
+          <text class="chip-t" x="187" y="774" text-anchor="middle">quote-occurrences</text>
+          <rect x="296" y="754" width="190" height="30" rx="4"></rect>
+          <text class="chip-t" x="391" y="774" text-anchor="middle">popover-placement</text>
+        </g>
+        <text class="edge-label grp-lbl" x="92" y="812" style="font-size:11.5px;">Both views. One implementation, no flag deciding which behaviour to run.</text>
+
+        <rect class="grp-box" x="730" y="674" width="380" height="164" rx="8" style="stroke:var(--teal); opacity:0.55;"></rect>
+        <text class="grp-title" x="752" y="698" style="fill:var(--teal);">src/lib/ — side-by-side only</text>
+        <g class="chip-teal">
+          <rect x="752" y="712" width="200" height="30" rx="4"></rect>
+          <text class="chip-t" x="852" y="732" text-anchor="middle">doc-link-extension</text>
+          <rect x="752" y="754" width="180" height="30" rx="4"></rect>
+          <text class="chip-t" x="842" y="774" text-anchor="middle">doc-link-anchor</text>
+        </g>
+        <text class="edge-label lbl-teal" x="752" y="812" style="font-size:11.5px;">No longer on the reading</text>
+        <text class="edge-label lbl-teal" x="752" y="828" style="font-size:11.5px;">view's import path at all.</text>
+      </svg>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <caption>Interactions — after</caption>
+        <thead>
+          <tr><th scope="col">Between</th><th scope="col">What crosses</th><th scope="col">Consequence</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="who who-slate">body<br>→ both hooks</td>
+            <td class="flow">editorRef</td>
+            <td class="note">Declared by the component and passed <em>into</em> both hooks; <code>useLiveDocContent</code> fills it. If either hook created it, the other would need a forward reference to state that doesn't exist yet — the shape React's <code>react-hooks/refs</code> rule rejects.</td>
+          </tr>
+          <tr>
+            <td class="who who-slate">useLiveDocContent<br>→ body</td>
+            <td class="flow">onSelectionUpdate → capture<br>onContentPushed → reresolve</td>
+            <td class="note">The old single-file choke point survives as a contract. Reached through a ref refreshed each render, which also fixes a latent staleness the old <code>applyUpdate</code> closure had.</td>
+          </tr>
+          <tr>
+            <td class="who who-teal">SideBySideDocBody<br>→ itself</td>
+            <td class="flow">onContentPushed → reresolve + syncDocLinks<br>onEditorCreated → syncDocLinks<br>onHitRef → click routing</td>
+            <td class="note">Doc-link resolution is added on top of the shared push, in the only file that has doc links.</td>
+          </tr>
+          <tr>
+            <td class="who who-rose">DocReadingBody<br>→ its popover</td>
+            <td class="flow">selection.pending<br>selection.placement</td>
+            <td class="note">Its own state. Nothing the side-by-side surface renders can reach it, so a change over there cannot move it.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="metrics">
+      <table>
+        <caption>What each view carries</caption>
+        <thead>
+          <tr>
+            <th scope="col">Reading view (<code>/doc/[slug]</code>)</th>
+            <th scope="col" class="num">Before</th>
+            <th scope="col" class="num">After</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Props on the body component it mounts</td><td class="num">17</td><td class="num">5</td></tr>
+          <tr><td>Lines in that component</td><td class="num">687</td><td class="num">77</td></tr>
+          <tr><td>Doc-link libraries on its import path</td><td class="num">2</td><td class="num">0</td></tr>
+          <tr><td>Popover components it can render</td><td class="num">3</td><td class="num">1</td></tr>
+          <tr><td>State fields shared with the other view</td><td class="num">1</td><td class="num">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="closing">
+    <h2>What the colours are actually showing</h2>
+    <p>
+      In the first diagram every rose line and every teal line passes through the same amber box. That is
+      not a drawing artefact — it is the arrangement. <strong>The reading view mounted a component carrying
+      twelve props of doc-link machinery it never used</strong>, and the two views shared one
+      <code>pending</code> field, which is precisely how a doc-link change mispositioned annotations on a
+      page it never touched.
+    </p>
+    <p>
+      In the second, rose and teal never meet. They converge only on slate — the live tap and the selection
+      gesture, the parts that are <em>identical</em> rather than merely similar. That is the same rule the
+      write column already followed: <code>CollabEditorBody.tsx</code> is reused by
+      <code>DocColumn</code> unchanged, because the write surface wanted the same behaviour rather than a
+      variation of it.
+    </p>
+    <p>
+      The cost is visible too. What was one file readable top to bottom is now a contract across three, and
+      the shared <code>editorRef</code> is a piece of load-bearing structure a reader has to understand.
+      That is the trade: more indirection, in exchange for two surfaces that can no longer break each other.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

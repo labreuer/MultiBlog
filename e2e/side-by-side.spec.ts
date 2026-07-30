@@ -19,7 +19,7 @@ import {
 /**
  * Selects an exact substring in a contenteditable identified by aria-label,
  * without deleting it — the read-mode column's doc-link-creation trigger
- * (LiveDocBody's onSelectionUpdate). Same recipe as fixtures.ts's own
+ * (SideBySideDocBody's onSelectionUpdate). Same recipe as fixtures.ts's own
  * selectTextInBody, generalized over the label since this page's two
  * columns don't share the default "Post body" name (§14f).
  */
@@ -519,7 +519,7 @@ test.describe("side-by-side group bar", () => {
 
       // The pulse effect queries the live editor's actual decorated DOM at
       // the instant activeGroupId changes — selecting before the read
-      // column has synced (LiveDocBody's `ready`/staticBody swap, §12g)
+      // column has synced (SideBySideDocBody's `ready`/staticBody swap, §12g)
       // races against decorations that don't exist yet, same class of
       // issue CLAUDE.md's onFirstRender-isn't-synced gotcha describes for
       // the write column.

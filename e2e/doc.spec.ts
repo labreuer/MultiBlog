@@ -108,7 +108,7 @@ test("a reader's already-open tab sees an author's edit with no reload", async (
   await page.keyboard.press("End");
   await page.keyboard.type(addition);
 
-  // No readerPage.reload() anywhere above or below — LiveDocBody's read-only
+  // No readerPage.reload() anywhere above or below — DocReadingBody's read-only
   // Hocuspocus tap is what has to deliver this.
   await expect(readerPage.getByText(addition.trim())).toBeVisible({ timeout: 15_000 });
 });
@@ -125,7 +125,7 @@ test.describe("annotations", () => {
     await expect(bodyEditor(readerPage)).toBeVisible();
     // The live tap's initial sync pushes its own setContent through the
     // editor, which would silently collapse a selection made before it
-    // lands (LiveDocBody's own comment on `synced`) — wait it out first.
+    // lands (DocReadingBody's own comment on `synced`) — wait it out first.
     await expect(readerPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
     await selectTextInBody(readerPage, QUOTED_TEXT);
 
@@ -171,7 +171,7 @@ test.describe("annotations", () => {
     await expect(bodyEditor(readerPage)).toBeVisible();
     // The live tap's initial sync pushes its own setContent through the
     // editor, which would silently collapse a selection made before it
-    // lands (LiveDocBody's own comment on `synced`) — wait it out first.
+    // lands (DocReadingBody's own comment on `synced`) — wait it out first.
     await expect(readerPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
     await selectTextInBody(readerPage, QUOTED_TEXT);
     const popup = readerPage.getByTestId("annotation-popup");
