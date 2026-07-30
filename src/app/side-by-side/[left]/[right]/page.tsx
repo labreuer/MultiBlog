@@ -93,7 +93,7 @@ export default async function SideBySidePage({
 
   // §14c — if either doc is unreadable, the whole page is forbidden rather
   // than one column beside a placeholder: this page's only purpose is
-  // comparison, and the "Compare with…" picker (§14k) only ever offers docs
+  // comparison, and the "Link to…" picker (§14k) only ever offers docs
   // the viewer can already read, so the sole way to reach a mismatched pair
   // is a shared URL.
   if (!leftReadable || !rightReadable) {

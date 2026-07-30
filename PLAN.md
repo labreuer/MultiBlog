@@ -3174,7 +3174,7 @@ link while only the quoted-text preview updated.
 
 ### 14k. Getting there
 
-A **"Compare with…"** control on `/doc/[slug]`, near the byline, listing other docs the viewer can
+A **"Link to…"** control on `/doc/[slug]`, near the byline, listing other docs the viewer can
 read and navigating to `/side-by-side/<thisDoc>/<thatDoc>`. Chosen over a two-checkbox control on
 `/docs` because `/docs` is gated on `canManageDocs`, and an `AUTHORIZED` reader — the role §12e
 exists for — never sees it.
@@ -3215,7 +3215,7 @@ Each phase leaves the app working, gated on `npx tsc --noEmit`, `npx eslint .`, 
   `Display?`, active darkening and pulse, "Show only my Links", delete-with-cascade.
 - **Phase 7** — click routing: `handleClick`, the single and multi cases, the chooser, and the
   read-versus-write return value.
-- **Phase 8** — the "Compare with…" entry point, `e2e/side-by-side.spec.ts` (plus `db-worker.ts`
+- **Phase 8** — the "Link to…" entry point, `e2e/side-by-side.spec.ts` (plus `db-worker.ts`
   helpers *and* their `handlers` entries, a `fixtures.ts` fixture, and a `sweepTestData` branch), and
   the doc updates: this section's "As built", CLAUDE.md's new gotchas (the `%2B` param encoding and
   the `attachIndexeddb`-per-database-name re-key), STYLE.md if the group bar introduces conventions.

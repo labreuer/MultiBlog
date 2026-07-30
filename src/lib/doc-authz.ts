@@ -49,7 +49,7 @@ export type ReadableDoc = { id: string; slug: string; title: string };
 // PLAN.md §14k — the same predicate canUserReadDoc checks per-row, expressed
 // instead as a `where` clause: ADMIN/EDITOR get every non-deleted doc;
 // everyone else gets SHARED docs plus their own byline-authored PRIVATE
-// ones. Backs the "Compare with…" picker on /doc/[slug] — proximity to
+// ones. Backs the "Link to…" picker on /doc/[slug] — proximity to
 // canUserReadDoc, plus this comment, is the only thing keeping the two
 // honest with each other, since Prisma has no way to share a boolean
 // predicate between a per-row check and a query filter.

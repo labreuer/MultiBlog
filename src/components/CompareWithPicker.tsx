@@ -10,7 +10,7 @@ type Props = {
   otherDocs: ReadableDoc[];
 };
 
-// PLAN.md §14k — the "Compare with…" entry point to /side-by-side, near the
+// PLAN.md §14k — the "Link to…" entry point to /side-by-side, near the
 // byline. A <select> rather than a link list: readableDocsFor can return
 // every doc a reader has access to, and a picker degrades better than a
 // wall of links at that size. Chosen over a two-checkbox control on /docs
@@ -23,9 +23,9 @@ export default function CompareWithPicker({ docId, otherDocs }: Props) {
 
   return (
     <label className={styles.picker}>
-      Compare with…
+      Link to…
       <select
-        aria-label="Compare with…"
+        aria-label="Link to…"
         defaultValue=""
         onChange={(e) => {
           const otherId = e.target.value;

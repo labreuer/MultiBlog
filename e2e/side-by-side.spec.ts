@@ -934,7 +934,7 @@ test.describe("side-by-side click routing", () => {
   });
 });
 
-// PLAN.md §14k/§14l Phase 8 — the "Compare with…" entry point.
+// PLAN.md §14k/§14l Phase 8 — the "Link to…" entry point.
 test.describe("compare with entry point", () => {
   test("picking another doc from /doc/[slug] navigates to the side-by-side pair", async ({ page }) => {
     const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Left doc." });
@@ -942,7 +942,7 @@ test.describe("compare with entry point", () => {
 
     try {
       await page.goto(`/doc/${left.id}`);
-      const picker = page.getByLabel("Compare with…");
+      const picker = page.getByLabel("Link to…");
       await expect(picker).toBeVisible();
       // The doc itself is never offered as its own comparison partner.
       await expect(picker.locator("option", { hasText: left.title })).toHaveCount(0);
@@ -974,7 +974,7 @@ test.describe("compare with entry point", () => {
 
     try {
       await readerPage.goto(`/doc/${visible.id}`);
-      const picker = readerPage.getByLabel("Compare with…");
+      const picker = readerPage.getByLabel("Link to…");
       await expect(picker).toBeVisible();
       await expect(picker.locator(`option[value="${otherVisible.id}"]`)).toHaveCount(1);
       await expect(picker.locator(`option[value="${privateDoc.id}"]`)).toHaveCount(0);
