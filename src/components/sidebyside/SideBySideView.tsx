@@ -109,7 +109,21 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
         otherDocLinksCount={initialOtherDocLinksCount}
         activeGroupId={isCreatingNew ? NEW_GROUP : activeGroupId}
         onlyMine={onlyMine}
-        onSelectGroup={setActiveGroupId}
+        onSelectGroup={(id) => {
+          setActiveGroupId(id);
+          // Selecting a group you'd previously hidden should make it visible
+          // again — otherwise the panel opens and the bar highlights it while
+          // its segments in both columns stay dark, which reads as broken
+          // rather than as "you already hid this."
+          if (id && id !== NEW_GROUP) {
+            setHiddenGroupIds((prev) => {
+              if (!prev.has(id)) return prev;
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+          }
+        }}
         onHideAll={() => {
           setHiddenGroupIds(new Set(groups.map((g) => g.id)));
           setActiveGroupId(null);

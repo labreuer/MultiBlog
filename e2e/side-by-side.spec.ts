@@ -402,6 +402,40 @@ test.describe("side-by-side group bar", () => {
     }
   });
 
+  test("selecting a hidden group from the dropdown re-checks Display?", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      const displayCheckbox = page.getByTestId("doc-link-group-panel").getByLabel("Display?");
+
+      await select.selectOption(link.groupId);
+      await displayCheckbox.uncheck();
+      await expect(highlight).toHaveCount(0);
+
+      // Deselect (closes the panel) without touching Display?, then pick the
+      // same group again from the dropdown. Regression: previously,
+      // hiddenGroupIds only ever changed via the checkbox itself, so
+      // re-selecting a hidden group opened its panel and highlighted it in
+      // the bar while its segments stayed dark — reading as broken rather
+      // than "you already hid this."
+      await select.selectOption("__none__");
+      await select.selectOption(link.groupId);
+
+      await expect(displayCheckbox).toBeChecked();
+      await expect(highlight.first()).toBeVisible();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
   test("editing the panel's name debounce-saves, and deleting the group soft-deletes its links", async ({ page }) => {
     const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
     const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
