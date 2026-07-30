@@ -169,6 +169,16 @@ export default function DocLinkGroupPanel({
           <input type="checkbox" checked={visible} disabled={!groupId} onChange={(e) => onToggleVisible(e.target.checked)} /> Display?
         </label>
         <span>{status === "saving" ? "Saving…" : status === "saved" ? "Saved" : status === "error" ? "Error" : ""}</span>
+        {/* Only for an unsaved draft (§14i) — name/text/override_color are
+            all nullable columns, so a group with none of them set is a
+            legitimate row, not an error state. Once a group exists, every
+            field already auto-saves on its own onChange; there's nothing
+            left for an explicit Save to do. */}
+        {!groupId && (
+          <button type="button" onClick={() => void flush()} disabled={status === "saving"}>
+            Save
+          </button>
+        )}
         <button type="button" className={styles.deleteButton} onClick={handleDelete} disabled={!groupId}>
           Delete
         </button>

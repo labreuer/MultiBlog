@@ -338,6 +338,42 @@ test.describe("side-by-side group bar", () => {
     }
   });
 
+  test("switching the dropdown to a different group updates the panel's fields, not just its visibility", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    // createTestDocLink names each new group after its quotedText, so these
+    // two groups start with distinct, known names ("brown fox" / "quick
+    // brown") to tell apart in the panel.
+    const groupA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+    const groupB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "quick brown" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      const panel = page.getByTestId("doc-link-group-panel");
+      const nameInput = panel.getByPlaceholder("Group name");
+
+      await select.selectOption(groupA.groupId);
+      await expect(nameInput).toHaveValue("brown fox");
+
+      // Regression: without a `key` on <DocLinkGroupPanel>, React reuses
+      // the same component instance across groups (same JSX position), so
+      // its name/text/overrideColor state — only ever initialized once,
+      // from the initial* props — kept showing group A's fields here.
+      await select.selectOption(groupB.groupId);
+      await expect(nameInput).toHaveValue("quick brown");
+
+      await select.selectOption(groupA.groupId);
+      await expect(nameInput).toHaveValue("brown fox");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(groupA.groupId);
+      await deleteTestDocLinkGroup(groupB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
   test("unchecking Display? hides the group's highlight; selecting darkens it", async ({ page }) => {
     const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
     const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
@@ -415,6 +451,102 @@ test.describe("side-by-side group bar", () => {
     } finally {
       await page.goto("about:blank").catch(() => {});
       if (createdGroupId) await deleteTestDocLinkGroup(createdGroupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("New Doc Link Group saves with a null name, and becomes active so the next selection joins it instead of making a second group", async ({
+    page,
+  }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: RIGHT_BODY });
+    let createdGroupId: string | null = null;
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      // Wait for the live tap to connect before touching either body — the
+      // aria-labelled textbox doesn't exist yet while the pre-connection
+      // static fallback is still showing (§14g).
+      await expect(page.getByRole("textbox", { name: "Left doc body" })).toContainText(LEFT_BODY);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+
+      // Open the panel and save with both name and description left blank —
+      // doc_link_group.name/text are nullable columns, so a group with
+      // neither set is a legitimate row, not an error state. Typing
+      // triggers the usual debounced autosave; with nothing typed, the
+      // panel's explicit Save button is the only way to create it.
+      await select.selectOption({ label: "New Doc Link Group" });
+      const panel = page.getByTestId("doc-link-group-panel");
+      await panel.getByRole("button", { name: "Save" }).click();
+      await expect(panel.getByText("Saved")).toBeVisible({ timeout: 5_000 });
+      createdGroupId = await select.locator("option", { hasText: "(untitled)" }).getAttribute("value");
+      expect(createdGroupId).not.toBeNull();
+
+      // §14l's own dropdown swap already proves a group is active; the
+      // popover's group note is what proves *creating a link* now joins it
+      // rather than spinning up a second group (§14i).
+      await selectTextByAriaLabel(page, "Left doc body", "brown fox");
+      const popup = page.getByTestId("doc-link-popup");
+      await expect(popup).toBeVisible();
+      await expect(popup).toContainText("Added to the selected group.");
+      await popup.getByRole("button", { name: "Save" }).click();
+      await expect(popup).not.toBeVisible();
+
+      await expect.poll(() => countDocLinks(left.id)).toBe(1);
+      await expect.poll(() => getDocLinkGroupIds(left.id)).toEqual([createdGroupId]);
+
+      // Still exactly one group in the dropdown — the link didn't spawn a
+      // second one.
+      await expect(select.locator("option")).toHaveCount(
+        // "Doc Link Groups"/"Hide all Groups" + the one real group + "New Doc Link Group"
+        3,
+      );
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      if (createdGroupId) await deleteTestDocLinkGroup(createdGroupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("creating a doc link while 'New Doc Link Group' is selected but not yet saved succeeds", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    let groupIds: string[] = [];
+
+    try {
+      // 1. Open a side-by-side pair.
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      await expect(page.getByRole("textbox", { name: "Left doc body" })).toContainText(LEFT_BODY);
+
+      // 2. Select "New Doc Link Group" — its panel opens, unsaved (no real
+      // group id exists yet, only the NEW_GROUP sentinel is "active").
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      await select.selectOption({ label: "New Doc Link Group" });
+      await expect(page.getByTestId("doc-link-group-panel")).toBeVisible();
+
+      // 3. Without saving that draft, try to create a doc link.
+      await selectTextByAriaLabel(page, "Left doc body", "brown fox");
+      const popup = page.getByTestId("doc-link-popup");
+      await expect(popup).toBeVisible();
+      await popup.getByRole("button", { name: "Save" }).click();
+
+      // The popup should close on success — if it's still open, Save
+      // failed (e.g. the NEW_GROUP sentinel "__new__" got sent to the
+      // server as a real groupId and createDocLink rejected it with
+      // "Group not found").
+      await expect(popup).not.toBeVisible({ timeout: 5_000 });
+      await expect(popup.locator("text=Group not found")).toHaveCount(0);
+
+      await expect.poll(() => countDocLinks(left.id)).toBe(1);
+      groupIds = await getDocLinkGroupIds(left.id);
+      expect(groupIds).toHaveLength(1);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const groupId of groupIds) {
+        await deleteTestDocLinkGroup(groupId);
+      }
       await deleteTestDoc(left.id);
       await deleteTestDoc(right.id);
     }

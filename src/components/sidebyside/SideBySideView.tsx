@@ -47,6 +47,17 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
   const isCreatingNew = activeGroupId === NEW_GROUP;
   const activeGroup = isCreatingNew ? null : groups.find((g) => g.id === activeGroupId) ?? null;
 
+  // While "New Doc Link Group" is selected but its panel hasn't saved yet,
+  // `activeGroupId` holds the NEW_GROUP sentinel ("__new__") — a real value
+  // for the *bar's* dropdown to render, but not a real group id. Each
+  // DocColumn below must see `null` instead: it forwards activeGroupId
+  // straight into DocLinkPopover's `groupId` on save, and the sentinel
+  // would otherwise be sent to createDocLink, which fails with "Group not
+  // found" (there's no row with that id). Passing null falls through to
+  // the popover's own "no group selected" path, which creates its own new
+  // group — the same thing selecting nothing at all does.
+  const columnActiveGroupId = isCreatingNew ? null : activeGroupId;
+
   const docLinksFor = useMemo(
     () => (docId: string): DocLinkInput[] => {
       const out: DocLinkInput[] = [];
@@ -107,6 +118,12 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       />
       {(activeGroup || isCreatingNew) && (
         <DocLinkGroupPanel
+          // Forces a remount on every dropdown switch — without this,
+          // React reuses the same component instance across groups (same
+          // JSX position), and its name/text/overrideColor state (only
+          // ever initialized once, from the initial* props) keeps showing
+          // whichever group was active before instead of resetting.
+          key={activeGroup?.id ?? "new"}
           groupId={activeGroup?.id ?? null}
           initialName={activeGroup?.name ?? null}
           initialText={activeGroup?.text ?? null}
@@ -143,7 +160,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           userName={userName}
           userColor={userColor}
           docLinks={docLinksFor(left.docId)}
-          activeGroupId={activeGroupId}
+          activeGroupId={columnActiveGroupId}
           onLinkCreated={(link) => appendLinkForDoc(left.docId, link)}
           onLinkUpdated={updateLink}
           onLinkDeleted={deleteLink}
@@ -155,7 +172,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           userName={userName}
           userColor={userColor}
           docLinks={docLinksFor(right.docId)}
-          activeGroupId={activeGroupId}
+          activeGroupId={columnActiveGroupId}
           onLinkCreated={(link) => appendLinkForDoc(right.docId, link)}
           onLinkUpdated={updateLink}
           onLinkDeleted={deleteLink}
