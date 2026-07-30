@@ -31,7 +31,7 @@ type Props = {
   onDeleted?: () => void;
   onCancel: () => void;
   // Fired on every checkbox/swatch change, before Save — lets the caller
-  // (LiveDocBody, editing mode only) paint the doc's highlight in the color
+  // (SideBySideDocBody, editing mode only) paint the doc's highlight in the color
   // being picked without waiting for a round trip. Persistence still only
   // happens when Save is actually clicked.
   onColorPreview?: (overrideColor: string | null) => void;

@@ -66,7 +66,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
   const canEdit = await canUserEditDoc(session.user.id, session.user.role, doc.id);
   const otherDocs = (await readableDocsFor(session.user.id, session.user.role)).filter((d) => d.id !== doc.id);
 
-  // bodyJSON seeds LiveDocBody's editor so its first paint is identical to
+  // bodyJSON seeds DocReadingBody's editor so its first paint is identical to
   // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
   // what's shown until that editor reports ready.
   let bodyJSON: JSONContent = EMPTY_DOC;
@@ -78,7 +78,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
     // decode-from-ydoc fallback (§12d) — prose_json is still null because no
     // store debounce has fired yet, e.g. a doc that was created but never
     // edited. A scratch Y.Doc decoded once for this render, then discarded;
-    // LiveDocBody below opens the real live connection.
+    // DocReadingBody below opens the real live connection.
     const row = await prisma.ydoc.findUnique({ where: { id: ydocIdForDoc(doc.id) }, select: { ydoc: true } });
     const scratch = new Y.Doc();
     if (row) Y.applyUpdate(scratch, row.ydoc);

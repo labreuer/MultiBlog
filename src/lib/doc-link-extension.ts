@@ -65,7 +65,7 @@ export type DocLinkOptions = {
 //
 // Resolving stored anchors against the current document (findQuoteOccurrences,
 // the drift policy in doc-link-anchor.ts) happens OUTSIDE this plugin, at the
-// single content-change choke point in the caller (LiveDocBody's setContent
+// single content-change choke point in the caller (SideBySideDocBody's setContent
 // handler) — decorations() below runs on every view update including bare
 // cursor moves, so an O(n·m) re-find inside it would be a per-keystroke path.
 // This plugin only ever draws from `links`, which already carry positions.

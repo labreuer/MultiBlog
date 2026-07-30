@@ -11,7 +11,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 // position, so a naive from+len window undercounts there).
 //
 // Shared between server/ydoc-hooks.ts's handleApplyAnnotationMark (walking a
-// plain prosemirror-model Node built server-side) and LiveDocBody.tsx's
+// plain prosemirror-model Node built server-side) and useSelectionPopover's
 // pending-selection re-resolution (walking a live editor's ProseMirror
 // state.doc) — both are PMNode instances with the same textBetween/
 // content.size shape, so one implementation serves both call sites without

@@ -11,7 +11,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 type Awareness = HocuspocusProvider["awareness"];
 
 // PLAN.md §13i — exposes the doc reading view's own awareness object
-// (LiveDocBody's read-only Hocuspocus connection) to the annotation tree,
+// (DocReadingBody's read-only Hocuspocus connection) to the annotation tree,
 // which is a sibling in page.tsx, not a child — same cross-tree problem
 // AnnotationMoveProvider already solves for "Move to bottom", solved the
 // same way here for a different signal: "who's currently composing an

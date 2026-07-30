@@ -39,7 +39,7 @@ type Props = {
   // generally, so a column's aria-label is fixed at mount rather than
   // reactive.
   ariaLabel?: string;
-  // See LiveDocBody's identical prop — PLAN.md §14f. The write column keeps
+  // Matches the read column's own suppression — PLAN.md §14f. The write column keeps
   // the `annotation` mark registered (dropping it would strip existing
   // anchors the moment anyone typed) but paints over its highlight the same
   // way the read column does.

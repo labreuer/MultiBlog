@@ -13,7 +13,7 @@ export type PendingRange = { from: number; to: number; color: string } | null;
 // is what keeps the source text visibly marked while that's true.
 export const pendingAnnotationKey = new PluginKey<PendingRange>("pendingAnnotation");
 
-// Dispatched by LiveDocBody whenever the pending range changes (a fresh
+// Dispatched by useSelectionPopover whenever the pending range changes (a fresh
 // selection, or a re-resolution after a live update moved the text) — the
 // meta-tagged transaction is what `apply` below reads instead of
 // recomputing state from the document itself.
@@ -37,7 +37,7 @@ export const PendingAnnotation = Extension.create({
             }
             // A normal (non-setContent-replacing-everything) edit — map the
             // range through it so the highlight tracks its text. This is a
-            // best-effort convenience only: LiveDocBody's explicit
+            // best-effort convenience only: useSelectionPopover's explicit
             // textBetween re-verification (§13f) is what actually catches
             // the case a remote update's full-document setContent call
             // defeats this mapping.

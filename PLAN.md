@@ -3410,3 +3410,54 @@ Smaller implementation notes:
   `where` clause instead of a per-row check** — ADMIN/EDITOR get every non-deleted doc in one
   branch; everyone else gets an `OR` array built from `canViewDocs`/`canManageDocs`, empty (and
   therefore an empty result, not an error) for a role that satisfies neither.
+
+### 14p. Splitting the reading surface
+
+The read column arrived by reusing `LiveDocBody`, `/doc/[slug]`'s reading view, and teaching it a
+`selectionUi` flag. That was the wrong reuse boundary, and the size of the change said so: on the
+branch that built §14, `CollabEditorBody` — reused *unchanged* by the write column — grew by 19
+lines, while `LiveDocBody` grew by 433, from 297 lines and 5 props to 687 and 17. Both are reuse.
+The difference is that the write column wanted the same thing the editor already did, and the read
+column wanted a variation of what the reading view already did.
+
+**Reuse is right where the second consumer wants the same behavior, and wrong where it wants a
+variation** — which is the rule §12o had already applied in the other direction, forking
+`AnnotatableArticle` rather than branching it on `target.kind` "touching a component that renders on
+every published post". Branching `LiveDocBody` on `selectionUi` was the same move §12o declined,
+made without noticing it was the same move.
+
+The cost was not hypothetical. `pending` fed both `AnnotationPopover` and `DocLinkPopover`, so
+switching the doc-link popover to `position: fixed` silently mispositioned annotations on
+`/doc/[slug]` by the scroll offset, with every test still green (§14o's own bug log records it).
+That is what a shared state field across two surfaces buys: a change to one is a change to both,
+including the changes nobody intended.
+
+**What is shared now is the part that is genuinely identical, and nothing else:**
+
+- `useLiveDocContent` (`src/lib/use-live-doc-content.ts`) — the live tap. The Hocuspocus connection,
+  `setContent` on every remote update, `ready`/`synced`/`error`, and §14g's owned-versus-hoisted
+  lifecycle with the different teardown each needs. This is the subtlest code either surface runs
+  and the one part worth never writing twice.
+- `useSelectionPopover` (`src/lib/use-selection-popover.ts`) — the selection gesture: the pending
+  range, its decoration, the §13f re-resolution after a content push, and §14i's placement. Selection
+  and placement are one hook rather than two because they are mutually dependent — placement needs
+  the anchor the selection provides, and capturing a selection must seed a provisional placement in
+  the same React batch so a popover never renders without a position. Splitting them yields a cycle,
+  not a layering.
+
+`DocReadingBody` and `SideBySideDocBody` are then siblings over those, each naming exactly one
+surface's behavior. `selectionUi`, `suppressAnnotations`, and the optional `ydoc`/`provider` pair all
+disappear: the reading view always annotates and always owns its connection, the side-by-side column
+always links and always borrows one, and neither carries a flag saying which it is. §14g's "always
+supplied together; never toggled on one instance" stops being a comment and becomes the type.
+
+**One structural detail worth naming, because it is the thing that makes the split work.** Both hooks
+need the editor ref, and if either created it the other would need a forward reference to state that
+does not exist yet — the shape React's `react-hooks/refs` rule correctly rejects. The caller declares
+`editorRef` and passes it to both; `useLiveDocContent` populates it. Neither hook depends on the
+other, and the callbacks each surface hands the content hook (`capture`, `reresolve`, `syncDocLinks`)
+are ordinary values by the time they are passed.
+
+Not changed, deliberately: `AnnotatableArticle` stays the post-side sibling it has been since §12o.
+Three surfaces now copy the same *interaction* shape while sharing only what is literally the same
+code, which is the arrangement §12o was reaching for and this section finishes.
