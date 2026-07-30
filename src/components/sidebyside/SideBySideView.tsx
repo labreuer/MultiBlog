@@ -179,7 +179,13 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           }}
         />
       )}
-      <div className={styles.columns}>
+      {/* data-popover-bounds — the rect a doc-link popover is kept inside
+          (popoverBoundsFor, src/lib/popover-placement.ts). Marked with an
+          attribute rather than threaded down as a prop through DocColumn:
+          LiveDocBody has no business knowing this page's layout, only that
+          *some* ancestor may constrain it, and /doc/[slug] marks nothing at
+          all and correctly falls back to the viewport. */}
+      <div className={styles.columns} data-popover-bounds>
         <DocColumn
           {...left}
           side="left"

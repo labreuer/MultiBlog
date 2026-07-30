@@ -9,6 +9,7 @@ import { renderYdocDoc } from "@/lib/ydoc-render";
 import { PendingAnnotation, setPendingAnnotation } from "@/lib/pending-annotation-extension";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { DocLink, setDocLinks, type ResolvedDocLink } from "@/lib/doc-link-extension";
+import { placePopover, popoverBoundsFor, POPOVER_GAP, type PopoverPlacement } from "@/lib/popover-placement";
 import { createDocLinkResolver, captureAnchor, type DocLinkInput } from "@/lib/doc-link-anchor";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import DocLinkPopover from "./sidebyside/DocLinkPopover";
@@ -16,13 +17,26 @@ import DocLinkChooser from "./sidebyside/DocLinkChooser";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import proseStyles from "@/styles/prose.module.css";
 
+// No top/left: every open popover's position is derived by the one placement
+// effect below, from the anchor's *document* position rather than from
+// coordinates frozen at open time — see `placement`.
 type PendingSelection = {
   from: number;
   to: number;
   quotedText: string;
-  top: number;
-  left: number;
 };
+
+/**
+ * The preferred (unclamped) spot for a popover about to open at `pos` — good
+ * enough to render at for one layout pass, which is what makes the measured
+ * placement possible: the popover has to exist in the DOM before its size can
+ * be read. Deliberately skips clamping rather than guessing a size, so the
+ * only thing ever painted is either this or the fully-measured result.
+ */
+function provisionalPlacement(liveEditor: Editor, pos: number): PopoverPlacement {
+  const coords = liveEditor.view.coordsAtPos(pos);
+  return { top: coords.bottom + POPOVER_GAP, left: coords.left + POPOVER_GAP };
+}
 
 type Props = {
   docId: string;
@@ -139,12 +153,15 @@ export default function LiveDocBody({
   // at a time. editingLink opens the same DocLinkPopover the selection
   // flow uses, but in edit mode (a linkId is present); chooser appears
   // when a click hit more than one candidate.
-  const [editingLink, setEditingLink] = useState<{ link: DocLinkInput; pos: number; top: number; left: number } | null>(
-    null,
-  );
-  const [chooser, setChooser] = useState<{ candidates: DocLinkInput[]; pos: number; top: number; left: number } | null>(
-    null,
-  );
+  const [editingLink, setEditingLink] = useState<{ link: DocLinkInput; pos: number } | null>(null);
+  const [chooser, setChooser] = useState<{ candidates: DocLinkInput[]; pos: number } | null>(null);
+  // Where whichever popover is currently open should sit — one piece of state
+  // for all three, since at most one is ever open at a time (see above). Set
+  // provisionally at open time (the unclamped preferred spot, which needs no
+  // measurement) and refined to its final clamped/flipped position by the
+  // layout effect below, before the browser paints either one.
+  const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   // The provider's initial handshake applies at least one Yjs update on
   // its own — same as any later real edit — which runs the setContent
   // call below and would silently collapse a selection made in the window
@@ -225,19 +242,8 @@ export default function LiveDocBody({
         setPendingAnnotation(liveEditor.view, null);
         return;
       }
-      // Viewport-relative, not container-relative — the popover is
-      // `position: fixed` (§14i) specifically so it isn't clipped by
-      // `.scroller`'s `overflow-y: auto` (which forces overflow-x to clip
-      // too) when a selection near a column's right edge would otherwise
-      // need to spill into the other column to stay readable.
-      const coords = liveEditor.view.coordsAtPos(to);
-      setPending({
-        from,
-        to,
-        quotedText,
-        top: coords.bottom,
-        left: coords.left,
-      });
+      setPending({ from, to, quotedText });
+      setPlacement(provisionalPlacement(liveEditor, to));
       setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
     },
   });
@@ -263,10 +269,6 @@ export default function LiveDocBody({
       const liveEditor = editorRef.current;
       const container = containerRef.current;
       if (!liveEditor || !container) return;
-      // Viewport-relative — see the onSelectionUpdate handler above.
-      const coords = liveEditor.view.coordsAtPos(pos);
-      const top = coords.bottom;
-      const left = coords.left;
 
       let narrowed = hits;
       if (activeGroupId) {
@@ -276,46 +278,65 @@ export default function LiveDocBody({
       const candidates = narrowed.map((h) => docLinks.find((l) => l.id === h.id)).filter((l): l is DocLinkInput => Boolean(l));
       if (candidates.length === 0) return;
 
+      setPlacement(provisionalPlacement(liveEditor, pos));
       if (candidates.length === 1) {
-        setEditingLink({ link: candidates[0], pos, top, left });
+        setEditingLink({ link: candidates[0], pos });
         setChooser(null);
         onDocLinkClicked?.(candidates[0].groupId);
       } else {
-        setChooser({ candidates, pos, top, left });
+        setChooser({ candidates, pos });
         setEditingLink(null);
       }
     };
   });
 
-  // A click that opens a popover here can also switch the active group
-  // (onDocLinkClicked, above) — which can open/resize the group panel
-  // above the columns and shift this column down. `pending`/`editingLink`'s
-  // top/left were measured *before* that shift (coordsAtPos is called
-  // synchronously inside the click handler, ahead of the re-render that
-  // adds the panel), so `position: fixed`'s viewport coordinates would
-  // otherwise stay pinned to the pre-shift spot — landing on whatever now
-  // occupies that vacated space instead of tracking the anchor. A
-  // `position: absolute` popover self-corrected here for free (its
-  // container moved with it); re-measuring after the shift settles is
-  // fixed's equivalent. useLayoutEffect, not useEffect, so the correction
-  // lands before the browser paints the stale position.
+  // The document position whichever open popover is anchored to. At most one
+  // is open at a time, so one anchor and one `placement` serve all three.
+  const anchorPos = pending ? pending.to : editingLink ? editingLink.pos : chooser ? chooser.pos : null;
+
+  // The single place a popover's final position is decided. Recomputes from
+  // the anchor's *current* coordinates plus the popover's *measured* size, so
+  // it clamps/flips correctly (§14i's three cases) and stays put across every
+  // way the anchor can move under it:
+  //
+  // - the group panel opening above the columns, when a click both opens a
+  //   popover and switches the active group (onDocLinkClicked, above) — the
+  //   provisional placement was computed synchronously inside the click
+  //   handler, before that reflow existed to measure
+  // - a column scrolling, which a `position: fixed` popover does not follow
+  //   on its own
+  // - the window resizing, which moves the bounds it is clamped into
+  //
+  // useLayoutEffect so the refinement lands before the browser paints the
+  // provisional spot. Note the ordering requirement this implies: the popover
+  // has to be in the DOM to be measured, so it renders at the provisional
+  // position first and is corrected within the same layout pass, rather than
+  // being placed before its first render.
+  // No need to clear `placement` when nothing is open: every render site reads
+  // it only alongside its own popover state (`pending && placement`, and so
+  // on), and whichever handler opens a popover sets the provisional placement
+  // in the same batch — so a leftover value is never the one painted.
   useLayoutEffect(() => {
-    const liveEditor = editorRef.current;
-    if (!liveEditor) return;
-    if (pending) {
-      const coords = liveEditor.view.coordsAtPos(pending.to);
-      if (coords.bottom !== pending.top || coords.left !== pending.left) {
-        setPending((prev) => (prev ? { ...prev, top: coords.bottom, left: coords.left } : prev));
-      }
+    if (anchorPos === null) return;
+    function reposition() {
+      const liveEditor = editorRef.current;
+      const el = popoverRef.current;
+      if (!liveEditor || !el || anchorPos === null) return;
+      const anchor = liveEditor.view.coordsAtPos(anchorPos);
+      const { width, height } = el.getBoundingClientRect();
+      const next = placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current));
+      setPlacement((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
     }
-    if (editingLink) {
-      const coords = liveEditor.view.coordsAtPos(editingLink.pos);
-      if (coords.bottom !== editingLink.top || coords.left !== editingLink.left) {
-        setEditingLink((prev) => (prev ? { ...prev, top: coords.bottom, left: coords.left } : prev));
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-measuring in response to activeGroupId's own reflow; pending/editingLink read via current value, not tracked as triggers (they're what this effect updates)
-  }, [activeGroupId]);
+    reposition();
+    // Capture phase: a column's own `.scroller` scrolls, not the window, and
+    // a scroll event from an inner element doesn't bubble.
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
+  }, [anchorPos, activeGroupId]);
 
   // Only constructed when nothing was hoisted in — see the Props comment.
   // Declared here (rather than beside the connection effect further down)
@@ -376,16 +397,9 @@ export default function LiveDocBody({
     const occurrences = container ? findQuoteOccurrences(doc, current.quotedText) : [];
     if (occurrences.length === 1 && container) {
       const { from, to } = occurrences[0];
-      // Viewport-relative — see the onSelectionUpdate handler above.
-      const coords = liveEditor.view.coordsAtPos(to);
-      const next: PendingSelection = {
-        from,
-        to,
-        quotedText: current.quotedText,
-        top: coords.bottom,
-        left: coords.left,
-      };
+      const next: PendingSelection = { from, to, quotedText: current.quotedText };
       setPending(next);
+      setPlacement(provisionalPlacement(liveEditor, to));
       setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
     } else {
       // No unique match any more — the selected text changed underneath
@@ -569,11 +583,12 @@ export default function LiveDocBody({
       >
         <EditorContent editor={editor} />
       </div>
-      {selectionUi === "annotation" && pending && (
+      {selectionUi === "annotation" && pending && placement && (
         <AnnotationPopover
+          elementRef={popoverRef}
           docId={docId}
-          top={pending.top}
-          left={pending.left}
+          top={placement.top}
+          left={placement.left}
           from={pending.from}
           to={pending.to}
           quotedText={pending.quotedText}
@@ -587,11 +602,12 @@ export default function LiveDocBody({
           }}
         />
       )}
-      {selectionUi === "doclink" && pending && editorRef.current && (
+      {selectionUi === "doclink" && pending && placement && editorRef.current && (
         <DocLinkPopover
+          elementRef={popoverRef}
           docId={docId}
-          top={pending.top}
-          left={pending.left}
+          top={placement.top}
+          left={placement.left}
           // Recomputed from the live doc rather than carried on
           // PendingSelection — before/after/blocks are only ever needed
           // here, at the moment of creation (§14i), and captureAnchor is
@@ -610,8 +626,9 @@ export default function LiveDocBody({
           }}
         />
       )}
-      {editingLink && (
+      {editingLink && placement && (
         <DocLinkPopover
+          elementRef={popoverRef}
           // Forces a remount when the click-routing target changes —
           // without this, React reuses the same instance across links (same
           // JSX position), and its text/overrideChecked/colorValue state
@@ -624,8 +641,8 @@ export default function LiveDocBody({
           // the note and override checkbox/color frozen on the first link.
           key={editingLink.link.id}
           docId={docId}
-          top={editingLink.top}
-          left={editingLink.left}
+          top={placement.top}
+          left={placement.left}
           // Only ever reached from an anchored hit (§14j's handleClick
           // filters to l.anchored), so mark is never actually null here —
           // asserted rather than fabricated, since a fallback empty mark
@@ -650,15 +667,16 @@ export default function LiveDocBody({
           onColorPreview={(overrideColor) => onDocLinkColorPreview?.(editingLink.link.id, overrideColor)}
         />
       )}
-      {chooser && (
+      {chooser && placement && (
         <DocLinkChooser
-          top={chooser.top}
-          left={chooser.left}
+          elementRef={popoverRef}
+          top={placement.top}
+          left={placement.left}
           candidates={chooser.candidates}
           onSelect={(link) => {
-            const { pos, top, left } = chooser;
+            const { pos } = chooser;
             setChooser(null);
-            setEditingLink({ link, pos, top, left });
+            setEditingLink({ link, pos });
             onDocLinkClicked?.(link.groupId);
           }}
           onCancel={() => setChooser(null)}

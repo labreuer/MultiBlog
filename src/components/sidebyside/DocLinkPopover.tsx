@@ -9,6 +9,10 @@ type Props = {
   docId: string;
   top: number;
   left: number;
+  // So the caller can measure this popover's rendered size — placement needs
+  // it to clamp/flip (src/lib/popover-placement.ts), and only the caller
+  // knows the bounds to clamp into.
+  elementRef?: React.Ref<HTMLDivElement>;
   mark: DocLinkMark;
   userColor: string;
   // §14h — the group currently selected in the dropdown, if any. Only
@@ -41,6 +45,7 @@ export default function DocLinkPopover({
   docId,
   top,
   left,
+  elementRef,
   mark,
   userColor,
   activeGroupId,
@@ -115,7 +120,7 @@ export default function DocLinkPopover({
   const quoted = mark.text.length > 80 ? `${mark.text.slice(0, 80)}…` : mark.text;
 
   return (
-    <div data-testid="doc-link-popup" className={styles.popover} style={{ top, left }}>
+    <div ref={elementRef} data-testid="doc-link-popup" className={styles.popover} style={{ top, left }}>
       <p className={styles.quotedText}>{isEditing ? "Editing link over" : "Linking"}: “{quoted}”</p>
       {!isEditing && (
         <p className={styles.groupNote}>

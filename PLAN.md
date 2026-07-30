@@ -3106,12 +3106,52 @@ alone, matching how a deleted doc already leaves its annotations alone.
 
 ### 14i. Creating a link
 
-Selecting text in a read-mode column opens `DocLinkPopover`, positioned from
-`coordsAtPos(selection.to)` minus the scroller's rect and then offset **0.5em right and 0.5em down**
-via a CSS `transform: translate(0.5em, 0.5em)` — note this anchors on `coords.right`, where
-`AnnotationPopover` uses `coords.left`. It carries optional `text`, an override color (§14e's
-checkbox-plus-swatch pair, which subsumes a separate Clear button), a Save button, Cancel when new,
-and Delete when editing an existing link.
+Selecting text in a read-mode column opens `DocLinkPopover`, anchored on `coordsAtPos(selection.to)`
+and offset **0.5em right and 0.5em down** from it. It carries optional `text`, an override color
+(§14e's checkbox-plus-swatch pair, which subsumes a separate Clear button), a Save button, Cancel when
+new, and Delete when editing an existing link.
+
+**Placement is `position: fixed` and computed, not `absolute` and laid out.** A `position: absolute`
+popover is clipped by its nearest scrolling ancestor, which here is the column's own `.scroller` —
+and because CSS cannot leave one axis visible while clipping the other, its `overflow-y: auto` clips
+horizontally too, cutting the popover off at the column boundary instead of letting it spill over the
+neighbouring column the way a floating popover should. `fixed` escapes the clip, at the price of
+having to keep the popover in bounds by hand, since a fixed element has no containing block to be laid
+out against. `placePopover` (`src/lib/popover-placement.ts`) is that arithmetic, in one pure function
+rather than at each of `LiveDocBody`'s three measurement sites, and the 0.5em offset above is its
+`POPOVER_GAP` — *not* a CSS `transform`, which would both double-count the gap and shift the painted
+box out from under the very `left` the clamp just computed.
+
+**Three ways it can run out of room, two different answers.** The bounds are the nearest
+`[data-popover-bounds]` ancestor — on this page the two-column grid, so a popover never strays outside
+the pair it belongs to — intersected with the viewport, falling back to the viewport alone where
+nothing is marked (`/doc/[slug]`).
+
+- **No width** → *slide* left until the right edge is inside bounds. Not a flip to the anchor's other
+  side: the popover is a large fraction of a column's width (260px of ~630px), so a flip overshoots
+  the left edge about as readily as the preferred position overshoots the right one. Sliding can never
+  cover the anchor, because the anchor is a point on a line while the popover sits above or below that
+  whole line.
+- **No height** → *flip* above the anchor. The opposite answer for the opposite reason: sliding up
+  would drag the popover over the very text it is describing, while flipping keeps that text visible.
+- **Neither** → both, with no special case of its own. The axes are independent, and because one
+  resolves by sliding and the other by flipping, neither can undo the other.
+
+Each axis then gets a two-sided clamp. Flipping only helps when the *anchor* is inside bounds; an
+anchor scrolled out of view is arbitrarily far outside them and every candidate position inherits
+that, so without the clamp a popover left open while its column scrolls away lands thousands of pixels
+off-screen instead of pinned to the edge it left through.
+
+**The position is derived, never frozen.** State holds the anchor's *document* position; one
+`useLayoutEffect` recomputes `coordsAtPos` plus the popover's measured size on open, on `activeGroupId`
+change, and on scroll (capture phase — a column's inner scroller emits no bubbling scroll event) and
+resize. Storing coordinates instead invites the whole family of bugs where the anchor moves out from
+under a placement taken before some reflow: opening the group panel is one such reflow, and it is
+`fixed`'s equivalent of the free re-layout `absolute` used to get. The ordering this implies is worth
+naming: the popover has to be in the DOM before its size can be read, so it renders once at the
+unclamped preferred spot and is corrected within the same layout pass — never painted there.
+`AnnotationPopover` shares the same `pending` state and is therefore on the same convention; when it
+briefly was not, annotations on `/doc/[slug]` silently mispositioned while every test still passed.
 
 **Group association.** If a group is selected in the dropdown, the popover says so and the link
 joins it. If none is selected, it says a new group will be created, and on save the group and the

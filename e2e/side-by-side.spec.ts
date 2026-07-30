@@ -49,6 +49,110 @@ async function selectTextByAriaLabel(page: Page, ariaLabel: string, needle: stri
   );
 }
 
+type Rect = { left: number; right: number; top: number; bottom: number };
+
+/**
+ * Selects whichever word sits furthest along `axis` in the given editor, and
+ * returns its rect. Deliberately measured rather than named: the popover-
+ * placement cases (§14i) are about a selection with no room *left* beside or
+ * below it, and which word that is depends on where the text happens to wrap
+ * at the current viewport width — naming one made the first attempt at these
+ * tests pass or fail on the wrapping, not on the placement.
+ */
+async function selectWordAtExtreme(
+  page: Page,
+  ariaLabel: string,
+  axis: "right" | "bottom" | "bottom-right",
+): Promise<Rect> {
+  return page.evaluate(
+    ({ ariaLabel, axis }) => {
+      const root = document.querySelector(`[aria-label="${ariaLabel}"]`);
+      if (!root) throw new Error(`Editor with aria-label "${ariaLabel}" not found.`);
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      const words: { node: Node; start: number; end: number; rect: DOMRect }[] = [];
+      while ((node = walker.nextNode())) {
+        const text = node.textContent ?? "";
+        const pattern = /\S+/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(text))) {
+          const probe = document.createRange();
+          probe.setStart(node, match.index);
+          probe.setEnd(node, match.index + match[0].length);
+          const rect = probe.getBoundingClientRect();
+          // On-screen only. A long doc keeps every paragraph in the DOM, so
+          // without this the "furthest down" word is one scrolled far out of
+          // view — which is a real case placePopover clamps, but not the one
+          // these tests are about (a selection the reader can actually see).
+          if (rect.width === 0 || rect.bottom <= 0 || rect.top >= window.innerHeight) continue;
+          words.push({ node, start: match.index, end: match.index + match[0].length, rect });
+        }
+      }
+      if (words.length === 0) throw new Error(`No visible word found in "${ariaLabel}".`);
+
+      let best: { node: Node; start: number; end: number; rect: DOMRect };
+      if (axis === "right") {
+        // At the right margin *and* in the upper half of the viewport, so
+        // there is definitely room below: this axis is for isolating the
+        // horizontal case, and the rightmost word overall can easily be on the
+        // last visible line, where the vertical case fires as well.
+        const upper = words.filter((w) => w.rect.bottom < window.innerHeight / 2);
+        const pool = upper.length > 0 ? upper : words;
+        best = pool.reduce((a, b) => (b.rect.right > a.rect.right ? b : a));
+      } else if (axis === "bottom") {
+        best = words.reduce((a, b) => (b.rect.bottom > a.rect.bottom ? b : a));
+      } else {
+        // Lowest word that is *also* at the right margin. Not "lowest, then
+        // rightmost on that line": a paragraph's last line is ragged, so its
+        // rightmost word can sit far short of the margin and leave room for
+        // the popover after all — which is exactly how this case first failed
+        // to trigger.
+        const maxRight = words.reduce((max, w) => Math.max(max, w.rect.right), 0);
+        const atRightMargin = words.filter((w) => w.rect.right >= maxRight - 20);
+        best = atRightMargin.reduce((a, b) => (b.rect.bottom > a.rect.bottom ? b : a));
+      }
+      const range = document.createRange();
+      range.setStart(best.node, best.start);
+      range.setEnd(best.node, best.end);
+      const selection = window.getSelection();
+      if (!selection) throw new Error("No selection available.");
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      const { left, right, top, bottom } = best.rect;
+      return { left, right, top, bottom };
+    },
+    { ariaLabel, axis },
+  );
+}
+
+/** Scrolls a column's own `.scroller` to its end, so its last line sits at the bottom. */
+async function scrollColumnToBottom(page: Page, side: "left" | "right"): Promise<void> {
+  await page.evaluate((side) => {
+    const column = document.querySelector(`[data-side="${side}"]`);
+    if (!column) throw new Error(`No [data-side="${side}"] column.`);
+    const scroller = Array.from(column.querySelectorAll("*")).find((el) => el.scrollHeight > el.clientHeight + 1);
+    if (!scroller) throw new Error(`Column "${side}" does not scroll — is its body long enough?`);
+    scroller.scrollTop = scroller.scrollHeight;
+  }, side);
+}
+
+/** The doc-link popover's rect alongside the rect it is supposed to stay inside. */
+async function popoverGeometry(page: Page): Promise<{ popup: Rect & { width: number; height: number }; bounds: Rect }> {
+  return page.evaluate(() => {
+    const popup = document.querySelector('[data-testid="doc-link-popup"]');
+    const boundsEl = document.querySelector("[data-popover-bounds]");
+    if (!popup) throw new Error("No doc-link popup is open.");
+    if (!boundsEl) throw new Error("No [data-popover-bounds] element on the page.");
+    const p = popup.getBoundingClientRect();
+    const b = boundsEl.getBoundingClientRect();
+    return {
+      popup: { left: p.left, right: p.right, top: p.top, bottom: p.bottom, width: p.width, height: p.height },
+      bounds: { left: b.left, right: b.right, top: b.top, bottom: b.bottom },
+    };
+  });
+}
+
 test.describe("side-by-side page shell", () => {
   test("both docs render as independent, side-by-side columns", async ({ page }) => {
     const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Left doc body text." });
@@ -997,6 +1101,114 @@ test.describe("side-by-side click routing", () => {
       await page.goto("about:blank").catch(() => {});
       await deleteTestDocLinkGroup(linkA.groupId);
       await deleteTestDocLinkGroup(linkB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+});
+
+// PLAN.md §14i — keeping the popover inside the two-column grid. Three cases,
+// one per axis that can run out of room plus the both-at-once corner: no width
+// (slide left), no height (flip above), neither (both, independently).
+test.describe("side-by-side popover placement", () => {
+  // Long enough that a column scrolls, so a selection can sit at the very
+  // bottom of the viewport with no room for a popover beneath it — the
+  // vertical case is unreachable with a one-line body.
+  const LONG_BODY = Array.from(
+    { length: 40 },
+    (_, i) =>
+      `Paragraph ${i + 1} of a deliberately long document, with enough words on ` +
+      `each line that some of them wrap all the way to the right-hand edge of ` +
+      `whichever column happens to be rendering it right now.`,
+  ).join("\n\n");
+
+  // A popover that overflows its bounds is a bug regardless of which edge it
+  // escapes from, so every case asserts full containment; what differs is
+  // which overflow is *proven to have been at risk*, so a test can't pass by
+  // accident on a selection that had room all along.
+  function expectWithinBounds(g: Awaited<ReturnType<typeof popoverGeometry>>) {
+    // 1px of slack: rects are sub-pixel, and placePopover works in CSS px.
+    expect(g.popup.left).toBeGreaterThanOrEqual(g.bounds.left - 1);
+    expect(g.popup.right).toBeLessThanOrEqual(g.bounds.right + 1);
+    expect(g.popup.top).toBeGreaterThanOrEqual(g.bounds.top - 1);
+    expect(g.popup.bottom).toBeLessThanOrEqual(g.bounds.bottom + 1);
+  }
+
+  test("no room to the right: the popover slides left instead of overflowing the column pair", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LONG_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LONG_BODY });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      await expect(page.locator('[data-side="right"] [data-testid="live-doc-synced"]')).toBeAttached();
+
+      // The *right* column specifically — its right edge is the page's, so
+      // this is the case the browser edge used to cut off.
+      const anchor = await selectWordAtExtreme(page, "Right doc body", "right");
+      await expect(page.getByTestId("doc-link-popup")).toBeVisible();
+      const g = await popoverGeometry(page);
+
+      expectWithinBounds(g);
+      // Proof the slide was needed: the preferred spot would have overflowed.
+      // `anchor.right`, not `.left` — placement anchors on coordsAtPos(to),
+      // the position at the selection's *end*, which is the word's right edge.
+      expect(anchor.right + 8 + g.popup.width).toBeGreaterThan(g.bounds.right);
+      // Slid, not flipped — still below the line it belongs to.
+      expect(g.popup.top).toBeGreaterThanOrEqual(anchor.bottom);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("no room below: the popover flips above the selection", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LONG_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LONG_BODY });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      await expect(page.locator('[data-side="left"] [data-testid="live-doc-synced"]')).toBeAttached();
+
+      await scrollColumnToBottom(page, "left");
+      const anchor = await selectWordAtExtreme(page, "Left doc body", "bottom");
+      await expect(page.getByTestId("doc-link-popup")).toBeVisible();
+      const g = await popoverGeometry(page);
+
+      expectWithinBounds(g);
+      // Proof the flip was needed, and that it flipped rather than sliding up
+      // over the quote: the popover now sits entirely above the selection.
+      expect(anchor.bottom + 8 + g.popup.height).toBeGreaterThan(g.bounds.bottom);
+      expect(g.popup.bottom).toBeLessThanOrEqual(anchor.top + 1);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("no room either way: the popover slides left and flips above at once", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LONG_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LONG_BODY });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      await expect(page.locator('[data-side="right"] [data-testid="live-doc-synced"]')).toBeAttached();
+
+      // Bottom-right corner of the right column: out of room on both axes.
+      await scrollColumnToBottom(page, "right");
+      const anchor = await selectWordAtExtreme(page, "Right doc body", "bottom-right");
+      await expect(page.getByTestId("doc-link-popup")).toBeVisible();
+      const g = await popoverGeometry(page);
+
+      expectWithinBounds(g);
+      // Both preferred placements would have overflowed, and both corrections
+      // applied — the axes resolve independently, so neither undoes the other.
+      expect(anchor.right + 8 + g.popup.width).toBeGreaterThan(g.bounds.right);
+      expect(anchor.bottom + 8 + g.popup.height).toBeGreaterThan(g.bounds.bottom);
+      expect(g.popup.bottom).toBeLessThanOrEqual(anchor.top + 1);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
       await deleteTestDoc(left.id);
       await deleteTestDoc(right.id);
     }
