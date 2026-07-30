@@ -31,6 +31,8 @@ type Props = {
   docLinks: DocLinkInput[];
   activeGroupId: string | null;
   onLinkCreated: (link: DocLinkInput) => void;
+  onLinkUpdated: (link: DocLinkInput) => void;
+  onLinkDeleted: (linkId: string) => void;
 };
 
 const ARIA = {
@@ -61,6 +63,8 @@ export default function DocColumn({
   docLinks,
   activeGroupId,
   onLinkCreated,
+  onLinkUpdated,
+  onLinkDeleted,
 }: Props) {
   const [mode, setMode] = useState<Mode>("read");
   const [title, setTitle] = useState(initialTitle);
@@ -204,6 +208,8 @@ export default function DocColumn({
               docLinks={docLinks}
               activeGroupId={activeGroupId}
               onDocLinkCreated={onLinkCreated}
+              onDocLinkUpdated={onLinkUpdated}
+              onDocLinkDeleted={onLinkDeleted}
             />
           ) : (
             // Mirrors LiveDocBody's own pre-connection fallback — shown

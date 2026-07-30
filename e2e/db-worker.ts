@@ -342,6 +342,13 @@ export async function getDocLinkGroupIds(docId: string): Promise<string[]> {
   return Array.from(new Set(links.map((l) => l.docLinkGroupId)));
 }
 
+/** A single doc_link's editable fields — for asserting the §14j edit-popover flow actually persisted, not just repainted. */
+export type DocLinkFields = { text: string | null; overrideColor: string | null };
+export async function getDocLinkFields(linkId: string): Promise<DocLinkFields | null> {
+  const link = await prisma.docLink.findUnique({ where: { id: linkId }, select: { text: true, overrideColor: true } });
+  return link ?? null;
+}
+
 export type AnnotationState = {
   id: string;
   parentAnnotationId: string | null;
@@ -673,6 +680,7 @@ const handlers = {
   deleteTestDocLinkGroup,
   countDocLinks,
   getDocLinkGroupIds,
+  getDocLinkFields,
   getAnnotationStates,
   countPostCollabRows,
   createComment,

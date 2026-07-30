@@ -113,8 +113,19 @@ export type StoredDocLink = { id: string; mark: DocLinkMark | null };
 // (groupId/color/mine) — the resolved from/to positions are computed at
 // render time, never stored on this type. `color` is already the final
 // three-level cascade result (§14e: link override ?? group override ??
-// author color); callers compute that once, not per resolve.
-export type DocLinkInput = StoredDocLink & { groupId: string; color: string; mine: boolean };
+// author color); callers compute that once, not per resolve. `text` (the
+// user-entered note) and `overrideColor` (the raw, uncascaded value) are
+// carried too — §14j's click-routing needs both to prefill an existing
+// link's edit popover, which the cascaded `color` alone can't do (editing
+// would otherwise silently promote an inherited group/author color into a
+// hard per-link override).
+export type DocLinkInput = StoredDocLink & {
+  groupId: string;
+  color: string;
+  mine: boolean;
+  text: string | null;
+  overrideColor: string | null;
+};
 
 // Memoized on (doc identity, links identity) — not an optimization but load-
 // bearing (§14d step 3): the read column calls setContent, and therefore

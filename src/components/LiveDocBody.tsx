@@ -12,6 +12,7 @@ import { DocLink, setDocLinks, type ResolvedDocLink } from "@/lib/doc-link-exten
 import { createDocLinkResolver, captureAnchor, type DocLinkInput } from "@/lib/doc-link-anchor";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import DocLinkPopover from "./sidebyside/DocLinkPopover";
+import DocLinkChooser from "./sidebyside/DocLinkChooser";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -74,6 +75,11 @@ type Props = {
   // appears immediately, without a page reload (doc links have no live
   // propagation channel, §14a).
   onDocLinkCreated?: (link: DocLinkInput) => void;
+  // PLAN.md §14j — fired when an existing link's edit popover saves or is
+  // deleted, so the caller can update/remove it from the same docLinks
+  // state onDocLinkCreated appends to.
+  onDocLinkUpdated?: (link: DocLinkInput) => void;
+  onDocLinkDeleted?: (linkId: string) => void;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -110,10 +116,18 @@ export default function LiveDocBody({
   docLinks = [],
   activeGroupId = null,
   onDocLinkCreated,
+  onDocLinkUpdated,
+  onDocLinkDeleted,
 }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // PLAN.md §14j — click-routing state: at most one of these is non-null
+  // at a time. editingLink opens the same DocLinkPopover the selection
+  // flow uses, but in edit mode (a linkId is present); chooser appears
+  // when a click hit more than one candidate.
+  const [editingLink, setEditingLink] = useState<{ link: DocLinkInput; top: number; left: number } | null>(null);
+  const [chooser, setChooser] = useState<{ candidates: DocLinkInput[]; top: number; left: number } | null>(null);
   // The provider's initial handshake applies at least one Yjs update on
   // its own — same as any later real edit — which runs the setContent
   // call below and would silently collapse a selection made in the window
@@ -145,13 +159,29 @@ export default function LiveDocBody({
   // between two unrelated docs' doc/links pairs, defeating the cache.
   const resolverRef = useRef(createDocLinkResolver());
 
+  // PLAN.md §14j — a stable indirection into DocLink.configure({onHit}),
+  // refreshed every render so it always sees the current docLinks/
+  // activeGroupId/editor without forcing the editor extensions array
+  // (fixed at construction) to be recreated — the same shape §14e's own
+  // header comment describes for this exact callback. Declared here (an
+  // empty no-op initially) so it can be referenced by useEditor's config
+  // below; the real implementation is assigned once `editorRef` exists,
+  // further down.
+  const onHitRef = useRef<(hits: ResolvedDocLink[], pos: number) => void>(() => {});
+
   const editor = useEditor({
     // PendingAnnotation (PLAN.md §13f) is view-only — a decoration, not a
     // node/mark type — so appending it here doesn't touch the schema
     // docContentExtensions itself defines, and can't drift the reading
     // view's schema from the editor's or the server's. DocLink (§14e) is
-    // the same: a decoration layer, no schema change.
-    extensions: [...docContentExtensions, PendingAnnotation, DocLink],
+    // the same: a decoration layer, no schema change. Configured with a
+    // stable indirection into onHitRef (§14j) rather than reconfigured per
+    // render — useEditor reads extensions once, at construction.
+    extensions: [
+      ...docContentExtensions,
+      PendingAnnotation,
+      DocLink.configure({ onHit: (hits, pos) => onHitRef.current(hits, pos), editable: false }),
+    ],
     content: initialBodyJSON,
     editable: false,
     immediatelyRender: false,
@@ -201,6 +231,39 @@ export default function LiveDocBody({
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  // PLAN.md §14j — the real onHitRef implementation, refreshed every render
+  // so it always closes over the current docLinks/activeGroupId. Routing:
+  // narrow to the active group first when it covers any of the hits;
+  // otherwise (or with no active group) every hit is a candidate. One
+  // candidate opens its edit popover directly; several open the chooser.
+  useEffect(() => {
+    onHitRef.current = (hits, pos) => {
+      const liveEditor = editorRef.current;
+      const container = containerRef.current;
+      if (!liveEditor || !container) return;
+      const coords = liveEditor.view.coordsAtPos(pos);
+      const containerRect = container.getBoundingClientRect();
+      const top = coords.bottom - containerRect.top;
+      const left = coords.left - containerRect.left;
+
+      let narrowed = hits;
+      if (activeGroupId) {
+        const inGroup = hits.filter((h) => h.groupId === activeGroupId);
+        if (inGroup.length > 0) narrowed = inGroup;
+      }
+      const candidates = narrowed.map((h) => docLinks.find((l) => l.id === h.id)).filter((l): l is DocLinkInput => Boolean(l));
+      if (candidates.length === 0) return;
+
+      if (candidates.length === 1) {
+        setEditingLink({ link: candidates[0], top, left });
+        setChooser(null);
+      } else {
+        setChooser({ candidates, top, left });
+        setEditingLink(null);
+      }
+    };
+  });
 
   // Only constructed when nothing was hoisted in — see the Props comment.
   // Declared here (rather than beside the connection effect further down)
@@ -333,6 +396,20 @@ export default function LiveDocBody({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [pending]);
+
+  // Same outside-click dismissal as the pending-selection popover above,
+  // for the two click-routing surfaces (§14j).
+  useEffect(() => {
+    if (!editingLink && !chooser) return;
+    const handleClick = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setEditingLink(null);
+        setChooser(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [editingLink, chooser]);
 
   useEffect(() => {
     function applyUpdate() {
@@ -479,6 +556,47 @@ export default function LiveDocBody({
             setPending(null);
             if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
           }}
+        />
+      )}
+      {editingLink && (
+        <DocLinkPopover
+          docId={docId}
+          top={editingLink.top}
+          left={editingLink.left}
+          // Only ever reached from an anchored hit (§14j's handleClick
+          // filters to l.anchored), so mark is never actually null here —
+          // asserted rather than fabricated, since a fallback empty mark
+          // would render a misleading blank "Editing link over: """.
+          mark={editingLink.link.mark!}
+          userColor={userColor}
+          activeGroupId={activeGroupId}
+          linkId={editingLink.link.id}
+          initialText={editingLink.link.text}
+          initialOverrideColor={editingLink.link.overrideColor}
+          onUpdated={(patch) => {
+            const updated = { ...editingLink.link, ...patch };
+            setEditingLink(null);
+            onDocLinkUpdated?.(updated);
+          }}
+          onDeleted={() => {
+            const { id } = editingLink.link;
+            setEditingLink(null);
+            onDocLinkDeleted?.(id);
+          }}
+          onCancel={() => setEditingLink(null)}
+        />
+      )}
+      {chooser && (
+        <DocLinkChooser
+          top={chooser.top}
+          left={chooser.left}
+          candidates={chooser.candidates}
+          onSelect={(link) => {
+            const { top, left } = chooser;
+            setChooser(null);
+            setEditingLink({ link, top, left });
+          }}
+          onCancel={() => setChooser(null)}
         />
       )}
     </div>

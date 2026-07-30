@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createDocLink } from "@/app/actions/doc-links";
+import { createDocLink, updateDocLink, deleteDocLink } from "@/app/actions/doc-links";
 import type { DocLinkMark, DocLinkInput } from "@/lib/doc-link-anchor";
 import styles from "./DocLinkPopover.module.css";
 
@@ -11,30 +11,64 @@ type Props = {
   left: number;
   mark: DocLinkMark;
   userColor: string;
-  // §14h/Phase 6 — the group currently selected in the dropdown, if any.
-  // DocColumn doesn't have that concept yet (Phase 5 only), so this is
-  // always null for now and every save creates a brand-new group.
+  // §14h — the group currently selected in the dropdown, if any. Only
+  // consulted in create mode (linkId absent); editing an existing link
+  // never moves it to a different group.
   activeGroupId: string | null;
-  onCreated: (link: DocLinkInput) => void;
+  // §14j — present means this popover is editing an existing link rather
+  // than creating one: Save calls updateDocLink instead of createDocLink,
+  // a Delete button appears, and the group note (which group a *new* link
+  // would join) doesn't apply.
+  linkId?: string;
+  initialText?: string | null;
+  initialOverrideColor?: string | null;
+  onCreated?: (link: DocLinkInput) => void;
+  onUpdated?: (patch: { text: string | null; overrideColor: string | null }) => void;
+  onDeleted?: () => void;
   onCancel: () => void;
 };
 
-// PLAN.md §14i — selecting text in a read-mode column opens this. Offset
-// 0.5em right/down from the selection's own end coordinates (the module's
-// .popover transform), carrying optional text and an override color. Save
-// creates the group (if none is selected) and the link in one transaction;
-// Cancel always shows, since this component only ever handles the "new
-// link" case — editing an existing one is the click-routing work in §14j
-// (Phase 7), not this popover's concern yet.
-export default function DocLinkPopover({ docId, top, left, mark, userColor, activeGroupId, onCreated, onCancel }: Props) {
-  const [text, setText] = useState("");
-  const [overrideColor, setOverrideColor] = useState("");
+// PLAN.md §14i/§14j — selecting text in a read-mode column opens this in
+// create mode; clicking existing linked text opens it in edit mode (§14j's
+// single-hit case, or a chooser selection). Offset 0.5em right/down from
+// the selection's own end coordinates (the module's .popover transform).
+export default function DocLinkPopover({
+  docId,
+  top,
+  left,
+  mark,
+  userColor,
+  activeGroupId,
+  linkId,
+  initialText,
+  initialOverrideColor,
+  onCreated,
+  onUpdated,
+  onDeleted,
+  onCancel,
+}: Props) {
+  const [text, setText] = useState(initialText ?? "");
+  const [overrideColor, setOverrideColor] = useState(initialOverrideColor ?? "");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const isEditing = Boolean(linkId);
 
   function handleSave() {
     setError(null);
     startTransition(async () => {
+      if (linkId) {
+        const result = await updateDocLink(linkId, {
+          text: text.trim() || null,
+          overrideColor: overrideColor || null,
+        });
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        onUpdated?.({ text: text.trim() || null, overrideColor: overrideColor || null });
+        return;
+      }
+
       const result = await createDocLink({
         docId,
         mark,
@@ -46,13 +80,24 @@ export default function DocLinkPopover({ docId, top, left, mark, userColor, acti
         setError(result.error);
         return;
       }
-      onCreated({
+      onCreated?.({
         id: result.id,
         mark,
         groupId: result.groupId,
         color: overrideColor || userColor,
         mine: true,
+        text: text.trim() || null,
+        overrideColor: overrideColor || null,
       });
+    });
+  }
+
+  function handleDelete() {
+    if (!linkId) return;
+    setError(null);
+    startTransition(async () => {
+      await deleteDocLink(linkId);
+      onDeleted?.();
     });
   }
 
@@ -60,10 +105,12 @@ export default function DocLinkPopover({ docId, top, left, mark, userColor, acti
 
   return (
     <div data-testid="doc-link-popup" className={styles.popover} style={{ top, left }}>
-      <p className={styles.quotedText}>Linking: “{quoted}”</p>
-      <p className={styles.groupNote}>
-        {activeGroupId ? "Added to the selected group." : "A new doc link group will be created."}
-      </p>
+      <p className={styles.quotedText}>{isEditing ? "Editing link over" : "Linking"}: “{quoted}”</p>
+      {!isEditing && (
+        <p className={styles.groupNote}>
+          {activeGroupId ? "Added to the selected group." : "A new doc link group will be created."}
+        </p>
+      )}
       <textarea
         className={styles.textInput}
         placeholder="Optional note"
@@ -93,6 +140,11 @@ export default function DocLinkPopover({ docId, top, left, mark, userColor, acti
         <button type="button" onClick={onCancel} disabled={pending}>
           Cancel
         </button>
+        {isEditing && (
+          <button type="button" onClick={handleDelete} disabled={pending}>
+            Delete
+          </button>
+        )}
       </div>
       {error && <p className={styles.error}>{error}</p>}
     </div>

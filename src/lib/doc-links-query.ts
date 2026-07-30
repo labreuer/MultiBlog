@@ -1,7 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { parseDocLinkMark, type DocLinkMark, type DocLinkInput } from "@/lib/doc-link-anchor";
-import { cascadeDocLinkColor } from "@/lib/doc-link-colors";
+import { parseDocLinkMark, type DocLinkMark } from "@/lib/doc-link-anchor";
 
 // PLAN.md §14 — neither DocLink nor DocLinkGroup joins the $extends
 // soft-delete filter in src/lib/prisma.ts (that covers only post/user/doc;
@@ -72,27 +71,6 @@ export async function getDocLinkGroupsForPair(leftDocId: string, rightDocId: str
     userId: g.userId,
     links: g.links.map(toDocLinkRow),
   }));
-}
-
-// PLAN.md §14e's color cascade: link override, then group override, then
-// the link's author's own color. Flattens getDocLinkGroupsForPair's result
-// into the per-doc, client-ready shape LiveDocBody's `docLinks` prop wants
-// — one call per column, filtered to that column's docId.
-export function buildDocLinkInputs(groups: DocLinkGroupWithLinks[], docId: string, viewerUserId: string): DocLinkInput[] {
-  const inputs: DocLinkInput[] = [];
-  for (const group of groups) {
-    for (const link of group.links) {
-      if (link.docId !== docId) continue;
-      inputs.push({
-        id: link.id,
-        mark: link.mark,
-        groupId: group.id,
-        color: cascadeDocLinkColor(link.overrideColor, group.overrideColor, link.authorColor),
-        mine: link.userId === viewerUserId,
-      });
-    }
-  }
-  return inputs;
 }
 
 // PLAN.md §14h's count line's "+Y" — links belonging to those same groups

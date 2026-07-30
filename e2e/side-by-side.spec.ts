@@ -13,6 +13,7 @@ import {
   deleteTestDocLinkGroup,
   countDocLinks,
   getDocLinkGroupIds,
+  getDocLinkFields,
 } from "./db";
 
 /**
@@ -414,6 +415,103 @@ test.describe("side-by-side group bar", () => {
     } finally {
       await page.goto("about:blank").catch(() => {});
       if (createdGroupId) await deleteTestDocLinkGroup(createdGroupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+});
+
+// PLAN.md §14j/§14l Phase 7 — clicking a marked range.
+test.describe("side-by-side click routing", () => {
+  const BODY = "The quick brown fox.";
+
+  test("clicking a single link opens its edit popover, and Save persists the note", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`).first();
+      await expect(highlight).toBeVisible();
+
+      await highlight.click();
+      const popup = page.getByTestId("doc-link-popup");
+      await expect(popup).toBeVisible();
+      await expect(popup).toContainText("Editing link over");
+      // Delete only appears in edit mode, never in the create-a-new-link
+      // popover — confirms this really is the edit path, not a second
+      // creation triggered by the click falling through to a selection.
+      await expect(popup.getByRole("button", { name: "Delete" })).toBeVisible();
+
+      await popup.getByPlaceholder("Optional note").fill("A note about this link.");
+      await popup.getByRole("button", { name: "Save" }).click();
+      await expect(popup).not.toBeVisible();
+
+      await expect.poll(async () => (await getDocLinkFields(link.id))?.text).toBe("A note about this link.");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("clicking overlapping links opens a chooser; picking one opens its own popover", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const linkA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "quick brown" });
+    const linkB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      // The "brown" segment is covered by both links (no active group, so
+      // the chooser offers all hits).
+      const overlap = page.locator(`[data-doc-link-ids~="${linkA.id}"][data-doc-link-ids~="${linkB.id}"]`).first();
+      await expect(overlap).toBeVisible();
+      await overlap.click();
+
+      const chooser = page.getByTestId("doc-link-chooser");
+      await expect(chooser).toBeVisible();
+      await expect(chooser.locator("button", { hasText: "quick brown" })).toBeVisible();
+      await expect(chooser.locator("button", { hasText: "brown fox" })).toBeVisible();
+
+      await chooser.locator("button", { hasText: "quick brown" }).click();
+      await expect(chooser).not.toBeVisible();
+      const popup = page.getByTestId("doc-link-popup");
+      await expect(popup).toBeVisible();
+      await expect(popup).toContainText("quick brown");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(linkA.groupId);
+      await deleteTestDocLinkGroup(linkB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("Delete in the edit popover removes the link and its highlight", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`).first();
+      await expect(highlight).toBeVisible();
+      await highlight.click();
+
+      const popup = page.getByTestId("doc-link-popup");
+      await popup.getByRole("button", { name: "Delete" }).click();
+      await expect(popup).not.toBeVisible();
+      await expect(page.locator(`[data-doc-link-ids~="${link.id}"]`)).toHaveCount(0);
+      await expect.poll(() => countDocLinks(left.id)).toBe(0);
+    } finally {
+      // deleteDocLink (the app action, called by the UI's Delete button)
+      // soft-deletes the link but never its group — same shape as a group
+      // delete, §14b — so this cleanup always has a group row to remove.
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
       await deleteTestDoc(left.id);
       await deleteTestDoc(right.id);
     }

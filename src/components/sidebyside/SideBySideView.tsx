@@ -61,6 +61,8 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
             groupId: group.id,
             color: cascadeDocLinkColor(link.overrideColor, group.overrideColor, link.authorColor),
             mine: link.userId === userId,
+            text: link.text,
+            overrideColor: link.overrideColor,
           });
         }
       }
@@ -143,6 +145,8 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           docLinks={docLinksFor(left.docId)}
           activeGroupId={activeGroupId}
           onLinkCreated={(link) => appendLinkForDoc(left.docId, link)}
+          onLinkUpdated={updateLink}
+          onLinkDeleted={deleteLink}
         />
         <DocColumn
           {...right}
@@ -153,6 +157,8 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           docLinks={docLinksFor(right.docId)}
           activeGroupId={activeGroupId}
           onLinkCreated={(link) => appendLinkForDoc(right.docId, link)}
+          onLinkUpdated={updateLink}
+          onLinkDeleted={deleteLink}
         />
       </div>
     </>
@@ -165,9 +171,9 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
         id: link.id,
         docId,
         mark: link.mark,
-        text: null,
+        text: link.text,
         docLinkGroupId: link.groupId,
-        overrideColor: null,
+        overrideColor: link.overrideColor,
         userId,
         authorColor: userColor,
         createdAt: new Date(),
@@ -180,5 +186,22 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       return next;
     });
     if (!activeGroupId) setActiveGroupId(link.groupId);
+  }
+
+  // PLAN.md §14j — a link edited or deleted via its click-routing popover.
+  // Both search every group rather than taking a groupId, since the
+  // caller (LiveDocBody, inside a column) only ever knows the link's own
+  // id — the group it belongs to isn't threaded through the edit flow.
+  function updateLink(link: DocLinkInput) {
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        links: g.links.map((l) => (l.id === link.id ? { ...l, text: link.text, overrideColor: link.overrideColor } : l)),
+      })),
+    );
+  }
+
+  function deleteLink(linkId: string) {
+    setGroups((prev) => prev.map((g) => ({ ...g, links: g.links.filter((l) => l.id !== linkId) })));
   }
 }

@@ -22,6 +22,7 @@ import type {
   DocState,
   AnnotationState,
   TestDocLink,
+  DocLinkFields,
 } from "./db-worker";
 
 export type {
@@ -35,6 +36,7 @@ export type {
   DocState,
   AnnotationState,
   TestDocLink,
+  DocLinkFields,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
@@ -138,6 +140,9 @@ export const countDocLinks = (...args: Parameters<DbHandlers["countDocLinks"]>):
 
 export const getDocLinkGroupIds = (...args: Parameters<DbHandlers["getDocLinkGroupIds"]>): Promise<string[]> =>
   call("getDocLinkGroupIds", ...args);
+
+export const getDocLinkFields = (...args: Parameters<DbHandlers["getDocLinkFields"]>): Promise<DocLinkFields | null> =>
+  call("getDocLinkFields", ...args);
 
 export const countDocYdocUpdates = (...args: Parameters<DbHandlers["countDocYdocUpdates"]>): Promise<number> =>
   call("countDocYdocUpdates", ...args);
