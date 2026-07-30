@@ -1,0 +1,77 @@
+/* Same shape as annotation/AnnotationPopover.module.css.
+
+   §14i's 0.5em offset from the selection is no longer a `transform` here — it
+   is POPOVER_GAP inside placePopover (src/lib/popover-placement.ts), along
+   with the clamping and flipping that keep this inside the column pair. A
+   transform would double-count it, and worse, it shifts the *painted* box out
+   from under the clamped `left` that placement just computed: the measured
+   rect placement clamps against would include the shift while the `left` it
+   writes back would not, so the popover overflowed its bounds by whatever the
+   two disagreed by.
+
+   position:fixed rather than absolute — top/left are viewport coordinates, so
+   a popover near a column's right edge isn't clipped by `.scroller`'s
+   overflow-y:auto (which forces overflow-x to clip too) and can spill over
+   the other column the way a floating popover should. */
+.popover {
+  position: fixed;
+  z-index: 20;
+  width: 260px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.quotedText {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.groupNote {
+  font-size: 0.8rem;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+.textInput {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 4px;
+  font: inherit;
+  resize: vertical;
+}
+
+.colorRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+}
+
+/* Unchecked but not disabled — picking a color still re-checks the box, so
+   the swatch stays interactive; only the color itself reads as "not
+   currently applied" via desaturation and a dashed outline. */
+.colorInputInactive {
+  filter: grayscale(1) opacity(0.5);
+  outline: 1px dashed #999;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 8px;
+}
+
+.submit {
+  flex: 1 1 auto;
+}
+
+.error {
+  color: crimson;
+  font-size: 0.8rem;
+  margin-top: 6px;
+}

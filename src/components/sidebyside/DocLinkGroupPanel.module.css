@@ -1,0 +1,57 @@
+.panel {
+  flex: 0 0 auto;
+  margin: 0.5rem auto 0;
+  max-width: 520px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.nameInput {
+  flex: 1 1 auto;
+  padding: 4px;
+  font: inherit;
+  font-weight: 600;
+}
+
+.textInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px;
+  font: inherit;
+  resize: vertical;
+  margin-bottom: 6px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.deleteButton {
+  color: crimson;
+}
+
+/* Unchecked but not disabled — picking a color still re-checks the box, so
+   the swatch stays interactive; only the color itself reads as "not
+   currently applied" via desaturation and a dashed outline. */
+.colorInputInactive {
+  filter: grayscale(1) opacity(0.5);
+  outline: 1px dashed #999;
+}
+
+.error {
+  color: crimson;
+  font-size: 0.8rem;
+}

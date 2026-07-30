@@ -1,5 +1,4 @@
-const SAFE_ID = /^[A-Za-z0-9_-]+$/;
-const SAFE_COLOR = /^#[0-9a-fA-F]{3,8}$/;
+import { SAFE_ID, SAFE_COLOR } from "@/lib/safe-css";
 
 // Colors a doc's annotation highlights (the mark from
 // src/lib/annotation-extension.ts) by their author's own color — the same

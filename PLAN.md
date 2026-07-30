@@ -2646,3 +2646,767 @@ oversights:
   deprecated-in-place**, once Phase 3 moved the inline popover off them — nothing else ever
   called either afterward, so keeping them around would have been dead code with no path back
   to it.
+
+## 14. Side-by-side docs, joined by doc links
+
+**Decided:** a third doc surface — two docs rendered in parallel columns at
+`/side-by-side/<left>/<right>` — on which a reader can select text in one column and text in the
+other and tie the two selections together into a named **doc link group**. A doc link's anchor
+lives in Postgres and is painted with ProseMirror **decorations**, not with a mark inside the
+document. That deliberately reverses §12i's central choice, and §14a says why and what it costs.
+Nothing about the single-doc read view (§12), the doc editor, or annotations (§13) changes; this
+section adds a surface beside them and touches shared code only where noted.
+
+### 14a. Why the anchor lives outside the document
+
+§12i put an annotation's anchor *inside* the doc's ydoc as a TipTap mark, and the `Annotation`
+model's schema comment says so with some pride: no anchor columns, no `quotedText`, "nothing here
+that could fall out of sync with the document." A doc link cannot have that, for a reason that is
+structural rather than a matter of taste:
+
+- **A mark lives in exactly one document; a link joins two.** The mark design needs *two* marks
+  per link, in two different ydocs, and immediately invents a failure mode neither annotations nor
+  quotes have: the half-applied pair, where one side's mark landed and the other's didn't. There is
+  no transaction spanning two Yjs documents to close that window.
+- **Applying a mark is a write to the document.** Side-by-side explicitly serves readers who may be
+  unable to edit either doc. §13 gets around this by having the *server* apply the mark over a
+  privileged channel (`applyAnnotationMark` → `ANNOTATION_MARK_PATH`), which would work here too —
+  and would couple doc links to a running collab server on day one, for a feature whose entire
+  state is otherwise ordinary rows.
+
+So the anchor is external, and the price is drift: an external offset is a claim about a document
+that keeps changing underneath it. §14d is that price paid in full, and it is the single largest
+piece of work in this section. **The new models' schema comments must say this out loud**, adjacent
+to `Annotation`'s comment claiming the opposite — the next reader will see the two side by side and
+deserves to know the difference is deliberate.
+
+**One consequence to state plainly rather than discover: doc links do not propagate live.** An
+annotation appears in every open tab because its anchor is a mark riding the same Yjs update stream
+as the text. A doc link is a Postgres row with no live channel, and no useful `revalidatePath`
+target either, since every consumer of it is client state on a page nobody re-renders. Two people
+on the same pair will not see each other's links until one of them reloads. Accepted for this
+section; the eventual fix is either a `doc_link:`-prefixed ydoc carrying the group set (§11's stack
+already supports that shape) or plain polling. Not both docs' *content* — that is live already,
+through each column's own provider.
+
+### 14b. Schema
+
+Two new tables, one migration, both additive:
+
+```
+model DocLinkGroup {
+  id            String    @id @default(cuid())
+  name          String?
+  text          String?
+  overrideColor String?   @map("override_color")
+  userId        String    @map("user_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+  user  User      @relation(fields: [userId], references: [id])
+  links DocLink[]
+  @@index([userId])
+  @@map("doc_link_group")
+}
+
+model DocLink {
+  id             String    @id @default(cuid())
+  docId          String    @map("doc_id")
+  markId         String?   @map("mark_id")
+  mark           Json?
+  text           String?
+  docLinkGroupId String    @map("doc_link_group_id")
+  overrideColor  String?   @map("override_color")
+  userId         String    @map("user_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+  doc   Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
+  group DocLinkGroup @relation(fields: [docLinkGroupId], references: [id], onDelete: Cascade)
+  user  User         @relation(fields: [userId], references: [id])
+  @@index([docId])
+  @@index([docLinkGroupId])
+  @@map("doc_link")
+}
+```
+
+**`mark_id` versus `mark` — inline versus external.** `markId` is the id attribute of an inline
+TipTap mark inside the doc's own ydoc, exactly as `annotation`'s anchor works; `mark` is the
+external anchor this section actually builds. Exactly one is ever non-null. Prisma has no
+CHECK-constraint DSL, so the generated migration gets a hand-added
+`CHECK (num_nonnulls(mark_id, mark) = 1)` with a comment citing this subsection — the same
+hand-edited-migration convention `drop_annotation_body` established. Without that constraint
+`mark_id` is an untested column with no writer, so the constraint is what makes shipping both
+columns honest rather than aspirational. `resolveAnchor(link)` is the single place that branches.
+
+**`mark`'s shape** — `Json?`, matching how `Doc.proseJson` and `Annotation.proseJson` already store
+structured blobs, and giving `jsonb` querying later:
+
+```
+{ v: 1, from, to, text, before, after, blocks }
+```
+
+`text` is `doc.textBetween(from, to, " ")` at capture time — the same value `findQuoteOccurrences`
+searches for. `before`/`after` are up to 50 characters of surrounding context, used to break ties
+when the text occurs more than once. `blocks` is how many block nodes the selection spanned, which
+§14d needs. `v` is there because this is the one column in the schema whose *shape* will change when
+the inline path lands. Prisma types `Json` as `JsonValue`, so every read goes through
+`parseDocLinkMark(value): DocLinkMark | null` rather than a cast.
+
+**Nullability beyond what the column list says.** `override_color` is nullable on both tables — the
+three-level cascade in §14e has no "no override" state otherwise. `name` and both `text` columns are
+nullable as specified. `docLinkGroupId` is required: a link with no group is meaningless, since the
+group *is* the link.
+
+**Soft delete is `deleted_at` alone**, not the `deletedByUserId` + `deletedAt` pair every other
+soft-deletable model here uses. Deliberate, and it buys something: with one FK to `User` per model
+instead of two, neither model needs a named `@relation`. Neither table joins the `$extends`
+soft-delete filter in `src/lib/prisma.ts` either — that covers only `post`/`user`/`doc`, and
+`annotation` is already excluded on purpose and filters by hand. Both new models do the same, and
+their schema comments should say so rather than leaving it to look like an oversight. Recorded as a
+divergence in §14n, since it is the one place this section knowingly departs from house convention.
+
+`Doc` gets `docLinks DocLink[]`; `User` gets `docLinks DocLink[]` and `docLinkGroups
+DocLinkGroup[]`. `onDelete: Cascade` on `doc_id` rarely fires — a `Doc` is normally soft-deleted —
+but it is what keeps a hard delete from orphaning rows.
+
+### 14c. The route
+
+`src/app/side-by-side/[left]/[right]/page.tsx`. Two things about this differ from the obvious
+reading, both worth writing down:
+
+**Two segments, not one `[id]+[id]` segment, because Next percent-encodes param values.**
+`getParamValue` in `next/dist/shared/lib/router/utils/get-dynamic-param.js` runs
+`encodeURIComponent` over every string param before handing it to user code — the comment on the
+returned field reads "The value that is passed to user code" — so a request for
+`/sidebyside/abc+def` arrives as `params.pair === "abc%2Bdef"`. (The `+`-means-space rule does *not*
+apply; that is a query-string convention, and `getRouteMatcher` correctly `decodeURIComponent`s the
+captured group first. The `%2B` comes from the *re*-encode afterward.) A `pair.split("+")` would
+therefore return one element and 404 every URL in the feature, for a cause that looks nothing like
+itself. Two segments sidestep it entirely, and leave room for a future `/side-by-side/<left>` that
+renders a "pick the other doc" picker. Verified against `next@16.2.11`.
+
+**Kebab-case, because every other multi-word route here is** — `ydoc-debug`, `site-settings`,
+`forgot-password`. A URL is expensive to change later.
+
+`"side-by-side"` goes into `RESERVED_SLUGS` (`src/lib/slug.ts`). `src/app/[slug]/page.tsx` is the
+post catch-all, and `changeDocSlug` checks the same set, so without this a post or doc slugged
+`side-by-side` would be permanently shadowed by the new static segment. That set exists for exactly
+this and is exactly what gets forgotten.
+
+**`left === right` is rejected** (`notFound()`). Two columns on one doc would build two distinct
+`Y.Doc`s under one `documentName`, and `attachIndexeddb` ref-counts on a `WeakMap<Y.Doc>` — so the
+two would get two `IndexeddbPersistence` instances against the same IndexedDB database, each
+re-persisting what the other wrote. That is y-indexeddb#25 precisely, reached by a path the existing
+ref-count does not cover (it was built for StrictMode's double-invoked effects, where the `Y.Doc` is
+the *same*). It is also a semantic rejection rather than a workaround: a link with both ends in one
+doc has no representation in `← N  M → (+Y)`. Independently, §14l Phase 0 re-keys that ref-count on
+the IndexedDB database name and refuses a second attach for a different `Y.Doc`, which fixes the
+class rather than this instance.
+
+**Authorization is per doc.** Each id resolves through `resolveDocParam` (id or slug, as everywhere
+else), then `canUserReadDoc(userId, role, { id, visibility })` per column, and `canUserEditDoc` per
+column for the write toggle. If *either* doc is unreadable the whole page is forbidden rather than
+rendering one column beside a placeholder: the page's only purpose is comparison, and the "Compare
+with…" picker (§14k) only ever offers docs the viewer can read, so the sole way to arrive here is a
+URL shared between people with different access. See §14n.
+
+### 14d. Anchor drift and repair
+
+Resolution runs per link, per content change, in this order — cheapest first, because the first step
+is the overwhelmingly common case:
+
+1. `to <= doc.content.size && doc.textBetween(from, to, " ") === mark.text` → use the stored offsets
+   as-is. O(1).
+2. Otherwise `findQuoteOccurrences(doc, mark.text)`. Exactly one occurrence → use it. More than one
+   → filter by `mark.before`/`mark.after` and use the survivor if exactly one remains. Zero, or
+   still ambiguous → the link is **unanchored**.
+3. Memoize on `(doc identity, links identity)`.
+
+Step 3 is not an optimization, it is load-bearing. The read column calls `setContent` on *every*
+incoming ydoc update — every remote keystroke — and `findQuoteOccurrences` is O(doc × text) with no
+index. Two docs and fifty links without memoization plus step 1's early-out is a full scan per link
+per keystroke. Neither annotations nor quotes ever hit this shape: both re-find at most once, on
+submit. Wrap the resolve in `perfMeasure` (`src/lib/perf-monitor.ts`), same as the author-highlight
+walk, so the cost is measurable rather than inferred.
+
+**Persistence of corrected offsets happens only from a column in write mode.** *(Not built — see
+§14o. Write-column highlighting was never wired up, so there is no write surface to persist from, and
+`updateDocLink` takes no `mark` argument. Every column resolves in memory, every time. The reasoning
+below is what should govern it whenever the write column does land.)* A write column is
+bound through the `Collaboration` extension, so its corrected positions come from ProseMirror steps
+mapped through real transactions — authoritative, and strictly better than any text search. A read
+column is a read-only tap that is always at least one update behind, so offsets it computes were
+already stale when computed; persisting them would mean N concurrent readers last-writer-wins on
+the one field whose whole job is precision, each rewriting rows owned by other users. So: read
+columns resolve in memory and never write; a write column persists (debounced) what its own
+transactions told it. Drift therefore heals whenever anybody edits the doc, which is the only moment
+at which anyone actually knows the answer.
+
+**An unanchored link stays visible in the group panel** with no highlight — it is still a named row
+in a group, and silently vanishing is worse than showing it as unplaced. *(Not built — see §14o. The
+group panel edits the group's own name/text/color and lists no links at all, so an unanchored link is
+currently invisible everywhere except the count line.)* This mirrors both
+`ThreadStatus.DETACHED` on the post side and §12i's degrade-an-annotation-to-document-level
+fallback. `anchored` is computed on the client and is deliberately **not** a column: nothing would
+ever write it, and a stored status would drift from the document exactly like the offsets do.
+
+Two failure modes that the annotation path never meets:
+
+- **`findQuoteOccurrences` cannot match a selection spanning block boundaries**, as its own header
+  comment says: a paragraph break costs two ProseMirror positions but emits one separator
+  character, so the `from + len` window under-counts once per boundary. Readers comparing two
+  documents will absolutely select across paragraphs. For this section: `mark.blocks > 1` skips
+  step 2 entirely and degrades straight to unanchored on any mismatch. Generalizing
+  `findQuoteOccurrences` is a shared change that would improve annotations too, and belongs in its
+  own pass (§14m).
+- **First paint resolves against `Doc.proseJson`, which is a store-debounce cache.** A link created
+  against the live editor and then loaded fresh lands on the *lagging* copy, so step 1 misses more
+  often right after an edit than intuition suggests. Step 2 covers it; the point is not to read the
+  miss as a bug.
+
+### 14e. The decoration layer
+
+`src/lib/doc-link-extension.ts`, built on `pending-annotation-extension.ts`'s skeleton rather than
+`quote-highlight-extension.ts`'s:
+
+```
+export const docLinkKey = new PluginKey<DocLinkPluginState>("docLink");
+export function setDocLinks(view: EditorView, next: DocLinkPluginState): void;
+type DocLinkPluginState = {
+  links: ResolvedDocLink[];   // { id, groupId, from, to, color, mine }
+  activeGroupId: string | null;
+};
+```
+
+**Link data enters through a meta-tagged transaction, not `configure()`.** `QuoteHighlight` bakes
+its threads in at construction and forces editor recreation through a `useEditor` dep array, which
+is fine for a page whose threads are fixed at load and wrong here: links change continuously as the
+user works, and recreating the editor would tear down the ProseMirror view, lose selection and
+scroll, and in the write column destroy the `Collaboration` binding. The push comes from an effect
+keyed on `[editor, links, activeGroupId]`. `Display?` and "Show only my Links" are filtered in
+React *before* the push — they are non-persisted view state and the plugin needs no concept of them.
+
+**A correction to the obvious worry about `setContent`.** `setContent` does not destroy plugin
+state; it dispatches a whole-document replacement, and the plugin's `apply` runs normally. What it
+destroys is any `DecorationSet` you tried to *map* through that transaction, since every interior
+position remaps to the boundary. Because `decorations(state)` recomputes from `links` plus the
+current doc and never caches a mapped set, this plugin is immune by construction — simpler than
+`reresolvePending`'s dance, and the real argument for computing decorations from stored anchors
+resolved against the current document.
+
+**Resolve outside `decorations()`.** That prop runs on every view update, including bare cursor
+moves; an O(n·m) re-find inside it is a per-keystroke path. `resolveDocLinks(doc, links)` lives in
+`src/lib/doc-link-anchor.ts` and is called at the one content-change choke point — synchronously in
+the same handler right after `setContent`, so no paint lands between the content change and the
+position fix. Per surface: the read column re-resolves after each content push; the write column
+**maps positions through each transaction in `apply`** (bias −1 on `from`, +1 on `to`, as
+`PendingAnnotation` does) and re-resolves only on a debounce after typing stops, or when links
+change. Highlights then stay correct while typing without paying the scan per keystroke — and those
+mapped positions are the ones §14d persists.
+
+**`buildSegments` is extracted, not copied.** New `src/lib/decoration-segments.ts`, generic over
+`{ id, from, to, color }`, returning segments carrying every covering range's id. The CLAUDE.md
+gotcha it exists for — ProseMirror silently drops one decoration's `data-*` attributes where inline
+decorations overlap — is a property of ProseMirror, not of quote threads; a second copy guarantees a
+third. `quote-highlight-extension.ts` calls the extracted function directly (its one call site reads
+`segment.ids` where the local version said `segment.threadIds`; no adapter was needed), and because
+`e2e/quote-anchoring.spec.ts` covers that file, the extraction is a **pure refactor in its own
+phase**, green before any doc-link code exists.
+
+Per segment: `class: "doc-link-highlight"`, plus `"doc-link-active"` when any covering link belongs
+to `activeGroupId`; `data-doc-link-ids` and `data-doc-link-group-ids`, both space-separated and
+`~=`-selectable exactly as `data-thread-ids` is; and `style: "--doc-link-color:<hex>"` when the
+covering links agree on a color, omitted when they disagree so the neutral gray in
+`prose.module.css` takes over — the same rule, and the same one-background-per-span reason, as
+`quote-highlight`. `data-doc-link-group-ids` is what lets a pulse target a whole group in one
+`querySelectorAll` across *both* columns, the one place this page's shared document scope helps.
+
+**Color cascade**, resolved in React and delivered inline on the decoration spec:
+`link.overrideColor ?? group.overrideColor ?? <the link author's own color>`. The author color does
+*not* come from `useAuthorColors` (`CollabEditorBody`'s client-side `/api/users/colors` fetch) —
+`getDocLinkGroupsForPair` already joins `user.color` per link, so it arrives with the first paint and
+needs no second round trip. `cascadeDocLinkColor` (`src/lib/doc-link-colors.ts`) is the one place the
+rule lives, called from `SideBySideView` on every recompute.
+`AnnotationColorStyles.tsx`'s injected `<style>` tag exists because a *mark*'s `renderHTML` cannot
+take a computed color; a decoration spec can, so no `<style>` tag is needed here. `SAFE_COLOR` moves
+out of `AnnotationColorStyles.tsx` into a shared `src/lib/safe-css.ts` and validates on write in the
+server action as well as on read.
+
+**Expressing "no override" needs a control of its own.** A native `<input type="color">` has no empty
+state — it always reports some hex — so both surfaces that edit an override (the group panel, §14h,
+and the link popover, §14i) pair the swatch with a checkbox to its left, tooltip `Override color`:
+checked exactly when the stored value is non-null, unchecking writes `null` without disturbing the
+swatch, and picking a color checks it. Keeping the swatch's value through an uncheck is what makes the
+box a real toggle — you can drop to the inherited color and back to your chosen one without
+re-picking it. Unchecked, the swatch renders `grayscale(1) opacity(0.5)` with a dashed outline so "not
+currently applied" is visible rather than inferred; it stays clickable, since clicking it is how you
+re-check.
+
+**Color edits repaint before they persist.** Both surfaces fire an `onColorPreview` callback on every
+checkbox/swatch change, updating `SideBySideView`'s group/link state — and therefore the cascade and
+both columns' decorations — synchronously, while persistence stays exactly as specified (the panel's
+debounce, the popover's Save). A `type="color"` swatch fires continuously as it is dragged: saving per
+change would be a write per pixel, and not previewing would make picking a color feel like guessing.
+
+**Darken and pulse are CSS only**, mirroring `prose.module.css`'s existing shape: base at 25% tint
+of `--doc-link-color`, `.doc-link-active` at 45%, and `.doc-link-active.pulse` running a
+`docLinkPulse` keyframe twice over 0.6s. The trigger is `QuoteThreadHeader.jumpToQuote`'s pattern
+verbatim — `querySelectorAll('[data-doc-link-group-ids~="G"]')`, `scrollIntoView` the first match in
+each column, add `"pulse"`, remove after 1200ms. One-shot on selection; the darkening persists while
+the group is selected.
+
+**The plugin's click callback must not be baked in.** `QuoteHighlight` captures
+`onIndicatorClick` at construction, which doc links cannot do because the handler needs the
+*current* `activeGroupId`. Configure once with `onHit: (hits, pos) => onHitRef.current(hits, pos)`
+where `onHitRef` is a ref refreshed every render: stable at construction, always current. This is
+the same stale-closure shape `AnnotationBody`'s co-authoring gate solves with a ref.
+
+### 14f. Two docs, one page
+
+**The flex-height chain.** `body` is `height:100dvh; display:flex; flex-direction:column` and
+`SiteHeader` is its first child, so `<main>` gets a definite remaining budget only as body's direct
+child — the `min-height`-defeats-grow/shrink gotcha in CLAUDE.md. Therefore `main.container` is
+`flex:1 1 auto; min-height:0; display:flex; flex-direction:column`, and does **not** copy
+`/doc/[slug]/page.module.css`'s `width:800px; margin:4rem auto`. The header row and group bar are
+`flex:0 0 auto`; `.columns` is `flex:1 1 auto; min-height:0; display:grid;
+grid-template-columns:1fr 1fr; gap:1rem`; each column is `display:flex; flex-direction:column;
+min-height:0; min-width:0`; each column's body scroller is `flex:1 1 auto; overflow-y:auto;
+min-height:0; position:relative`.
+
+Two of those are load-bearing and easy to omit. **`min-width:0`** on a grid item, because grid items
+default to `min-width:auto`, long unbreakable content blows out the `1fr`, and `body`'s
+`overflow-x:hidden` then silently clips the evidence instead of showing the bug.
+**`position:relative` on the scroller**, because both popovers compute `top`/`left` as
+`coordsAtPos(...)` minus the container rect — if that rect is not the scroller, the popover drifts as
+the column scrolls. `LiveDocBody` already wraps itself in `position:relative`, so that wrapper stays
+*inside* the scroller. `PostEditor.module.css`'s `.editorContent { min-height:300px }` fights a short
+viewport — *not actually overridden as built (§14o); the write column inherits the 300px floor, which
+only shows up as an unwanted scroll on a very short viewport.*
+
+**Singletons.** `DocPresenceProvider` gets one instance **per column**, as siblings — it is a React
+context, so two nest fine; the bug is one instance with two writers. `LiveDocBody` calls
+`useDocPresence()` unconditionally and throws outside a provider, so per-column is both cheaper and
+safer than loosening that contract, and it leaves the channel correct by construction if annotations
+ever do come here. `AnnotationMoveProvider`, `AnnotationSection`, and `AnnotationPopover` are all
+omitted: "move to bottom" needs a bottom composer that does not exist here, and the selection
+gesture belongs to doc-link creation. That last one is a real change to `LiveDocBody`, which today
+*always* renders `AnnotationPopover` on selection — it gains a prop selecting which selection UI to
+use. `DocScrubBar` is omitted; it is a `position:fixed` full-width bar and two of them would overlap
+with nothing saying which doc each scrubs. `pseudo-border.ts` and `AnnotationList`'s global
+`hashchange` listener are never reached, since no annotation tree mounts.
+
+**Annotation highlights are suppressed visually, never schematically.** The `annotation` mark stays
+in the write column's extension list. Dropping it would strip every existing annotation anchor out
+of the shared ydoc the instant anyone typed — the wrong-schema-variant trap in
+`src/lib/tiptap-schema.ts`, with a destructive edge. Suppression is one rule in
+`prose.module.css`: `.prose.noAnnotations :global(.annotation-highlight)` resetting background and
+cursor, at specificity (0,3,0) so it beats the existing (0,2,0) rule regardless of source order.
+
+**`aria-label`s must be disambiguated.** `e2e/fixtures.ts`'s `bodyEditor()` is
+`getByRole("textbox", { name: "Post body" })`, a strict-mode locator that fails on two matches, and
+this page can mount four editors. `LiveDocBody`, `CollabEditorBody`, and `CollabTitleField` gain an
+optional `ariaLabel` prop **defaulting to today's values**, set here to "Left doc body" / "Right doc
+body" / "Left doc title" / "Right doc title", plus `data-side="left"|"right"` on each column for
+scoping new specs. Every existing spec stays green because none visits this page.
+
+**Viewport.** Two comfortable columns want roughly 1700px. `1fr 1fr` with `min-width:320px` per
+column, and a `@media (max-width:900px)` that stacks to one column — at which point "side by side"
+degrades to "stacked", which still works for links but loses the point. A draggable splitter is out
+of scope; saying so beats leaving it implied.
+
+### 14g. Read and write per column
+
+**One `Y.Doc` and one provider per column, reused across both modes.** The read surface needs a
+`Y.Doc` plus a provider and listens on `ydoc.on("update")`; the write surface needs the same
+`Y.Doc` bound through `Collaboration`/`CollaborationCaret` on the same provider. So ownership moves
+out of `LiveDocBody` up into a per-column `DocColumn` that owns `ydoc`, `provider`, and —
+conditionally — `attachIndexeddb`. Toggling mode then unmounts and mounts only the TipTap editors,
+never the websocket; leaving the provider inside `LiveDocBody` would tear down a socket and re-mint
+a token on every toggle.
+
+`/doc/[slug]` stays byte-identical: `LiveDocBody` gains optional `ydoc?`/`provider?` props, and when
+they are absent it creates and destroys its own exactly as today.
+
+**That hoisting exposes one real bug that must be fixed with it.** `LiveDocBody` registers
+`ydoc.on("update", …)` and relies on its own `ydoc.destroy()` to remove it. In hoisted mode it does
+not own the doc's lifetime, so a read → write → read cycle leaks a listener that calls `setContent`
+on a destroyed editor. The hoisted path must `ydoc.off("update", handler)` explicitly. Today's code
+is correct only because it owns the doc.
+
+**Token flow.** `DocColumn` fetches `/api/doc/[id]/token` once and keeps `token` as a *function*, so
+reconnects re-mint against the two-minute expiry. The response's `readOnly` decides whether the
+write toggle is offered at all. The route computes `readOnly` from the session and offers no way to
+*request* a read-only token for a doc you can edit — that stays as it is; the read surface is
+`editable:false` with no `Collaboration` binding, so it cannot write regardless of the token's
+rights. `attachIndexeddb` runs only for a column actually in write mode.
+
+**The title row.** In write mode the title sits in a `display:flex; gap:8px; align-items:flex-start`
+row with a **"Doc Links"** button to its right; the button switches that column to read mode, which
+is where links are created. `.titleInput` becomes `flex:1 1 auto; min-width:0` and keeps
+`position:relative` (its `::before` placeholder depends on it); the button is `flex:0 0 auto`. The
+width is *not* computed from the button in JS — that is the `PostsTable` `contentRect`-versus-
+`getBoundingClientRect()` trap, and flex avoids the question. In read mode the same slot holds an
+**"Edit"** button (shown only when the token says writable), so the two modes are symmetric and the
+title's width math is identical. Read mode's title is additionally a link out to
+`/doc/<id>/edit` when the viewer can edit and `/doc/<id>` otherwise — `DocView`'s existing rule plus
+an else branch.
+
+### 14h. The group bar
+
+A single strip above the columns, horizontally centered, `flex:0 0 auto`.
+
+**The dropdown.** First entry is `Doc Link Groups` while nothing is selected and becomes
+`Hide all Groups` once something is; selecting it deselects and hides every group's highlights. Then
+one entry per group having at least one link to either doc, showing its name, prefixed `← ` for
+links only to the left doc, `→ ` for only the right, `↔ ` for both. Last entry is
+`New Group`. Selecting a group opens a collapsible panel below the bar, in flow rather than
+overlaid, with editable `name`, `text`, and `override_color`, a `Display?` checkbox, and a delete
+button. (The count line lives in the bar, not this panel — see below.) The panel is **keyed on the
+group's id**, so switching the dropdown remounts it: its field state is seeded from props once, and a
+reused instance would keep showing the previous group's name.
+
+**Default visibility is every group shown.** This is forced by the spec's own click-disambiguation
+case: "if no group is selected, present a choice of which one" is only reachable if highlights are
+visible with nothing selected. `Display?` is a per-group opt-out held in page state keyed by group
+id, not persisted, defaulting to on; selecting a group *darkens* rather than isolates. Note that
+`Hide all Groups` and "uncheck every `Display?`" reach the same paint by different states, and only
+the first also clears `activeGroupId`. **Selecting a group also clears its own `Display?` opt-out.**
+Opening a panel and darkening a group in the bar while its segments stay hidden reads as broken rather
+than as "you already hid this."
+
+**`Show one Group at a time`**, beside `Show only my Links`, restricts both columns' highlights to
+whichever group is active rather than darkening it among the rest; with no group active it has no
+effect (there is nothing yet to restrict to). Switching the dropdown — including via a doc link click,
+§14j — swaps which single group is shown, same as `Display?`'s per-group state does when this is off.
+A plain `docLinksFor` filter, not a second copy of `hiddenGroupIds`: no state to keep in sync, since it
+reads `activeGroupId` directly.
+
+**The count line, `← N  M → (+Y)`** — N links in the left doc, M in the right, Y in any other doc.
+*As built it sits in the bar itself, beside the dropdown, and sums across every group on the page
+rather than describing only the selected one — see §14o.* Two queries: one `findMany` over links whose
+`docId` is either of the two (with their groups), which
+also produces the dropdown's membership and its arrow prefixes; and one over all links belonging to
+those group ids, selecting `{ id, docId, docLinkGroupId }`, bucketed in JS. Counts are non-deleted
+rows and include unanchored links — they describe the group, not the paint — and are unaffected by
+"Show only my Links", which filters the dropdown and the highlights only. `(+Y)` deliberately
+does not name those other docs or link to them: the viewer may not be able to read them, and a bare
+integer leaks nothing a link count doesn't.
+
+**Saving.** One `DEBOUNCE_MS` constant, flushed on blur and on unmount — without the flush,
+navigating away loses the last edit, which is the same class of race `postAnnotation`'s bounded
+retry loop exists for. A saving/saved indicator, and a stated last-write-wins rule when two people
+edit one group's name, which follows from §14a's no-live-propagation. `updated_at` is `@updatedAt`.
+
+**Deleting a group soft-deletes its links** in one transaction, since `docLinkGroupId` is required
+and an orphaned link has no meaning; restore restores both *(the delete half is built; there is no
+restore UI or action for either a group or a link — see §14o)*. Deleting the last link does *not* delete
+its group — an empty group is a legitimate work-in-progress. Soft-deleting a `Doc` leaves its links
+alone, matching how a deleted doc already leaves its annotations alone.
+
+### 14i. Creating a link
+
+Selecting text in a read-mode column opens `DocLinkPopover`, anchored on `coordsAtPos(selection.to)`
+and offset **0.5em right and 0.5em down** from it. It carries optional `text`, an override color
+(§14e's checkbox-plus-swatch pair, which subsumes a separate Clear button), a Save button, Cancel when
+new, and Delete when editing an existing link.
+
+**Placement is `position: fixed` and computed, not `absolute` and laid out.** A `position: absolute`
+popover is clipped by its nearest scrolling ancestor, which here is the column's own `.scroller` —
+and because CSS cannot leave one axis visible while clipping the other, its `overflow-y: auto` clips
+horizontally too, cutting the popover off at the column boundary instead of letting it spill over the
+neighbouring column the way a floating popover should. `fixed` escapes the clip, at the price of
+having to keep the popover in bounds by hand, since a fixed element has no containing block to be laid
+out against. `placePopover` (`src/lib/popover-placement.ts`) is that arithmetic, in one pure function
+rather than at each of `LiveDocBody`'s three measurement sites, and the 0.5em offset above is its
+`POPOVER_GAP` — *not* a CSS `transform`, which would both double-count the gap and shift the painted
+box out from under the very `left` the clamp just computed.
+
+**Three ways it can run out of room, two different answers.** The bounds are the nearest
+`[data-popover-bounds]` ancestor — on this page the two-column grid, so a popover never strays outside
+the pair it belongs to — intersected with the viewport, falling back to the viewport alone where
+nothing is marked (`/doc/[slug]`).
+
+- **No width** → *slide* left until the right edge is inside bounds. Not a flip to the anchor's other
+  side: the popover is a large fraction of a column's width (260px of ~630px), so a flip overshoots
+  the left edge about as readily as the preferred position overshoots the right one. Sliding can never
+  cover the anchor, because the anchor is a point on a line while the popover sits above or below that
+  whole line.
+- **No height** → *flip* above the anchor. The opposite answer for the opposite reason: sliding up
+  would drag the popover over the very text it is describing, while flipping keeps that text visible.
+- **Neither** → both, with no special case of its own. The axes are independent, and because one
+  resolves by sliding and the other by flipping, neither can undo the other.
+
+Each axis then gets a two-sided clamp. Flipping only helps when the *anchor* is inside bounds; an
+anchor scrolled out of view is arbitrarily far outside them and every candidate position inherits
+that, so without the clamp a popover left open while its column scrolls away lands thousands of pixels
+off-screen instead of pinned to the edge it left through.
+
+**The position is derived, never frozen.** State holds the anchor's *document* position; one
+`useLayoutEffect` recomputes `coordsAtPos` plus the popover's measured size on open, on `activeGroupId`
+change, and on scroll (capture phase — a column's inner scroller emits no bubbling scroll event) and
+resize. Storing coordinates instead invites the whole family of bugs where the anchor moves out from
+under a placement taken before some reflow: opening the group panel is one such reflow, and it is
+`fixed`'s equivalent of the free re-layout `absolute` used to get. The ordering this implies is worth
+naming: the popover has to be in the DOM before its size can be read, so it renders once at the
+unclamped preferred spot and is corrected within the same layout pass — never painted there.
+`AnnotationPopover` shares the same `pending` state and is therefore on the same convention; when it
+briefly was not, annotations on `/doc/[slug]` silently mispositioned while every test still passed.
+
+**Group association.** If a group is selected in the dropdown, the popover says so and the link
+joins it. If none is selected, it says a new group will be created, and on save the group and the
+link are created in one transaction, the new group becomes `activeGroupId`, and its panel opens.
+
+**A group row is not written until there is something to put in it.** The dropdown's
+`New Group` opens an *unsaved* panel; the row lands on the first debounced save of
+name/text/color, or when the first link is saved into it. Creating it eagerly is worse than it
+looks: the dropdown's own membership rule is "groups with a link to either doc", so an eagerly
+created empty group would be **invisible in the very list that created it**, and abandoning the
+panel would orphan it permanently. This is the same reasoning `AnnotationPopover` applies when it
+refuses to create a draft from a selection alone (§13's two-stage composer), reached from a
+different direction.
+
+The first Save creates the row; subsequent edits debounce-save, as specified. Creating a link
+requires only `canUserReadDoc` on that column's doc — a doc link never mutates the document, so the
+annotation rule applies. Editing or deleting a group is owner-or-admin, matching
+`requireOwnOrAdmin`.
+
+### 14j. Clicking a marked range
+
+Through the plugin's `props.handleClick(view, pos, event)`, not a React `onClick` on the container:
+it hands over `pos`, runs before selection handling, and the decoration spans are ProseMirror-managed
+DOM that React does not own. Routing is over **resolved plugin-state positions, never DOM `data-`
+attributes**, so the logic and the paint cannot disagree and the same code serves both surfaces.
+(There is no precedent to copy: `.annotation-highlight` has `cursor:pointer` in `prose.module.css`
+and no click handler anywhere in the repo.)
+
+With `hits = links.filter(l => pos >= l.from && pos < l.to)` — no `anchored` check, because an
+unanchored link never enters the plugin's `links` in the first place (`syncDocLinks` drops it before
+the push, so the plugin only ever holds ranges with real positions):
+
+- none → return `false`; this is also the drag-select-to-create path
+- one → open that link's popover
+- several, `activeGroupId` set, exactly one hit in it → open that one
+- several, `activeGroupId` set, several hits in it → chooser filtered to that group
+- several, no `activeGroupId` → chooser over all hits
+
+**Opening a link's popover — directly, or via the chooser — also makes its group the active one**,
+the same effect as picking it from the bar's dropdown (including un-hiding it, §14h). A click is
+therefore also a navigation: it answers "which group is this" without a separate lookup, and composes
+with `Show one Group at a time` to let clicking through a document step from one group's links to the
+next.
+
+The chooser shows each candidate's selected text, elided in the middle when long — first 50
+characters, `…`, last 50 — which is this section's reading of "max 50 chars either side". (The
+competing reading is 50 characters of *surrounding context* on each side, which tells two nearby
+links apart better; §14n keeps it open, and the two are a one-line swap in `contextAround`.)
+
+**`handleClick` must not swallow caret placement in write mode.** A click inside a highlight is also
+a click into an editor, and returning `true` eats it. Read mode returns `true`; write mode opens the
+popover and returns `false`, taking the side effect without stealing the caret. `handleClick` only
+fires when mousedown and mouseup land together, so a drag-select ending inside an existing highlight
+correctly does not trigger it.
+
+**The edit popover is keyed on the link's id**, for the same reason §14h's panel is keyed on the
+group's: clicking a second highlight while the first link's popover is open re-renders the same
+component, and its note/override state — seeded from props once — would otherwise stay on the first
+link while only the quoted-text preview updated.
+
+### 14k. Getting there
+
+A **"Link to…"** control on `/doc/[slug]`, near the byline, listing other docs the viewer can
+read and navigating to `/side-by-side/<thisDoc>/<thatDoc>`. Chosen over a two-checkbox control on
+`/docs` because `/docs` is gated on `canManageDocs`, and an `AUTHORIZED` reader — the role §12e
+exists for — never sees it.
+
+Backed by a new `readableDocsFor(userId, role)` in `src/lib/doc-authz.ts`, placed directly beside
+`canUserReadDoc` with a comment tying the two together: it is the same predicate expressed as a
+`where` clause instead of per-row, and the only thing keeping them honest is proximity plus that
+comment. ADMIN/EDITOR get every non-deleted doc; everyone else gets `SHARED` plus their own
+byline-authored `PRIVATE` docs.
+
+### 14l. Build order
+
+Each phase leaves the app working, gated on `npx tsc --noEmit`, `npx eslint .`, and `npm run e2e`.
+
+- **Phase 0** — pure refactors, nothing user-visible: extract `buildSegments` into
+  `decoration-segments.ts` and `SAFE_COLOR` into `safe-css.ts`; re-key `attachIndexeddb`'s ref-count
+  on the IndexedDB database name; add the optional `ariaLabel` props with unchanged defaults. Gate is
+  `quote-anchoring.spec.ts` and `doc.spec.ts` passing untouched. First, so the risky shared-code edit
+  is isolated from the feature that motivated it.
+- **Phase 1** — schema, migration (including the hand-added CHECK), `doc-link-anchor.ts`,
+  `doc-links-query.ts`. No UI. **Restart `next dev` after migrating** — CLAUDE.md's new-model trap
+  presents as `prisma.docLink is undefined` while typecheck passes.
+- **Phase 2** — the page shell: route, `RESERVED_SLUGS`, `left === right` rejection, both columns
+  read-only, the flex chain, independent scrolling, per-column `DocPresenceProvider`, annotation
+  suppression, disambiguated `aria-label`s. Gate: a spec measuring both columns' bounding boxes
+  in-process (CLAUDE.md prefers that to driving the pane) and asserting `x/x` 404s.
+- **Phase 3** — the per-column read/write toggle: provider hoisting, `LiveDocBody`'s
+  optional-provider mode *with* the `ydoc.off` fix, the toggle gated on the token's `readOnly`, the
+  title row and its button. Gate: a spec on `collab.spec.ts`'s two-context pattern — toggle to write,
+  type, assert the other identity sees it, toggle back, assert no duplication and no stale listener.
+- **Phase 4** — decorations on the read path: `doc-link-extension.ts`, the CSS, links seeded straight
+  from a fixture. Gate: highlights render; two overlapping links produce one segment with a plural
+  `data-doc-link-ids`; a highlight survives a remote edit and re-finds after a shift.
+- **Phase 5** — creation: the selection popover, server actions in `src/app/actions/doc-links.ts`,
+  debounced save, create-group-on-first-link. Gate: create a link on each side through the UI and
+  assert both rows plus `← 1  1 →`.
+- **Phase 6** — the group bar in full: dropdown with its prefixes and its first-entry swap, the panel,
+  `Display?`, active darkening and pulse, "Show only my Links", delete-with-cascade.
+- **Phase 7** — click routing: `handleClick`, the single and multi cases, the chooser, and the
+  read-versus-write return value.
+- **Phase 8** — the "Link to…" entry point, `e2e/side-by-side.spec.ts` (plus `db-worker.ts`
+  helpers *and* their `handlers` entries, a `fixtures.ts` fixture, and a `sweepTestData` branch), and
+  the doc updates: this section's "As built", CLAUDE.md's new gotchas (the `%2B` param encoding and
+  the `attachIndexeddb`-per-database-name re-key), STYLE.md if the group bar introduces conventions.
+
+Write-path phases 4 and 6 also want `scripts/test-doc-link.ts` (create/list/delete, contained to
+groups and links owned by `@example.com` accounts, following `scripts/test-doc.ts`'s header-is-the-
+documentation shape).
+
+### 14m. Deferred, with reasons
+
+- **The inline-mark path (`mark_id`).** Shipped as a constrained column with no writer, because the
+  CHECK constraint makes the intent enforceable now and the migration to it per-row later.
+- **Live propagation of links between users** (§14a). Needs either a `doc_link:` ydoc or polling;
+  both are larger than this section and neither is needed to make the feature useful to one person
+  at a time.
+- **Generalizing `findQuoteOccurrences` across block boundaries** (§14d). A shared change that would
+  improve annotations too, so it deserves its own pass rather than riding in here.
+- **Doc links on the ordinary `/doc/[slug]` page.** They do not show there in this section, which
+  means a link created side-by-side is invisible in the single-doc view. Stated rather than implied.
+- **A draggable column splitter, a swap-sides control, and group permalinks.**
+
+### 14n. Open questions
+
+- **Soft delete as `deleted_at` alone** (§14b) is the one knowing divergence from house convention.
+  The counter-argument for adding `deleted_by_user_id` is consistency with every other soft-deletable
+  model plus knowing who deleted a row in a group several users contributed to; the argument against
+  is that it buys a named-`@relation` requirement for information no UI would show.
+- **"Max 50 chars either side"** (§14j) — the selection elided in the middle, as built, versus 50
+  characters of surrounding context on each side.
+- **Forbidding the whole page when either doc is unreadable** (§14c), versus rendering the readable
+  column beside a placeholder so a pair URL shared between people with different access degrades
+  instead of hard-failing.
+- **Whether a group's `name`/`text` should be visible to someone who can read only one of its docs.**
+  Moot while §14c forbids the mixed case, and live the moment that changes: those fields are
+  user-entered and will quote content, so a group's text can leak what the other doc contains.
+- **Whether `override_color` on a shared group should be editable by anyone with a link in it**, or
+  only its creator (as built) — one user recoloring another's link is the case at issue.
+
+### 14o. As built
+
+Built 2026-07-29, in the order §14l lays out (Phase 0 → 8), each phase gated on `npx tsc
+--noEmit`, `npx eslint .`, and the full `npm run e2e` suite before moving to the next.
+
+**Reconciled against the implementation afterward**, which is why several subsections above now carry
+inline *(not built)* / *(as built)* notes. Those notes are the authority on what exists; the prose
+around them is kept as the record of what was decided and why, since a design rationale is worth more
+than a description of code that can be read directly. The unbuilt pieces are listed together below so
+nothing is only discoverable by reading all of §14a–§14k.
+
+Three deliberate deviations from the text above:
+
+- **Write-column highlighting was never built.** §14e's decoration layer, §14j's click routing,
+  and the `editable` option on `DocLink.configure(...)` are all written to support a highlighted
+  write surface — but `CollabEditorBody` never gained the `DocLink` extension, so a write column
+  shows no doc-link highlights at all and §14j's "write mode returns `false`" branch is
+  unreachable in this build. Out of Phase 4's stated "read path" scope, and no later phase
+  explicitly picked it up; noted here rather than silently expanded into. The plugin itself needs
+  no change to support it later — only wiring `DocLink.configure({ onHit, editable: true })` into
+  `CollabEditorBody`'s extension list and pushing resolved links into it the way the write
+  column's `apply()` position-mapping already anticipates.
+- **`DocLinkPopover`'s Cancel button shows in both create and edit mode**, not just "when new" as
+  §14i's composer description reads. Edit mode's only other way to dismiss without saving was the
+  outside-click handler; keeping Cancel visible there too is a usability call, not an oversight.
+- **The entry point is a `<select>`** (`CompareWithPicker.tsx`), not the bare "control... listing
+  other docs" §14k leaves unspecified in shape. Chosen over a list of links because
+  `readableDocsFor` can return every doc a reader has access to, and a picker degrades better
+  than a wall of links at that size; renders nothing when the list is empty rather than an
+  always-visible disabled control.
+
+Designed above but **not built**, each marked in place and collected here:
+
+- **Write-mode persistence of corrected offsets** (§14d). Follows directly from the write column
+  never being highlighted: there is no write surface to persist from, and `updateDocLink` accepts
+  only `text`/`overrideColor` — never `mark`. Every column resolves in memory on every content
+  change and throws the result away. Drift therefore never heals; it is merely re-derived, correctly,
+  on each load. Cheap to add once the write column lands, and §14d's reasoning about *why only* the
+  write column may persist still holds.
+- **Unanchored links have no UI** (§14d). `DocLinkGroupPanel` edits the group's own
+  name/text/override_color and lists no links, so a link whose anchor stopped resolving is invisible
+  everywhere except its contribution to the count line. §14d's "stays visible in the group panel"
+  needs the panel to list links first, which nothing in §14l's build order called for.
+- **Restore for a soft-deleted group or link** (§14h's "restore restores both"). Both delete paths
+  set `deletedAt`, and nothing ever clears it — there is no restore action and no UI to reach one.
+  Note this interacts with §14b's `deleted_at`-alone divergence: with no `deleted_by_user_id`, a
+  restore UI would also have no way to show who deleted the row it is offering to bring back.
+- **`.editorContent`'s 300px floor is not overridden** (§14f). The write column inherits
+  `PostEditor.module.css`'s `min-height:300px`, which on a very short viewport produces the
+  unnecessary scroll §14f predicted. One CSS rule in `DocColumn.module.css` whenever it bites.
+
+One correction to §14i's own promise, fixed in code rather than documented around: "the row lands on
+the first debounced save of name/text/color, **or when the first link is saved into it**". The second
+path did not work — with the `NEW_GROUP` sentinel active, `createDocLink` correctly built a *fresh*
+group (once the sentinel-leak bug below was fixed), but `appendLinkForDoc`'s
+`if (!activeGroupId)` guard saw the truthy sentinel and declined to follow it, leaving the unsaved
+draft panel open beside a group it had nothing to do with. `appendLinkForDoc` now treats
+`isCreatingNew` as "nothing selected" for that guard, so the panel switches to the group that was
+actually created.
+
+Bugs worth recording, all of the kind that pass a first read and fail only under real interaction.
+The first three surfaced in hand-testing the group bar *after* the phases were done, and were fixed
+together; each was confirmed by reverting its fix and watching a new regression test fail with the
+exact reported symptom.
+
+- **The `NEW_GROUP` sentinel leaked into `createDocLink` as a real group id.** `SideBySideView`'s
+  `activeGroupId` holds three kinds of value — a real id, `null`, or the `"__new__"` sentinel that
+  tells the *bar* to render an unsaved draft panel — and passed the raw state to both `DocColumn`s,
+  which forward it into `DocLinkPopover`'s `groupId` on save. Creating a link with "New Doc Link
+  Group" selected therefore sent `groupId: "__new__"`, `createDocLink` found no such row and
+  returned "Group not found", and since that path has no error display the Save button silently did
+  nothing. Fixed with a derived `columnActiveGroupId` (null while `isCreatingNew`) for the columns
+  only, which falls through to the popover's ordinary "no group selected" path.
+- **`DocLinkGroupPanel` had no `key`,** so React reused one component instance across dropdown
+  selections (same JSX position). Its `name`/`text`/`overrideColor` state initializes only once,
+  from the `initial*` props, so switching groups left the panel showing the *previous* group's
+  fields — the props changed, but `useState` initializers do not re-run. Fixed with
+  `key={activeGroup?.id ?? "new"}`, forcing a remount per switch.
+- **A blank group could never be saved.** Every field's autosave fires only from its own `onChange`,
+  so opening "New Group" and typing nothing meant no debounce was ever scheduled and no row
+  was ever written — even though `name`/`text`/`override_color` are all nullable and a group with
+  none of them set is a legitimate row (§14b). Fixed with an explicit Save button, rendered only for
+  an unsaved draft, calling the same `flush()` the debounce uses.
+- **A stale-closure bug in `DocLinkGroupPanel`'s debounced save** — reading `name`/`text`/
+  `overrideColor` directly from React state inside the `setTimeout` callback saved whatever they
+  were *before* the keystroke that scheduled the save, not the just-typed value, because the
+  callback's closure was created (and its `flush` reference captured) synchronously within the
+  same `onChange` handler that called `setState`, one render before the state update took effect.
+  Silent for an *edit* (a debounced save still writes the old value, which happens to already be
+  correct at the very first keystroke of a session) and only surfaced testing "New Doc Link
+  Group," where the first save's `name` field was empty regardless of what was typed. Fixed with
+  a parallel `useRef`, updated synchronously in each `onChange` alongside the `setState` call, that
+  `flush()` reads from instead of the state closure.
+- **Soft-deleting a `DocLinkGroup` through the UI still blocks e2e user teardown on the FK.**
+  §14b's `deleted_at`-alone soft delete (deliberately, unlike every other soft-deletable model's
+  `deleted_by_user_id` pair) means a "deleted" group's row — and its `user_id` FK — never
+  actually goes away. `e2e/db-worker.ts`'s `deleteTestUser` now hard-deletes a test user's own
+  `doc_link`/`doc_link_group` rows before deleting the user, the same shape its existing
+  annotation/ydoc cleanup already has for a different FK.
+
+Smaller implementation notes:
+
+- **`doc-links-query.ts`'s `buildDocLinkInputs` was written in Phase 4 and deleted in Phase 7** —
+  Phase 6 moved per-column link derivation (including the color cascade) into `SideBySideView`
+  itself, since the group bar and both columns need to agree on one filtered/colored set; the
+  server-side helper doing the same computation became dead code once nothing called it.
+  `cascadeDocLinkColor` (`src/lib/doc-link-colors.ts`) is what both the removed server helper and
+  the client computation shared, so the cascade rule itself never forked.
+- **The `(+Y)` other-docs count is computed once, server-side, at page load** — like every other
+  cross-session doc-link state (§14a), it does not update if a link to a third doc is added by
+  someone else mid-session. Consistent with the rest of this section's no-live-propagation stance,
+  not a separate gap.
+- **`readableDocsFor` (§14k) lives beside `canUserReadDoc`, expressing the same predicate as a
+  `where` clause instead of a per-row check** — ADMIN/EDITOR get every non-deleted doc in one
+  branch; everyone else gets an `OR` array built from `canViewDocs`/`canManageDocs`, empty (and
+  therefore an empty result, not an error) for a role that satisfies neither.

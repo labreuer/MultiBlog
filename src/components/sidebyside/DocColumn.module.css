@@ -1,0 +1,73 @@
+/* PLAN.md §14f/§14g — min-width:0 is load-bearing (grid items default to
+   min-width:auto, and body's overflow-x:hidden would silently clip an
+   overflow instead of showing the bug). */
+.column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.titleRow {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.titleText {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-family: sans-serif;
+}
+
+/* Matches DocEditor.module.css's .titleInput sizing rules but as flex:1
+   instead of width:100% — §14g: put the title + button in a flex row and
+   the title becomes flex:1 1 auto; min-width:0 rather than a fixed 100%,
+   which would overflow the button. position:relative stays: the
+   placeholder ::before depends on it. */
+.titleInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+  margin: 0;
+  padding: 4px;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: text;
+  line-height: 1.4;
+  min-height: 1.4em;
+}
+
+.titleInput :global(.tiptap) {
+  white-space: nowrap;
+  overflow-x: auto;
+  outline: none;
+}
+
+/* The width is deliberately not computed from the button in JS — that's
+   the PostsTable contentRect-vs-getBoundingClientRect trap (CLAUDE.md);
+   flex avoids the question entirely. */
+.titleButton {
+  flex: 0 0 auto;
+  font-size: 1.2rem;
+}
+
+.statusLine {
+  flex: 0 0 auto;
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #666;
+  font-family: sans-serif;
+}
+
+.scroller {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  position: relative;
+}

@@ -11,6 +11,10 @@ type Props = {
   docId: string;
   top: number;
   left: number;
+  // So the caller can measure this popover's rendered size — placement needs
+  // it to clamp/flip (src/lib/popover-placement.ts), and only the caller
+  // knows the bounds to clamp into.
+  elementRef?: React.Ref<HTMLDivElement>;
   from: number;
   to: number;
   quotedText: string;
@@ -26,7 +30,17 @@ type Props = {
 // micro-adjustment of a selection someone is still dragging. A row (and its
 // ydoc) exists only once "Annotate" — or "Move to bottom", which needs one
 // too — is actually clicked.
-export default function AnnotationPopover({ docId, top, left, from, to, quotedText, onPosted, onCancel }: Props) {
+export default function AnnotationPopover({
+  docId,
+  top,
+  left,
+  elementRef,
+  from,
+  to,
+  quotedText,
+  onPosted,
+  onCancel,
+}: Props) {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -57,8 +71,11 @@ export default function AnnotationPopover({ docId, top, left, from, to, quotedTe
     });
   }
 
+  // `top`/`left` are used exactly as given: the gap below the selection is
+  // POPOVER_GAP, applied once by placePopover, not an extra +6 stacked on it
+  // here — placement is the caller's job now (src/lib/popover-placement.ts).
   return (
-    <div data-testid="annotation-popup" className={styles.popover} style={{ top: top + 6, left }}>
+    <div ref={elementRef} data-testid="annotation-popup" className={styles.popover} style={{ top, left }}>
       <p className={styles.quotedText}>
         Annotating: “{quotedText.length > 80 ? `${quotedText.slice(0, 80)}…` : quotedText}”
       </p>

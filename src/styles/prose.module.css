@@ -135,3 +135,49 @@
   background: color-mix(in srgb, var(--thread-color, #999) 18%, transparent);
   border-bottom: 2px dashed var(--thread-color, #999);
 }
+
+/* PLAN.md §14f — /side-by-side suppresses annotation highlights visually,
+   never schematically: the `annotation` mark stays in the write column's
+   extension list (dropping it would strip every existing anchor out of the
+   shared ydoc the instant anyone typed), so this is a pure paint override
+   rather than a schema change. Specificity (0,3,0) beats .annotation-
+   highlight's own (0,2,0) regardless of source order, so it doesn't matter
+   which stylesheet loads last. */
+.prose.noAnnotations :global(.annotation-highlight) {
+  background: none;
+  cursor: inherit;
+}
+
+/* PLAN.md §14e — a doc link's decoration. Same --thread-color-style custom
+   property convention as quote-highlight/annotation above, named
+   --doc-link-color to keep the three concepts visually distinguishable in
+   devtools; set per segment by doc-link-extension.ts when its covering
+   links agree on a color, omitted (neutral gray) when they disagree — the
+   same one-background-per-span reason quote-highlight's segments do this.
+   .doc-link-active is the "this segment belongs to the selected group"
+   state (§14h) — darker than the base wash; .pulse (only ever combined with
+   .doc-link-active) is the one-shot flash triggered by
+   QuoteThreadHeader.jumpToQuote's pattern, reused verbatim. */
+.prose :global(.doc-link-highlight) {
+  background: color-mix(in srgb, var(--doc-link-color, #999) 25%, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.prose :global(.doc-link-highlight.doc-link-active) {
+  background: color-mix(in srgb, var(--doc-link-color, #999) 45%, transparent);
+}
+
+.prose :global(.doc-link-highlight.doc-link-active.pulse) {
+  animation: docLinkPulse 0.6s ease-in-out 2;
+}
+
+@keyframes docLinkPulse {
+  0%,
+  100% {
+    background-color: color-mix(in srgb, var(--doc-link-color, #999) 45%, transparent);
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--doc-link-color, #999) 70%, transparent);
+  }
+}

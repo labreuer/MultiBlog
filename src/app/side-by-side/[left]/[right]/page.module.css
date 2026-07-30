@@ -1,0 +1,20 @@
+/* PLAN.md §14f — the flex-height chain. body (globals.css) is
+   height:100dvh; display:flex; flex-direction:column with SiteHeader as its
+   first child, so <main> gets a definite remaining budget only as body's
+   direct child (the min-height-defeats-grow/shrink gotcha in CLAUDE.md).
+   Deliberately does NOT copy /doc/[slug]/page.module.css's
+   `width:800px; margin:4rem auto` — this page fills the available height
+   instead of centering a fixed-width reading column. */
+.container {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  font-family: sans-serif;
+}
+
+.forbidden {
+  max-width: 480px;
+  margin: 4rem auto;
+  font-family: sans-serif;
+}

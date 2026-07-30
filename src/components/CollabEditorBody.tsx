@@ -32,6 +32,18 @@ type Props = {
   editable?: boolean;
   onEditorReady: (editor: Editor | null) => void;
   onAuthorStats?: (stats: AuthorStat[]) => void;
+  // Overrides the default accessible name — needed on /side-by-side (PLAN.md
+  // §14f), which can mount two body editors on one page and would otherwise
+  // break e2e's strict-mode `getByRole("textbox", { name: "Post body" })`
+  // locator. Read only at useEditor construction, same as editorProps
+  // generally, so a column's aria-label is fixed at mount rather than
+  // reactive.
+  ariaLabel?: string;
+  // See LiveDocBody's identical prop — PLAN.md §14f. The write column keeps
+  // the `annotation` mark registered (dropping it would strip existing
+  // anchors the moment anyone typed) but paints over its highlight the same
+  // way the read column does.
+  suppressAnnotations?: boolean;
 };
 
 // A thin colored bar rather than the library default's always-visible name
@@ -62,6 +74,8 @@ export default function CollabEditorBody({
   editable = true,
   onEditorReady,
   onAuthorStats,
+  ariaLabel = "Post body",
+  suppressAnnotations = false,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
@@ -86,7 +100,7 @@ export default function CollabEditorBody({
     // share this page, and without distinct accessible names the only thing
     // telling them apart is DOM order — which is what the e2e suite would
     // otherwise have to key off (see CLAUDE.md's `.tiptap` ordering note).
-    editorProps: { attributes: { "aria-label": "Post body", role: "textbox" } },
+    editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -141,7 +155,10 @@ export default function CollabEditorBody({
     <div className={styles.editorFrame}>
       <AuthorHighlightStyles colors={authorColors} />
       <EditorToolbar editor={editor} disabled={!editable} />
-      <EditorContent editor={editor} className={`${styles.editorContent} ${proseStyles.prose}`} />
+      <EditorContent
+        editor={editor}
+        className={`${styles.editorContent} ${proseStyles.prose} ${suppressAnnotations ? proseStyles.noAnnotations : ""}`}
+      />
     </div>
   );
 }

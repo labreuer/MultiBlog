@@ -1,0 +1,21 @@
+/* PLAN.md §14f — flex:1 1 auto/min-height:0 continues the chain page.module
+   .css's .container starts. grid-template-columns:1fr 1fr rather than
+   flex, since each column needs an equal, independent width — 1fr with
+   min-width:320px per column, stacking below 900px (still usable, just
+   loses the point of "side by side"). box-sizing:border-box so the 0.2em
+   padding sits inside that same flex budget rather than growing past it. */
+.columns {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 0.2em;
+  box-sizing: border-box;
+}
+
+@media (max-width: 900px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}

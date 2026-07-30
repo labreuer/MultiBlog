@@ -112,6 +112,8 @@ model User {
   docDeletions         Doc[]                @relation("DocDeletedBy")
   annotations          Annotation[]         @relation("AnnotationAuthor")
   annotationDeletions  Annotation[]         @relation("AnnotationDeletedBy")
+  docLinks             DocLink[]
+  docLinkGroups        DocLinkGroup[]
 
   @@map("user")
 }
@@ -401,6 +403,7 @@ model Doc {
   deletedBy   User?             @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory DocSlugHistory[]
   annotations Annotation[]
+  docLinks    DocLink[]
 
   @@map("doc")
 }
@@ -474,6 +477,71 @@ model Annotation {
 
   @@index([docId])
   @@map("annotation")
+}
+
+// PLAN.md §14 — a doc link joins a selection in one doc to a selection in
+// another. Deliberately the opposite of Annotation's comment above: a doc
+// link's anchor lives *outside* the document, in `mark`, rather than as a
+// mark embedded in the doc's own ydoc (§14a explains why — a mark lives in
+// exactly one document, and a link joins two). That means it CAN fall out of
+// sync with the document, and §14d is the resolution/repair policy that pays
+// for it. `mark_id` is the inline-mark path (§14b) — a future alternative
+// anchor using the same style of mark Annotation uses — reserved but unused;
+// exactly one of `mark_id`/`mark` is ever non-null, enforced by a hand-added
+// CHECK constraint in this model's migration (Prisma has no CHECK DSL).
+//
+// Soft delete is `deletedAt` alone here, not the deletedByUserId+deletedAt
+// pair every other soft-deletable model in this file uses — a deliberate,
+// singular divergence (§14b/§14n): neither this model nor DocLinkGroup joins
+// the $extends soft-delete filter in src/lib/prisma.ts (that covers only
+// post/user/doc; annotation is excluded too, on the same grounds, and
+// filters by hand) so there is no UI depending on "who deleted this," and
+// the single column avoids a second named @relation to User on both models.
+model DocLink {
+  id             String    @id @default(cuid())
+  docId          String    @map("doc_id")
+  markId         String?   @map("mark_id")
+  mark           Json?
+  text           String?
+  docLinkGroupId String    @map("doc_link_group_id")
+  overrideColor  String?   @map("override_color")
+  userId         String    @map("user_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  doc   Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
+  group DocLinkGroup @relation(fields: [docLinkGroupId], references: [id], onDelete: Cascade)
+  user  User         @relation(fields: [userId], references: [id])
+
+  @@index([docId])
+  @@index([docLinkGroupId])
+  @@map("doc_link")
+}
+
+// PLAN.md §14h/§14i — the named grouping a doc_link belongs to; the group,
+// not the individual link, is what the group bar's dropdown lists and what a
+// pulse targets across both columns at once (data-doc-link-group-ids). Not
+// created until there is something to save (§14i) — an eagerly-created empty
+// group would be invisible in its own dropdown, whose membership rule is
+// "has a link to either doc." Deleting the last link does not delete the
+// group; deleting the group soft-deletes its links, since docLinkGroupId is
+// required and an orphaned link is meaningless.
+model DocLinkGroup {
+  id            String    @id @default(cuid())
+  name          String?
+  text          String?
+  overrideColor String?   @map("override_color")
+  userId        String    @map("user_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  user  User      @relation(fields: [userId], references: [id])
+  links DocLink[]
+
+  @@index([userId])
+  @@map("doc_link_group")
 }
 
 // A generic, standalone Yjs document store — PLAN.md §11. Keyed purely by the

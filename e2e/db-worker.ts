@@ -26,7 +26,9 @@ import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
-import { contentExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { contentExtensions, collectMarkAttrValues, pmDocContentSchema } from "@/lib/tiptap-schema";
+import { findQuoteOccurrences } from "@/lib/quote-occurrences";
+import { captureAnchor } from "@/lib/doc-link-anchor";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
@@ -109,6 +111,16 @@ export async function deleteTestUser(email: string): Promise<void> {
     if (annotationIds.length > 0) {
       await prisma.ydoc.deleteMany({ where: { id: { in: annotationIds.map(ydocIdForAnnotation) } } });
     }
+    // doc_link.user_id and doc_link_group.user_id are the same shape of
+    // required, RESTRICT-by-default FK — and unlike annotations, PLAN.md
+    // §14b's soft delete is deletedAt-only, so a group "deleted" through
+    // the UI (updateDocLinkGroup's soft delete) still owns the row and
+    // still blocks this. Links first (a link can live in a group owned by
+    // someone else), then this user's own groups (whose onDelete: Cascade
+    // takes any remaining links in them, e.g. someone else's link inside
+    // a group this user created).
+    await prisma.docLink.deleteMany({ where: { userId: user.id } });
+    await prisma.docLinkGroup.deleteMany({ where: { userId: user.id } });
   }
   await prisma.user.deleteMany({ where: { email } });
 }
@@ -269,6 +281,72 @@ export async function getDocState(docId: string): Promise<DocState | null> {
 /** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), same check createTestYdoc's own spec makes for /ydoc-debug documents. */
 export async function countDocYdocUpdates(docId: string): Promise<number> {
   return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
+}
+
+// ---------------------------------------------------------------------------
+// Doc links (PLAN.md §14) — a doc link's anchor is a plain JSON blob computed
+// against a doc's body text, not a live-collab mark, so unlike an annotation
+// it needs no collab connection to create. `bodyText` here must be exactly
+// what createTestDoc's own `bodyText` seeded (docFromText builds the same
+// paragraph-split JSON both times), so the anchor this computes matches what
+// the reading view actually renders. deleteTestDoc already cascades DocLink
+// rows away (onDelete: Cascade on doc_id, §14b) but not their DocLinkGroup —
+// deleteTestDocLinkGroup is the explicit cleanup for that.
+// ---------------------------------------------------------------------------
+
+export type TestDocLink = { id: string; groupId: string };
+
+export async function createTestDocLink(opts: {
+  docId: string;
+  authorEmail: string;
+  bodyText: string;
+  quotedText: string;
+  groupId?: string;
+  overrideColor?: string;
+}): Promise<TestDocLink> {
+  const { docId, authorEmail, bodyText, quotedText, groupId, overrideColor } = opts;
+  assertSafe(authorEmail);
+  const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
+
+  const node = pmDocContentSchema.nodeFromJSON(docFromText(bodyText));
+  const occurrences = findQuoteOccurrences(node, quotedText);
+  if (occurrences.length !== 1) {
+    throw new Error(`"${quotedText}" occurs ${occurrences.length} time(s) in the given bodyText — need exactly one.`);
+  }
+  const mark = captureAnchor(node, occurrences[0].from, occurrences[0].to);
+
+  const group = groupId
+    ? await prisma.docLinkGroup.findUniqueOrThrow({ where: { id: groupId } })
+    : await prisma.docLinkGroup.create({ data: { name: quotedText.slice(0, 60), userId: author.id } });
+
+  const link = await prisma.docLink.create({
+    data: { docId, mark: mark as object, docLinkGroupId: group.id, userId: author.id, overrideColor },
+  });
+
+  return { id: link.id, groupId: group.id };
+}
+
+export async function deleteTestDocLinkGroup(groupId: string): Promise<void> {
+  await prisma.docLink.deleteMany({ where: { docLinkGroupId: groupId } });
+  await prisma.docLinkGroup.deleteMany({ where: { id: groupId } });
+}
+
+/** Non-deleted doc_link rows for a doc — used to assert the Phase 5 creation flow wrote a real row, not just painted a decoration. */
+export async function countDocLinks(docId: string): Promise<number> {
+  return prisma.docLink.count({ where: { docId, deletedAt: null } });
+}
+
+/** groupId for every non-deleted doc_link on a doc — lets a test clean up the groups it created through the UI, which it has no id for otherwise. */
+export async function getDocLinkGroupIds(docId: string): Promise<string[]> {
+  const links = await prisma.docLink.findMany({ where: { docId, deletedAt: null }, select: { docLinkGroupId: true } });
+  return Array.from(new Set(links.map((l) => l.docLinkGroupId)));
+}
+
+/** A single doc_link's editable fields — for asserting the §14j edit-popover flow actually persisted, not just repainted. */
+export type DocLinkFields = { text: string | null; overrideColor: string | null };
+export async function getDocLinkFields(linkId: string): Promise<DocLinkFields | null> {
+  const link = await prisma.docLink.findUnique({ where: { id: linkId }, select: { text: true, overrideColor: true } });
+  return link ?? null;
 }
 
 export type AnnotationState = {
@@ -598,6 +676,11 @@ const handlers = {
   deleteTestDoc,
   getDocState,
   countDocYdocUpdates,
+  createTestDocLink,
+  deleteTestDocLinkGroup,
+  countDocLinks,
+  getDocLinkGroupIds,
+  getDocLinkFields,
   getAnnotationStates,
   countPostCollabRows,
   createComment,

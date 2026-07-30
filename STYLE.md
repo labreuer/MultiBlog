@@ -92,6 +92,7 @@ value that two systems depend on invites drift.
 | Quote-thread marker (detached) | `#999`, fixed (not `--thread-color`-driven) | `QuoteThreadHeader.module.css` |
 | Quote highlight background / pulse | `color-mix(in srgb, var(--thread-color, #999) 25%, transparent)`, pulses to 55% | `prose.module.css` |
 | Annotation highlight background / pulse | `rgba(255, 200, 0, 0.28)`, pulses to `0.55` alpha | `prose.module.css` `.annotation-highlight` — flat amber, not `--thread-color`-driven: unlike a quote thread, an annotation isn't multi-colored per commenter (PLAN.md §12i) |
+| Doc link highlight background / active / pulse | `color-mix(in srgb, var(--doc-link-color, #999) 25%, transparent)`, 45% when its group is active, pulses to 70% | `prose.module.css` `.doc-link-highlight`/`.doc-link-active`/`.pulse` — a third, separately-named custom property from `--thread-color` (same per-instance-color pattern, §14e's cascade: link override → group override → author color), kept distinct so devtools can tell the three anchor kinds apart at a glance |
 | Comment-form buttons | `#333` (Post comment) / `#666` (Cancel) | `CommentForm.module.css` `.submit`/`.cancel` |
 | Error text | `crimson` | form validation errors |
 | Danger/delete action | `#c00` (text/border, no fill) | `PostsTable.tsx`/`UsersTable.tsx` delete icon buttons, `PostSettingsPanel.module.css` `.deleteButton` — consistent across every soft-delete control in the admin/editor UI |

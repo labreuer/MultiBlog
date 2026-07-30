@@ -15,6 +15,7 @@ export const RESERVED_SLUGS = new Set([
   "reset-password",
   "rss.xml",
   "search",
+  "side-by-side",
   "sign-in",
   "sign-up",
   "site-settings",

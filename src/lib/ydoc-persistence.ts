@@ -9,17 +9,22 @@ import { IndexeddbPersistence } from "y-indexeddb";
 
 const DB_PREFIX = "ydoc-debug:";
 
-type Attachment = { persistence: IndexeddbPersistence; refs: number };
+type Attachment = { persistence: IndexeddbPersistence; refs: number; doc: Y.Doc };
 
 // Bug 1 (y-indexeddb#25: https://github.com/yjs/y-indexeddb/issues/25) —
-// creating more than one IndexeddbPersistence for the same Y.Doc makes each
-// instance re-persist the updates the *other* instance already wrote, because
-// the library's own guard only excludes itself as an origin. React
-// StrictMode's double-invoked effects are exactly how you'd end up with two.
-// Refcounting one instance per doc (rather than one per attach call) is the
-// fix: a second attach reuses the first instance instead of constructing a
-// competing one, and only the last detach actually tears it down.
-const attachments = new WeakMap<Y.Doc, Attachment>();
+// creating more than one IndexeddbPersistence for the same local database
+// makes each instance re-persist the updates the *other* instance already
+// wrote, because the library's own guard only excludes itself as an origin.
+// React StrictMode's double-invoked effects are one way to end up with two
+// (same Y.Doc, attached twice) — refcounting fixes that case. Keyed on the
+// database *name* rather than the Y.Doc (a WeakMap<Y.Doc> would not catch
+// it): two distinct Y.Docs asking to attach the same name — e.g. PLAN.md
+// §14c's /side-by-side/<a>/<a>, where two columns would otherwise build two
+// separate Y.Docs over the one documentName — hit the exact same bug through
+// a path per-doc refcounting can't see. A second attach for a different
+// Y.Doc is refused outright rather than silently building a second
+// IndexeddbPersistence.
+const attachments = new Map<string, Attachment>();
 
 // Bug 2 — the one that actually corrupts content. A stale local IndexedDB
 // copy merging into a server document that has been re-seeded (a structurally
@@ -61,26 +66,33 @@ async function sweepStaleLineages(documentName: string, currentDbName: string): 
  * `detach()` in the same effect's cleanup that calls this.
  */
 export function attachIndexeddb(doc: Y.Doc, documentName: string, lineageMs: number): () => void {
-  const existing = attachments.get(doc);
+  const name = dbName(documentName, lineageMs);
+  const existing = attachments.get(name);
   if (existing) {
+    if (existing.doc !== doc) {
+      console.error(
+        `attachIndexeddb: refusing a second attach for "${name}" — a different Y.Doc is already attached. ` +
+          "Two Y.Docs sharing one local database would each re-persist the other's writes (y-indexeddb#25).",
+      );
+      return () => {};
+    }
     existing.refs += 1;
-    return () => detach(doc);
+    return () => detach(name);
   }
 
-  const name = dbName(documentName, lineageMs);
   const persistence = new IndexeddbPersistence(name, doc);
-  attachments.set(doc, { persistence, refs: 1 });
+  attachments.set(name, { persistence, refs: 1, doc });
   void sweepStaleLineages(documentName, name);
 
-  return () => detach(doc);
+  return () => detach(name);
 }
 
-function detach(doc: Y.Doc): void {
-  const attachment = attachments.get(doc);
+function detach(name: string): void {
+  const attachment = attachments.get(name);
   if (!attachment) return;
   attachment.refs -= 1;
   if (attachment.refs <= 0) {
-    attachments.delete(doc);
+    attachments.delete(name);
     void attachment.persistence.destroy();
   }
 }

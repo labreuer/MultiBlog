@@ -5,13 +5,14 @@ import * as Y from "yjs";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
-import { canUserReadDoc, canUserEditDoc } from "@/lib/doc-authz";
+import { canUserReadDoc, canUserEditDoc, readableDocsFor } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
+import CompareWithPicker from "@/components/CompareWithPicker";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
@@ -63,6 +64,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
   }
 
   const canEdit = await canUserEditDoc(session.user.id, session.user.role, doc.id);
+  const otherDocs = (await readableDocsFor(session.user.id, session.user.role)).filter((d) => d.id !== doc.id);
 
   // bodyJSON seeds LiveDocBody's editor so its first paint is identical to
   // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
@@ -117,6 +119,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                     §12k), so "last edited" is the only date that means anything.
                     Short date visible, full timestamp on hover. */}
                 <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
+                <CompareWithPicker docId={doc.id} otherDocs={otherDocs} />
               </p>
             }
           />
