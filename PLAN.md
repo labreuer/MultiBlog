@@ -2830,7 +2830,10 @@ per keystroke. Neither annotations nor quotes ever hit this shape: both re-find 
 submit. Wrap the resolve in `perfMeasure` (`src/lib/perf-monitor.ts`), same as the author-highlight
 walk, so the cost is measurable rather than inferred.
 
-**Persistence of corrected offsets happens only from a column in write mode.** A write column is
+**Persistence of corrected offsets happens only from a column in write mode.** *(Not built — see
+§14o. Write-column highlighting was never wired up, so there is no write surface to persist from, and
+`updateDocLink` takes no `mark` argument. Every column resolves in memory, every time. The reasoning
+below is what should govern it whenever the write column does land.)* A write column is
 bound through the `Collaboration` extension, so its corrected positions come from ProseMirror steps
 mapped through real transactions — authoritative, and strictly better than any text search. A read
 column is a read-only tap that is always at least one update behind, so offsets it computes were
@@ -2841,7 +2844,9 @@ transactions told it. Drift therefore heals whenever anybody edits the doc, whic
 at which anyone actually knows the answer.
 
 **An unanchored link stays visible in the group panel** with no highlight — it is still a named row
-in a group, and silently vanishing is worse than showing it as unplaced. This mirrors both
+in a group, and silently vanishing is worse than showing it as unplaced. *(Not built — see §14o. The
+group panel edits the group's own name/text/color and lists no links at all, so an unanchored link is
+currently invisible everywhere except the count line.)* This mirrors both
 `ThreadStatus.DETACHED` on the post side and §12i's degrade-an-annotation-to-document-level
 fallback. `anchored` is computed on the client and is deliberately **not** a column: nothing would
 ever write it, and a stored status would drift from the document exactly like the offsets do.
@@ -2869,7 +2874,7 @@ Two failure modes that the annotation path never meets:
 export const docLinkKey = new PluginKey<DocLinkPluginState>("docLink");
 export function setDocLinks(view: EditorView, next: DocLinkPluginState): void;
 type DocLinkPluginState = {
-  links: ResolvedDocLink[];   // { id, groupId, from, to, color, mine, anchored }
+  links: ResolvedDocLink[];   // { id, groupId, from, to, color, mine }
   activeGroupId: string | null;
 };
 ```
@@ -2904,9 +2909,10 @@ mapped positions are the ones §14d persists.
 `{ id, from, to, color }`, returning segments carrying every covering range's id. The CLAUDE.md
 gotcha it exists for — ProseMirror silently drops one decoration's `data-*` attributes where inline
 decorations overlap — is a property of ProseMirror, not of quote threads; a second copy guarantees a
-third. `quote-highlight-extension.ts` calls it through a thin adapter with behavior unchanged, and
-because `e2e/quote-anchoring.spec.ts` covers that file, the extraction is a **pure refactor in its
-own phase**, green before any doc-link code exists.
+third. `quote-highlight-extension.ts` calls the extracted function directly (its one call site reads
+`segment.ids` where the local version said `segment.threadIds`; no adapter was needed), and because
+`e2e/quote-anchoring.spec.ts` covers that file, the extraction is a **pure refactor in its own
+phase**, green before any doc-link code exists.
 
 Per segment: `class: "doc-link-highlight"`, plus `"doc-link-active"` when any covering link belongs
 to `activeGroupId`; `data-doc-link-ids` and `data-doc-link-group-ids`, both space-separated and
@@ -2917,8 +2923,11 @@ covering links agree on a color, omitted when they disagree so the neutral gray 
 `querySelectorAll` across *both* columns, the one place this page's shared document scope helps.
 
 **Color cascade**, resolved in React and delivered inline on the decoration spec:
-`link.overrideColor ?? group.overrideColor ?? authorColors[link.userId]`, with `useAuthorColors`
-seeded with the current user the way `CollabEditorBody` already does.
+`link.overrideColor ?? group.overrideColor ?? <the link author's own color>`. The author color does
+*not* come from `useAuthorColors` (`CollabEditorBody`'s client-side `/api/users/colors` fetch) —
+`getDocLinkGroupsForPair` already joins `user.color` per link, so it arrives with the first paint and
+needs no second round trip. `cascadeDocLinkColor` (`src/lib/doc-link-colors.ts`) is the one place the
+rule lives, called from `SideBySideView` on every recompute.
 `AnnotationColorStyles.tsx`'s injected `<style>` tag exists because a *mark*'s `renderHTML` cannot
 take a computed color; a decoration spec can, so no `<style>` tag is needed here. `SAFE_COLOR` moves
 out of `AnnotationColorStyles.tsx` into a shared `src/lib/safe-css.ts` and validates on write in the
@@ -2956,7 +2965,8 @@ default to `min-width:auto`, long unbreakable content blows out the `1fr`, and `
 `coordsAtPos(...)` minus the container rect — if that rect is not the scroller, the popover drifts as
 the column scrolls. `LiveDocBody` already wraps itself in `position:relative`, so that wrapper stays
 *inside* the scroller. `PostEditor.module.css`'s `.editorContent { min-height:300px }` fights a short
-viewport and is overridden in this context.
+viewport — *not actually overridden as built (§14o); the write column inherits the 300px floor, which
+only shows up as an unwanted scroll on a very short viewport.*
 
 **Singletons.** `DocPresenceProvider` gets one instance **per column**, as siblings — it is a React
 context, so two nest fine; the bug is one instance with two writers. `LiveDocBody` calls
@@ -3035,7 +3045,8 @@ A single strip above the columns, horizontally centered, `flex:0 0 auto`.
 one entry per group having at least one link to either doc, showing its name, prefixed `← ` for
 links only to the left doc, `→ ` for only the right, `↔ ` for both. Last entry is
 `New Doc Link Group`. Selecting a group opens a collapsible panel below the bar, in flow rather than
-overlaid, with editable `name`, `text`, and `override_color`, a delete button, and the count line.
+overlaid, with editable `name`, `text`, and `override_color`, a `Display?` checkbox, and a delete
+button. (The count line lives in the bar, not this panel — see below.)
 
 **Default visibility is every group shown.** This is forced by the spec's own click-disambiguation
 case: "if no group is selected, present a choice of which one" is only reachable if highlights are
@@ -3045,7 +3056,9 @@ id, not persisted, defaulting to on; selecting a group *darkens* rather than iso
 the first also clears `activeGroupId`.
 
 **The count line, `← N  M → (+Y)`** — N links in the left doc, M in the right, Y in any other doc.
-Two queries: one `findMany` over links whose `docId` is either of the two (with their groups), which
+*As built it sits in the bar itself, beside the dropdown, and sums across every group on the page
+rather than describing only the selected one — see §14o.* Two queries: one `findMany` over links whose
+`docId` is either of the two (with their groups), which
 also produces the dropdown's membership and its arrow prefixes; and one over all links belonging to
 those group ids, selecting `{ id, docId, docLinkGroupId }`, bucketed in JS. Counts are non-deleted
 rows and include unanchored links — they describe the group, not the paint — and are unaffected by
@@ -3059,7 +3072,8 @@ retry loop exists for. A saving/saved indicator, and a stated last-write-wins ru
 edit one group's name, which follows from §14a's no-live-propagation. `updated_at` is `@updatedAt`.
 
 **Deleting a group soft-deletes its links** in one transaction, since `docLinkGroupId` is required
-and an orphaned link has no meaning; restore restores both. Deleting the last link does *not* delete
+and an orphaned link has no meaning; restore restores both *(the delete half is built; there is no
+restore UI or action for either a group or a link — see §14o)*. Deleting the last link does *not* delete
 its group — an empty group is a legitimate work-in-progress. Soft-deleting a `Doc` leaves its links
 alone, matching how a deleted doc already leaves its annotations alone.
 
@@ -3098,7 +3112,9 @@ attributes**, so the logic and the paint cannot disagree and the same code serve
 (There is no precedent to copy: `.annotation-highlight` has `cursor:pointer` in `prose.module.css`
 and no click handler anywhere in the repo.)
 
-With `hits = links.filter(l => l.anchored && pos >= l.from && pos < l.to)`:
+With `hits = links.filter(l => pos >= l.from && pos < l.to)` — no `anchored` check, because an
+unanchored link never enters the plugin's `links` in the first place (`syncDocLinks` drops it before
+the push, so the plugin only ever holds ranges with real positions):
 
 - none → return `false`; this is also the drag-select-to-create path
 - one → open that link's popover
@@ -3202,8 +3218,15 @@ documentation shape).
 ### 14o. As built
 
 Built 2026-07-29, in the order §14l lays out (Phase 0 → 8), each phase gated on `npx tsc
---noEmit`, `npx eslint .`, and the full `npm run e2e` suite before moving to the next. Three
-deliberate deviations from the text above:
+--noEmit`, `npx eslint .`, and the full `npm run e2e` suite before moving to the next.
+
+**Reconciled against the implementation afterward**, which is why several subsections above now carry
+inline *(not built)* / *(as built)* notes. Those notes are the authority on what exists; the prose
+around them is kept as the record of what was decided and why, since a design rationale is worth more
+than a description of code that can be read directly. The unbuilt pieces are listed together below so
+nothing is only discoverable by reading all of §14a–§14k.
+
+Three deliberate deviations from the text above:
 
 - **Write-column highlighting was never built.** §14e's decoration layer, §14j's click routing,
   and the `editable` option on `DocLink.configure(...)` are all written to support a highlighted
@@ -3223,9 +3246,58 @@ deliberate deviations from the text above:
   than a wall of links at that size; renders nothing when the list is empty rather than an
   always-visible disabled control.
 
-Two bugs worth recording, since both are the kind that pass a first read and fail only under
-real interaction:
+Designed above but **not built**, each marked in place and collected here:
 
+- **Write-mode persistence of corrected offsets** (§14d). Follows directly from the write column
+  never being highlighted: there is no write surface to persist from, and `updateDocLink` accepts
+  only `text`/`overrideColor` — never `mark`. Every column resolves in memory on every content
+  change and throws the result away. Drift therefore never heals; it is merely re-derived, correctly,
+  on each load. Cheap to add once the write column lands, and §14d's reasoning about *why only* the
+  write column may persist still holds.
+- **Unanchored links have no UI** (§14d). `DocLinkGroupPanel` edits the group's own
+  name/text/override_color and lists no links, so a link whose anchor stopped resolving is invisible
+  everywhere except its contribution to the count line. §14d's "stays visible in the group panel"
+  needs the panel to list links first, which nothing in §14l's build order called for.
+- **Restore for a soft-deleted group or link** (§14h's "restore restores both"). Both delete paths
+  set `deletedAt`, and nothing ever clears it — there is no restore action and no UI to reach one.
+  Note this interacts with §14b's `deleted_at`-alone divergence: with no `deleted_by_user_id`, a
+  restore UI would also have no way to show who deleted the row it is offering to bring back.
+- **`.editorContent`'s 300px floor is not overridden** (§14f). The write column inherits
+  `PostEditor.module.css`'s `min-height:300px`, which on a very short viewport produces the
+  unnecessary scroll §14f predicted. One CSS rule in `DocColumn.module.css` whenever it bites.
+
+One correction to §14i's own promise, fixed in code rather than documented around: "the row lands on
+the first debounced save of name/text/color, **or when the first link is saved into it**". The second
+path did not work — with the `NEW_GROUP` sentinel active, `createDocLink` correctly built a *fresh*
+group (once the sentinel-leak bug below was fixed), but `appendLinkForDoc`'s
+`if (!activeGroupId)` guard saw the truthy sentinel and declined to follow it, leaving the unsaved
+draft panel open beside a group it had nothing to do with. `appendLinkForDoc` now treats
+`isCreatingNew` as "nothing selected" for that guard, so the panel switches to the group that was
+actually created.
+
+Bugs worth recording, all of the kind that pass a first read and fail only under real interaction.
+The first three surfaced in hand-testing the group bar *after* the phases were done, and were fixed
+together; each was confirmed by reverting its fix and watching a new regression test fail with the
+exact reported symptom.
+
+- **The `NEW_GROUP` sentinel leaked into `createDocLink` as a real group id.** `SideBySideView`'s
+  `activeGroupId` holds three kinds of value — a real id, `null`, or the `"__new__"` sentinel that
+  tells the *bar* to render an unsaved draft panel — and passed the raw state to both `DocColumn`s,
+  which forward it into `DocLinkPopover`'s `groupId` on save. Creating a link with "New Doc Link
+  Group" selected therefore sent `groupId: "__new__"`, `createDocLink` found no such row and
+  returned "Group not found", and since that path has no error display the Save button silently did
+  nothing. Fixed with a derived `columnActiveGroupId` (null while `isCreatingNew`) for the columns
+  only, which falls through to the popover's ordinary "no group selected" path.
+- **`DocLinkGroupPanel` had no `key`,** so React reused one component instance across dropdown
+  selections (same JSX position). Its `name`/`text`/`overrideColor` state initializes only once,
+  from the `initial*` props, so switching groups left the panel showing the *previous* group's
+  fields — the props changed, but `useState` initializers do not re-run. Fixed with
+  `key={activeGroup?.id ?? "new"}`, forcing a remount per switch.
+- **A blank group could never be saved.** Every field's autosave fires only from its own `onChange`,
+  so opening "New Doc Link Group" and typing nothing meant no debounce was ever scheduled and no row
+  was ever written — even though `name`/`text`/`override_color` are all nullable and a group with
+  none of them set is a legitimate row (§14b). Fixed with an explicit Save button, rendered only for
+  an unsaved draft, calling the same `flush()` the debounce uses.
 - **A stale-closure bug in `DocLinkGroupPanel`'s debounced save** — reading `name`/`text`/
   `overrideColor` directly from React state inside the `setTimeout` callback saved whatever they
   were *before* the keystroke that scheduled the save, not the just-typed value, because the

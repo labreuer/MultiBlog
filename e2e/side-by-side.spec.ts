@@ -542,6 +542,12 @@ test.describe("side-by-side group bar", () => {
       await expect.poll(() => countDocLinks(left.id)).toBe(1);
       groupIds = await getDocLinkGroupIds(left.id);
       expect(groupIds).toHaveLength(1);
+
+      // The dropdown follows the group that was actually created, rather
+      // than staying on "New Doc Link Group" with a stale empty draft panel
+      // open beside a group it has nothing to do with (§14i).
+      await expect(select).toHaveValue(groupIds[0]);
+      await expect(select.locator("option").first()).toHaveText("Hide all Groups");
     } finally {
       await page.goto("about:blank").catch(() => {});
       for (const groupId of groupIds) {

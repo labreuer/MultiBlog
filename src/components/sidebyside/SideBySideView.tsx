@@ -202,7 +202,14 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       next[idx] = { ...next[idx], links: [...next[idx].links, rawLink] };
       return next;
     });
-    if (!activeGroupId) setActiveGroupId(link.groupId);
+    // isCreatingNew counts as "nothing selected" here even though the
+    // sentinel is truthy: columnActiveGroupId sent null to the popover, so
+    // createDocLink built a brand-new group rather than filling the unsaved
+    // draft the panel is showing. Following it makes the panel describe the
+    // group that actually got created — §14i's "the new group becomes
+    // activeGroupId, and its panel opens" — instead of leaving a stale
+    // empty draft open beside a group it has nothing to do with.
+    if (!activeGroupId || isCreatingNew) setActiveGroupId(link.groupId);
   }
 
   // PLAN.md §14j — a link edited or deleted via its click-routing popover.
