@@ -108,7 +108,7 @@ export function resolveAnchor(doc: PMNode, mark: DocLinkMark): ResolvedAnchor {
 
 export type StoredDocLink = { id: string; mark: DocLinkMark | null };
 
-// What a rendering surface (LiveDocBody, and eventually the write column)
+// What a rendering surface (SideBySideDocBody, and eventually the write column)
 // needs per link to both resolve it (mark) and paint it once resolved
 // (groupId/color/mine) — the resolved from/to positions are computed at
 // render time, never stored on this type. `color` is already the final

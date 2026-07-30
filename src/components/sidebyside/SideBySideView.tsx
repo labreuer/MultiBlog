@@ -182,7 +182,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       {/* data-popover-bounds — the rect a doc-link popover is kept inside
           (popoverBoundsFor, src/lib/popover-placement.ts). Marked with an
           attribute rather than threaded down as a prop through DocColumn:
-          LiveDocBody has no business knowing this page's layout, only that
+          SideBySideDocBody has no business knowing this page's layout, only that
           *some* ancestor may constrain it, and /doc/[slug] marks nothing at
           all and correctly falls back to the viewport. */}
       <div className={styles.columns} data-popover-bounds>
@@ -268,7 +268,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
 
   // PLAN.md §14j — a link edited or deleted via its click-routing popover.
   // Both search every group rather than taking a groupId, since the
-  // caller (LiveDocBody, inside a column) only ever knows the link's own
+  // caller (SideBySideDocBody, inside a column) only ever knows the link's own
   // id — the group it belongs to isn't threaded through the edit flow.
   function updateLink(link: DocLinkInput) {
     setGroups((prev) =>

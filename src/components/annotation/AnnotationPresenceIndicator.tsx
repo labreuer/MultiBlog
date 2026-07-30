@@ -9,7 +9,7 @@ type Peer = { clientId: number; name: string; color: string };
 type AnnotationEditingState = { annotationId: string; name: string; color: string };
 
 // PLAN.md §13i — the discovery half of presence: every reader on the doc
-// (LiveDocBody's own awareness, exposed via DocPresenceProvider) sees
+// (DocReadingBody's own awareness, exposed via DocPresenceProvider) sees
 // everyone else's LiveAnnotationComposer publish "I'm writing an
 // annotation" into it. Not per-annotation (a brand-new one has nowhere to
 // anchor an indicator to yet — no list entry exists until it's posted),

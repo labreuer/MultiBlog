@@ -96,7 +96,7 @@ export default async function AnnotationSection({ docId }: { docId: string }) {
           author, same as AuthorHighlightStyles does for attributed body
           text — a <style> tag's attribute-selector rules apply document-wide
           regardless of where it sits in the tree, so rendering it here
-          (rather than up in LiveDocBody, which has no reason to know about
+          (rather than up in DocReadingBody, which has no reason to know about
           annotation authorship) is fine. */}
       <AnnotationColorStyles colors={Object.fromEntries(quoteThreads.map((t) => [t.id, t.color]))} />
       <h2 className={styles.heading}>Annotations</h2>

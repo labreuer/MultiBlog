@@ -23,7 +23,7 @@ type Props = {
 };
 
 // The inline annotation popover (PLAN.md §13j Phase 3). Two stages, not one:
-// selecting text alone never creates anything — LiveDocBody's own
+// selecting text alone never creates anything — DocReadingBody's own
 // pending-selection decoration (pending-annotation-extension.ts) already
 // shows the selection is "about to be annotated" for free, so there's no
 // need to also spin up a draft row and a live editor connection on every

@@ -262,7 +262,7 @@ export async function deleteTextInBody(page: Page, needle: string): Promise<void
 
 /**
  * Selects an exact substring in the body editor without deleting it — the
- * doc reading view's annotation-capture trigger (LiveDocBody's
+ * doc reading view's annotation-capture trigger (DocReadingBody's
  * onSelectionUpdate, PLAN.md §12i). A native `document.execCommand("delete")`
  * doesn't apply here since nothing should be removed; dispatching
  * `selectionchange` by hand is what makes TipTap's selection plugin (and so
