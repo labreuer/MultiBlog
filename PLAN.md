@@ -3198,3 +3198,64 @@ documentation shape).
   user-entered and will quote content, so a group's text can leak what the other doc contains.
 - **Whether `override_color` on a shared group should be editable by anyone with a link in it**, or
   only its creator (as built) — one user recoloring another's link is the case at issue.
+
+### 14o. As built
+
+Built 2026-07-29, in the order §14l lays out (Phase 0 → 8), each phase gated on `npx tsc
+--noEmit`, `npx eslint .`, and the full `npm run e2e` suite before moving to the next. Three
+deliberate deviations from the text above:
+
+- **Write-column highlighting was never built.** §14e's decoration layer, §14j's click routing,
+  and the `editable` option on `DocLink.configure(...)` are all written to support a highlighted
+  write surface — but `CollabEditorBody` never gained the `DocLink` extension, so a write column
+  shows no doc-link highlights at all and §14j's "write mode returns `false`" branch is
+  unreachable in this build. Out of Phase 4's stated "read path" scope, and no later phase
+  explicitly picked it up; noted here rather than silently expanded into. The plugin itself needs
+  no change to support it later — only wiring `DocLink.configure({ onHit, editable: true })` into
+  `CollabEditorBody`'s extension list and pushing resolved links into it the way the write
+  column's `apply()` position-mapping already anticipates.
+- **`DocLinkPopover`'s Cancel button shows in both create and edit mode**, not just "when new" as
+  §14i's composer description reads. Edit mode's only other way to dismiss without saving was the
+  outside-click handler; keeping Cancel visible there too is a usability call, not an oversight.
+- **The entry point is a `<select>`** (`CompareWithPicker.tsx`), not the bare "control... listing
+  other docs" §14k leaves unspecified in shape. Chosen over a list of links because
+  `readableDocsFor` can return every doc a reader has access to, and a picker degrades better
+  than a wall of links at that size; renders nothing when the list is empty rather than an
+  always-visible disabled control.
+
+Two bugs worth recording, since both are the kind that pass a first read and fail only under
+real interaction:
+
+- **A stale-closure bug in `DocLinkGroupPanel`'s debounced save** — reading `name`/`text`/
+  `overrideColor` directly from React state inside the `setTimeout` callback saved whatever they
+  were *before* the keystroke that scheduled the save, not the just-typed value, because the
+  callback's closure was created (and its `flush` reference captured) synchronously within the
+  same `onChange` handler that called `setState`, one render before the state update took effect.
+  Silent for an *edit* (a debounced save still writes the old value, which happens to already be
+  correct at the very first keystroke of a session) and only surfaced testing "New Doc Link
+  Group," where the first save's `name` field was empty regardless of what was typed. Fixed with
+  a parallel `useRef`, updated synchronously in each `onChange` alongside the `setState` call, that
+  `flush()` reads from instead of the state closure.
+- **Soft-deleting a `DocLinkGroup` through the UI still blocks e2e user teardown on the FK.**
+  §14b's `deleted_at`-alone soft delete (deliberately, unlike every other soft-deletable model's
+  `deleted_by_user_id` pair) means a "deleted" group's row — and its `user_id` FK — never
+  actually goes away. `e2e/db-worker.ts`'s `deleteTestUser` now hard-deletes a test user's own
+  `doc_link`/`doc_link_group` rows before deleting the user, the same shape its existing
+  annotation/ydoc cleanup already has for a different FK.
+
+Smaller implementation notes:
+
+- **`doc-links-query.ts`'s `buildDocLinkInputs` was written in Phase 4 and deleted in Phase 7** —
+  Phase 6 moved per-column link derivation (including the color cascade) into `SideBySideView`
+  itself, since the group bar and both columns need to agree on one filtered/colored set; the
+  server-side helper doing the same computation became dead code once nothing called it.
+  `cascadeDocLinkColor` (`src/lib/doc-link-colors.ts`) is what both the removed server helper and
+  the client computation shared, so the cascade rule itself never forked.
+- **The `(+Y)` other-docs count is computed once, server-side, at page load** — like every other
+  cross-session doc-link state (§14a), it does not update if a link to a third doc is added by
+  someone else mid-session. Consistent with the rest of this section's no-live-propagation stance,
+  not a separate gap.
+- **`readableDocsFor` (§14k) lives beside `canUserReadDoc`, expressing the same predicate as a
+  `where` clause instead of a per-row check** — ADMIN/EDITOR get every non-deleted doc in one
+  branch; everyone else gets an `OR` array built from `canViewDocs`/`canManageDocs`, empty (and
+  therefore an empty result, not an error) for a role that satisfies neither.

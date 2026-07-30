@@ -517,3 +517,56 @@ test.describe("side-by-side click routing", () => {
     }
   });
 });
+
+// PLAN.md §14k/§14l Phase 8 — the "Compare with…" entry point.
+test.describe("compare with entry point", () => {
+  test("picking another doc from /doc/[slug] navigates to the side-by-side pair", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Left doc." });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Right doc." });
+
+    try {
+      await page.goto(`/doc/${left.id}`);
+      const picker = page.getByLabel("Compare with…");
+      await expect(picker).toBeVisible();
+      // The doc itself is never offered as its own comparison partner.
+      await expect(picker.locator("option", { hasText: left.title })).toHaveCount(0);
+      await expect(picker.locator("option", { hasText: right.title })).toHaveCount(1);
+
+      await picker.selectOption(right.id);
+      await page.waitForURL(`**/side-by-side/${left.id}/${right.id}`);
+      await expect(page.getByRole("textbox", { name: "Left doc body" })).toContainText("Left doc.");
+      await expect(page.getByRole("textbox", { name: "Right doc body" })).toContainText("Right doc.");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("a PRIVATE doc is never offered to a lower-privilege reader who isn't its author", async ({ secondUser }) => {
+    const visible = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Visible doc." });
+    // A second SHARED doc, so the picker has something to offer at all —
+    // otherwise CompareWithPicker renders nothing (§14k) and the "not
+    // offered" assertion below would trivially pass for the wrong reason.
+    const otherVisible = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Other visible doc." });
+    const privateDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "PRIVATE", bodyText: "Private doc." });
+    // AUTHORIZED (§12e) can read SHARED docs (canViewDocs) but manages none
+    // (canManageDocs is false), so readableDocsFor's PRIVATE branch — which
+    // requires both canManageDocs *and* byline authorship — excludes this
+    // doc regardless of who authored it.
+    const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
+
+    try {
+      await readerPage.goto(`/doc/${visible.id}`);
+      const picker = readerPage.getByLabel("Compare with…");
+      await expect(picker).toBeVisible();
+      await expect(picker.locator(`option[value="${otherVisible.id}"]`)).toHaveCount(1);
+      await expect(picker.locator(`option[value="${privateDoc.id}"]`)).toHaveCount(0);
+    } finally {
+      await readerPage.goto("about:blank").catch(() => {});
+      await deleteTestDoc(privateDoc.id);
+      await deleteTestDoc(otherVisible.id);
+      await deleteTestDoc(visible.id);
+    }
+  });
+});

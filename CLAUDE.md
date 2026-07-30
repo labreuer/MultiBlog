@@ -340,9 +340,13 @@ anything repeatable.
   `IndexeddbPersistence` for a `Y.Doc` that already has one.
   [y-indexeddb#25](https://github.com/yjs/y-indexeddb/issues/25) — each instance re-persists
   updates the *other* instance already wrote, because the library's own guard only excludes
-  itself as an origin, not sibling instances. `attachIndexeddb` is ref-counted per `Y.Doc`
-  (a `WeakMap`) specifically so React StrictMode's double-invoked effects can't trigger
-  this. Separately, the local IndexedDB database is keyed by the document's *lineage*
+  itself as an origin, not sibling instances. `attachIndexeddb` is ref-counted per local
+  IndexedDB database *name* (a `Map`, not a `WeakMap<Y.Doc>` — re-keyed in PLAN.md §14l
+  Phase 0), so React StrictMode's double-invoked effects (same `Y.Doc`, attached twice)
+  reuse the one instance, *and* a second attach for a genuinely different `Y.Doc` against
+  the same name is refused outright rather than silently building a competing instance —
+  the shape `/side-by-side/<a>/<a>` would hit if the route didn't already reject it (PLAN.md
+  §14c). Separately, the local IndexedDB database is keyed by the document's *lineage*
   (`ydoc.created_at`, fetched from `/api/ydoc/[id]/token` alongside the collab token) rather
   than by `documentName` alone — `created_at` only changes if the row is ever recreated,
   i.e. exactly when the server has built a structurally new document, so a stale local copy
@@ -361,6 +365,24 @@ anything repeatable.
   which is both correct and cheaper than replaying the deltas in between, and is the only way a
   snapshot earns its keep on a forward jump. The `forward`/`rebuild` marker at the head of the
   status line is what tells the two apart.
+- **A Next dynamic-route `params` value arrives percent-encoded, not literal.** `getParamValue`
+  in `next/dist/shared/lib/router/utils/get-dynamic-param.js` runs `encodeURIComponent` on every
+  string param before handing it to user code — verified against `next@16.2.11`. A route that
+  tried to pack two ids into one segment (`/side-by-side/[pair]`, meaning `a+b`) would see
+  `params.pair === "a%2Bb"`, not `"a+b"`, so `.split("+")` would silently return one element and
+  404 every URL — a `+`-means-space assumption that's true for query strings and false here
+  (`getRouteMatcher` already `decodeURIComponent`s the captured group; the `%2B` comes from the
+  *re*-encode after that). `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path segments
+  specifically to never need to decode anything.
+- **A doc link's anchor (PLAN.md §14) is a plain JSON blob in Postgres, not a mark in the doc's
+  ydoc** — the opposite of an annotation's anchor (§13), and deliberately: a link joins two
+  *different* docs, and no single ydoc can hold that. The cost is drift, paid for by re-running
+  `findQuoteOccurrences` against the current document on every content change (§14d) — memoized
+  per column, since the read surface does this on every remote keystroke, not just at load.
+  Persisting a corrected offset only ever happens from a column in *write* mode: a read column's
+  view is always at least one Yjs update behind, so a "correction" it computed was already stale,
+  and persisting it would be N concurrent readers last-writer-wins on the one field whose entire
+  job is precision.
 
 ## Conventions
 
