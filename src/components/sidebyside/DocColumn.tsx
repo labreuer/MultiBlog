@@ -25,7 +25,7 @@ type Props = {
   userName: string;
   userColor: string;
   // Derived by SideBySideView (Phase 6) from its own group state —
-  // filtered by Display?/"Show only my Doc Links" and colored by the
+  // filtered by Display?/"Show only my Links" and colored by the
   // cascade — rather than owned here, since the group bar needs the same
   // set both columns paint from to stay in sync.
   docLinks: DocLinkInput[];

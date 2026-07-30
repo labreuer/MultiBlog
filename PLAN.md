@@ -2884,7 +2884,7 @@ its threads in at construction and forces editor recreation through a `useEditor
 is fine for a page whose threads are fixed at load and wrong here: links change continuously as the
 user works, and recreating the editor would tear down the ProseMirror view, lose selection and
 scroll, and in the write column destroy the `Collaboration` binding. The push comes from an effect
-keyed on `[editor, links, activeGroupId]`. `Display?` and "Show only my Doc Links" are filtered in
+keyed on `[editor, links, activeGroupId]`. `Display?` and "Show only my Links" are filtered in
 React *before* the push — they are non-persisted view state and the plugin needs no concept of them.
 
 **A correction to the obvious worry about `setContent`.** `setContent` does not destroy plugin
@@ -3060,7 +3060,7 @@ A single strip above the columns, horizontally centered, `flex:0 0 auto`.
 `Hide all Groups` once something is; selecting it deselects and hides every group's highlights. Then
 one entry per group having at least one link to either doc, showing its name, prefixed `← ` for
 links only to the left doc, `→ ` for only the right, `↔ ` for both. Last entry is
-`New Doc Link Group`. Selecting a group opens a collapsible panel below the bar, in flow rather than
+`New Group`. Selecting a group opens a collapsible panel below the bar, in flow rather than
 overlaid, with editable `name`, `text`, and `override_color`, a `Display?` checkbox, and a delete
 button. (The count line lives in the bar, not this panel — see below.) The panel is **keyed on the
 group's id**, so switching the dropdown remounts it: its field state is seeded from props once, and a
@@ -3075,7 +3075,7 @@ the first also clears `activeGroupId`. **Selecting a group also clears its own `
 Opening a panel and darkening a group in the bar while its segments stay hidden reads as broken rather
 than as "you already hid this."
 
-**`Show one Group at a time`**, beside `Show only my Doc Links`, restricts both columns' highlights to
+**`Show one Group at a time`**, beside `Show only my Links`, restricts both columns' highlights to
 whichever group is active rather than darkening it among the rest; with no group active it has no
 effect (there is nothing yet to restrict to). Switching the dropdown — including via a doc link click,
 §14j — swaps which single group is shown, same as `Display?`'s per-group state does when this is off.
@@ -3089,7 +3089,7 @@ rather than describing only the selected one — see §14o.* Two queries: one `f
 also produces the dropdown's membership and its arrow prefixes; and one over all links belonging to
 those group ids, selecting `{ id, docId, docLinkGroupId }`, bucketed in JS. Counts are non-deleted
 rows and include unanchored links — they describe the group, not the paint — and are unaffected by
-"Show only my Doc Links", which filters the dropdown and the highlights only. `(+Y)` deliberately
+"Show only my Links", which filters the dropdown and the highlights only. `(+Y)` deliberately
 does not name those other docs or link to them: the viewer may not be able to read them, and a bare
 integer leaks nothing a link count doesn't.
 
@@ -3118,7 +3118,7 @@ joins it. If none is selected, it says a new group will be created, and on save 
 link are created in one transaction, the new group becomes `activeGroupId`, and its panel opens.
 
 **A group row is not written until there is something to put in it.** The dropdown's
-`New Doc Link Group` opens an *unsaved* panel; the row lands on the first debounced save of
+`New Group` opens an *unsaved* panel; the row lands on the first debounced save of
 name/text/color, or when the first link is saved into it. Creating it eagerly is worse than it
 looks: the dropdown's own membership rule is "groups with a link to either doc", so an eagerly
 created empty group would be **invisible in the very list that created it**, and abandoning the
@@ -3212,7 +3212,7 @@ Each phase leaves the app working, gated on `npx tsc --noEmit`, `npx eslint .`, 
   debounced save, create-group-on-first-link. Gate: create a link on each side through the UI and
   assert both rows plus `← 1  1 →`.
 - **Phase 6** — the group bar in full: dropdown with its prefixes and its first-entry swap, the panel,
-  `Display?`, active darkening and pulse, "Show only my Doc Links", delete-with-cascade.
+  `Display?`, active darkening and pulse, "Show only my Links", delete-with-cascade.
 - **Phase 7** — click routing: `handleClick`, the single and multi cases, the chooser, and the
   read-versus-write return value.
 - **Phase 8** — the "Compare with…" entry point, `e2e/side-by-side.spec.ts` (plus `db-worker.ts`
@@ -3333,7 +3333,7 @@ exact reported symptom.
   fields — the props changed, but `useState` initializers do not re-run. Fixed with
   `key={activeGroup?.id ?? "new"}`, forcing a remount per switch.
 - **A blank group could never be saved.** Every field's autosave fires only from its own `onChange`,
-  so opening "New Doc Link Group" and typing nothing meant no debounce was ever scheduled and no row
+  so opening "New Group" and typing nothing meant no debounce was ever scheduled and no row
   was ever written — even though `name`/`text`/`override_color` are all nullable and a group with
   none of them set is a legitimate row (§14b). Fixed with an explicit Save button, rendered only for
   an unsaved draft, calling the same `flush()` the debounce uses.

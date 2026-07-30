@@ -9,7 +9,7 @@ const DEBOUNCE_MS = 600;
 export type SavedGroupFields = { name: string | null; text: string | null; overrideColor: string | null };
 
 type Props = {
-  // null = an unsaved "New Doc Link Group" draft — the first debounced
+  // null = an unsaved "New Group" draft — the first debounced
   // save creates the row (§14i: not created eagerly, since the dropdown
   // that spawned it only lists groups with a link to either doc, and an
   // eagerly-created empty group would be invisible in that same list).

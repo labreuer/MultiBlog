@@ -119,7 +119,7 @@ export default function DocLinkPopover({
       <p className={styles.quotedText}>{isEditing ? "Editing link over" : "Linking"}: “{quoted}”</p>
       {!isEditing && (
         <p className={styles.groupNote}>
-          {activeGroupId ? "Added to the selected group." : "A new doc link group will be created."}
+          {activeGroupId ? "Added to the selected group." : "A new group will be created."}
         </p>
       )}
       <textarea

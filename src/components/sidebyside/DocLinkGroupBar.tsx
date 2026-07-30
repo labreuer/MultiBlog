@@ -20,7 +20,7 @@ type Props = {
 };
 
 // PLAN.md §14h — one entry per group with a link to either doc, prefixed
-// ← / → / ↔ for which side(s) it touches; "New Doc Link Group" last. The
+// ← / → / ↔ for which side(s) it touches; "New Group" last. The
 // first entry's own label flips between "Doc Link Groups" (nothing active)
 // and "Hide all Groups" (something is) — selecting it in the second state
 // is a bigger action than a plain deselect (it also hides every group's
@@ -71,14 +71,14 @@ export default function DocLinkGroupBar({
             {group.name || "(untitled)"}
           </option>
         ))}
-        <option value={NEW_GROUP}>New Doc Link Group</option>
+        <option value={NEW_GROUP}>New Group</option>
       </select>
       <span className={styles.count}>
         ← {leftCount} {"  "} {rightCount} → {otherDocLinksCount > 0 ? `(+${otherDocLinksCount})` : ""}
       </span>
       <label className={styles.checkboxLabel}>
         <input type="checkbox" checked={onlyMine} onChange={(e) => onToggleOnlyMine(e.target.checked)} />
-        Show only my Doc Links
+        Show only my Links
       </label>
       <label className={styles.checkboxLabel}>
         <input

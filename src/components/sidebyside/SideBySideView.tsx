@@ -51,7 +51,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
   const isCreatingNew = activeGroupId === NEW_GROUP;
   const activeGroup = isCreatingNew ? null : groups.find((g) => g.id === activeGroupId) ?? null;
 
-  // While "New Doc Link Group" is selected but its panel hasn't saved yet,
+  // While "New Group" is selected but its panel hasn't saved yet,
   // `activeGroupId` holds the NEW_GROUP sentinel ("__new__") — a real value
   // for the *bar's* dropdown to render, but not a real group id. Each
   // DocColumn below must see `null` instead: it forwards activeGroupId
@@ -67,7 +67,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
       const out: DocLinkInput[] = [];
       for (const group of groups) {
         if (hiddenGroupIds.has(group.id)) continue;
-        // An unsaved "New Doc Link Group" draft has no links of its own —
+        // An unsaved "New Group" draft has no links of its own —
         // restricting to it means restricting to nothing, not falling back
         // to showing every group.
         if (oneGroupAtATime && activeGroupId && (isCreatingNew || group.id !== activeGroupId)) continue;

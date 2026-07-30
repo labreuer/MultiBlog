@@ -116,7 +116,7 @@ export async function deleteDocLink(linkId: string): Promise<void> {
   await prisma.docLink.update({ where: { id: link.id }, data: { deletedAt: new Date() } });
 }
 
-// PLAN.md §14h/§14i — "New Doc Link Group" opens an *unsaved* panel; this
+// PLAN.md §14h/§14i — "New Group" opens an *unsaved* panel; this
 // is called on that panel's first debounced save, not when the dropdown
 // item is clicked. Creating eagerly would make the group invisible in the
 // very dropdown that created it (membership there is "has a link to either
