@@ -194,7 +194,7 @@ Yjs fragment (`"title"`) of the *same* `Y.Doc` as the body — see
 `CollabTitleField.tsx` and PLAN.md §3d. Two `EditorView`s on the page instead
 of one.
 
-**Method:** working tree vs. `master` at `a96ebff`, via `git stash push -u` /
+**Method:** working tree vs. the default branch (then named `master`) at `a96ebff`, via `git stash push -u` /
 `git stash pop`, with both dev servers restarted for each side (not an
 estimate). Two throwaway posts held a copy of a real post's content — 3,796
 chars / 17 paragraphs ("small") and 18,038 chars / 89 paragraphs ("large") —
