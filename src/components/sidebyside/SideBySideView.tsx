@@ -160,6 +160,10 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
             if (!activeGroup) return;
             setGroups((prev) => prev.map((g) => (g.id === activeGroup.id ? { ...g, ...fields } : g)));
           }}
+          onColorPreview={(overrideColor) => {
+            if (!activeGroup) return;
+            previewGroupColor(activeGroup.id, overrideColor);
+          }}
           onDeleted={() => {
             if (activeGroup) setGroups((prev) => prev.filter((g) => g.id !== activeGroup.id));
             setActiveGroupId(null);
@@ -178,6 +182,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           onLinkCreated={(link) => appendLinkForDoc(left.docId, link)}
           onLinkUpdated={updateLink}
           onLinkDeleted={deleteLink}
+          onLinkColorPreview={previewLinkColor}
         />
         <DocColumn
           {...right}
@@ -190,6 +195,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           onLinkCreated={(link) => appendLinkForDoc(right.docId, link)}
           onLinkUpdated={updateLink}
           onLinkDeleted={deleteLink}
+          onLinkColorPreview={previewLinkColor}
         />
       </div>
     </>
@@ -241,5 +247,21 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
 
   function deleteLink(linkId: string) {
     setGroups((prev) => prev.map((g) => ({ ...g, links: g.links.filter((l) => l.id !== linkId) })));
+  }
+
+  // Live-preview channels: paint the new color into both columns' highlights
+  // immediately, ahead of the debounced/on-Save persistence that will
+  // eventually confirm (or, on error, silently fail to confirm) it. Cheap to
+  // call speculatively — a failed save just leaves the preview slightly
+  // wrong until the next real update, the same staleness docLinksFor already
+  // tolerates between saves.
+  function previewGroupColor(groupId: string, overrideColor: string | null) {
+    setGroups((prev) => prev.map((g) => (g.id === groupId ? { ...g, overrideColor } : g)));
+  }
+
+  function previewLinkColor(linkId: string, overrideColor: string | null) {
+    setGroups((prev) =>
+      prev.map((g) => ({ ...g, links: g.links.map((l) => (l.id === linkId ? { ...l, overrideColor } : l)) })),
+    );
   }
 }

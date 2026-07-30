@@ -24,6 +24,10 @@ type Props = {
   onCreated: (groupId: string, fields: SavedGroupFields) => void;
   onUpdated: (fields: Partial<SavedGroupFields>) => void;
   onDeleted: () => void;
+  // Fired on every checkbox/swatch change, ahead of the debounced save —
+  // lets both columns repaint the group's links in the color being picked
+  // without waiting on the round trip.
+  onColorPreview: (overrideColor: string | null) => void;
 };
 
 // PLAN.md §14h — the collapsible panel a dropdown selection opens: editable
@@ -41,10 +45,15 @@ export default function DocLinkGroupPanel({
   onCreated,
   onUpdated,
   onDeleted,
+  onColorPreview,
 }: Props) {
   const [name, setName] = useState(initialName ?? "");
   const [text, setText] = useState(initialText ?? "");
-  const [overrideColor, setOverrideColor] = useState(initialOverrideColor ?? "");
+  // Split from whether the override is *active*: unchecking the box clears
+  // the persisted override but leaves the swatch showing whatever color was
+  // last picked, so re-checking it doesn't lose that choice.
+  const [overrideChecked, setOverrideChecked] = useState(Boolean(initialOverrideColor));
+  const [colorValue, setColorValue] = useState(initialOverrideColor || "#999999");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,7 +70,12 @@ export default function DocLinkGroupPanel({
   // this save. Reading through a ref instead means flush() always sees
   // the latest typed value regardless of which render's closure is
   // actually invoked.
-  const fieldsRef = useRef({ name: initialName ?? "", text: initialText ?? "", overrideColor: initialOverrideColor ?? "" });
+  const fieldsRef = useRef({
+    name: initialName ?? "",
+    text: initialText ?? "",
+    overrideChecked: Boolean(initialOverrideColor),
+    colorValue: initialOverrideColor || "#999999",
+  });
 
   async function flush() {
     if (debounceRef.current) {
@@ -72,7 +86,7 @@ export default function DocLinkGroupPanel({
     const fields: SavedGroupFields = {
       name: current.name.trim() || null,
       text: current.text.trim() || null,
-      overrideColor: current.overrideColor || null,
+      overrideColor: current.overrideChecked ? current.colorValue : null,
     };
     setStatus("saving");
     if (!groupIdRef.current) {
@@ -141,11 +155,27 @@ export default function DocLinkGroupPanel({
           onBlur={() => void flush()}
         />
         <input
-          type="color"
-          value={overrideColor || "#999999"}
+          type="checkbox"
+          aria-label="Override color"
+          title="Override color"
+          checked={overrideChecked}
           onChange={(e) => {
-            setOverrideColor(e.target.value);
-            fieldsRef.current = { ...fieldsRef.current, overrideColor: e.target.value };
+            const checked = e.target.checked;
+            setOverrideChecked(checked);
+            fieldsRef.current = { ...fieldsRef.current, overrideChecked: checked };
+            onColorPreview(checked ? colorValue : null);
+            scheduleSave();
+          }}
+        />
+        <input
+          type="color"
+          className={overrideChecked ? undefined : styles.colorInputInactive}
+          value={colorValue}
+          onChange={(e) => {
+            setColorValue(e.target.value);
+            setOverrideChecked(true);
+            fieldsRef.current = { ...fieldsRef.current, colorValue: e.target.value, overrideChecked: true };
+            onColorPreview(e.target.value);
             scheduleSave();
           }}
           onBlur={() => void flush()}

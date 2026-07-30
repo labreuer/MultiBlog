@@ -26,6 +26,11 @@ type Props = {
   onUpdated?: (patch: { text: string | null; overrideColor: string | null }) => void;
   onDeleted?: () => void;
   onCancel: () => void;
+  // Fired on every checkbox/swatch change, before Save — lets the caller
+  // (LiveDocBody, editing mode only) paint the doc's highlight in the color
+  // being picked without waiting for a round trip. Persistence still only
+  // happens when Save is actually clicked.
+  onColorPreview?: (overrideColor: string | null) => void;
 };
 
 // PLAN.md §14i/§14j — selecting text in a read-mode column opens this in
@@ -46,9 +51,15 @@ export default function DocLinkPopover({
   onUpdated,
   onDeleted,
   onCancel,
+  onColorPreview,
 }: Props) {
   const [text, setText] = useState(initialText ?? "");
-  const [overrideColor, setOverrideColor] = useState(initialOverrideColor ?? "");
+  // Split from whether the override is *active*: unchecking the box clears
+  // the persisted override but leaves the swatch showing whatever color was
+  // last picked, so re-checking it doesn't lose that choice.
+  const [overrideChecked, setOverrideChecked] = useState(Boolean(initialOverrideColor));
+  const [colorValue, setColorValue] = useState(initialOverrideColor || userColor);
+  const overrideColor = overrideChecked ? colorValue : "";
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const isEditing = Boolean(linkId);
@@ -120,18 +131,30 @@ export default function DocLinkPopover({
         disabled={pending}
       />
       <label className={styles.colorRow}>
-        Color override
+        <input
+          type="checkbox"
+          aria-label="Override color"
+          title="Override color"
+          checked={overrideChecked}
+          disabled={pending}
+          onChange={(e) => {
+            const checked = e.target.checked;
+            setOverrideChecked(checked);
+            onColorPreview?.(checked ? colorValue : null);
+          }}
+        />
         <input
           type="color"
-          value={overrideColor || userColor}
-          onChange={(e) => setOverrideColor(e.target.value)}
+          className={overrideChecked ? undefined : styles.colorInputInactive}
+          title="Override color"
+          value={colorValue}
           disabled={pending}
+          onChange={(e) => {
+            setColorValue(e.target.value);
+            setOverrideChecked(true);
+            onColorPreview?.(e.target.value);
+          }}
         />
-        {overrideColor && (
-          <button type="button" onClick={() => setOverrideColor("")} disabled={pending}>
-            Clear
-          </button>
-        )}
       </label>
       <div className={styles.buttonRow}>
         <button type="button" onClick={handleSave} disabled={pending} className={styles.submit}>

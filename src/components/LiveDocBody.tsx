@@ -80,6 +80,12 @@ type Props = {
   // state onDocLinkCreated appends to.
   onDocLinkUpdated?: (link: DocLinkInput) => void;
   onDocLinkDeleted?: (linkId: string) => void;
+  // Fired live as the edit popover's color checkbox/swatch changes, before
+  // Save — lets the highlight repaint immediately without waiting on
+  // updateDocLink's round trip. Only meaningful in edit mode (a link
+  // already exists to repaint); the create-mode popover has nothing to
+  // preview against yet.
+  onDocLinkColorPreview?: (linkId: string, overrideColor: string | null) => void;
 };
 
 // The reading view's live half (PLAN.md §12g/§12i). Two things this
@@ -118,6 +124,7 @@ export default function LiveDocBody({
   onDocLinkCreated,
   onDocLinkUpdated,
   onDocLinkDeleted,
+  onDocLinkColorPreview,
 }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
@@ -560,6 +567,17 @@ export default function LiveDocBody({
       )}
       {editingLink && (
         <DocLinkPopover
+          // Forces a remount when the click-routing target changes —
+          // without this, React reuses the same instance across links (same
+          // JSX position), and its text/overrideChecked/colorValue state
+          // (only ever initialized once, from the initial* props) keeps
+          // showing whichever link was being edited before instead of
+          // resetting. Same bug, same fix, as DocLinkGroupPanel's `key`
+          // (SideBySideView.tsx) — clicking a highlight while a different
+          // link's popover is already open updated the quoted-text preview
+          // (read straight from editingLink.link on every render) but left
+          // the note and override checkbox/color frozen on the first link.
+          key={editingLink.link.id}
           docId={docId}
           top={editingLink.top}
           left={editingLink.left}
@@ -584,6 +602,7 @@ export default function LiveDocBody({
             onDocLinkDeleted?.(id);
           }}
           onCancel={() => setEditingLink(null)}
+          onColorPreview={(overrideColor) => onDocLinkColorPreview?.(editingLink.link.id, overrideColor)}
         />
       )}
       {chooser && (

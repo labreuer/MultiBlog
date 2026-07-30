@@ -33,6 +33,7 @@ type Props = {
   onLinkCreated: (link: DocLinkInput) => void;
   onLinkUpdated: (link: DocLinkInput) => void;
   onLinkDeleted: (linkId: string) => void;
+  onLinkColorPreview: (linkId: string, overrideColor: string | null) => void;
 };
 
 const ARIA = {
@@ -65,6 +66,7 @@ export default function DocColumn({
   onLinkCreated,
   onLinkUpdated,
   onLinkDeleted,
+  onLinkColorPreview,
 }: Props) {
   const [mode, setMode] = useState<Mode>("read");
   const [title, setTitle] = useState(initialTitle);
@@ -210,6 +212,7 @@ export default function DocColumn({
               onDocLinkCreated={onLinkCreated}
               onDocLinkUpdated={onLinkUpdated}
               onDocLinkDeleted={onLinkDeleted}
+              onDocLinkColorPreview={onLinkColorPreview}
             />
           ) : (
             // Mirrors LiveDocBody's own pre-connection fallback — shown

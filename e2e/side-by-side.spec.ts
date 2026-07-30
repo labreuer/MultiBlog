@@ -464,6 +464,43 @@ test.describe("side-by-side group bar", () => {
     }
   });
 
+  test("the group panel's override checkbox previews live and only nulls the color, not the swatch, when unchecked", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: LEFT_BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const select = page.getByRole("combobox", { name: "Doc link groups" });
+      await select.selectOption(link.groupId);
+
+      const panel = page.getByTestId("doc-link-group-panel");
+      const checkbox = panel.getByRole("checkbox", { name: "Override color" });
+      const colorInput = panel.locator('input[type="color"]');
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`).first();
+
+      await expect(checkbox).not.toBeChecked();
+
+      // Picking a color checks the box and repaints the highlight
+      // immediately, ahead of the debounced save.
+      await colorInput.fill("#445566");
+      await expect(checkbox).toBeChecked();
+      await expect(highlight).toHaveAttribute("style", /--doc-link-color: ?#445566/);
+
+      // Unchecking clears the group's override (persisted as null once the
+      // debounce fires) but leaves the swatch on #445566.
+      await checkbox.uncheck();
+      await expect(colorInput).toHaveValue("#445566");
+      await expect(highlight).not.toHaveAttribute("style", /--doc-link-color: ?#445566/);
+      await expect(panel.getByText("Saved")).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
   test("New Doc Link Group creates a group on first save, with no links yet", async ({ page }) => {
     const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: LEFT_BODY });
     const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
@@ -621,6 +658,80 @@ test.describe("side-by-side click routing", () => {
       await expect(popup).not.toBeVisible();
 
       await expect.poll(async () => (await getDocLinkFields(link.id))?.text).toBe("A note about this link.");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(link.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("clicking a different link while the edit popover is already open refreshes its override checkbox and color", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const linkA = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "quick brown", overrideColor: "#6b70ff" });
+    const linkB = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const popup = page.getByTestId("doc-link-popup");
+      const checkbox = popup.getByRole("checkbox", { name: "Override color" });
+      const colorInput = popup.locator('input[type="color"]');
+
+      await page.locator(`[data-doc-link-ids~="${linkA.id}"]`).first().click();
+      await expect(checkbox).toBeChecked();
+      await expect(colorInput).toHaveValue("#6b70ff");
+
+      // Regression: without a `key` on the editing-mode <DocLinkPopover>,
+      // React reuses the same instance across links (same JSX position), so
+      // its overrideChecked/colorValue state — only ever initialized once,
+      // from the initial* props — kept showing linkA's override here, even
+      // though the quoted-text preview (read straight from props) updated
+      // correctly.
+      await page.locator(`[data-doc-link-ids~="${linkB.id}"]`).first().click();
+      await expect(popup).toContainText("“fox”");
+      await expect(checkbox).not.toBeChecked();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDocLinkGroup(linkA.groupId);
+      await deleteTestDocLinkGroup(linkB.groupId);
+      await deleteTestDoc(left.id);
+      await deleteTestDoc(right.id);
+    }
+  });
+
+  test("the edit popover's override checkbox previews live and only nulls the color, not the swatch, when unchecked", async ({ page }) => {
+    const left = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: BODY });
+    const right = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const link = await createTestDocLink({ docId: left.id, authorEmail: ADMIN_EMAIL, bodyText: BODY, quotedText: "brown fox" });
+
+    try {
+      await page.goto(`/side-by-side/${left.id}/${right.id}`);
+      const highlight = page.locator(`[data-doc-link-ids~="${link.id}"]`).first();
+      await highlight.click();
+
+      const popup = page.getByTestId("doc-link-popup");
+      const checkbox = popup.getByRole("checkbox", { name: "Override color" });
+      const colorInput = popup.locator('input[type="color"]');
+
+      // No override yet — unchecked.
+      await expect(checkbox).not.toBeChecked();
+
+      // Picking a color checks the box and repaints the highlight
+      // immediately, before Save is ever clicked.
+      await colorInput.fill("#112233");
+      await expect(checkbox).toBeChecked();
+      await expect(highlight).toHaveAttribute("style", /--doc-link-color: ?#112233/);
+
+      // Unchecking clears the override (persisted as null on Save) but
+      // leaves the swatch showing #112233 rather than resetting it.
+      await checkbox.uncheck();
+      await expect(colorInput).toHaveValue("#112233");
+      await expect(highlight).not.toHaveAttribute("style", /--doc-link-color: ?#112233/);
+
+      await popup.getByRole("button", { name: "Save" }).click();
+      await expect(popup).not.toBeVisible();
+      await expect.poll(async () => (await getDocLinkFields(link.id))?.overrideColor).toBeNull();
     } finally {
       await page.goto("about:blank").catch(() => {});
       await deleteTestDocLinkGroup(link.groupId);

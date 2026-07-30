@@ -2933,6 +2933,22 @@ take a computed color; a decoration spec can, so no `<style>` tag is needed here
 out of `AnnotationColorStyles.tsx` into a shared `src/lib/safe-css.ts` and validates on write in the
 server action as well as on read.
 
+**Expressing "no override" needs a control of its own.** A native `<input type="color">` has no empty
+state — it always reports some hex — so both surfaces that edit an override (the group panel, §14h,
+and the link popover, §14i) pair the swatch with a checkbox to its left, tooltip `Override color`:
+checked exactly when the stored value is non-null, unchecking writes `null` without disturbing the
+swatch, and picking a color checks it. Keeping the swatch's value through an uncheck is what makes the
+box a real toggle — you can drop to the inherited color and back to your chosen one without
+re-picking it. Unchecked, the swatch renders `grayscale(1) opacity(0.5)` with a dashed outline so "not
+currently applied" is visible rather than inferred; it stays clickable, since clicking it is how you
+re-check.
+
+**Color edits repaint before they persist.** Both surfaces fire an `onColorPreview` callback on every
+checkbox/swatch change, updating `SideBySideView`'s group/link state — and therefore the cascade and
+both columns' decorations — synchronously, while persistence stays exactly as specified (the panel's
+debounce, the popover's Save). A `type="color"` swatch fires continuously as it is dragged: saving per
+change would be a write per pixel, and not previewing would make picking a color feel like guessing.
+
 **Darken and pulse are CSS only**, mirroring `prose.module.css`'s existing shape: base at 25% tint
 of `--doc-link-color`, `.doc-link-active` at 45%, and `.doc-link-active.pulse` running a
 `docLinkPulse` keyframe twice over 0.6s. The trigger is `QuoteThreadHeader.jumpToQuote`'s pattern
@@ -3046,14 +3062,18 @@ one entry per group having at least one link to either doc, showing its name, pr
 links only to the left doc, `→ ` for only the right, `↔ ` for both. Last entry is
 `New Doc Link Group`. Selecting a group opens a collapsible panel below the bar, in flow rather than
 overlaid, with editable `name`, `text`, and `override_color`, a `Display?` checkbox, and a delete
-button. (The count line lives in the bar, not this panel — see below.)
+button. (The count line lives in the bar, not this panel — see below.) The panel is **keyed on the
+group's id**, so switching the dropdown remounts it: its field state is seeded from props once, and a
+reused instance would keep showing the previous group's name.
 
 **Default visibility is every group shown.** This is forced by the spec's own click-disambiguation
 case: "if no group is selected, present a choice of which one" is only reachable if highlights are
 visible with nothing selected. `Display?` is a per-group opt-out held in page state keyed by group
 id, not persisted, defaulting to on; selecting a group *darkens* rather than isolates. Note that
 `Hide all Groups` and "uncheck every `Display?`" reach the same paint by different states, and only
-the first also clears `activeGroupId`.
+the first also clears `activeGroupId`. **Selecting a group also clears its own `Display?` opt-out.**
+Opening a panel and darkening a group in the bar while its segments stay hidden reads as broken rather
+than as "you already hid this."
 
 **The count line, `← N  M → (+Y)`** — N links in the left doc, M in the right, Y in any other doc.
 *As built it sits in the bar itself, beside the dropdown, and sums across every group on the page
@@ -3082,8 +3102,9 @@ alone, matching how a deleted doc already leaves its annotations alone.
 Selecting text in a read-mode column opens `DocLinkPopover`, positioned from
 `coordsAtPos(selection.to)` minus the scroller's rect and then offset **0.5em right and 0.5em down**
 via a CSS `transform: translate(0.5em, 0.5em)` — note this anchors on `coords.right`, where
-`AnnotationPopover` uses `coords.left`. It carries optional `text`, an override color, a Save
-button, Cancel when new, and Delete when editing an existing link.
+`AnnotationPopover` uses `coords.left`. It carries optional `text`, an override color (§14e's
+checkbox-plus-swatch pair, which subsumes a separate Clear button), a Save button, Cancel when new,
+and Delete when editing an existing link.
 
 **Group association.** If a group is selected in the dropdown, the popover says so and the link
 joins it. If none is selected, it says a new group will be created, and on save the group and the
@@ -3132,6 +3153,11 @@ a click into an editor, and returning `true` eats it. Read mode returns `true`; 
 popover and returns `false`, taking the side effect without stealing the caret. `handleClick` only
 fires when mousedown and mouseup land together, so a drag-select ending inside an existing highlight
 correctly does not trigger it.
+
+**The edit popover is keyed on the link's id**, for the same reason §14h's panel is keyed on the
+group's: clicking a second highlight while the first link's popover is open re-renders the same
+component, and its note/override state — seeded from props once — would otherwise stay on the first
+link while only the quoted-text preview updated.
 
 ### 14k. Getting there
 

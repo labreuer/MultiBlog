@@ -43,6 +43,14 @@
   color: crimson;
 }
 
+/* Unchecked but not disabled — picking a color still re-checks the box, so
+   the swatch stays interactive; only the color itself reads as "not
+   currently applied" via desaturation and a dashed outline. */
+.colorInputInactive {
+  filter: grayscale(1) opacity(0.5);
+  outline: 1px dashed #999;
+}
+
 .error {
   color: crimson;
   font-size: 0.8rem;
