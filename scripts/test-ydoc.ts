@@ -5,23 +5,25 @@
 // convention as scripts/test-user.ts's @example.com guard.
 //
 // Usage:
-//   npx tsx scripts/test-ydoc.ts create [--from-post <postId>] [--garbage]
+//   npx tsx scripts/test-ydoc.ts create [--garbage]
 //   npx tsx scripts/test-ydoc.ts list
 //   npx tsx scripts/test-ydoc.ts delete <id>
 //
 // With no flags, `create` writes an empty (but TipTap-compatible) document.
-// --from-post seeds it from that post's latest revision, so /ydoc-debug has
-// real content to render — via TiptapTransformer, the same seeding TipTap
-// schema the editor and Hocuspocus both use (src/lib/tiptap-schema.ts).
 // --garbage writes bytes that are not a valid Yjs update at all, to exercise
 // the "this document isn't TipTap-compatible" error path deliberately rather
 // than by accident.
+//
+// There used to be a --from-post flag seeding a test ydoc from a post's
+// latest revision — posts no longer have their own editable content to seed
+// from (PLAN.md §15: a post's content is a snapshot *of* a doc, not
+// independently authored), so the only way to get a ydoc real content now is
+// to actually edit one — scripts/test-doc.ts create, then edit it at
+// /doc/<slug>/edit.
 
 import "dotenv/config";
 import * as Y from "yjs";
-import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prisma } from "../src/lib/prisma";
-import { contentExtensions } from "../src/lib/tiptap-schema";
 import { newTestYdocId, isTestYdocDocument } from "../src/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 
@@ -29,57 +31,17 @@ import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 // decoding it, which is what drives renderYdocBlob's catch path.
 const GARBAGE_BYTES = new Uint8Array([0xff, 0x00, 0xff, 0x00, 0xff]);
 
-async function buildFromPost(postId: string): Promise<{ ydoc: Uint8Array; stateVector: Uint8Array }> {
-  const revision = await prisma.revision.findFirst({
-    where: { postId },
-    orderBy: { revisionNumber: "desc" },
-  });
-  if (!revision) {
-    throw new Error(`Post ${postId} has no revisions to seed from.`);
-  }
-
-  const doc = TiptapTransformer.toYdoc(revision.doc, "default", contentExtensions);
-  // Title fragment, built the same way onLoadDocument seeds a fresh post doc
-  // (server/collab.ts) — a plain paragraph, not run through TiptapTransformer.
-  const titleFragment = doc.getXmlFragment("title");
-  const paragraph = new Y.XmlElement("paragraph");
-  if (revision.title) {
-    paragraph.insert(0, [new Y.XmlText(revision.title)]);
-  }
-  titleFragment.insert(0, [paragraph]);
-
-  const state = encodeYdocState(doc);
-  doc.destroy();
-  return state;
-}
-
-function parseCreateArgs(args: string[]): { fromPost: string | null; garbage: boolean } {
-  let fromPost: string | null = null;
-  let garbage = false;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--from-post") {
-      fromPost = args[++i] ?? null;
-    } else if (args[i] === "--garbage") {
-      garbage = true;
-    }
-  }
-  return { fromPost, garbage };
+function parseCreateArgs(args: string[]): { garbage: boolean } {
+  return { garbage: args.includes("--garbage") };
 }
 
 async function create(args: string[]) {
-  const { fromPost, garbage } = parseCreateArgs(args);
-  if (fromPost && garbage) {
-    console.error("--from-post and --garbage are mutually exclusive.");
-    process.exitCode = 1;
-    return;
-  }
+  const { garbage } = parseCreateArgs(args);
 
   const id = newTestYdocId();
   let bytes: { ydoc: Uint8Array; stateVector: Uint8Array };
   if (garbage) {
     bytes = { ydoc: GARBAGE_BYTES, stateVector: GARBAGE_BYTES };
-  } else if (fromPost) {
-    bytes = await buildFromPost(fromPost);
   } else {
     const doc = new Y.Doc();
     bytes = encodeYdocState(doc);
@@ -87,7 +49,7 @@ async function create(args: string[]) {
   }
 
   await ydocStore.createIfAbsent(id, bytes.ydoc, bytes.stateVector);
-  console.log(`Created ${garbage ? "garbage " : ""}ydoc ${id}${fromPost ? ` (seeded from post ${fromPost})` : ""}.`);
+  console.log(`Created ${garbage ? "garbage " : ""}ydoc ${id}.`);
   console.log(`View: http://localhost:3000/ydoc-debug`);
 }
 
@@ -137,7 +99,7 @@ async function main() {
   } else {
     console.error(
       "Usage:\n" +
-        "  npx tsx scripts/test-ydoc.ts create [--from-post <postId>] [--garbage]\n" +
+        "  npx tsx scripts/test-ydoc.ts create [--garbage]\n" +
         "  npx tsx scripts/test-ydoc.ts list\n" +
         "  npx tsx scripts/test-ydoc.ts delete <id>",
     );

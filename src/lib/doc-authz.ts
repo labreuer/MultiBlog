@@ -73,3 +73,24 @@ export async function readableDocsFor(userId: string, role: Role): Promise<Reada
     orderBy: { title: "asc" },
   });
 }
+
+// canUserEditDoc expressed as a `where` clause — the same relationship
+// readableDocsFor has to canUserReadDoc, above. Backs the doc picker at
+// /posts/new and "Change doc…" on /posts/[id]/edit (PLAN.md §15d): only a doc
+// its creator/publisher could open the editor for is offered.
+export async function editableDocsFor(userId: string, role: Role): Promise<ReadableDoc[]> {
+  if (canEditAnyPost(role)) {
+    return prisma.doc.findMany({
+      where: { deletedByUserId: null },
+      select: { id: true, slug: true, title: true },
+      orderBy: { title: "asc" },
+    });
+  }
+  if (role !== "AUTHOR") return [];
+
+  return prisma.doc.findMany({
+    where: { deletedByUserId: null, authors: { some: { userId } } },
+    select: { id: true, slug: true, title: true },
+    orderBy: { title: "asc" },
+  });
+}

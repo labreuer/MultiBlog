@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canUserReadDoc, canUserEditDoc, readableDocsFor } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
+import { createPostFromDoc } from "@/app/actions/posts";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
@@ -110,7 +111,12 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
             canEdit={canEdit}
             userColor={session.user.color}
             byline={
-              <p className={styles.byline}>
+              // A <div>, not <p> — <form> isn't valid inside <p> (HTML
+              // rejects it; React hydrates it anyway and then warns), same
+              // reason docs/page.tsx's own create-doc form isn't wrapped in
+              // one. .byline's styling (page.module.css) is purely visual,
+              // so the tag swap changes nothing about how this renders.
+              <div className={styles.byline}>
                 <AuthorByline
                   authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
                   showPrefix={false}
@@ -120,7 +126,17 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                     Short date visible, full timestamp on hover. */}
                 <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
                 <CompareWithPicker docId={doc.id} otherDocs={otherDocs} />
-              </p>
+                {/* PLAN.md §15d — the doc-page entry point into post
+                    creation, alongside the /posts/new picker. Bound with the
+                    extra leading arg the way any parameterized form action
+                    is; createPostFromDoc redirects to the new post's editor
+                    on success. */}
+                {canEdit && (
+                  <form action={createPostFromDoc.bind(null, doc.id)} style={{ display: "inline" }}>
+                    <button type="submit">Publish as blog post</button>
+                  </form>
+                )}
+              </div>
             }
           />
           <AnnotationSection docId={doc.id} />

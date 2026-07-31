@@ -21,6 +21,7 @@ import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, 
 import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
 import { annotationIdFromYdocId } from "../src/lib/ydoc-names";
 import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
+import { materializeYdocAt } from "../src/lib/ydoc-snapshot";
 import { updateDocCache } from "./doc-cache";
 import { updateAnnotationCache } from "./annotation-cache";
 
@@ -219,15 +220,17 @@ async function backfillAnnotationHighlight(annotationId: string, document: Docum
 }
 
 // POST /admin/ydoc-snapshot — the new-stack twin of collab-admin.ts's
-// replace-doc endpoint (PLAN.md §11d). Reads the current high-water mark in
-// ydoc_update *before* encoding the live document, which is what guarantees
-// the snapshot blob contains everything at or before that mark: anything that
-// lands in between shows up after it in the log and survives a future
-// truncation rather than being silently lost.
+// replace-doc endpoint (PLAN.md §11d). Snapshots by replaying the log up to
+// the current high-water mark, the same way src/lib/ydoc-snapshot.ts snapshots
+// a *historical* mark for a publish (PLAN.md §15b) — not by encoding the live
+// document via openDirectConnection. The two used to diverge: the live doc can
+// run ahead of the log (onChange's appendUpdate is enqueued and un-awaited,
+// PLAN.md §11c), so encoding it produced a snapshot whose bytes were ahead of
+// the mark it claimed. A replay's bytes equal its mark exactly, which is what
+// callers resolving a replay base (loadReplaySlice) assume.
 export async function handleYdocSnapshot(
   request: IncomingMessage,
   response: ServerResponse,
-  instance: Hocuspocus,
 ): Promise<void> {
   const body = (await readJsonBody(request)) as Partial<{ token: string; documentName: string }>;
   const { token, documentName } = body;
@@ -242,29 +245,17 @@ export async function handleYdocSnapshot(
     return;
   }
 
-  const lastUpdate = await prisma.ydocUpdate.findFirst({
-    where: { ydocId: documentName },
-    orderBy: { id: "desc" },
-  });
-  if (!lastUpdate) {
+  const throughUpdateId = await ydocStore.maxUpdateId(documentName);
+  if (throughUpdateId === null) {
     send(response, 404, "This document has no update history to snapshot yet.");
     return;
   }
 
-  const connection = await instance.openDirectConnection(documentName);
-  let ydoc: Uint8Array;
-  let stateVector: Uint8Array;
-  try {
-    await connection.transact((document) => {
-      const encoded = encodeYdocState(document);
-      ydoc = encoded.ydoc;
-      stateVector = encoded.stateVector;
-    });
-  } finally {
-    await connection.disconnect();
-  }
+  const doc = await materializeYdocAt(documentName, throughUpdateId);
+  const { ydoc, stateVector } = encodeYdocState(doc);
+  doc.destroy();
 
-  await ydocStore.createSnapshot(documentName, ydoc!, stateVector!, lastUpdate.id, payload.sub);
+  await ydocStore.createSnapshot(documentName, ydoc, stateVector, throughUpdateId, payload.sub);
   send(response, 204, "");
 }
 
@@ -498,7 +489,7 @@ function readJsonBody(request: IncomingMessage): Promise<unknown> {
   });
 }
 
-function send(response: ServerResponse, status: number, message: string): void {
+export function send(response: ServerResponse, status: number, message: string): void {
   response.writeHead(status, { "Content-Type": "text/plain" });
   response.end(message);
 }

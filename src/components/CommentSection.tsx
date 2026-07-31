@@ -41,10 +41,10 @@ export default async function CommentSection({ postId }: { postId: string }) {
 
   const detachedContextByThread = new Map<string, string | null>();
   for (const thread of quoteThreads) {
-    if (thread.status === "DETACHED" && thread.anchoredRevisionId !== null) {
+    if (thread.status === "DETACHED" && thread.anchoredEventId !== null) {
       detachedContextByThread.set(
         thread.id,
-        await getDetachedThreadContext(thread.anchoredRevisionId, thread.anchorFrom!, thread.anchorTo!),
+        await getDetachedThreadContext(thread.anchoredEventId, thread.anchorFrom!, thread.anchorTo!),
       );
     }
   }

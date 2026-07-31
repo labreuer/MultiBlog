@@ -21,14 +21,13 @@ export async function GET() {
     where: publishedPostWhere(),
     orderBy: { publishedAt: "desc" },
     take: 30,
-    include: { publishRevision: { select: { title: true, doc: true } } },
   });
 
   const items = posts
     .map((post) => {
-      const title = post.publishRevision?.title ?? post.title;
+      const title = post.title;
       const link = `${baseUrl}/${post.slug}`;
-      const description = post.publishRevision ? extractText(post.publishRevision.doc).slice(0, 300) : "";
+      const description = post.proseJson ? extractText(post.proseJson).slice(0, 300) : "";
       const pubDate = (post.publishedAt ?? post.createdAt).toUTCString();
       return `  <item>
     <title>${escapeXml(title)}</title>

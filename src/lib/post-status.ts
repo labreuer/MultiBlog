@@ -1,21 +1,21 @@
 import type { Prisma } from "@/generated/prisma/client";
 
-// There is no stored status field — see PLAN.md §4/§10. publishRevisionId is
+// There is no stored status field — see PLAN.md §4/§10/§15. publishEventId is
 // set immediately by both an immediate publish and a scheduled one; whether
 // it's actually live depends purely on comparing publishedAt to now().
 export type PostStatus = "draft" | "scheduled" | "published";
 
 export function derivePostStatus(post: {
-  publishRevisionId: string | null;
+  publishEventId: string | null;
   publishedAt: Date | null;
 }): PostStatus {
-  if (!post.publishRevisionId) return "draft";
+  if (!post.publishEventId) return "draft";
   return post.publishedAt && post.publishedAt.getTime() > Date.now() ? "scheduled" : "published";
 }
 
 // The shared "is this post actually visible" gate — every public-facing
-// query must use this instead of checking publishRevisionId alone, or a
-// scheduled-but-not-yet-due post (which already has publishRevisionId set)
+// query must use this instead of checking publishEventId alone, or a
+// scheduled-but-not-yet-due post (which already has publishEventId set)
 // would leak through before its publishedAt arrives.
 //
 // Doesn't need its own deletedByUserId check — src/lib/prisma.ts's `prisma`
@@ -24,5 +24,5 @@ export function derivePostStatus(post: {
 // handful of call sites that deliberately use the unfiltered
 // prismaIncludingDeleted instead).
 export function publishedPostWhere(): Prisma.PostWhereInput {
-  return { publishRevisionId: { not: null }, publishedAt: { lte: new Date() } };
+  return { publishEventId: { not: null }, publishedAt: { lte: new Date() } };
 }

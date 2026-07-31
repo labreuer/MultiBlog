@@ -3,7 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 import { derivePostStatus } from "@/lib/post-status";
-import PostEditor from "@/components/PostEditor";
+import { editableDocsFor } from "@/lib/doc-authz";
+import PostPublisher from "@/components/PostPublisher";
 
 export default async function EditPostPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,8 +20,8 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     where: { id },
     include: {
       authors: { select: { userId: true }, orderBy: { bylineOrder: "asc" } },
-      publishRevision: { select: { revisionNumber: true, title: true } },
-      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { title: true, revisionNumber: true, doc: true } },
+      doc: { select: { id: true, slug: true, title: true } },
+      publishEvent: { select: { ydocSnapshot: { select: { lastYdocUpdateId: true } } } },
     },
   });
   if (!post) {
@@ -37,7 +38,6 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  const latest = post.revisions[0];
   const status = derivePostStatus(post);
 
   const eligibleUsers = await prisma.user.findMany({
@@ -46,48 +46,35 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     orderBy: { name: "asc" },
   });
 
-  // Excludes doc — the Settings panel's revisions table only needs the
-  // lightweight columns, not the full ProseMirror JSON.
-  const allRevisions = await prisma.revision.findMany({
-    where: { postId: post.id },
-    orderBy: { revisionNumber: "asc" },
-    select: {
-      revisionNumber: true,
-      title: true,
-      changelog: true,
-      createdAt: true,
-      editor: { select: { name: true, email: true } },
-    },
-  });
-  const revisions = allRevisions.map((r) => ({
-    revisionNumber: r.revisionNumber,
-    title: r.title,
-    editorName: r.editor?.name ?? r.editor?.email ?? "unknown",
-    changelog: r.changelog,
-    createdAt: r.createdAt,
-  }));
+  // PLAN.md §15d — "Change doc…" only ever offers a doc this user could
+  // actually publish from; the post's own current doc is always included
+  // even for an ADMIN/EDITOR browsing someone else's byline-only doc, since
+  // editableDocsFor already returns every doc for those roles.
+  const editableDocs = await editableDocsFor(session.user.id, session.user.role);
+
+  // The scrub bar should open on the point this post is actually live from,
+  // not the doc's head — a bigint can't cross the RSC boundary (same reason
+  // publishPostFromDoc's throughUpdateId is a string), so it's stringified
+  // here. ydoc_update ids are a single BIGSERIAL shared by every doc, so an
+  // id that belongs to a different doc's log simply won't be found there —
+  // safe even if "Change doc…" is used afterward (PostSnapshotScrubBar falls
+  // back to the new doc's head).
+  const initialThroughUpdateId = post.publishEvent?.ydocSnapshot?.lastYdocUpdateId?.toString() ?? null;
 
   return (
-    <PostEditor
+    <PostPublisher
       postId={post.id}
-      slug={post.slug}
-      initialTitle={latest?.title ?? post.title}
-      revisionNumber={latest?.revisionNumber ?? 0}
-      publishedRevisionNumber={status === "published" ? post.publishRevision!.revisionNumber : null}
-      publishedTitle={status === "published" ? post.publishRevision!.title : null}
-      scheduledRevisionNumber={status === "scheduled" ? post.publishRevision!.revisionNumber : null}
+      postTitle={post.title}
+      docId={post.doc.id}
+      editableDocs={editableDocs}
       postStatus={status}
       publishedAt={post.publishedAt}
-      lastRevisionDoc={latest?.doc ?? null}
-      userId={session.user.id}
-      userName={session.user.name ?? session.user.email ?? "Anonymous"}
-      userColor={session.user.color}
       moderationPolicy={post.moderationPolicy}
       createdAt={post.createdAt}
       authorIds={post.authors.map((a) => a.userId)}
       eligibleUsers={eligibleUsers}
       initialDeleted={post.deletedByUserId !== null}
-      revisions={revisions}
+      initialThroughUpdateId={initialThroughUpdateId}
     />
   );
 }

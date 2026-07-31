@@ -1,0 +1,81 @@
+/* Pinned-bottom shell mirrors DocScrubBar.module.css — the same "scrub bar
+   under a reading column" shape, purpose-built rather than shared (PLAN.md
+   §14p/§15c: this bar wants dots, selection and a will-create line
+   DocScrubBar has no use for). */
+
+.bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--background);
+  border-top: 1px solid #ccc;
+  padding: 0.5rem 1rem;
+  z-index: 10;
+}
+
+.inner {
+  width: 800px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+/* The dots below are absolutely positioned against this, so the track and
+   the overlay share one coordinate space (YdocDebug.module.css's .sliderWrapper). */
+.sliderWrapper {
+  position: relative;
+  padding-bottom: 14px;
+}
+
+.slider {
+  width: 100%;
+  display: block;
+  margin: 0;
+}
+
+.snapshotDot {
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid #3366cc;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.snapshotDotActive {
+  background: #3366cc;
+}
+
+.positionLine,
+.loadingLine {
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.positionLine {
+  color: #666;
+}
+
+.loadingLine {
+  color: #999;
+}
+
+.snapshotLine {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0.35rem 0 0;
+}
+
+.error {
+  color: crimson;
+  font-size: 0.85rem;
+}
+
+.muted {
+  color: #999;
+  font-size: 0.85rem;
+}

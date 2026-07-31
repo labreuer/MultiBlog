@@ -125,6 +125,16 @@ export function stripMarkFromDoc(doc: JSONContent, markName: string): JSONConten
   return strip(doc);
 }
 
+// stripMarkFromDoc applied for each name in turn — PLAN.md §15b. A post's
+// content comes from a doc's ydoc, decoded with docContentExtensions (which
+// carries authorHighlight and annotation, neither of which every post-side
+// consumer's plain contentExtensions/pmSchema knows about); publishing must
+// strip both before the content ever reaches Post.proseJson, not one and then
+// the other by hand at the call site where it's easy to forget the second.
+export function stripMarksFromDoc(doc: JSONContent, markNames: string[]): JSONContent {
+  return markNames.reduce((acc, markName) => stripMarkFromDoc(acc, markName), doc);
+}
+
 // Collects the distinct values of a given mark attribute across a doc, e.g.
 // every authorId referenced by authorHighlight marks — used to know which
 // users' colors need fetching for rendering.

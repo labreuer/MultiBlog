@@ -4,7 +4,7 @@
 // form — which is the single biggest fixed cost in a suite like this.
 import { test as setup, expect } from "@playwright/test";
 import { ADMIN_STORAGE_STATE } from "../playwright.config";
-import { ADMIN_EMAIL, TEST_PASSWORD, createTestPost, createTestUser, deleteTestPost, uniqueTitle } from "./db";
+import { ADMIN_EMAIL, TEST_PASSWORD, createTestDoc, createTestUser, deleteTestDoc, uniqueTitle } from "./db";
 
 setup("create and sign in the shared admin", async ({ page }) => {
   // `trusted` so this account's own comments auto-approve — a moderation test
@@ -21,24 +21,26 @@ setup("create and sign in the shared admin", async ({ page }) => {
 
   await page.context().storageState({ path: ADMIN_STORAGE_STATE });
 
-  // Warm `/posts/[id]/edit` before the workers start, and fail fast if live
-  // editing is unavailable.
-  //
-  // It's much the heaviest route to compile (TipTap + Yjs + the collab
-  // provider), and `next dev` compiles on first request — so without this,
-  // every worker hits it cold simultaneously and the handshake can overrun
-  // `waitForCollabReady`'s budget. Seen once for real: a full-suite run right
-  // after a new editor spec was added timed out waiting for "🟢 Live", then
-  // passed on the next run untouched.
+  // Warm `/doc/[id]/edit` before the workers start, and fail fast if live
+  // editing is unavailable. PLAN.md §15 — /posts/[id]/edit has no collab
+  // connection at all any more (it publishes, it doesn't edit), so the doc
+  // editor is the heaviest route left to compile (TipTap + Yjs + the collab
+  // provider) and the one every editing spec now actually depends on.
+  // `next dev` compiles on first request — so without this, every worker
+  // hits it cold simultaneously and the handshake can overrun
+  // `waitForDocCollabReady`'s budget. Seen once for real, under the old
+  // post-editor equivalent of this warm-up: a full-suite run right after a
+  // new editor spec was added timed out waiting for "🟢 Live", then passed
+  // on the next run untouched.
   //
   // Doing it here also turns "the collab server isn't reachable" into a single
   // clear setup failure rather than a puzzling 30s timeout in every collab test.
-  const warmup = await createTestPost({ authorEmail: ADMIN_EMAIL, title: uniqueTitle("warmup") });
+  const warmup = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle("warmup") });
   try {
-    await page.goto(`/posts/${warmup.id}/edit`);
+    await page.goto(`/doc/${warmup.id}/edit`);
     await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: 90_000 });
   } finally {
     await page.goto("about:blank").catch(() => {});
-    await deleteTestPost(warmup.id);
+    await deleteTestDoc(warmup.id);
   }
 });

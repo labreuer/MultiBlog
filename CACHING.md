@@ -5,8 +5,14 @@ Add a new dated entry below for each notable finding — most recent last.
 
 ## 2026-07-20 — Edit badge broke ISR on the home and author pages
 
-Adding the "(edit)"/"(edited)" badge (`src/components/PostEditBadge.tsx`,
-`src/lib/post-edit-status.ts`) required knowing who's viewing the page, so
+*(`PostEditBadge` and the two entries below about it are gone as of PLAN.md
+§15, 2026-07-30 — a published post is a static snapshot with no live-edit
+staleness signal at all now, by decision. Left in place as history; the file
+reference below was wrong even at the time — the heuristic it names lived
+inline in `PostEditBadge.tsx`, not a separate `post-edit-status.ts`.)*
+
+Adding the "(edit)"/"(edited)" badge (`src/components/PostEditBadge.tsx`)
+required knowing who's viewing the page, so
 `src/app/page.tsx` and `src/app/authors/[id]/page.tsx` each gained a call to
 `auth()`.
 
@@ -66,8 +72,10 @@ once the client-side session fetch resolves, instead of being present in the ini
 
 Restoring real ISR above (entry directly above) meant `/`, `/[slug]`, and `/authors/[slug]`
 went back to being cached with `revalidate = 60` instead of rendering fresh per request. But
-`publishPost`/`unpublishPost` (`src/app/actions/posts.ts`) only ever called `revalidatePath`
-for the *admin* surfaces (`/posts/[id]/edit`, `/posts/[id]/history`, `/posts`) — never for the
+`publishPost`/`unpublishPost` (`src/app/actions/posts.ts` — the publish action is now
+`publishPostFromDoc`, PLAN.md §15, same `revalidatePublicPaths` call) only ever called
+`revalidatePath` for the *admin* surfaces (`/posts/[id]/edit`, `/posts/[id]/history`,
+`/posts`) — never for the
 public pages whose `publishedPostWhere()` query result the action had just changed. A newly
 published post wouldn't appear on `/` or its authors' `/authors/[slug]` pages, and an
 unpublished post wouldn't disappear from them, until the next background revalidation (up to
@@ -110,6 +118,12 @@ involved — those two layers are the whole story.
 (`src/components/PostEditor.tsx`). A hard navigation bypasses the Router Cache entirely and
 loads the page the way an actual visitor would — which is what "view my published post"
 should mean anyway. Confirmed working on production.
+
+*(`PostEditor.tsx` is gone as of PLAN.md §15 — `PostPublisher.tsx`, its replacement, has no
+"view published post" link of its own at all, so this specific staleness path isn't
+currently exercised by anything in the editor. The lesson still applies to `PostsTable.tsx`'s
+`Published` column link, which is a plain `<Link>` to `/${slug}` and always has been — see
+the "still unverified" paragraph below, unchanged by this rewrite.)*
 
 Two things worth knowing before touching this again:
 

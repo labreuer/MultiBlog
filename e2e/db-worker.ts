@@ -29,8 +29,11 @@ import { uniqueDocSlug } from "@/lib/doc-slug";
 import { contentExtensions, collectMarkAttrValues, pmDocContentSchema } from "@/lib/tiptap-schema";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { captureAnchor } from "@/lib/doc-link-anchor";
+import { postContentFromYdoc } from "@/lib/post-content";
+import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
 import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
 // server/ isn't under src/, but it's still part of the one tsconfig project
 // (CLAUDE.md's ydoc-store note) — same relative-import style server/collab.ts
@@ -129,10 +132,18 @@ export type TestPost = {
   id: string;
   slug: string;
   title: string;
-  revisionId: string;
+  docId: string;
+  /** null unless `publish` was requested. */
+  eventId: string | null;
   bodyText: string;
 };
 
+// PLAN.md §15 — a post is a snapshot of a doc, so creating one always creates
+// its own throwaway backing doc first (createTestDoc, below — same E2E_TITLE_
+// PREFIX naming, so sweepTestData's existing doc sweep catches it even if a
+// test's own teardown doesn't run). publish snapshots that doc's just-seeded
+// content and publishes it immediately, the fixture-level equivalent of
+// publishPostFromDoc (src/app/actions/posts.ts).
 export async function createTestPost(opts: {
   authorEmail: string;
   title?: string;
@@ -152,27 +163,55 @@ export async function createTestPost(opts: {
   const author = await prisma.user.findUnique({ where: { email: authorEmail } });
   if (!author) throw new Error(`No such test author: ${authorEmail}`);
 
+  const doc = await createTestDoc({ authorEmail, title: uniqueTitle("post-doc"), bodyText });
+
   const post = await prisma.post.create({
     data: {
       slug: await uniquePostSlug(title),
       title,
+      docId: doc.id,
       moderationPolicy: policy,
-      authors: { create: { userId: author.id, bylineOrder: 0 } },
-      revisions: {
-        create: { revisionNumber: 1, title, doc: docFromText(bodyText), editorId: author.id },
-      },
-      ...(publish ? { publishedAt: new Date() } : {}),
+      authors: { create: { userId: author.id, bylineOrder: 0, createdUserId: author.id } },
     },
-    include: { revisions: true },
   });
 
-  const revisionId = post.revisions[0].id;
+  let eventId: string | null = null;
   if (publish) {
-    // Can't be part of the nested create above — the revision has no id yet.
-    await prisma.post.update({ where: { id: post.id }, data: { publishRevisionId: revisionId } });
+    const throughUpdateId = await ydocStore.maxUpdateId(ydocIdForDoc(doc.id));
+    if (throughUpdateId === null) throw new Error(`Test doc ${doc.id} has no update history to publish.`);
+    const { snapshotId, doc: materialized } = await ensureYdocSnapshotAt({
+      ydocId: ydocIdForDoc(doc.id),
+      throughUpdateId,
+      userId: author.id,
+    });
+    const { proseJson, title: docTitle } = postContentFromYdoc(materialized);
+    materialized.destroy();
+    const publishedTitle = title || docTitle || "Untitled";
+
+    const event = await prisma.postPublicationEvent.create({
+      data: {
+        postId: post.id,
+        type: "PUBLISHED",
+        docId: doc.id,
+        ydocSnapshotId: snapshotId,
+        title: publishedTitle,
+        proseJson: proseJson as Prisma.InputJsonValue,
+        actorId: author.id,
+      },
+    });
+    await prisma.post.update({
+      where: { id: post.id },
+      data: {
+        title: publishedTitle,
+        proseJson: proseJson as Prisma.InputJsonValue,
+        publishEventId: event.id,
+        publishedAt: new Date(),
+      },
+    });
+    eventId = event.id;
   }
 
-  return { id: post.id, slug: post.slug, title: post.title, revisionId, bodyText };
+  return { id: post.id, slug: post.slug, title: post.title, docId: doc.id, eventId, bodyText };
 }
 
 export async function deleteTestPost(idOrSlug: string): Promise<void> {
@@ -186,7 +225,15 @@ export async function deleteTestPost(idOrSlug: string): Promise<void> {
   if (post.authors.length === 0 || unsafe.length > 0) {
     throw new Error(`Refusing to delete post "${post.title}" — it has a non-throwaway (or missing) author.`);
   }
+  const docId = post.docId;
+  // Post.doc is ON DELETE RESTRICT (PLAN.md §15) — the post has to go first.
   await prisma.post.delete({ where: { id: post.id } });
+  // Best-effort: createTestPost always creates its own private backing doc,
+  // so cleaning it up here too (rather than waiting for sweepTestData's
+  // generic doc sweep) is safe. deleteTestDoc no-ops on an id that's already
+  // gone, which covers a post created from a *shared* fixture doc (draftDoc/
+  // sharedDoc) whose own teardown will delete it separately.
+  await deleteTestDoc(docId).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -380,12 +427,6 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
   }));
 }
 
-/** post_collab + post_collab_update row counts — the isolation check's other direction (see ydoc-debug.spec.ts's post-side one). */
-export async function countPostCollabRows(): Promise<{ collab: number; updates: number }> {
-  const [collab, updates] = await Promise.all([prisma.postCollab.count(), prisma.postCollabUpdate.count()]);
-  return { collab, updates };
-}
-
 /**
  * Inserts a comment straight into the DB, skipping submitComment entirely.
  *
@@ -397,13 +438,13 @@ export async function countPostCollabRows(): Promise<{ collab: number; updates: 
  */
 export async function createComment(opts: {
   postId: string;
-  anchoredRevisionId: string;
+  anchoredEventId: string;
   email: string;
   displayName: string;
   body: string;
   status?: CommentStatus;
 }): Promise<{ id: string; commenterId: string }> {
-  const { postId, anchoredRevisionId, email, displayName, body, status = "PENDING" } = opts;
+  const { postId, anchoredEventId, email, displayName, body, status = "PENDING" } = opts;
   assertSafe(email);
 
   const commenter = await prisma.commenter.upsert({
@@ -415,7 +456,7 @@ export async function createComment(opts: {
   const thread =
     (await prisma.commentThread.findFirst({ where: { postId, quotedText: "" } })) ??
     (await prisma.commentThread.create({
-      data: { postId, anchoredRevisionId, anchorFrom: 0, anchorTo: 0, quotedText: "" },
+      data: { postId, anchoredEventId, anchorFrom: 0, anchorTo: 0, quotedText: "" },
     }));
 
   const comment = await prisma.comment.create({
@@ -436,7 +477,7 @@ export async function createComment(opts: {
  */
 export async function createQuoteThread(opts: {
   postId: string;
-  anchoredRevisionId: string;
+  anchoredEventId: string;
   anchorFrom: number;
   anchorTo: number;
   quotedText: string;
@@ -444,7 +485,7 @@ export async function createQuoteThread(opts: {
   displayName: string;
   body: string;
 }): Promise<{ threadId: string; commentId: string }> {
-  const { postId, anchoredRevisionId, anchorFrom, anchorTo, quotedText, email, displayName, body } = opts;
+  const { postId, anchoredEventId, anchorFrom, anchorTo, quotedText, email, displayName, body } = opts;
   assertSafe(email);
 
   const commenter = await prisma.commenter.upsert({
@@ -453,7 +494,7 @@ export async function createQuoteThread(opts: {
     create: { email, displayName },
   });
   const thread = await prisma.commentThread.create({
-    data: { postId, anchoredRevisionId, anchorFrom, anchorTo, quotedText },
+    data: { postId, anchoredEventId, anchorFrom, anchorTo, quotedText },
   });
   const comment = await prisma.comment.create({
     data: { threadId: thread.id, commenterId: commenter.id, body: { text: body }, status: "APPROVED" },
@@ -466,48 +507,48 @@ export type ThreadState = {
   status: string;
   anchorFrom: number;
   anchorTo: number;
-  anchoredRevisionId: string;
+  anchoredEventId: string;
 };
 
 export async function getThread(threadId: string): Promise<ThreadState | null> {
   return prisma.commentThread.findUnique({
     where: { id: threadId },
-    select: { status: true, anchorFrom: true, anchorTo: true, anchoredRevisionId: true },
+    select: { status: true, anchorFrom: true, anchorTo: true, anchoredEventId: true },
   });
 }
 
-export type RevisionSummary = {
-  revisionNumber: number;
-  title: string;
-  text: string;
-  changelog: string | null;
+export type PublicationEventSummary = {
+  id: string;
+  type: string;
+  title: string | null;
+  text: string | null;
+  createdAt: string;
 };
 
-export async function getRevisions(postId: string): Promise<RevisionSummary[]> {
-  const revisions = await prisma.revision.findMany({
+/** A post's publish/schedule/unpublish history — the direct successor to getRevisions (PLAN.md §15). */
+export async function getPublicationEvents(postId: string): Promise<PublicationEventSummary[]> {
+  const events = await prisma.postPublicationEvent.findMany({
     where: { postId },
-    orderBy: { revisionNumber: "asc" },
+    orderBy: { createdAt: "asc" },
   });
-  return revisions.map((r) => ({
-    revisionNumber: r.revisionNumber,
-    title: r.title,
-    text: extractText(r.doc),
-    changelog: r.changelog,
+  return events.map((e) => ({
+    id: e.id,
+    type: e.type,
+    title: e.title,
+    text: e.proseJson ? extractText(e.proseJson) : null,
+    createdAt: e.createdAt.toISOString(),
   }));
 }
 
-/** Whether the post has a live collab doc at all — see the PostCollab lifecycle note in CLAUDE.md. */
-export async function hasCollabDoc(postId: string): Promise<boolean> {
-  return (await prisma.postCollab.count({ where: { postId } })) > 0;
+/** Post.proseJson as plain text, or null for a never-published post — what the public page actually renders. */
+export async function getPostContentText(postId: string): Promise<string | null> {
+  const post = await prisma.post.findUnique({ where: { id: postId }, select: { proseJson: true } });
+  return post?.proseJson ? extractText(post.proseJson) : null;
 }
 
-export async function getLatestRevisionId(postId: string): Promise<string | null> {
-  const revision = await prisma.revision.findFirst({
-    where: { postId },
-    orderBy: { revisionNumber: "desc" },
-    select: { id: true },
-  });
-  return revision?.id ?? null;
+/** ydoc_snapshot row count for a doc — the "publishing again reuses, doesn't duplicate" assertion (PLAN.md §15b). */
+export async function countDocYdocSnapshots(docId: string): Promise<number> {
+  return prisma.ydocSnapshot.count({ where: { ydocId: ydocIdForDoc(docId) } });
 }
 
 export async function getCommentStatus(commentId: string): Promise<CommentStatus | null> {
@@ -682,13 +723,12 @@ const handlers = {
   getDocLinkGroupIds,
   getDocLinkFields,
   getAnnotationStates,
-  countPostCollabRows,
   createComment,
   createQuoteThread,
   getThread,
-  getRevisions,
-  hasCollabDoc,
-  getLatestRevisionId,
+  getPublicationEvents,
+  getPostContentText,
+  countDocYdocSnapshots,
   getCommentStatus,
   createTestYdoc,
   deleteTestYdoc,

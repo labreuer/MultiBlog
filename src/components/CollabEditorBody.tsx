@@ -14,7 +14,7 @@ import { useAuthorColors } from "@/lib/use-author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import EditorToolbar from "./EditorToolbar";
-import styles from "./PostEditor.module.css";
+import styles from "./EditorChrome.module.css";
 import proseStyles from "@/styles/prose.module.css";
 
 // See PERFORMANCE.md — walking the whole document for author-mark stats is
@@ -48,7 +48,7 @@ type Props = {
 
 // A thin colored bar rather than the library default's always-visible name
 // label — the name still shows, but only in a tooltip on hover (see
-// .collabCaretLabel in PostEditor.module.css). Never rendered for the local
+// .collabCaretLabel in EditorChrome.module.css). Never rendered for the local
 // user: y-prosemirror's cursor plugin filters out the client's own
 // awareness state before this is ever called.
 function renderCaret(user: Record<string, unknown>): HTMLElement {

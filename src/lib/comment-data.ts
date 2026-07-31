@@ -22,7 +22,7 @@ export type ThreadWithComments = {
   // quotedText: "", src/app/actions/comments.ts).
   quotedText: string;
   status: ThreadStatus;
-  anchoredRevisionId: string | null;
+  anchoredEventId: string | null;
   comments: ThreadComment[];
   // The thread's own color, not any one comment's — shared by every reply
   // in the thread (the highlight/bubble/arrow are per-thread UI, not
@@ -35,18 +35,18 @@ export type ThreadWithComments = {
 const CONTEXT_PADDING = 80;
 
 // For a detached thread, pulls a snippet of surrounding text from the
-// revision the quote was last known to be valid against, so a reader can
-// still see where it used to sit even though it's gone from the current
-// version (PLAN.md §5, "what the reader sees").
+// publication event the quote was last known to be valid against, so a
+// reader can still see where it used to sit even though it's gone from the
+// current version (PLAN.md §5/§15, "what the reader sees").
 export async function getDetachedThreadContext(
-  anchoredRevisionId: string,
+  anchoredEventId: string,
   anchorFrom: number,
   anchorTo: number,
 ): Promise<string | null> {
-  const revision = await prisma.revision.findUnique({ where: { id: anchoredRevisionId } });
-  if (!revision) return null;
+  const event = await prisma.postPublicationEvent.findUnique({ where: { id: anchoredEventId } });
+  if (!event || !event.proseJson) return null;
 
-  const node = pmSchema.nodeFromJSON(revision.doc as object);
+  const node = pmSchema.nodeFromJSON(event.proseJson as object);
   const size = node.content.size;
   const from = Math.max(0, anchorFrom - CONTEXT_PADDING);
   const to = Math.min(size, anchorTo + CONTEXT_PADDING);
@@ -89,7 +89,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         anchorTo: thread.anchorTo,
         quotedText: thread.quotedText,
         status: thread.status,
-        anchoredRevisionId: thread.anchoredRevisionId,
+        anchoredEventId: thread.anchoredEventId,
         color,
         comments: thread.comments.map((c) => ({
           id: c.id,

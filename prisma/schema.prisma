@@ -79,39 +79,39 @@ enum AnnotationStatus {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  email            String            @unique
-  slug             String            @unique
-  emailVerified    DateTime?         @map("email_verified")
+  id               String           @id @default(cuid())
+  email            String           @unique
+  slug             String           @unique
+  emailVerified    DateTime?        @map("email_verified")
   name             String?
   image            String?
-  passwordHash     String?           @map("password_hash")
-  role             Role              @default(COMMENTER)
-  moderationPolicy ModerationPolicy  @default(INHERIT) @map("moderation_policy")
-  color            String            @default("#5b8cff")
-  adminInitials    String            @map("admin_initials")
-  createdAt        DateTime          @default(now()) @map("created_at")
-  deletedByUserId  String?           @map("deleted_by_user_id")
-  deletedAt        DateTime?         @map("deleted_at")
+  passwordHash     String?          @map("password_hash")
+  role             Role             @default(COMMENTER)
+  moderationPolicy ModerationPolicy @default(INHERIT) @map("moderation_policy")
+  color            String           @default("#5b8cff")
+  adminInitials    String           @map("admin_initials")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  deletedByUserId  String?          @map("deleted_by_user_id")
+  deletedAt        DateTime?        @map("deleted_at")
 
   accounts             Account[]
   sessions             Session[]
-  postAuthors          PostAuthor[]
-  revisions            Revision[]           @relation("RevisionEditor")
+  postAuthors          PostAuthor[]           @relation("PostAuthorUser")
+  postAuthorGrants     PostAuthor[]           @relation("PostAuthorCreatedBy")
   commenter            Commenter?
   passwordResetTokens  PasswordResetToken[]
-  commentStatusChanges Comment[]            @relation("CommentStatusChangedBy")
-  commentDeletions     Comment[]            @relation("CommentDeletedBy")
+  commentStatusChanges Comment[]              @relation("CommentStatusChangedBy")
+  commentDeletions     Comment[]              @relation("CommentDeletedBy")
   publicationEvents    PostPublicationEvent[] @relation("PublicationEventActor")
-  deletedBy            User?                @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
-  deletedUsers         User[]               @relation("UserDeletedBy")
-  postDeletions        Post[]               @relation("PostDeletedBy")
+  deletedBy            User?                  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
+  deletedUsers         User[]                 @relation("UserDeletedBy")
+  postDeletions        Post[]                 @relation("PostDeletedBy")
   slugHistory          UserSlugHistory[]
-  ydocSnapshots        YdocSnapshot[]       @relation("YdocSnapshotUser")
+  ydocSnapshots        YdocSnapshot[]         @relation("YdocSnapshotUser")
   docAuthors           DocAuthor[]
-  docDeletions         Doc[]                @relation("DocDeletedBy")
-  annotations          Annotation[]         @relation("AnnotationAuthor")
-  annotationDeletions  Annotation[]         @relation("AnnotationDeletedBy")
+  docDeletions         Doc[]                  @relation("DocDeletedBy")
+  annotations          Annotation[]           @relation("AnnotationAuthor")
+  annotationDeletions  Annotation[]           @relation("AnnotationDeletedBy")
   docLinks             DocLink[]
   docLinkGroups        DocLinkGroup[]
 
@@ -186,32 +186,42 @@ model PasswordResetToken {
   @@map("password_reset_token")
 }
 
+// PLAN.md §15 — a post is an immutable snapshot of a Doc at one point in that
+// doc's ydoc history, not an independently-edited document. `docId` is the doc
+// it currently draws from (re-publishing may point it at a different one);
+// `proseJson`/`title` are its own copy of that snapshot's content, so every
+// public read is a column, not a join; `publishEventId` replaces
+// `publishRevisionId` as the draft/published discriminator.
+//
+// `title` is deliberately its own column and not derived: a post's title may
+// differ from the doc's title at snapshot time (it defaults to it).
 model Post {
-  id                String     @id @default(cuid())
-  slug              String     @unique
-  title             String
-  publishRevisionId String?    @unique @map("publish_revision_id")
-  moderationPolicy  ModerationPolicy @default(INHERIT) @map("moderation_policy")
-  createdAt         DateTime   @default(now()) @map("created_at")
-  publishedAt       DateTime?  @map("published_at") // may be in the future — see below
-  deletedByUserId   String?    @map("deleted_by_user_id")
-  deletedAt         DateTime?  @map("deleted_at")
+  id               String           @id @default(cuid())
+  slug             String           @unique
+  title            String
+  docId            String           @map("doc_id")
+  proseJson        Json?            @map("prose_json")
+  publishEventId   String?          @unique @map("publish_event_id")
+  moderationPolicy ModerationPolicy @default(INHERIT) @map("moderation_policy")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  publishedAt      DateTime?        @map("published_at") // may be in the future — see below
+  deletedByUserId  String?          @map("deleted_by_user_id")
+  deletedAt        DateTime?        @map("deleted_at")
 
-  // publishRevisionId is set immediately by both an immediate publish and a
+  // publishEventId is set immediately by both an immediate publish and a
   // *scheduled* one — visibility is gated by publishedAt vs now(), a pure
   // query-time condition (src/lib/post-status.ts's publishedPostWhere), not
   // a stored status or a background sweep that flips something at the
-  // scheduled instant. See PLAN.md §4/§10.
-  publishRevision Revision?          @relation("PublishRevision", fields: [publishRevisionId], references: [id])
-  authors         PostAuthor[]
-  revisions       Revision[]         @relation("PostRevisions")
-  collab          PostCollab?
-  collabUpdates   PostCollabUpdate[]
-  threads         CommentThread[]
-  publicationEvents PostPublicationEvent[]
-  deletedBy         User?            @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
+  // scheduled instant. See PLAN.md §4/§10/§15.
+  doc               Doc                    @relation(fields: [docId], references: [id])
+  publishEvent      PostPublicationEvent?  @relation("PublishEvent", fields: [publishEventId], references: [id])
+  authors           PostAuthor[]
+  threads           CommentThread[]
+  publicationEvents PostPublicationEvent[] @relation("PostEvents")
+  deletedBy         User?                  @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory       PostSlugHistory[]
 
+  @@index([docId])
   @@map("post")
 }
 
@@ -233,89 +243,65 @@ model PostSlugHistory {
   @@map("post_slug_history")
 }
 
+// createdUserId/createdAt record who added this byline entry and when. A post's
+// authors start as a copy of the source doc's doc_author rows but are edited
+// independently from then on — a post author need not be a doc author, and vice
+// versa. Deliberately no history: only the current set is stored, and changing
+// the byline overwrites rather than appends. (§15 — the simplification is the
+// point; a post_author_history table would be the first thing to add if the
+// question "who was on this byline in March" ever gets asked.)
 model PostAuthor {
-  postId      String @map("post_id")
-  userId      String @map("user_id")
-  bylineOrder Int    @map("byline_order")
+  postId        String   @map("post_id")
+  userId        String   @map("user_id")
+  bylineOrder   Int      @map("byline_order")
+  createdUserId String   @map("created_user_id")
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post        Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user        User @relation("PostAuthorUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdUser User @relation("PostAuthorCreatedBy", fields: [createdUserId], references: [id])
 
   @@id([postId, userId])
   @@map("post_author")
 }
 
-model Revision {
-  id             String   @id @default(cuid())
-  postId         String   @map("post_id")
-  revisionNumber Int      @map("revision_number")
-  doc            Json
-  title          String
-  editorId       String?  @map("editor_id")
-  changelog      String?
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  post              Post                   @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade)
-  editor            User?                  @relation("RevisionEditor", fields: [editorId], references: [id])
-  publishedAsRevisionOf Post?               @relation("PublishRevision")
-  threads           CommentThread[]
-  publicationEvents PostPublicationEvent[]
-
-  @@unique([postId, revisionNumber])
-  @@map("revision")
-}
-
-// Append-only audit log of publish/unpublish/schedule transitions. Needed
-// because, once a no-op save/publish or an unpublish-republish cycle can
-// happen without a new Revision row, Revision.createdAt alone can no longer
-// answer "when did this go live/offline" — see PLAN.md §10.
+// Append-only audit log of publish/unpublish/schedule transitions, and — since
+// §15 — the immutable per-version record that `Revision` used to be. A
+// PUBLISHED/SCHEDULED row carries the whole published version: which doc it came
+// from, which ydoc_snapshot pins that doc's state, and the title/proseJson
+// derived from that snapshot. UNPUBLISHED/SCHEDULE_CANCELED rows carry none of
+// those four (they retire a version rather than introducing one).
+//
+// ydocSnapshot is SetNull rather than Cascade: a snapshot is provenance, and an
+// event that outlives its ydoc row still holds the content it published. Losing
+// the pointer costs the ability to re-derive, not the version itself.
 model PostPublicationEvent {
-  id           String               @id @default(cuid())
-  postId       String               @map("post_id")
-  type         PublicationEventType
-  revisionId   String?              @map("revision_id") // the revision that went (or would go) live; null for UNPUBLISHED/SCHEDULE_CANCELED
-  scheduledFor DateTime?            @map("scheduled_for") // only set for SCHEDULED events
-  actorId      String?              @map("actor_id") // null = system (the due-schedule sweep)
-  createdAt    DateTime             @default(now()) @map("created_at")
+  id             String               @id @default(cuid())
+  postId         String               @map("post_id")
+  type           PublicationEventType
+  docId          String?              @map("doc_id")
+  ydocSnapshotId String?              @map("ydoc_snapshot_id")
+  title          String?
+  proseJson      Json?                @map("prose_json")
+  scheduledFor   DateTime?            @map("scheduled_for") // only set for SCHEDULED events
+  actorId        String?              @map("actor_id") // null = system
+  createdAt      DateTime             @default(now()) @map("created_at")
 
-  post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  revision Revision? @relation(fields: [revisionId], references: [id])
-  actor    User?     @relation("PublicationEventActor", fields: [actorId], references: [id])
+  post         Post            @relation("PostEvents", fields: [postId], references: [id], onDelete: Cascade)
+  doc          Doc?            @relation(fields: [docId], references: [id], onDelete: SetNull)
+  ydocSnapshot YdocSnapshot?   @relation(fields: [ydocSnapshotId], references: [id], onDelete: SetNull)
+  actor        User?           @relation("PublicationEventActor", fields: [actorId], references: [id])
+  livePostOf   Post?           @relation("PublishEvent")
+  threads      CommentThread[]
 
   @@index([postId, createdAt])
   @@map("post_publication_event")
 }
 
-model PostCollab {
-  postId    String   @id @map("post_id")
-  ydoc      Bytes
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@map("post_collab")
-}
-
-// Append-only log of raw Yjs updates for a post's current (unpublished) collab
-// session, used to replay/scrub through in-progress editing history. Reset
-// (deleted) every time a revision is created — see PLAN.md §3a: this is
-// working-session state, not part of the immutable revision history.
-model PostCollabUpdate {
-  id        BigInt   @id @default(autoincrement())
-  postId    String   @map("post_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  update    Bytes
-
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@index([postId, id])
-  @@map("post_collab_update")
-}
-
 model SiteSettings {
-  id                      Int               @id @default(1)
-  defaultModerationPolicy ModerationPolicy  @default(ALWAYS) @map("default_moderation_policy")
-  trustThreshold          Int               @default(3) @map("trust_threshold")
+  id                      Int              @id @default(1)
+  defaultModerationPolicy ModerationPolicy @default(ALWAYS) @map("default_moderation_policy")
+  trustThreshold          Int              @default(3) @map("trust_threshold")
 
   @@map("site_settings")
 }
@@ -335,17 +321,17 @@ model Commenter {
 }
 
 model CommentThread {
-  id                 String       @id @default(cuid())
-  postId             String       @map("post_id")
-  anchoredRevisionId String       @map("anchored_revision_id")
-  anchorFrom         Int          @map("anchor_from")
-  anchorTo           Int          @map("anchor_to")
-  quotedText         String       @map("quoted_text")
-  status             ThreadStatus @default(ACTIVE)
-  createdAt          DateTime     @default(now()) @map("created_at")
+  id              String       @id @default(cuid())
+  postId          String       @map("post_id")
+  anchoredEventId String       @map("anchored_event_id")
+  anchorFrom      Int          @map("anchor_from")
+  anchorTo        Int          @map("anchor_to")
+  quotedText      String       @map("quoted_text")
+  status          ThreadStatus @default(ACTIVE)
+  createdAt       DateTime     @default(now()) @map("created_at")
 
-  post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  revision Revision  @relation(fields: [anchoredRevisionId], references: [id])
+  post     Post                 @relation(fields: [postId], references: [id], onDelete: Cascade)
+  event    PostPublicationEvent @relation(fields: [anchoredEventId], references: [id])
   comments Comment[]
 
   @@map("comment_thread")
@@ -389,21 +375,23 @@ model Comment {
 // (§12d) — nullable because they're empty until the first store, i.e. for a
 // doc that's been created but never edited.
 model Doc {
-  id              String         @id @default(cuid())
-  slug            String         @unique
+  id              String        @id @default(cuid())
+  slug            String        @unique
   title           String
-  visibility      DocVisibility  @default(PRIVATE)
-  proseJson       Json?          @map("prose_json")
-  createdAt       DateTime       @default(now()) @map("created_at")
-  updatedAt       DateTime       @updatedAt @map("updated_at")
-  deletedByUserId String?        @map("deleted_by_user_id")
-  deletedAt       DateTime?      @map("deleted_at")
+  visibility      DocVisibility @default(PRIVATE)
+  proseJson       Json?         @map("prose_json")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  deletedByUserId String?       @map("deleted_by_user_id")
+  deletedAt       DateTime?     @map("deleted_at")
 
-  authors     DocAuthor[]
-  deletedBy   User?             @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
-  slugHistory DocSlugHistory[]
-  annotations Annotation[]
-  docLinks    DocLink[]
+  authors           DocAuthor[]
+  deletedBy         User?                  @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
+  slugHistory       DocSlugHistory[]
+  annotations       Annotation[]
+  docLinks          DocLink[]
+  posts             Post[]
+  publicationEvents PostPublicationEvent[]
 
   @@map("doc")
 }
@@ -588,8 +576,9 @@ model YdocSnapshot {
   userId           String?  @map("user_id")
   createdAt        DateTime @default(now()) @map("created_at")
 
-  doc  Ydoc  @relation(fields: [ydocId], references: [id], onDelete: Cascade)
-  user User? @relation("YdocSnapshotUser", fields: [userId], references: [id])
+  doc               Ydoc                   @relation(fields: [ydocId], references: [id], onDelete: Cascade)
+  user              User?                  @relation("YdocSnapshotUser", fields: [userId], references: [id])
+  publicationEvents PostPublicationEvent[]
 
   @@index([ydocId, lastYdocUpdateId])
   @@map("ydoc_snapshot")

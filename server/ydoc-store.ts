@@ -15,9 +15,16 @@ export type CreateIfAbsentResult =
   | { won: true }
   | { won: false; existing: LoadedYdoc };
 
-export type ResolvedReplayBase =
-  | { kind: "snapshot"; snapshot: { id: string; ydoc: Uint8Array; stateVector: Uint8Array; lastYdocUpdateId: bigint } }
-  | { kind: "firstUpdate"; firstUpdateId: bigint };
+// A slice of a document's history sufficient to replay it up to (and
+// including) throughUpdateId — PLAN.md §15b. base is the newest snapshot at
+// or before throughUpdateId, or null when none qualifies (in which case
+// invariant 1, PLAN.md §11b, guarantees updates[0] is itself a full state);
+// updates are ordered ids in (baseMark, throughUpdateId].
+export type ReplaySlice = {
+  base: Uint8Array | null;
+  baseSnapshotId: string | null;
+  updates: Uint8Array[];
+};
 
 // Prisma's foreign-key-violation code — the `ydoc` row was deleted (or never
 // existed) underneath a write that assumed it. Same classification as
@@ -98,8 +105,10 @@ export interface YdocStore {
     stateVector: Uint8Array,
     lastYdocUpdateId: bigint,
     userId: string | null,
-  ): Promise<void>;
-  resolveReplayBase(id: string): Promise<ResolvedReplayBase | null>;
+  ): Promise<{ id: string }>;
+  maxUpdateId(id: string): Promise<bigint | null>;
+  findSnapshotAtMark(id: string, mark: bigint): Promise<{ id: string } | null>;
+  loadReplaySlice(id: string, throughUpdateId: bigint): Promise<ReplaySlice | typeof UNAVAILABLE>;
 }
 
 class PrismaYdocStore implements YdocStore {
@@ -191,8 +200,8 @@ class PrismaYdocStore implements YdocStore {
     stateVector: Uint8Array,
     lastYdocUpdateId: bigint,
     userId: string | null,
-  ): Promise<void> {
-    await prisma.ydocSnapshot.create({
+  ): Promise<{ id: string }> {
+    const row = await prisma.ydocSnapshot.create({
       data: {
         ydocId: id,
         ydoc: Buffer.from(ydoc),
@@ -200,29 +209,55 @@ class PrismaYdocStore implements YdocStore {
         lastYdocUpdateId,
         userId,
       },
+      select: { id: true },
     });
+    return row;
   }
 
-  async resolveReplayBase(id: string): Promise<ResolvedReplayBase | null> {
-    const first = await prisma.ydocUpdate.findFirst({ where: { ydocId: id }, orderBy: { id: "asc" } });
-    if (!first) return null;
+  async maxUpdateId(id: string): Promise<bigint | null> {
+    const last = await prisma.ydocUpdate.findFirst({ where: { ydocId: id }, orderBy: { id: "desc" }, select: { id: true } });
+    return last?.id ?? null;
+  }
 
-    const snapshot = await prisma.ydocSnapshot.findFirst({
-      where: { ydocId: id, lastYdocUpdateId: { lt: first.id } },
-      orderBy: { lastYdocUpdateId: "desc" },
-    });
-    if (snapshot) {
-      return {
-        kind: "snapshot",
-        snapshot: {
-          id: snapshot.id,
-          ydoc: new Uint8Array(snapshot.ydoc),
-          stateVector: new Uint8Array(snapshot.stateVector),
-          lastYdocUpdateId: snapshot.lastYdocUpdateId,
+  async findSnapshotAtMark(id: string, mark: bigint): Promise<{ id: string } | null> {
+    return prisma.ydocSnapshot.findFirst({ where: { ydocId: id, lastYdocUpdateId: mark }, select: { id: true } });
+  }
+
+  // PLAN.md §15b — the replay-base primitive resolveReplayBase never actually
+  // was: newest snapshot at or before throughUpdateId, then updates strictly
+  // after its mark up to and including throughUpdateId. With no qualifying
+  // snapshot, invariant 1 (PLAN.md §11b) guarantees the very first update row
+  // is itself a full state, so starting from row #1 is always correct.
+  async loadReplaySlice(id: string, throughUpdateId: bigint): Promise<ReplaySlice | typeof UNAVAILABLE> {
+    if (isCircuitOpen(id)) return UNAVAILABLE;
+    try {
+      const snapshot = await prisma.ydocSnapshot.findFirst({
+        where: { ydocId: id, lastYdocUpdateId: { lte: throughUpdateId } },
+        orderBy: { lastYdocUpdateId: "desc" },
+      });
+
+      const updates = await prisma.ydocUpdate.findMany({
+        where: {
+          ydocId: id,
+          id: { lte: throughUpdateId, ...(snapshot ? { gt: snapshot.lastYdocUpdateId } : {}) },
         },
+        orderBy: { id: "asc" },
+        select: { update: true },
+      });
+
+      return {
+        base: snapshot ? new Uint8Array(snapshot.ydoc) : null,
+        baseSnapshotId: snapshot?.id ?? null,
+        updates: updates.map((u) => new Uint8Array(u.update)),
       };
+    } catch (err) {
+      if (isConnectionError(err)) {
+        tripCircuit(id);
+        return UNAVAILABLE;
+      }
+      console.error(`[ydoc-store] loadReplaySlice(${id}, ${throughUpdateId}) failed:`, err);
+      return UNAVAILABLE;
     }
-    return { kind: "firstUpdate", firstUpdateId: first.id };
   }
 }
 
@@ -257,13 +292,24 @@ class NullYdocStore implements YdocStore {
     this.warn(id, "storeState");
   }
 
-  async createSnapshot(id: string): Promise<void> {
+  async createSnapshot(id: string): Promise<{ id: string }> {
     this.warn(id, "createSnapshot");
     throw new Error("Snapshots are unavailable while YDOC_PERSISTENCE=off.");
   }
 
-  async resolveReplayBase(): Promise<ResolvedReplayBase | null> {
+  async maxUpdateId(id: string): Promise<bigint | null> {
+    this.warn(id, "maxUpdateId");
     return null;
+  }
+
+  async findSnapshotAtMark(id: string): Promise<{ id: string } | null> {
+    this.warn(id, "findSnapshotAtMark");
+    return null;
+  }
+
+  async loadReplaySlice(id: string): Promise<ReplaySlice | typeof UNAVAILABLE> {
+    this.warn(id, "loadReplaySlice");
+    return UNAVAILABLE;
   }
 }
 

@@ -12,10 +12,10 @@
 }
 
 /* A contenteditable (CollabTitleField), not an <input> — same border as
-   .editorFrame below (shared with PostEditor.module.css) so the title reads
-   as the same kind of editable surface as the body, not a plain label. No
-   .titleChanged swap here unlike PostEditor's version: a doc has no
-   published state for the title to differ from. */
+   .editorFrame (EditorChrome.module.css) so the title reads as the same kind
+   of editable surface as the body, not a plain label. No .titleChanged swap
+   here unlike the old PostEditor's version: a doc has no published state for
+   the title to differ from. */
 .titleInput {
   position: relative;
   font-size: clamp(1.1rem, 4vw, 1.5rem);

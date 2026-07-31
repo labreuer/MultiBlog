@@ -1,0 +1,163 @@
+/* Shared editor chrome for every CollabEditorBody consumer (DocEditor,
+   sidebyside/DocColumn, YdocDebug's EditView) — the toolbar, the scrollable
+   body frame, and remote-collaborator caret styling. Split out of what used
+   to be PostEditor.module.css (deleted with PostEditor.tsx, PLAN.md §15):
+   that file's name suggested it was post-specific, but CollabEditorBody/
+   EditorToolbar/QuoteControls always imported it directly regardless of
+   which surface embedded them, so deleting it broke every doc-side editor
+   too. This file is that shared half, under an honest name. */
+
+/* Grows to fill whatever space is left after the header/footer. min-height:
+   0 overrides the default content-based automatic minimum size that flex
+   items get — without it, .editorContent's own long content would inflate
+   this box instead of scrolling inside it. The 300px floor lives on
+   .editorContent itself; when the available space can't satisfy it,
+   .editorContent overflows this frame (which has no overflow:hidden), and
+   the page scrolls to reveal it instead of the editor shrinking below a
+   usable height — body { overflow-x: hidden } in globals.css implicitly
+   computes body's overflow-y to auto per the CSS overflow spec (an
+   element can't have one axis hidden and the other stay visible), which
+   is what makes that page-level scroll actually happen. */
+.editorFrame {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid #ccc;
+  flex: 0 0 auto;
+}
+
+.toolbarButton {
+  min-height: 36px;
+  padding: 4px 10px;
+}
+
+/* Split button: .quoteGroup has no gap of its own, so the two buttons sit
+   pixel-adjacent instead of getting .toolbar's normal 4px inter-button gap. */
+.quoteGroup {
+  position: relative;
+  display: inline-flex;
+}
+
+.quoteDropdownTrigger {
+  min-height: 36px;
+  padding: 4px 6px;
+  line-height: 1;
+  font-size: 0.6rem;
+  cursor: pointer;
+}
+
+.quoteMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.quoteMenuItem {
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.quoteMenuItem:hover {
+  background: #f0f0f0;
+}
+
+/* The scroll container: sized by flex-grow up to the space available, with
+   a 300px floor and its own scrollbar for content taller than that. */
+.editorContent {
+  flex: 1 1 auto;
+  min-height: 300px;
+  overflow-y: auto;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+/* .tiptap is the actual contenteditable ProseMirror node, rendered by the
+   TipTap library itself (unscoped, hence :global). Without this, it's only
+   as tall as its content, leaving dead space below short content that
+   looks editable but isn't. flex: 1 1 auto stretches it to fill
+   .editorContent when content is short; when content is taller than the
+   available space, .tiptap's own automatic (content-based) minimum size
+   keeps it from being squashed, and the overflow scrolls within
+   .editorContent instead — a percentage min-height here doesn't reliably
+   resolve against a flex-item ancestor, so this uses flex-grow instead. */
+.editorContent :global(.tiptap) {
+  flex: 1 1 auto;
+  outline: none;
+  cursor: text;
+}
+
+/* Remote collaborator cursors: a thin colored bar (border-left) with a
+   generous invisible hit area (the padding/negative-margin pair below) so
+   hovering near the line — not just the 2px line itself — reveals who it
+   is. The name label is positioned absolutely so it doesn't affect layout
+   or line height while hidden. */
+.collabCaret {
+  position: relative;
+  border-left: 2px solid;
+  margin-left: -1px;
+  padding: 0;
+  left: 1px;
+}
+
+.collabCaretLabel {
+  position: absolute;
+  top: -1.4em;
+  left: -2px;
+  padding: 1px 6px;
+  border-radius: 3px 3px 3px 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+}
+
+.collabCaret:hover .collabCaretLabel {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (max-width: 480px) {
+  .toolbarButton {
+    min-height: 44px;
+    padding: 6px 12px;
+  }
+
+  .quoteDropdownTrigger {
+    min-height: 44px;
+    padding: 6px 8px;
+  }
+
+  .editorContent {
+    min-height: 200px;
+  }
+}

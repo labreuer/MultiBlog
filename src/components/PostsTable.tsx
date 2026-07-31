@@ -17,7 +17,7 @@ export type PostRow = {
   status: "draft" | "scheduled" | "published";
   publishedAt: Date | null;
   createdAt: Date;
-  ahead: number;
+  eventCount: number;
   lastEditorName: string;
   lastEditAt: Date | null;
   approved: number;
@@ -124,7 +124,7 @@ function formatCountdown(target: Date): string {
   return parts.join(" ");
 }
 
-type SortKey = "title" | "authors" | "published" | "comments" | "ahead" | "editor" | "lastEdit" | "created" | "deleted";
+type SortKey = "title" | "authors" | "published" | "comments" | "events" | "editor" | "lastEdit" | "created" | "deleted";
 
 function compareNullableDates(a: Date | null, b: Date | null): number {
   if (a === null && b === null) return 0;
@@ -166,8 +166,8 @@ function compareByKey(key: SortKey, a: PostRow, b: PostRow, dir: "asc" | "desc")
       // for a published row (there is no separate scheduledFor anymore), so
       // this single comparison already sorts both correctly.
       return compareNullableDatesAlwaysLast(a.publishedAt, b.publishedAt, dir);
-    case "ahead":
-      return a.ahead - b.ahead;
+    case "events":
+      return a.eventCount - b.eventCount;
     case "editor":
       return a.lastEditorName.localeCompare(b.lastEditorName);
     case "lastEdit":
@@ -267,8 +267,8 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
             <th style={sortableTh} onClick={(e) => handleSort("comments", e.ctrlKey)}>
               Comments{sortIndicator("comments")}
             </th>
-            <th style={sortableTh} onClick={(e) => handleSort("ahead", e.ctrlKey)}>
-              Revisions{sortIndicator("ahead")}
+            <th style={sortableTh} onClick={(e) => handleSort("events", e.ctrlKey)}>
+              History{sortIndicator("events")}
             </th>
             <th style={nowrapSortableTh} onClick={(e) => handleSort("editor", e.ctrlKey)}>
               Last edit by{sortIndicator("editor")}
@@ -324,7 +324,7 @@ export default function PostsTable({ rows }: { rows: PostRow[] }) {
                 )}
               </td>
               <td style={td}>
-                <Link href={`/posts/${row.id}/history`}>{row.ahead === 0 ? "current" : `+${row.ahead}`}</Link>
+                <Link href={`/posts/${row.id}/history`}>{row.eventCount === 0 ? "none" : row.eventCount}</Link>
               </td>
               <td style={nowrapTd}>{row.lastEditorName}</td>
               <td style={nowrapTd}>{row.lastEditAt ? formatDate(row.lastEditAt, dateFormat) : ""}</td>

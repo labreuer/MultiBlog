@@ -11,7 +11,6 @@ import {
   restorePost,
 } from "@/app/actions/posts";
 import { ModerationPolicy, type Role } from "@/generated/prisma/enums";
-import { formatDate } from "@/lib/format-date";
 import styles from "./PostSettingsPanel.module.css";
 
 export type EligibleUser = {
@@ -19,14 +18,6 @@ export type EligibleUser = {
   name: string | null;
   email: string;
   role: Role;
-};
-
-export type RevisionRow = {
-  revisionNumber: number;
-  title: string;
-  editorName: string;
-  changelog: string | null;
-  createdAt: Date;
 };
 
 type Props = {
@@ -38,9 +29,6 @@ type Props = {
   eligibleUsers: EligibleUser[];
   deleted: boolean;
   onDeletedChange: (deleted: boolean) => void;
-  revisions: RevisionRow[];
-  publishedRevisionNumber: number | null;
-  scheduledRevisionNumber: number | null;
 };
 
 export default function PostSettingsPanel({
@@ -52,9 +40,6 @@ export default function PostSettingsPanel({
   eligibleUsers,
   deleted,
   onDeletedChange,
-  revisions,
-  publishedRevisionNumber,
-  scheduledRevisionNumber,
 }: Props) {
   const router = useRouter();
   const detailsRef = useRef<HTMLDetailsElement>(null);
@@ -73,10 +58,6 @@ export default function PostSettingsPanel({
   const usersById = useMemo(() => new Map(eligibleUsers.map((u) => [u.id, u])), [eligibleUsers]);
   const dragIdRef = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const sortedRevisions = useMemo(
-    () => [...revisions].sort((a, b) => a.revisionNumber - b.revisionNumber),
-    [revisions],
-  );
 
   function handlePolicyChange(next: ModerationPolicy) {
     const prev = policy;
@@ -254,39 +235,9 @@ export default function PostSettingsPanel({
           </tbody>
         </table>
 
-        <p className={styles.label}>Revisions:</p>
-
-        <table className={styles.revisionsTable}>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Title</th>
-              <th>Editor</th>
-              <th>Changelog</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedRevisions.map((revision) => (
-              <tr
-                key={revision.revisionNumber}
-                className={
-                  revision.revisionNumber === scheduledRevisionNumber
-                    ? styles.scheduledRevisionRow
-                    : revision.revisionNumber === publishedRevisionNumber
-                      ? styles.publishedRevisionRow
-                      : undefined
-                }
-              >
-                <td>{revision.revisionNumber}</td>
-                <td>{revision.title}</td>
-                <td>{revision.editorName}</td>
-                <td>{revision.changelog ?? ""}</td>
-                <td>{formatDate(revision.createdAt, "yyyy-MM-dd HH:mm")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <p>
+          <Link href={`/posts/${postId}/history`}>Publication history…</Link>
+        </p>
 
         <button type="button" onClick={handleDeleteToggle} disabled={pending} className={styles.deleteButton}>
           {deleted ? "Undelete" : "Delete"}

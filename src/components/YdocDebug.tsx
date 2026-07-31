@@ -346,13 +346,18 @@ export type ReplayScrub = {
 };
 
 // The replay/seek machinery, shared by ReplayView below (unmodified UI, for
-// /ydoc-debug) and DocScrubBar.tsx's lazy-loaded, live-body-swapping
-// instance embedded in /doc/[slug]'s own reading view (PLAN.md §12) — the
-// tricky part (incremental-vs-rebuild replay, §11h) stays in exactly one
-// place either way.
-export function useReplayScrub(replay: ReplayPayload): ReplayScrub {
+// /ydoc-debug), DocScrubBar.tsx's lazy-loaded, live-body-swapping instance
+// embedded in /doc/[slug]'s own reading view (PLAN.md §12), and
+// PostSnapshotScrubBar.tsx's publish surface (§15c) — the tricky part
+// (incremental-vs-rebuild replay, §11h) stays in exactly one place either
+// way. initialIndex opens the scrub bar somewhere other than the log's head —
+// PostSnapshotScrubBar's only use for it — and is clamped the same way any
+// other seek target is; omitted (every other caller) it defaults to the head,
+// unchanged from before this parameter existed.
+export function useReplayScrub(replay: ReplayPayload, initialIndex?: number): ReplayScrub {
   const prepared = useMemo(() => prepare(replay), [replay]);
   const total = prepared.updates.length;
+  const startIndex = Math.min(Math.max(initialIndex ?? total - 1, 0), Math.max(total - 1, 0));
 
   // Mutable replay machinery, deliberately refs rather than state: a
   // re-render per applyUpdate would swamp the very measurement this exists to
@@ -361,7 +366,7 @@ export function useReplayScrub(replay: ReplayPayload): ReplayScrub {
   const baseSnapshotIdRef = useRef<string | null>(null);
   const indexRef = useRef(-1);
 
-  const [index, setIndex] = useState(Math.max(0, total - 1));
+  const [index, setIndex] = useState(startIndex);
   const [renderResult, setRenderResult] = useState<YdocRenderResult | null>(null);
   const [status, setStatus] = useState<ScrubStatus | null>(null);
 
@@ -447,10 +452,11 @@ export function useReplayScrub(replay: ReplayPayload): ReplayScrub {
     [prepared, total],
   );
 
-  // Materialize the newest position on mount. This component is keyed by its
-  // parent on the replay-fetch version, so "mount" is also what happens after
-  // a Refresh — which is how the Y.Doc gets rebuilt against new data without
-  // a separate teardown path.
+  // Materialize startIndex (the newest position, unless a caller asked for
+  // somewhere else) on mount. This component is keyed by its parent on the
+  // replay-fetch version, so "mount" is also what happens after a Refresh —
+  // which is how the Y.Doc gets rebuilt against new data without a separate
+  // teardown path.
   //
   // set-state-in-effect is disabled deliberately rather than worked around.
   // The materialized Y.Doc *is* an external system in the sense the rule
@@ -463,7 +469,7 @@ export function useReplayScrub(replay: ReplayPayload): ReplayScrub {
   // to show correctly.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    seek(total - 1);
+    seek(startIndex);
     return () => {
       docRef.current?.destroy();
       docRef.current = null;

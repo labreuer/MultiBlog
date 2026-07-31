@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
-import styles from "./PostEditor.module.css";
+import styles from "./EditorChrome.module.css";
 
 // Split button: "Quote" keeps its existing toggle behavior (wrap/unwrap one
 // level). The dropdown gives access to wrapIn/lift directly, which always
