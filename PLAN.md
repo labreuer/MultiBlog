@@ -800,8 +800,10 @@ Git history carries per-step detail.
 **Done**
 
 1. **Skeleton** — Next.js 16 (App Router) + Prisma 6 + local Postgres + Auth.js v5
-   credentials auth with roles; forgot-password flow (single-use hashed tokens, 1h expiry,
-   enumeration-safe).
+   credentials auth with roles; forgot-password flow. Authentication mechanics — the
+   credentials provider, the `jwt` session strategy and what it bakes in, the
+   forgot-password token details, and how the sign-in form is wired — live in
+   [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 2. **Posts & editor** — TipTap v3 editor, immutable append-only revisions, publish,
    diff + restore-as-new-revision. Editor is responsive and fills window height (300px floor).
    Toolbar grew beyond plan: clear-formatting, and a split-button quote dropdown exposing
@@ -1804,11 +1806,10 @@ Blast radius is small and already surveyed: the enum and `src/lib/role-checks.ts
 usage string gains one option. `updateUserRole` validates against `Object.values(Role)`
 generically and needs no edit.
 
-**Known consequence: a role change doesn't reach an existing session.** `src/lib/auth.ts` uses
-the `jwt` strategy and reads `user` only when it's present — i.e. once, at sign-in. Promoting
-someone to `AUTHORIZED` does nothing until they sign out and back in. A curiosity today; once
-promotion *is* the mechanism for granting doc access it becomes the first support question, with
-nothing broken to find. Interim fix: say so in the permission-denied message.
+**Known consequence: a role change doesn't reach an existing session.** Promoting someone to
+`AUTHORIZED` does nothing until they sign out and back in — the session is a JWT with `role`
+baked in at sign-in. Interim fix: say so in the permission-denied message. Why it works that
+way, and the deferred fix, are in [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 
 ### 12f. Routes
 
@@ -2091,9 +2092,10 @@ Three things keep a later convergence cheap, and all are worth protecting while 
   divergence is visible rather than guessed at (§12k).
 - **Deduplicating `src/lib/ydoc-render.ts` with `LiveHistoryViewer`.** Belongs to the post cutover,
   when there is one renderer's worth of behavior to keep rather than two.
-- **Re-reading `role` from the DB in the `jwt` callback** (§12e), rather than documenting the
-  sign-out-and-back-in workaround. Waits for the granular-permissions work that supersedes this
-  whole role scheme.
+- **Re-reading `role` from the DB in the `jwt` callback** (§12e) — moved to
+  [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md) with the rest of the session mechanics.
+  Still deferred, for the same reason: it waits for the granular-permissions work that
+  supersedes this whole role scheme.
 
 ### 12n. As built
 

@@ -5,6 +5,8 @@ Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually
 Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMANCE.md).
 Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
 Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STYLE.md).
+Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
+[src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 
 ## Running
 

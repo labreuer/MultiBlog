@@ -19,6 +19,15 @@ setup("create and sign in the shared admin", async ({ page }) => {
   await page.waitForURL("**/dashboard");
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
+  // SiteHeader reads the session from the root layout's SessionProvider, which
+  // a client-side redirect never remounts — so assert the header actually
+  // reflects the new session *without* a reload. Regression this pins: signing
+  // in through a server action left the top bar logged-out (and refusing to
+  // re-check, since the provider bails out early once it has cached a null
+  // session) until the next full page load.
+  // Scoped to the header's <nav> — the dashboard page has its own Sign out button.
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Sign out" })).toBeVisible();
+
   await page.context().storageState({ path: ADMIN_STORAGE_STATE });
 
   // Warm `/doc/[id]/edit` before the workers start, and fail fast if live
