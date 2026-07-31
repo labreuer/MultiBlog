@@ -294,6 +294,8 @@ Quick sanity check: `psql "postgresql://multiblog:<pw>@127.0.0.1:5432/multiblog"
 `EnvironmentFile`). Full set:
 
 ```
+# WARNING: delete all inline # comments, else systemd interprets them as part of the variable name
+
 DATABASE_URL="postgresql://multiblog:<pw>@127.0.0.1:5432/multiblog?schema=public"
 
 AUTH_SECRET="<openssl rand -base64 32>"     # generate FRESH — do not reuse the dev secret
