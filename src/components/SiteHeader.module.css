@@ -1,13 +1,13 @@
-/* The "Docs" nav item's dropdown (Annotations) — same <details>/<summary>
-   shape as CommentsTable.tsx's MultiSelectDropdown (AdminTable.module.css's
-   .dropdownWrapper/.dropdownSummary/.dropdownPanel), but that file is scoped
-   to admin tables (STYLE.md) and this is plain nav chrome, hence its own
-   copy rather than a cross-import. */
+/* Nav items with a dropdown ("Posts" → Comments, "Docs" → Annotations) — same
+   <details>/<summary> shape as CommentsTable.tsx's MultiSelectDropdown
+   (AdminTable.module.css's .dropdownWrapper/.dropdownSummary/.dropdownPanel),
+   but that file is scoped to admin tables (STYLE.md) and this is plain nav
+   chrome, hence its own copy rather than a cross-import. */
 
 /* The positioning context for .dropdownPanel below — not .dropdownWrapper
    itself (which only wraps the caret), so the panel's left edge lines up
-   with "Docs" rather than with the caret next to it. */
-.docsGroup {
+   with the group's own link rather than with the caret next to it. */
+.navGroup {
   position: relative;
   display: inline-flex;
   align-items: center;
