@@ -26,33 +26,23 @@ export default async function PostsPage() {
       : { authors: { some: { userId: session.user.id } } },
     orderBy: { createdAt: "desc" },
     include: {
-      publishRevision: { select: { revisionNumber: true } },
       authors: {
         orderBy: { bylineOrder: "asc" },
         select: { user: { select: { adminInitials: true } } },
       },
-      revisions: {
-        orderBy: { revisionNumber: "desc" },
+      publicationEvents: {
+        orderBy: { createdAt: "desc" },
         take: 1,
-        select: {
-          revisionNumber: true,
-          createdAt: true,
-          editor: { select: { name: true, email: true } },
-        },
+        select: { createdAt: true, actor: { select: { name: true, email: true } } },
       },
       threads: { select: { comments: { select: { status: true, deletedByUserId: true } } } },
+      _count: { select: { publicationEvents: true } },
     },
   });
 
   const rows = posts.map((post) => {
-    const latest = post.revisions[0];
+    const latest = post.publicationEvents[0];
     const status = derivePostStatus(post);
-    const latestRevisionNumber = latest?.revisionNumber ?? 0;
-    const publishedRevisionNumber = post.publishRevision?.revisionNumber ?? 0;
-    // publishRevision is set for a scheduled post too (not just published),
-    // so both non-draft statuses compare against it — "ahead" means "edited
-    // since whatever's committed to go/be live," not just "since published."
-    const ahead = status !== "draft" ? latestRevisionNumber - publishedRevisionNumber : latestRevisionNumber;
 
     let approved = 0;
     let pending = 0;
@@ -72,8 +62,8 @@ export default async function PostsPage() {
       status,
       publishedAt: post.publishedAt,
       createdAt: post.createdAt,
-      ahead,
-      lastEditorName: latest?.editor?.name ?? latest?.editor?.email ?? "—",
+      eventCount: post._count.publicationEvents,
+      lastEditorName: latest?.actor?.name ?? latest?.actor?.email ?? "—",
       lastEditAt: latest?.createdAt ?? null,
       approved,
       pending,

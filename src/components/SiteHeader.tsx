@@ -9,6 +9,7 @@ import styles from "./SiteHeader.module.css";
 
 export default function SiteHeader() {
   const { data: session } = useSession();
+  const postsMenuRef = useRef<HTMLDetailsElement>(null);
   const docsMenuRef = useRef<HTMLDetailsElement>(null);
 
   // <details> has no native "close on outside click" — same fix as
@@ -17,8 +18,10 @@ export default function SiteHeader() {
   // needs to react to open/closed.
   useEffect(() => {
     function handlePointerDown(e: MouseEvent) {
-      if (docsMenuRef.current && !docsMenuRef.current.contains(e.target as Node)) {
-        docsMenuRef.current.open = false;
+      for (const ref of [postsMenuRef, docsMenuRef]) {
+        if (ref.current && !ref.current.contains(e.target as Node)) {
+          ref.current.open = false;
+        }
       }
     }
     document.addEventListener("mousedown", handlePointerDown);
@@ -44,11 +47,17 @@ export default function SiteHeader() {
             <span aria-hidden="true" style={{ color: "#ccc" }}>
               |
             </span>
-            <Link href="/posts">Manage Posts</Link>
-            <span aria-hidden="true" style={{ color: "#ccc" }}>
-              |
+            <span className={styles.navGroup}>
+              <Link href="/posts">Posts</Link>
+              <details ref={postsMenuRef} className={styles.dropdownWrapper}>
+                <summary className={styles.dropdownSummary} aria-label="Post tools">
+                  ▾
+                </summary>
+                <div className={styles.dropdownPanel}>
+                  <Link href="/comments">Comments</Link>
+                </div>
+              </details>
             </span>
-            <Link href="/comments">Manage Comments</Link>
           </>
         )}
         {session?.user && canManageDocs(session.user.role) && (
@@ -56,7 +65,7 @@ export default function SiteHeader() {
             <span aria-hidden="true" style={{ color: "#ccc" }}>
               |
             </span>
-            <span className={styles.docsGroup}>
+            <span className={styles.navGroup}>
               <Link href="/docs">Docs</Link>
               <details ref={docsMenuRef} className={styles.dropdownWrapper}>
                 <summary className={styles.dropdownSummary} aria-label="Doc tools">

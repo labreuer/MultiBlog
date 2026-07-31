@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
-import PostEditBadge from "@/components/PostEditBadge";
 import styles from "./page.module.css";
 
 export const revalidate = 60;
@@ -13,13 +12,10 @@ export default async function Home() {
     where: publishedPostWhere(),
     orderBy: { publishedAt: "desc" },
     include: {
-      publishRevision: { select: { title: true, doc: true } },
       authors: {
         orderBy: { bylineOrder: "asc" },
         include: { user: { select: { name: true, slug: true } } },
       },
-      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { createdAt: true } },
-      collab: { select: { updatedAt: true } },
     },
   });
 
@@ -30,20 +26,14 @@ export default async function Home() {
           <p>No posts published yet.</p>
         ) : (
           posts.map((post) => {
-            const excerpt = post.publishRevision ? extractText(post.publishRevision.doc).slice(0, 200) : "";
+            const excerpt = post.proseJson ? extractText(post.proseJson).slice(0, 200) : "";
 
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
                 <h2 className={styles.postHeading}>
                   <Link href={`/${post.slug}`} className={styles.titleLink}>
-                    {post.publishRevision?.title ?? post.title}
+                    {post.title}
                   </Link>
-                  <PostEditBadge
-                    postId={post.id}
-                    authorUserIds={post.authors.map((a) => a.userId)}
-                    latestRevisionAt={post.revisions[0]?.createdAt.toISOString() ?? null}
-                    collabUpdatedAt={post.collab?.updatedAt.toISOString() ?? null}
-                  />
                 </h2>
                 <p style={{ color: "#666", fontSize: "0.9rem" }}>
                   <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />

@@ -2,11 +2,13 @@
 // /ydoc-debug — invariant 1 (row #1 is always a full state), that read-only
 // viewing never writes, that clientID attribution only happens on an actual
 // edit, that a replay of the log reproduces the editor's text with no
-// duplication, that a snapshot's high-water mark is correct, and — the one
-// that matters most, since nothing existing may touch these tables — that
-// ordinary post editing leaves every ydoc-stack table untouched.
+// duplication, and that a snapshot's high-water mark is correct. The old
+// "editing a post never writes to any ydoc-stack table" isolation check is
+// gone with PostEditor — posts no longer have any editable content of their
+// own to isolate from (PLAN.md §15), so there's no second stack left to
+// stay isolated from.
 import type { Page } from "@playwright/test";
-import { test, expect, waitForCollabReady, bodyEditor, gotoOk } from "./fixtures";
+import { test, expect, bodyEditor, gotoOk } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createTestYdoc,
@@ -17,7 +19,6 @@ import {
   getYdocClients,
   replayYdocText,
   getUserIdByEmail,
-  countAllYdocs,
 } from "./db";
 
 // /ydoc-debug pulls in the same TipTap+Yjs+collab bundle as the post editor,
@@ -104,19 +105,6 @@ test("a snapshot captures the document's actual high-water mark", async ({ page 
     await page.goto("about:blank").catch(() => {});
     await deleteTestYdoc(doc.id);
   }
-});
-
-test("editing a post never writes to any ydoc-stack table", async ({ page, draftPost }) => {
-  const before = await countAllYdocs();
-
-  await gotoOk(page, `/posts/${draftPost.id}/edit`);
-  await waitForCollabReady(page);
-  await bodyEditor(page).click();
-  await page.keyboard.type(" More text for the isolation check.");
-  await page.getByRole("button", { name: "Save draft" }).click();
-  await expect(page.getByText(/No changes since revision|Currently viewing/)).toBeVisible();
-
-  expect(await countAllYdocs()).toBe(before);
 });
 
 // A range input ignores fill()/click-based interaction in a way that doesn't

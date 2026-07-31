@@ -6,7 +6,7 @@ test.describe("comment moderation", () => {
     const body = "Pending comment awaiting a moderator.";
     const { id: commentId } = await createComment({
       postId: publishedPost.id,
-      anchoredRevisionId: publishedPost.revisionId,
+      anchoredEventId: publishedPost.eventId!,
       email: uniqueEmail("commenter"),
       displayName: "Pending Person",
       body,
@@ -33,7 +33,7 @@ test.describe("comment moderation", () => {
     const body = "Approved comment that later gets flagged.";
     const { id: commentId } = await createComment({
       postId: publishedPost.id,
-      anchoredRevisionId: publishedPost.revisionId,
+      anchoredEventId: publishedPost.eventId!,
       email: uniqueEmail("commenter"),
       displayName: "Flagged Person",
       body,

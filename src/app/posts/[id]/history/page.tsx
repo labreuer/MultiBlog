@@ -4,6 +4,9 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 
+// PLAN.md §15 — a post's history is now its publish/schedule/unpublish
+// events, not a list of independently-saved revisions: there's nothing to
+// list between publishes, since editing happens on the doc instead.
 export default async function PostHistoryPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await auth();
@@ -15,9 +18,9 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
     where: { id },
     include: {
       authors: { select: { userId: true } },
-      revisions: {
-        orderBy: { revisionNumber: "desc" },
-        include: { editor: { select: { name: true, email: true } } },
+      publicationEvents: {
+        orderBy: { createdAt: "desc" },
+        include: { actor: { select: { name: true, email: true } }, doc: { select: { title: true, slug: true } } },
       },
     },
   });
@@ -41,23 +44,30 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
       <p>
         <Link href={`/posts/${post.id}/edit`}>Back to editor</Link>
       </p>
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {post.revisions.map((revision) => (
-          <li key={revision.id} style={{ padding: "8px 0", borderBottom: "1px solid #ddd" }}>
-            <Link href={`/posts/${post.id}/history/${revision.revisionNumber}`}>
-              Revision #{revision.revisionNumber}
-            </Link>{" "}
-            {revision.id === post.publishRevisionId && (
-              <strong style={{ color: "green" }}>(published)</strong>
-            )}
-            <div style={{ color: "#666", fontSize: "0.9rem" }}>
-              {revision.createdAt.toLocaleString()} by{" "}
-              {revision.editor?.name ?? revision.editor?.email ?? "unknown"}
-              {revision.changelog ? ` — ${revision.changelog}` : ""}
-            </div>
-          </li>
-        ))}
-      </ul>
+      {post.publicationEvents.length === 0 ? (
+        <p style={{ color: "#666" }}>No publish activity yet.</p>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0 }}>
+          {post.publicationEvents.map((event) => (
+            <li key={event.id} style={{ padding: "8px 0", borderBottom: "1px solid #ddd" }}>
+              {event.proseJson ? (
+                <Link href={`/posts/${post.id}/history/${event.id}`}>
+                  {event.type} — {event.title}
+                </Link>
+              ) : (
+                <span>{event.type}</span>
+              )}{" "}
+              {event.id === post.publishEventId && <strong style={{ color: "green" }}>(current)</strong>}
+              <div style={{ color: "#666", fontSize: "0.9rem" }}>
+                {event.createdAt.toLocaleString()} by{" "}
+                {event.actor?.name ?? event.actor?.email ?? "system"}
+                {event.doc && ` — from doc “${event.doc.title || "Untitled"}”`}
+                {event.scheduledFor && ` — scheduled for ${event.scheduledFor.toLocaleString()}`}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </main>
   );
 }

@@ -17,22 +17,23 @@ import { docContentExtensions, titleAuthorHighlightExtensions, collectMarkAttrVa
 // tearing it down here would break the next incremental step. Decoding bytes
 // into a doc is the caller's job (and, for the slider, the thing being timed).
 
-export type YdocRenderResult =
+export type YdocContent =
   | {
       ok: true;
       bodyJSON: JSONContent;
-      body: ReactNode;
-      title: ReactNode;
-      // Alongside `title` (already-rendered, for ReplayContent's preview) —
-      // DocScrubBar needs the raw JSON to flatten to plain text for the
-      // reading view's <h1>, which isn't a rich-text surface.
+      // No fallback of its own (PLAN.md §12n) — null means the title
+      // fragment is genuinely empty, not that decoding failed.
       titleJSON: JSONContent | null;
       authorIds: string[];
       clients: Record<string, string>;
     }
   | { ok: false; error: string };
 
-export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
+// The decode-only half of renderYdocDoc below — no @tiptap/static-renderer
+// work, so no React nodes. PLAN.md §15b's publish path only ever needs the
+// JSON (to strip marks and derive Post.proseJson/title from), and rendering
+// React elements it then throws away would be pure waste on that path.
+export function readYdocContent(doc: Y.Doc): YdocContent {
   try {
     const bodyJSON = TiptapTransformer.extensions(docContentExtensions).fromYdoc(doc, "default");
     const titleFragment = doc.getXmlFragment("title");
@@ -51,15 +52,7 @@ export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
       clients[clientId] = userId;
     });
 
-    return {
-      ok: true,
-      bodyJSON,
-      body: renderToReactElement({ content: bodyJSON, extensions: docContentExtensions }),
-      title: titleJSON ? renderToReactElement({ content: titleJSON, extensions: titleAuthorHighlightExtensions }) : null,
-      titleJSON,
-      authorIds: Array.from(authorIds),
-      clients,
-    };
+    return { ok: true, bodyJSON, titleJSON, authorIds: Array.from(authorIds), clients };
   } catch (err) {
     // Carries the complete, user-facing sentence rather than a bare reason:
     // the replay step ahead of this one produces its own differently-worded
@@ -70,4 +63,21 @@ export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
       error: `This document isn't TipTap-compatible: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+export type YdocRenderResult =
+  | (Extract<YdocContent, { ok: true }> & { body: ReactNode; title: ReactNode })
+  | { ok: false; error: string };
+
+export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
+  const content = readYdocContent(doc);
+  if (!content.ok) return content;
+
+  return {
+    ...content,
+    body: renderToReactElement({ content: content.bodyJSON, extensions: docContentExtensions }),
+    title: content.titleJSON
+      ? renderToReactElement({ content: content.titleJSON, extensions: titleAuthorHighlightExtensions })
+      : null,
+  };
 }

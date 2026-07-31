@@ -15,7 +15,7 @@ import type {
   TestUser,
   TestPost,
   ThreadState,
-  RevisionSummary,
+  PublicationEventSummary,
   TestYdoc,
   TestYdocSnapshot,
   TestDoc,
@@ -29,7 +29,7 @@ export type {
   TestUser,
   TestPost,
   ThreadState,
-  RevisionSummary,
+  PublicationEventSummary,
   TestYdoc,
   TestYdocSnapshot,
   TestDoc,
@@ -150,9 +150,6 @@ export const countDocYdocUpdates = (...args: Parameters<DbHandlers["countDocYdoc
 export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotationStates"]>): Promise<AnnotationState[]> =>
   call("getAnnotationStates", ...args);
 
-export const countPostCollabRows = (...args: Parameters<DbHandlers["countPostCollabRows"]>) =>
-  call("countPostCollabRows", ...args);
-
 export const createComment = (...args: Parameters<DbHandlers["createComment"]>) => call("createComment", ...args);
 
 export const createQuoteThread = (...args: Parameters<DbHandlers["createQuoteThread"]>) =>
@@ -161,14 +158,15 @@ export const createQuoteThread = (...args: Parameters<DbHandlers["createQuoteThr
 export const getThread = (...args: Parameters<DbHandlers["getThread"]>): Promise<ThreadState | null> =>
   call("getThread", ...args);
 
-export const getLatestRevisionId = (...args: Parameters<DbHandlers["getLatestRevisionId"]>) =>
-  call("getLatestRevisionId", ...args);
+export const getPublicationEvents = (
+  ...args: Parameters<DbHandlers["getPublicationEvents"]>
+): Promise<PublicationEventSummary[]> => call("getPublicationEvents", ...args);
 
-export const getRevisions = (...args: Parameters<DbHandlers["getRevisions"]>): Promise<RevisionSummary[]> =>
-  call("getRevisions", ...args);
+export const getPostContentText = (...args: Parameters<DbHandlers["getPostContentText"]>): Promise<string | null> =>
+  call("getPostContentText", ...args);
 
-export const hasCollabDoc = (...args: Parameters<DbHandlers["hasCollabDoc"]>): Promise<boolean> =>
-  call("hasCollabDoc", ...args);
+export const countDocYdocSnapshots = (...args: Parameters<DbHandlers["countDocYdocSnapshots"]>): Promise<number> =>
+  call("countDocYdocSnapshots", ...args);
 
 export const getCommentStatus = (...args: Parameters<DbHandlers["getCommentStatus"]>) =>
   call("getCommentStatus", ...args);

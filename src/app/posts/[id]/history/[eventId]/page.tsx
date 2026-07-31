@@ -4,15 +4,19 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 import { extractText, diffText } from "@/lib/diff";
-import RestoreRevisionButton from "@/components/RestoreRevisionButton";
+import { Prisma } from "@/generated/prisma/client";
 
-export default async function RevisionDiffPage({
+// PLAN.md §15 — diffs one PUBLISHED/SCHEDULED event against the previous
+// event (by createdAt) that actually carried content, the direct successor
+// to the old revision-vs-revision diff. No restore button: re-publishing
+// from an earlier point in the doc's own history (the scrub bar on
+// /posts/[id]/edit) is what "restore" means now.
+export default async function EventDiffPage({
   params,
 }: {
-  params: Promise<{ id: string; revisionNumber: string }>;
+  params: Promise<{ id: string; eventId: string }>;
 }) {
-  const { id, revisionNumber: revisionNumberParam } = await params;
-  const revisionNumber = Number(revisionNumberParam);
+  const { id, eventId } = await params;
 
   const session = await auth();
   if (!session?.user) {
@@ -23,7 +27,7 @@ export default async function RevisionDiffPage({
     where: { id },
     include: { authors: { select: { userId: true } } },
   });
-  if (!post || !Number.isInteger(revisionNumber)) {
+  if (!post) {
     notFound();
   }
 
@@ -37,30 +41,31 @@ export default async function RevisionDiffPage({
     );
   }
 
-  const [target, previous] = await Promise.all([
-    prisma.revision.findUnique({ where: { postId_revisionNumber: { postId: id, revisionNumber } } }),
-    prisma.revision.findUnique({
-      where: { postId_revisionNumber: { postId: id, revisionNumber: revisionNumber - 1 } },
-    }),
-  ]);
-  if (!target) {
+  const target = await prisma.postPublicationEvent.findUnique({ where: { id: eventId } });
+  if (!target || target.postId !== id || !target.proseJson) {
     notFound();
   }
 
-  const oldText = previous ? extractText(previous.doc) : "";
-  const newText = extractText(target.doc);
+  const previous = await prisma.postPublicationEvent.findFirst({
+    where: { postId: id, proseJson: { not: Prisma.JsonNull }, createdAt: { lt: target.createdAt } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const oldText = previous?.proseJson ? extractText(previous.proseJson) : "";
+  const newText = extractText(target.proseJson);
   const tokens = diffText(oldText, newText);
 
   return (
     <main style={{ maxWidth: 720, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>
-        {post.title} — revision #{revisionNumber}
+        {post.title} — {target.title}
       </h1>
       <p>
         <Link href={`/posts/${post.id}/history`}>Back to history</Link>
       </p>
       <p style={{ color: "#666" }}>
-        Diff against {previous ? `revision #${previous.revisionNumber}` : "(no earlier revision)"}
+        {target.createdAt.toLocaleString()} · Diff against{" "}
+        {previous ? `${previous.title} (${previous.createdAt.toLocaleString()})` : "(no earlier published version)"}
       </p>
       <pre
         style={{
@@ -89,7 +94,6 @@ export default async function RevisionDiffPage({
           return <span key={i}>{token.value}</span>;
         })}
       </pre>
-      <RestoreRevisionButton postId={post.id} revisionNumber={revisionNumber} />
     </main>
   );
 }

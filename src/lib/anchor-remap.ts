@@ -3,44 +3,49 @@ import { pmSchema } from "./tiptap-schema";
 import { prisma } from "./prisma";
 
 // Remaps every ACTIVE *or DETACHED* quote-anchored thread on a post forward
-// from whatever revision it's currently anchored to, onto the revision that
-// was just published — the "surviving a new revision" mechanism from
-// PLAN.md §5. Threads are grouped by their current anchoredRevisionId so a
-// post whose threads lag behind by several publishes (or the remap job
-// hasn't run since this feature shipped) still only costs one document diff
-// per distinct source revision, not one per thread.
+// from whatever publication event it's currently anchored to, onto the event
+// that was just published — the "surviving a new revision" mechanism from
+// PLAN.md §5, now diffing PostPublicationEvent.proseJson pairs instead of
+// Revision.doc pairs (§15). Threads are grouped by their current
+// anchoredEventId so a post whose threads lag behind by several publishes
+// still only costs one document diff per distinct source event, not one per
+// thread.
 //
 // DETACHED is included deliberately, not just ACTIVE: a DETACHED thread stays
-// frozen at the last revision it was valid against (never touched again while
-// it remains detached, below), so it's still grouped and re-diffed by that
-// same frozen revision on every later publish. If the article's text at that
-// anchor now matches the thread's quotedText again — most directly, restoring
-// that exact revision and publishing it, PLAN.md §10 — the thread reattaches.
-// Before this, DETACHED was a terminal state: excluded from the query
-// entirely, so nothing ever gave a detached thread a second look, no matter
-// what a later revision said.
-export async function remapThreadsToRevision(postId: string, newRevisionId: string): Promise<void> {
+// frozen at the last event it was valid against (never touched again while it
+// remains detached, below), so it's still grouped and re-diffed by that same
+// frozen event on every later publish. If the article's text at that anchor
+// now matches the thread's quotedText again — most directly, scrubbing back
+// to and republishing the doc state a restore used to reach, PLAN.md §15 —
+// the thread reattaches. Before this, DETACHED was a terminal state: excluded
+// from the query entirely, so nothing ever gave a detached thread a second
+// look, no matter what a later publish said.
+export async function remapThreadsToEvent(postId: string, newEventId: string): Promise<void> {
   const threads = await prisma.commentThread.findMany({
     where: { postId, status: { in: ["ACTIVE", "DETACHED"] }, quotedText: { not: "" } },
   });
 
-  const byRevision = new Map<string, typeof threads>();
+  const byEvent = new Map<string, typeof threads>();
   for (const thread of threads) {
-    if (thread.anchoredRevisionId === newRevisionId) continue;
-    const group = byRevision.get(thread.anchoredRevisionId);
+    if (thread.anchoredEventId === newEventId) continue;
+    const group = byEvent.get(thread.anchoredEventId);
     if (group) group.push(thread);
-    else byRevision.set(thread.anchoredRevisionId, [thread]);
+    else byEvent.set(thread.anchoredEventId, [thread]);
   }
-  if (byRevision.size === 0) return;
+  if (byEvent.size === 0) return;
 
-  const newRevision = await prisma.revision.findUniqueOrThrow({ where: { id: newRevisionId } });
-  const newNode = pmSchema.nodeFromJSON(newRevision.doc as object);
+  const newEvent = await prisma.postPublicationEvent.findUniqueOrThrow({ where: { id: newEventId } });
+  const newNode = pmSchema.nodeFromJSON((newEvent.proseJson ?? { type: "doc", content: [] }) as object);
 
-  for (const [oldRevisionId, group] of byRevision) {
-    const oldRevision = await prisma.revision.findUnique({ where: { id: oldRevisionId } });
-    if (!oldRevision) continue;
+  for (const [oldEventId, group] of byEvent) {
+    const oldEvent = await prisma.postPublicationEvent.findUnique({ where: { id: oldEventId } });
+    // An event with no proseJson (UNPUBLISHED/SCHEDULE_CANCELED) never
+    // becomes a thread's anchor — see submitComment, which anchors to
+    // post.publishEventId, always a PUBLISHED/SCHEDULED row — so this only
+    // guards a row that's since been deleted out from under the thread.
+    if (!oldEvent || !oldEvent.proseJson) continue;
 
-    const oldNode = pmSchema.nodeFromJSON(oldRevision.doc as object);
+    const oldNode = pmSchema.nodeFromJSON(oldEvent.proseJson as object);
     const { mapping } = recreateTransform(oldNode, newNode);
 
     for (const thread of group) {
@@ -55,7 +60,7 @@ export async function remapThreadsToRevision(postId: string, newRevisionId: stri
         newNode.textBetween(mappedFrom, mappedTo, " ").trim() === thread.quotedText.trim();
 
       // A DETACHED thread that's still not found: nothing to write. Its
-      // anchor stays frozen at oldRevisionId exactly as it already was — a
+      // anchor stays frozen at oldEventId exactly as it already was — a
       // write here would be a no-op on every field, repeated on every future
       // publish for as long as the thread stays detached.
       if (!survived && thread.status === "DETACHED") continue;
@@ -63,7 +68,7 @@ export async function remapThreadsToRevision(postId: string, newRevisionId: stri
       await prisma.commentThread.update({
         where: { id: thread.id },
         data: survived
-          ? { anchorFrom: mappedFrom, anchorTo: mappedTo, anchoredRevisionId: newRevisionId, status: "ACTIVE" }
+          ? { anchorFrom: mappedFrom, anchorTo: mappedTo, anchoredEventId: newEventId, status: "ACTIVE" }
           : { status: "DETACHED" },
       });
     }

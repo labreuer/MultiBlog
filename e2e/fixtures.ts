@@ -122,7 +122,7 @@ export const test = base.extend<Fixtures>({
     const post = await createTestPost({ authorEmail: ADMIN_EMAIL, bodyText: QUOTED_BODY, publish: true });
     const { threadId } = await createQuoteThread({
       postId: post.id,
-      anchoredRevisionId: post.revisionId,
+      anchoredEventId: post.eventId!,
       anchorFrom: QUOTE_FROM,
       anchorTo: QUOTE_TO,
       quotedText: QUOTED_TEXT,
@@ -291,20 +291,6 @@ export async function selectTextInBody(page: Page, needle: string): Promise<void
     }
     throw new Error(`"${text}" not found in the body editor.`);
   }, needle);
-}
-
-/**
- * Waits for the collab handshake, not just for the editor to render.
- *
- * PostEditor gates Save/Publish/Schedule on the provider having synced —
- * before that the local Y.Doc is legitimately empty, and a save would persist
- * that emptiness over the real content. So "🟢 Live" is the earliest point at
- * which acting on the editor means anything.
- */
-export async function waitForCollabReady(page: Page): Promise<void> {
-  await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: 30_000 });
-  // `exact` matters: without it "Publish" also matches the Unpublish button.
-  await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeEnabled();
 }
 
 /**

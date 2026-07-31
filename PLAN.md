@@ -3461,3 +3461,185 @@ are ordinary values by the time they are passed.
 Not changed, deliberately: `AnnotatableArticle` stays the post-side sibling it has been since §12o.
 Three surfaces now copy the same *interaction* shape while sharing only what is literally the same
 code, which is the arrangement §12o was reaching for and this section finishes.
+
+## 15. Posts become snapshots of docs
+
+Posts and docs have been two independently-editable document stacks solving the same problem
+twice — a post edited through `PostEditor` against `post_collab`/`post_collab_update`, saved into
+an immutable `revision`, published by pointing `post.publish_revision_id` at one; a doc (§12)
+edited through `DocEditor` against the ydoc stack, read live, never checkpointed. §11 called the
+ydoc stack a parallel stack meant to be proved on `/ydoc-debug` and then cut over to. This is that
+cutover.
+
+**Decided:** a post stops being an independently-edited document and becomes an immutable snapshot
+of a doc at a chosen point in that doc's ydoc history, carrying its own `prose_json` and `title`.
+`revision`, `post_collab`, and `post_collab_update` are dropped; the post-side half of
+`server/collab.ts` is dropped; one editing stack remains. `/posts/[id]/edit` no longer edits — it
+publishes. It shows the publish/schedule/unpublish controls, a read-only view of the doc at a
+selected history point, and a scrub bar over that doc's `ydoc_update` log. Publishing pins the
+selected point as a `ydoc_snapshot` (reusing one if the point is already snapshotted) and copies its
+content onto the post. Re-publishing from an earlier point is what "restore a revision" used to
+mean; re-publishing from a different doc entirely is now expressible, since a post's `doc_id` is
+just the doc it currently draws from, not a fixed parent.
+
+No existing post data was migrated across this change — see §15h.
+
+### 15a. Schema
+
+`Post` drops `publishRevisionId` and its `revisions`/`collab`/`collabUpdates` relations. It gains
+`docId` (required — the doc currently backing it), `proseJson` (its own copy of the published
+content, so every public read is a column instead of a join), and `publishEventId` (replacing
+`publishRevisionId` as the draft/published discriminator). `title` stays its own column rather than
+being derived, since a post's title may differ from its doc's title at snapshot time — it only
+*defaults* to it. `doc` is a required relation with the default `onDelete: Restrict`: a doc that
+still backs a post can't be hard-deleted out from under it.
+
+`PostPublicationEvent` — previously write-only, with no reader anywhere in the app — becomes the
+immutable per-version record `Revision` used to be. It gains `docId`, `ydocSnapshotId`, `title`, and
+`proseJson`, all nullable: a PUBLISHED/SCHEDULED row carries the whole published version (which doc,
+which snapshot pins that doc's state, and the title/content derived from it); UNPUBLISHED/
+SCHEDULE_CANCELED rows carry none of the four, since they retire a version rather than introduce
+one. `ydocSnapshot` is `SetNull`, not `Cascade` — the snapshot is provenance, and an event that
+outlives its ydoc row still holds the content it published; losing the pointer costs only the
+ability to re-derive, not the version itself.
+
+`CommentThread.anchoredRevisionId` becomes `anchoredEventId`, referencing `PostPublicationEvent`.
+§5's mechanism is unchanged in shape — `remapThreadsToRevision` becomes `remapThreadsToEvent`,
+diffing `PostPublicationEvent.proseJson` pairs instead of `Revision.doc` pairs — filtered to events
+with non-null `proseJson`, since UNPUBLISHED/SCHEDULE_CANCELED rows have none.
+
+`PostAuthor` gains `createdUserId`/`createdAt`, recording who added a byline entry and when. A
+post's authors start as a copy of its source doc's `doc_author` rows but are edited independently
+from then on — a post author need not be a doc author, or vice versa. Deliberately no history is
+kept beyond that: the simplification is the point, and a `post_author_history` table is the obvious
+first addition if "who was on this byline in March" ever needs answering. Two relations to `User`
+now exist on the same model, so both carry explicit relation names.
+
+### 15b. Creating a snapshot at an arbitrary past point
+
+The only existing snapshot path — `/ydoc-debug`'s Snapshot button → `POST /api/ydoc/[id]/snapshot`
+→ `snapshotYdoc()` → `POST /admin/ydoc-snapshot` on the collab server → `handleYdocSnapshot` in
+`server/ydoc-hooks.ts` — snapshots the *live* doc via `openDirectConnection`, which cannot rewind.
+Publishing needs a snapshot at a chosen historical `ydoc_update.id`, so wherever it runs, it is a log
+replay — the collab server's one unique asset (the live in-memory doc) is precisely the thing a
+historical snapshot must not use.
+
+**Decided:** replay in the Next process; leave the `/ydoc-debug` snapshot path untouched. This keeps
+§11c's "only writer" rule intact — it's module-scoped, not process-scoped, and `src/app/actions/
+docs.ts` already calls `ydocStore.createIfAbsent` directly from Next — while buying WYSIWYG: a
+replay to `throughUpdateId` produces exactly the bytes the scrub bar rendered at that position,
+where an `openDirectConnection` snapshot at head cannot make that guarantee (`onChange` →
+`appendUpdate` is enqueued and un-awaited, so the live doc generally runs ahead of the log). It also
+keeps a reachable collab server off the publish button's critical path.
+
+`server/ydoc-store.ts` gains `maxUpdateId`, `findSnapshotAtMark`, and `loadReplaySlice` (newest
+snapshot with `lastYdocUpdateId <= target`, then updates in `(mark, target]`) — the primitive
+`resolveReplayBase` was declared for but never actually implemented (it keyed on `MIN(ydoc_update.id)`,
+invariant 2's truncation question, not this one) and had no callers anywhere; it and
+`ResolvedReplayBase` are deleted. `createSnapshot` now returns the new row's id. `src/lib/
+ydoc-snapshot.ts` adds `materializeYdocAt`/`ensureYdocSnapshotAt` on top. Snapshot bytes become post
+content through `postContentFromYdoc` (`src/lib/post-content.ts`), which strips both the
+`authorHighlight` and `annotation` marks before handing off — a doc's ydoc decodes with
+`docContentExtensions`, which has both, while every post-side consumer (`[slug]/page.tsx`,
+`anchor-remap.ts`, `comment-data.ts`) uses plain `contentExtensions`/`pmSchema`; an unstripped mark
+would 500 the public page.
+
+One existing bug this promotes from latent to live: `handleYdocSnapshot` wrote a snapshot whose
+bytes could run *ahead* of its own `last_ydoc_update_id` ("the error is in the safe direction" —
+safe for truncation), but the replay-base resolution (`baseFor` in `YdocDebug.tsx`, and now
+`loadReplaySlice`) treats a snapshot's bytes as exactly the state at its mark. Landing on such a
+dot could render content from *after* the mark. Harmless while only `/ydoc-debug` created snapshots
+and nothing asserted content at a dot; not harmless once a doc's own scrub bar (`DocScrubBar`,
+already wired to `/api/doc/[id]/replay`) can land on a snapshot a publish created. Fixed as part of
+this section: `handleYdocSnapshot` now replays to its own mark rather than encoding the live doc.
+
+### 15c. The publish surface
+
+`/posts/[id]/edit` (route unchanged) replaces `PostEditor` with `PostPublisher`: a plain title input
+(defaulting to, and offering to reset to, the source doc's title), a line naming the source doc with
+a link to `/doc/[slug]/edit` and a "Change doc…" picker, the publish/schedule/unpublish controls, a
+line stating whether publishing will create a new snapshot or reuse an existing one, a read-only
+render of the doc at the selected point, and a scrub bar pinned at the bottom.
+
+The read-only view needs no TipTap editor instance — `useReplayScrub`'s `renderResult` already
+carries a rendered `body`; this is `ReplayContent` (`YdocDebug.tsx`) minus the perf line and clients
+table, rendered inside `.prose` per the `globals.css` reset. It uses `docContentExtensions`, since
+it is showing *unpublished* doc content — author highlights and all.
+
+The scrub bar is a new sibling, `PostSnapshotScrubBar`, not a variant grafted onto `DocScrubBar` —
+§14p's rule again: the second consumer here wants dots, selection, and a will-create/will-reuse
+line that `DocScrubBar` has no use for, and teaching it those would be the `LiveDocBody` mistake
+repeated. Both sit on the same `useReplayScrub` hook. No new API was needed: `GET /api/doc/[id]/
+replay` already ships every snapshot with its `lastYdocUpdateId`, gated on exactly the required
+`canUserEditDoc` check.
+
+### 15d. Publish semantics
+
+`publishPostFromDoc`/`schedulePostFromDoc` take `{docId, title, throughUpdateId, snapshotId?}` and
+require both `canUserEditPost` and `canUserEditDoc(docId)` — the second is new, and applies to
+creation too. They resolve a snapshot at the chosen point (reusing one if `snapshotId` was given or
+one already sits at that mark), derive `{proseJson, title}` from it, and in one transaction write a
+`PostPublicationEvent` and update `Post{docId, title, proseJson, publishEventId, publishedAt}`. The
+original go-live-date-preservation rule across an unpublish/republish cycle carries over unchanged.
+`unpublishPost` is unchanged in shape. `derivePostStatus`/`publishedPostWhere` swap
+`publishRevisionId` for `publishEventId`.
+
+A post can be created from a doc two ways: a picker at `/posts/new` (replacing the old title-only
+form) and a "Publish as blog post" button on `/doc/[slug]`, both landing on the same
+`createPostFromDoc(docId)` action, gated on `canUserEditDoc` and seeding the post's authors from the
+doc's `doc_author` rows.
+
+### 15e. The collab server after posts leave it
+
+`server/collab.ts` keeps only the ydoc-hooks dispatch. The `isYdocDocument` guard becomes an
+outright rejection, but only in `onAuthenticate` — registering that hook is what makes Hocuspocus
+require authentication on every connection, so it is the real chokepoint; a throw there is a clean
+connection refusal, where a throw inside `onLoadDocument` would instead read as a document-creation
+failure. The other three hooks call their ydoc versions unconditionally now that nothing else can
+reach them. `src/lib/collab-token.ts`, `/api/collab-token`, `/admin/replace-doc`, and
+`src/lib/collab-admin.ts` are deleted outright — their only callers (the post editor's token
+fetch and `restoreRevision`) are gone. `src/lib/ydoc-names.ts` loses no exports; the `ydoc:` prefix's
+job changes from "route away from the legacy post path" to just carving out the `ydoc:annotation:`
+sub-namespace and the `ydoc:test-` containment guard, and its comments were rewritten to say so.
+
+### 15f. Build order
+
+Phase 0 (snapshot machinery) → Phase 1 (schema + migration) → Phase 2 (post creation from a doc,
+transitional — new posts still opened the old editor for one phase) → Phase 3 (the cutover: new
+publish actions and every public read surface switched to `Post.proseJson`/`Post.title` in the same
+commit, since neither can move alone) → Phase 4 (teardown of the old post-editing UI; `/posts/[id]/
+history` rebuilt as a publication-event list + word diff between consecutive published versions) →
+Phase 5 (comments retargeted onto events) → Phase 6 (collab server teardown) → Phase 7 (this
+section, plus CLAUDE.md/CACHING.md/e2e docs).
+
+### 15g. As built
+
+Deleted: `LiveHistoryViewer.tsx`, `/posts/[id]/live-history`, `/api/posts/[id]/collab-updates`,
+`RestoreRevisionButton.tsx`, `PostEditBadge.tsx` and its four call sites, `PostEditor.tsx` (+ its
+module CSS), `PostSettingsPanel`'s revisions table, `e2e/restore-revision.spec.ts`,
+`e2e/collab.spec.ts` (after porting its two genuinely doc-side tests — body-edit propagation and the
+title's independent Yjs fragment — into `e2e/doc.spec.ts`, which had no two-author *editing*
+coverage before).
+
+`src/lib/post-edit-status.ts`, referenced by name in CLAUDE.md/CACHING.md/earlier PLAN.md prose,
+never existed as a file — the heuristic it named lived inline in `PostEditBadge.tsx`, which is one
+of the things this section deletes. Those references were corrected rather than pointing at a
+deletion.
+
+### 15h. Known gaps
+
+- `PostPublicationEvent` stores a denormalized `title`/`proseJson` rather than re-deriving from its
+  `ydoc_snapshot` on demand. Deliberate: §5's remap diffs two versions on every publish, and decoding
+  two Yjs blobs through the full extension stack per diff is a real, recurring cost against a table
+  row that is written once and never touched again.
+- "Post title defaults to the doc's" is enforced client-side (the title field tracks the scrubbed
+  doc's title until the user edits it) rather than with a stored `titleOverridden` flag. Cheap, but
+  "was this title deliberate?" isn't answerable from the database alone.
+- `GET /api/doc/[id]/replay` base64s every snapshot blob in one response. That was inert while docs
+  had zero snapshot rows (§12m); it stops being inert once a publish can create one per republish.
+  No mitigation shipped yet — the fix, when the payload size actually bites, is to ship snapshot
+  metadata for the scrub bar's dots and fetch a blob only on selection.
+- No existing post data was carried across this change. The one pre-existing post (`test`, zero
+  comments) was deleted rather than backfilled into a doc — there was nothing worth preserving, and
+  a backfill script would have had to get byline order, the title fragment, and a synthetic
+  publication event right for a single throwaway row.

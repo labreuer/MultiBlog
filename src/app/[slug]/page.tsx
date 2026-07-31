@@ -11,23 +11,24 @@ import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
-import PostEditBadge from "@/components/PostEditBadge";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
 export const revalidate = 60;
 
+// PLAN.md §15 — a published post's content is its own proseJson/title
+// columns, not a joined Revision. No collab/PostEditBadge staleness signal
+// any more either: a published post is a snapshot, deliberately silent about
+// whether its backing doc has moved on since (§15, "known gaps" weighed and
+// declined this on purpose).
 async function getPublishedPost(slug: string) {
   return prisma.post.findFirst({
     where: { slug, ...publishedPostWhere() },
     include: {
-      publishRevision: true,
       authors: {
         orderBy: { bylineOrder: "asc" },
         include: { user: { select: { name: true, slug: true } } },
       },
-      revisions: { orderBy: { revisionNumber: "desc" }, take: 1, select: { createdAt: true } },
-      collab: { select: { updatedAt: true } },
     },
   });
 }
@@ -47,12 +48,12 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const post = await getPublishedPost(slug);
-  if (!post?.publishRevision) {
+  if (!post?.proseJson) {
     return {};
   }
   return {
-    title: post.publishRevision.title,
-    description: extractText(post.publishRevision.doc).slice(0, 160),
+    title: post.title,
+    description: extractText(post.proseJson).slice(0, 160),
   };
 }
 
@@ -75,7 +76,7 @@ async function resolveRedirectSlug(slug: string): Promise<string | null> {
 export default async function PublicPostPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const post = await getPublishedPost(slug);
-  if (!post?.publishRevision) {
+  if (!post?.proseJson) {
     const redirectSlug = await resolveRedirectSlug(slug);
     if (redirectSlug) {
       permanentRedirect(`/${redirectSlug}`);
@@ -83,7 +84,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
     notFound();
   }
 
-  const doc = post.publishRevision.doc as JSONContent;
+  const doc = post.proseJson as JSONContent;
   const staticContent = renderToReactElement({ content: doc, extensions: contentExtensions });
 
   const threads = await getPostThreadsWithApprovedComments(post.id);
@@ -108,15 +109,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
   return (
     <div className={styles.container}>
       <main className={styles.main}>
-        <h1 className={styles.title}>
-          {post.publishRevision.title}
-          <PostEditBadge
-            postId={post.id}
-            authorUserIds={post.authors.map((a) => a.userId)}
-            latestRevisionAt={post.revisions[0]?.createdAt.toISOString() ?? null}
-            collabUpdatedAt={post.collab?.updatedAt.toISOString() ?? null}
-          />
-        </h1>
+        <h1 className={styles.title}>{post.title}</h1>
         <p className={styles.byline}>
           <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
           {post.publishedAt?.toLocaleDateString()}

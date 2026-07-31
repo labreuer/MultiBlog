@@ -5,17 +5,16 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { uniquePostSlug, changePostSlug, revertPostSlug as revertPostSlugInDb } from "@/lib/post-slug";
-import { canManagePosts, canUserEditPost } from "@/lib/authz";
-import { remapThreadsToRevision } from "@/lib/anchor-remap";
-import { replaceCollabDoc } from "@/lib/collab-admin";
-import { stripMarkFromDoc } from "@/lib/tiptap-schema";
-import { docsEqual } from "@/lib/diff";
+import { canUserEditPost } from "@/lib/authz";
+import { canUserEditDoc } from "@/lib/doc-authz";
+import { docTitleOrFallback } from "@/lib/doc-title";
+import { remapThreadsToEvent } from "@/lib/anchor-remap";
+import { postContentFromYdoc } from "@/lib/post-content";
+import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
+import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
-import type { JSONContent } from "@tiptap/core";
-
-const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
 // the home page, author pages, and the post's own page are built from — all
@@ -50,123 +49,108 @@ async function requireEditableSession(postId: string) {
   return { session, post };
 }
 
-export type CreatePostState = { error?: string };
-
-export async function createPostAction(
-  _prevState: CreatePostState,
-  formData: FormData,
-): Promise<CreatePostState> {
+// PLAN.md §15d — a post can be created from any doc its creator can edit,
+// either from the /posts/new picker or a "Publish as blog post" button on
+// /doc/[slug]. Seeds the post's authors as a copy of the doc's byline at
+// creation time (post_author.createdUserId records who added each row) —
+// from then on the two author lists are edited independently.
+export async function createPostFromDoc(docId: string): Promise<void> {
   const session = await auth();
   if (!session?.user) {
     redirect("/sign-in");
   }
-  if (!canManagePosts(session.user.role)) {
-    return { error: "You don't have permission to create posts." };
+  if (!(await canUserEditDoc(session.user.id, session.user.role, docId))) {
+    throw new Error("You don't have permission to create a post from this doc.");
   }
 
-  const title = formData.get("title");
-  if (typeof title !== "string" || !title.trim()) {
-    return { error: "Title is required." };
+  const doc = await prisma.doc.findUnique({
+    where: { id: docId },
+    select: {
+      title: true,
+      authors: { select: { userId: true, bylineOrder: true }, orderBy: { bylineOrder: "asc" } },
+    },
+  });
+  if (!doc) {
+    throw new Error("Doc not found.");
   }
-  const trimmedTitle = title.trim();
 
-  const slug = await uniquePostSlug(trimmedTitle);
+  const title = docTitleOrFallback(doc.title);
+  const slug = await uniquePostSlug(title);
+
   const post = await prisma.post.create({
     data: {
       slug,
-      title: trimmedTitle,
-      authors: { create: { userId: session.user.id, bylineOrder: 0 } },
-      revisions: {
-        create: {
-          revisionNumber: 1,
-          title: trimmedTitle,
-          doc: EMPTY_DOC,
-          editorId: session.user.id,
-        },
+      title,
+      docId,
+      authors: {
+        create: doc.authors.map((a) => ({
+          userId: a.userId,
+          bylineOrder: a.bylineOrder,
+          createdUserId: session.user.id,
+        })),
       },
     },
   });
 
+  revalidatePath("/posts");
   redirect(`/posts/${post.id}/edit`);
 }
 
-// Creates a new revision unless title+doc are identical to the latest one
-// (order-independent — see docsEqual), in which case the existing latest
-// revision is reused untouched. Shared by saveDraft/publishPost/schedulePost
-// so "save/publish/schedule with no real change" never grows the revision
-// history. Must run inside the same transaction as any Post update that
-// depends on the result, so it takes a transaction client rather than the
-// module-level `prisma`.
-async function resolveRevision(
-  tx: TransactionClient,
-  postId: string,
-  title: string,
-  doc: Prisma.InputJsonValue,
-  editorId: string,
-  changelog?: string,
-): Promise<{ id: string; revisionNumber: number; created: boolean }> {
-  const latest = await tx.revision.findFirst({ where: { postId }, orderBy: { revisionNumber: "desc" } });
-  if (latest && latest.title === title && docsEqual(latest.doc, doc)) {
-    return { id: latest.id, revisionNumber: latest.revisionNumber, created: false };
+export type CreatePostFromDocState = { error?: string };
+
+// FormData wrapper around createPostFromDoc for useActionState — deliberately
+// does not try/catch the call: createPostFromDoc's redirect() at the end
+// throws Next's own signal, which must propagate to useActionState untouched
+// rather than being reported as a validation error (see createPostAction's
+// old equivalent, same shape). A permission/not-found throw from an editable
+// doc a stale picker somehow still listed is defense in depth, not a path a
+// correct UI should ever actually hit.
+export async function createPostFromDocAction(
+  _prevState: CreatePostFromDocState,
+  formData: FormData,
+): Promise<CreatePostFromDocState> {
+  const docId = formData.get("docId");
+  if (typeof docId !== "string" || !docId) {
+    return { error: "Choose a doc." };
+  }
+  await createPostFromDoc(docId);
+  return {};
+}
+
+type PublishFromDocOpts = {
+  docId: string;
+  title?: string;
+  // A string, not bigint: server action arguments cross the RSC boundary
+  // through React's flight serialization, which doesn't carry bigint. The
+  // client reads this straight off a PreparedUpdate.id.toString() (YdocDebug.tsx).
+  throughUpdateId: string;
+};
+
+// Resolves (find-or-create) a ydoc_snapshot at throughUpdateId, derives the
+// post's content from it (stripping the two marks a doc's ydoc carries that
+// no post-side reader knows about), and returns everything a publish/schedule
+// transaction needs to write. Shared by publishPostFromDoc/schedulePostFromDoc
+// — PLAN.md §15b/§15d.
+async function resolvePublishContent(opts: PublishFromDocOpts, userId: string) {
+  const { snapshotId, doc } = await ensureYdocSnapshotAt({
+    ydocId: ydocIdForDoc(opts.docId),
+    throughUpdateId: BigInt(opts.throughUpdateId),
+    userId,
+  });
+  const { proseJson, title: docTitle } = postContentFromYdoc(doc);
+  doc.destroy();
+
+  const title = opts.title?.trim() || docTitle || "Untitled";
+  return { snapshotId, proseJson: proseJson as Prisma.InputJsonValue, title };
+}
+
+export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpts): Promise<{ eventId: string }> {
+  const { session, post } = await requireEditableSession(postId);
+  if (!(await canUserEditDoc(session.user.id, session.user.role, opts.docId))) {
+    throw new Error("You don't have permission to publish from this doc.");
   }
 
-  const revisionNumber = (latest?.revisionNumber ?? 0) + 1;
-  const revision = await tx.revision.create({
-    data: { postId, revisionNumber, title, doc, editorId, changelog: changelog?.trim() || undefined },
-  });
-  return { id: revision.id, revisionNumber, created: true };
-}
-
-// Debounced from the title field's onTitleChange (see PostEditor.tsx) —
-// roughly once per second while a title is settling, well before any
-// explicit Save/Publish/Schedule. Deliberately touches only `Post.title`,
-// never `Revision` or `publishRevisionId`: the *saved* and *published* titles
-// are still written exclusively by the transaction inside
-// saveDraft/publishPost/schedulePost, so an in-progress, unreviewed keystroke
-// can never move what a reader currently sees, and never grows the revision
-// history on its own.
-//
-// No revalidatePath: every page that shows Post.title (the /posts admin
-// table, /posts/[id]/history, etc.) requires auth() and is therefore already
-// dynamically rendered on every request (see CACHING.md) — there's no Full
-// Route Cache entry here to invalidate. Deliberately no router.refresh()
-// either; this runs silently in the background rather than interrupting
-// typing with a re-render.
-export async function updatePostTitle(postId: string, title: string): Promise<void> {
-  await requireEditableSession(postId);
-  const trimmed = title.trim();
-  if (!trimmed) return;
-  await prisma.post.update({ where: { id: postId }, data: { title: trimmed } });
-}
-
-export async function saveDraft(
-  postId: string,
-  title: string,
-  doc: Prisma.InputJsonValue,
-): Promise<{ revisionNumber: number; created: boolean }> {
-  const { session } = await requireEditableSession(postId);
-  const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
-
-  const revision = await prisma.$transaction(async (tx) => {
-    const result = await resolveRevision(tx, postId, title, cleanDoc, session.user.id);
-    await tx.post.update({ where: { id: postId }, data: { title } });
-    await tx.postCollabUpdate.deleteMany({ where: { postId } });
-    return result;
-  });
-
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
-  return { revisionNumber: revision.revisionNumber, created: revision.created };
-}
-
-export async function publishPost(
-  postId: string,
-  title: string,
-  doc: Prisma.InputJsonValue,
-  changelog?: string,
-): Promise<{ revisionNumber: number; created: boolean }> {
-  const { session, post } = await requireEditableSession(postId);
-  const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
+  const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id);
   const now = new Date();
   // Preserve the original go-live date across an unpublish/republish with no
   // reschedule in between (post.publishedAt already in the past); otherwise
@@ -174,75 +158,91 @@ export async function publishPost(
   // overridden) it goes live now.
   const publishedAt = post.publishedAt && post.publishedAt <= now ? post.publishedAt : now;
 
-  const revision = await prisma.$transaction(async (tx) => {
-    const result = await resolveRevision(tx, postId, title, cleanDoc, session.user.id, changelog);
+  const event = await prisma.$transaction(async (tx: TransactionClient) => {
+    const created = await tx.postPublicationEvent.create({
+      data: {
+        postId,
+        type: "PUBLISHED",
+        docId: opts.docId,
+        ydocSnapshotId: snapshotId,
+        title,
+        proseJson,
+        actorId: session.user.id,
+      },
+    });
     await tx.post.update({
       where: { id: postId },
-      data: { title, publishRevisionId: result.id, publishedAt },
+      data: { docId: opts.docId, title, proseJson, publishEventId: created.id, publishedAt },
     });
-    await tx.postCollabUpdate.deleteMany({ where: { postId } });
-    await tx.postPublicationEvent.create({
-      data: { postId, type: "PUBLISHED", revisionId: result.id, actorId: session.user.id },
-    });
-    return result;
+    return created;
   });
 
-  await remapThreadsToRevision(postId, revision.id);
+  await remapThreadsToEvent(postId, event.id);
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
   await revalidatePublicPaths(postId, post.slug);
-  return { revisionNumber: revision.revisionNumber, created: revision.created };
+  return { eventId: event.id };
 }
 
 // Scheduling is only disallowed while the post is actually *live* right now
 // (derivePostStatus === "published") — a live post's currently-served
 // content must never go dark while a future edit is pending. It's fine from
-// draft or from an already-scheduled post (a reschedule): publishRevisionId
-// is set immediately either way, and publishedAt (now/future) alone decides
-// what's actually visible — see PLAN.md §10.
-export async function schedulePost(
+// draft or from an already-scheduled post (a reschedule): publishEventId is
+// set immediately either way, and publishedAt (now/future) alone decides
+// what's actually visible — see PLAN.md §10/§15.
+export async function schedulePostFromDoc(
   postId: string,
-  title: string,
-  doc: Prisma.InputJsonValue,
-  scheduledFor: Date,
-  changelog?: string,
-): Promise<{ revisionNumber: number; created: boolean }> {
+  opts: PublishFromDocOpts & { scheduledFor: Date },
+): Promise<{ eventId: string }> {
   const { session, post } = await requireEditableSession(postId);
+  if (!(await canUserEditDoc(session.user.id, session.user.role, opts.docId))) {
+    throw new Error("You don't have permission to publish from this doc.");
+  }
   if (derivePostStatus(post) === "published") {
     throw new Error("Unpublish this post before scheduling a new version of it.");
   }
-  if (scheduledFor.getTime() <= Date.now()) {
+  if (opts.scheduledFor.getTime() <= Date.now()) {
     throw new Error("Scheduled time must be in the future.");
   }
-  const cleanDoc = stripMarkFromDoc(doc as JSONContent, "authorHighlight") as Prisma.InputJsonValue;
 
-  const revision = await prisma.$transaction(async (tx) => {
-    const result = await resolveRevision(tx, postId, title, cleanDoc, session.user.id, changelog);
+  const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id);
+
+  const event = await prisma.$transaction(async (tx: TransactionClient) => {
+    const created = await tx.postPublicationEvent.create({
+      data: {
+        postId,
+        type: "SCHEDULED",
+        docId: opts.docId,
+        ydocSnapshotId: snapshotId,
+        title,
+        proseJson,
+        scheduledFor: opts.scheduledFor,
+        actorId: session.user.id,
+      },
+    });
     await tx.post.update({
       where: { id: postId },
-      data: { title, publishRevisionId: result.id, publishedAt: scheduledFor },
+      data: { docId: opts.docId, title, proseJson, publishEventId: created.id, publishedAt: opts.scheduledFor },
     });
-    await tx.postCollabUpdate.deleteMany({ where: { postId } });
-    await tx.postPublicationEvent.create({
-      data: { postId, type: "SCHEDULED", revisionId: result.id, scheduledFor, actorId: session.user.id },
-    });
-    return result;
+    return created;
   });
 
-  await remapThreadsToRevision(postId, revision.id);
+  await remapThreadsToEvent(postId, event.id);
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
-  return { revisionNumber: revision.revisionNumber, created: revision.created };
+  return { eventId: event.id };
 }
 
 // Doubles as "cancel schedule": a post is published, scheduled, or draft,
 // never more than one at once (derivePostStatus), so one action covers both
 // non-draft starting states. publishedAt is left untouched — it's inert
-// whenever publishRevisionId is null, so there's nothing to clean up.
+// whenever publishEventId is null, so there's nothing to clean up. The
+// UNPUBLISHED/SCHEDULE_CANCELED event carries none of docId/ydocSnapshotId/
+// title/proseJson — it retires a version rather than introducing one.
 export async function unpublishPost(postId: string): Promise<void> {
   const { session, post } = await requireEditableSession(postId);
   const status = derivePostStatus(post);
@@ -253,13 +253,12 @@ export async function unpublishPost(postId: string): Promise<void> {
   await prisma.$transaction([
     prisma.post.update({
       where: { id: postId },
-      data: { publishRevisionId: null },
+      data: { publishEventId: null },
     }),
     prisma.postPublicationEvent.create({
       data: {
         postId,
         type: status === "scheduled" ? "SCHEDULE_CANCELED" : "UNPUBLISHED",
-        revisionId: post.publishRevisionId,
         actorId: session.user.id,
       },
     }),
@@ -355,14 +354,14 @@ export async function revertPostSlug(postId: string): Promise<{ slug: string }> 
 // to a different author. New rows go after the current max bylineOrder,
 // preserving the existing byline order instead of reshuffling it.
 export async function updatePostAuthor(postId: string, userId: string, included: boolean): Promise<void> {
-  await requireEditableSession(postId);
+  const { session } = await requireEditableSession(postId);
 
   if (included) {
     const existing = await prisma.postAuthor.findUnique({ where: { postId_userId: { postId, userId } } });
     if (existing) return;
     const maxOrder = await prisma.postAuthor.aggregate({ where: { postId }, _max: { bylineOrder: true } });
     await prisma.postAuthor.create({
-      data: { postId, userId, bylineOrder: (maxOrder._max.bylineOrder ?? -1) + 1 },
+      data: { postId, userId, bylineOrder: (maxOrder._max.bylineOrder ?? -1) + 1, createdUserId: session.user.id },
     });
   } else {
     const count = await prisma.postAuthor.count({ where: { postId } });
@@ -398,57 +397,4 @@ export async function updatePostAuthorOrder(postId: string, orderedUserIds: stri
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath("/posts");
-}
-
-export async function restoreRevision(
-  postId: string,
-  revisionNumber: number,
-): Promise<{ newRevisionNumber: number }> {
-  const { session } = await requireEditableSession(postId);
-
-  const source = await prisma.revision.findUnique({
-    where: { postId_revisionNumber: { postId, revisionNumber } },
-  });
-  if (!source) {
-    throw new Error("Revision not found.");
-  }
-
-  const latest = await prisma.revision.findFirst({
-    where: { postId },
-    orderBy: { revisionNumber: "desc" },
-    select: { revisionNumber: true },
-  });
-  const newRevisionNumber = (latest?.revisionNumber ?? 0) + 1;
-
-  await prisma.$transaction([
-    prisma.revision.create({
-      data: {
-        postId,
-        revisionNumber: newRevisionNumber,
-        title: source.title,
-        doc: source.doc as Prisma.InputJsonValue,
-        editorId: session.user.id,
-        changelog: `Restored from revision ${revisionNumber}`,
-      },
-    }),
-    prisma.post.update({ where: { id: postId }, data: { title: source.title } }),
-  ]);
-
-  // Writing the revision row is only half of a restore. The editor renders the
-  // live collab document, which onLoadDocument re-seeds from a revision *only*
-  // when no PostCollab row exists — false for any post that's been edited once
-  // — so without this the author lands back in the editor still looking at the
-  // content they meant to discard, and the next Publish snapshots that,
-  // silently undoing the restore. See src/lib/collab-admin.ts.
-  await replaceCollabDoc({
-    postId,
-    userId: session.user.id,
-    role: session.user.role,
-    doc: source.doc as JSONContent,
-    title: source.title,
-  });
-
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
-  return { newRevisionNumber };
 }

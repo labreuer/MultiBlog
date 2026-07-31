@@ -1,0 +1,76 @@
+.container {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem 1rem 6rem;
+  font-family: sans-serif;
+  box-sizing: border-box;
+}
+
+.titleInput {
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 4px;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.useDocTitleButton {
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+}
+
+.statusLine {
+  color: #666;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+}
+
+.docSelect {
+  font-size: 0.85rem;
+}
+
+.actionsRow {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.actionButton {
+  padding: 6px 7px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.statusMessage {
+  color: green;
+}
+
+.errorMessage {
+  color: crimson;
+}
+
+.revisionNote {
+  margin-top: 12px;
+  color: #666;
+  font-size: 1rem;
+}
+
+.readOnlyLabel {
+  margin-top: 1.5rem;
+  color: #666;
+  font-size: 0.85rem;
+  border-top: 1px solid #eee;
+  padding-top: 1rem;
+}
+
+.readOnlyView {
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 12px;
+  min-height: 100px;
+}

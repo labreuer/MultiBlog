@@ -2,7 +2,7 @@
 
 import type { Editor } from "@tiptap/react";
 import QuoteControls from "./QuoteControls";
-import styles from "./PostEditor.module.css";
+import styles from "./EditorChrome.module.css";
 
 export type ToolbarTool = "bold" | "italic" | "h2" | "bullets" | "numbered" | "quote" | "clear";
 

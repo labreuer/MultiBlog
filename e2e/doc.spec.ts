@@ -15,11 +15,12 @@ import {
   deleteTextInBody,
   selectTextInBody,
   waitForDocCollabReady,
+  statusLine,
   visibleText,
   QUOTED_BODY,
   QUOTED_TEXT,
 } from "./fixtures";
-import { countDocYdocUpdates, getDocState, getAnnotationStates, countPostCollabRows } from "./db";
+import { countDocYdocUpdates, getDocState, getAnnotationStates } from "./db";
 import { uniqueTitle } from "./naming";
 
 test("+ New doc creates titleless and drops straight into the editor, no title-collecting page in between", async ({
@@ -68,12 +69,7 @@ test("creating a doc writes exactly one full-state update row", async ({ draftDo
   expect(await countDocYdocUpdates(draftDoc.id)).toBe(1);
 });
 
-test("editing a doc updates its title/prose_json cache on the store debounce, and never touches post_collab", async ({
-  page,
-  draftDoc,
-}) => {
-  const before = await countPostCollabRows();
-
+test("editing a doc updates its title/prose_json cache on the store debounce", async ({ page, draftDoc }) => {
   await page.goto(`/doc/${draftDoc.id}/edit`);
   await waitForDocCollabReady(page);
 
@@ -88,11 +84,6 @@ test("editing a doc updates its title/prose_json cache on the store debounce, an
     .poll(async () => (await getDocState(draftDoc.id))?.proseText, { timeout: 15_000 })
     .toBe("Cached by the collab server, not saved by hand.");
   expect((await getDocState(draftDoc.id))?.title).toBe("Retitled live");
-
-  // The isolation constraint's other direction (see doc.spec.ts's sibling
-  // check in ydoc-debug.spec.ts, "editing a post never writes to any
-  // ydoc-stack table") — a doc must never touch the post-side tables either.
-  expect(await countPostCollabRows()).toEqual(before);
 });
 
 test("a reader's already-open tab sees an author's edit with no reload", async ({ page, sharedDoc, secondUser }) => {
@@ -199,5 +190,62 @@ test.describe("annotations", () => {
     await readerPage.goto(`/doc/${sharedDoc.slug}`);
     await expect(readerPage.getByText("This quote is about to disappear.")).toBeVisible();
     await expect(readerPage.locator("blockquote")).toHaveCount(0);
+  });
+});
+
+// Ported from the old e2e/collab.spec.ts (deleted with PostEditor, PLAN.md
+// §15) — two signed-in users editing one *doc* at once. CollabEditorBody/
+// CollabTitleField are unchanged from the post-editing days (same aria-labels
+// bodyEditor()/titleEditor() key off), so these work verbatim against
+// /doc/[id]/edit. The old suite's third test ("a save by one author is
+// visible as a new revision to the other") has no equivalent here — a doc has
+// no save step at all (PLAN.md §12k); its content just is the live Yjs state.
+test.describe("real-time collaboration", () => {
+  test("body edits from one author appear in the other's editor", async ({ page, draftDoc, secondUser }) => {
+    const { user: other, page: otherPage } = await secondUser();
+
+    await page.goto(`/doc/${draftDoc.id}/edit`);
+    await otherPage.goto(`/doc/${draftDoc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await waitForDocCollabReady(otherPage);
+
+    const typed = "Text typed by the first author.";
+    await bodyEditor(page).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(` ${typed}`);
+
+    await expect(bodyEditor(otherPage)).toContainText(typed);
+
+    // …and back the other way, which also proves the second context is really
+    // a second identity rather than the first one's session reused.
+    const reply = "And a line from the second author.";
+    await bodyEditor(otherPage).click();
+    await otherPage.keyboard.press("End");
+    await otherPage.keyboard.type(` ${reply}`);
+
+    await expect(bodyEditor(page)).toContainText(reply);
+    // Scoped to the status line's connected-authors list: the same name also
+    // appears on a caret label and in the settings panel's author picker.
+    await expect(statusLine(page)).toContainText(other.name);
+  });
+
+  test("the title is collaborative too, and its own Yjs fragment", async ({ page, draftDoc, secondUser }) => {
+    const { page: otherPage } = await secondUser();
+
+    await page.goto(`/doc/${draftDoc.id}/edit`);
+    await otherPage.goto(`/doc/${draftDoc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await waitForDocCollabReady(otherPage);
+
+    const suffix = " (retitled live)";
+    await titleEditor(page).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(suffix);
+
+    await expect(titleEditor(otherPage)).toContainText(suffix);
+    // The body must be untouched — the two fragments share a Y.Doc, and a
+    // title edit leaking into the body would be the failure mode worth
+    // catching here.
+    await expect(bodyEditor(otherPage)).not.toContainText(suffix);
   });
 });

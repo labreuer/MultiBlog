@@ -69,7 +69,7 @@ export async function submitComment(
       authors: { include: { user: { select: { moderationPolicy: true } } } },
     },
   });
-  if (!post || !post.publishRevisionId || derivePostStatus(post) !== "published") {
+  if (!post || !post.publishEventId || derivePostStatus(post) !== "published") {
     return { error: "This post isn't open for comments." };
   }
 
@@ -116,7 +116,7 @@ export async function submitComment(
       (await prisma.commentThread.create({
         data: {
           postId,
-          anchoredRevisionId: post.publishRevisionId,
+          anchoredEventId: post.publishEventId,
           anchorFrom,
           anchorTo,
           quotedText: quotedText.trim(),
@@ -130,7 +130,7 @@ export async function submitComment(
       (await prisma.commentThread.create({
         data: {
           postId,
-          anchoredRevisionId: post.publishRevisionId,
+          anchoredEventId: post.publishEventId,
           anchorFrom: 0,
           anchorTo: 0,
           quotedText: "",
