@@ -8,7 +8,7 @@
 // own to isolate from (PLAN.md §15), so there's no second stack left to
 // stay isolated from.
 import type { Page } from "@playwright/test";
-import { test, expect, bodyEditor, gotoOk } from "./fixtures";
+import { test, expect, bodyEditor, titleEditor, gotoOk } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createTestYdoc,
@@ -101,6 +101,63 @@ test("a snapshot captures the document's actual high-water mark", async ({ page 
     // (PLAN.md §11d), so it can only be at or after what had already landed
     // when we asked — never before it.
     expect(Number(snapshot.lastYdocUpdateId)).toBeGreaterThanOrEqual(Number(maxIdBeforeSnapshot));
+  } finally {
+    await page.goto("about:blank").catch(() => {});
+    await deleteTestYdoc(doc.id);
+  }
+});
+
+test("the title-history panel lists only title-changing updates, and tells absent from empty", async ({ page }) => {
+  const doc = await createTestYdoc();
+  const title = `ydoc title ${Date.now()}`;
+  try {
+    await gotoOk(page, "/ydoc-debug");
+    await page.getByLabel("Document").selectOption(doc.id);
+
+    // A freshly created ydoc is an empty document — no title fragment at all,
+    // which is the state this panel distinguishes from an empty-string title.
+    const panel = page.getByTestId("title-history");
+    await expect(page.getByText("No update changes the title")).toBeVisible();
+    await expect(panel).toBeHidden();
+
+    await page.getByRole("button", { name: "Switch to editing" }).click();
+    await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: LIVE_TIMEOUT });
+
+    await titleEditor(page).click();
+    await page.keyboard.type(title);
+    await expect.poll(() => countYdocUpdates(doc.id)).toBeGreaterThan(1);
+
+    await page.getByRole("button", { name: "Switch to read-only" }).click();
+    await page.getByRole("button", { name: "Refresh" }).click();
+
+    // The typed title shows up as a resultant value, JSON-quoted so trailing
+    // whitespace would be visible.
+    await expect(panel).toBeVisible();
+    await expect(panel.locator("tbody tr").last()).toContainText(JSON.stringify(title));
+
+    // Body typing must not add a row — only title-changing updates qualify,
+    // which is the filter this panel is for.
+    const rowsAfterTitle = await panel.locator("tbody tr").count();
+    await page.getByRole("button", { name: "Switch to editing" }).click();
+    await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: LIVE_TIMEOUT });
+    await bodyEditor(page).click();
+    await page.keyboard.type("body text that leaves the title alone");
+    const countAfterBody = await countYdocUpdates(doc.id);
+
+    // Clearing the title is the third state: the fragment is still there, but
+    // it now holds the empty string — which server/doc-cache.ts would write
+    // through as Doc.title = "" indistinguishably from never having had one.
+    await titleEditor(page).click();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.press("Backspace");
+    await expect.poll(() => countYdocUpdates(doc.id)).toBeGreaterThan(countAfterBody);
+
+    await page.getByRole("button", { name: "Switch to read-only" }).click();
+    await page.getByRole("button", { name: "Refresh" }).click();
+
+    await expect(panel.locator("tbody tr").last()).toContainText("present, empty string");
+    // Exactly one new row for the clear — the body typing in between added none.
+    await expect(panel.locator("tbody tr")).toHaveCount(rowsAfterTitle + 1);
   } finally {
     await page.goto("about:blank").catch(() => {});
     await deleteTestYdoc(doc.id);

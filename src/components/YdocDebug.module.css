@@ -58,6 +58,25 @@
   color: crimson;
 }
 
+/* ---- title history ---- */
+
+/* Quoted and monospaced so leading/trailing whitespace in a title is visible
+   rather than silently collapsing into the surrounding cell. */
+.titleValue {
+  font-family: var(--font-geist-mono), monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The two states that carry no text — "the fragment isn't there" and "it is
+   there and holds the empty string". Italic, so neither can be mistaken for a
+   document whose title is literally the words below. */
+.titleAbsent,
+.titleEmpty {
+  color: #999;
+  font-style: italic;
+}
+
 /* ---- replay slider (PLAN.md §11f) ---- */
 
 .replay {

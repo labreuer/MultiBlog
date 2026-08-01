@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
+import { TiptapTransformer } from "@hocuspocus/transformer";
 import { renderYdocDoc, type YdocRenderResult } from "@/lib/ydoc-render";
+import { titleAuthorHighlightExtensions } from "@/lib/tiptap-schema";
+import { extractText } from "@/lib/diff";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import CollabEditorBody from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
@@ -244,6 +247,143 @@ function DocumentPanel({
         {detailError && <p className={styles.error}>{detailError}</p>}
         {detail && <DetailTables detail={detail} />}
       </section>
+
+      <section className={styles.section}>
+        <h2>Title history</h2>
+        {replay ? <TitleHistory key={replayVersion} replay={replay} /> : <p>Loading…</p>}
+      </section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Title history
+//
+// Which updates in `ydoc_update` actually move the "title" fragment, and what
+// the title reads as afterwards. Built from the same replay payload the slider
+// uses — every update's bytes are already in hand, so this needs no endpoint
+// of its own and issues no request.
+//
+// The three-way distinction is the point. server/doc-cache.ts collapses two of
+// these states when it writes Doc.title: a fragment that isn't there and a
+// fragment holding the empty string both come out as "" (its `titleFragment
+// .length > 0 ? … : null` then `titleJSON ? extractText(titleJSON) : ""`), and
+// that is deliberate on its side. Here they are kept apart, because "no title
+// was ever written into this ydoc" and "the title was written and then cleared"
+// are different histories that the cache alone can't tell you about.
+// ---------------------------------------------------------------------------
+
+type TitleState = { kind: "absent" } | { kind: "empty" } | { kind: "text"; text: string };
+type TitleChange = { id: string; createdAt: string; state: TitleState };
+type TitleHistoryResult = { ok: true; changes: TitleChange[]; total: number } | { ok: false; error: string };
+
+// Mirrors readYdocContent's title half (src/lib/ydoc-render.ts) rather than
+// calling it: that also decodes the body and collects mark attrs, which would
+// be paid once per update here for nothing. `absent` is its `titleJSON: null`
+// case — the fragment has no children at all.
+//
+// Note extractText trims, so a whitespace-only title reports as `empty`. That
+// matches what doc-cache would write to Doc.title for the same document, which
+// is the comparison this panel exists to support.
+function titleStateOf(doc: Y.Doc): TitleState {
+  const fragment = doc.getXmlFragment("title");
+  if (fragment.length === 0) return { kind: "absent" };
+  const json = TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(doc, "title");
+  const text = extractText(json);
+  return text === "" ? { kind: "empty" } : { kind: "text", text };
+}
+
+function sameTitle(a: TitleState, b: TitleState): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind === "text" && b.kind === "text" ? a.text === b.text : true;
+}
+
+// One cumulative pass over the log — the same total work as a single full
+// replay, done once and memoized. Deliberately NOT wired into the scrub bar:
+// §11h's "the slider is unoptimized on purpose" applies to scrubbing, and
+// nothing here changes what a scrub step does.
+function computeTitleHistory(replay: ReplayPayload): TitleHistoryResult {
+  const doc = new Y.Doc();
+  try {
+    const changes: TitleChange[] = [];
+    // The baseline before any update is applied: an empty document has no
+    // title fragment, so update #1 only earns a row if it puts one there.
+    let previous: TitleState = { kind: "absent" };
+
+    for (const u of replay.updates) {
+      Y.applyUpdate(doc, base64ToBytes(u.base64));
+      const state = titleStateOf(doc);
+      if (!sameTitle(state, previous)) {
+        changes.push({ id: u.id, createdAt: u.createdAt, state });
+        previous = state;
+      }
+    }
+    return { ok: true, changes, total: replay.updates.length };
+  } catch (err) {
+    // Same failure the replay slider hits on a document that was never a
+    // TipTap doc (the --garbage fixture, PLAN.md §11f).
+    return {
+      ok: false,
+      error: `Couldn't read this document's title history: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  } finally {
+    doc.destroy();
+  }
+}
+
+function TitleValue({ state }: { state: TitleState }) {
+  if (state.kind === "absent") {
+    return <span className={styles.titleAbsent}>not present — no title fragment</span>;
+  }
+  if (state.kind === "empty") {
+    return <span className={styles.titleEmpty}>present, empty string</span>;
+  }
+  return <span className={styles.titleValue}>{JSON.stringify(state.text)}</span>;
+}
+
+function TitleHistory({ replay }: { replay: ReplayPayload }) {
+  const result = useMemo(() => computeTitleHistory(replay), [replay]);
+
+  if (!result.ok) {
+    return <p className={styles.error}>{result.error}</p>;
+  }
+  if (result.total === 0) {
+    return <p className={styles.muted}>This document has no update history.</p>;
+  }
+  if (result.changes.length === 0) {
+    return (
+      <p className={styles.muted}>
+        No update changes the title — it is <TitleValue state={{ kind: "absent" }} /> throughout all {result.total}{" "}
+        update{result.total === 1 ? "" : "s"}.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <p className={styles.muted}>
+        {result.changes.length} of {result.total} update{result.total === 1 ? "" : "s"} change the title.
+      </p>
+      <table className={adminStyles.table} data-testid="title-history">
+        <thead>
+          <tr>
+            <th className={adminStyles.headerCell}>update id</th>
+            <th className={adminStyles.headerCell}>created_at</th>
+            <th className={adminStyles.headerCell}>title after this update</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.changes.map((c) => (
+            <tr key={c.id} className={adminStyles.row}>
+              <td className={adminStyles.cell}>{c.id}</td>
+              <td className={adminStyles.cell}>{new Date(c.createdAt).toLocaleString()}</td>
+              <td className={adminStyles.cell}>
+                <TitleValue state={c.state} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }
