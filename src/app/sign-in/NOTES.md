@@ -27,21 +27,60 @@ sent. DEPLOY.md §4 covers what that means in production.
 
 `session: { strategy: "jwt" }`. The `jwt` callback reads `user` only when it's present —
 i.e. exactly once, at sign-in — and copies `id`, `role`, and `color` into the token. Nothing
-re-reads the database on later requests.
+re-reads the database on ordinary later requests.
 
-**Consequence: a role change doesn't reach an existing session.** Promoting someone (to
-`AUTHORIZED`, or anything else) does nothing until they sign out and back in. A curiosity
-when roles rarely changed; once promotion *is* the mechanism for granting doc access it
-becomes the first support question, with nothing broken to find. Interim fix: say so in the
-permission-denied message.
+**Consequence: a role change doesn't reach an existing session by itself.** Promoting someone
+(to `AUTHORIZED`, or anything else) does nothing on its own until they sign out and back in.
+A curiosity when roles rarely changed; once promotion *is* the mechanism for granting doc
+access it becomes the first support question, with nothing broken to find.
 
 The same staleness has a testing-side face — deleting a `User` row mid-session doesn't sign
 that browser out or revoke its role, so "the row is gone" is not proof a test session ended.
 CLAUDE.md's *Driving the browser pane* section covers that angle.
 
-**Deferred: re-reading `role` from the DB in the `jwt` callback**, rather than documenting
-the sign-out-and-back-in workaround. Waits for the granular-permissions work that supersedes
-this whole role scheme.
+## /dashboard refreshes the session from the database
+
+The one place that *does* re-read the DB. `<SessionRefresh />`
+(`src/components/SessionRefresh.tsx`) is mounted on `/dashboard` and, once per mount, calls
+`useSession().update({})`; the `jwt` callback answers `trigger === "update"` by re-reading
+`name`/`email`/`role`/`color` from the user's row and re-signing the token. So "go to your
+dashboard" is the whole fix for a promotion that hasn't landed yet — no sign-out, and the
+refreshed cookie is then good everywhere, not just on that page.
+
+`/dashboard` rather than everywhere: it's the page a promoted user is pointed at, it already
+displays the role, and it's a full DB round trip that has no business running on every
+navigation. This is deliberately *not* the granular-permissions work that supersedes the
+whole role scheme — it makes the current scheme's staleness fixable by the user rather than
+only by signing out.
+
+Three things about it that are easy to get wrong:
+
+- **`update()` with no argument does nothing useful.** `next-auth/react` issues a GET to
+  `/api/auth/session` when `data` is `undefined` and a POST otherwise, and `@auth/core`'s
+  session action sets `trigger: "update"` only for the POST. `update({})` is the smallest
+  call that reaches the callback. The payload itself is ignored — everything written to the
+  token comes from the DB, never from the client.
+- **`update` is a no-op while the provider is loading** (`if (loading) return`, same file),
+  which is exactly the state a full page load starts in. `SessionRefresh` waits for
+  `status === "authenticated"` rather than firing on mount.
+- **It can't be done from the server component.** Re-issuing the session means setting a
+  cookie, and `unstable_update` (like `signIn`/`signOut`) writes through `cookies().set` —
+  legal only in a server action or route handler, not during a render. The client `update`
+  is also what fixes `SessionProvider`'s cached copy, which `SiteHeader` reads.
+
+The cost is that the first render of `/dashboard` still shows the pre-refresh values; the
+`router.refresh()` that follows the update corrects them a beat later. Reading the user row
+directly in `page.tsx` would remove that flicker, at the price of a second source of truth
+on the page — not worth it while the refresh is this cheap.
+
+If the row is gone (deleted, or soft-deleted — `prisma` filters those out, so both look the
+same here) the callback returns `null`, which makes `@auth/core` clear the session cookie
+instead of re-signing it. The user is signed out at the same moment they'd otherwise have
+been shown a dashboard for an account that can no longer sign in.
+
+Regression coverage: `e2e/session-refresh.spec.ts` drives a promotion and a deletion, and
+checks in both cases that the change is still invisible elsewhere until `/dashboard` is
+visited.
 
 ## Why the form uses client `signIn`, not a server action
 

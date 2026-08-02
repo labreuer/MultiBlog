@@ -37,12 +37,35 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    jwt: async ({ token, user }) => {
+    jwt: async ({ token, user, trigger }) => {
       if (user) {
         token.id = user.id as string;
         token.role = (user as { role: Role }).role;
         token.color = (user as { color: string }).color;
+        return token;
       }
+
+      // Re-read the row so a role (or name/color) change made after sign-in
+      // reaches an already-issued JWT — see src/app/sign-in/NOTES.md. Fires on
+      // any POST to /api/auth/session; today the only caller is
+      // <SessionRefresh /> on /dashboard.
+      if (trigger === "update" && token.id) {
+        const fresh = await prisma.user.findUnique({
+          where: { id: token.id },
+          select: { name: true, email: true, role: true, color: true },
+        });
+        // No row means deleted or soft-deleted (`prisma` filters those out),
+        // i.e. someone who could no longer sign in. Returning null clears the
+        // session cookie rather than re-signing a token for them.
+        if (!fresh) {
+          return null;
+        }
+        token.name = fresh.name;
+        token.email = fresh.email;
+        token.role = fresh.role;
+        token.color = fresh.color;
+      }
+
       return token;
     },
     session: async ({ session, token }) => {

@@ -156,7 +156,13 @@ export const test = base.extend<Fixtures>({
 
     await use(async ({ role = "ADMIN" } = {}) => {
       const email = uniqueEmail("second");
-      const user = await createTestUser({ email, name: "Second Editor", role });
+      // Unique per call, like the email: `uniqueUserSlug` derives the slug from
+      // the *name*, and does so with a check-then-create loop. A fixed name
+      // therefore has two workers picking the same free slug at the same moment
+      // and one of them losing on the unique index — a cross-file flake
+      // ("Unique constraint failed on the fields: (`slug`)") that has nothing to
+      // do with whatever either test was checking.
+      const user = await createTestUser({ email, name: `Second Editor ${email.split("@")[0]}`, role });
       const page = await signedInContext(browser, email);
       created.push({ email, page });
       return { user, page };
