@@ -38,7 +38,16 @@ import type { AText, AttribPool } from "./dirty-db";
 // attributes are pointer-equal, which makes run detection in to-prosemirror.ts
 // a `!==` and keeps memory flat across thousands of replayed revisions.
 export type Attrs = Readonly<Record<string, string>>;
-export type Cell = { readonly ch: string; readonly attrs: Attrs };
+// `seed` marks a character as part of the pad's boilerplate seed text — what
+// Etherpad's own `settings.defaultPadText` put there at creation, before anyone
+// typed anything. It is set once, on the characters revision 0 inserts, and from
+// then on it simply rides along: a `-` op drops those cells, an attributed `=`
+// copies the flag onto the rewritten cell, and `+` ops never set it. That is what
+// lets the importer present a history in which the boilerplate never existed even
+// for a pad where somebody deleted it halfway through, or never deleted it at all
+// — the flag identifies the characters, so no content matching is needed and a
+// user editing inside the boilerplate doesn't defeat it.
+export type Cell = { readonly ch: string; readonly attrs: Attrs; readonly seed?: true };
 
 const interned = new Map<string, Attrs>();
 
@@ -115,17 +124,26 @@ export function emptyDocument(): Cell[] {
 
 export type ApplyAnomaly = { kind: "line-count"; op: string; declared: number; actual: number };
 
+export type ApplyOptions = {
+  // Collects `|lines` mismatches instead of throwing: the declared newline count
+  // is a redundancy check, and the atext checkpoints are the real gate — a soft
+  // signal here can't turn into a spurious abort on a live run.
+  anomalies?: ApplyAnomaly[];
+  // Flags every character this changeset inserts as boilerplate (see `Cell`).
+  // Passed only for revision 0, whose inserts ARE the pad's seed text. Marking
+  // during application rather than by offset afterwards keeps it correct however
+  // the seeding changeset is shaped.
+  markInsertsAsSeed?: boolean;
+};
+
 // Applies one changeset, mutating `cells` in place and returning it.
-//
-// `anomalies` collects `|lines` mismatches instead of throwing: the declared
-// newline count is a redundancy check, and the atext checkpoints (below) are the
-// real gate — a soft signal here can't turn into a spurious abort on a live run.
 export function applyChangeset(
   cells: Cell[],
   changeset: string,
   pool: Record<string, [string, string]>,
-  anomalies?: ApplyAnomaly[],
+  options: ApplyOptions = {},
 ): Cell[] {
+  const { anomalies, markInsertsAsSeed } = options;
   const { oldLen, newLen, ops, charBank } = unpack(changeset);
   if (cells.length !== oldLen) {
     throw new Error(`changeset expects a document of ${oldLen} chars, replay has ${cells.length}`);
@@ -147,7 +165,11 @@ export function applyChangeset(
         const instructions = readInstructions(refs, pool);
         for (let i = 0; i < n; i++) {
           const cell = cells[cursor + i];
-          cells[cursor + i] = { ch: cell.ch, attrs: applyInstructions(cell.attrs, instructions) };
+          const attrs = applyInstructions(cell.attrs, instructions);
+          // Rewriting a cell must carry `seed` across, or an attribute change
+          // over the boilerplate (a "clear authorship colors" sweep covers the
+          // whole document, boilerplate included) would launder it into content.
+          cells[cursor + i] = cell.seed ? { ch: cell.ch, attrs, seed: true } : { ch: cell.ch, attrs };
         }
       }
       if (declaredLines !== null && anomalies) {
@@ -176,7 +198,7 @@ export function applyChangeset(
         // in order on the way out.
         const ch = charBank[bank + i];
         if (ch === "\n") actual += 1;
-        inserted[i] = { ch, attrs };
+        inserted[i] = markInsertsAsSeed ? { ch, attrs, seed: true } : { ch, attrs };
       }
       if (declaredLines !== null && anomalies && actual !== declaredLines) {
         anomalies.push({ kind: "line-count", op: m[0], declared: declaredLines, actual });
@@ -246,6 +268,21 @@ export function cellsDiffer(replayed: Cell[], stored: Cell[]): string | null {
 export function cellsText(cells: Cell[]): string {
   let out = "";
   for (const cell of cells) out += cell.ch;
+  return out;
+}
+
+export function hasSeedCells(cells: Cell[]): boolean {
+  for (const cell of cells) if (cell.seed) return true;
+  return false;
+}
+
+// The document with its boilerplate seed text removed — what the import maps and
+// publishes. The full array is what the atext checkpoints compare against, so
+// this never weakens the correctness gate: the replay still has to reproduce
+// Etherpad exactly, boilerplate included; only the mapping looks away from it.
+export function withoutSeedCells(cells: Cell[]): Cell[] {
+  const out: Cell[] = [];
+  for (const cell of cells) if (!cell.seed) out.push(cell);
   return out;
 }
 

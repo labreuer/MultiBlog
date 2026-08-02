@@ -33,6 +33,39 @@ by `/ydoc-debug` and `DocScrubBar`, and publishable from any past point (PLAN.md
 So the import emits **one `ydoc_update` row per Etherpad revision**, carrying that
 revision's real timestamp and its author's clientID.
 
+## The boilerplate pad text is removed from the whole history
+
+Etherpad seeds every new pad with `settings.defaultPadText` — here "Welcome to
+Etherpad!" plus three more paragraphs, one of them a DirtyDB warning. That is
+the software talking, not the authors, so the imported history is written as
+though it had never been there: not merely deleted at the end, but **absent from
+every revision**, including those before whoever it was got around to selecting
+it and pressing delete, and including pads where nobody ever did. In the real
+file, 48 of 50 pads were seeded; 28 still carried some of it at head, and 20 had
+deleted it themselves partway through.
+
+It is identified **by identity, not by content**. Revision 0 is the seeding
+revision, so the characters it inserts are flagged (`Cell.seed` in
+`changeset.ts`) and the flag rides along through every later changeset: a `-` op
+drops those cells, an attributed `=` copies the flag onto the rewritten cell,
+and no `+` op ever sets it. A pad that deleted the boilerplate halfway through,
+one that deleted only half of it, one where somebody typed inside it, and one
+that never touched it all come out right, with no text matching anywhere. The
+mapping stage then looks only at unflagged cells.
+
+This does not weaken the correctness gate below: the atext checkpoints still
+compare the **full** replayed document, boilerplate included, against Etherpad's
+own stored atext — all 116 still match. Only the mapping looks away.
+`--keep-default-text` imports the boilerplate instead.
+
+Two consequences worth knowing. Sixteen pads contained nothing else and import
+as empty documents (one empty paragraph). And the revision whose only effect was
+deleting the boilerplate now changes nothing, so it writes no row — four of them
+in the real file, each named in the summary. That is the row/revision shear the
+next section is about, and `First_entry` exercises it for real: its revision 286
+collapses, and its snapshot at revision 326 still lands on the right content
+because marks are resolved from row indices rather than revision numbers.
+
 ## Each pad becomes a Doc, never a Post
 
 Same call `scripts/import-legacy.ts` made: the editable, collaboratively-authored,
@@ -59,8 +92,9 @@ typed in the real file, so it is diffing rather than rewriting whole paragraphs.
 A `Y.Doc` transaction that changes nothing emits no update at all, so a revision
 that is real at the atext level but a no-op once mapped writes no row. Snapshot
 marks are therefore resolved from the row index the update handler actually saw,
-never from a revision number. (In the real file nothing collapsed: 2,140 revisions
-+ 50 base rows = 2,190 rows.)
+never from a revision number. In the real file four revisions collapse — each one
+the revision that deleted the boilerplate — giving 2,140 revisions + 50 base rows
+− 4 = 2,186 rows.
 
 ## `ydoc.created_at` is not backdated
 
@@ -114,4 +148,5 @@ seconds before it by typing the title with spaces instead of underscores
 — a transcription does not get to decide which of somebody's documents were
 worth keeping — so nine docs share a title with their content-bearing twin, and
 the twin with more revisions takes the unsuffixed slug. `--skip-untouched` drops
-them.
+them. Since the boilerplate is stripped, these are exactly the sixteen documents
+that import empty.

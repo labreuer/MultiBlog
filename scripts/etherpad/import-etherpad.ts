@@ -36,11 +36,33 @@
 // ROWS DO NOT CORRESPOND ONE-TO-ONE WITH REVISIONS, AND THAT IS NOT A BUG.
 // A Y.Doc transaction that changes nothing emits NO update event at all. Some
 // Etherpad revisions are real at the atext level but no-ops once mapped —
-// an `insertorder` churn, or an authorship-attribute change for an author whose
-// marks are dropped. Those revisions produce no row. Every one is listed by
+// an `insertorder` churn, an authorship-attribute change for an author whose
+// marks are dropped, or an edit that only touched the boilerplate this import
+// removes. Those revisions produce no row. Every one is listed by
 // number in the summary, and snapshot marks are resolved from the row index the
 // update handler actually saw, never from the revision number, because a shear
 // of even one row would silently point a snapshot at the wrong content.
+//
+// THE BOILERPLATE PAD TEXT IS REMOVED FROM THE WHOLE HISTORY, NOT JUST THE HEAD
+// Etherpad seeds every new pad with `settings.defaultPadText` — here "Welcome to
+// Etherpad!" and three more paragraphs, one of them a DirtyDB warning. That is
+// the software talking, not the authors, so the imported history is written as
+// though it had never been there: not merely deleted at the end, but absent from
+// every revision, including the ones before whoever it was got around to
+// selecting it and hitting delete, and including pads where nobody ever did.
+//
+// It is identified BY IDENTITY, not by content: revision 0 is the seeding
+// revision, so the characters it inserts are flagged (`Cell.seed`,
+// changeset.ts) and the flag rides along through every later changeset. A `-`
+// op drops those cells, an attributed `=` copies the flag onto the rewritten
+// cell, and no `+` op ever sets it. So a pad that deleted the boilerplate
+// halfway through, one that deleted half of it, and one that typed inside it
+// all come out right, with no text matching anywhere. The mapping stage then
+// looks only at the unflagged cells.
+//
+// This does NOT weaken the correctness gate below: the atext checkpoints still
+// compare the FULL replayed document, boilerplate included, against Etherpad's
+// own stored atext. Only the mapping looks away. --keep-default-text imports it.
 //
 // THE LOG IS WHAT THE ydoc BLOB IS COMPUTED FROM
 // Exactly as in scripts/import-legacy.ts: `Y.mergeUpdates(rows)` and
@@ -96,9 +118,13 @@ import {
   applyChangeset,
   atextToCells,
   cellsDiffer,
+  cellsText,
   emptyDocument,
+  hasSeedCells,
   insertedChars,
   poolOf,
+  unpack,
+  withoutSeedCells,
   type ApplyAnomaly,
   type Cell,
 } from "./changeset";
@@ -215,6 +241,8 @@ type ReplayStep = { rev: number; author: string; timestamp: number; doc: PMNode 
 type ReplayResult = {
   steps: ReplayStep[];
   finalCells: Cell[];
+  // finalCells minus the boilerplate seed text — what was actually mapped.
+  finalVisibleCells: Cell[];
   keyRevsChecked: number;
   unknown: Map<string, number>;
   ignored: Map<string, number>;
@@ -223,9 +251,22 @@ type ReplayResult = {
   strayLineMarkers: number;
   lineCountAnomalies: number;
   etherpadInsertedChars: number;
+  // Boilerplate was found and dropped from this pad's history.
+  seeded: boolean;
+  // The pad still carried some of its boilerplate at head, i.e. nobody ever
+  // deleted it and the import is what removed it.
+  seedSurvivedToHead: boolean;
+  // Nothing but boilerplate: every revision maps to an empty document.
+  emptyAfterSeedStrip: boolean;
 };
 
-function replayPad(padId: string, pad: PadRecord, revs: Map<number, Revision>, mapOptions: MapOptions): ReplayResult {
+function replayPad(
+  padId: string,
+  pad: PadRecord,
+  revs: Map<number, Revision>,
+  mapOptions: MapOptions,
+  opts: { stripSeedText: boolean; defaultPadText: string },
+): ReplayResult {
   const pool = poolOf(pad.pool);
   let cells = emptyDocument();
   const steps: ReplayStep[] = [];
@@ -237,6 +278,8 @@ function replayPad(padId: string, pad: PadRecord, revs: Map<number, Revision>, m
   let synthesizedItems = 0;
   let strayLineMarkers = 0;
   let etherpadInsertedChars = 0;
+  let seeded = false;
+  let visible: Cell[] = cells;
 
   // Revisions are 0..head — Etherpad's Pad constructor starts head at -1 and
   // init() appends rev 0 with the pad's initial text. Rev 0 is also a keyRev
@@ -245,11 +288,19 @@ function replayPad(padId: string, pad: PadRecord, revs: Map<number, Revision>, m
     const revision = revs.get(rev);
     if (!revision) throw new Error(`${padId}: revision ${rev} is missing (head is ${pad.head})`);
 
+    // Revision 0 is the seeding revision, so whatever it inserts IS the pad's
+    // boilerplate — but only when it actually looks like the boilerplate, since
+    // a pad created through the API has real content at revision 0. Deciding off
+    // the charbank means the check happens before anything is marked.
+    const isSeedRev =
+      rev === 0 && opts.stripSeedText && unpack(revision.changeset).charBank.startsWith(opts.defaultPadText);
+
     try {
-      cells = applyChangeset(cells, revision.changeset, pool, anomalies);
+      cells = applyChangeset(cells, revision.changeset, pool, { anomalies, markInsertsAsSeed: isSeedRev });
     } catch (err) {
       throw new Error(`${padId} rev ${rev}: ${err instanceof Error ? err.message : String(err)}`);
     }
+    if (isSeedRev) seeded = true;
     etherpadInsertedChars += insertedChars(revision.changeset);
 
     // Every 100th revision stores the full atext it should have produced.
@@ -262,7 +313,10 @@ function replayPad(padId: string, pad: PadRecord, revs: Map<number, Revision>, m
       keyRevsChecked += 1;
     }
 
-    const mapped = cellsToProseMirror(cells, mapOptions);
+    // The gates above compared the FULL document against Etherpad's own stored
+    // atext; only the mapping looks away from the boilerplate.
+    visible = seeded ? withoutSeedCells(cells) : cells;
+    const mapped = cellsToProseMirror(visible, mapOptions);
     // MAX over revisions, not sum. Every revision re-maps the whole document, so
     // summing would report a 40-line indented pad edited 1000 times as 40,000
     // indented lines — a number that reads as catastrophic and means nothing.
@@ -292,6 +346,7 @@ function replayPad(padId: string, pad: PadRecord, revs: Map<number, Revision>, m
   return {
     steps,
     finalCells: cells,
+    finalVisibleCells: visible,
     keyRevsChecked,
     unknown,
     ignored,
@@ -300,6 +355,9 @@ function replayPad(padId: string, pad: PadRecord, revs: Map<number, Revision>, m
     strayLineMarkers,
     lineCountAnomalies: anomalies.length,
     etherpadInsertedChars,
+    seeded,
+    seedSurvivedToHead: seeded && hasSeedCells(cells),
+    emptyAfterSeedStrip: seeded && cellsText(visible).trim() === "",
   };
 }
 
@@ -480,6 +538,7 @@ async function main() {
   const allowUnmapped = process.argv.includes("--allow-unmapped");
   const skipUntouched = process.argv.includes("--skip-untouched");
   const defaultPadText = arg("default-pad-text") ?? "Welcome to Etherpad!";
+  const seedOptions = { stripSeedText: !process.argv.includes("--keep-default-text"), defaultPadText };
   const selectedPads = args("pad");
 
   console.log(`\nSource: ${sourcePath}`);
@@ -531,7 +590,8 @@ async function main() {
   if (untouched.length) {
     console.log(
       `\n  Never edited — head 0 and still the stock pad text (${untouched.length}), ` +
-        `${skipUntouched ? "SKIPPED per --skip-untouched" : "imported anyway (--skip-untouched drops them)"}:`,
+        `${skipUntouched ? "SKIPPED per --skip-untouched" : "imported anyway (--skip-untouched drops them)"}` +
+        `${!skipUntouched && seedOptions.stripSeedText ? ", and empty once that text is stripped" : ""}:`,
     );
     for (const id of untouched) console.log(`    ${JSON.stringify(id)}`);
   }
@@ -620,10 +680,12 @@ async function main() {
   const startedAt = Date.now();
   for (const id of padIds) {
     try {
-      const result = replayPad(id, db.pads.get(id)!, db.revs.get(id) ?? new Map(), identityMap);
+      const result = replayPad(id, db.pads.get(id)!, db.revs.get(id) ?? new Map(), identityMap, seedOptions);
       // The atext gates prove the replay; this proves the whole
-      // atext -> ProseMirror pipeline is lossless on text.
-      const expected = cellsTextWithoutMarkers(result.finalCells);
+      // atext -> ProseMirror pipeline is lossless on text. Against the VISIBLE
+      // cells, since dropping the boilerplate is exactly the difference the
+      // mapping is now allowed to have from the pad.
+      const expected = cellsTextWithoutMarkers(result.finalVisibleCells);
       const got = proseMirrorText(result.steps[result.steps.length - 1].doc.toJSON());
       if (got !== expected && result.synthesizedItems === 0) {
         throw new Error(
@@ -656,6 +718,28 @@ async function main() {
   if (failedPads.length) {
     console.error(`\n  ${failedPads.length} pad(s) FAILED and will not be imported:`);
     for (const f of failedPads) console.error(`    ${f}`);
+  }
+
+  const seededPads = [...replays].filter(([, r]) => r.seeded);
+  if (seedOptions.stripSeedText && seededPads.length) {
+    const survived = seededPads.filter(([, r]) => r.seedSurvivedToHead);
+    const emptied = seededPads.filter(([, r]) => r.emptyAfterSeedStrip);
+    console.log(
+      `\n  Etherpad's boilerplate pad text was removed from ${seededPads.length} pad(s)' ENTIRE history,` +
+        ` as though it had never been there (--keep-default-text to import it):`,
+    );
+    console.log(
+      `    ${seededPads.length - survived.length} had deleted it themselves at some point` +
+        ` — those revisions now show no boilerplate before the deletion either`,
+    );
+    if (survived.length) {
+      console.log(`    ${survived.length} still carried some of it at head, so the import is what removed it:`);
+      for (const [id] of survived) console.log(`      ${JSON.stringify(id)}`);
+    }
+    if (emptied.length) {
+      console.log(`    ${emptied.length} contained NOTHING ELSE and import as empty documents:`);
+      for (const [id] of emptied) console.log(`      ${JSON.stringify(id)}`);
+    }
   }
   if (ignoredAll.size) {
     console.log(`\n  Attributes dropped by --ignore-attributes:`);
@@ -795,7 +879,7 @@ async function main() {
           }
 
           // Re-map with real User.ids now that they exist.
-          const replay = replayPad(padId, pad, db.revs.get(padId) ?? new Map(), mapOptions);
+          const replay = replayPad(padId, pad, db.revs.get(padId) ?? new Map(), mapOptions, seedOptions);
 
           const savedRevisions = new Map<number, { userId: string | null; at: Date }>();
           for (const saved of pad.savedRevisions ?? []) {
