@@ -109,7 +109,6 @@
 import "dotenv/config";
 import fs from "node:fs";
 import * as Y from "yjs";
-import bcrypt from "bcryptjs";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
@@ -536,6 +535,7 @@ async function main() {
   const authorDomain = arg("author-domain") ?? "etherpad.invalid";
   const ignoreAttributes = new Set((arg("ignore-attributes") ?? "").split(",").filter(Boolean));
   const allowUnmapped = process.argv.includes("--allow-unmapped");
+  const allowUnusedAuthors = process.argv.includes("--allow-unused-authors");
   const skipUntouched = process.argv.includes("--skip-untouched");
   const defaultPadText = arg("default-pad-text") ?? "Welcome to Etherpad!";
   const seedOptions = { stripSeedText: !process.argv.includes("--keep-default-text"), defaultPadText };
@@ -646,6 +646,50 @@ async function main() {
     console.log(`\n${JSON.stringify(skeleton, null, 2)}\n`);
     console.log(`Leave an email blank to get a placeholder account at @${authorDomain} that cannot sign in.`);
     return;
+  }
+
+  // EVERY --authors KEY MUST NAME AN AUTHOR THAT ACTUALLY WROTE SOMETHING.
+  // A key matching nothing is otherwise completely inert: the person it was
+  // meant to cover falls through to a placeholder account, and the only trace
+  // is one more line in a summary that looks much like the lines around it.
+  // Attribution is baked into the Yjs history at import time and cannot be
+  // repointed afterwards, so silently inert is the worst failure mode available
+  // here — hence a hard stop rather than a warning.
+  //
+  // Etherpad author ids are case-sensitive (`a.HdfupRyGqy3CxVPV`), and the
+  // placeholder emails this script generates are lower-cased, so building the
+  // mapping file from a previous run's summary rather than from --list-authors
+  // is an easy way to end up with keys that differ only in case. That case is
+  // named explicitly rather than quietly accepted: matching case-insensitively
+  // would be a guess about identity, and this file's whole job is not guessing.
+  if (authorMap.size > 0) {
+    const present = new Set(revisionsByAuthor.keys());
+    const byLowercase = new Map<string, string>();
+    for (const id of present) byLowercase.set(id.toLowerCase(), id);
+
+    const unmatched: string[] = [];
+    for (const key of authorMap.keys()) {
+      if (present.has(key)) continue;
+      const near = byLowercase.get(key.toLowerCase());
+      unmatched.push(
+        near
+          ? `${JSON.stringify(key)} — no such author, but ${JSON.stringify(near)} exists` +
+            ` (${revisionsByAuthor.get(near)} revs). Etherpad author ids are case-sensitive.`
+          : `${JSON.stringify(key)} — no author with this id wrote in the selected pads`,
+      );
+    }
+
+    if (unmatched.length) {
+      console.error(`\n  ${unmatched.length} --authors entries match no author in this file:`);
+      for (const u of unmatched) console.error(`    ${u}`);
+      if (!allowUnusedAuthors) {
+        fail(
+          "Refusing to import: whoever those entries were meant to cover would silently get a placeholder " +
+            "account instead, and attribution can't be repointed after the fact. Fix the ids " +
+            "(--list-authors prints them verbatim), or pass --allow-unused-authors.",
+        );
+      }
+    }
   }
 
   // ---- Stages 1-3, no database ------------------------------------------
@@ -813,10 +857,15 @@ async function main() {
               email,
               slug: await claimSlug(tx, "user", name || email.split("@")[0], claimedUserSlugs),
               name,
-              // No password hash: a placeholder account exists to own attribution,
-              // not to be signed into. An explicitly mapped account that did not
-              // exist yet gets one so it can be handed over.
-              passwordHash: mappedEmail ? await bcrypt.hash(`etherpad-import-${suffix}`, 12) : null,
+              // NEVER a password, mapped or not. An account exists here to own
+              // attribution, not to be signed into, and a data migration has no
+              // business minting credentials — anything it could derive one from
+              // (the author id) is in the file it just read, so the "password"
+              // would be a published secret. An explicitly mapped address that
+              // did not already exist is handed over with
+              // `npx tsx scripts/set-user-password.ts`, or through the ordinary
+              // password-reset flow.
+              passwordHash: null,
               role: asEnum(Role, (typeof entry === "object" ? entry.role : undefined) ?? Role.COMMENTER, "--authors role"),
               color: colorForSeed(email),
               adminInitials: explicitInitials ?? deriveInitials(name, email),
@@ -827,7 +876,9 @@ async function main() {
           summary.usersCreated.push(
             `${etherpadId || "(unattributed)"} → ${email}` +
               ` name=${JSON.stringify(name)} ${revisions} revs` +
-              `${mappedEmail ? "" : "  [placeholder, cannot sign in]"}` +
+              (mappedEmail
+                ? "  [MAPPED but no such account existed — created WITHOUT a password; set one to hand it over]"
+                : "  [placeholder, cannot sign in]") +
               `${ga?.colorId !== undefined ? `  etherpadColor=${JSON.stringify(ga.colorId)}` : ""}`,
           );
         }

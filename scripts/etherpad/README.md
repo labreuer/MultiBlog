@@ -87,6 +87,35 @@ reinsert a run whose marks changed, attributing untouched characters to the edit
 author at the CRDT level. Measured at 2.2 bytes of Yjs update per character ever
 typed in the real file, so it is diffing rather than rewriting whole paragraphs.
 
+## Mapping authors to accounts
+
+`--authors=<json>` maps Etherpad author ids to email addresses; anything
+unmapped becomes a placeholder account at `@etherpad.invalid` that cannot sign
+in. Several ids may point at the same address — that is the normal case for one
+person who accumulated several Etherpad identities, and it composes correctly:
+each id keeps its own Yjs `clientID`, so the separate editing sessions survive
+in the CRDT, while `authorHighlight`, the `clients` map and the byline all
+resolve to the single account.
+
+**Every key must name an author who actually wrote something, and the import
+refuses to run otherwise.** A key matching nothing is completely inert — the
+person it was meant to cover quietly falls through to a placeholder, and the
+only trace is one more line in a summary that looks like the lines around it.
+Since attribution is written into the Yjs history and cannot be repointed
+afterwards, that has to be a hard stop rather than a warning. Etherpad ids are
+case-sensitive and the generated placeholder emails are lower-cased, so building
+the mapping from a previous run's summary instead of from `--list-authors` is an
+easy way to end up with keys differing only in case; the error names the
+near-match explicitly rather than case-folding, because matching
+case-insensitively would be a guess about identity. `--allow-unused-authors`
+downgrades it.
+
+**No account is ever created with a password**, mapped or not. A data migration
+has no business minting credentials, and anything it could derive one from is in
+the file it just read. A mapped address that did not already exist is created
+without one and flagged in the summary; hand it over with
+`npx tsx scripts/set-user-password.ts` or the ordinary reset flow.
+
 ## Rows do not correspond one-to-one with revisions
 
 A `Y.Doc` transaction that changes nothing emits no update at all, so a revision
