@@ -92,6 +92,16 @@ export async function createTestUser(opts: {
   return { id: user.id, email: user.email, name, role };
 }
 
+/**
+ * Changes a user's role behind the app's back, the way an admin promoting
+ * someone in another browser would — the setup /dashboard's session refresh
+ * exists to handle, since the signed-in JWT still carries the old role.
+ */
+export async function setTestUserRole(email: string, role: Role): Promise<void> {
+  assertSafe(email);
+  await prisma.user.update({ where: { email }, data: { role } });
+}
+
 export async function deleteTestUser(email: string): Promise<void> {
   assertSafe(email);
   // Commenter.email is unique and its userId FK is optional, so deleting the
@@ -710,6 +720,7 @@ export async function sweepTestData(): Promise<{ posts: number; docs: number; us
 
 const handlers = {
   createTestUser,
+  setTestUserRole,
   deleteTestUser,
   createTestPost,
   deleteTestPost,

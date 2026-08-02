@@ -111,6 +111,9 @@ process.on("exit", () => {
 export const createTestUser = (...args: Parameters<DbHandlers["createTestUser"]>): Promise<TestUser> =>
   call("createTestUser", ...args);
 
+export const setTestUserRole = (...args: Parameters<DbHandlers["setTestUserRole"]>): Promise<void> =>
+  call("setTestUserRole", ...args);
+
 export const deleteTestUser = (...args: Parameters<DbHandlers["deleteTestUser"]>): Promise<void> =>
   call("deleteTestUser", ...args);
 

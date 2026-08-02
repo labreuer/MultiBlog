@@ -3,7 +3,9 @@
 Playwright, driving the real app against the real local Postgres. Covers the
 flows that otherwise get re-verified by hand every session: publish/unpublish,
 comment moderation, two-author live collaboration, quote anchoring across
-publishes, and republishing from an earlier point in a doc's history.
+publishes, republishing from an earlier point in a doc's history, and
+/dashboard's session refresh (`src/app/sign-in/NOTES.md`) — the one flow whose
+whole point is that a change is *not* visible until the right page is visited.
 
 ```bash
 npm run e2e
