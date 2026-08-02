@@ -54,3 +54,7 @@ next-env.d.ts
 
 # local DB backups (pg_dump), taken before risky schema/data work
 /.db-backups
+
+# scratch space for one-shot import sources (e.g. an Etherpad dirty.db) — real
+# content, and large; see scripts/import-etherpad.ts
+/temp

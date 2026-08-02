@@ -167,6 +167,27 @@ anything repeatable.
   `e2e/ydoc-debug.spec.ts`), and a teardown project sweeps whatever a crashed run left
   behind.
 
+### One-shot data imports
+
+Two, both carrying their rationale in a long file header rather than here — read the header
+before touching either, and prefer copying their shape to inventing a third one:
+
+- `scripts/import-legacy.ts` — a pre-§15 MultiBlog database into the present schema.
+- `scripts/etherpad/import-etherpad.ts` — an Etherpad Lite `dirty.db`, preserving full
+  per-revision edit history: each pad becomes a Doc plus one `ydoc_update` row per
+  Etherpad revision, timestamped and attributed. `--verify` replays the whole file and
+  checks it against the atext Etherpad itself stored at every 100th revision and at
+  head, without touching the database; `--list-authors` prints the `--authors` mapping
+  skeleton; `--dry-run` does the real import and rolls it back. Run all three, in that
+  order, before a live run. Full rationale: `scripts/etherpad/README.md`.
+
+Both share the conventions worth knowing: an existing user is matched by email and never
+duplicated, slugs are claimed through the transaction (`claimSlug` — `uniqueDocSlug`/
+`uniqueUserSlug` query the global client and can't see rows the same import just created),
+the `ydoc` blob is always recomputed as `Y.mergeUpdates` over the rows being written rather
+than copied from a source, and `@updatedAt` columns need raw SQL to backdate. Afterwards,
+`npx tsx scripts/check-ydoc-integrity.ts` is the acceptance test.
+
 ### Performance measurement
 
 - For editing-latency benchmarks, `document.execCommand('insertText', false, char)` in a
