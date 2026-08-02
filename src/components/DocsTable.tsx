@@ -18,11 +18,15 @@ export type DocRow = {
   authors: string;
   visibility: DocVisibility;
   createdAt: Date;
+  // Character count from doc_length(prose_json) (see /docs/page.tsx) — a
+  // Postgres function, not something computed here, so a doc's full body
+  // never has to reach this component to show its length.
+  length: number;
   deleted: boolean;
   canEdit: boolean;
 };
 
-type SortKey = "title" | "authors" | "visibility" | "created" | "deleted";
+type SortKey = "title" | "authors" | "visibility" | "created" | "length" | "deleted";
 
 const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid #ddd" };
 const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
@@ -40,6 +44,8 @@ function compareByKey(key: SortKey, a: DocRow, b: DocRow): number {
       return a.visibility.localeCompare(b.visibility);
     case "created":
       return a.createdAt.getTime() - b.createdAt.getTime();
+    case "length":
+      return a.length - b.length;
     case "deleted":
       return a.deleted === b.deleted ? 0 : a.deleted ? 1 : -1;
   }
@@ -152,6 +158,9 @@ export default function DocsTable({ rows }: { rows: DocRow[] }) {
             <th style={nowrapSortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
               Created{sortIndicator("created")}
             </th>
+            <th style={nowrapSortableTh} onClick={(e) => handleSort("length", e.ctrlKey)}>
+              Length{sortIndicator("length")}
+            </th>
             <th style={sortableTh} onClick={(e) => handleSort("deleted", e.ctrlKey)}>
               {sortIndicator("deleted")}
             </th>
@@ -175,6 +184,7 @@ export default function DocsTable({ rows }: { rows: DocRow[] }) {
               <td style={td}>{row.authors}</td>
               <td style={td}>{row.visibility}</td>
               <td style={nowrapTd}>{formatDate(row.createdAt, "yyyy-MM-dd HH:mm")}</td>
+              <td style={nowrapTd}>{row.length.toLocaleString()}</td>
               <td style={td}>
                 <DeleteCell
                   docId={row.id}

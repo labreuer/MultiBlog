@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma/client";
 import { canManageDocs } from "@/lib/doc-authz";
 import { canEditAnyPost } from "@/lib/authz";
 import { createDoc } from "@/app/actions/docs";
@@ -26,13 +27,36 @@ export default async function DocsPage() {
   const docs = await prismaIncludingDeleted.doc.findMany({
     where: canEditAny ? undefined : { authors: { some: { userId: session.user.id } } },
     orderBy: { createdAt: "desc" },
-    include: {
+    // Explicit select, not `include` — deliberately excludes proseJson. It's
+    // the whole document body and nothing here needs it: the Length column
+    // comes from doc_length(prose_json) (below), computed in Postgres so the
+    // body itself never has to cross into this process.
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      visibility: true,
+      createdAt: true,
+      deletedByUserId: true,
       authors: {
         orderBy: { bylineOrder: "asc" },
         select: { userId: true, user: { select: { adminInitials: true } } },
       },
     },
   });
+
+  // A second, narrow round-trip rather than folding this into the query
+  // above: Prisma has no way to project a raw SQL expression into a
+  // findMany's select, and rewriting the whole permission-filtered query
+  // (the canEditAny/authors-some WHERE above) as raw SQL just to add one
+  // column isn't worth losing that type safety for.
+  const lengthById = new Map<string, number>();
+  if (docs.length > 0) {
+    const lengths = await prismaIncludingDeleted.$queryRaw<{ id: string; length: number }[]>`
+      SELECT id, doc_length(prose_json) AS length FROM doc WHERE id IN (${Prisma.join(docs.map((d) => d.id))})
+    `;
+    for (const l of lengths) lengthById.set(l.id, l.length);
+  }
 
   const rows = docs.map((doc) => ({
     id: doc.id,
@@ -44,6 +68,7 @@ export default async function DocsPage() {
     authors: doc.authors.map((a) => a.user.adminInitials).join(", "),
     visibility: doc.visibility,
     createdAt: doc.createdAt,
+    length: lengthById.get(doc.id) ?? 0,
     deleted: doc.deletedByUserId !== null,
     // Mirrors canUserEditDoc (src/lib/doc-authz.ts) without a per-row DB
     // round-trip — canEditAny already decided the WHERE clause above (an
