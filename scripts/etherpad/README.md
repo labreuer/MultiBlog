@@ -14,9 +14,11 @@ npx tsx scripts/etherpad/import-etherpad.ts --source=<dirty.db> --authors=<json>
 `--verify` runs everything that touches no database (read, replay, map, and the
 list-nesting self-test) and prints the attribute inventory. `--list-authors` prints
 an `--authors` skeleton — you cannot write that file without it, because Etherpad
-author ids are opaque. `--dry-run` does the whole import inside a transaction and
-rolls it back. Run all three, in that order, before a live run, then
-`npx tsx scripts/check-ydoc-integrity.ts` afterwards.
+author ids are opaque; add `--include-titles` to give each entry a `pads` array of
+the titles that author wrote in, since a revision count rarely identifies an
+anonymous id but the documents they wrote in often do. `--dry-run` does the whole
+import inside a transaction and rolls it back. Run all three, in that order, before
+a live run, then `npx tsx scripts/check-ydoc-integrity.ts` afterwards.
 
 Full flag reference and the design rationale for each stage live in the file headers
 of `import-etherpad.ts`, `dirty-db.ts`, `changeset.ts`, and `to-prosemirror.ts` — this
@@ -96,6 +98,15 @@ person who accumulated several Etherpad identities, and it composes correctly:
 each id keeps its own Yjs `clientID`, so the separate editing sessions survive
 in the CRDT, while `authorHighlight`, the `clients` map and the byline all
 resolve to the single account.
+
+An entry is either an email string or an object taking `email`, `name`,
+`adminInitials`, `role`, and `pads`. **Any other field is rejected**, naming the
+key it was probably meant to be. The resolver only ever reads `email`, so a
+mistyped `"emial"` would otherwise be inert — and inert means that person
+silently gets a placeholder, with attribution that can't be repointed later.
+`pads` is the exception that is deliberately accepted and never read: it is what
+`--list-authors --include-titles` writes, so the skeleton round-trips back in as
+`--authors` with the titles still in place.
 
 **Every key must name an author who actually wrote something, and the import
 refuses to run otherwise.** A key matching nothing is completely inert — the

@@ -15,8 +15,14 @@
 // --verify runs everything that touches no database (read, replay, map, and the
 // list-nesting self-test) and prints the attribute inventory. --list-authors
 // prints an --authors skeleton; you cannot write that file without it, because
-// Etherpad author ids are opaque. --dry-run does the whole import inside a
-// transaction and rolls it back, so its summary is a real result.
+// Etherpad author ids are opaque. --include-titles (with --list-authors) adds
+// each author's pad titles to their entry as a `pads` array — a revision count
+// rarely tells you who an anonymous id is, but recognizing which documents they
+// wrote in often does, and putting it in the entry means the file can be filled
+// in author-by-author with no cross-referencing. `pads` is tolerated and
+// ignored on the way back in, so the file round-trips as --authors unedited.
+// --dry-run does the whole import inside a transaction and rolls it back, so
+// its summary is a real result.
 //
 // WHY A PAD BECOMES A DOC AND NOT A POST
 // A post here is an immutable snapshot of a doc at a chosen point in that doc's
@@ -485,7 +491,25 @@ function buildLog(opts: {
 // Author resolution
 // ---------------------------------------------------------------------------
 
-type AuthorMapEntry = string | { email: string; name?: string; adminInitials?: string; role?: string };
+type AuthorMapEntry =
+  | string
+  | {
+      email: string;
+      name?: string;
+      adminInitials?: string;
+      role?: string;
+      // Written by --list-authors --include-titles, never read: the titles of
+      // the pads this author wrote in, carried in the file so the mapping can
+      // be filled in author-by-author without cross-referencing anything.
+      pads?: string[];
+    };
+
+// Everything an entry object is allowed to carry. Unknown keys are rejected
+// rather than ignored: the resolver only ever reads `email`, so a mistyped
+// "emial" would otherwise be inert, and inert means the person silently gets a
+// placeholder account with attribution that can't be repointed afterwards —
+// the same failure mode the unmatched-author-id check exists to prevent.
+const AUTHOR_ENTRY_KEYS = ["email", "name", "adminInitials", "role", "pads"] as const;
 
 type ResolvedAuthor = {
   etherpadId: string;
@@ -509,7 +533,38 @@ function loadAuthorMap(path: string | undefined): Map<string, AuthorMapEntry> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     fail(`--authors must be a JSON object of {"a.xxx": "email" | {"email": ...}}`);
   }
-  for (const [k, v] of Object.entries(parsed as Record<string, AuthorMapEntry>)) map.set(k, v);
+
+  const known = new Set<string>(AUTHOR_ENTRY_KEYS);
+  const problems: string[] = [];
+  for (const [k, v] of Object.entries(parsed as Record<string, AuthorMapEntry>)) {
+    if (typeof v === "string") {
+      map.set(k, v);
+      continue;
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v)) {
+      problems.push(`${JSON.stringify(k)} — must be an email string or an object, got ${JSON.stringify(v)}`);
+      continue;
+    }
+    for (const key of Object.keys(v)) {
+      if (known.has(key)) continue;
+      // Name the intended key when it's an obvious typo, the same way the
+      // unmatched-author-id check names a case-mismatched id.
+      const near = AUTHOR_ENTRY_KEYS.find(
+        (e) => e.toLowerCase() === key.toLowerCase() || [...e].sort().join("") === [...key.toLowerCase()].sort().join(""),
+      );
+      problems.push(
+        `${JSON.stringify(k)} has unknown field ${JSON.stringify(key)}` +
+          (near ? ` — did you mean ${JSON.stringify(near)}?` : ` — expected one of ${AUTHOR_ENTRY_KEYS.join(", ")}`),
+      );
+    }
+    map.set(k, v);
+  }
+
+  if (problems.length) {
+    console.error(`\n  ${problems.length} problem(s) in ${path}:`);
+    for (const p of problems) console.error(`    ${p}`);
+    fail("Refusing to import: an unrecognized field is silently ignored, which would hand someone a placeholder account.");
+  }
   return map;
 }
 
@@ -523,6 +578,7 @@ async function main() {
   const verifyOnly = process.argv.includes("--verify");
   const listPads = process.argv.includes("--list-pads");
   const listAuthors = process.argv.includes("--list-authors");
+  const includeTitles = process.argv.includes("--include-titles");
   const dryRun = process.argv.includes("--dry-run");
   const replace = process.argv.includes("--replace");
   const timeout = Number(arg("timeout") ?? 900_000);
@@ -633,7 +689,7 @@ async function main() {
 
   if (listAuthors) {
     console.log(`\n${revisionsByAuthor.size} authors wrote in the selected pads. An --authors skeleton:\n`);
-    const skeleton: Record<string, { email: string; name: string }> = {};
+    const skeleton: Record<string, { email: string; name: string; pads?: string[] }> = {};
     for (const [id, count] of [...revisionsByAuthor].sort((a, b) => b[1] - a[1])) {
       const ga = db.authors.get(id);
       const label = id === "" ? "(unattributed)" : id;
@@ -641,7 +697,22 @@ async function main() {
         `  // ${label.padEnd(22)} ${String(count).padStart(5)} revs in ${padsByAuthor.get(id)!.size} pads` +
           `  name=${JSON.stringify(ga?.name ?? null)} etherpadColor=${JSON.stringify(ga?.colorId ?? null)}`,
       );
-      skeleton[id] = { email: "", name: ga?.name ?? "" };
+      // `pads` goes in the entry itself rather than a comment above it: which
+      // documents someone wrote in is usually what decides who they are, and
+      // that decision is made one author at a time, so the evidence belongs
+      // beside the field being filled in. Last of the three keys so `email`
+      // stays at the top of each entry where it is edited. The importer
+      // tolerates it and never reads it (AUTHOR_ENTRY_KEYS), so the file
+      // round-trips straight back in as --authors with the titles still there.
+      if (includeTitles) {
+        skeleton[id] = {
+          email: "",
+          name: ga?.name ?? "",
+          pads: [...padsByAuthor.get(id)!].sort().map((padId) => prettyTitle(padId, titleMode)),
+        };
+      } else {
+        skeleton[id] = { email: "", name: ga?.name ?? "" };
+      }
     }
     console.log(`\n${JSON.stringify(skeleton, null, 2)}\n`);
     console.log(`Leave an email blank to get a placeholder account at @${authorDomain} that cannot sign in.`);
