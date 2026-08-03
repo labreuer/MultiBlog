@@ -3745,7 +3745,21 @@ Hooks:
 - `useRevealedRows` — the visit-local overlay that keeps a just-deleted row visible until a real
   navigation, generalized from `CommentsTable`. A `Map`, not the older tables' `Set` of ids: under
   pagination the server refetch drops the row entirely, so the overlay has to carry the row itself,
-  not just a flag saying "show it".
+  not just a flag saying "show it" — **and its index**, so it goes back where it was rather than
+  onto the end. Appending is the obvious implementation and reads as a bug: delete the second of
+  four rows and it drops to the bottom, which looks like the table re-sorting itself. The index is
+  free to capture, since both reveal calls happen while `rows` still contains the row.
+
+  The alternative was to stop dropping these rows in SQL at all — hand the just-deleted ids back to
+  the server and widen the `WHERE`, so Postgres returns them in their sorted place. That is the more
+  truthful model (the row would be counted and paginated like any other) and it is the one to reach
+  for if a revealed row should ever be a *real* row. It was not taken here because it makes the ids
+  a sixth shared querystring param, and with that: bookmarkable URLs that resurrect rows for whoever
+  opens them, a `FilterHelp` entry for something no one types, a total that moves, and a revealed
+  row displacing a live one onto page 2. Three of the five tables also already use `where.OR` for
+  their search, so the new clause has to nest under `AND` or it silently disables the search box.
+  None of that is worth paying for a row the admin deleted a second ago, where nothing else on the
+  page has moved.
 - `useRowStatus` — §16f.
 - `useRowSelection` — §16g.
 
@@ -3886,13 +3900,72 @@ through `edited` on its way; a `<select>` or color picker submits on change and 
 `saving`. Delete/restore is a mutation like any other and paints the same border, which is why this
 lives in the kit rather than in `UsersTable`.
 
+**A bulk action paints it too**, on every row it applied to — `runWithStatusMany`, the batch
+counterpart of `runWithStatus`, which `BulkToolbar` takes as a required prop rather than an optional
+one so a new table cannot quietly leave its bulk actions the only mutations on the surface with no
+per-row feedback. Two properties fall out of it, both deliberate:
+
+- **Only the rows the action actually applied to are marked.** §16g's rule is that a mixed selection
+  silently skips the rows an action doesn't apply to; marking only the rest means the border answers
+  *which of the rows I selected did that change?*, not merely *did something run?*. The skipped rows
+  stay idle.
+- **The mark outlives the selection.** `onDone()` clears the selection and refreshes immediately
+  afterwards, so a moment later nothing is checked any more — the border is then the only remaining
+  record of what the action covered, which is precisely the standing-record argument above applied
+  to a batch.
+
+- **Each row reports its own outcome, not the batch's.** The batched actions are not transactional
+  (§16k), so a selection mixing rows the caller may change with rows it may not — the normal case
+  for anyone who isn't ADMIN — half succeeds. That is why they return a `BulkResult`
+  (`src/lib/bulk-result.ts`) instead of `Promise<void>`: `Promise.all` rejects on the first bad id
+  and *discards which ids the rest were*, leaving the browser one bit for the whole batch and no
+  choice but to redden rows that saved. `Promise.allSettled` behind `settleBulk` changes only the
+  reporting — `Promise.all` already started every call, so the ones that were going to succeed
+  always did — and green now means *this row saved*.
+
+  A thrown action still reddens everything, and should: an unauthenticated caller or a dead network
+  is the case where the client genuinely doesn't know which rows are which.
+
+- **A red row carries its reason**, as a `title` on the same cell that paints the border — the only
+  place a *per-row* explanation can live when one toolbar serves N rows. The toolbar keeps the
+  summary (`3 of 8 failed …`), preserving §16f's split: border says *that*, text says *what*.
+
+  The message is filtered, not passed through. Next redacts the message of an error *thrown* from a
+  server action in production and a returned value gets no such treatment, so echoing
+  `reason.message` verbatim would route around that and put a Prisma query and absolute source
+  paths on an admin's screen. `describeFailure` passes through a plain `Error` — which is what this
+  codebase's own authorization guards throw — and collapses everything else to a generic string.
+
+  **The collapsed ones are logged, and that is not bookkeeping — it replaces something
+  `Promise.allSettled` took away.** Under `Promise.all` the first rejection propagated out of the
+  server action and Next logged it (with a digest in production, to correlate against). `allSettled`
+  captures the rejection, so nothing throws, so nothing is logged: without an explicit
+  `console.error` the only trace of a failure would be one generic sentence on an admin's screen.
+  Only the collapsed ones, though — a plain `Error` is a guard the admin reads in full, ordinary
+  feedback rather than a fault, and logging every refused authorization at error level would bury
+  the real ones. The row id is the correlation key: it is in the log line, and the UI reddens that
+  exact row.
+
+Beneath both, **`BulkToolbar` refreshes on the failure path too** — `onDone(ok)`, with every table
+refreshing regardless and clearing the selection only when `ok`. Skipping the refresh on failure
+left the rows that *had* saved showing their pre-action values next to a red border until someone
+reloaded, which made §16k's "a partial application is visible" untrue as written. Keeping the
+selection armed when anything fails is the other half: the action is re-runnable without re-picking
+the rows. Deletion's `onDeleted` overlay also runs either way, since the ids that did delete are
+gone from a `?deleted=0` refetch and would otherwise vanish mid-action — a row that *didn't* delete
+costs nothing there, because `useRevealedRows` drops an overlay entry as soon as `rows` contains
+that id again.
+
 ### 16g. Phase 4 — selection and bulk actions
 
 `useRowSelection` (checkbox column, header select-all, the selected-id set) and `BulkToolbar` (the
 toolbar that appears once anything is selected). A table declares its bulk actions as data —
 `{ label, icon, applicableTo(row), run(ids) }` — and the toolbar renders them; the "silently skip
 rows the action doesn't apply to rather than erroring on a mixed selection" rule that
-`bulkModerateComments` established becomes the convention every bulk action follows.
+`bulkModerateComments` established becomes the convention every bulk action follows. Skipping
+silently is only tolerable because §16f's border then marks exactly the rows that *were* affected —
+the two rules are a pair, and the second is what stops the first from being an admin wondering
+whether anything happened.
 
 Each table gets batched server actions of its own, each enforcing its own authorization — which is
 why the toolbar takes server actions rather than a table name. `/comments` keeps Approve/Pend/Spam;
@@ -4001,9 +4074,18 @@ survive. The file also lost its `"use client"`, since the server pages import `S
 to build their `orderBy`.
 
 `e2e/admin-table.spec.ts` covers the border's idle → edited → saved path (asserting computed
-colors, not class names), the querystring round-trip for search/sort/page size including the
-"a page size equal to your preference isn't written to the URL" rule, and that all five
-tables keep their header and controls when a filter matches nothing.
+colors, not class names), the same path driven by a bulk action of each kind — including that a
+row the action skipped on a mixed selection stays idle — the querystring round-trip for
+search/sort/page size including the "a page size equal to your preference isn't written to the
+URL" rule, and that all five tables keep their header and controls when a filter matches nothing.
+
+`e2e/bulk-partial.spec.ts` covers the half-successful batch, which is the case the per-row border
+exists for and the one that is easiest to get wrong. It selects the signed-in admin's own row
+alongside a throwaway user and bulk-deletes: `deleteUser` refuses the first and completes the
+second, so the spec can assert green-on-one and red-on-the-other, the failed row's `title`
+carrying its reason, the deleted row rendering as deleted with no reload, and the selection
+surviving. That last one was verified by reverting the fix and watching the spec fail on exactly
+that assertion.
 
 Two deviations from the plan as written, both flagged when the work was reported:
 

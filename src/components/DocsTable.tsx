@@ -72,7 +72,7 @@ export default function DocsTable({
     build: (next, extra) => buildDocsQueryString(next, extra, defaultPageSize),
   });
   const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
-  const { rowStatusClass, runWithStatus } = useRowStatus();
+  const { rowStatusClass, rowStatusTitle, runWithStatus, runWithStatusMany } = useRowStatus();
   const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
     useRowSelection(displayRows);
 
@@ -118,9 +118,10 @@ export default function DocsTable({
       <BulkToolbar
         selectedRows={selectedRows}
         actions={bulkActions}
+        runWithStatus={runWithStatusMany}
         onDeleted={revealRows}
-        onDone={() => {
-          clearSelection();
+        onDone={(ok) => {
+          if (ok) clearSelection();
           router.refresh();
         }}
       />
@@ -152,7 +153,7 @@ export default function DocsTable({
           {displayRows.length === 0 && <EmptyRow colSpan={COLUMN_COUNT} message="No docs matching the criteria." />}
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-              <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
+              <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`} title={rowStatusTitle(row.id)}>
                 <SelectRowCheckbox
                   checked={selectedIds.has(row.id)}
                   onChange={() => toggleRow(row.id)}

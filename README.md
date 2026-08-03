@@ -58,6 +58,7 @@ No test suite yet.
 ## Documentation
 
 - [PLAN.md](PLAN.md) — architecture, design decisions, and build progress.
+- [TODO.md](TODO.md) — open items carrying enough context to act on directly.
 - [DEPLOY.md](DEPLOY.md) — deploying to a self-managed Linode/Ubuntu box.
 - [CACHING.md](CACHING.md) — caching behavior and trade-offs (ISR, etc.).
 - [PERFORMANCE.md](PERFORMANCE.md) — performance findings and the opt-in

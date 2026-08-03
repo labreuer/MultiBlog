@@ -11,6 +11,7 @@ import { getClientIp } from "@/lib/request-ip";
 import { isCommentRateLimited } from "@/lib/rate-limit";
 import { checkSpam } from "@/lib/spam-check";
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
+import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -295,32 +296,47 @@ export async function restoreComment(commentId: string): Promise<void> {
   revalidateTouchedPosts([post]);
 }
 
-export async function bulkModerateComments(commentIds: string[], action: "approve" | "spam" | "pend"): Promise<void> {
+// The three below report per-id outcomes (settleBulk, src/lib/bulk-result.ts)
+// rather than throwing on the first failure, so /comments can paint each row's
+// own border. Note `fulfilled` in place of the old `Promise.all` result: only
+// the comments that actually moved should revalidate their post, or a failed
+// moderation would bust a public page's cache for a change that never landed.
+//
+// The session check still throws. It is not per row — if the caller isn't
+// signed in, no id in the batch was ever going to work, and reporting that as
+// N identical per-row failures would be noise.
+export async function bulkModerateComments(
+  commentIds: string[],
+  action: "approve" | "spam" | "pend",
+): Promise<BulkResult> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
   const { id: userId, role } = session.user;
-  const posts = await Promise.all(commentIds.map((id) => moderateOne(userId, role, id, action)));
-  revalidateTouchedPosts(posts);
+  const { failed, fulfilled } = await settleBulk(commentIds, (id) => moderateOne(userId, role, id, action));
+  revalidateTouchedPosts(fulfilled);
+  return { failed };
 }
 
-export async function bulkDeleteComments(commentIds: string[]): Promise<void> {
+export async function bulkDeleteComments(commentIds: string[]): Promise<BulkResult> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
   const { id: userId, role } = session.user;
-  const posts = await Promise.all(commentIds.map((id) => deleteOne(userId, role, id)));
-  revalidateTouchedPosts(posts);
+  const { failed, fulfilled } = await settleBulk(commentIds, (id) => deleteOne(userId, role, id));
+  revalidateTouchedPosts(fulfilled);
+  return { failed };
 }
 
-export async function bulkRestoreComments(commentIds: string[]): Promise<void> {
+export async function bulkRestoreComments(commentIds: string[]): Promise<BulkResult> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
   const { id: userId, role } = session.user;
-  const posts = await Promise.all(commentIds.map((id) => restoreOne(userId, role, id)));
-  revalidateTouchedPosts(posts);
+  const { failed, fulfilled } = await settleBulk(commentIds, (id) => restoreOne(userId, role, id));
+  revalidateTouchedPosts(fulfilled);
+  return { failed };
 }

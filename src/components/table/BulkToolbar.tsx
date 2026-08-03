@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { IconTrash, IconTrashOff } from "@tabler/icons-react";
+import type { BulkFailure, BulkResult } from "@/lib/bulk-result";
 import styles from "./AdminTable.module.css";
 
 // The toolbar that appears once anything is selected (PLAN.md §16g). A table
@@ -33,7 +34,7 @@ export type BulkAction<T> = BulkActionBase<T> &
         className?: string;
         /** Sets destructive actions apart from the rest of the toolbar. */
         separated?: boolean;
-        run: (ids: string[]) => Promise<void>;
+        run: (ids: string[]) => Promise<BulkResult>;
       }
     | {
         // For "set every selected row's role/visibility to X" — a value the
@@ -42,7 +43,7 @@ export type BulkAction<T> = BulkActionBase<T> &
         // *has* that value.
         kind: "select";
         options: readonly string[];
-        run: (ids: string[], value: string) => Promise<void>;
+        run: (ids: string[], value: string) => Promise<BulkResult>;
       }
   );
 
@@ -51,14 +52,33 @@ export function BulkToolbar<T extends { id: string }>({
   actions,
   onDone,
   onDeleted,
+  runWithStatus,
 }: {
   selectedRows: T[];
   actions: BulkAction<T>[];
-  onDone: () => void;
+  // Called once the action settles, either way. `ok` is false when it threw,
+  // and the split every table makes with it is: refresh regardless, clear the
+  // selection only on success.
+  //
+  // Refreshing regardless is not cosmetic. These actions are not transactional
+  // (PLAN.md §16k) and run per id under Promise.all, so a rejection still
+  // leaves the ids that succeeded committed. Skipping the refresh left those
+  // rows showing their old values beside a red border until someone reloaded —
+  // i.e. §16k's claim that "a partial application is visible" was not true.
+  // Keeping the selection armed on failure is the other half: the action is
+  // re-runnable without re-picking the rows.
+  onDone: (ok: boolean) => void;
   // Lets a table keep just-deleted rows visible (useRevealedRows) when the
   // action that ran was a deletion; it gets the rows the action actually
   // applied to, not the whole selection.
   onDeleted?: (rows: T[]) => void;
+  // `runWithStatusMany` from the table's own useRowStatus (§16f), so a bulk
+  // change paints the same amber → green/red border on each affected row that
+  // a single-cell edit does. Required rather than optional: every table on the
+  // kit already paints the border, and an optional prop is one a new table can
+  // quietly omit, leaving its bulk actions the only mutations on the surface
+  // that give no per-row feedback.
+  runWithStatus: (rowIds: string[], action: () => Promise<BulkFailure[]>) => Promise<BulkFailure[]>;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,17 +92,48 @@ export function BulkToolbar<T extends { id: string }>({
     const ids = targetRows.map((r) => r.id);
 
     setPending(true);
+    let ok = false;
     try {
-      if (action.kind === "select") {
-        await action.run(ids, value!);
-      } else {
-        await action.run(ids);
-        if (action.icon === "delete") onDeleted?.(targetRows);
+      // Wraps only the server call, so the borders settle on saved/error
+      // before onDone clears the selection and refreshes — the rows the
+      // action touched stay marked once they are no longer selected, which is
+      // what makes the border readable as "these are the ones that changed".
+      const failed = await runWithStatus(ids, async () => {
+        const result = action.kind === "select" ? await action.run(ids, value!) : await action.run(ids);
+        return result.failed;
+      });
+
+      // A partial failure resolves rather than throws, so `ok` is about the
+      // batch as a whole: it decides whether the selection is cleared, and any
+      // failure at all means keep it armed for a re-run. The rows have already
+      // been painted individually by then.
+      ok = failed.length === 0;
+      if (!ok) {
+        setError(
+          failed.length === 1
+            ? failed[0].message
+            : `${failed.length} of ${ids.length} failed — hover a red row for its reason.`,
+        );
       }
-      onDone();
     } catch (e) {
+      // A throw is the whole batch failing at once (unauthenticated, offline,
+      // a bug) rather than some ids being refused; runWithStatus has already
+      // reddened every row. This is the toolbar's own message, which says
+      // *what* failed where the border only says *that* something did.
       setError(e instanceof Error ? e.message : "Bulk action failed.");
     } finally {
+      // Both of these run on the failure path too, and a partly-succeeded
+      // delete is exactly why. The batched actions are Promise.all over
+      // per-id calls, so a rejection does not stop the others — the ids that
+      // succeeded are already committed by the time the error arrives.
+      //
+      // Revealing on failure: the rows that did delete are gone from a
+      // ?deleted=0 refetch, so without the overlay they would vanish mid-
+      // action, taking their border with them. A row that *didn't* delete
+      // costs nothing here — useRevealedRows drops an overlay entry the moment
+      // `rows` contains that id again, which it still does for a live row.
+      if (action.kind === "button" && action.icon === "delete") onDeleted?.(targetRows);
+      onDone(ok);
       setPending(false);
     }
   }
@@ -156,8 +207,8 @@ export function BulkToolbar<T extends { id: string }>({
 // share soft-deletion. `noun` only shapes the accessible label.
 export function softDeleteBulkActions<T extends { deleted: boolean }>(
   noun: string,
-  bulkDelete: (ids: string[]) => Promise<void>,
-  bulkRestore: (ids: string[]) => Promise<void>,
+  bulkDelete: (ids: string[]) => Promise<BulkResult>,
+  bulkRestore: (ids: string[]) => Promise<BulkResult>,
 ): BulkAction<T & { id: string }>[] {
   return [
     {

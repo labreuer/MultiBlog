@@ -312,7 +312,7 @@ export default function UsersTable({
     build: (next, extra) => buildUsersQueryString(next, extra, defaultPageSize),
   });
   const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
-  const { rowStatusClass, setStatus, runWithStatus } = useRowStatus();
+  const { rowStatusClass, rowStatusTitle, setStatus, runWithStatus, runWithStatusMany } = useRowStatus();
   const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
     useRowSelection(displayRows);
 
@@ -374,9 +374,10 @@ export default function UsersTable({
       <BulkToolbar
         selectedRows={selectedRows}
         actions={bulkActions}
+        runWithStatus={runWithStatusMany}
         onDeleted={revealRows}
-        onDone={() => {
-          clearSelection();
+        onDone={(ok) => {
+          if (ok) clearSelection();
           router.refresh();
         }}
       />
@@ -426,7 +427,7 @@ export default function UsersTable({
             };
             return (
               <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-                <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
+                <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`} title={rowStatusTitle(row.id)}>
                   <SelectRowCheckbox
                     checked={selectedIds.has(row.id)}
                     onChange={() => toggleRow(row.id)}

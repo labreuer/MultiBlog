@@ -124,6 +124,18 @@ test.describe("admin table kit", () => {
       await expect(rowFor(first)).toBeVisible();
       await expect(rowFor(second)).toBeVisible();
 
+      // §16f's border applies to bulk changes too, so both rows start idle and
+      // have to end up green — the same standing record a single-cell edit
+      // leaves, which is what tells an admin which rows an action touched once
+      // the selection has been cleared out from under them.
+      const borderOf = (email: string) =>
+        rowFor(email)
+          .locator("td")
+          .first()
+          .evaluate((el) => getComputedStyle(el).borderLeftColor);
+      expect(await borderOf(first)).toBe(IDLE);
+      expect(await borderOf(second)).toBe(IDLE);
+
       await rowFor(first).getByRole("checkbox").check();
       await rowFor(second).getByRole("checkbox").check();
       await expect(page.getByText("2 selected")).toBeVisible();
@@ -135,6 +147,12 @@ test.describe("admin table kit", () => {
       // Running an action clears the selection rather than leaving it armed.
       await expect(page.getByText("2 selected")).toHaveCount(0);
 
+      // Both rows carry the saved border, and still do after the selection is
+      // gone. ("saving" is real but too brief to assert without racing the
+      // action, same as the single-row test above.)
+      await expect.poll(() => borderOf(first)).toBe(SAVED);
+      await expect.poll(() => borderOf(second)).toBe(SAVED);
+
       // A button-kind action, and the one whose applicableTo matters: both
       // rows are live, so both are deleted and each offers Restore afterwards.
       await rowFor(first).getByRole("checkbox").check();
@@ -142,6 +160,29 @@ test.describe("admin table kit", () => {
       await page.getByRole("button", { name: "Delete selected users" }).click();
       await expect(rowFor(first).getByRole("button", { name: "Restore user" })).toBeVisible();
       await expect(rowFor(second).getByRole("button", { name: "Restore user" })).toBeVisible();
+      await expect.poll(() => borderOf(first)).toBe(SAVED);
+      await expect.poll(() => borderOf(second)).toBe(SAVED);
+
+      // Rows an action skips are left alone rather than swept up with the rest,
+      // so the border answers "which of the rows I selected did that actually
+      // change?" — not just "did something run?".
+      //
+      // A reload clears the statuses (they are visit-local, §16f), leaving both
+      // rows deleted and idle. Restoring only `first` makes the selection mixed
+      // for Set role, whose applicableTo is `!row.deleted`: `first` applies,
+      // `second` is dropped silently and must stay idle.
+      await page.reload();
+      expect(await borderOf(first)).toBe(IDLE);
+      expect(await borderOf(second)).toBe(IDLE);
+
+      await rowFor(first).getByRole("button", { name: "Restore user" }).click();
+      await expect.poll(() => borderOf(first)).toBe(SAVED);
+
+      await rowFor(first).getByRole("checkbox").check();
+      await rowFor(second).getByRole("checkbox").check();
+      await page.getByLabel("Set role").selectOption("AUTHOR");
+      await expect(rowFor(first).getByRole("combobox").first()).toHaveValue("AUTHOR");
+      expect(await borderOf(second)).toBe(IDLE);
     } finally {
       await deleteTestUser(first);
       await deleteTestUser(second);
@@ -365,6 +406,60 @@ test.describe("admin table kit", () => {
       await deleteTestDoc(longDoc.id);
       await deleteTestUser(aaAuthor);
       await deleteTestUser(zzAuthor);
+    }
+  });
+
+  // PLAN.md §16d — a just-deleted row keeps its place. With the show-deleted
+  // toggle off it is gone from the refetch entirely, so useRevealedRows puts it
+  // back from its overlay; appending it there sent it to the bottom of the
+  // table, which reads as the list spontaneously re-sorting.
+  test("a deleted row stays where it was, not at the bottom", async ({ page }) => {
+    const token = `ordering${Date.now()}`;
+    // Created oldest → newest. /users defaults to createdAt desc, so the
+    // display order is the reverse of creation: third, second, first.
+    const first = uniqueEmail(`${token}-first`);
+    const second = uniqueEmail(`${token}-second`);
+    const third = uniqueEmail(`${token}-third`);
+    for (const email of [first, second, third]) {
+      await createTestUser({ email, name: email.split("@")[0], role: "AUTHOR" });
+    }
+
+    try {
+      // No ?deleted=1 here — the toggle being *off* is the whole point, since
+      // that is what makes the server drop the row and the overlay supply it.
+      await page.goto(`/users?q=${token}`);
+      const positions = async () =>
+        (await page.locator("table").first().locator("tbody tr").allTextContents()).map(
+          (text) => text.match(/ordering\d+-(first|second|third)/)?.[1] ?? "?",
+        );
+
+      expect(await positions()).toEqual(["third", "second", "first"]);
+
+      // Single-row delete, from the middle.
+      await page
+        .getByRole("row")
+        .filter({ hasText: second })
+        .getByRole("button", { name: "Delete user" })
+        .click();
+      await expect(page.getByRole("row").filter({ hasText: second }).getByRole("button", { name: "Restore user" })).toBeVisible();
+      expect(await positions()).toEqual(["third", "second", "first"]);
+
+      // A real navigation clears the overlay, at which point the row is simply
+      // gone — the overlay is visit-local, not a second source of truth.
+      await page.reload();
+      expect(await positions()).toEqual(["third", "first"]);
+
+      // And the bulk path, which reveals several rows at once: both deleted
+      // rows have to land back in their own slots, not both at the end.
+      await page.goto(`/users?q=${token}`);
+      expect(await positions()).toEqual(["third", "first"]);
+      await page.getByRole("row").filter({ hasText: third }).getByRole("checkbox").check();
+      await page.getByRole("row").filter({ hasText: first }).getByRole("checkbox").check();
+      await page.getByRole("button", { name: "Delete selected users" }).click();
+      await expect(page.getByRole("row").filter({ hasText: third }).getByRole("button", { name: "Restore user" })).toBeVisible();
+      expect(await positions()).toEqual(["third", "first"]);
+    } finally {
+      for (const email of [first, second, third]) await deleteTestUser(email);
     }
   });
 

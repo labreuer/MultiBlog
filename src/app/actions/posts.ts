@@ -15,6 +15,7 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
+import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
 // the home page, author pages, and the post's own page are built from — all
@@ -410,10 +411,10 @@ export async function updatePostAuthorOrder(postId: string, orderedUserIds: stri
 // an authorization failure mid-batch is visible and re-runnable, and wrapping
 // N independent soft-deletes in one just turns "9 of 10 worked" into "none
 // did" without making the caller any better informed.
-export async function bulkDeletePosts(postIds: string[]): Promise<void> {
-  await Promise.all(postIds.map((id) => setPostDeleted(id, true)));
+export async function bulkDeletePosts(postIds: string[]): Promise<BulkResult> {
+  return settleBulk(postIds, (id) => setPostDeleted(id, true));
 }
 
-export async function bulkRestorePosts(postIds: string[]): Promise<void> {
-  await Promise.all(postIds.map((id) => setPostDeleted(id, false)));
+export async function bulkRestorePosts(postIds: string[]): Promise<BulkResult> {
+  return settleBulk(postIds, (id) => setPostDeleted(id, false));
 }

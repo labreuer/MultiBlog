@@ -7,6 +7,7 @@ import { isAdmin } from "@/lib/authz";
 import { changeUserSlug, revertUserSlug as revertUserSlugInDb } from "@/lib/user-slug";
 import { isPageSize } from "@/lib/table-query";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
+import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -139,18 +140,18 @@ export async function restoreUser(userId: string): Promise<void> {
 // deleteUser's "you can't delete your own account" and updateUserRole's "you
 // can't remove your own admin role", which a bulk path must not be able to
 // sidestep.
-export async function bulkDeleteUsers(userIds: string[]): Promise<void> {
-  await Promise.all(userIds.map((id) => deleteUser(id)));
+export async function bulkDeleteUsers(userIds: string[]): Promise<BulkResult> {
+  return settleBulk(userIds, (id) => deleteUser(id));
 }
 
-export async function bulkRestoreUsers(userIds: string[]): Promise<void> {
-  await Promise.all(userIds.map((id) => restoreUser(id)));
+export async function bulkRestoreUsers(userIds: string[]): Promise<BulkResult> {
+  return settleBulk(userIds, (id) => restoreUser(id));
 }
 
-export async function bulkSetUserRole(userIds: string[], role: Role): Promise<void> {
-  await Promise.all(userIds.map((id) => updateUserRole(id, role)));
+export async function bulkSetUserRole(userIds: string[], role: Role): Promise<BulkResult> {
+  return settleBulk(userIds, (id) => updateUserRole(id, role));
 }
 
-export async function bulkSetUserModerationPolicy(userIds: string[], policy: ModerationPolicy): Promise<void> {
-  await Promise.all(userIds.map((id) => updateUserModerationPolicy(id, policy)));
+export async function bulkSetUserModerationPolicy(userIds: string[], policy: ModerationPolicy): Promise<BulkResult> {
+  return settleBulk(userIds, (id) => updateUserModerationPolicy(id, policy));
 }
