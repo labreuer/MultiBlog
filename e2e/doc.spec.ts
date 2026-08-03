@@ -73,7 +73,14 @@ test("editing a doc updates its title/prose_json cache on the store debounce", a
   await page.goto(`/doc/${draftDoc.id}/edit`);
   await waitForDocCollabReady(page);
 
+  // Clear before typing: createTestDoc seeds the title *fragment*, not just
+  // the column, so a fixture doc opens with its title already in the editor
+  // and typing would append to it. That seeding is the point — a doc's title
+  // fragment is canonical (§3d), and a fixture that set only the column had a
+  // title that vanished the first time the store debounce ran.
   await titleEditor(page).click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("Backspace");
   await page.keyboard.type("Retitled live");
   await bodyEditor(page).click();
   await page.keyboard.type("Cached by the collab server, not saved by hand.");

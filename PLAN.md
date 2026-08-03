@@ -3775,21 +3775,89 @@ click/ctrl-click toggle semantics) survives, which is what the URL-driven tables
 privilege order for free: Postgres orders an enum by declaration order, and `Role` is declared
 ADMIN → COMMENTER, which is what `ROLE_ORDER` spelled out client-side.
 
-**Columns that stop being sortable.** A column derived from a to-many relation or computed in SQL
-cannot be a Prisma `orderBy`, so it becomes display-only — the same trade-off §11 already made for
-`/comments`'s commenter-activity column, now applying to:
+**Sorting the derived columns.** Moving sort into Postgres means every sort key has to be something
+an `ORDER BY` can name, and several of these columns are not: they are derived from a to-many
+relation, or computed by a SQL function. Prisma's `orderBy` over a to-many offers exactly one
+member — `_count` (`PostPublicationEventOrderByRelationAggregateInput` and friends, generated,
+Prisma 7.9). A joined byline is not a count; "approved comments, excluding soft-deleted ones" is a
+*filtered* count `_count` cannot express either; and "who made the most recent publication event"
+is not an aggregate at all but an **argmax** — the actor of the row *having* the max — which no
+`orderBy` extension short of raw SQL could reach.
 
-| Table | Column | Why |
-|---|---|---|
-| `/posts` | Author(s) | joined `adminInitials` across `PostAuthor` |
-| `/posts` | Comments | approved/pending counts nested through `threads`, filtered by status |
-| `/posts` | Last edit by / at | the *latest* `PostPublicationEvent`, not an aggregate Prisma can order by |
-| `/docs` | Author(s) | as above |
-| `/docs` | Length | `doc_length(prose_json)`, a Postgres function, not a column |
+What that wall is really about is *to-many* relations. Prisma orders a **to-one** relation's own
+columns freely, nested arbitrarily deep, which is how `/comments` sorts by post title and commenter
+name. So a **view keyed 1:1 on the base table's primary key** is a to-one relation, and turns each
+of these into a shape Prisma already handles:
 
-`/posts`'s History column keeps its sort (`_count: { publicationEvents }`), as does `/users`'s Posts
-column (`_count: { postAuthors }`) — those are plain relation counts, which Prisma does order by.
-The escape hatch, if any of these sorts is later worth having back, is written down in §16l.
+| Table | Column | Sorts through | Which is |
+|---|---|---|---|
+| `/posts` | Author(s) | `post_metrics.byline` | `string_agg` of `adminInitials` in byline order |
+| `/posts` | Comments | `post_metrics.approved_count`/`pending_count` | `count(*) FILTER` per status, excluding soft-deleted |
+| `/posts` | Last edit by/at | `post_activity.last_editor_name`/`last_event_at` | the argmax over `PostPublicationEvent` |
+| `/docs` | Author(s) | `doc_metrics.byline` | `string_agg`, as above |
+| `/docs` | Length | `Doc.proseJsonLength` | a stored column, not a view — §16l has the reasoning |
+
+Each view **also displays** the value it sorts (`include: { activity: true }` and friends, rather
+than a `take: 1` sub-select or a JS join over an authors include), so the sorted expression and the
+rendered one are the same expression. Sorting by one thing while showing another is the failure this
+rules out by construction rather than guards against — and it was the deciding factor against the
+cheaper alternative for Last edit: `Post.publishEvent` is already a to-one relation and needs no
+view, but it is nulled on unpublish and only ever points at a `PUBLISHED`/`SCHEDULED` row, so
+sorting by it while displaying "latest event of any type" would have read as a broken sort.
+
+`/posts`'s History column needs none of this (`_count: { publicationEvents }`), nor does `/users`'
+Posts column (`_count: { postAuthors }`) — those are plain relation counts, which Prisma does order
+by. Nothing here tries to make *every* column sortable: a comment's body text, an avatar, a colour
+swatch and an action button are not sort keys in any useful sense and stay plain `<th>`s, as does
+`/comments`' commenter-activity column for the reason §11 gives.
+
+The argmax view, which is the one worth writing out:
+
+```sql
+CREATE VIEW post_activity AS
+SELECT DISTINCT ON (e.post_id)
+       e.post_id, e.created_at AS last_event_at, COALESCE(u.name, u.email) AS last_editor_name
+FROM post_publication_event e LEFT JOIN "user" u ON u.id = e.actor_id
+ORDER BY e.post_id, e.created_at DESC, e.id DESC;
+```
+
+The `e.id DESC` tiebreaker matters more than it looks: `created_at` is not a unique ordering key, so
+without it *which* of two same-instant events won would be arbitrary. Not reachable today — each of
+the three `postPublicationEvent.create` sites writes one event per transaction, and `now()` is the
+transaction timestamp — but the view shouldn't depend on that continuing to hold. `id` is the
+primary key, so it breaks every tie by definition.
+
+`DISTINCT ON` is a PostgreSQL extension rather than standard SQL; the portable spelling is
+`ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC, id DESC)` filtered to `= 1`. Kept
+as `DISTINCT ON` deliberately: portability is not the binding constraint (`doc_length()`, Prisma's
+`mode: "insensitive"`, JSON path filtering and native enums would all have to move first), it is
+normally the cheaper plan on Postgres for top-1-per-group, and the choice is reversible for free —
+the schema block, the relation, `buildOrderBy` and the spec are identical either way, so swapping it
+is one `CREATE OR REPLACE VIEW` and no application code. `ROW_NUMBER()` would win on merit only if
+this ever needed top-*N* per post rather than top-1.
+
+`orderBy: { activity: { lastEventAt: { sort, nulls: "last" } } }` then just works, with the argmax
+happening in SQL where it belongs. A post with no events has no row in the view, which is why
+`PostActivity` is a nullable relation and both columns sort nulls-last — matching what the cell
+shows for such a post anyway.
+
+`post_metrics` and `doc_metrics` are the aggregate counterparts, and stay separate from
+`post_activity` rather than being folded into it: an argmax over `post_publication_event` and a
+`GROUP BY` over `post_author`/`comment` want different plans, and merging them would force one
+shape onto both while changing the row-presence semantics the nulls-last ordering depends on.
+The two differ from each other in the same way, and deliberately — `post_metrics` reads `FROM post`
+so every post has a row, while `doc_metrics` groups `doc_author`, so a doc with *no* authors has no
+row at all. Both render as the same empty cell and sort the same way, since each relation is
+optional and byline is ordered nulls-last either way; §16l has why `doc_metrics` is worth the
+difference.
+
+Two things Prisma views make you live with: they take `@unique`, never `@id` ("Views cannot have
+primary keys"), and **Prisma Migrate does not manage them** — `migrate diff` emits no DDL for a
+`view` block at all, so the `CREATE VIEW` lives in a hand-written migration exactly as
+`doc_length()` does, and changing it means a new migration rather than an edit to the schema block.
+The generated client will also happily *type* writes to a view that Postgres will reject.
+
+What each of these costs, and the measurements behind Length being a column instead: §16l.
 
 ### 16f. Row state as a left border
 
@@ -3911,7 +3979,10 @@ work introduces, and doing it before staging keeps the two from colliding in the
 Phase 1 (§16c) + Phase 2 (§16d) + Phase 3 (§16e), with §16b's `User.rowsPerPage` and §16f's
 row-status border, land as **one commit**: the kit and its first three consumers can't be split
 without leaving either an unused abstraction or a half-migrated table. Phase 4 (§16g) is a second
-commit on top. Phase 5 (§16h) and Phase 6 (§16i) are not built.
+commit on top. Phase 3's derived-column sorting — the three views, `Doc.proseJsonLength` and its
+trigger, and the two foreign-key indexes the comment counts need — is a third: it is the only part
+that carries migrations, and separating it keeps a schema change out of a commit that is otherwise
+all application code. Phase 5 (§16h) and Phase 6 (§16i) are not built.
 
 ### 16k. As built
 
@@ -3966,6 +4037,28 @@ telling the caller more.
 The row-status border now sits on the selection checkbox's cell, since that became the first
 `<td>`. Still the row's leftmost edge, which is what the border is for.
 
+**The derived-column sorting** (§16e) is five migrations: `post_activity`, `post_metrics` and
+`doc_metrics`; the two foreign-key indexes `post_metrics`' comment counts need
+(`comment.thread_id`, `comment_thread.post_id` — Postgres indexes a primary key but never the
+referencing side of a foreign key); and `Doc.prose_json_length` with its trigger. On the
+application side that is three `view` blocks plus their relations, the `buildOrderBy` cases, and
+the pages reading each value from the thing that sorts it — which let `/posts` drop the `authors`
+and `threads` includes entirely (the latter pulled every comment of every post on the page into
+Node to count two statuses) and `/docs` drop its second `$queryRaw` round trip for `doc_length`.
+
+`e2e/admin-table.spec.ts` asserts the actual row order in both directions for every one of these
+columns. That is the only assertion that means anything here: a sort through a view fails by
+returning the wrong order, not by throwing.
+
+Two operational notes this surfaced, both in CLAUDE.md but easy to be bitten by anyway. Adding a
+view is adding a *model*, so a `next dev` started before `prisma generate` keeps the old client in
+module memory and every `/posts` query dies with `Unknown argument 'activity'` — restarting the dev
+server is the whole fix, regenerating alone is not. And a doc's `prose_json` is a cache with no
+recompute-on-read, so the three places that create a doc without a collab server in the loop
+(`scripts/seed-sample-data.ts`, `scripts/test-doc.ts`, `e2e/db-worker.ts`) have to write it
+themselves; they all call `docContentFromYdoc`, the same derivation `server/doc-cache.ts` uses, and
+`scripts/integrity/check-doc-integrity.ts` is what verifies they agree.
+
 ### 16l. Known gaps
 
 - **`User.rowsPerPage` is only editable in `/users`, which is ADMIN-only.** An AUTHOR or
@@ -3974,15 +4067,63 @@ The row-status border now sits on the selection checkbox's cell, since that beca
   home for a self-service version is `/dashboard`, alongside whatever other per-account
   preferences arrive — §16i's `User.tableColumns` will want exactly the same surface, which
   is the argument for building it once, then, rather than twice.
-- **Five columns lost their sort** (§16e's table). If any is worth restoring, the fix is
-  one of two shapes, and which one depends on the column: denormalize it onto the row
-  (right for `/docs`' Length, which is a pure function of `prose_json` and could be a
-  generated column or trigger-maintained), or select the page's ids through a raw SQL query
-  that can join and aggregate freely, then fetch those ids through Prisma and re-order in
-  JS (right for the to-many columns — byline lists, comment counts, latest publication
-  event). The second buys back every sort at once but hand-writes the permission-scoped
-  `WHERE`, which is precisely the type safety `/docs`' existing two-query split was written
-  to avoid losing.
+- **Each view is recomputed per query, and a sort has no `WHERE` to push down.** This is the
+  cost that decides view-versus-column, so it is worth stating as a rule: reach for a view
+  when a value is *awkward to reach* (a joined byline, a filtered count) and for a stored
+  column when it is *expensive to compute*. A view's per-query cost is not bounded by the
+  page size — ordering by one of its columns evaluates the expression for every row in the
+  table, however few end up on screen.
+
+  `/docs`' Length is the column where that bites, and the reason it is `Doc.proseJsonLength`
+  rather than `doc_metrics.length`. `doc_length` is a recursive walk over the whole document
+  body, measured here at **~52µs per 1k characters** (~2.1ms for a 40k-character doc, ~0.04ms
+  for a 500-character one). Through a view that lands in the two worst places: `/docs` would
+  recompute it for the page's 25 docs on *every* load, and sorting by it would walk every doc
+  in the table — around a second per page load at 1,000 docs of 20k characters, growing with
+  the corpus. The write side pays one walk per debounced collab flush. The other four columns
+  have no such asymmetry: a `string_agg` over a byline and a `count(*) FILTER` are cheap, and
+  `post_activity`'s argmax is served straight from `post_publication_event`'s existing
+  `(post_id, created_at)` index.
+
+  Three things that decided the column's shape, each checked rather than assumed:
+
+  - **A trigger, not a `GENERATED ... STORED` column.** The generated column is the better
+    mechanism on every axis but one — identical cost, and it *cannot* drift. Prisma reads and
+    sorts it correctly and `doc.create()` works (Prisma omits unnamed columns from the
+    INSERT). But `migrate diff` reads the generation expression as a column default and emits
+    `ALTER COLUMN "prose_json_length" DROP DEFAULT` permanently, so every future `migrate dev`
+    would offer to strip the generated-ness. A plain column plus a trigger diffs clean,
+    because Migrate doesn't introspect triggers. It wins by being invisible. (PG18's *virtual*
+    generated columns are out regardless — they reject user-defined functions.)
+  - **The trigger is narrowed to `UPDATE OF prose_json`**, so title/slug/visibility/soft-delete
+    writes don't pay the walk. Verified: a title-only update leaves a deliberately-corrupted
+    length untouched, while a body update recomputes it.
+  - **Nothing in the application feeds it.** `server/doc-cache.ts` writes `prose_json` and the
+    column follows — confirmed end to end by typing 31 characters into a live editor and
+    watching the flush land `31`.
+
+  What it costs: drift is possible where a view cannot drift, since a trigger can be bypassed
+  by `DISABLE TRIGGER`, a `COPY`, or a restore. `scripts/integrity/check-doc-integrity.ts`
+  has a table-wide `length-cache` check for that, reporting the stored and actual values and
+  the no-op write that repairs them. No index on the column: sorting an `int` is cheap enough
+  that one would be maintenance cost without a demonstrated need.
+- **A view that reads its own base table is scanned twice under a sort, and there is no knob
+  for it.** Postgres 18's self-join elimination is precisely the optimisation and cannot
+  help: it only fires on `INNER` joins, while Prisma emits a `LEFT JOIN` for a to-one
+  relation ordering regardless of how the relation's optionality is declared (it also refuses
+  a 1:1 with both sides required). `post_metrics` pays this — it reads `FROM post`, which is
+  the readable shape and gives every post a row. `doc_metrics` avoids it by grouping
+  `doc_author` instead, which is only possible because Length is a column rather than a view
+  expression; the same trick would work for `post_metrics` as a `FULL OUTER JOIN` of its two
+  aggregates, at the cost of readability and of making both counts nullable for a post with
+  authors but no comments. Not worth it for one avoided scan of a small table.
+- **Prisma issues the two halves of a view differently, and only one is a join.** An
+  `orderBy` through a view is a `LEFT JOIN`; an `include`/`select` of it is a separate
+  `WHERE <pk> IN (…)` query. Worth knowing because it means the display path costs one flat
+  round trip rather than anything per row — and because the two paths can therefore have
+  quite different plans for what looks like one query.
+- **Each view is a `previewFeatures = ["views"]` model Migrate won't manage**, so its DDL is
+  hand-written and has to be kept in step with the schema block by hand. There are three.
 - **Cross-page selection is still unresolved** (§16g). Selecting rows, paging, and coming
   back keeps the selection in React state, so it survives — but the header checkbox only
   ever means "this page", and there is no way to act on "all N matching".

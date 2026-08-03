@@ -3,6 +3,10 @@
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
+  // `views` is still a preview feature in Prisma 7.9 — it's what makes the
+  // `view` block below generate a model at all. See PostActivity for why a
+  // view earns its keep here.
+  previewFeatures = ["views"]
 }
 
 // No `url` here: Prisma 7 rejects it in the schema (P1012). The CLI reads the
@@ -224,9 +228,68 @@ model Post {
   publicationEvents PostPublicationEvent[] @relation("PostEvents")
   deletedBy         User?                  @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory       PostSlugHistory[]
+  activity          PostActivity?
+  metrics           PostMetrics?
 
   @@index([docId])
   @@map("post")
+}
+
+// The latest publication event per post, as a database view (PLAN.md §16e).
+//
+// Exists to make "Last edit by"/"Last edit at" sortable on /posts. Both are
+// properties of the *most recent* row of a to-many relation, and Prisma can
+// only order a to-many by `_count` — but it orders a to-one relation's
+// columns freely, and a view keyed 1:1 on post_id is a to-one relation. The
+// argmax (DISTINCT ON) happens in SQL, where it belongs; "Last edit by" isn't
+// even an aggregate, so no amount of Prisma orderBy would have expressed it.
+//
+// Two things to know before touching it:
+//   - Prisma Migrate does not manage views. `migrate diff` emits nothing for
+//     this block, so the CREATE VIEW lives in a hand-written migration
+//     (add_post_activity_view) the same way doc_length() does. Changing the
+//     view means a new migration with CREATE OR REPLACE VIEW, not just an
+//     edit here.
+//   - The generated client will happily *type* writes to this model
+//     (PostActivityCreateInput and friends). Postgres will reject them; the
+//     view is read-only in fact, but nothing in TypeScript says so.
+view PostActivity {
+  // @unique, not @id: Prisma rejects a primary key on a view outright
+  // ("Views cannot have primary keys").
+  postId         String    @unique @map("post_id")
+  lastEventAt    DateTime? @map("last_event_at")
+  lastEditorName String?   @map("last_editor_name")
+
+  post Post @relation(fields: [postId], references: [id])
+
+  @@map("post_activity")
+}
+
+// Per-post aggregates, as a database view (PLAN.md §16e/§16l) — the byline
+// and the comment counts /posts shows as "Author(s)" and "Comments".
+//
+// Same trick as PostActivity above and every caveat there applies verbatim
+// (Migrate doesn't manage it; the client will type writes Postgres rejects).
+// Kept separate from PostActivity deliberately: that one is an argmax over
+// post_publication_event with a row only for posts that have events, this one
+// is an aggregate with a row for every post. See add_post_metrics_view.
+//
+// Why these two couldn't be sorted before: both are derived from a to-many
+// relation, and `orderBy` over a to-many offers only `_count`. A joined
+// byline is not a count, and "approved comments, excluding soft-deleted ones"
+// is a *filtered* count `_count` can't express either.
+view PostMetrics {
+  postId String @unique @map("post_id")
+  // NULL for a post with no authors — sorted `nulls: "last"` so such a post
+  // stays out of the way in both directions, and rendered as "" so the cell
+  // reads exactly as it did when this was a JS join over the authors include.
+  byline        String? @map("byline")
+  approvedCount Int     @map("approved_count")
+  pendingCount  Int     @map("pending_count")
+
+  post Post @relation(fields: [postId], references: [id])
+
+  @@map("post_metrics")
 }
 
 // Redirect sources for a post's past slugs — one row per slug the post has
@@ -338,6 +401,11 @@ model CommentThread {
   event    PostPublicationEvent @relation(fields: [anchoredEventId], references: [id])
   comments Comment[]
 
+  // Postgres indexes a primary key but never the referencing side of a
+  // foreign key. post_metrics' comment counts walk post → thread → comment,
+  // so without this the display path rescans this table per post on the page
+  // (add_comment_count_indexes).
+  @@index([postId])
   @@map("comment_thread")
 }
 
@@ -363,6 +431,8 @@ model Comment {
   statusChangedBy User?         @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
   deletedBy       User?         @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
 
+  // The other half of post_metrics' count path — see CommentThread.postId.
+  @@index([threadId])
   @@map("comment")
 }
 
@@ -384,6 +454,16 @@ model Doc {
   title           String
   visibility      DocVisibility @default(PRIVATE)
   proseJson       Json?         @map("prose_json")
+  // Character count of proseJson, maintained by the doc_sync_prose_json_length
+  // trigger — never assign to it. A plain column rather than a GENERATED one
+  // because Prisma reads a generated column's expression as a default and
+  // would offer to strip it on every migrate (add_doc_prose_json_length), and
+  // a stored column rather than a doc_metrics view column because a view
+  // recomputes the recursive walk per query — for every doc in the table when
+  // sorting by it, not just the page. @default(0) so
+  // `doc.create()` needn't name it; the trigger overwrites it on INSERT
+  // anyway.
+  proseJsonLength Int           @default(0) @map("prose_json_length")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
   deletedByUserId String?       @map("deleted_by_user_id")
@@ -396,8 +476,31 @@ model Doc {
   docLinks          DocLink[]
   posts             Post[]
   publicationEvents PostPublicationEvent[]
+  metrics           DocMetrics?
 
   @@map("doc")
+}
+
+// The joined byline /docs shows as "Author(s)", as a database view (PLAN.md
+// §16e/§16l). Same caveats as PostMetrics; see add_doc_metrics_view.
+//
+// Unlike PostMetrics this is built by grouping doc_author rather than by
+// selecting FROM doc, so it never references the base table. That is what
+// keeps Prisma's LEFT JOIN back to doc from scanning it twice on every sort
+// through the view — Postgres 18's self-join elimination only collapses INNER
+// joins, so the second scan has to be removed rather than optimised away.
+// /docs' other derived value, Length, would have forced this view to read doc;
+// it is a stored column instead (Doc.proseJsonLength).
+view DocMetrics {
+  docId String @unique @map("doc_id")
+  // Never NULL in practice: a doc with no authors simply has no row here now
+  // that the view groups doc_author, so the *relation* is the optional part.
+  // Still declared nullable because a view's columns carry no NOT NULL.
+  byline String? @map("byline")
+
+  doc Doc @relation(fields: [docId], references: [id])
+
+  @@map("doc_metrics")
 }
 
 model DocAuthor {

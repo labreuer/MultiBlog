@@ -47,6 +47,7 @@ import { uniquePostSlug } from "../src/lib/post-slug";
 import { contentExtensions, titleExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
 import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
 import { postContentFromYdoc } from "../src/lib/post-content";
+import { docContentFromYdoc } from "../src/lib/doc-content";
 import { ensureYdocSnapshotAt } from "../src/lib/ydoc-snapshot";
 import { seedAnnotationYdoc } from "../src/lib/annotation-ydoc-seed";
 import { applyAnnotationMark } from "../src/lib/annotation-admin";
@@ -126,8 +127,26 @@ async function createDoc(opts: {
   Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededTitle));
   seededTitle.destroy();
   const { ydoc, stateVector } = encodeYdocState(seed);
+
+  // Write the title/prose_json cache the collab server would have written on
+  // its first store debounce (server/doc-cache.ts), using that same derivation
+  // so the two cannot disagree. Seeding only the ydoc leaves prose_json NULL,
+  // and nothing recomputes it on read — so /docs reports the doc as 0
+  // characters, and every non-editing surface sees an empty body, until
+  // somebody happens to open it in an editor. Two of these four sample docs
+  // used to be in exactly that state, and only escaped it by accident: the
+  // ones that get an anchored annotation are touched through the collab
+  // server by applyAnnotationMark, which triggers the flush as a side effect.
+  // scripts/integrity/check-doc-integrity.ts is what surfaced it.
+  const cached = docContentFromYdoc(seed);
   seed.destroy();
   await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
+  // prose_json_length follows automatically — the doc_sync_prose_json_length
+  // trigger fires on any UPDATE naming prose_json.
+  await prisma.doc.update({
+    where: { id: doc.id },
+    data: { proseJson: cached.proseJson as Prisma.InputJsonValue, title: cached.title },
+  });
 
   console.log(`  doc "${doc.title}" (${opts.visibility})`);
   return { id: doc.id, slug: doc.slug, title: doc.title, bodyText: opts.bodyText };

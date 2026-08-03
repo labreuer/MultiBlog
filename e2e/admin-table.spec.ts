@@ -5,7 +5,17 @@
 // cells, so it exercises the full idle → edited → saving → saved path that
 // §16f describes; the URL assertions hold for every table on the kit.
 import { test, expect } from "./fixtures";
-import { createTestUser, deleteTestUser, uniqueEmail } from "./db";
+import {
+  createComment,
+  createTestDoc,
+  createTestPost,
+  createTestUser,
+  deleteTestDoc,
+  deleteTestPost,
+  deleteTestUser,
+  uniqueEmail,
+  uniqueTitle,
+} from "./db";
 
 // The four border colors from AdminTable.module.css, as the browser reports
 // them. Asserting the computed color (rather than a class name) is what makes
@@ -135,6 +145,226 @@ test.describe("admin table kit", () => {
     } finally {
       await deleteTestUser(first);
       await deleteTestUser(second);
+    }
+  });
+
+  // PLAN.md §16e — these two columns are the reason the post_activity view
+  // exists: both are properties of the *latest* row of a to-many relation,
+  // which Prisma can only order by _count. Asserting the actual row order (not
+  // just that the header is clickable) is the whole point — a sort through a
+  // view fails by returning the wrong order, not by throwing.
+  test("Last edit by/at sort through the post_activity view", async ({ page }) => {
+    const token = `viewsort${Date.now()}`;
+    const earlyAuthor = uniqueEmail("viewsort-early");
+    const lateAuthor = uniqueEmail("viewsort-late");
+    // Names, not emails, decide the "Last edit by" order: the view is
+    // COALESCE(name, email), and these two bracket the alphabet.
+    await createTestUser({ email: earlyAuthor, name: "Aaa Firstauthor", role: "ADMIN" });
+    await createTestUser({ email: lateAuthor, name: "Zzz Lastauthor", role: "ADMIN" });
+
+    // Published in this order, so `alpha`'s publication event is the older one.
+    const alpha = await createTestPost({
+      authorEmail: earlyAuthor,
+      title: uniqueTitle(`${token} alpha`),
+      publish: true,
+    });
+    const beta = await createTestPost({
+      authorEmail: lateAuthor,
+      title: uniqueTitle(`${token} beta`),
+      publish: true,
+    });
+
+    try {
+      const table = page.getByRole("table").first();
+      const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+
+      // ?q= narrows to just this test's two posts, so other rows can't affect
+      // the relative order being asserted.
+      await page.goto(`/posts?q=${token}&sort=lastEdit:asc`);
+      expect(await titlesInOrder()).toEqual([alpha.title, beta.title]);
+
+      await page.goto(`/posts?q=${token}&sort=lastEdit:desc`);
+      expect(await titlesInOrder()).toEqual([beta.title, alpha.title]);
+
+      await page.goto(`/posts?q=${token}&sort=editor:asc`);
+      expect(await titlesInOrder()).toEqual([alpha.title, beta.title]);
+
+      await page.goto(`/posts?q=${token}&sort=editor:desc`);
+      expect(await titlesInOrder()).toEqual([beta.title, alpha.title]);
+
+      // The displayed names come from the same view the sort reads, so they
+      // agree by construction rather than by coincidence.
+      await expect(page.getByRole("row").filter({ hasText: alpha.title })).toContainText("Aaa Firstauthor");
+      await expect(page.getByRole("row").filter({ hasText: beta.title })).toContainText("Zzz Lastauthor");
+
+      // And the header is wired up, not just the URL.
+      await page.goto(`/posts?q=${token}`);
+      await page.getByRole("columnheader", { name: "Last edit at" }).click();
+      await expect(page).toHaveURL(/sort=lastEdit%3Aasc/);
+    } finally {
+      await deleteTestPost(alpha.id);
+      await deleteTestPost(beta.id);
+      await deleteTestUser(earlyAuthor);
+      await deleteTestUser(lateAuthor);
+    }
+  });
+
+  // PLAN.md §16l — the last two /posts columns to get a sort, both through
+  // post_metrics. Same reasoning as the post_activity test above: a sort
+  // through a view fails by returning the wrong order, so only asserting the
+  // actual row order proves anything.
+  test("Author(s) and Comments sort through the post_metrics view", async ({ page }) => {
+    const token = `pmetrics${Date.now()}`;
+    const aaAuthor = uniqueEmail("pmetrics-aa");
+    const zzAuthor = uniqueEmail("pmetrics-zz");
+    // createTestUser derives adminInitials as name.slice(0, 2).toUpperCase(),
+    // and the byline the view string_aggs is built from those — so these two
+    // names bracket the alphabet as "AA" and "ZZ".
+    await createTestUser({ email: aaAuthor, name: "Aaa Alpha", role: "ADMIN" });
+    await createTestUser({ email: zzAuthor, name: "Zzz Omega", role: "ADMIN" });
+
+    const alpha = await createTestPost({
+      authorEmail: aaAuthor,
+      title: uniqueTitle(`${token} alpha`),
+      publish: true,
+    });
+    const beta = await createTestPost({
+      authorEmail: zzAuthor,
+      title: uniqueTitle(`${token} beta`),
+      publish: true,
+    });
+
+    // beta gets everything the Comments column counts; alpha gets only a SPAM
+    // comment, which the view must *not* count — so alpha reading 0 is a real
+    // assertion about the status filter, not just an absence of data.
+    for (const body of ["First approved", "Second approved"]) {
+      await createComment({
+        postId: beta.id,
+        anchoredEventId: beta.eventId!,
+        email: uniqueEmail("pmetrics-commenter"),
+        displayName: "Beta Commenter",
+        body,
+        status: "APPROVED",
+      });
+    }
+    await createComment({
+      postId: beta.id,
+      anchoredEventId: beta.eventId!,
+      email: uniqueEmail("pmetrics-commenter"),
+      displayName: "Beta Moderatee",
+      body: "Awaiting moderation",
+      status: "PENDING",
+    });
+    await createComment({
+      postId: alpha.id,
+      anchoredEventId: alpha.eventId!,
+      email: uniqueEmail("pmetrics-commenter"),
+      displayName: "Alpha Spammer",
+      body: "Uncounted spam",
+      status: "SPAM",
+    });
+
+    try {
+      const table = page.getByRole("table").first();
+      const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+
+      await page.goto(`/posts?q=${token}&sort=authors:asc`);
+      expect(await titlesInOrder()).toEqual([alpha.title, beta.title]);
+
+      await page.goto(`/posts?q=${token}&sort=authors:desc`);
+      expect(await titlesInOrder()).toEqual([beta.title, alpha.title]);
+
+      // The byline the view produced is also the byline the cell prints —
+      // the property that makes sorting and display impossible to drift.
+      await expect(page.getByRole("row").filter({ hasText: alpha.title })).toContainText("AA");
+      await expect(page.getByRole("row").filter({ hasText: beta.title })).toContainText("ZZ");
+
+      // beta has 2 approved, alpha 0, so descending puts beta first.
+      await page.goto(`/posts?q=${token}&sort=comments:desc`);
+      expect(await titlesInOrder()).toEqual([beta.title, alpha.title]);
+
+      await page.goto(`/posts?q=${token}&sort=comments:asc`);
+      expect(await titlesInOrder()).toEqual([alpha.title, beta.title]);
+
+      // SPAM counts for neither number: alpha's only comment is spam, so its
+      // cell offers no moderation link at all.
+      const betaRow = page.getByRole("row").filter({ hasText: beta.title });
+      const alphaRow = page.getByRole("row").filter({ hasText: alpha.title });
+      await expect(betaRow).toContainText("in moderation 1");
+      await expect(alphaRow).not.toContainText("in moderation");
+
+      await page.goto(`/posts?q=${token}`);
+      await page.getByRole("columnheader", { name: "Comments" }).click();
+      await expect(page).toHaveURL(/sort=comments%3Aasc/);
+    } finally {
+      await deleteTestPost(alpha.id);
+      await deleteTestPost(beta.id);
+      await deleteTestUser(aaAuthor);
+      await deleteTestUser(zzAuthor);
+    }
+  });
+
+  // PLAN.md §16l — /docs' last two, through doc_metrics. Length is the one
+  // that also retired a second round trip, so this covers both the ordering
+  // and that the number still renders from the view.
+  test("Author(s) and Length sort through the doc_metrics view", async ({ page }) => {
+    const token = `dmetrics${Date.now()}`;
+    const aaAuthor = uniqueEmail("dmetrics-aa");
+    const zzAuthor = uniqueEmail("dmetrics-zz");
+    await createTestUser({ email: aaAuthor, name: "Aaa Alpha", role: "ADMIN" });
+    await createTestUser({ email: zzAuthor, name: "Zzz Omega", role: "ADMIN" });
+
+    // `bodyText` is what makes this test possible: createTestDoc writes the
+    // prose_json cache the collab server would have written, and Length is
+    // measured from that column — so two docs given different bodies really do
+    // differ here, with no collab server in the loop.
+    const shortBody = "Tiny.";
+    const longBody = "A considerably longer body, so the two docs cannot tie on length.";
+    const shortDoc = await createTestDoc({
+      authorEmail: aaAuthor,
+      title: uniqueTitle(`${token} shorter`),
+      bodyText: shortBody,
+    });
+    const longDoc = await createTestDoc({
+      authorEmail: zzAuthor,
+      title: uniqueTitle(`${token} longer`),
+      bodyText: longBody,
+    });
+
+    try {
+      const table = page.getByRole("table").first();
+      const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+
+      await page.goto(`/docs?q=${token}&sort=length:asc`);
+      expect(await titlesInOrder()).toEqual([shortDoc.title, longDoc.title]);
+
+      await page.goto(`/docs?q=${token}&sort=length:desc`);
+      expect(await titlesInOrder()).toEqual([longDoc.title, shortDoc.title]);
+
+      // The rendered number is doc_length's own count of the body text, which
+      // for a single paragraph of plain text is just its character count.
+      await expect(page.getByRole("row").filter({ hasText: longDoc.title })).toContainText(String(longBody.length));
+
+      // "Aaa Alpha" authors the short doc, "Zzz Omega" the long one, so the
+      // byline order is the opposite of the length order — which is what
+      // makes these two assertions independent of each other.
+      await page.goto(`/docs?q=${token}&sort=authors:asc`);
+      expect(await titlesInOrder()).toEqual([shortDoc.title, longDoc.title]);
+
+      await page.goto(`/docs?q=${token}&sort=authors:desc`);
+      expect(await titlesInOrder()).toEqual([longDoc.title, shortDoc.title]);
+
+      await expect(page.getByRole("row").filter({ hasText: shortDoc.title })).toContainText("AA");
+      await expect(page.getByRole("row").filter({ hasText: longDoc.title })).toContainText("ZZ");
+
+      await page.goto(`/docs?q=${token}`);
+      await page.getByRole("columnheader", { name: "Length" }).click();
+      await expect(page).toHaveURL(/sort=length%3Aasc/);
+    } finally {
+      await deleteTestDoc(shortDoc.id);
+      await deleteTestDoc(longDoc.id);
+      await deleteTestUser(aaAuthor);
+      await deleteTestUser(zzAuthor);
     }
   });
 

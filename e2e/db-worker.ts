@@ -26,10 +26,11 @@ import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
-import { contentExtensions, collectMarkAttrValues, pmDocContentSchema } from "@/lib/tiptap-schema";
+import { contentExtensions, titleExtensions, collectMarkAttrValues, pmDocContentSchema } from "@/lib/tiptap-schema";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { captureAnchor } from "@/lib/doc-link-anchor";
 import { postContentFromYdoc } from "@/lib/post-content";
+import { docContentFromYdoc } from "@/lib/doc-content";
 import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
@@ -292,11 +293,36 @@ export async function createTestDoc(opts: {
     Y.applyUpdate(seed, Y.encodeStateAsUpdate(seeded));
     seeded.destroy();
   }
+  // The title is a *separate* Yjs fragment (PLAN.md §3d) and it, not the
+  // Doc.title column, is canonical — server/doc-cache.ts derives the column
+  // from it whenever the collab server touches the document. Seed only the
+  // body and the first store debounce writes an empty title straight over the
+  // title this fixture was asked for, so any spec that opens the doc and then
+  // looks for its title by name fails in a way that reads like a title bug.
+  const seededTitle = TiptapTransformer.toYdoc(
+    { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: title }] }] },
+    "title",
+    titleExtensions,
+  );
+  Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededTitle));
+  seededTitle.destroy();
+
   const { ydoc, stateVector } = encodeYdocState(seed);
+  // Write the same title/prose_json cache the collab server would write on its
+  // first store debounce, via that same derivation. Without it prose_json
+  // stays NULL and nothing recomputes it on read, so a fixture doc measures 0
+  // characters on /docs however much body text it was given — which is a
+  // fixture that quietly can't be used to test anything reading a doc's body.
+  const cached = docContentFromYdoc(seed);
   seed.destroy();
   await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
+  // prose_json_length follows from the doc_sync_prose_json_length trigger.
+  const cachedDoc = await prisma.doc.update({
+    where: { id: doc.id },
+    data: { proseJson: cached.proseJson as Prisma.InputJsonValue, title: cached.title },
+  });
 
-  return { id: doc.id, slug: doc.slug, title: doc.title };
+  return { id: cachedDoc.id, slug: cachedDoc.slug, title: cachedDoc.title };
 }
 
 export async function deleteTestDoc(idOrSlug: string): Promise<void> {

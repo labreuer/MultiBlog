@@ -9,7 +9,16 @@ Admin tables (`/posts`, `/docs`, `/users`, `/comments`, `/annotations`) all rend
 one kit — `src/components/table/` plus a per-table `*-query.ts` over `src/lib/table-query.ts`.
 Filters, sort, pagination and the show-deleted toggle live in the querystring and are
 applied in Postgres, never client-side; a new admin table means a `*-query.ts` and the
-kit's hooks, not a fresh `<table>`. Rationale and the phases still unbuilt: PLAN.md §16.
+kit's hooks, not a fresh `<table>`. Every column on every one of them sorts — the ones
+Prisma's `orderBy` can't reach (a joined byline, filtered counts) go through a database
+view keyed 1:1 on the table's primary key, which Prisma then treats as an ordinary to-one
+relation: `post_activity`, `post_metrics`, `doc_metrics`. Reach for that before
+denormalizing or re-sorting in JS. The exception is a value expensive to *compute* rather
+than merely awkward to reach — a view recomputes per query, and sorting through one has no
+`WHERE` to push down, so it evaluates the expression for every row in the table on every
+page load. That is why `/docs`' Length is a stored, trigger-maintained column
+(`Doc.proseJsonLength`) and not a view column. Rationale, measurements, costs and the
+phases still unbuilt: PLAN.md §16 (§16e, §16l).
 Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
 [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 
@@ -32,9 +41,40 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
 
 ## Database
 
-- Local Postgres 14 (Windows service `postgresql-x64-14`). Role/DB `multiblog` connects
-  passwordless via trust entries in `pg_hba.conf` scoped to only that role+DB; all other
-  roles still require passwords. `psql -U multiblog -h 127.0.0.1 -d multiblog` just works.
+- Local **Postgres 18** (Windows service `postgresql-x64-18`), owning port 5432. The
+  `multiblog` role/DB connect passwordless — the 18 instance trusts all local connections.
+  `psql -U multiblog -h 127.0.0.1 -d multiblog` just works. The old `postgresql-x64-14`
+  service is stopped, not uninstalled: its data directory still holds the pre-rebuild
+  database, recoverable with `pg_dump` by starting 14 on a spare port. That door closes if
+  14 is ever uninstalled.
+- **What Postgres 18 does *not* change, having been checked directly.** Worth recording
+  because each looks like it should help and doesn't:
+  - `jsonb_path_query(doc, '$.**.text')` **still double-counts** on 18.4, exactly as
+    `add_doc_length_function`'s header found on 14 (a lone `{"type":"text","text":"hello"}`
+    inside an array still yields `["hello","hello"]`). `doc_length`'s recursive CTE is not
+    a workaround waiting to be retired. `JSON_TABLE` (new in 17) doesn't help either — it
+    needs a known shape, and a TipTap document nests arbitrarily.
+  - **Virtual generated columns** (18's headline, and now the default) reject
+    user-defined functions outright: *"Virtual generated columns that make use of
+    user-defined functions are not yet supported."* So `doc_length(prose_json)` cannot
+    become one. A `STORED` column *is* accepted, and Prisma reads and sorts it correctly
+    — but `migrate diff` reads the generation expression as a column default and
+    permanently emits `ALTER COLUMN … DROP DEFAULT`, so every `migrate dev` would offer
+    to strip the generated-ness. Hence `Doc.proseJsonLength` being a plain column plus a
+    trigger (`doc_sync_prose_json_length`) instead: Migrate doesn't introspect triggers,
+    so the trigger is invisible to it and the diff stays clean. **Never assign to that
+    column** — the trigger owns it, on `INSERT` and on any `UPDATE` naming `prose_json`.
+    A bypass (`DISABLE TRIGGER`, `COPY`, a restore) drifts silently; the `length-cache`
+    check in `scripts/integrity/check-doc-integrity.ts` is what catches it, and a no-op
+    `UPDATE doc SET prose_json = prose_json WHERE id = …` re-fires the trigger to repair.
+  - **Self-join elimination** is on by default and does work (an inner join of a table to
+    itself on the primary key collapses to one scan) — but it only fires for `INNER` joins,
+    and Prisma emits a `LEFT JOIN` for a to-one relation ordering no matter how the
+    relation is declared. So it does not rescue a view that reads its own base table. See
+    `add_post_metrics_view` and PLAN.md §16l.
+  - **B-tree skip scan** changes nothing here: every composite index this schema relies on
+    (`post_publication_event(post_id, created_at)`, `post_author`/`doc_author`'s composite
+    primary keys) is already queried on its leading column.
 - Restarting the Postgres service needs an elevated shell — ask the user to do it.
 - `npx prisma generate` fails with EPERM while the dev server runs (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
@@ -212,7 +252,10 @@ duplicated, slugs are claimed through the transaction (`claimSlug` — `uniqueDo
 `uniqueUserSlug` query the global client and can't see rows the same import just created),
 the `ydoc` blob is always recomputed as `Y.mergeUpdates` over the rows being written rather
 than copied from a source, and `@updatedAt` columns need raw SQL to backdate. Afterwards,
-`npx tsx scripts/check-ydoc-integrity.ts` is the acceptance test.
+`scripts/integrity/` is the acceptance test — run both of its checks, ydoc first (a bad
+blob makes the doc-side checks report faults that evaporate once it's repaired). See
+[scripts/integrity/README.md](scripts/integrity/README.md) for which link of the
+`ydoc_update → ydoc.ydoc → doc.*` chain each one covers.
 
 ### Performance measurement
 

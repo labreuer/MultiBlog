@@ -11,19 +11,45 @@ import {
 // table now uses: the five shared params come from table-query.ts, the sort
 // keys and default sort are this table's own.
 
-// Four of /posts' nine columns are deliberately absent from this list, and
-// stay display-only (§16e) — each is derived from a to-many relation, which
-// Prisma has no `orderBy` for:
+// Every /posts column sorts (§16e/§16l). Three of them only because a database
+// view gives Prisma a to-one relation to order through, each expressing
+// something `orderBy` cannot reach on a to-many — which offers `_count` and
+// nothing else:
 //
-//   Author(s)          joined adminInitials across PostAuthor
-//   Comments           approved/pending counts nested through threads, by status
-//   Last edit by / at  the *latest* PublicationEvent, not an aggregate
+//   editor/lastEdit  post_activity — an *argmax*, the actor and timestamp of
+//                    the most recent publication event. "Last edit by" isn't
+//                    even an aggregate, so no orderBy extension short of raw
+//                    SQL could have expressed it.
+//   authors          post_metrics.byline — adminInitials string_agg'd across
+//                    PostAuthor in byline order, i.e. the same string the
+//                    cell prints.
+//   comments         post_metrics.approved_count/pending_count — *filtered*
+//                    counts (by status, excluding soft-deleted comments),
+//                    which `_count` cannot express even though it counts.
 //
-// "events" survives because it's a plain relation count (_count), which
-// Prisma does order by. Same trade-off /comments already made for its
-// commenter-activity column.
-export type PostsSortKey = "title" | "published" | "events" | "created" | "deleted";
-const SORT_KEYS: readonly PostsSortKey[] = ["title", "published", "events", "created", "deleted"];
+// "events" needs no view: a plain relation count is exactly what `_count`
+// orders by.
+export type PostsSortKey =
+  | "title"
+  | "authors"
+  | "published"
+  | "comments"
+  | "events"
+  | "editor"
+  | "lastEdit"
+  | "created"
+  | "deleted";
+const SORT_KEYS: readonly PostsSortKey[] = [
+  "title",
+  "authors",
+  "published",
+  "comments",
+  "events",
+  "editor",
+  "lastEdit",
+  "created",
+  "deleted",
+];
 export const DEFAULT_SORT: SortColumn<PostsSortKey>[] = [{ key: "created", dir: "desc" }];
 
 export type PostsFilters = BaseFilters<PostsSortKey>;

@@ -18,7 +18,8 @@ author ids are opaque; add `--include-titles` to give each entry a `pads` array 
 the titles that author wrote in, since a revision count rarely identifies an
 anonymous id but the documents they wrote in often do. `--dry-run` does the whole
 import inside a transaction and rolls it back. Run all three, in that order, before
-a live run, then `npx tsx scripts/check-ydoc-integrity.ts` afterwards.
+a live run, then the checks in `scripts/integrity/` afterwards — `check-ydoc-integrity.ts`
+first, then `check-doc-integrity.ts` (see that folder's README for why the order matters).
 
 Full flag reference and the design rationale for each stage live in the file headers
 of `import-etherpad.ts`, `dirty-db.ts`, `changeset.ts`, and `to-prosemirror.ts` — this

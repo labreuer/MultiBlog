@@ -99,7 +99,17 @@ function formatCountdown(target: Date): string {
   return parts.join(" ");
 }
 
-const SORTABLE_KEYS = ["title", "published", "events", "created", "deleted"] as const;
+const SORTABLE_KEYS = [
+  "title",
+  "authors",
+  "published",
+  "comments",
+  "events",
+  "editor",
+  "lastEdit",
+  "created",
+  "deleted",
+] as const;
 const COLUMN_COUNT = 10;
 
 export default function PostsTable({
@@ -191,16 +201,24 @@ export default function PostsTable({
             <SortHeader sortKey="title" sort={filters.sort} onSort={handleSort} thRef={titleThRef}>
               Title
             </SortHeader>
-            <th className={adminStyles.headerCell}>Author(s)</th>
+            <SortHeader sortKey="authors" sort={filters.sort} onSort={handleSort}>
+              Author(s)
+            </SortHeader>
             <SortHeader sortKey="published" sort={filters.sort} onSort={handleSort}>
               Published
             </SortHeader>
-            <th className={adminStyles.headerCell}>Comments</th>
+            <SortHeader sortKey="comments" sort={filters.sort} onSort={handleSort}>
+              Comments
+            </SortHeader>
             <SortHeader sortKey="events" sort={filters.sort} onSort={handleSort}>
               History
             </SortHeader>
-            <th className={adminStyles.nowrapHeaderCell}>Last edit by</th>
-            <th className={adminStyles.nowrapHeaderCell}>Last edit at</th>
+            <SortHeader sortKey="editor" sort={filters.sort} onSort={handleSort} nowrap>
+              Last edit by
+            </SortHeader>
+            <SortHeader sortKey="lastEdit" sort={filters.sort} onSort={handleSort} nowrap>
+              Last edit at
+            </SortHeader>
             <SortHeader sortKey="created" sort={filters.sort} onSort={handleSort} nowrap>
               Created at
             </SortHeader>
@@ -280,9 +298,13 @@ export default function PostsTable({
         searchDescription="Free-text search over the post title."
         notes={
           <p style={{ marginTop: 8 }}>
-            <strong>Author(s)</strong>, <strong>Comments</strong> and <strong>Last edit by/at</strong> are display-only:
-            each is derived from a to-many relation (a byline list, comment counts by status, the latest publication
-            event), which has no plain <code>ORDER BY</code> to sort on (PLAN.md §16e).
+            Every column here sorts. Four do so through a database view, because each is derived from a to-many
+            relation that a plain <code>ORDER BY</code> cannot reach: <strong>Last edit by/at</strong> resolve each
+            post&apos;s most recent publication event via <code>post_activity</code>, while{" "}
+            <strong>Author(s)</strong> and <strong>Comments</strong> come from <code>post_metrics</code> — the byline
+            joined in SQL, and approved/pending counts that exclude deleted comments. Sorting by{" "}
+            <strong>Comments</strong> orders by the approved count, using the moderation count only to break ties
+            (PLAN.md §16e).
           </p>
         }
       />

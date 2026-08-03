@@ -40,16 +40,16 @@ export type DocRow = {
   authors: string;
   visibility: DocVisibility;
   createdAt: Date;
-  // Character count from doc_length(prose_json) (see /docs/page.tsx) — a
-  // Postgres function, not something computed here, so a doc's full body
-  // never has to reach this component to show its length. Display-only:
-  // there's no column for an `orderBy` to name (PLAN.md §16e).
+  // Character count, read straight off Doc.proseJsonLength — a stored column
+  // kept current by a Postgres trigger, not something computed here, so a
+  // doc's full body never has to reach this component to show its length
+  // (PLAN.md §16l).
   length: number;
   deleted: boolean;
   canEdit: boolean;
 };
 
-const SORTABLE_KEYS = ["title", "visibility", "created", "deleted"] as const;
+const SORTABLE_KEYS = ["title", "authors", "visibility", "created", "length", "deleted"] as const;
 const COLUMN_COUNT = 8;
 
 export default function DocsTable({
@@ -133,14 +133,18 @@ export default function DocsTable({
               Title
             </SortHeader>
             <th className={adminStyles.headerCell}>Edit</th>
-            <th className={adminStyles.headerCell}>Author(s)</th>
+            <SortHeader sortKey="authors" sort={filters.sort} onSort={handleSort}>
+              Author(s)
+            </SortHeader>
             <SortHeader sortKey="visibility" sort={filters.sort} onSort={handleSort}>
               Visibility
             </SortHeader>
             <SortHeader sortKey="created" sort={filters.sort} onSort={handleSort} nowrap>
               Created
             </SortHeader>
-            <th className={adminStyles.nowrapHeaderCell}>Length</th>
+            <SortHeader sortKey="length" sort={filters.sort} onSort={handleSort} nowrap>
+              Length
+            </SortHeader>
             <DeletedSortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort} />
           </tr>
         </thead>
@@ -201,9 +205,12 @@ export default function DocsTable({
         searchDescription="Free-text search over the doc title."
         notes={
           <p style={{ marginTop: 8 }}>
-            <strong>Author(s)</strong> and <strong>Length</strong> are display-only: the first is a joined list across
-            a doc&apos;s authors, the second is computed in Postgres from the document body, and neither is a column an
-            <code> ORDER BY</code> can name (PLAN.md §16e).
+            Every column here sorts except <strong>Edit</strong>, which is a link rather than a value.{" "}
+            <strong>Author(s)</strong> goes through the <code>doc_metrics</code>{" "}
+            view — the byline joined in SQL across a doc&apos;s authors, which a plain <code>ORDER BY</code> could not
+            name. <strong>Length</strong> is a
+            stored character count of the document body, measured in Postgres and kept current by a trigger, so sorting
+            by it costs no more than sorting by a date (PLAN.md §16l).
           </p>
         }
       />

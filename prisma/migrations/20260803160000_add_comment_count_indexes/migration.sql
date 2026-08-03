@@ -1,0 +1,32 @@
+-- Index the two foreign keys the post_metrics view's comment counts walk:
+-- comment_thread.post_id and comment.thread_id. Postgres indexes a primary
+-- key automatically but never the *referencing* side of a foreign key, and
+-- neither of these had one — so counting a post's comments meant a full scan
+-- of both tables however few comments the post had.
+--
+-- PLAN.md §16l named exactly this as the cost to weigh before adding a view:
+-- post_activity got its ordering free from post_publication_event's existing
+-- (post_id, created_at) index, and a view with no such support "pays for
+-- itself on every page load". This is that payment, made up front.
+--
+-- These are justified by the access pattern rather than by a measured plan —
+-- this database is too small for EXPLAIN to say anything meaningful, so no
+-- claim about which plan Postgres picks at scale is made here. What is
+-- certain is the shape: /posts reads the view back for one page's ids with
+-- `WHERE post_id IN (…)` (verified — Prisma issues an `include` of a to-one
+-- relation as its own keyed query, not as part of the join it uses to sort),
+-- and each of those lookups correlates on exactly these two columns. Without
+-- an index on them there is no access path to a single post's comments at
+-- all, only a scan of every comment in the table.
+--
+-- The sort path is the one that gains least: ordering by Comments has no
+-- WHERE to push down, so the whole view has to be built either way.
+--
+-- Names match what Prisma generates for the @@index([threadId]) /
+-- @@index([postId]) attributes added to schema.prisma alongside this
+-- migration ({table}_{column}_idx), so `migrate diff` sees no drift. Unlike
+-- the view migrations either side of this one, these indexes *are* managed by
+-- Migrate — they belong to tables it owns, so leaving them out of the schema
+-- would make the next `migrate dev` offer to drop them.
+CREATE INDEX "comment_thread_id_idx" ON "comment"("thread_id");
+CREATE INDEX "comment_thread_post_id_idx" ON "comment_thread"("post_id");
