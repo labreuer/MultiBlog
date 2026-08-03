@@ -167,6 +167,27 @@ anything repeatable.
   pointing at it can't be removed underneath it. `test-ydoc.ts` uses the equivalent
   containment for a table with no email column: it only ever creates ids under the
   `ydoc:test-` prefix (`src/lib/ydoc-names.ts`) and refuses to `delete` anything else.
+- `scripts/seed-sample-data.ts` is the odd one out, and deliberately inverts the convention
+  above. It seeds *durable* sample content for a freshly rebuilt database — four docs, four
+  posts spanning draft/scheduled/published, six comments across every status (one thread
+  quote-anchored), and four annotations, one left document-level on purpose so
+  `/annotations` has a row exercising that state. Its addresses are `@sample.invalid`
+  (RFC 2606, guaranteed unroutable) rather than `@example.com`, and its titles carry no
+  `E2E ` prefix, precisely so the e2e teardown *doesn't* sweep it back out.
+  - Re-running is idempotent rather than additive: it clears its own content first, and
+    `--reset` does only that clearing step. Both paths empty the content tables wholesale,
+    so both refuse unless the doc count is 0 (fresh database) or exactly
+    `SAMPLE_DOCS.length` (its own output) — `--force` is the deliberate override, and the
+    check counts soft-deleted docs too, since a doc in the trash is still content the clear
+    would destroy.
+  - **User rows are the exception no flag widens**: only the three `@sample.invalid`
+    addresses are ever deleted, so an account someone actually signed up with survives both
+    paths. Sample accounts use the same `testpass123` as the throwaway scripts.
+  - The collab server has to be running, or the anchored annotations quietly degrade to
+    document-level — `applyAnnotationMark` reaches the doc's live ydoc through it (§12i).
+    A doc's title is seeded into its own Yjs fragment as well as the column, because the
+    fragment is canonical (§3d) and `server/doc-cache.ts` otherwise writes an empty title
+    straight over the column on first flush.
 - The e2e suite needs none of this — its fixtures create and clean up their own rows
   (`e2e/db-worker.ts`, same `@example.com` guard, plus the `ydoc:test-` prefix guard for
   `e2e/ydoc-debug.spec.ts`), and a teardown project sweeps whatever a crashed run left
