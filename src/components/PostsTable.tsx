@@ -3,13 +3,20 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { deletePost, restorePost } from "@/app/actions/posts";
+import { deletePost, restorePost, bulkDeletePosts, bulkRestorePosts } from "@/app/actions/posts";
 import { type DateFormat, formatDate } from "@/lib/format-date";
 import { type PostsFilters, buildPostsQueryString } from "@/lib/posts-query";
 import type { PageSize } from "@/lib/table-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
 import { useRowStatus } from "@/components/table/use-row-status";
+import { useRowSelection } from "@/components/table/use-row-selection";
+import {
+  BulkToolbar,
+  SelectAllHeader,
+  SelectRowCheckbox,
+  softDeleteBulkActions,
+} from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
 import {
   CellError,
@@ -93,7 +100,7 @@ function formatCountdown(target: Date): string {
 }
 
 const SORTABLE_KEYS = ["title", "published", "events", "created", "deleted"] as const;
-const COLUMN_COUNT = 9;
+const COLUMN_COUNT = 10;
 
 export default function PostsTable({
   rows,
@@ -117,8 +124,12 @@ export default function PostsTable({
     filters,
     build: (next, extra) => buildPostsQueryString(next, extra, defaultPageSize),
   });
-  const { displayRows, revealRow } = useRevealedRows(rows, searchParams);
+  const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, runWithStatus } = useRowStatus();
+  const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
+    useRowSelection(displayRows);
+
+  const bulkActions = softDeleteBulkActions<PostRow>("posts", bulkDeletePosts, bulkRestorePosts);
 
   useEffect(() => {
     const el = titleThRef.current;
@@ -163,9 +174,20 @@ export default function PostsTable({
         />
       </div>
 
+      <BulkToolbar
+        selectedRows={selectedRows}
+        actions={bulkActions}
+        onDeleted={revealRows}
+        onDone={() => {
+          clearSelection();
+          router.refresh();
+        }}
+      />
+
       <table className={adminStyles.table}>
         <thead>
           <tr style={{ textAlign: "left" }}>
+            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
             <SortHeader sortKey="title" sort={filters.sort} onSort={handleSort} thRef={titleThRef}>
               Title
             </SortHeader>
@@ -190,6 +212,13 @@ export default function PostsTable({
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
               <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
+                <SelectRowCheckbox
+                  checked={selectedIds.has(row.id)}
+                  onChange={() => toggleRow(row.id)}
+                  label={`post ${row.title}`}
+                />
+              </td>
+              <td className={adminStyles.cell}>
                 <Link href={`/posts/${row.id}/edit`}>{row.title}</Link>
               </td>
               <td className={adminStyles.cell}>{row.authors}</td>

@@ -6,10 +6,22 @@ import Link from "next/link";
 import { type DateFormat, formatDate } from "@/lib/format-date";
 import { type AnnotationsFilters, buildAnnotationsQueryString } from "@/lib/annotations-query";
 import type { PageSize } from "@/lib/table-query";
-import { deleteAnnotation, restoreAnnotation } from "@/app/actions/annotations";
+import {
+  deleteAnnotation,
+  restoreAnnotation,
+  bulkDeleteAnnotations,
+  bulkRestoreAnnotations,
+} from "@/app/actions/annotations";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
 import { useRowStatus } from "@/components/table/use-row-status";
+import { useRowSelection } from "@/components/table/use-row-selection";
+import {
+  BulkToolbar,
+  SelectAllHeader,
+  SelectRowCheckbox,
+  softDeleteBulkActions,
+} from "@/components/table/BulkToolbar";
 import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
 import {
   CellError,
@@ -42,7 +54,7 @@ export type AnnotationRow = {
 };
 
 const SORTABLE_KEYS = ["doc", "author", "created", "edited", "deleted"] as const;
-const COLUMN_COUNT = 8;
+const COLUMN_COUNT = 9;
 
 // A much smaller sibling of CommentsTable (PLAN.md §12j): no status/thread-
 // status filters, no moderation buttons — the only action an annotation
@@ -67,8 +79,18 @@ export default function AnnotationsTable({
     filters,
     build: (next, extra) => buildAnnotationsQueryString(next, extra, defaultPageSize),
   });
-  const { displayRows, revealRow } = useRevealedRows(rows, searchParams);
+  const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, runWithStatus } = useRowStatus();
+  const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
+    useRowSelection(displayRows);
+
+  // Delete/restore only: §12j's decision that an annotation supports no other
+  // action holds in bulk too.
+  const bulkActions = softDeleteBulkActions<AnnotationRow>(
+    "annotations",
+    bulkDeleteAnnotations,
+    bulkRestoreAnnotations,
+  );
 
   function handleDeleteToggle(row: AnnotationRow) {
     setError(null);
@@ -100,9 +122,20 @@ export default function AnnotationsTable({
         />
       </div>
 
+      <BulkToolbar
+        selectedRows={selectedRows}
+        actions={bulkActions}
+        onDeleted={revealRows}
+        onDone={() => {
+          clearSelection();
+          router.refresh();
+        }}
+      />
+
       <table className={adminStyles.table}>
         <thead>
           <tr style={{ textAlign: "left" }}>
+            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
             <SortHeader sortKey="doc" sort={filters.sort} onSort={handleSort}>
               Doc
             </SortHeader>
@@ -130,6 +163,13 @@ export default function AnnotationsTable({
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
               <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
+                <SelectRowCheckbox
+                  checked={selectedIds.has(row.id)}
+                  onChange={() => toggleRow(row.id)}
+                  label={`annotation by ${row.authorName}`}
+                />
+              </td>
+              <td className={adminStyles.cell}>
                 <Link href={`/doc/${row.docSlug}`}>{row.docTitle}</Link>
               </td>
               <td className={adminStyles.cell}>{row.authorName}</td>

@@ -3913,7 +3913,7 @@ row-status border, land as **one commit**: the kit and its first three consumers
 without leaving either an unused abstraction or a half-migrated table. Phase 4 (§16g) is a second
 commit on top. Phase 5 (§16h) and Phase 6 (§16i) are not built.
 
-### 16k. As built (Phases 1–3)
+### 16k. As built
 
 New: `src/lib/table-query.ts` (the shared five params), `src/lib/user-preferences.ts`
 (`getDefaultPageSize`), `posts-query.ts`/`docs-query.ts`/`users-query.ts`, and
@@ -3942,6 +3942,29 @@ Two deviations from the plan as written, both flagged when the work was reported
   change to preserve.
 - `/users`' Name column sorted by `name ?? email` client-side. Postgres can't express that
   fallback mid-`ORDER BY`, so a nameless user now sorts as a null (kept last either way).
+
+**Phase 4** added `use-row-selection.ts` and `BulkToolbar.tsx`, and put a selection column on
+all five tables. `BulkAction` turned out to need two kinds, not one: `"button"` for a fixed
+verb (Approve, Delete) and `"select"` for "set every selected row to *this*" — `/users`' role
+and moderation policy and `/docs`' visibility have no single obvious value, so a button per
+option would have meant eight buttons in the toolbar. `softDeleteBulkActions()` builds the
+delete/restore pair every table ends with, since all five share soft-deletion.
+
+The new batched actions (`bulkDeletePosts`/`bulkRestorePosts`, `bulkDeleteDocs`/
+`bulkRestoreDocs`/`bulkSetDocVisibility`, `bulkDeleteUsers`/`bulkRestoreUsers`/
+`bulkSetUserRole`/`bulkSetUserModerationPolicy`, `bulkDeleteAnnotations`/
+`bulkRestoreAnnotations`) each delegate to the existing single-row action per id rather than
+issuing one bulk `updateMany`. That is deliberate and the reason is authorization: the
+per-row helpers carry guards a bulk path must not be able to sidestep — `deleteUser`'s "you
+can't delete your own account", `updateUserRole`'s "you can't remove your own admin role",
+`canUserEditPost`/`canUserEditDoc` per row. A `updateMany` over an id list would have had to
+restate all of them, correctly, in a second place. Not transactional, matching
+`bulkModerateComments`: a partial application is visible and re-runnable, and wrapping N
+independent soft-deletes in one transaction turns "9 of 10 worked" into "none did" without
+telling the caller more.
+
+The row-status border now sits on the selection checkbox's cell, since that became the first
+`<td>`. Still the row's leftmost edge, which is what the border is for.
 
 ### 16l. Known gaps
 

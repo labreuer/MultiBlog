@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { IconTrash, IconTrashOff } from "@tabler/icons-react";
 import { type DateFormat, formatDate } from "@/lib/format-date";
 import {
   STATUS_OPTIONS,
@@ -24,6 +23,14 @@ import type { CommentStatus, ThreadStatus } from "@/generated/prisma/enums";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
 import { useRowStatus } from "@/components/table/use-row-status";
+import { useRowSelection } from "@/components/table/use-row-selection";
+import {
+  BulkToolbar,
+  SelectAllHeader,
+  SelectRowCheckbox,
+  softDeleteBulkActions,
+  type BulkAction,
+} from "@/components/table/BulkToolbar";
 import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
 import {
   CellError,
@@ -153,9 +160,6 @@ export default function CommentsTable({
 }) {
   const router = useRouter();
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkPending, setBulkPending] = useState(false);
-  const [bulkError, setBulkError] = useState<string | null>(null);
   const [rowPending, startRowTransition] = useTransition();
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -165,28 +169,22 @@ export default function CommentsTable({
   });
   const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, runWithStatus } = useRowStatus();
+  const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
+    useRowSelection(displayRows);
 
-  const allVisibleSelected = displayRows.length > 0 && displayRows.every((r) => selectedIds.has(r.id));
-
-  function toggleSelectAll() {
-    setSelectedIds((prev) => {
-      if (allVisibleSelected) {
-        const next = new Set(prev);
-        for (const row of displayRows) next.delete(row.id);
-        return next;
-      }
-      return new Set([...prev, ...displayRows.map((r) => r.id)]);
-    });
-  }
-
-  function toggleRow(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  // Approve/Pend/Spam mirror the per-row Action column, and skip a row that's
+  // already in the target status or soft-deleted rather than erroring.
+  const bulkActions: BulkAction<CommentRow>[] = [
+    ...(["approve", "pend", "spam"] as const).map((action) => ({
+      kind: "button" as const,
+      key: action,
+      label: action === "approve" ? "Approve" : action === "pend" ? "Pend" : "Spam",
+      className: action === "approve" ? styles.approve : action === "pend" ? styles.pend : styles.spam,
+      applicableTo: (row: CommentRow) => !row.deleted,
+      run: (ids: string[]) => bulkModerateComments(ids, action),
+    })),
+    ...softDeleteBulkActions<CommentRow>("comments", bulkDeleteComments, bulkRestoreComments),
+  ];
 
   function handleDeleteToggle(row: CommentRow) {
     setRowError(null);
@@ -205,32 +203,6 @@ export default function CommentsTable({
         setRowError(e instanceof Error ? e.message : "Failed to update comment.");
       }
     });
-  }
-
-  async function runBulk(action: "approve" | "pend" | "spam" | "delete" | "restore") {
-    setBulkError(null);
-    const selected = displayRows.filter((r) => selectedIds.has(r.id));
-    const targetRows =
-      action === "restore" ? selected.filter((r) => r.deleted) : selected.filter((r) => !r.deleted);
-    if (targetRows.length === 0) return;
-    const targetIds = targetRows.map((r) => r.id);
-
-    setBulkPending(true);
-    try {
-      if (action === "approve") await bulkModerateComments(targetIds, "approve");
-      else if (action === "pend") await bulkModerateComments(targetIds, "pend");
-      else if (action === "spam") await bulkModerateComments(targetIds, "spam");
-      else if (action === "delete") await bulkDeleteComments(targetIds);
-      else await bulkRestoreComments(targetIds);
-
-      if (action === "delete") revealRows(targetRows);
-      setSelectedIds(new Set());
-      router.refresh();
-    } catch (e) {
-      setBulkError(e instanceof Error ? e.message : "Bulk action failed.");
-    } finally {
-      setBulkPending(false);
-    }
   }
 
   return (
@@ -256,68 +228,20 @@ export default function CommentsTable({
         />
       </div>
 
-      {selectedIds.size > 0 && (
-        <div className={adminStyles.bulkToolbar}>
-          <span>{selectedIds.size} selected</span>
-          <button
-            type="button"
-            disabled={bulkPending}
-            onClick={() => runBulk("approve")}
-            className={`${adminStyles.actionButton} ${styles.approve}`}
-          >
-            Approve
-          </button>
-          <button
-            type="button"
-            disabled={bulkPending}
-            onClick={() => runBulk("pend")}
-            className={`${adminStyles.actionButton} ${styles.pend}`}
-          >
-            Pend
-          </button>
-          <button
-            type="button"
-            disabled={bulkPending}
-            onClick={() => runBulk("spam")}
-            className={`${adminStyles.actionButton} ${styles.spam}`}
-          >
-            Spam
-          </button>
-          <button
-            type="button"
-            disabled={bulkPending}
-            onClick={() => runBulk("delete")}
-            aria-label="Delete selected"
-            title="Delete selected"
-            className={`${adminStyles.iconButton} ${adminStyles.iconButtonDanger} ${adminStyles.bulkDangerSpacing}`}
-          >
-            <IconTrash size={16} />
-          </button>
-          <button
-            type="button"
-            disabled={bulkPending}
-            onClick={() => runBulk("restore")}
-            aria-label="Restore selected"
-            title="Restore selected"
-            className={`${adminStyles.iconButton} ${adminStyles.iconButtonMuted}`}
-          >
-            <IconTrashOff size={16} />
-          </button>
-          {bulkError && <span style={{ color: "crimson" }}>{bulkError}</span>}
-        </div>
-      )}
+      <BulkToolbar
+        selectedRows={selectedRows}
+        actions={bulkActions}
+        onDeleted={revealRows}
+        onDone={() => {
+          clearSelection();
+          router.refresh();
+        }}
+      />
 
       <table className={adminStyles.table}>
         <thead>
           <tr style={{ textAlign: "left" }}>
-            <th className={adminStyles.headerCell}>
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={toggleSelectAll}
-                aria-label="Select all rows"
-              />
-            </th>
+            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
             <SortHeader sortKey="post" sort={filters.sort} onSort={handleSort} className={styles.postColumn}>
               Post
             </SortHeader>
@@ -355,11 +279,10 @@ export default function CommentsTable({
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
               <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
-                <input
-                  type="checkbox"
+                <SelectRowCheckbox
                   checked={selectedIds.has(row.id)}
                   onChange={() => toggleRow(row.id)}
-                  aria-label={`Select comment from ${row.commenterName}`}
+                  label={`comment from ${row.commenterName}`}
                 />
               </td>
               <td className={adminStyles.cell}>

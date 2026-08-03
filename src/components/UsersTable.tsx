@@ -13,6 +13,10 @@ import {
   updateUserAdminInitials,
   deleteUser,
   restoreUser,
+  bulkDeleteUsers,
+  bulkRestoreUsers,
+  bulkSetUserRole,
+  bulkSetUserModerationPolicy,
 } from "@/app/actions/users";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
 import { PAGE_SIZE_OPTIONS, type PageSize } from "@/lib/table-query";
@@ -20,6 +24,14 @@ import { type UsersFilters, buildUsersQueryString } from "@/lib/users-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
 import { useRowStatus, type RowStatus } from "@/components/table/use-row-status";
+import { useRowSelection } from "@/components/table/use-row-selection";
+import {
+  BulkToolbar,
+  SelectAllHeader,
+  SelectRowCheckbox,
+  softDeleteBulkActions,
+  type BulkAction,
+} from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
 import {
   CellError,
@@ -277,7 +289,7 @@ const SORTABLE_KEYS = [
   "createdAt",
   "deleted",
 ] as const;
-const COLUMN_COUNT = 13;
+const COLUMN_COUNT = 14;
 
 export default function UsersTable({
   rows,
@@ -299,8 +311,35 @@ export default function UsersTable({
     filters,
     build: (next, extra) => buildUsersQueryString(next, extra, defaultPageSize),
   });
-  const { displayRows, revealRow } = useRevealedRows(rows, searchParams);
+  const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, setStatus, runWithStatus } = useRowStatus();
+  const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
+    useRowSelection(displayRows);
+
+  // A deleted user keeps their role and policy: those are edits to an account
+  // an admin has already taken out of circulation. The self-protection guards
+  // (can't delete your own account, can't drop your own admin role) live in
+  // the server actions, which these delegate to per row rather than
+  // reimplementing — a bulk path must not be able to sidestep them.
+  const bulkActions: BulkAction<UserRow>[] = [
+    {
+      kind: "select",
+      key: "role",
+      label: "Set role",
+      options: Object.values(Role),
+      applicableTo: (row) => !row.deleted,
+      run: (ids, value) => bulkSetUserRole(ids, value as Role),
+    },
+    {
+      kind: "select",
+      key: "moderationPolicy",
+      label: "Set moderation",
+      options: Object.values(ModerationPolicy),
+      applicableTo: (row) => !row.deleted,
+      run: (ids, value) => bulkSetUserModerationPolicy(ids, value as ModerationPolicy),
+    },
+    ...softDeleteBulkActions<UserRow>("users", bulkDeleteUsers, bulkRestoreUsers),
+  ];
 
   function handleDeleteToggle(row: UserRow) {
     setError(null);
@@ -332,9 +371,20 @@ export default function UsersTable({
         />
       </div>
 
+      <BulkToolbar
+        selectedRows={selectedRows}
+        actions={bulkActions}
+        onDeleted={revealRows}
+        onDone={() => {
+          clearSelection();
+          router.refresh();
+        }}
+      />
+
       <table className={adminStyles.table}>
         <thead>
           <tr style={{ textAlign: "left" }}>
+            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
             <SortHeader sortKey="name" sort={filters.sort} onSort={handleSort} className={adminStyles.nameColumn}>
               Name
             </SortHeader>
@@ -377,6 +427,13 @@ export default function UsersTable({
             return (
               <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
                 <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
+                  <SelectRowCheckbox
+                    checked={selectedIds.has(row.id)}
+                    onChange={() => toggleRow(row.id)}
+                    label={`user ${row.email}`}
+                  />
+                </td>
+                <td className={adminStyles.cell}>
                   <NameCell {...cellProps} name={row.name} />
                 </td>
                 <td className={adminStyles.cell}>

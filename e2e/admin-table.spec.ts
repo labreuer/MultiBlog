@@ -26,6 +26,9 @@ test.describe("admin table kit", () => {
 
       const row = page.getByRole("row").filter({ hasText: email });
       await expect(row).toBeVisible();
+      // The border lives on the row's first cell, which is the selection
+      // checkbox's — the leftmost edge of the row, whatever it contains. The
+      // Name input it reports on is the cell after it.
       const firstCell = row.locator("td").first();
       const borderColor = () =>
         firstCell.evaluate((el) => getComputedStyle(el).borderLeftColor);
@@ -35,7 +38,7 @@ test.describe("admin table kit", () => {
       await expect(firstCell).toHaveCSS("border-left-width", "3px");
       expect(await borderColor()).toBe(IDLE);
 
-      const nameInput = firstCell.getByRole("textbox");
+      const nameInput = row.locator("td").nth(1).getByRole("textbox");
       await nameInput.fill("Row Status Edited");
       expect(await borderColor()).toBe(EDITED);
 
@@ -45,14 +48,14 @@ test.describe("admin table kit", () => {
       await expect.poll(borderColor).toBe(SAVED);
 
       // …and the edit actually landed, rather than the border merely claiming
-      // so. Scoped to the first cell: a user row carries three textboxes
-      // (name, initials, color).
+      // so. Scoped to one cell: a user row carries three textboxes (name,
+      // initials, color).
       await page.reload();
       const reloadedName = page
         .getByRole("row")
         .filter({ hasText: email })
         .locator("td")
-        .first()
+        .nth(1)
         .getByRole("textbox");
       await expect(reloadedName).toHaveValue("Row Status Edited");
     } finally {
@@ -92,6 +95,46 @@ test.describe("admin table kit", () => {
       await expect(page).not.toHaveURL(/pageSize=/);
     } finally {
       await deleteTestUser(email);
+    }
+  });
+
+  test("bulk actions apply to the selected rows, by button and by select", async ({ page }) => {
+    // A prefix both users share, so one ?q= brings exactly this test's rows
+    // into view regardless of what other workers created.
+    const first = uniqueEmail("bulkops");
+    const second = uniqueEmail("bulkops");
+    await createTestUser({ email: first, name: "Bulk One", role: "AUTHOR" });
+    await createTestUser({ email: second, name: "Bulk Two", role: "AUTHOR" });
+
+    try {
+      // ?deleted=1 so the rows stay on screen after being deleted, which is
+      // what makes the assertion possible at all.
+      await page.goto("/users?q=bulkops&deleted=1");
+      const rowFor = (email: string) => page.getByRole("row").filter({ hasText: email });
+      await expect(rowFor(first)).toBeVisible();
+      await expect(rowFor(second)).toBeVisible();
+
+      await rowFor(first).getByRole("checkbox").check();
+      await rowFor(second).getByRole("checkbox").check();
+      await expect(page.getByText("2 selected")).toBeVisible();
+
+      // A select-kind action: every selected row's role at once.
+      await page.getByLabel("Set role").selectOption("EDITOR");
+      await expect(rowFor(first).getByRole("combobox").first()).toHaveValue("EDITOR");
+      await expect(rowFor(second).getByRole("combobox").first()).toHaveValue("EDITOR");
+      // Running an action clears the selection rather than leaving it armed.
+      await expect(page.getByText("2 selected")).toHaveCount(0);
+
+      // A button-kind action, and the one whose applicableTo matters: both
+      // rows are live, so both are deleted and each offers Restore afterwards.
+      await rowFor(first).getByRole("checkbox").check();
+      await rowFor(second).getByRole("checkbox").check();
+      await page.getByRole("button", { name: "Delete selected users" }).click();
+      await expect(rowFor(first).getByRole("button", { name: "Restore user" })).toBeVisible();
+      await expect(rowFor(second).getByRole("button", { name: "Restore user" })).toBeVisible();
+    } finally {
+      await deleteTestUser(first);
+      await deleteTestUser(second);
     }
   });
 

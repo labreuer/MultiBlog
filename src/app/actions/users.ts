@@ -133,3 +133,24 @@ export async function restoreUser(userId: string): Promise<void> {
   await prisma.user.update({ where: { id: userId }, data: { deletedByUserId: null, deletedAt: null } });
   revalidatePath("/users");
 }
+
+// Bulk actions (PLAN.md §16g). Each delegates to the single-row action, so
+// every row goes through the same requireAdmin and the same guards — notably
+// deleteUser's "you can't delete your own account" and updateUserRole's "you
+// can't remove your own admin role", which a bulk path must not be able to
+// sidestep.
+export async function bulkDeleteUsers(userIds: string[]): Promise<void> {
+  await Promise.all(userIds.map((id) => deleteUser(id)));
+}
+
+export async function bulkRestoreUsers(userIds: string[]): Promise<void> {
+  await Promise.all(userIds.map((id) => restoreUser(id)));
+}
+
+export async function bulkSetUserRole(userIds: string[], role: Role): Promise<void> {
+  await Promise.all(userIds.map((id) => updateUserRole(id, role)));
+}
+
+export async function bulkSetUserModerationPolicy(userIds: string[], policy: ModerationPolicy): Promise<void> {
+  await Promise.all(userIds.map((id) => updateUserModerationPolicy(id, policy)));
+}

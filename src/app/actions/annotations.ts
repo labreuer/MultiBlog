@@ -283,3 +283,13 @@ export async function restoreAnnotation(annotationId: string): Promise<void> {
   revalidatePath(`/doc/${annotation.docId}`);
   revalidatePath("/annotations");
 }
+
+// Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are
+// per-row rather than one transaction.
+export async function bulkDeleteAnnotations(annotationIds: string[]): Promise<void> {
+  await Promise.all(annotationIds.map((id) => deleteAnnotation(id)));
+}
+
+export async function bulkRestoreAnnotations(annotationIds: string[]): Promise<void> {
+  await Promise.all(annotationIds.map((id) => restoreAnnotation(id)));
+}

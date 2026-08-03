@@ -193,3 +193,17 @@ export async function deleteDoc(docId: string): Promise<void> {
 export async function restoreDoc(docId: string): Promise<void> {
   await setDocDeleted(docId, false);
 }
+
+// Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are
+// per-row rather than one transaction.
+export async function bulkDeleteDocs(docIds: string[]): Promise<void> {
+  await Promise.all(docIds.map((id) => setDocDeleted(id, true)));
+}
+
+export async function bulkRestoreDocs(docIds: string[]): Promise<void> {
+  await Promise.all(docIds.map((id) => setDocDeleted(id, false)));
+}
+
+export async function bulkSetDocVisibility(docIds: string[], visibility: DocVisibility): Promise<void> {
+  await Promise.all(docIds.map((id) => updateDocVisibility(id, visibility)));
+}

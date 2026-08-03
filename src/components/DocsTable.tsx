@@ -3,14 +3,22 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { deleteDoc, restoreDoc } from "@/app/actions/docs";
+import { deleteDoc, restoreDoc, bulkDeleteDocs, bulkRestoreDocs, bulkSetDocVisibility } from "@/app/actions/docs";
 import { formatDate } from "@/lib/format-date";
-import type { DocVisibility } from "@/generated/prisma/enums";
+import { DocVisibility } from "@/generated/prisma/enums";
 import { type DocsFilters, buildDocsQueryString } from "@/lib/docs-query";
 import type { PageSize } from "@/lib/table-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
 import { useRowStatus } from "@/components/table/use-row-status";
+import { useRowSelection } from "@/components/table/use-row-selection";
+import {
+  BulkToolbar,
+  SelectAllHeader,
+  SelectRowCheckbox,
+  softDeleteBulkActions,
+  type BulkAction,
+} from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
 import {
   CellError,
@@ -42,7 +50,7 @@ export type DocRow = {
 };
 
 const SORTABLE_KEYS = ["title", "visibility", "created", "deleted"] as const;
-const COLUMN_COUNT = 7;
+const COLUMN_COUNT = 8;
 
 export default function DocsTable({
   rows,
@@ -63,8 +71,24 @@ export default function DocsTable({
     filters,
     build: (next, extra) => buildDocsQueryString(next, extra, defaultPageSize),
   });
-  const { displayRows, revealRow } = useRevealedRows(rows, searchParams);
+  const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, runWithStatus } = useRowStatus();
+  const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
+    useRowSelection(displayRows);
+
+  const bulkActions: BulkAction<DocRow>[] = [
+    {
+      kind: "select",
+      key: "visibility",
+      label: "Set visibility",
+      options: Object.values(DocVisibility),
+      // A deleted doc keeps whatever visibility it had: changing it would be
+      // an edit to a row the admin has already taken out of circulation.
+      applicableTo: (row) => !row.deleted && row.canEdit,
+      run: (ids, value) => bulkSetDocVisibility(ids, value as DocVisibility),
+    },
+    ...softDeleteBulkActions<DocRow>("docs", bulkDeleteDocs, bulkRestoreDocs),
+  ];
 
   function handleDeleteToggle(row: DocRow) {
     setError(null);
@@ -91,9 +115,20 @@ export default function DocsTable({
         <SearchBox value={searchDraft} onChange={onSearchChange} placeholder="Search title …" label="Search title" />
       </div>
 
+      <BulkToolbar
+        selectedRows={selectedRows}
+        actions={bulkActions}
+        onDeleted={revealRows}
+        onDone={() => {
+          clearSelection();
+          router.refresh();
+        }}
+      />
+
       <table className={adminStyles.table}>
         <thead>
           <tr style={{ textAlign: "left" }}>
+            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
             <SortHeader sortKey="title" sort={filters.sort} onSort={handleSort}>
               Title
             </SortHeader>
@@ -113,8 +148,15 @@ export default function DocsTable({
           {displayRows.length === 0 && <EmptyRow colSpan={COLUMN_COUNT} message="No docs matching the criteria." />}
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
+              <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
+                <SelectRowCheckbox
+                  checked={selectedIds.has(row.id)}
+                  onChange={() => toggleRow(row.id)}
+                  label={`doc ${row.title}`}
+                />
+              </td>
               <td
-                className={`${adminStyles.cell} ${rowStatusClass(row.id)} ${styles.titleCell}`}
+                className={`${adminStyles.cell} ${styles.titleCell}`}
                 onClick={(e) => {
                   if (!(e.target instanceof Element) || !e.target.closest("a")) {
                     router.push(`/doc/${row.id}`);
