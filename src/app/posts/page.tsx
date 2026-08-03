@@ -4,9 +4,47 @@ import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
 import { derivePostStatus } from "@/lib/post-status";
+import type { Prisma } from "@/generated/prisma/client";
+import { toURLSearchParams } from "@/lib/table-query";
+import { getDefaultPageSize } from "@/lib/user-preferences";
+import { parsePostsFilters, type PostsFilters, type PostsSortKey } from "@/lib/posts-query";
+import type { SortColumn } from "@/lib/table-sort";
 import PostsTable from "@/components/PostsTable";
 
-export default async function PostsPage() {
+function buildFilterWhere(filters: PostsFilters): Prisma.PostWhereInput {
+  const where: Prisma.PostWhereInput = {};
+  if (!filters.deleted) where.deletedByUserId = null;
+  if (filters.q) where.title = { contains: filters.q, mode: "insensitive" };
+  return where;
+}
+
+function buildOrderBy(sort: SortColumn<PostsSortKey>[]): Prisma.PostOrderByWithRelationInput[] {
+  return sort.map(({ key, dir }): Prisma.PostOrderByWithRelationInput => {
+    switch (key) {
+      case "title":
+        return { title: dir };
+      case "published":
+        // publishedAt holds a future date for a scheduled row and a past one
+        // for a published row (there is no separate scheduledFor anymore), so
+        // this single ordering already covers both. A draft has none at all;
+        // nulls stay last in either direction, matching what the client-side
+        // comparator did before this moved into Postgres.
+        return { publishedAt: { sort: dir, nulls: "last" } };
+      case "events":
+        return { publicationEvents: { _count: dir } };
+      case "created":
+        return { createdAt: dir };
+      case "deleted":
+        return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+    }
+  });
+}
+
+export default async function PostsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await auth();
   if (!session?.user) {
     redirect("/sign-in");
@@ -20,25 +58,39 @@ export default async function PostsPage() {
     );
   }
 
-  const posts = await prismaIncludingDeleted.post.findMany({
-    where: canEditAnyPost(session.user.role)
-      ? undefined
-      : { authors: { some: { userId: session.user.id } } },
-    orderBy: { createdAt: "desc" },
-    include: {
-      authors: {
-        orderBy: { bylineOrder: "asc" },
-        select: { user: { select: { adminInitials: true } } },
+  const urlSearchParams = toURLSearchParams(await searchParams);
+  const defaultPageSize = await getDefaultPageSize(session.user.id);
+  const filters = parsePostsFilters(urlSearchParams, defaultPageSize);
+
+  const where: Prisma.PostWhereInput = {
+    AND: [
+      canEditAnyPost(session.user.role) ? {} : { authors: { some: { userId: session.user.id } } },
+      buildFilterWhere(filters),
+    ],
+  };
+
+  const [posts, totalCount] = await Promise.all([
+    prismaIncludingDeleted.post.findMany({
+      where,
+      orderBy: buildOrderBy(filters.sort),
+      take: filters.pageSize,
+      skip: (filters.page - 1) * filters.pageSize,
+      include: {
+        authors: {
+          orderBy: { bylineOrder: "asc" },
+          select: { user: { select: { adminInitials: true } } },
+        },
+        publicationEvents: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { createdAt: true, actor: { select: { name: true, email: true } } },
+        },
+        threads: { select: { comments: { select: { status: true, deletedByUserId: true } } } },
+        _count: { select: { publicationEvents: true } },
       },
-      publicationEvents: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { createdAt: true, actor: { select: { name: true, email: true } } },
-      },
-      threads: { select: { comments: { select: { status: true, deletedByUserId: true } } } },
-      _count: { select: { publicationEvents: true } },
-    },
-  });
+    }),
+    prismaIncludingDeleted.post.count({ where }),
+  ]);
 
   const rows = posts.map((post) => {
     const latest = post.publicationEvents[0];
@@ -77,7 +129,7 @@ export default async function PostsPage() {
       <p>
         <Link href="/posts/new">+ New post</Link>
       </p>
-      <PostsTable rows={rows} />
+      <PostsTable rows={rows} totalCount={totalCount} filters={filters} defaultPageSize={defaultPageSize} />
     </main>
   );
 }

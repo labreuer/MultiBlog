@@ -80,6 +80,19 @@ the admin account.
   submission form; `moderation.spec.ts` has exactly one that is.
 - **`"Publish"` also matches "Publish as blog post" on `/doc/[slug]`.** Use
   `exact: true`.
+- **`getByRole("button", { name: "Next" })` also matches Next.js's dev-tools
+  button.** The pagination controls are `"◀ Prev"`/`"Next ▶"`; match them with
+  `exact: true` on the full label, arrows included.
+- **An admin table's row can hold several textboxes.** A `/users` row has three
+  (name, initials, colour), so `row.getByRole("textbox")` trips strict mode —
+  scope to a cell first. `admin-table.spec.ts` does this, and is the place to
+  add coverage for anything in the shared table kit (PLAN.md §16): it asserts
+  the row-status border by *computed colour* rather than class name, so it
+  fails if the palette is changed without meaning to.
+- **Filter/sort/page-size changes are `router.replace` navigations**, and the
+  search box debounces 400ms before firing one. Assert with
+  `await expect(page).toHaveURL(...)` (which retries) rather than reading
+  `page.url()` straight after the interaction.
 - **Public post bodies exist twice in the DOM.** `AnnotatableArticle` keeps a
   static server-rendered copy and an interactive one, toggling `display` between
   them — so a bare `getByText` trips strict mode and `.first()` can land on the

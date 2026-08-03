@@ -5,6 +5,11 @@ Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually
 Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMANCE.md).
 Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
 Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STYLE.md).
+Admin tables (`/posts`, `/docs`, `/users`, `/comments`, `/annotations`) all render through
+one kit — `src/components/table/` plus a per-table `*-query.ts` over `src/lib/table-query.ts`.
+Filters, sort, pagination and the show-deleted toggle live in the querystring and are
+applied in Postgres, never client-side; a new admin table means a `*-query.ts` and the
+kit's hooks, not a fresh `<table>`. Rationale and the phases still unbuilt: PLAN.md §16.
 Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
 [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 

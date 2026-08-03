@@ -8,7 +8,9 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { parseAnnotationsFilters, type AnnotationsSortKey } from "@/lib/annotations-query";
-import type { SortColumn } from "@/lib/use-sortable-rows";
+import { toURLSearchParams } from "@/lib/table-query";
+import { getDefaultPageSize } from "@/lib/user-preferences";
+import type { SortColumn } from "@/lib/table-sort";
 import AnnotationsTable, { type AnnotationRow } from "@/components/AnnotationsTable";
 
 // Deep-link-only filters (no dedicated dropdown yet, same convention as
@@ -77,14 +79,9 @@ export default async function AnnotationsPage({
     );
   }
 
-  const resolvedSearchParams = await searchParams;
-  const flatParams: Record<string, string> = {};
-  for (const [key, value] of Object.entries(resolvedSearchParams)) {
-    if (typeof value === "string") flatParams[key] = value;
-    else if (Array.isArray(value) && value.length > 0) flatParams[key] = value[0];
-  }
-  const urlSearchParams = new URLSearchParams(flatParams);
-  const filters = parseAnnotationsFilters(urlSearchParams);
+  const urlSearchParams = toURLSearchParams(await searchParams);
+  const defaultPageSize = await getDefaultPageSize(session.user.id);
+  const filters = parseAnnotationsFilters(urlSearchParams, defaultPageSize);
 
   const baseWhere: Prisma.AnnotationWhereInput = {
     AND: [
@@ -149,7 +146,12 @@ export default async function AnnotationsPage({
   return (
     <main style={{ maxWidth: 1200, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Annotations</h1>
-      <AnnotationsTable rows={rows} totalCount={totalCount} filters={filters} />
+      <AnnotationsTable
+        rows={rows}
+        totalCount={totalCount}
+        filters={filters}
+        defaultPageSize={defaultPageSize}
+      />
     </main>
   );
 }

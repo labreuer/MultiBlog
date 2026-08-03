@@ -3645,3 +3645,327 @@ deletion.
   comments) was deleted rather than backfilled into a doc — there was nothing worth preserving, and
   a backfill script would have had to get byline order, the title fragment, and a synthetic
   publication event right for a single throwaway row.
+
+## 16. Admin tables become one kit
+
+Six surfaces render a table of rows an admin acts on: `/posts`, `/docs`, `/users`, `/comments`,
+`/annotations`, and `/site-settings`. All of them ultimately need pagination, bulk operations,
+standardized search/filter parameters visible in the URL, and — eventually — the ability to stage
+changes locally when the connection is unreliable. This section builds that as one kit the six
+share, rather than a seventh copy per surface.
+
+### 16a. Why our own, and what "our own" means here
+
+There were two generations of table already. `/comments` (§11) and `/annotations` (§12j) are
+server-driven: filters, sort and pagination all live in the querystring, a `*-query.ts` module is
+the single place that knows the querystring's shape, and the server page turns it into a Prisma
+`where`/`orderBy`/`take`+`skip`. `/posts`, `/docs` and `/users` are the older generation: every row
+is shipped to the browser and sorted/filtered there, with sort state in `useState` and the
+show-deleted toggle in `sessionStorage`.
+
+So the kit is an **extraction, not an invention** — the second generation already is the design,
+and `/annotations` was built by copying `/comments`, which is the duplication this section stops
+before a third copy. A survey of table libraries (headless and rendering both) found none that
+supplies pagination, URL-serialized filters, bulk semantics and offline staging as a unit; each
+supplies at most the part we already own, and the row-level customization these tables carry —
+`UsersTable`'s six inline-edit cell types, `PostsTable`'s scheduled-countdown tooltip and
+width-tracking search box — is exactly what a rendering grid makes awkward.
+
+The kit is therefore **hooks plus small components, never a `<DataTable columns={...} />`**. Each
+table keeps its own `<thead>`/`<tbody>` JSX and its own cells; what it stops owning is the
+plumbing every table repeats. That boundary is the whole design: it is what keeps a cell an
+ordinary React component that calls a server action.
+
+`/site-settings` is deliberately out of scope. It is a form wearing table markup — a fixed pair of
+settings plus a read-only config list — with no rows to page, select, or sort. It takes the
+row-status border (§16f) and nothing else.
+
+### 16b. Rows per page: a stored default, a temporary override
+
+Page size is `10/25/50/100` everywhere. The chosen value is **per user, stored in the database**:
+`User.rowsPerPage`, defaulting to 25. Every table's server page reads it and uses it as that
+user's default page size; the rows-per-page dropdown in the pagination bar writes `?pageSize=` to
+the URL, which **overrides it temporarily** — for that URL, that navigation, that shared link —
+without touching the stored preference.
+
+This is why `pageSize` cannot be compared against a module-level constant when serializing the
+querystring: the param is omitted when it equals *this user's* default, not when it equals 25. The
+user's default is therefore threaded into both halves — `parse*Filters(searchParams, defaultPageSize)`
+on the server, and a `defaultPageSize` prop on the client table for the build half. A URL with no
+`pageSize` means "whatever my preference is", so the same bookmarked link gives two admins their
+own page sizes, which is the intent.
+
+Read from the database per request rather than baked into the session JWT: `id`/`role`/`color` are
+fixed at sign-in and go stale until sign-out (see `src/app/sign-in/NOTES.md`), and a preference the
+user just changed should apply on the next page load, not the next session.
+
+The preference is edited in `/users`, as a select cell in the row's own **Rows/page** column,
+alongside Role and Moderation policy. That surface is ADMIN-only, which is a real gap for everyone
+else — see §16l.
+
+### 16c. Phase 1 — the query-param kit
+
+`src/lib/table-query.ts` holds what `comments-query.ts` and `annotations-query.ts` had two copies
+of: the page-size options, and parsers/serializers for the five params every admin table has —
+`deleted`, `q`, `page`, `pageSize`, `sort`.
+
+```
+BaseFilters<K>                       = { deleted, q, page, pageSize, sort: SortColumn<K>[] }
+parseBaseFilters(sp, spec)           -> BaseFilters<K>
+buildBaseQueryString(f, extra, spec) -> URLSearchParams   // not a string — see below
+parseSetParam(value, options)        -> Set<T> | "ALL"
+```
+
+Each table's `*-query.ts` composes these into its own **fully typed** filter shape rather than
+receiving a generic bag:
+`CommentsFilters = BaseFilters<CommentsSortKey> & { status: Set<CommentStatus> | "ALL"; threadStatus: ... }`.
+A generic `Record<string, Set<string>>` for the multi-select params would have erased exactly the
+enum types that make the server's `where` builder safe, so the kit stops at the shared five and
+lets each table add its own with the primitives.
+
+`buildBaseQueryString` returns a `URLSearchParams`, not a string, so a table can set its own params
+on the result before serializing. The deep-link-only params (`?post=`, `?author=`, `?commenter=`,
+`?doc=`, `?user=`) keep round-tripping through the `extra` argument untouched.
+
+What stays per-table, because it is schema-specific and not plumbing: the sort-key list, the
+default sort, the `SortKey -> Prisma orderBy` mapping, the `filters -> Prisma where` mapping, and
+the deep-link `where`.
+
+### 16d. Phase 2 — the client kit
+
+`src/components/table/`, with `AdminTable.module.css` moving into it (it was already named for the
+shared concept rather than a component — see STYLE.md).
+
+Hooks:
+
+- `useTableFilters` — the `navigate` / `updateFilters` / debounced-search trio, plus the
+  search-draft state that resyncs when `filters.q` changes for an outside reason (back/forward, a
+  deep link). `updateFilters` resets to page 1; `navigate` does not, so Prev/Next can move the page
+  alone.
+- `useRevealedRows` — the visit-local overlay that keeps a just-deleted row visible until a real
+  navigation, generalized from `CommentsTable`. A `Map`, not the older tables' `Set` of ids: under
+  pagination the server refetch drops the row entirely, so the overlay has to carry the row itself,
+  not just a flag saying "show it".
+- `useRowStatus` — §16f.
+- `useRowSelection` — §16g.
+
+Components: `SortHeader` (the `<th>`, its click/ctrl-click handling and the ▲/▼ + priority
+superscript), `SearchBox`, `MultiSelectDropdown` (promoted out of `CommentsTable`), `PaginationBar`,
+`DateFormatSelect`, `ShowDeletedToggle`, `RowActionButton` (the delete/restore icon toggle every
+table has), and `FilterHelp` — the querystring help panel, **generated from the same filter spec
+Phase 1 parses**, so the documented params cannot drift from the parsed ones the way a hand-written
+help table can.
+
+Three conventions STYLE.md's TODO left open are settled here, since the kit has to pick one:
+`.table` carries `margin: 1em 0`; the date-format and show-deleted controls are **siblings after
+`</table>`, not a `<tfoot>`** (a `<tfoot>` is for summary rows of the table's own data, not page
+controls — `UsersTable`'s `<tfoot>` goes); and every table renders its header row with a centered
+`.emptyRow` when there are no rows, rather than bailing to a bare `<p>`, because with pagination and
+filters present the controls must stay usable when a filter matches nothing.
+
+### 16e. Phase 3 — Posts, Docs and Users move server-side
+
+Each gets a `*-query.ts` (Phase 1), a rebuilt page (`where`/`orderBy`/`take`/`skip` plus a `count`),
+and a table rebuilt on the kit. Their sort and search move from React state into the URL, the
+`sessionStorage`-backed `useShowDeletedRows` retires in favour of the `deleted` param, and
+`useSortableRows`'s client-side sorting retires with it — only `nextSortColumns` (the
+click/ctrl-click toggle semantics) survives, which is what the URL-driven tables already used.
+
+`/users` gains a search box (name/email/initials), which it never had. Sorting by role stays in
+privilege order for free: Postgres orders an enum by declaration order, and `Role` is declared
+ADMIN → COMMENTER, which is what `ROLE_ORDER` spelled out client-side.
+
+**Columns that stop being sortable.** A column derived from a to-many relation or computed in SQL
+cannot be a Prisma `orderBy`, so it becomes display-only — the same trade-off §11 already made for
+`/comments`'s commenter-activity column, now applying to:
+
+| Table | Column | Why |
+|---|---|---|
+| `/posts` | Author(s) | joined `adminInitials` across `PostAuthor` |
+| `/posts` | Comments | approved/pending counts nested through `threads`, filtered by status |
+| `/posts` | Last edit by / at | the *latest* `PostPublicationEvent`, not an aggregate Prisma can order by |
+| `/docs` | Author(s) | as above |
+| `/docs` | Length | `doc_length(prose_json)`, a Postgres function, not a column |
+
+`/posts`'s History column keeps its sort (`_count: { publicationEvents }`), as does `/users`'s Posts
+column (`_count: { postAuthors }`) — those are plain relation counts, which Prisma does order by.
+The escape hatch, if any of these sorts is later worth having back, is written down in §16l.
+
+### 16f. Row state as a left border
+
+The `savedPulse` animation (`UsersTable`, `SiteSettingsTable`) is replaced by a persistent **3px
+left border on the row's first `<td>`**, driven by `useRowStatus`:
+
+| State | Border | Means |
+|---|---|---|
+| idle | transparent | nothing has happened to this row |
+| edited | gray | a field has been changed locally, not yet submitted |
+| saving | yellow | a server action is in flight |
+| error | red | the action failed |
+| saved | green | the action succeeded |
+
+Every row paints the border at all times, transparent when idle, so no row shifts horizontally when
+its state changes.
+
+A pulse is a momentary acknowledgement that is gone a second later; a border is a **standing record
+of what this visit touched**, which is what an admin editing several rows in a row actually wants.
+So `saved` persists until that row is edited again or the page navigates — there is no timer.
+`error` persists likewise, and keeps the existing per-cell error text underneath the control, which
+says *what* failed; the border only says *that* something did.
+
+The states are not all reachable from every control. A text cell commits on blur, so it passes
+through `edited` on its way; a `<select>` or color picker submits on change and goes straight to
+`saving`. Delete/restore is a mutation like any other and paints the same border, which is why this
+lives in the kit rather than in `UsersTable`.
+
+### 16g. Phase 4 — selection and bulk actions
+
+`useRowSelection` (checkbox column, header select-all, the selected-id set) and `BulkToolbar` (the
+toolbar that appears once anything is selected). A table declares its bulk actions as data —
+`{ label, icon, applicableTo(row), run(ids) }` — and the toolbar renders them; the "silently skip
+rows the action doesn't apply to rather than erroring on a mixed selection" rule that
+`bulkModerateComments` established becomes the convention every bulk action follows.
+
+Each table gets batched server actions of its own, each enforcing its own authorization — which is
+why the toolbar takes server actions rather than a table name. `/comments` keeps Approve/Pend/Spam;
+`/posts`, `/docs`, `/users` and `/annotations` get delete/restore, and `/users` also gets bulk role
+and moderation-policy changes.
+
+Selection stays **scoped to the current page**, as `/comments` already had it. Cross-page "select
+all N matching" remains deliberately unresolved; the shape it should take when it lands is a
+*filter-scoped* server action (`bulkModerateWhere(filters)`) rather than an id list, so no
+thousand-element array crosses the wire and the action means the same thing it displays.
+
+### 16h. Phase 5 — staging changes in IndexedDB (not built)
+
+The requirement is that a change survives a bad connection: an admin moderating on a train should be
+able to act, see what they did, and have it land when the network returns. Hand-rolled over plain
+IndexedDB, following `y-indexeddb`'s precedent (§11e) that the subtle parts of local persistence are
+worth owning.
+
+- A staged mutation is a serialized server-action call:
+  `{ id, table, action, args, rowIds, createdAt, status: pending|inflight|failed }`, in one object
+  store **keyed by the signed-in user's id**. The browser's cookie jar is shared across tabs, and
+  replaying user A's queue as user B is the same class of identity bleed the browser-pane notes in
+  CLAUDE.md warn about.
+- Actions route through `stageMutation()`. Online, it calls straight through and the queue is never
+  touched — the current code path, unchanged. On a network failure it enqueues and paints an
+  optimistic overlay: the generalization of `useRevealedRows` from "a deleted row stays visible" to
+  "a row shows its staged values", with a per-row pending marker and a queue banner
+  ("3 staged changes — retry / discard"). Staging a moderation decision silently would be worse
+  than failing loudly.
+- Replay on the `online` event, on visibility change, and on an interval: FIFO, one at a time,
+  dropping an entry only once its action resolves. A **server-rejected** mutation (as opposed to a
+  network failure) goes to `failed` for explicit discard — it must not retry forever.
+- Conflict policy is per-action and deliberately dumb: moderation and delete/restore are idempotent
+  last-write-wins; field edits are last-write-wins per field. No merge machinery. This is an admin
+  table, not a document — the ydoc stack already owns the hard version of this problem.
+- **Mutations only.** Staging *reads* (a cached page for offline viewing) is a different and much
+  larger feature, excluded on purpose.
+
+### 16i. Phase 6 — column visibility and order (not built)
+
+Each table declares its columns as data — the kit already needs a per-table column list for the
+help panel and the bulk-action spec, and this extends it to a `ColumnSpec`:
+
+```
+{ key, header, sortKey?, alwaysVisible?, defaultVisible?, cell(row) }
+```
+
+`key` is a stable string, never the array index: a saved order that survives a column being added
+or removed has to name columns, not positions.
+
+**State lives in the URL, like every other table parameter** — `?cols=title,authors,created` — with
+absent meaning "the default set, in declaration order". That choice falls out of the rest of the
+section: a filtered, sorted, paginated view is already shareable, and a link that arrives with the
+wrong columns is a worse bug than a preference that doesn't persist. Two params would be one too
+many, so a single ordered list carries both facts at once: membership is visibility, position is
+order.
+
+The durable half is `User.tableColumns`, a JSON column keyed by table
+(`{ posts: ["title", "authors", ...] }`) — the same stored-default/temporary-override split page
+size uses in §16b, for the same reason, and the second customer that justifies the pattern. A
+"save as my default" control in the column picker writes it; the URL param overrides it for that
+navigation.
+
+The picker itself is the existing `MultiSelectDropdown` for visibility (it already renders a
+checkbox list with an All option) plus drag-to-reorder for order, reusing `PostSettingsPanel`'s
+`.draggableRow`/`.dragOver` pattern rather than inventing a second one.
+
+Three things this must not break, all of which constrain it:
+
+- **A column that carries a row action cannot be hidden into uselessness.** The delete/restore
+  column and the selection checkbox are `alwaysVisible`; hiding the only way to act on a row is not
+  a customization.
+- **`colSpan` stops being a literal.** Every empty-state row currently hardcodes its column count
+  (`colSpan={11}`); with visibility in play that has to be computed from the visible column list.
+- **Sorting by a hidden column.** A `?sort=` naming a column that `?cols=` excludes is reachable by
+  hand-editing a URL. The sort stays honoured — dropping it would silently change the result set —
+  but the picker shows the column as sorted, so the state is at least visible.
+
+Sequenced after §16g and independent of §16h; it touches the same `ColumnSpec` that the bulk-action
+work introduces, and doing it before staging keeps the two from colliding in the same files.
+
+### 16j. Build order
+
+Phase 1 (§16c) + Phase 2 (§16d) + Phase 3 (§16e), with §16b's `User.rowsPerPage` and §16f's
+row-status border, land as **one commit**: the kit and its first three consumers can't be split
+without leaving either an unused abstraction or a half-migrated table. Phase 4 (§16g) is a second
+commit on top. Phase 5 (§16h) and Phase 6 (§16i) are not built.
+
+### 16k. As built (Phases 1–3)
+
+New: `src/lib/table-query.ts` (the shared five params), `src/lib/user-preferences.ts`
+(`getDefaultPageSize`), `posts-query.ts`/`docs-query.ts`/`users-query.ts`, and
+`src/components/table/` — `use-table-filters.ts`, `use-revealed-rows.ts`, `use-row-status.ts`,
+`TableControls.tsx`, `FilterHelp.tsx`, and `AdminTable.module.css` moved in from
+`src/components/`.
+
+Deleted: `src/lib/use-show-deleted.ts` (the `deleted` param replaced it),
+`UsersTable.module.css` and `SiteSettingsTable.module.css` (each held nothing but its own
+copy of the `savedPulse` keyframes). `use-sortable-rows.ts` became `table-sort.ts`: the
+`useSortableRows` hook — which also *did* the sorting, client-side, over every row — had no
+callers once sorting became an `ORDER BY`, so only `nextSortColumns` and the two types
+survive. The file also lost its `"use client"`, since the server pages import `SortColumn`
+to build their `orderBy`.
+
+`e2e/admin-table.spec.ts` covers the border's idle → edited → saved path (asserting computed
+colors, not class names), the querystring round-trip for search/sort/page size including the
+"a page size equal to your preference isn't written to the URL" rule, and that all five
+tables keep their header and controls when a filter matches nothing.
+
+Two deviations from the plan as written, both flagged when the work was reported:
+
+- `Doc.title` is stored empty for an untitled doc and rendered as "Untitled" (§12n). While
+  `/docs` sorted client-side it sorted the *rendered* string; server-side it sorts the
+  stored one, so untitled docs now sort as the empty string. Not worth a stored-title
+  change to preserve.
+- `/users`' Name column sorted by `name ?? email` client-side. Postgres can't express that
+  fallback mid-`ORDER BY`, so a nameless user now sorts as a null (kept last either way).
+
+### 16l. Known gaps
+
+- **`User.rowsPerPage` is only editable in `/users`, which is ADMIN-only.** An AUTHOR or
+  EDITOR who can reach `/posts`, `/docs` and `/comments` has a preference they cannot
+  change; the `?pageSize=` override is their only recourse, and it doesn't persist. The
+  home for a self-service version is `/dashboard`, alongside whatever other per-account
+  preferences arrive — §16i's `User.tableColumns` will want exactly the same surface, which
+  is the argument for building it once, then, rather than twice.
+- **Five columns lost their sort** (§16e's table). If any is worth restoring, the fix is
+  one of two shapes, and which one depends on the column: denormalize it onto the row
+  (right for `/docs`' Length, which is a pure function of `prose_json` and could be a
+  generated column or trigger-maintained), or select the page's ids through a raw SQL query
+  that can join and aggregate freely, then fetch those ids through Prisma and re-order in
+  JS (right for the to-many columns — byline lists, comment counts, latest publication
+  event). The second buys back every sort at once but hand-writes the permission-scoped
+  `WHERE`, which is precisely the type safety `/docs`' existing two-query split was written
+  to avoid losing.
+- **Cross-page selection is still unresolved** (§16g). Selecting rows, paging, and coming
+  back keeps the selection in React state, so it survives — but the header checkbox only
+  ever means "this page", and there is no way to act on "all N matching".
+- **Every page load costs one extra query** for `getDefaultPageSize`. Narrow
+  (`select: { rowsPerPage: true }` by primary key) and deliberate — see §16b on why not the
+  JWT — but it is a per-request round-trip that did not exist before.
+- **`?q=` searches one or two obvious columns per table**, chosen to match what the old
+  client-side filters did (title for posts/docs; name/email/initials for users). Postgres
+  full-text search over post/doc *bodies* is a different feature and isn't attempted here.

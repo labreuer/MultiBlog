@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
 import { changeUserSlug, revertUserSlug as revertUserSlugInDb } from "@/lib/user-slug";
+import { isPageSize } from "@/lib/table-query";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -60,6 +61,18 @@ export async function updateUserAdminInitials(userId: string, adminInitials: str
     throw new Error("Initials can't be empty.");
   }
   await prisma.user.update({ where: { id: userId }, data: { adminInitials: trimmed } });
+  revalidatePath("/users");
+}
+
+// The user's default rows-per-page for every admin table (PLAN.md §16b). A
+// table's ?pageSize= param overrides this per navigation and never writes
+// back here — this is only ever set deliberately, from the Rows/page column.
+export async function updateUserRowsPerPage(userId: string, rowsPerPage: number): Promise<void> {
+  await requireAdmin();
+  if (!isPageSize(rowsPerPage)) {
+    throw new Error("Invalid rows per page.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { rowsPerPage } });
   revalidatePath("/users");
 }
 

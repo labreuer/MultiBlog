@@ -1,0 +1,227 @@
+.cell {
+  padding: 6px 12px;
+  vertical-align: top;
+}
+
+.headerCell {
+  padding: 6px 12px;
+  border-bottom: 2px solid #ddd;
+}
+
+.sortableHeaderCell {
+  padding: 6px 12px;
+  border-bottom: 2px solid #ddd;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nowrapCell {
+  padding: 6px 12px;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.nowrapHeaderCell {
+  padding: 6px 12px;
+  border-bottom: 2px solid #ddd;
+  white-space: nowrap;
+}
+
+.nowrapSortableHeaderCell {
+  padding: 6px 12px;
+  border-bottom: 2px solid #ddd;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+.row {
+  border-bottom: 1px solid #eee;
+}
+
+.rowDeleted {
+  opacity: 0.5;
+}
+
+.iconButton {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.iconButtonDanger {
+  color: #c00;
+}
+
+.iconButtonMuted {
+  color: #666;
+}
+
+.emptyRow {
+  text-align: center;
+  color: #666;
+}
+
+.actionButton {
+  border: 1px solid #999;
+  padding: 2px;
+}
+
+.dateFormatRow {
+  margin-top: 12px;
+}
+
+.showDeletedRow {
+  margin-top: 8px;
+}
+
+.filterRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.dropdownWrapper {
+  display: inline-block;
+  position: relative;
+}
+
+.dropdownSummary {
+  cursor: pointer;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  list-style: none;
+}
+
+.dropdownPanel {
+  position: absolute;
+  z-index: 1;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px;
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.dropdownOption {
+  display: block;
+  padding: 2px 0;
+}
+
+.paginationBar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  margin-bottom: 2em;
+}
+
+.searchInput {
+  padding: 6px 12px;
+  min-width: 240px;
+}
+
+/* /users' Name column holds a full-width text input; without a floor it
+   collapses to roughly the header's own width. Was ~68px rendered, doubled
+   and rounded. */
+.nameColumn {
+  min-width: 135px;
+}
+
+/* Row status (PLAN.md §16f) — a 3px left border on the row's first cell,
+   replacing the momentary savedPulse animation with a standing record of
+   what this visit touched. Every row carries the border at all times,
+   transparent when idle, so a row never shifts horizontally as its state
+   changes. Colors are the established palette (STYLE.md): #999 muted, #d4a017
+   the project's amber, #c00 danger, #0a5 success. */
+.rowStatusCell {
+  border-left: 3px solid transparent;
+}
+
+.rowStatusEdited {
+  border-left-color: #999;
+}
+
+.rowStatusSaving {
+  border-left-color: #d4a017;
+}
+
+.rowStatusError {
+  border-left-color: #c00;
+}
+
+.rowStatusSaved {
+  border-left-color: #0a5;
+}
+
+.cellError {
+  color: crimson;
+  font-size: 0.8rem;
+}
+
+.bulkToolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+/* Sets the destructive actions apart from the non-destructive ones sharing
+   the toolbar, so "delete everything selected" isn't one slip away from
+   "approve everything selected". */
+.bulkDangerSpacing {
+  margin-left: 4em;
+}
+
+.helpPanel {
+  margin-top: 1em;
+  margin-bottom: 1em;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.helpSummary {
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.helpBody {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.helpTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.helpHeaderCell {
+  padding: 4px 8px;
+  border-bottom: 1px solid #ccc;
+}
+
+.helpCell {
+  padding: 4px 8px;
+  vertical-align: top;
+  border-bottom: 1px solid #eee;
+}

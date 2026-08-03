@@ -1,19 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { IconTrash, IconTrashOff } from "@tabler/icons-react";
-import { nextSortColumns } from "@/lib/use-sortable-rows";
-import { DATE_FORMATS, type DateFormat, formatDate } from "@/lib/format-date";
+import { type DateFormat, formatDate } from "@/lib/format-date";
 import {
   STATUS_OPTIONS,
   THREAD_STATUS_OPTIONS,
-  PAGE_SIZE_OPTIONS,
   type CommentsFilters,
-  type CommentsSortKey,
   buildCommentsQueryString,
 } from "@/lib/comments-query";
+import type { PageSize } from "@/lib/table-query";
 import {
   moderateComment,
   deleteComment,
@@ -23,7 +21,23 @@ import {
   bulkRestoreComments,
 } from "@/app/actions/comments";
 import type { CommentStatus, ThreadStatus } from "@/generated/prisma/enums";
-import adminStyles from "./AdminTable.module.css";
+import { useTableFilters } from "@/components/table/use-table-filters";
+import { useRevealedRows } from "@/components/table/use-revealed-rows";
+import { useRowStatus } from "@/components/table/use-row-status";
+import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
+import {
+  CellError,
+  DateFormatSelect,
+  DeletedSortHeader,
+  EmptyRow,
+  MultiSelectDropdown,
+  PaginationBar,
+  RowActionButton,
+  SearchBox,
+  ShowDeletedToggle,
+  SortHeader,
+} from "@/components/table/TableControls";
+import adminStyles from "@/components/table/AdminTable.module.css";
 import styles from "./CommentsTable.module.css";
 
 export type CommentRow = {
@@ -63,239 +77,94 @@ function statusTextClass(status: CommentStatus): string {
   }
 }
 
-function MultiSelectDropdown<T extends string>({
-  label,
-  options,
-  selected,
-  onChange,
-}: {
-  label: string;
-  options: readonly T[];
-  selected: Set<T> | "ALL";
-  onChange: (next: Set<T> | "ALL") => void;
-}) {
-  const summary = selected === "ALL" ? "All" : options.filter((o) => selected.has(o)).join(", ") || "All";
-  const detailsRef = useRef<HTMLDetailsElement>(null);
-
-  // <details> has no native "close on outside click" behavior — only
-  // toggles via its own <summary>. Set .open directly on the DOM node
-  // (rather than lifting it into React state) since nothing else here needs
-  // to react to open/closed.
-  useEffect(() => {
-    function handlePointerDown(e: MouseEvent) {
-      if (detailsRef.current && !detailsRef.current.contains(e.target as Node)) {
-        detailsRef.current.open = false;
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
-
-  return (
-    <details ref={detailsRef} className={adminStyles.dropdownWrapper}>
-      <summary className={adminStyles.dropdownSummary}>
-        {label}: {summary}
-      </summary>
-      <div className={adminStyles.dropdownPanel}>
-        <label className={adminStyles.dropdownOption}>
-          <input type="checkbox" checked={selected === "ALL"} onChange={() => onChange("ALL")} /> All
-        </label>
-        {options.map((option) => (
-          <label key={option} className={adminStyles.dropdownOption}>
-            <input
-              type="checkbox"
-              checked={selected !== "ALL" && selected.has(option)}
-              onChange={(e) => {
-                const current = selected === "ALL" ? new Set<T>() : new Set(selected);
-                if (e.target.checked) current.add(option);
-                else current.delete(option);
-                onChange(current.size === 0 ? "ALL" : current);
-              }}
-            />{" "}
-            {option}
-          </label>
-        ))}
-      </div>
-    </details>
-  );
-}
-
-function ActionCell({ comment, disabled }: { comment: CommentRow; disabled: boolean }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const handle = (action: "approve" | "pend" | "spam") => {
-    startTransition(async () => {
-      await moderateComment(comment.id, action);
-      router.refresh();
-    });
-  };
-  return (
-    <div style={{ display: "flex", gap: 4 }}>
-      <button
-        type="button"
-        onClick={() => handle("approve")}
-        disabled={disabled || pending || comment.status === "APPROVED"}
-        className={`${adminStyles.actionButton} ${styles.approve}`}
-      >
-        Approve
-      </button>
-      <button
-        type="button"
-        onClick={() => handle("pend")}
-        disabled={disabled || pending || comment.status === "PENDING"}
-        className={`${adminStyles.actionButton} ${styles.pend}`}
-      >
-        Pend
-      </button>
-      <button
-        type="button"
-        onClick={() => handle("spam")}
-        disabled={disabled || pending || comment.status === "SPAM"}
-        className={`${adminStyles.actionButton} ${styles.spam}`}
-      >
-        Spam
-      </button>
-    </div>
-  );
-}
-
-function DeleteCell({
+function ActionCell({
   comment,
-  onDeleted,
+  disabled,
+  run,
 }: {
   comment: CommentRow;
-  onDeleted: (row: CommentRow) => void;
+  disabled: boolean;
+  run: (action: () => Promise<void>) => Promise<void>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const handle = () => {
+  const handle = (action: "approve" | "pend" | "spam") => {
     setError(null);
     startTransition(async () => {
       try {
-        if (comment.deleted) {
-          await restoreComment(comment.id);
-        } else {
-          await deleteComment(comment.id);
-          onDeleted(comment);
-        }
+        await run(async () => {
+          await moderateComment(comment.id, action);
+        });
         router.refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to update comment.");
+        setError(e instanceof Error ? e.message : "Failed to moderate comment.");
       }
     });
   };
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handle}
-        disabled={pending}
-        aria-label={comment.deleted ? "Restore comment" : "Delete comment"}
-        title={comment.deleted ? "Restore comment" : "Delete comment"}
-        className={`${adminStyles.iconButton} ${comment.deleted ? adminStyles.iconButtonMuted : adminStyles.iconButtonDanger}`}
-      >
-        {comment.deleted ? <IconTrashOff size={16} /> : <IconTrash size={16} />}
-      </button>
-      {error && <div style={{ color: "crimson", fontSize: "0.8rem" }}>{error}</div>}
+      <div style={{ display: "flex", gap: 4 }}>
+        <button
+          type="button"
+          onClick={() => handle("approve")}
+          disabled={disabled || pending || comment.status === "APPROVED"}
+          className={`${adminStyles.actionButton} ${styles.approve}`}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          onClick={() => handle("pend")}
+          disabled={disabled || pending || comment.status === "PENDING"}
+          className={`${adminStyles.actionButton} ${styles.pend}`}
+        >
+          Pend
+        </button>
+        <button
+          type="button"
+          onClick={() => handle("spam")}
+          disabled={disabled || pending || comment.status === "SPAM"}
+          className={`${adminStyles.actionButton} ${styles.spam}`}
+        >
+          Spam
+        </button>
+      </div>
+      <CellError message={error} />
     </>
   );
 }
 
-type SortKey = CommentsSortKey;
+const SORTABLE_KEYS = ["post", "commenter", "status", "threadStatus", "created", "statusChanged", "deleted"] as const;
+const COLUMN_COUNT = 11;
 
 export default function CommentsTable({
   rows,
   totalCount,
   filters,
+  defaultPageSize,
 }: {
   rows: CommentRow[];
   totalCount: number;
   filters: CommentsFilters;
+  defaultPageSize: PageSize;
 }) {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
-  const [searchDraft, setSearchDraft] = useState(filters.q);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // Rows deleted (or bulk-deleted) during this visit are kept visible —
-  // deleting one row shouldn't yank it out of view when `deleted` isn't
-  // shown, since the server refetch that follows won't include it anymore.
-  // Cleared whenever the URL's querystring actually changes (a real
-  // filter/sort/page navigation), but not by the same-URL refresh a
-  // delete/restore/moderate action triggers.
-  const [revealedRows, setRevealedRows] = useState<Map<string, CommentRow>>(new Map());
   const [bulkPending, setBulkPending] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
-  const prevSearchParamsRef = useRef(searchParams.toString());
+  const [rowPending, startRowTransition] = useTransition();
+  const [rowError, setRowError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const current = searchParams.toString();
-    if (prevSearchParamsRef.current !== current) {
-      prevSearchParamsRef.current = current;
-      setRevealedRows(new Map());
-    }
-  }, [searchParams]);
-
-  // Keeps the search box in sync when `filters.q` changes for a reason other
-  // than this component's own debounced navigation (e.g. browser back/
-  // forward, or a deep link with ?q= already set) — a no-op the rest of the
-  // time, since by then searchDraft already equals filters.q.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from the URL (an external system), see above
-    setSearchDraft(filters.q);
-  }, [filters.q]);
-
-  function navigate(partial: Partial<CommentsFilters>) {
-    const nextFilters: CommentsFilters = { ...filters, ...partial };
-    const qs = buildCommentsQueryString(nextFilters, searchParams);
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }
-
-  // Any filter/sort/page-size change resets to page 1; only Prev/Next
-  // (which call `navigate` directly) are meant to change just the page.
-  function updateFilters(partial: Partial<CommentsFilters>) {
-    navigate({ page: 1, ...partial });
-  }
-
-  function handleSearchChange(value: string) {
-    setSearchDraft(value);
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => updateFilters({ q: value }), 400);
-  }
-
-  function handleSort(key: SortKey, addToSort: boolean) {
-    updateFilters({ sort: nextSortColumns(filters.sort, key, addToSort) });
-  }
-
-  function sortIndicator(key: SortKey) {
-    const idx = filters.sort.findIndex((c) => c.key === key);
-    if (idx === -1) return null;
-    return (
-      <>
-        {" "}
-        {filters.sort[idx].dir === "asc" ? "▲" : "▼"}
-        {idx > 0 && <sup>{idx + 1}</sup>}
-      </>
-    );
-  }
-
-  function revealRow(row: CommentRow) {
-    setRevealedRows((prev) => new Map(prev).set(row.id, { ...row, deleted: true }));
-  }
-
-  const displayRows = useMemo(() => {
-    const overlayOnly = [...revealedRows.values()].filter((r) => !rows.some((row) => row.id === r.id));
-    return [...rows, ...overlayOnly];
-  }, [rows, revealedRows]);
-
-  const totalPages = Math.max(1, Math.ceil(totalCount / filters.pageSize));
-  const currentPage = Math.min(filters.page, totalPages);
+  const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
+    filters,
+    build: (next, extra) => buildCommentsQueryString(next, extra, defaultPageSize),
+  });
+  const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
+  const { rowStatusClass, runWithStatus } = useRowStatus();
 
   const allVisibleSelected = displayRows.length > 0 && displayRows.every((r) => selectedIds.has(r.id));
 
@@ -319,6 +188,25 @@ export default function CommentsTable({
     });
   }
 
+  function handleDeleteToggle(row: CommentRow) {
+    setRowError(null);
+    startRowTransition(async () => {
+      try {
+        await runWithStatus(row.id, async () => {
+          if (row.deleted) {
+            await restoreComment(row.id);
+          } else {
+            await deleteComment(row.id);
+            revealRow(row);
+          }
+        });
+        router.refresh();
+      } catch (e) {
+        setRowError(e instanceof Error ? e.message : "Failed to update comment.");
+      }
+    });
+  }
+
   async function runBulk(action: "approve" | "pend" | "spam" | "delete" | "restore") {
     setBulkError(null);
     const selected = displayRows.filter((r) => selectedIds.has(r.id));
@@ -335,13 +223,7 @@ export default function CommentsTable({
       else if (action === "delete") await bulkDeleteComments(targetIds);
       else await bulkRestoreComments(targetIds);
 
-      if (action === "delete") {
-        setRevealedRows((prev) => {
-          const next = new Map(prev);
-          for (const row of targetRows) next.set(row.id, { ...row, deleted: true });
-          return next;
-        });
-      }
+      if (action === "delete") revealRows(targetRows);
       setSelectedIds(new Set());
       router.refresh();
     } catch (e) {
@@ -354,13 +236,11 @@ export default function CommentsTable({
   return (
     <>
       <div className={adminStyles.filterRow}>
-        <input
-          type="search"
+        <SearchBox
           value={searchDraft}
-          onChange={(e) => handleSearchChange(e.target.value)}
+          onChange={onSearchChange}
           placeholder="Search comment or commenter …"
-          aria-label="Search comments"
-          className={styles.searchInput}
+          label="Search comments"
         />
         <MultiSelectDropdown
           label="Status"
@@ -377,7 +257,7 @@ export default function CommentsTable({
       </div>
 
       {selectedIds.size > 0 && (
-        <div className={styles.bulkToolbar}>
+        <div className={adminStyles.bulkToolbar}>
           <span>{selectedIds.size} selected</span>
           <button
             type="button"
@@ -409,7 +289,7 @@ export default function CommentsTable({
             onClick={() => runBulk("delete")}
             aria-label="Delete selected"
             title="Delete selected"
-            className={`${adminStyles.iconButton} ${adminStyles.iconButtonDanger} ${styles.bulkDeleteSpacing}`}
+            className={`${adminStyles.iconButton} ${adminStyles.iconButtonDanger} ${adminStyles.bulkDangerSpacing}`}
           >
             <IconTrash size={16} />
           </button>
@@ -431,61 +311,50 @@ export default function CommentsTable({
         <thead>
           <tr style={{ textAlign: "left" }}>
             <th className={adminStyles.headerCell}>
-              <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Select all rows" />
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAll}
+                aria-label="Select all rows"
+              />
             </th>
-            <th className={`${adminStyles.sortableHeaderCell} ${styles.postColumn}`} onClick={(e) => handleSort("post", e.ctrlKey)}>
-              Post{sortIndicator("post")}
-            </th>
-            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("commenter", e.ctrlKey)}>
-              Commenter{sortIndicator("commenter")}
-            </th>
+            <SortHeader sortKey="post" sort={filters.sort} onSort={handleSort} className={styles.postColumn}>
+              Post
+            </SortHeader>
+            <SortHeader sortKey="commenter" sort={filters.sort} onSort={handleSort}>
+              Commenter
+            </SortHeader>
             <th className={adminStyles.headerCell}>Comment</th>
-            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("status", e.ctrlKey)}>
-              Status{sortIndicator("status")}
-            </th>
-            <th className={adminStyles.sortableHeaderCell} onClick={(e) => handleSort("threadStatus", e.ctrlKey)}>
-              Thread{sortIndicator("threadStatus")}
-            </th>
-            <th className={adminStyles.nowrapSortableHeaderCell} onClick={(e) => handleSort("created", e.ctrlKey)}>
-              Created at{sortIndicator("created")}
-            </th>
-            <th
-              className={adminStyles.nowrapSortableHeaderCell}
-              onClick={(e) => handleSort("statusChanged", e.ctrlKey)}
+            <SortHeader sortKey="status" sort={filters.sort} onSort={handleSort}>
+              Status
+            </SortHeader>
+            <SortHeader sortKey="threadStatus" sort={filters.sort} onSort={handleSort}>
+              Thread
+            </SortHeader>
+            <SortHeader sortKey="created" sort={filters.sort} onSort={handleSort} nowrap>
+              Created at
+            </SortHeader>
+            <SortHeader
+              sortKey="statusChanged"
+              sort={filters.sort}
+              onSort={handleSort}
+              nowrap
               title="Last moderation change"
             >
-              Changed at{sortIndicator("statusChanged")}
-            </th>
+              Changed at
+            </SortHeader>
             <th className={adminStyles.headerCell}>Commenter activity</th>
             <th className={adminStyles.headerCell}>Action</th>
-            <th className={adminStyles.headerCell}>
-              {/* padding/border/background match DeleteCell's button exactly, so
-                  the icon's left edge lines up with the row icons below it —
-                  same alignment fix as PostsTable/UsersTable. */}
-              <button
-                type="button"
-                onClick={(e) => handleSort("deleted", e.ctrlKey)}
-                aria-label="Sort by deleted status"
-                title="Sort by deleted status"
-                className={adminStyles.iconButton}
-              >
-                <IconTrash size={16} color="#000" style={{ verticalAlign: "middle" }} />
-                {sortIndicator("deleted")}
-              </button>
-            </th>
+            <DeletedSortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort} />
           </tr>
         </thead>
         <tbody>
           {displayRows.length === 0 && (
-            <tr>
-              <td colSpan={11} className={`${adminStyles.cell} ${adminStyles.emptyRow}`}>
-                (no comments matching the criteria)
-              </td>
-            </tr>
+            <EmptyRow colSpan={COLUMN_COUNT} message="(no comments matching the criteria)" />
           )}
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-              <td className={adminStyles.cell}>
+              <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`}>
                 <input
                   type="checkbox"
                   checked={selectedIds.has(row.id)}
@@ -505,161 +374,75 @@ export default function CommentsTable({
               <td className={`${adminStyles.cell} ${statusTextClass(row.status)}`}>{row.status}</td>
               <td className={adminStyles.cell}>{row.threadStatus}</td>
               <td className={adminStyles.nowrapCell}>{formatDate(row.createdAt, dateFormat)}</td>
-              <td className={adminStyles.nowrapCell}>{row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}</td>
+              <td className={adminStyles.nowrapCell}>
+                {row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}
+              </td>
               <td className={adminStyles.nowrapCell}>
                 {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
               </td>
               <td className={adminStyles.cell}>
-                <ActionCell comment={row} disabled={row.deleted} />
+                <ActionCell
+                  comment={row}
+                  disabled={row.deleted}
+                  run={(action) => runWithStatus(row.id, action)}
+                />
               </td>
               <td className={adminStyles.cell}>
-                <DeleteCell comment={row} onDeleted={revealRow} />
+                <RowActionButton
+                  deleted={row.deleted}
+                  noun="comment"
+                  disabled={rowPending}
+                  onClick={() => handleDeleteToggle(row)}
+                />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      <CellError message={rowError} />
 
-      <div className={adminStyles.paginationBar}>
-        <label>
-          Rows per page:{" "}
-          <select value={filters.pageSize} onChange={(e) => updateFilters({ pageSize: Number(e.target.value) as CommentsFilters["pageSize"] })}>
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span>
-          {totalCount === 0
-            ? "0 comments"
-            : `${(currentPage - 1) * filters.pageSize + 1}–${Math.min(currentPage * filters.pageSize, totalCount)} of ${totalCount}`}
-        </span>
-        <button type="button" onClick={() => navigate({ page: currentPage - 1 })} disabled={currentPage <= 1}>
-          ◀ Prev
-        </button>
-        <span>
-          Page {currentPage} of {totalPages}
-        </span>
-        <button type="button" onClick={() => navigate({ page: currentPage + 1 })} disabled={currentPage >= totalPages}>
-          Next ▶
-        </button>
-      </div>
+      <PaginationBar
+        totalCount={totalCount}
+        page={filters.page}
+        pageSize={filters.pageSize}
+        noun="comments"
+        onPageChange={(page) => navigate({ page })}
+        onPageSizeChange={(pageSize) => updateFilters({ pageSize })}
+      />
 
-      <p className={adminStyles.dateFormatRow}>
-        <label>
-          Date format:{" "}
-          <select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as DateFormat)}>
-            {DATE_FORMATS.map((format) => (
-              <option key={format} value={format}>
-                {format}
-              </option>
-            ))}
-          </select>
-        </label>
-      </p>
-      <p className={adminStyles.showDeletedRow}>
-        <label>
-          <input
-            type="checkbox"
-            checked={filters.deleted}
-            onChange={(e) => updateFilters({ deleted: e.target.checked })}
-          />{" "}
-          Show deleted rows
-        </label>
-      </p>
+      <DateFormatSelect value={dateFormat} onChange={setDateFormat} />
+      <ShowDeletedToggle checked={filters.deleted} onChange={(deleted) => updateFilters({ deleted })} />
 
-      <details className={styles.helpPanel}>
-        <summary className={styles.helpSummary}>Help: filtering &amp; the URL</summary>
-        <div className={styles.helpBody}>
-          <p>The filters below are mirrored into the page&apos;s querystring, so a filtered view can be bookmarked or shared.</p>
-          <table className={styles.helpTable}>
-            <thead>
-              <tr style={{ textAlign: "left" }}>
-                <th className={styles.helpHeaderCell}>Param</th>
-                <th className={styles.helpHeaderCell}>Meaning</th>
-                <th className={styles.helpHeaderCell}>Control</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>status</code>
-                </td>
-                <td className={styles.helpCell}>Comma-separated {STATUS_OPTIONS.join(", ")}; omitted means all.</td>
-                <td className={styles.helpCell}>Status dropdown</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>threadStatus</code>
-                </td>
-                <td className={styles.helpCell}>Comma-separated {THREAD_STATUS_OPTIONS.join(", ")}; omitted means all.</td>
-                <td className={styles.helpCell}>Thread status dropdown</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>deleted</code>
-                </td>
-                <td className={styles.helpCell}>
-                  <code>1</code> to include deleted comments; omitted hides them.
-                </td>
-                <td className={styles.helpCell}>Show deleted rows checkbox</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>q</code>
-                </td>
-                <td className={styles.helpCell}>Free-text search over the comment body and commenter name/email.</td>
-                <td className={styles.helpCell}>Search box</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>page</code> / <code>pageSize</code>
-                </td>
-                <td className={styles.helpCell}>1-indexed page number, and rows per page ({PAGE_SIZE_OPTIONS.join(", ")}).</td>
-                <td className={styles.helpCell}>Prev/Next and rows-per-page dropdown</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>sort</code>
-                </td>
-                <td className={styles.helpCell}>
-                  Comma-separated <code>key:asc</code>/<code>key:desc</code> pairs; ctrl-click a column to add it as a
-                  secondary sort key.
-                </td>
-                <td className={styles.helpCell}>Click a column header</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>post</code>
-                </td>
-                <td className={styles.helpCell}>A post id; shows only that post&apos;s comments.</td>
-                <td className={styles.helpCell}>Deep link only — edit the URL</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>author</code>
-                </td>
-                <td className={styles.helpCell}>A user id; shows only comments on posts that user is credited as an author of.</td>
-                <td className={styles.helpCell}>Deep link only — edit the URL</td>
-              </tr>
-              <tr>
-                <td className={styles.helpCell}>
-                  <code>commenter</code>
-                </td>
-                <td className={styles.helpCell}>A commenter id; shows only that person&apos;s comments.</td>
-                <td className={styles.helpCell}>Deep link only — edit the URL</td>
-              </tr>
-            </tbody>
-          </table>
+      <FilterHelp
+        sortKeys={SORTABLE_KEYS}
+        defaultPageSize={defaultPageSize}
+        searchDescription="Free-text search over the comment body and commenter name/email."
+        filters={[
+          {
+            param: "status",
+            meaning: <>Comma-separated {STATUS_OPTIONS.join(", ")}; omitted means all.</>,
+            control: "Status dropdown",
+          },
+          {
+            param: "threadStatus",
+            meaning: <>Comma-separated {THREAD_STATUS_OPTIONS.join(", ")}; omitted means all.</>,
+            control: "Thread status dropdown",
+          },
+        ]}
+        deepLinks={[
+          deepLinkEntry("post", "A post id; shows only that post's comments."),
+          deepLinkEntry("author", "A user id; shows only comments on posts that user is credited as an author of."),
+          deepLinkEntry("commenter", "A commenter id; shows only that person's comments."),
+        ]}
+        notes={
           <p style={{ marginTop: 8 }}>
             The <strong>Commenter activity</strong> column reads {"{submitted} / {in moderation} / {spam}"} — counts of
             that commenter&apos;s non-deleted comments visible on this page (an author only sees counts scoped to their
-            own posts), independent of the current status/thread-status/search filters.
+            own posts), independent of the current status/thread-status/search filters. Display-only: sorting by it
+            would need a correlated subquery per row rather than a plain <code>ORDER BY</code>.
           </p>
-        </div>
-      </details>
+        }
+      />
     </>
   );
 }

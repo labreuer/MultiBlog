@@ -1,7 +1,6 @@
-.searchInput {
-  padding: 6px 12px;
-  min-width: 240px;
-}
+/* Only what's specific to comment moderation — the generic table styles
+   (search box, bulk toolbar, help panel) moved to table/AdminTable.module.css
+   when the kit was extracted (PLAN.md §16d). */
 
 /* In a table-layout: auto table (the default) with the table itself at
    width: 100%, a column that's the only one carrying an explicit width
@@ -46,55 +45,4 @@
 
 .statusSpam {
   color: #c00;
-}
-
-.bulkToolbar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  background: #f5f5f5;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-}
-
-.bulkDeleteSpacing {
-  margin-left: 4em;
-}
-
-.helpPanel {
-  margin-top: 1em;
-  margin-bottom: 1em;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 8px 12px;
-}
-
-.helpSummary {
-  cursor: pointer;
-  font-weight: bold;
-}
-
-.helpBody {
-  margin-top: 8px;
-  font-size: 0.9rem;
-  color: #333;
-}
-
-.helpTable {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 8px;
-}
-
-.helpHeaderCell {
-  padding: 4px 8px;
-  border-bottom: 1px solid #ccc;
-}
-
-.helpCell {
-  padding: 4px 8px;
-  vertical-align: top;
-  border-bottom: 1px solid #eee;
 }

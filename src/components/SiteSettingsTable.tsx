@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateSiteDefaultModerationPolicy, updateSiteTrustThreshold } from "@/app/actions/site-settings";
-import styles from "./SiteSettingsTable.module.css";
+import { useRowStatus } from "@/components/table/use-row-status";
+import { CellError } from "@/components/table/TableControls";
+import adminStyles from "@/components/table/AdminTable.module.css";
 
 export type SiteSettingsRow = {
   defaultModerationPolicy: "ALWAYS" | "AUTO";
@@ -15,15 +17,18 @@ export type ConfigRow = {
   value: string;
 };
 
-const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid #ddd", textAlign: "left" };
-const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
+// Not a row-collection table (PLAN.md §16a) — a fixed pair of settings and a
+// read-only config list, with nothing to page, select or sort. It takes the
+// row-status border from the kit and none of the rest.
+const POLICY_ROW = "defaultModerationPolicy";
+const THRESHOLD_ROW = "trustThreshold";
 
 function PolicyCell({
   value,
-  onSaved,
+  run,
 }: {
   value: "ALWAYS" | "AUTO";
-  onSaved: () => void;
+  run: (action: () => Promise<void>) => Promise<void>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -39,8 +44,9 @@ function PolicyCell({
           setError(null);
           startTransition(async () => {
             try {
-              await updateSiteDefaultModerationPolicy(next);
-              onSaved();
+              await run(async () => {
+                await updateSiteDefaultModerationPolicy(next);
+              });
               router.refresh();
             } catch (err) {
               setError(err instanceof Error ? err.message : "Failed to update moderation policy.");
@@ -51,17 +57,19 @@ function PolicyCell({
         <option value="ALWAYS">ALWAYS (queue for approval)</option>
         <option value="AUTO">AUTO (publish immediately)</option>
       </select>
-      {error && <div style={{ color: "crimson", fontSize: "0.8rem" }}>{error}</div>}
+      <CellError message={error} />
     </>
   );
 }
 
 function TrustThresholdCell({
   value,
-  onSaved,
+  onEdit,
+  run,
 }: {
   value: number;
-  onSaved: () => void;
+  onEdit: () => void;
+  run: (action: () => Promise<void>) => Promise<void>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -80,9 +88,10 @@ function TrustThresholdCell({
     setError(null);
     startTransition(async () => {
       try {
-        await updateSiteTrustThreshold(parsed);
+        await run(async () => {
+          await updateSiteTrustThreshold(parsed);
+        });
         setText(String(parsed));
-        onSaved();
         router.refresh();
       } catch (err) {
         setText(String(value));
@@ -99,14 +108,17 @@ function TrustThresholdCell({
         step={1}
         value={text}
         disabled={pending}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value.trim() !== String(value)) onEdit();
+        }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
         style={{ width: 80, padding: "2px 4px" }}
       />
-      {error && <div style={{ color: "crimson", fontSize: "0.8rem" }}>{error}</div>}
+      <CellError message={error} />
     </>
   );
 }
@@ -122,18 +134,7 @@ export default function SiteSettingsTable({
   configLocation: string;
   configToChange: string;
 }) {
-  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
-
-  // Re-triggers the pulse even if a row is already mid-animation — toggling
-  // a class doesn't replay a running animation, so it's removed and a
-  // reflow forced before re-adding it. Same mechanism as UsersTable.
-  function pulseRow(rowId: string) {
-    const el = rowRefs.current.get(rowId);
-    if (!el) return;
-    el.classList.remove(styles.savedPulse);
-    void el.offsetWidth;
-    el.classList.add(styles.savedPulse);
-  }
+  const { rowStatusClass, setStatus, runWithStatus } = useRowStatus();
 
   return (
     <>
@@ -142,47 +143,37 @@ export default function SiteSettingsTable({
         Stored in the database (<code>SiteSettings</code>) — edits below save immediately and take effect on the
         next request, no deploy needed.
       </p>
-      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "0.5em" }}>
+      <table className={adminStyles.table}>
         <thead>
-          <tr>
-            <th style={th}>Setting</th>
-            <th style={th}>Value</th>
-            <th style={th}>Description</th>
+          <tr style={{ textAlign: "left" }}>
+            <th className={adminStyles.headerCell}>Setting</th>
+            <th className={adminStyles.headerCell}>Value</th>
+            <th className={adminStyles.headerCell}>Description</th>
           </tr>
         </thead>
         <tbody>
-          <tr
-            ref={(el) => {
-              if (el) rowRefs.current.set("defaultModerationPolicy", el);
-              else rowRefs.current.delete("defaultModerationPolicy");
-            }}
-            onAnimationEnd={(e) => e.currentTarget.classList.remove(styles.savedPulse)}
-            style={{ borderBottom: "1px solid #eee" }}
-          >
-            <td style={td}>Default moderation policy</td>
-            <td style={td}>
+          <tr className={adminStyles.row}>
+            <td className={`${adminStyles.cell} ${rowStatusClass(POLICY_ROW)}`}>Default moderation policy</td>
+            <td className={adminStyles.cell}>
               <PolicyCell
                 value={siteSettings.defaultModerationPolicy}
-                onSaved={() => pulseRow("defaultModerationPolicy")}
+                run={(action) => runWithStatus(POLICY_ROW, action)}
               />
             </td>
-            <td style={{ ...td, color: "#666" }}>
+            <td className={adminStyles.cell} style={{ color: "#666" }}>
               Moderation policy when neither author nor post overrides it.
             </td>
           </tr>
-          <tr
-            ref={(el) => {
-              if (el) rowRefs.current.set("trustThreshold", el);
-              else rowRefs.current.delete("trustThreshold");
-            }}
-            onAnimationEnd={(e) => e.currentTarget.classList.remove(styles.savedPulse)}
-            style={{ borderBottom: "1px solid #eee" }}
-          >
-            <td style={td}>Trust threshold</td>
-            <td style={td}>
-              <TrustThresholdCell value={siteSettings.trustThreshold} onSaved={() => pulseRow("trustThreshold")} />
+          <tr className={adminStyles.row}>
+            <td className={`${adminStyles.cell} ${rowStatusClass(THRESHOLD_ROW)}`}>Trust threshold</td>
+            <td className={adminStyles.cell}>
+              <TrustThresholdCell
+                value={siteSettings.trustThreshold}
+                onEdit={() => setStatus(THRESHOLD_ROW, "edited")}
+                run={(action) => runWithStatus(THRESHOLD_ROW, action)}
+              />
             </td>
-            <td style={{ ...td, color: "#666" }}>
+            <td className={adminStyles.cell} style={{ color: "#666" }}>
               Number of approved comments before a commenter is auto-approved, when a comment&apos;s resolved
               moderation policy is ALWAYS. Otherwise, this setting is inert.
             </td>
@@ -194,18 +185,18 @@ export default function SiteSettingsTable({
       <p style={{ color: "#666" }}>
         Defined as plain constants in source, not the database — read-only here.
       </p>
-      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "0.5em" }}>
+      <table className={adminStyles.table}>
         <thead>
-          <tr>
-            <th style={th}>Setting</th>
-            <th style={th}>Value</th>
+          <tr style={{ textAlign: "left" }}>
+            <th className={adminStyles.headerCell}>Setting</th>
+            <th className={adminStyles.headerCell}>Value</th>
           </tr>
         </thead>
         <tbody>
           {configRows.map((row) => (
-            <tr key={row.name} style={{ borderBottom: "1px solid #eee" }}>
-              <td style={td}>{row.name}</td>
-              <td style={td}>{row.value}</td>
+            <tr key={row.name} className={adminStyles.row}>
+              <td className={adminStyles.cell}>{row.name}</td>
+              <td className={adminStyles.cell}>{row.value}</td>
             </tr>
           ))}
         </tbody>

@@ -1,14 +1,28 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { IconTrash, IconTrashOff } from "@tabler/icons-react";
-import { useSortableRows } from "@/lib/use-sortable-rows";
-import { useShowDeletedRows } from "@/lib/use-show-deleted";
 import { deleteDoc, restoreDoc } from "@/app/actions/docs";
 import { formatDate } from "@/lib/format-date";
 import type { DocVisibility } from "@/generated/prisma/enums";
+import { type DocsFilters, buildDocsQueryString } from "@/lib/docs-query";
+import type { PageSize } from "@/lib/table-query";
+import { useTableFilters } from "@/components/table/use-table-filters";
+import { useRevealedRows } from "@/components/table/use-revealed-rows";
+import { useRowStatus } from "@/components/table/use-row-status";
+import { FilterHelp } from "@/components/table/FilterHelp";
+import {
+  CellError,
+  DeletedSortHeader,
+  EmptyRow,
+  PaginationBar,
+  RowActionButton,
+  SearchBox,
+  ShowDeletedToggle,
+  SortHeader,
+} from "@/components/table/TableControls";
+import adminStyles from "@/components/table/AdminTable.module.css";
 import styles from "./DocsTable.module.css";
 
 export type DocRow = {
@@ -20,158 +34,87 @@ export type DocRow = {
   createdAt: Date;
   // Character count from doc_length(prose_json) (see /docs/page.tsx) — a
   // Postgres function, not something computed here, so a doc's full body
-  // never has to reach this component to show its length.
+  // never has to reach this component to show its length. Display-only:
+  // there's no column for an `orderBy` to name (PLAN.md §16e).
   length: number;
   deleted: boolean;
   canEdit: boolean;
 };
 
-type SortKey = "title" | "authors" | "visibility" | "created" | "length" | "deleted";
+const SORTABLE_KEYS = ["title", "visibility", "created", "deleted"] as const;
+const COLUMN_COUNT = 7;
 
-const th: React.CSSProperties = { padding: "6px 12px", borderBottom: "2px solid #ddd" };
-const td: React.CSSProperties = { padding: "6px 12px", verticalAlign: "top" };
-const sortableTh: React.CSSProperties = { ...th, cursor: "pointer", userSelect: "none" };
-const nowrapTd: React.CSSProperties = { ...td, whiteSpace: "nowrap" };
-const nowrapSortableTh: React.CSSProperties = { ...sortableTh, whiteSpace: "nowrap" };
-
-function compareByKey(key: SortKey, a: DocRow, b: DocRow): number {
-  switch (key) {
-    case "title":
-      return a.title.localeCompare(b.title);
-    case "authors":
-      return a.authors.localeCompare(b.authors);
-    case "visibility":
-      return a.visibility.localeCompare(b.visibility);
-    case "created":
-      return a.createdAt.getTime() - b.createdAt.getTime();
-    case "length":
-      return a.length - b.length;
-    case "deleted":
-      return a.deleted === b.deleted ? 0 : a.deleted ? 1 : -1;
-  }
-}
-
-function DeleteCell({ docId, deleted, onDeleted }: { docId: string; deleted: boolean; onDeleted: (docId: string) => void }) {
+export default function DocsTable({
+  rows,
+  totalCount,
+  filters,
+  defaultPageSize,
+}: {
+  rows: DocRow[];
+  totalCount: number;
+  filters: DocsFilters;
+  defaultPageSize: PageSize;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const handle = () => {
+  const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
+    filters,
+    build: (next, extra) => buildDocsQueryString(next, extra, defaultPageSize),
+  });
+  const { displayRows, revealRow } = useRevealedRows(rows, searchParams);
+  const { rowStatusClass, runWithStatus } = useRowStatus();
+
+  function handleDeleteToggle(row: DocRow) {
     setError(null);
     startTransition(async () => {
       try {
-        if (deleted) {
-          await restoreDoc(docId);
-        } else {
-          await deleteDoc(docId);
-          onDeleted(docId);
-        }
+        await runWithStatus(row.id, async () => {
+          if (row.deleted) {
+            await restoreDoc(row.id);
+          } else {
+            await deleteDoc(row.id);
+            revealRow(row);
+          }
+        });
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to update doc.");
       }
     });
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={handle}
-        disabled={pending}
-        aria-label={deleted ? "Restore doc" : "Delete doc"}
-        title={deleted ? "Restore doc" : "Delete doc"}
-        style={{ background: "none", border: "none", padding: 4, cursor: "pointer", color: deleted ? "#666" : "#c00" }}
-      >
-        {deleted ? <IconTrashOff size={16} /> : <IconTrash size={16} />}
-      </button>
-      {error && <div style={{ color: "crimson", fontSize: "0.8rem" }}>{error}</div>}
-    </>
-  );
-}
-
-export default function DocsTable({ rows }: { rows: DocRow[] }) {
-  const router = useRouter();
-  const [searchText, setSearchText] = useState("");
-  const { showDeleted, toggle: toggleShowDeleted } = useShowDeletedRows("docs-show-deleted-rows");
-  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
-
-  function revealRow(id: string) {
-    setRevealedIds((prev) => new Set(prev).add(id));
-  }
-
-  const filteredRows = useMemo(() => {
-    const needle = searchText.trim().toLowerCase();
-    return rows.filter(
-      (row) =>
-        (showDeleted || !row.deleted || revealedIds.has(row.id)) &&
-        (!needle || row.title.toLowerCase().includes(needle)),
-    );
-  }, [rows, searchText, showDeleted, revealedIds]);
-
-  const { sortedRows, handleSort, sortState } = useSortableRows(filteredRows, compareByKey);
-
-  function sortIndicator(key: SortKey) {
-    const state = sortState(key);
-    if (!state) return null;
-    return (
-      <>
-        {" "}
-        {state.dir === "asc" ? "▲" : "▼"}
-        {state.priority > 1 && <sup>{state.priority}</sup>}
-      </>
-    );
-  }
-
-  if (rows.length === 0) {
-    return <p>No docs yet.</p>;
   }
 
   return (
     <>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: "1em", marginBottom: 8 }}>
-        <input
-          type="search"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          placeholder="Search title …"
-          aria-label="Search title"
-          style={{ padding: "6px 12px" }}
-        />
-        <label style={{ fontSize: "0.85rem", color: "#444" }}>
-          <input type="checkbox" checked={showDeleted} onChange={(e) => toggleShowDeleted(e.target.checked)} /> Show deleted
-        </label>
+      <div className={adminStyles.filterRow}>
+        <SearchBox value={searchDraft} onChange={onSearchChange} placeholder="Search title …" label="Search title" />
       </div>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+
+      <table className={adminStyles.table}>
         <thead>
           <tr style={{ textAlign: "left" }}>
-            <th style={sortableTh} onClick={(e) => handleSort("title", e.ctrlKey)}>
-              Title{sortIndicator("title")}
-            </th>
-            <th style={th}>Edit</th>
-            <th style={sortableTh} onClick={(e) => handleSort("authors", e.ctrlKey)}>
-              Author(s){sortIndicator("authors")}
-            </th>
-            <th style={sortableTh} onClick={(e) => handleSort("visibility", e.ctrlKey)}>
-              Visibility{sortIndicator("visibility")}
-            </th>
-            <th style={nowrapSortableTh} onClick={(e) => handleSort("created", e.ctrlKey)}>
-              Created{sortIndicator("created")}
-            </th>
-            <th style={nowrapSortableTh} onClick={(e) => handleSort("length", e.ctrlKey)}>
-              Length{sortIndicator("length")}
-            </th>
-            <th style={sortableTh} onClick={(e) => handleSort("deleted", e.ctrlKey)}>
-              {sortIndicator("deleted")}
-            </th>
+            <SortHeader sortKey="title" sort={filters.sort} onSort={handleSort}>
+              Title
+            </SortHeader>
+            <th className={adminStyles.headerCell}>Edit</th>
+            <th className={adminStyles.headerCell}>Author(s)</th>
+            <SortHeader sortKey="visibility" sort={filters.sort} onSort={handleSort}>
+              Visibility
+            </SortHeader>
+            <SortHeader sortKey="created" sort={filters.sort} onSort={handleSort} nowrap>
+              Created
+            </SortHeader>
+            <th className={adminStyles.nowrapHeaderCell}>Length</th>
+            <DeletedSortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort} />
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map((row) => (
-            <tr key={row.id} style={{ opacity: row.deleted ? 0.6 : 1 }}>
+          {displayRows.length === 0 && <EmptyRow colSpan={COLUMN_COUNT} message="No docs matching the criteria." />}
+          {displayRows.map((row) => (
+            <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
               <td
-                style={td}
-                className={styles.titleCell}
+                className={`${adminStyles.cell} ${rowStatusClass(row.id)} ${styles.titleCell}`}
                 onClick={(e) => {
                   if (!(e.target instanceof Element) || !e.target.closest("a")) {
                     router.push(`/doc/${row.id}`);
@@ -180,24 +123,48 @@ export default function DocsTable({ rows }: { rows: DocRow[] }) {
               >
                 <Link href={`/doc/${row.id}`}>{row.title}</Link>
               </td>
-              <td style={td}>{row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>}</td>
-              <td style={td}>{row.authors}</td>
-              <td style={td}>{row.visibility}</td>
-              <td style={nowrapTd}>{formatDate(row.createdAt, "yyyy-MM-dd HH:mm")}</td>
-              <td style={nowrapTd}>{row.length.toLocaleString()}</td>
-              <td style={td}>
-                <DeleteCell
-                  docId={row.id}
+              <td className={adminStyles.cell}>{row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>}</td>
+              <td className={adminStyles.cell}>{row.authors}</td>
+              <td className={adminStyles.cell}>{row.visibility}</td>
+              <td className={adminStyles.nowrapCell}>{formatDate(row.createdAt, "yyyy-MM-dd HH:mm")}</td>
+              <td className={adminStyles.nowrapCell}>{row.length.toLocaleString()}</td>
+              <td className={adminStyles.cell}>
+                <RowActionButton
                   deleted={row.deleted}
-                  onDeleted={(id) => {
-                    revealRow(id);
-                  }}
+                  noun="doc"
+                  disabled={pending}
+                  onClick={() => handleDeleteToggle(row)}
                 />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      <CellError message={error} />
+
+      <PaginationBar
+        totalCount={totalCount}
+        page={filters.page}
+        pageSize={filters.pageSize}
+        noun="docs"
+        onPageChange={(page) => navigate({ page })}
+        onPageSizeChange={(pageSize) => updateFilters({ pageSize })}
+      />
+
+      <ShowDeletedToggle checked={filters.deleted} onChange={(deleted) => updateFilters({ deleted })} />
+
+      <FilterHelp
+        sortKeys={SORTABLE_KEYS}
+        defaultPageSize={defaultPageSize}
+        searchDescription="Free-text search over the doc title."
+        notes={
+          <p style={{ marginTop: 8 }}>
+            <strong>Author(s)</strong> and <strong>Length</strong> are display-only: the first is a joined list across
+            a doc&apos;s authors, the second is computed in Postgres from the document body, and neither is a column an
+            <code> ORDER BY</code> can name (PLAN.md §16e).
+          </p>
+        }
+      />
     </>
   );
 }

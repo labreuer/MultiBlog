@@ -4,7 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
 import type { Prisma } from "@/generated/prisma/client";
 import { parseCommentsFilters, type CommentsSortKey } from "@/lib/comments-query";
-import type { SortColumn } from "@/lib/use-sortable-rows";
+import { toURLSearchParams } from "@/lib/table-query";
+import { getDefaultPageSize } from "@/lib/user-preferences";
+import type { SortColumn } from "@/lib/table-sort";
 import CommentsTable from "@/components/CommentsTable";
 import styles from "./page.module.css";
 
@@ -85,14 +87,9 @@ export default async function CommentsPage({
     );
   }
 
-  const resolvedSearchParams = await searchParams;
-  const flatParams: Record<string, string> = {};
-  for (const [key, value] of Object.entries(resolvedSearchParams)) {
-    if (typeof value === "string") flatParams[key] = value;
-    else if (Array.isArray(value) && value.length > 0) flatParams[key] = value[0];
-  }
-  const urlSearchParams = new URLSearchParams(flatParams);
-  const filters = parseCommentsFilters(urlSearchParams);
+  const urlSearchParams = toURLSearchParams(await searchParams);
+  const defaultPageSize = await getDefaultPageSize(session.user.id);
+  const filters = parseCommentsFilters(urlSearchParams, defaultPageSize);
 
   // `baseWhere` is "everything this user could ever see here" (role scope +
   // deep links); `filterWhere` layers the UI filters on top of it. Kept
@@ -165,7 +162,7 @@ export default async function CommentsPage({
   return (
     <main style={{ maxWidth: 1200, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1 className={styles.heading}>Comments</h1>
-      <CommentsTable rows={rows} totalCount={totalCount} filters={filters} />
+      <CommentsTable rows={rows} totalCount={totalCount} filters={filters} defaultPageSize={defaultPageSize} />
     </main>
   );
 }
