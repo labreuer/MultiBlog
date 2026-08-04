@@ -373,6 +373,32 @@ export async function clearColumnOrder(email: string): Promise<void> {
   await prisma.user.updateMany({ where: { email }, data: { columnOrder: Prisma.DbNull } });
 }
 
+/**
+ * Read and overwrite the site-wide default column order (§16i's
+ * `SiteSettings.defaultColumnOrder`, `id: 1`, a real singleton row — not a
+ * throwaway one `assertSafe` could scope to).
+ *
+ * Unlike `columnOrder` above, this isn't a spec-created row: it's live
+ * config, editable from `/site-settings` in the real app, so a test that
+ * asserts against it (or overwrites it to get a known baseline) has to save
+ * whatever was there and put it back — the same "the shared thing is reused,
+ * so return it" rule `clearColumnOrder`'s own comment states, but for a
+ * value that can be genuine production configuration rather than merely
+ * another spec's leftovers.
+ */
+export async function getSiteDefaultColumnOrder(): Promise<Prisma.JsonValue | null> {
+  const row = await prisma.siteSettings.findUnique({ where: { id: 1 } });
+  return row?.defaultColumnOrder ?? null;
+}
+
+export async function setSiteDefaultColumnOrder(value: Prisma.JsonValue | null): Promise<void> {
+  await prisma.siteSettings.upsert({
+    where: { id: 1 },
+    update: { defaultColumnOrder: value === null ? Prisma.DbNull : value },
+    create: { id: 1, defaultColumnOrder: value === null ? Prisma.DbNull : value },
+  });
+}
+
 /** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), same check createTestYdoc's own spec makes for /ydoc-debug documents. */
 export async function countDocYdocUpdates(docId: string): Promise<number> {
   return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
@@ -766,6 +792,8 @@ const handlers = {
   deleteTestDoc,
   getDocState,
   clearColumnOrder,
+  getSiteDefaultColumnOrder,
+  setSiteDefaultColumnOrder,
   countDocYdocUpdates,
   createTestDocLink,
   deleteTestDocLinkGroup,

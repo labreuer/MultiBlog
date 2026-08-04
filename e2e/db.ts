@@ -132,6 +132,14 @@ export const deleteTestDoc = (...args: Parameters<DbHandlers["deleteTestDoc"]>):
 export const clearColumnOrder = (...args: Parameters<DbHandlers["clearColumnOrder"]>): Promise<void> =>
   call("clearColumnOrder", ...args);
 
+export const getSiteDefaultColumnOrder = (
+  ...args: Parameters<DbHandlers["getSiteDefaultColumnOrder"]>
+): Promise<Awaited<ReturnType<DbHandlers["getSiteDefaultColumnOrder"]>>> => call("getSiteDefaultColumnOrder", ...args);
+
+export const setSiteDefaultColumnOrder = (
+  ...args: Parameters<DbHandlers["setSiteDefaultColumnOrder"]>
+): Promise<void> => call("setSiteDefaultColumnOrder", ...args);
+
 export const getDocState = (...args: Parameters<DbHandlers["getDocState"]>): Promise<DocState | null> =>
   call("getDocState", ...args);
 

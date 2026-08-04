@@ -15,6 +15,8 @@ import {
   deleteTestDoc,
   deleteTestPost,
   deleteTestUser,
+  getSiteDefaultColumnOrder,
+  setSiteDefaultColumnOrder,
   uniqueEmail,
   uniqueTitle,
 } from "./db";
@@ -473,6 +475,20 @@ test.describe("admin table kit", () => {
         t.replace(/[▲▼\s]/g, ""),
       );
 
+    // This test's assertions assume the built-in code-level defaults
+    // (admin-table-columns.ts), but /site-settings' own default-columns
+    // editor writes a *site-wide* override for the very same table
+    // (SiteSettings.defaultColumnOrder, id: 1) — a real singleton, not a
+    // throwaway row scoped to this test's own data. Reusing it without
+    // reading it first would silently overwrite genuine site config;
+    // reading it and never resetting it would leave every assertion below
+    // hostage to whatever an admin last saved from the real app. Snapshot,
+    // reset to the code-level default (null), and put back in `finally`,
+    // the same "the shared thing has to go back" rule clearColumnOrder's
+    // own comment states for the per-user version of this.
+    const originalSiteDefault = await getSiteDefaultColumnOrder();
+    await setSiteDefaultColumnOrder(null);
+
     try {
       await page.goto("/docs");
       // Two of the eight are alwaysVisible and render as icon-only headers, so
@@ -530,6 +546,7 @@ test.describe("admin table kit", () => {
     } finally {
       // The shared admin is reused by every other spec, so this has to go back.
       await clearColumnOrder(ADMIN_EMAIL);
+      await setSiteDefaultColumnOrder(originalSiteDefault);
     }
   });
 
