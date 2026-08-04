@@ -1,3 +1,38 @@
+.banner {
+  position: relative;
+  width: 100%;
+  /* Aspect ratio is genuinely per-deployment (SITE_BANNER_ASPECT), so it's
+     set inline rather than here — STYLE.md's bar for inline over a CSS
+     Module value. */
+}
+
+.bannerImage {
+  object-fit: cover;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 2.5rem;
+  /* A third centered-column width alongside STYLE.md's documented 680px
+     (listings) and 800px (full-text) — not a drift from either: the main
+     column inside this grid stays at roughly 680px, and the extra width is
+     the 280px sidebar plus its gap. */
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.preamble {
+  margin-bottom: 2rem;
+}
+
 .postHeading {
   display: flex;
   align-items: center;

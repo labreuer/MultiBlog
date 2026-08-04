@@ -182,3 +182,59 @@ None of this touches the live half. `LiveDocBody` (`src/components/LiveDocBody.t
 own read-only Hocuspocus connection independent of the HTTP response and re-renders in the
 browser on every synced update — a second, always-fresh path with no cache of its own to
 invalidate, the same way `AnnotatableArticle`'s live editor swap-in works for a post.
+
+## 2026-08-04 — Contributor avatars: why a route beat a base64 data URI
+
+Self-hosting the landing page's contributor avatars (PLAN.md §17n) presented as a
+binary — keep a remote URL, or store the bytes and inline them as a base64 data
+URI. It isn't one. "Store the bytes" and "serve them as base64" are orthogonal,
+and the second is the part that would have been wrong *here specifically*.
+
+`/` is ISR-cached (`revalidate = 60`, §17a) — a shared HTML artifact regenerated
+at most once a minute and served to everyone in between. A data URI becomes part
+of that artifact. Concretely, that means:
+
+- the bytes are re-sent in full on **every** page load, by every visitor, forever
+  — the browser has no separate cache entry to hit, because there is no separate
+  resource;
+- they are re-serialized into the ISR cache entry on every regeneration;
+- there is no `ETag`, so no conditional request is even expressible;
+- `next/image` can never touch them.
+
+At five contributors × ~5KB that is ~25KB welded onto every load of the site's
+most-visited page, permanently. The counterargument is real but narrow: under
+~1–4KB inlining saves a round trip, and a 40px avatar is genuinely in that
+range — but that's a *cold-first-visit* win, and a blog front page is dominated
+by repeat visits, where a cacheable URL wins outright.
+
+So the bytes live in Postgres (`user_avatar`) and are served from
+`/api/avatar/<userId>/<hash>`.
+
+**The hash in the path is what makes `immutable` honest.** It's a content hash,
+so replacing an avatar changes the URL. The handler answers
+`Cache-Control: public, max-age=31536000, immutable` with an `ETag` of the same
+hash, and a conditional request gets a 304. Nothing has to guess at a TTL,
+because the URL never outlives its content.
+
+**The ISR window creates one case worth naming.** `/`'s HTML is cached for up to
+60s, so a reader can hold HTML that references a hash which was current at
+generation time and isn't now. 404ing that would show a broken image for the
+rest of the window. The handler instead serves the *current* bytes — the reader
+sees the right face — but downgrades that response to
+`max-age=0, must-revalidate`, since a URL whose content just moved shouldn't be
+claiming immutability. Fresh and stale are the same lookup; only the header
+differs.
+
+Verified against the running app: a matching `If-None-Match` returns 304 with the
+`immutable` header intact; a stale path hash returns 200 with `must-revalidate`
+and the correct current body length; an unknown user returns 404.
+
+The 2026-07-24 finding still applies unchanged — `revalidatePath` reaches the
+server's Full Route Cache but not a browser's own copy. It doesn't bite here,
+because an avatar's URL changes when its content does, so there is no stale
+browser copy to invalidate in the first place. That is the same property the
+content hash buys for the CDN case, arrived at from the other direction.
+
+One deliberate non-caching consequence, recorded because it's the kind of thing
+that surprises later: the avatars now ride along in `pg_dump` (DEPLOY.md §9),
+roughly 5KB per contributor, exactly as the ydoc `BYTEA` already does.

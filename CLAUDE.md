@@ -101,7 +101,39 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
 - `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`,
   `NEXT_PUBLIC_COLLAB_URL`. Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
   `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
-  deployment's title survives `git pull` instead of living in a tracked file.
+  deployment's title survives `git pull` instead of living in a tracked file. Also optional:
+  `SITE_BANNER`/`SITE_BANNER_ASPECT`/`SITE_BANNER_ALT` (`src/lib/site-banner.ts`, PLAN.md
+  §17b) — the landing page's banner image, path plus aspect ratio plus alt text. Bare, not
+  `NEXT_PUBLIC_`, on purpose: unlike `NEXT_PUBLIC_SITE_TITLE`, these are read server-side
+  only, so changing them needs a **restart, not a rebuild** — and the image file itself
+  (`public/banner.*`, gitignored) needs neither, since `public/` is served straight from
+  disk at runtime.
+- **A contributor's avatar is bytes in `user_avatar`, not a URL** (PLAN.md §17n), served from
+  `/api/avatar/<userId>/<hash>` where `hash` is a content hash — so the URL changes whenever
+  the image does, which is what lets the route answer `Cache-Control: immutable` and use the
+  same hash as its `ETag`. Three things not to undo:
+  - **It's a separate table on purpose.** `src/app/users/page.tsx` queries with `include:` and
+    no `select:`, so every scalar column comes back; an avatar column on `user` would drag up
+    to 100 blobs into that page's payload silently. Any query that wants an avatar names
+    `avatar: { select: { hash: true } }` — never `bytes`, which only the route handler reads.
+  - **`User.image` stays a URL string.** It's the Auth.js adapter's field (`PrismaAdapter`),
+    populated from an OAuth profile; `resolveAvatarSrc` (`src/lib/avatar-url.ts`) prefers the
+    upload and falls back to it, then to the initials circle.
+  - **`src/lib/avatar.ts` is server-only** (`sharp`, `node:crypto`). `avatar-url.ts` holds the
+    browser-safe half, because `ContributorCard` builds these URLs and is imported by the
+    `"use client"` `ContributorPanel`, so it compiles into the client bundle too.
+  Uploads are always re-encoded (160px square WebP) rather than stored as sent — that's what
+  strips EXIF/GPS from a phone photo, and `.rotate()` bakes the orientation flag into the
+  pixels first so the strip doesn't leave it sideways. There is deliberately **no
+  "avatar from URL" path**: a server-side fetch of a user-supplied URL is SSRF. `sharp` is a
+  direct dependency pinned at the range its pre-existing `overrides` entry uses — npm rejects
+  a direct dep whose spec doesn't match its own override.
+- The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
+  exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
+  own title is never shown, only its body. Seed one with `npx tsx scripts/seed-front-page.ts`
+  (create-if-absent, never clears anything). No `DocVisibility` check: a doc's `visibility`
+  still gates `/doc/<slug>` exactly as before, but the title alone is what makes its body
+  public here — see PLAN.md §17c for why gating on `SHARED` would be wrong.
 - Adding a **required** (non-nullable, no `@default`) column to a table that already has
   rows: `prisma migrate dev` normally prompts interactively for how to backfill existing
   rows, which doesn't work non-interactively. Instead, add the field nullable first and
@@ -109,6 +141,25 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
   migration is a plain `ALTER COLUMN ... SET NOT NULL` with no prompt, since every row
   already has a value by then. See `adminInitials`'s two migrations
   (`add_admin_initials_nullable`, `make_admin_initials_required`) for the pattern.
+- **Editing a migration file after it's been applied makes the next `migrate dev` demand a
+  full database reset** — and the message says so in a way that's easy to accept by reflex:
+  *"The migration `…` was modified after it was applied. We need to reset the `public`
+  schema … All data will be lost."* Prisma records a SHA-256 of each `migration.sql` in
+  `_prisma_migrations.checksum`, and any edit — including appending a hand-written backfill
+  to a file `migrate dev` just generated — invalidates it. **Do not reset a dev database
+  holding real content.** When the database genuinely already reflects the edited file (the
+  DDL ran, and the backfill was applied by hand), the schema and the file agree and only the
+  recorded checksum is stale, so correct that instead:
+  ```
+  sha256sum prisma/migrations/<name>/migration.sql
+  psql -U multiblog -h 127.0.0.1 -d multiblog \
+    -c "UPDATE _prisma_migrations SET checksum='<hash>' WHERE migration_name='<name>';"
+  ```
+  Take a `pg_dump` first (`.db-backups/`, the convention that directory exists for). Note the
+  `pg_dump` on `PATH` is the **14.2** one from the stopped `postgresql-x64-14` install and
+  refuses an 18.4 server (`server version mismatch`) — use
+  `"/c/Program Files/PostgreSQL/18/bin/pg_dump.exe"`. Better still, put the backfill in the
+  file *before* the first `migrate dev` run, or in its own follow-up migration.
 
 ## Checks & verification
 
@@ -309,14 +360,23 @@ blob makes the doc-side checks report faults that evaporate once it's repaired).
 - `body` gets implicit `overflow-y: auto` (side effect of its `overflow-x: hidden`), and
   `documentElement` is the effective scroller — use `window.scrollY`, not
   `body.scrollTop`, when checking scroll behavior.
-- TipTap v3's StarterKit already bundles Link and undo/redo: never add
-  `@tiptap/extension-link` separately, and pass `undoRedo: false` when combining with the
-  Collaboration extension. `@tiptap/extension-document`/`-paragraph`/`-text` *are* declared
-  deps, which isn't a violation of that: they're for the **title** editor
-  (`CollabTitleField.tsx`), which registers no StarterKit at all, so nothing is double-
-  registered. Pin them to the same exact version as `@tiptap/core` when installing —
-  `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0` exactly, and npm
-  fails the install.
+- TipTap v3's StarterKit already bundles Link, Bold and Italic (among others) and
+  undo/redo: never add any of those extensions **alongside StarterKit** in the same
+  schema, and pass `undoRedo: false` when combining StarterKit with the Collaboration
+  extension (`undoRedo` stays on wherever there's no `Collaboration` to own the history
+  stack instead — `blurbExtensions` below is the one schema in this codebase where that
+  inversion applies). `@tiptap/extension-document`/`-paragraph`/`-text` *are* declared
+  deps, which isn't a violation of that: they're for schemas built **without** StarterKit
+  at all, so nothing is double-registered — the **title** editor's `titleExtensions`
+  (`CollabTitleField.tsx`) and the **contributor blurb**'s `blurbExtensions`
+  (`ContributorPanel.tsx`, PLAN.md §17f), both constrained to `content: "paragraph"` so a
+  second block is structurally impossible. `blurbExtensions` also declares
+  `@tiptap/extension-bold`/`-italic` directly for the same reason — StarterKit has no
+  option to keep only `document`/`text` and drop everything else, so building the schema
+  from scratch is the only way to get "exactly one paragraph, a couple of marks, nothing
+  else". Pin every one of these to the same exact version as `@tiptap/core` when
+  installing — `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0`
+  exactly, and npm fails the install.
 - **TipTap v3's `setContent` takes an options object where v2 took a boolean**:
   `editor.commands.setContent(json, { emitUpdate: false })`, not `setContent(json, false)`.
   The v2 form is a type error (`Type 'false' has no properties in common with type

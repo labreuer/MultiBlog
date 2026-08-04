@@ -23,6 +23,8 @@ import type {
   AnnotationState,
   TestDocLink,
   DocLinkFields,
+  ContributorFields,
+  AvatarFacts,
 } from "./db-worker";
 
 export type {
@@ -37,6 +39,8 @@ export type {
   AnnotationState,
   TestDocLink,
   DocLinkFields,
+  ContributorFields,
+  AvatarFacts,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
@@ -142,6 +146,13 @@ export const setSiteDefaultColumnOrder = (
 
 export const getDocState = (...args: Parameters<DbHandlers["getDocState"]>): Promise<DocState | null> =>
   call("getDocState", ...args);
+
+export const getContributorFields = (
+  ...args: Parameters<DbHandlers["getContributorFields"]>
+): Promise<ContributorFields | null> => call("getContributorFields", ...args);
+
+export const getAvatarFacts = (...args: Parameters<DbHandlers["getAvatarFacts"]>): Promise<AvatarFacts | null> =>
+  call("getAvatarFacts", ...args);
 
 export const createTestDocLink = (...args: Parameters<DbHandlers["createTestDocLink"]>): Promise<TestDocLink> =>
   call("createTestDocLink", ...args);

@@ -4330,3 +4330,652 @@ drag handling reuses `ColumnPicker`'s own mechanics and CSS classes (`columnPick
 `columnRow`/`columnDragHandle`, `AdminTable.module.css`) rather than a second implementation of the
 same gesture — only a checked row is draggable there too, for the same reason: there is no
 meaningful position for a column that isn't shown.
+
+## 17. The landing page
+
+`/` has been a bare list of published posts since the first week — `src/app/page.tsx`, a
+680px column, inline styles, every published post unbounded. This section turns it into an
+actual landing page with four blocks: a **banner** image, a **preamble** taken from a doc, the
+**latest posts**, and a **contributor list** in a right-hand column that moves below the
+posts when the viewport is too narrow to hold both.
+
+Three of those four are static content the whole world sees identically. The fourth —
+contributors — is the only one that needed schema, and it brought a self-service editing
+surface with it, which is the substance of this section.
+
+### 17a. Three constraints that exist before anything is designed
+
+**`/` is genuinely ISR-cached again, and must stay that way.** CACHING.md's 2026-07-20
+entry recorded that `PostEditBadge` forced `auth()` into the home page and silently turned
+a shared static page into a per-request render; §15 deleted that badge, so `page.tsx` now
+has `revalidate = 60` and no viewer-identity read anywhere in its tree. That is a real
+shared cache today, not a vestigial export. **Nothing added here may call `auth()`,
+`cookies()` or `headers()`** — not the contributor list, not the preamble, not the banner.
+
+This constraint is not just a performance note; it decides where the editing UI goes. A
+contributor cannot be offered an inline "edit my entry" affordance on the front page itself,
+because knowing whether to show it means knowing who is looking. The panel therefore lives
+on `/dashboard` (§17g), which already calls `auth()` and is already dynamic — the same
+split CACHING.md's 2026-07-23 entry prescribed and §15 finally made true of this route.
+
+**A doc's prose carries marks the public renderer doesn't know.** `docContentExtensions`
+includes `authorHighlight` and `annotation`; `contentExtensions`, which every public
+surface renders with, does not. The preamble is doc content on a public page, so it needs the
+same strip `postContentFromYdoc` (`src/lib/post-content.ts`, §15b) applies before a post's
+snapshot is written — for exactly the same reason, and it would fail exactly as loudly if
+skipped.
+
+**`src/lib/prisma.ts`'s soft-delete extension only rewrites a *top-level* `where`.** It
+does not reach a nested relation filter, and it does not exist at all in raw SQL. Neither
+of the queries this section adds joins through a relation, so the trap is dodged — but the
+one-time backfill in §17e is raw SQL and spells out both `deleted_by_user_id IS NULL`
+checks by hand for precisely this reason.
+
+### 17b. The banner: env-configured, gitignored, and deliberately not `NEXT_PUBLIC_`
+
+The image is deployment content, not repository content — the same argument
+`NEXT_PUBLIC_SITE_TITLE` already won (`src/lib/site-config.ts`): a real deployment's
+identity should live somewhere `git pull` cannot revert. So the *path* comes from the
+environment and the *file* is gitignored:
+
+```
+SITE_BANNER="/banner.png"
+SITE_BANNER_ASPECT="4724 / 1609"     # optional — defaults to 3 / 1
+SITE_BANNER_ALT=""                   # optional — empty is correct for a decorative banner
+```
+
+with `/public/banner.*` added to `.gitignore`.
+
+**A new module, `src/lib/site-banner.ts`, rather than three more lines in
+`site-config.ts`.** `SiteHeader.tsx` imports `site-config.ts` and is a `"use client"`
+component, which is the whole reason `SITE_TITLE` is `NEXT_PUBLIC_`-prefixed — only those
+are inlined into the browser bundle. A bare `process.env.SITE_BANNER` added to that module
+would read `undefined` in the browser and quietly resolve to the fallback, a footgun that
+only bites whoever next imports the constant from a client component. Keeping the
+server-only values in their own file makes "this is never readable from the client" a
+property of the module rather than a comment on a line.
+
+**Bare, not `NEXT_PUBLIC_`, is also the better operational answer.** DEPLOY.md §4 warns
+that every `NEXT_PUBLIC_` var is baked in at `npm run build` and changing one needs a
+rebuild. These are read server-side only, so changing them needs a service restart and
+nothing more — and swapping the *image file* needs neither, since `public/` is served from
+the project directory at runtime. Dropping a new `banner.png` on the server is a `scp` and
+a cache expiry.
+
+**`next/image`, not `<img>`.** The file this was built against is 4724 × 1609; serving that
+unresized to every visitor is indefensible when the optimizer is already there. `sharp@0.35.3`
+resolves under `next@16.2.11` without being a direct dependency, so production optimization
+works as-is. The image renders `fill` inside a wrapper carrying `aspect-ratio` as an inline
+style — a genuinely per-deployment value, which is STYLE.md's stated bar for inline over
+CSS Modules — with `object-fit: cover` and `priority` (it is the LCP element).
+
+Unset `SITE_BANNER` renders nothing at all and the page degrades to preamble + posts +
+contributors. A *set* variable pointing at a missing file is left to 404 rather than
+detected and hidden: that is a deployment error, and failing visibly is the point.
+
+### 17c. The preamble: a doc found by title
+
+The preamble is the body of the doc titled **`FRONT PAGE`**. `src/lib/front-page.ts` owns
+the lookup:
+
+```ts
+export const FRONT_PAGE_DOC_TITLE = "FRONT PAGE";
+// getFrontPagePreamble():
+// findFirst({ where: { title: { equals: FRONT_PAGE_DOC_TITLE, mode: "insensitive" } },
+//             orderBy: { createdAt: "asc" },
+//             select: { proseJson: true } })
+```
+
+**"Preamble", not "blurb", and the distinction is load-bearing.** §17f gives a contributor
+their own short rich-text field, and calling both of them a blurb would collapse two
+genuinely different mechanisms into one word: this one is a *doc* — ydoc-backed, collab-
+edited, multi-author, arriving through the debounce-written `prose_json` cache and therefore
+eventually consistent (§17j) — while `contributor_blurb` is a plain `User` column written by
+a server action in the web process and live immediately. Nearly every design difference
+between the two follows from that split, so the vocabulary should make it hard to conflate
+them rather than easy. "Preamble" also carries no implication of brevity, which "blurb"
+does and which is wrong here: this is a whole doc, and it can be several paragraphs.
+Identifiers follow the prose — `getFrontPagePreamble`, `.preamble` — with `FRONT PAGE`
+staying the doc's literal title, since that is a user-facing string an editor types.
+
+**Only `proseJson` is selected, which is what makes "don't show the title" structural
+rather than a rule someone has to remember.** The title is the *selector*; it never reaches
+the render because it is never read.
+
+**First-created wins.** `Doc.title` has no unique constraint and never will — it is a cache
+of the ydoc's title fragment (§12d), written by the collab server, and two docs can trivially
+end up with the same one. `orderBy: { createdAt: "asc" }` makes a second `FRONT PAGE` doc
+inert rather than letting the front page flip between two preambles depending on which row
+Postgres happened to return. The trade-off is that it also makes the preamble awkward to
+test in isolation — see §17m.
+
+**Visibility is deliberately not consulted.** The obvious instinct is to require
+`DocVisibility.SHARED`, and it is wrong: §12e defines `SHARED` as "anyone with
+`canViewDocs`", which is a role gate, not the public. Requiring it would attach a meaning to
+that enum value it does not have, and would leave a `SHARED` doc looking world-readable in
+the admin UI when it isn't. The title *is* the switch — one mechanism, stated once. A doc's
+`visibility` continues to govern `/doc/<slug>` exactly as before; what changes is that a
+doc named `FRONT PAGE` also has its body published anonymously, which is the section every
+future reader of this repo needs to have read.
+
+Rendering is `renderToReactElement({ content, extensions: contentExtensions })` inside
+`proseStyles.prose`, over content passed through
+`stripMarksFromDoc(json, ["authorHighlight", "annotation"])` — §17a's second constraint.
+
+`proseJson === null` (a doc created but never edited, so the store debounce has never
+fired) omits the preamble rather than falling back to decoding the ydoc the way
+`/doc/[slug]/page.tsx` does. That fallback costs a row read and a Yjs decode on a
+statically-generated page, to cover a state that resolves itself the moment anyone types a
+character.
+
+**Seeding.** `scripts/seed-front-page.ts` creates the doc if and only if one doesn't already
+exist, and never clears anything — deliberately *not* folded into
+`scripts/seed-sample-data.ts` as the primary path, because that script empties the content
+tables wholesale and is not something to point at a database with real content in it. It
+copies that script's mechanics rather than reinventing them: the ydoc row is created
+eagerly (§12b), and the title is seeded into the **title fragment** as well as the column,
+or `server/doc-cache.ts` writes an empty title straight over it on first flush. Adding the
+same doc to `SAMPLE_DOCS` for freshly rebuilt databases is a one-line follow-up, noting that
+its guard compares against `SAMPLE_DOCS.length` and that count shifts by one.
+
+### 17d. The latest posts
+
+Unchanged markup — the `padding: 1.5rem 0; border-bottom: 1px solid #eee` article block
+STYLE.md documents as repeated across home, author and search listings — plus `take: 10`,
+where the query is currently unbounded.
+
+That bound has no escape hatch yet: `/posts` is the admin table, and there is no public
+archive route. The eleventh-newest post becomes reachable only by search, RSS, or a direct
+link. Recorded in TODO.md rather than solved here.
+
+### 17e. Contributors: three new `User` columns, and what they replace
+
+```prisma
+isListedContributor Boolean @default(false) @map("is_listed_contributor")
+contributorBlurb    Json?   @map("contributor_blurb")
+contributorOrder    Int?    @map("contributor_order")
+orcid               String? @map("orcid")
+website             String? @map("website")
+```
+
+All five in one migration. `isListedContributor` is non-nullable *with* a default, so it
+does not need the two-step nullable-then-backfill dance CLAUDE.md documents for
+`adminInitials` — that is only required for a non-nullable column with no default.
+
+**`isListedContributor` is the membership switch, and it replaces a derived one.** The
+first draft of this section computed the contributor list as "anyone with at least one live
+published post". An explicit column is better on three counts: the query stops joining
+through a relation (and therefore stops needing the manual `deletedByUserId: null` that
+§17a's third constraint would otherwise demand); appearing on the public front page becomes
+a deliberate editorial act rather than a side effect of publishing; and it gives the
+opt-out in §17h something to write to. The cost is real and worth stating: a newly
+published author does **not** appear automatically, and an admin has to flip the flag.
+
+So that the list is not empty on day one, the migration backfills it — raw SQL, in the same
+migration file, after the `ALTER TABLE`:
+
+```sql
+UPDATE "user" u SET is_listed_contributor = true
+WHERE u.deleted_by_user_id IS NULL
+  AND EXISTS (SELECT 1 FROM post_author pa JOIN post p ON p.id = pa.post_id
+              WHERE pa.user_id = u.id AND p.deleted_by_user_id IS NULL
+                AND p.publish_event_id IS NOT NULL AND p.published_at <= now());
+```
+
+Both `deleted_by_user_id IS NULL` checks are written out because raw SQL is outside the
+Prisma extension entirely — the one place in this section where forgetting them would
+silently put a deleted author on the public front page.
+
+**`contributorOrder` is a nullable `Int`, not `@default(0)`.** "Unset" needs to be
+expressible and needs to sort to the tail, which `{ contributorOrder: { sort: "asc",
+nulls: "last" } }` gives directly; a zero default would make everyone tie at the front and
+the column would carry no information until someone edited every row.
+
+The query, then, is flat:
+
+```ts
+where:   { isListedContributor: true, name: { not: null } },
+orderBy: [{ contributorOrder: { sort: "asc", nulls: "last" } }, { name: "asc" }],
+```
+
+`name: { not: null }` mirrors `AuthorByline`, which already drops unnamed authors rather
+than rendering an empty link. Name is the secondary sort so equal `contributorOrder`
+values — including the whole unset tail — are stable rather than arbitrary.
+
+**One card component, two callers.** `ContributorCard` (`src/components/ContributorCard.tsx`)
+renders a single entry and is used by both the front page and the dashboard panel's live
+preview (§17g). This is `AuthorByline`'s argument applied again: a preview that renders
+something *resembling* the real thing is a preview that will eventually lie.
+
+**The avatar.** `User.image` when set, rendered as a plain `<img>` with the same
+`eslint-disable-next-line @next/next/no-img-element` precedent `UsersTable.tsx` already
+carries — these are arbitrary remote URLs, not a fixed asset set, and `next/image` would
+need an `images.remotePatterns` entry per provider. When null, the stand-in is a circle
+filled with `User.color` showing `adminInitials`, rather than a generic silhouette asset:
+both columns already exist, both are already treated as general-purpose (the admin table
+labels the latter simply "Initials", and `doc_metrics.byline` `string_agg`s it), and
+`color` is validated to `#rrggbb` on write, so it is safe in an inline style. Worth noting
+the mild misnomer being leaned on: `adminInitials` is not admin-only in practice and hasn't
+been since `doc_metrics`.
+
+**ORCID is stored bare** (`0000-0002-1825-0097`), not as a URL — one canonical form,
+validated against `^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$` plus the ISO 7064 mod-11-2 checksum
+(cheap, and catches transposed digits, which a regex alone does not). The
+`https://orcid.org/…` link is built at render. **Website** is parsed with `new URL()` and
+required to be `http:`/`https:` — that check, not an allowlist of hostnames, is what makes
+a stored `javascript:` href impossible. Both live in `src/lib/contributor-links.ts`
+alongside `orcidUrl()`.
+
+### 17f. `contributor_blurb` is TipTap JSON, and the schema *is* the validation
+
+A short rich-text line ("Historian of science; writes here about X") wants emphasis, so the
+column is `Json` holding a TipTap/ProseMirror document, rendered with
+`renderToReactElement` — the same call §17c's preamble, the post pages and the doc pages
+already make. There is no `dangerouslySetInnerHTML` anywhere in this section.
+
+**No ydoc, deliberately — this is the first editable content surface in the app that isn't
+backed by a `Y.Doc`.** Everything §11–§13 built exists for content with at least one of
+three properties: more than one simultaneous author, a history worth replaying, or anchors
+that must survive an edit. A contributor's blurb has none. It is one line, owned by exactly
+one person, edited on their own dashboard, and changed about twice a year.
+
+Wiring one up would not be reuse, it would be four new integration points: a
+`ydoc:contributor:<userId>` sub-namespace in `src/lib/ydoc-names.ts`; a third authz branch
+in `/api/ydoc/[id]/token` beside `doc-authz.ts` and `annotation-authz.ts`; a **third
+cache-flush path in the collab server** writing to `user` (`server/doc-cache.ts` writes
+docs, annotations have their own, neither touches that table); and client provider plus
+`attachIndexeddb` wiring under §11e's ref-counting rules. It would also *cost* something:
+a column written by the collab process joins §17j's can't-be-pushed bucket, because that
+process has no `revalidatePath`. A plain server action revalidates `/` inline and the edit
+is live immediately.
+
+What the plain path reuses instead is already load-bearing elsewhere: `getSchema` over a
+restricted extension set, `renderToReactElement`, and `toPlainJSON` — which exists in
+`tiptap-schema.ts` for precisely this hop, since `editor.getJSON()`'s null-prototype `attrs`
+objects are silently replaced by React's Server Action encoder unless they are round-tripped
+first. The editor is a plain `useEditor` with `content:` seeded from the column: no
+`Collaboration`, no provider, no IndexedDB, and one explicit Save for the whole panel rather
+than a per-keystroke debounce.
+
+**`blurbExtensions`, in `src/lib/tiptap-schema.ts` and nowhere else** — CLAUDE.md's rule
+that the schema has exactly one home, now with a fourth entry beside `contentExtensions`,
+`titleExtensions` and their mark-layered variants. It is the only one with no Yjs variant:
+
+```ts
+export const blurbExtensions = [Document.extend({ content: "paragraph" }), Paragraph, Text, Bold, Italic];
+export const pmBlurbSchema = getSchema(blurbExtensions);
+```
+
+`content: "paragraph"` (exactly one, not `block+`) is `titleExtensions`' trick and buys the
+same thing: neither Enter nor a multi-line paste can turn a one-line sidebar entry into a
+stack of paragraphs, structurally rather than by CSS clamp.
+
+**Built from individual extensions rather than `StarterKit.configure({ document: false })`,
+because that option does not exist.** Verified against `StarterKitOptions` in
+`@tiptap/starter-kit@3.29.0`: every node and mark can be switched off — `blockquote`,
+`heading`, `bulletList`, `codeBlock`, `horizontalRule`, and the rest — *except* `document`
+and `text`. So "exactly one paragraph" is unreachable through configuration, and the
+StarterKit-free shape `titleExtensions` already uses is the only way to get it.
+
+That means two new declared dependencies, `@tiptap/extension-bold` and
+`@tiptap/extension-italic`. Both are already physically present at 3.29.0 as transitive
+deps of StarterKit, so declaring them adds nothing to the install — but they must be pinned
+to `@tiptap/core`'s exact version per CLAUDE.md's install note, not `^3.28.0`.
+
+**This narrows CLAUDE.md's "never add `@tiptap/extension-link` separately" rather than
+breaking it.** That rule is about double-registering an extension StarterKit already bundles
+*within the same schema*; `titleExtensions` already imports Document/Paragraph/Text directly
+for a StarterKit-free schema, and CLAUDE.md explicitly calls that out as not a violation.
+The wording should be amended to "never alongside StarterKit" when this lands. Link and Code
+are left out of the blurb on their own merits: the card already has dedicated website and
+ORCID fields, so the one link a blurb would plausibly want is a field already. Either is one
+dependency and one array entry away if that turns out to be wrong.
+
+**`undoRedo` stays on.** CLAUDE.md's `undoRedo: false` rule applies when combining StarterKit
+with the `Collaboration` extension, which owns the history stack. There is no `Collaboration`
+extension here, so the rule inverts — worth stating, because it reads absolute and this is
+the one place in the codebase where it doesn't apply.
+
+**Validation is the schema, not an allowlist.** The server action runs
+`pmBlurbSchema.nodeFromJSON(json)`, which throws on any node or mark the schema doesn't
+define, and stores the re-serialized `.toJSON()`. Nothing unknown survives the round trip —
+a structural guarantee, and a strictly stronger one than sanitizing HTML, since there is no
+list to keep current and no parser to be differential against. A cap on extracted text
+length rides along, so nobody pastes an essay into a 280px column. The self-service action
+(§17g) and the admin action (§17i) call one shared validator, so the two write paths cannot
+diverge on what they accept.
+
+The alternative weighed and dropped was **HTML plus `sanitize-html`**: a new runtime
+dependency, an allowlist to keep current, and `dangerouslySetInnerHTML` on the public front
+page — all to reach a weaker guarantee than the schema gives for nothing.
+
+### 17g. The dashboard panel
+
+`ContributorPanel.tsx`, a client component mounted on `/dashboard` beside `SessionRefresh`,
+**rendered only when the signed-in user's `isListedContributor` is true.** That flag is read
+from the database in the dashboard's server component, not from the session: the JWT bakes
+in `id`/`role`/`color` at sign-in and never re-reads (`src/app/sign-in/NOTES.md`), so a
+freshly-listed contributor would otherwise not see their own panel until the token turned
+over.
+
+Fields: **image URL**, **blurb**, **order** — the three the panel was asked for — plus
+**ORCID** and **website**. Those last two are an addition to the brief, made because the
+preview underneath renders the real `ContributorCard`, which shows them: a panel that
+previews fields it cannot edit invites exactly one bug report. They are trivial to drop if
+that reads as scope creep.
+
+Below the form, the live preview renders `ContributorCard` from the *form state* rather
+than from the saved row, so it answers "what will this look like" and not "what did this
+look like before I started typing".
+
+**The actions are new, and separately guarded.** Every existing `updateUser*` in
+`src/app/actions/users.ts` is `requireAdmin()`; these are self-service and belong in
+`src/app/actions/contributor.ts` behind a `requireListedContributor()` that (a) resolves the
+user from the session, never from a client-supplied id, and (b) re-reads
+`isListedContributor` from the database rather than trusting that the panel was only
+rendered when it was true.
+
+**One asymmetry carries the entire security model of the panel: these actions can set
+`isListedContributor` to `false` and can never set it to `true`.** Setting it true stays in
+`actions/users.ts` behind `requireAdmin()`. Without that asymmetry the opt-out in §17h is
+theatre — anyone who had ever been listed could put themselves back on the public front
+page at will.
+
+**`contributorOrder` is a shared resource and self-service editing of it is a known
+compromise.** Nothing stops a contributor setting `0` and jumping the queue. Accepted
+deliberately at this scale — a handful of trusted authors, and the name-ascending secondary
+sort keeps the result stable rather than random. If it ever stops being fine, moving that
+one field to admin-only leaves the rest of the panel untouched.
+
+Each action calls `revalidatePath("/")` alongside its write (§17j).
+
+### 17h. Opting out, and why an admin has to undo it
+
+The panel offers "Remove me from the contributor list" as an **inline two-step confirm** —
+the button swaps in place for `Are you sure? [Yes] [Cancel]` — following
+`AnnotationNode.tsx` and `CommentNode.tsx`, which is the established pattern here. Not
+`window.confirm`: there is not one call to it anywhere in this codebase, and there is no
+reason for this to be the first.
+
+The confirmation text names the consequence rather than gesturing at it: **you will need an
+admin to put you back**. That is a true statement about §17g's asymmetry, not a scare
+message, and a contributor who understands it before clicking is the entire point of making
+this two steps instead of one.
+
+On success `router.refresh()` re-renders the dashboard, `isListedContributor` is now false,
+and the panel is simply gone — the same condition that gated it in the first place, with no
+separate "you have opted out" state to maintain.
+
+### 17i. `/users` gets the same five columns
+
+All five (`isListedContributor`, `contributorBlurb`, `contributorOrder`, `orcid`, `website`)
+join the users admin table as movable columns, all `defaultHidden: true` per §16m so no
+existing admin's table silently widens by five columns on deploy.
+
+That means **both** `UsersTable.tsx`'s `ColumnSpec[]` and `ADMIN_TABLE_COLUMNS.users` in
+`src/lib/admin-table-columns.ts` — the hand-duplication §16m documents and explicitly warns
+must be kept in step.
+
+**Four of the five sort; `contributorBlurb` does not, and that is the `image` column's
+precedent rather than a new exception.** `isListedContributor`, `contributorOrder`, `orcid`
+and `website` are plain scalar `User` columns, so Prisma's `orderBy` reaches them directly
+and each gets a `sortKey` plus a `case` arm in `src/app/users/page.tsx` — per CLAUDE.md
+every column on every admin table sorts, and none of these needs a view to do it. `orcid`
+and `website` also join that page's `q` OR-list.
+
+`contributorBlurb` is `Json`, which Prisma's `orderBy` cannot reach at all, and the
+documented escape hatch — a view keyed 1:1 on the table's primary key (§16e/§16l) — would
+need a SQL text-extraction function over TipTap JSON to sort by. That is the `doc_length`
+recursive CTE all over again, built for a default-hidden column on a table of a few dozen
+rows, to support an alphabetical ordering of one-line biographies that has no user. So the
+cell renders an `extractText` excerpt and carries no `sortKey`, exactly as `image` already
+does on this same table: shown, not sorted, not inline-editable. It is also left out of the
+`q` OR-list, since `contains` doesn't reach into `Json` either. If sorting or searching it
+ever matters, `Doc.proseJsonLength`'s trigger-maintained-column pattern is the answer, not
+a view.
+
+Editing the blurb therefore stays where §17g put it. The other four get admin actions in
+`actions/users.ts` behind the existing `requireAdmin()`, sharing `contributor-links.ts`'s
+validators with the self-service pair so the two paths cannot diverge on what they accept —
+and an admin blurb editor, if one is ever wanted, shares §17f's `pmBlurbSchema` validator
+for the same reason. `updateUserIsListedContributor` is the **only** code path that sets
+that flag true.
+
+### 17j. Cache invalidation, and the one thing that can't be pushed
+
+`revalidatePublicPaths` (CACHING.md, 2026-07-23) already revalidates `/` on publish and
+unpublish, so the post list is covered. Every action in §17g and §17i adds
+`revalidatePath("/")` to whatever it already revalidates, so contributor edits land
+immediately.
+
+**Preamble edits cannot be pushed.** `Doc.prose_json` is written by the collab server's
+debounce (`server/doc-cache.ts`) — a *different process*, with no access to Next's
+`revalidatePath`. An edit to the `FRONT PAGE` doc therefore reaches the public page after
+the store debounce plus up to 60s of ISR. A webhook from collab into the web app would close
+that, and is not worth a cross-process dependency for a preamble that changes a few times a
+year.
+
+The contrast with `contributor_blurb` is the whole of §17f's argument in one line, and the
+reason §17c insists the two have different names: same kind of content, same TipTap JSON,
+but written by a server action in *this* process, so it revalidates inline and is live
+immediately. Which process owns the write is what decides this, not what the content is.
+
+CACHING.md's 2026-07-24 finding — that `revalidatePath` reaches the server's Full Route
+Cache but not a browser's own `s-maxage` copy — applies here unchanged.
+
+### 17k. Build order
+
+1. **Schema.** Five columns, one migration, the backfill SQL in the same file. Stop
+   `dev:all`, `npx prisma migrate dev --name add_user_contributor_fields`, restart.
+2. **`blurbExtensions` + `contributor-links.ts`.** `npm i @tiptap/extension-bold@<core's
+   exact version> @tiptap/extension-italic@<same>`; the fourth schema and `pmBlurbSchema` in
+   `tiptap-schema.ts`; the ORCID/website validators and `orcidUrl()`. No UI yet, and no new
+   runtime dependency beyond two already-installed transitive ones.
+3. **`ContributorCard` + the contributor query.** Renderable in isolation before anything
+   links to it — `renderToReactElement` over `blurbExtensions` for the blurb.
+4. **The landing page.** `site-banner.ts`, `front-page.ts`, the grid, `take: 10`, and
+   `page.tsx`'s inline styles moved into `page.module.css` — it is one of the last inline-style
+   holdouts.
+5. **`scripts/seed-front-page.ts`**, so step 4 has something to render.
+6. **The dashboard panel** and `actions/contributor.ts`.
+7. **`/users` columns** and the admin actions, including the only set-to-true path.
+8. **`e2e/landing.spec.ts`**, docs (STYLE.md, DEPLOY.md §4, TODO.md, and CLAUDE.md — the
+   `.env` vars, the `FRONT PAGE` title convention, and §17f's narrowing of the
+   never-add-`extension-link`-separately rule to "never alongside StarterKit").
+
+Steps 1–5 are the landing page and stand alone; 6–7 are the editing surfaces and can land
+separately if the branch wants splitting.
+
+### 17l. Layout, and a third column width
+
+```css
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px;
+          gap: 2.5rem; max-width: 1040px; margin: 0 auto; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+```
+
+Contributors are second in DOM order, so the narrow case needs no `order` juggling — the
+aside simply flows below the posts, which is the requested behaviour and also the correct
+reading order.
+
+1040px is a **third** centered-column width alongside the 680px (listings) and 800px
+(full-text) STYLE.md documents. It is not a drift: the main column inside it stays at
+roughly 680px and the extra width is the sidebar plus its gap. STYLE.md gets a line saying
+so, since the next person to add a page will otherwise read three widths as three accidents.
+
+### 17m. Known gaps
+
+- **A contributor blurb has no history and no concurrent editing.** That is §17f's decision
+  working as intended, not an oversight, but it does mean a mis-save is unrecoverable — no
+  `ydoc_update` log to replay, no revision to fall back to, and last-write-wins if a
+  contributor has their dashboard open in two tabs. Acceptable for one line owned by one
+  person; the moment a blurb wants either property, §11's stack is what it should move onto,
+  and the four integration points §17f lists are the actual cost of that move.
+- **The preamble is awkward to assert on in isolation.** §17c's first-created-wins tie-break
+  means a spec that creates its own `FRONT PAGE` doc loses to any pre-existing one — the
+  same class of problem the column-order spec hit against the site-wide default. The spec
+  therefore asserts that *a* preamble renders and that the literal string `FRONT PAGE` does
+  **not** appear anywhere on the page, rather than asserting on specific preamble text.
+  Production determinism was judged worth more than test convenience; reversing the tie-break
+  to newest-wins would swap which of the two is easy.
+- **No public post archive.** §17d's `take: 10` has nothing to link "older posts" to.
+- **No self-service profile page.** `/dashboard`'s panel edits the contributor-facing
+  fields only; name, slug, color and role remain admin-only, and a user who is not a listed
+  contributor has no self-service surface at all.
+- **Contributor membership does not follow publishing.** §17e's explicit flag means an
+  author's first published post does not add them to the front page. Whether that ought to
+  be a nudge on `/users` (a "published, not listed" hint) or left alone is unresolved.
+- **The banner has no admin surface.** It is env plus a file on disk, which is right for a
+  self-hosted single deployment and wrong the moment a non-technical editor wants to change
+  it. `SiteSettings` is where that would go if it ever matters.
+
+### 17n. Avatars move off remote URLs and into Postgres
+
+`User.image` was a remote URL — originally the Auth.js adapter's field, and
+what §17e first rendered. That works, and for the seeded Wikimedia portraits it
+was defensible, but it has three costs that only grow:
+
+- **Every visitor's browser talks to a third party.** `next/font/google`
+  self-hosts at build time, so contributor avatars were the *only* third-party
+  runtime request on `/` — leaking each visitor's IP, User-Agent and Referer to
+  whoever hosts the image, on the one page everybody lands on.
+- **Link rot and hotlink blocking.** Wikimedia explicitly discourages
+  hotlinking; any host can rename, 403, or disappear.
+- **The host controls what renders.** A URL's contents can be swapped after the
+  fact, on the front page, with no change on our side. Low risk for Wikimedia;
+  a real vector for a contributor-supplied URL pointing somewhere they control.
+
+Avatars are now stored as bytes in Postgres and served from our own route.
+
+#### Why not base64 data URIs — the option that looks equivalent and isn't
+
+"Store it in the database" and "serve it as base64" are orthogonal decisions
+that are easy to weld together. Storing bytes is right here; inlining them as a
+data URI would have been wrong, and specifically wrong *because of this app*:
+
+`/` is an ISR-cached shared HTML artifact (`revalidate = 60`, §17a). A data URI
+becomes part of that payload — re-sent in full on every visit by every visitor,
+never separately cacheable, never eligible for an ETag, and re-serialized into
+the cache entry on every regeneration. With five contributors at ~5KB each
+that is ~25KB welded onto every page load, permanently, in exchange for saving
+some first-visit round trips that HTTP/2 multiplexing already made cheap.
+
+The counterargument is real but narrow: below ~1–4KB, inlining does save a
+round trip, and a 40px avatar is in that range. It is a cold-first-visit win
+only, and a blog front page is dominated by repeat visits.
+
+So: bytes in the database, served from a route, with the browser keeping its
+own cache entry. That is strictly better than the data URI on every axis they
+differ, and the only thing it costs is one route handler.
+
+#### The table, and the `SELECT *` trap it exists to prevent
+
+`user_avatar` is its own table rather than a `Bytes` column on `User`, for one
+concrete reason: `src/app/users/page.tsx` queries with `include:` and no
+`select:`, so Prisma returns **every scalar column**. An avatar column on
+`user` would drag up to 100 blobs (the max page size) into the RSC payload on
+every `/users` load, to render 32px circles — silently, because nothing in that
+query names the column. A separate table cannot be reached by a wide select on
+`user`, which turns "remember to deselect the blob" into "the blob is
+unreachable from here". Every query that *does* want it names `avatar: {
+select: { hash: true } }` and never `bytes`.
+
+`userId` is the primary key rather than a separate id: one avatar per user, and
+the lookup the route does on every request is then a primary-key hit.
+
+**`User.image` is deliberately untouched.** It belongs to the Auth.js adapter
+contract (`PrismaAdapter`, `src/lib/auth.ts`), which specifies a string URL and
+would populate it from an OAuth provider's profile. Retyping it would break
+that contract. `resolveAvatarSrc` (`src/lib/avatar-url.ts`) encodes the
+precedence: self-hosted upload → remote `User.image` → null, at which point the
+colored initials circle renders. Only `Credentials` is configured today, so the
+remote branch is dormant rather than a live privacy cost — but it is why
+"self-hosted avatars" is not the same claim as "no third-party image request is
+possible".
+
+#### The hash is what earns `immutable`
+
+The route is `/api/avatar/<userId>/<hash>`, where `hash` is a content hash of
+the stored bytes. Replacing an avatar changes the hash and therefore the URL,
+so the handler can answer `Cache-Control: public, max-age=31536000, immutable`
+without any risk of serving a stale image. The same hash is the `ETag`, so a
+conditional request answers 304.
+
+One case needs care rather than a rule. `/`'s HTML is cached for up to 60s, so
+a reader can hold HTML referencing a hash that was current when the page was
+generated and is not current now. 404ing that would show a broken image for the
+remainder of the window. Instead the handler serves the *current* bytes — the
+reader sees the right person's face — but downgrades to
+`max-age=0, must-revalidate`, because a URL whose content just moved has no
+business claiming immutability. Fresh hash and stale hash are the same lookup;
+only the header differs.
+
+The route is public and unauthenticated on purpose: the contributor list is
+public content, and `/` must not call `auth()` (§17a). Nothing there reads a
+session, so the response stays cacheable by any intermediary.
+
+#### Ingestion, and what it obliges
+
+`processAvatar` (`src/lib/avatar.ts`) re-encodes every upload through `sharp`
+to a 160px square WebP. Re-encoding is not an optimization here, it is the
+security and privacy step:
+
+- **EXIF, including GPS, is stripped** — `sharp` drops metadata on re-encode
+  unless `withMetadata()` is called. Uploaded phone photos routinely carry
+  coordinates, and this image is published publicly. Verified rather than
+  assumed: a test JPEG carrying 224 bytes of EXIF including GPS tags comes out
+  with zero.
+- **`.rotate()` with no argument bakes the EXIF orientation into the pixels**
+  *before* that metadata is discarded — otherwise a portrait phone photo would
+  be stored sideways.
+- **The format is sniffed, never trusted.** The declared content type of an
+  upload is attacker-controlled; `sharp` decodes the actual bytes and anything
+  it can't parse is rejected. (The declared type is still checked first, only
+  to produce a clearer message than a decode failure.)
+- A 5MB cap is enforced *before* decoding, and `limitInputPixels` caps the
+  decompression bomb at 50MP against `sharp`'s ~268MP default.
+
+160px is 4× the 40px card slot, so one stored size covers the dashboard preview
+and 2× displays without a second variant — which is what lets the render path
+skip `next/image` entirely. Routing an already-correctly-sized, content-hashed,
+immutably-cached WebP through the optimizer would add a hop and a second cache
+layer to re-derive what ingestion already produced. `ContributorCard` therefore
+keeps a plain `<img>` and an eslint-disable, with that as the stated reason —
+the *remote* fallback keeps the original reason too, since arbitrary hosts
+would each need an `images.remotePatterns` entry.
+
+**There is deliberately no "avatar from URL" path.** Having the server fetch a
+user-supplied URL is textbook SSRF — internal addresses, cloud metadata
+endpoints. The only URL fetch in this feature is
+`scripts/seed-sample-data.ts`'s, against hardcoded constants. A remote
+`User.image` still renders, but the *browser* fetches that, not us.
+
+#### The upload surface
+
+The dashboard panel's "Image URL" text field becomes a file input plus a
+"Remove photo" control, with its own action rather than a field on the combined
+Save (§17g): it carries binary in a `FormData`, it should apply immediately
+rather than waiting for a Save the user might not press, and its failure modes
+are entirely its own. The action returns the new URL so the preview can
+repoint without a round trip through the server component. Both actions sit
+behind the same `requireListedContributor` as the rest of the panel, and both
+`revalidatePath("/")`.
+
+The panel says, in the UI and not only here, that the image is stored on this
+site and that location data is removed — a claim the user should be able to
+read before uploading a photo of themselves.
+
+#### Known gaps
+
+- **`pg_dump` now carries the avatars.** DEPLOY.md §9's daily dump grows by
+  roughly 5KB per contributor — negligible at this scale, and consistent with
+  the ydoc `BYTEA` already riding along in the same dump, but it is a real
+  change to what backup means. Object storage would decouple them; at
+  single-Linode scale that is more moving parts than it is worth.
+- **No CSP is configured**, so the tighter `img-src 'self'` this now makes
+  possible isn't actually enforced anywhere yet.
+- **An admin cannot upload on someone else's behalf.** `/users` shows the
+  avatar but doesn't edit it, same as it always did for `image`.
+- **Avatars are never garbage collected beyond the `ON DELETE CASCADE`.**
+  Replacing an avatar overwrites the row, so there is no orphan accumulation —
+  but there is also no history, and no way to undo a replacement.

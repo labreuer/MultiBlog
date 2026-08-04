@@ -516,9 +516,24 @@ test.describe("admin table kit", () => {
       // A sort naming a hidden column stays honoured — dropping it would
       // silently change the result set. Only reachable by hand-editing a URL,
       // which is exactly why it needs pinning.
+      //
+      // Scoped to the Title cell specifically (td index 1 — index 0 is the
+      // alwaysVisible select column, present in every ?cols= variant tested
+      // here), not a slice of the whole row's text: a row-wide slice silently
+      // assumed every title is long enough that appending the next columns'
+      // text (Edit/Author(s)/Visibility/…) never lands within the first 20
+      // characters — true of every doc title in this suite's own fixtures,
+      // but not of a real ≤20-char title like a "FRONT PAGE" doc seeded into
+      // the same dev database (PLAN.md §17c) can be, where the `cols=title`
+      // view (just "FRONT PAGE") and the full-columns view ("FRONT
+      // PAGEeditLBPRIV…") produced different slices for the identical row.
       const titlesFor = async (qs: string) => {
         await page.goto(`/docs${qs}`);
-        return (await page.locator("table").first().locator("tbody tr").allTextContents()).map((t) => t.slice(0, 20));
+        return page
+          .locator("table")
+          .first()
+          .locator("tbody tr")
+          .evaluateAll((rows) => rows.map((row) => row.querySelectorAll("td")[1]?.textContent?.trim() ?? ""));
       };
       const ascVisible = await titlesFor("?sort=length:asc");
       expect(await titlesFor("?cols=title&sort=length:asc")).toEqual(ascVisible);

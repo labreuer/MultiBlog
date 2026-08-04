@@ -100,6 +100,20 @@ model User {
   deletedByUserId  String?          @map("deleted_by_user_id")
   deletedAt        DateTime?        @map("deleted_at")
 
+  // Landing-page contributor list (PLAN.md §17e/§17f). isListedContributor is
+  // the only membership switch — self-service actions may clear it but never
+  // set it (§17g/§17h); only updateUserIsListedContributor (admin-gated) sets
+  // it true. contributorBlurb is TipTap JSON validated against pmBlurbSchema
+  // on write, not a ydoc — one owner, no history, no concurrent editors
+  // (§17f). contributorOrder is nullable (not @default(0)) so "unset" sorts
+  // to the tail via `nulls: "last"` instead of tying everyone at the front.
+  isListedContributor Boolean @default(false) @map("is_listed_contributor")
+  contributorBlurb    Json?   @map("contributor_blurb")
+  contributorOrder    Int?    @map("contributor_order")
+  orcid               String? @map("orcid")
+  website             String? @map("website")
+
+  avatar               UserAvatar?
   accounts             Account[]
   sessions             Session[]
   postAuthors          PostAuthor[]           @relation("PostAuthorUser")
@@ -122,6 +136,44 @@ model User {
   docLinkGroups        DocLinkGroup[]
 
   @@map("user")
+}
+
+// A self-hosted contributor avatar (PLAN.md §17n), stored as bytes rather
+// than referenced by a remote URL. Three things about this shape are
+// deliberate:
+//
+// 1. **Its own table, not a `Bytes` column on User.** src/app/users/page.tsx
+//    queries with `include:` and no `select:`, which returns every scalar
+//    column — an avatar column on `user` would drag up to 100 blobs into the
+//    RSC payload on every /users page load, to render 32px circles. A
+//    separate table cannot be reached by a wide select on `user`, so that
+//    regression is structurally impossible rather than a rule to remember.
+// 2. **`hash` is what makes the served URL immutable.** The route is
+//    /api/avatar/<userId>/<hash>, so replacing an avatar changes its URL —
+//    which is what lets the handler answer `Cache-Control: immutable`
+//    without ever serving a stale image. It doubles as the ETag.
+// 3. **`User.image` is deliberately left alone.** That column belongs to the
+//    Auth.js adapter contract (`PrismaAdapter`, src/lib/auth.ts), which
+//    specifies a string URL and would populate it from an OAuth provider's
+//    profile. This table takes precedence over it at render time; the URL
+//    column survives as the fallback for an OAuth-linked account that never
+//    uploaded anything.
+//
+// userId is the primary key (not a separate id): one avatar per user, and
+// the lookup the route handler does on every request is then a PK hit.
+model UserAvatar {
+  userId      String   @id @map("user_id")
+  bytes       Bytes
+  contentType String   @map("content_type")
+  // Content hash of `bytes` — the URL path segment and the ETag.
+  hash        String
+  width       Int
+  height      Int
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_avatar")
 }
 
 // Redirect sources for a user's past slugs — same shape as PostSlugHistory,

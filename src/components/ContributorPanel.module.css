@@ -1,0 +1,103 @@
+.panel {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #ddd;
+}
+
+.heading {
+  margin-bottom: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.field label {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.field input {
+  padding: 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
+.editorFrame {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0.4rem;
+}
+
+.editorContent {
+  min-height: 3em;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.saveButton {
+  padding: 0.4rem 1rem;
+}
+
+.error {
+  color: crimson;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+/* A button that reads as a link — for a secondary action sitting inside a
+   line of explanatory text, where a bordered control would dominate it. */
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #c00;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.optOutRow {
+  margin-top: 1.5rem;
+}
+
+.optOutButton {
+  color: #c00;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.confirmPrompt {
+  color: #c00;
+}
+
+.previewHeading {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.previewCard {
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+  padding: 0.75rem;
+  max-width: 280px;
+}

@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import type { JSONContent } from "@tiptap/core";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
+import { resolveAvatarSrc } from "@/lib/avatar-url";
 import type { Prisma } from "@/generated/prisma/client";
 import { coercePageSize, toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
@@ -17,6 +19,8 @@ function buildFilterWhere(filters: UsersFilters): Prisma.UserWhereInput {
       { name: { contains: filters.q, mode: "insensitive" } },
       { email: { contains: filters.q, mode: "insensitive" } },
       { adminInitials: { contains: filters.q, mode: "insensitive" } },
+      { orcid: { contains: filters.q, mode: "insensitive" } },
+      { website: { contains: filters.q, mode: "insensitive" } },
     ];
   }
   return where;
@@ -45,6 +49,14 @@ function buildOrderBy(sort: SortColumn<UsersSortKey>[]): Prisma.UserOrderByWithR
         return { rowsPerPage: dir };
       case "posts":
         return { postAuthors: { _count: dir } };
+      case "isListedContributor":
+        return { isListedContributor: dir };
+      case "contributorOrder":
+        return { contributorOrder: { sort: dir, nulls: "last" } };
+      case "orcid":
+        return { orcid: { sort: dir, nulls: "last" } };
+      case "website":
+        return { website: { sort: dir, nulls: "last" } };
       case "createdAt":
         return { createdAt: dir };
       case "deletedAt":
@@ -84,7 +96,14 @@ export default async function UsersPage({
       orderBy: buildOrderBy(filters.sort),
       take: filters.pageSize,
       skip: (filters.page - 1) * filters.pageSize,
-      include: { _count: { select: { postAuthors: true } } },
+      // `include` (not `select`) means every scalar column comes back — which
+      // is exactly why an avatar is a row in its own table rather than a
+      // Bytes column here (PLAN.md §17n). The hash is pulled in explicitly;
+      // the bytes are unreachable from this query by construction.
+      include: {
+        _count: { select: { postAuthors: true } },
+        avatar: { select: { hash: true } },
+      },
     }),
     prismaIncludingDeleted.user.count({ where }),
   ]);
@@ -102,7 +121,12 @@ export default async function UsersPage({
     // stored value predates the current option list (PLAN.md §16b).
     rowsPerPage: coercePageSize(user.rowsPerPage),
     color: user.color,
-    image: user.image,
+    avatarSrc: resolveAvatarSrc({ userId: user.id, avatarHash: user.avatar?.hash, image: user.image }),
+    isListedContributor: user.isListedContributor,
+    contributorBlurb: user.contributorBlurb as JSONContent | null,
+    contributorOrder: user.contributorOrder,
+    orcid: user.orcid,
+    website: user.website,
     createdAt: user.createdAt,
     postCount: user._count.postAuthors,
     deletedAt: user.deletedAt,

@@ -1,14 +1,41 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { JSONContent } from "@tiptap/core";
 import { auth, signOut } from "@/lib/auth";
 import { canManagePosts, isAdmin } from "@/lib/authz";
+import { prisma } from "@/lib/prisma";
+import { resolveAvatarSrc } from "@/lib/avatar-url";
 import SessionRefresh from "@/components/SessionRefresh";
+import ContributorPanel from "@/components/ContributorPanel";
 
 export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user) {
     redirect("/sign-in");
   }
+
+  // isListedContributor gates ContributorPanel below. Read from the
+  // database, not the session: the JWT bakes in id/role/color at sign-in
+  // and never re-reads (src/app/sign-in/NOTES.md), so a freshly-listed
+  // contributor would otherwise not see their own panel until the token
+  // turned over (PLAN.md §17g).
+  const contributor = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: {
+      name: true,
+      slug: true,
+      color: true,
+      adminInitials: true,
+      isListedContributor: true,
+      image: true,
+      contributorBlurb: true,
+      contributorOrder: true,
+      orcid: true,
+      website: true,
+      // Hash only — never the bytes (PLAN.md §17n).
+      avatar: { select: { hash: true } },
+    },
+  });
 
   return (
     <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
@@ -34,6 +61,24 @@ export default async function DashboardPage() {
         <p>
           <Link href="/users">Manage users</Link>
         </p>
+      )}
+      {contributor && contributor.isListedContributor && (
+        <ContributorPanel
+          name={contributor.name ?? session.user.email ?? "You"}
+          slug={contributor.slug}
+          color={contributor.color}
+          adminInitials={contributor.adminInitials}
+          avatarSrc={resolveAvatarSrc({
+            userId: session.user.id,
+            avatarHash: contributor.avatar?.hash,
+            image: contributor.image,
+          })}
+          hasUploadedAvatar={contributor.avatar !== null}
+          contributorBlurb={contributor.contributorBlurb as JSONContent | null}
+          contributorOrder={contributor.contributorOrder}
+          orcid={contributor.orcid}
+          website={contributor.website}
+        />
       )}
       <form
         action={async () => {

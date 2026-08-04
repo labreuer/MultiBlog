@@ -104,3 +104,67 @@ without committing to one now. Item 1 is independent and worth checking on the b
 PLAN.md §16h (staging changes in IndexedDB, before they hit the server) was never
 implemented. §16j's build order lists it as the one phase skipped; §16i (column visibility/
 order) and §16m (site-wide defaults) both shipped without it.
+
+---
+
+## No public archive of older posts (PLAN.md §17d/§17m)
+
+The landing page now shows only the 10 most recent published posts (`take: 10`, added
+alongside the rest of §17). Before that it was unbounded, so this is a real behavior change:
+the 11th-newest post and everything older is reachable only via search, RSS, or a direct
+link — nothing on the site links to "older posts" from here. `/posts` is the admin table and
+isn't a public substitute. Worth a `/archive` (or paginated `/`) if this ever needs to be
+browsable rather than just searchable.
+
+---
+
+## No self-service profile page beyond the contributor panel (PLAN.md §17g/§17m)
+
+`/dashboard`'s contributor panel (added with §17) edits the avatar upload (§17n) plus
+`contributorBlurb`/`contributorOrder`/`orcid`/`website` — but only for a user who is already
+`isListedContributor`, and only those fields. `name`, `slug`, `color`, and `role` all remain admin-only
+(`/users`), and a user who has never been listed as a contributor has no self-service surface
+at all — not even to change their own display name. Whether that's worth a general profile
+page, or whether it's fine as-is for a small trusted-author blog, is unresolved.
+
+---
+
+## Avatar route's `If-None-Match` handling is exact-match only (PLAN.md §17n)
+
+`src/app/api/avatar/[userId]/[hash]/route.ts` decides whether to answer 304 with a single
+string comparison:
+
+```ts
+const etag = `"${avatar.hash}"`;
+if (request.headers.get("if-none-match") === etag) { /* 304 */ }
+```
+
+That covers the only form a browser actually sends — it echoes back verbatim whatever `ETag`
+it was given — which is why the e2e assertion in `e2e/landing.spec.ts` passes and why this
+has never misbehaved in practice. But three other forms are legal HTTP and all currently
+fall through to a full 200 + body where a 304 was correct:
+
+- **A weak validator**, `W/"<hash>"`. Weak comparison is what `If-None-Match` is *supposed*
+  to use (RFC 9110 §13.1.2 — strong comparison is only for `If-Match`/ranges).
+- **A list**, `"a", "b"` — a client that has seen more than one version of the resource.
+- **`*`**, meaning "if any representation exists" — always a 304 for us, since reaching that
+  line means the row was found.
+
+**Why it's worth fixing rather than closing.** Nothing in front of the app sends these
+*today*: DEPLOY.md's nginx is a plain reverse proxy with no `proxy_cache`, so browsers talk
+to Next directly. It becomes real the moment a caching layer is added — nginx `proxy_cache`,
+a CDN, or Cloudflare in front of the box — because intermediaries do normalize and rewrite
+these headers. The failure is benign (wasted bandwidth, not wrong content), which is exactly
+why it would go unnoticed.
+
+**Two ways, roughly equal effort.**
+
+1. Parse it inline: strip an optional `W/` prefix, split on commas, trim, compare each — plus
+   an `*` short-circuit. ~8 lines, no new dependency.
+2. The `fresh` package, which is what Express uses and handles the whole matrix in one call.
+   One dependency, and half of what it does (`If-Modified-Since`, `Cache-Control: no-cache`)
+   is dead weight here — this route serves one immutable representation with no
+   `Last-Modified` at all.
+
+Leaning (1) for that reason. Either way the e2e spec should grow the three cases alongside
+the exact-match one it already asserts.

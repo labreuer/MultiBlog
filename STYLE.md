@@ -139,14 +139,28 @@ by design, not by accident.
 ## Layout patterns
 
 - **Centered reading column**: `max-width: ...px; margin: 0 auto;` — not yet a shared
-  component/class; each page repeats it. Two widths, kept deliberately separate:
+  component/class; each page repeats it. Three widths, kept deliberately separate:
   - `800px` on pages showing full post text — `[slug]/page.module.css` (public post
     display) and `PostEditor.module.css` (editor).
-  - `680px` on listing/excerpt pages — `page.tsx` (home), `authors/[id]/page.tsx`,
-    `search/page.tsx`. These show post previews, not full text, so they weren't widened
-    alongside the two full-text surfaces above.
+  - `680px` on listing/excerpt pages — `authors/[id]/page.tsx`, `search/page.tsx`. These
+    show post previews, not full text, so they weren't widened alongside the two
+    full-text surfaces above.
+  - `1040px` on the landing page (`page.module.css` `.layout`, PLAN.md §17l) — not a
+    fourth, drifted number: it's a two-column CSS grid (`minmax(0, 1fr) 280px`) built
+    for the contributor sidebar, and the main column inside it still lands at roughly
+    680px; the extra width is the 280px sidebar plus its `2.5rem` gap. Collapses to a
+    single column under 900px, with the sidebar (second in DOM order) simply flowing
+    below the post list rather than needing an `order` override.
 - **Post-listing article block**: `padding: 1.5rem 0; border-bottom: 1px solid #eee;`
   — repeated verbatim across home, author, and search listings.
+- **Avatar with a generic-standin fallback** (`ContributorCard.module.css` `.avatarFallback`,
+  PLAN.md §17e): when `User.image` is unset, a 40px circle filled with `User.color`
+  (already `#rrggbb`-validated on write) showing `User.adminInitials` — no separate
+  silhouette asset, since both columns already exist and are already treated as
+  general-purpose elsewhere (the admin table just calls the latter "Initials"). The `<img>`
+  branch reuses the `eslint-disable-next-line @next/next/no-img-element` precedent
+  `UsersTable.tsx`'s own Image column set first: arbitrary remote avatar URLs, not a fixed
+  asset set `next/image` could optimize without a `remotePatterns` entry per provider.
 - **Vertical centering of small elements next to a heading** (e.g. the `(edit)`/
   `(edited)` badge beside a post title): prefer `display: flex; align-items: center`
   on the heading container over `vertical-align: middle`. The latter centers against

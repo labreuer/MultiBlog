@@ -58,3 +58,7 @@ next-env.d.ts
 # scratch space for one-shot import sources (e.g. an Etherpad dirty.db) — real
 # content, and large; see scripts/import-etherpad.ts
 /temp
+
+# landing-page banner (src/lib/site-banner.ts, PLAN.md §17b) — deployment
+# content, not repository content, same reasoning as .env above
+/public/banner.*

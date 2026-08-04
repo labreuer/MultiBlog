@@ -4,6 +4,8 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
+import { resolveAvatarSrc } from "@/lib/avatar-url";
+import Avatar from "@/components/Avatar";
 import styles from "./page.module.css";
 
 export const revalidate = 60;
@@ -11,7 +13,16 @@ export const revalidate = 60;
 async function getAuthorWithPosts(slug: string) {
   const user = await prisma.user.findUnique({
     where: { slug },
-    select: { id: true, name: true },
+    // avatar.hash only, never the bytes — see PLAN.md §17n for why the
+    // avatar is its own table and what a wide select on `user` would drag in.
+    select: {
+      id: true,
+      name: true,
+      image: true,
+      color: true,
+      adminInitials: true,
+      avatar: { select: { hash: true } },
+    },
   });
   if (!user) {
     return null;
@@ -61,7 +72,19 @@ export default async function AuthorPage({ params }: { params: Promise<{ slug: s
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", fontFamily: "sans-serif" }}>
       <main style={{ padding: "1rem" }}>
-        <h1>{author.user.name ?? "Author"}</h1>
+        <div className={styles.authorHeading}>
+          <Avatar
+            src={resolveAvatarSrc({
+              userId: author.user.id,
+              avatarHash: author.user.avatar?.hash,
+              image: author.user.image,
+            })}
+            color={author.user.color}
+            initials={author.user.adminInitials}
+            size={64}
+          />
+          <h1>{author.user.name ?? "Author"}</h1>
+        </div>
         {author.posts.length === 0 ? (
           <p style={{ color: "#666" }}>No published posts yet.</p>
         ) : (

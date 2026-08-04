@@ -1,0 +1,32 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* .avatar/.avatarFallback moved to Avatar.module.css when the author page
+   became the third surface rendering one (PLAN.md §17n). */
+.name {
+  font-weight: 600;
+}
+
+.meta {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.blurb {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.blurb p {
+  margin: 0;
+}

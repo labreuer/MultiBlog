@@ -307,6 +307,10 @@ COLLAB_PORT=1234
 NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"   # path-based; see note below
 
 NEXT_PUBLIC_SITE_TITLE="<your blog's real name>"   # optional — omit to keep "MultiBlog"
+
+SITE_BANNER="/banner.png"                   # optional — landing-page banner; omit to show none
+SITE_BANNER_ASPECT="4724 / 1609"            # optional — defaults to "3 / 1"
+SITE_BANNER_ALT=""                          # optional — empty is correct for a decorative banner
 ```
 
 > **`AUTH_TRUST_HOST`/`AUTH_URL` are required behind a reverse proxy.** `src/lib/auth.ts`
@@ -322,11 +326,24 @@ NEXT_PUBLIC_SITE_TITLE="<your blog's real name>"   # optional — omit to keep "
 > changing it later requires a rebuild, not just a service restart. Same discipline for
 > anything else `NEXT_PUBLIC_`, including `NEXT_PUBLIC_SITE_TITLE` below.
 
-`NEXT_PUBLIC_SITE_TITLE` (`src/lib/site-config.ts`) is the only optional var above — it's
-deliberately env-sourced rather than hardcoded so a real deployment's title lives in this
-gitignored file instead of a tracked one (a `git pull` on the server can't revert it). Leave
-it unset to keep the "MultiBlog" default. Like `NEXT_PUBLIC_COLLAB_URL`, changing it later
-needs a rebuild (§5 step 7), not just a service restart.
+`NEXT_PUBLIC_SITE_TITLE` (`src/lib/site-config.ts`) is env-sourced for the same reason as
+`SITE_BANNER*` below — a real deployment's identity should live in this gitignored file, not
+a tracked one a `git pull` could revert. Leave it unset to keep the "MultiBlog" default.
+Unlike `SITE_BANNER*`, it's `NEXT_PUBLIC_`, so — like `NEXT_PUBLIC_COLLAB_URL` — changing it
+later needs a rebuild (§5 step 7), not just a service restart.
+
+`SITE_BANNER`/`SITE_BANNER_ASPECT`/`SITE_BANNER_ALT` (`src/lib/site-banner.ts`, PLAN.md §17b)
+configure the landing page's banner image — deliberately **bare, not `NEXT_PUBLIC_`**, since
+they're read server-side only. Changing any of them needs a service restart, not a rebuild —
+the opposite of `NEXT_PUBLIC_SITE_TITLE` just above, worth noting since the two otherwise look
+like the same kind of setting. The image itself lives at `/srv/multiblog/public/banner.*`
+(gitignored, same reasoning as `.env`) — swap the file directly on the server; that needs
+neither a restart nor a rebuild, since `public/` is served straight off disk at runtime.
+Leave `SITE_BANNER` unset to show no banner at all.
+
+The landing page's preamble paragraph(s) are separate from all of this — not an env var, but
+the body of whichever `Doc` is titled exactly `FRONT PAGE` (PLAN.md §17c). Seed one after the
+first deploy with `npx tsx scripts/seed-front-page.ts` (create-if-absent, safe to re-run).
 
 No email provider is wired (`sendMail()` is a logging stub), so password-reset emails aren't
 actually sent — the reset link just gets logged. `APP_URL` still matters for the RSS feed's
@@ -650,7 +667,9 @@ Daily `pg_dump` off-box (cron), and **test a restore once** — an untested back
 
 Ship the dumps somewhere off the box (Linode Object Storage / another host). The `postCollab`
 BYTEA and `postCollabUpdate` log are included in a normal `pg_dump`, so live editing state
-survives a restore.
+survives a restore. So are contributor avatars (`user_avatar.bytes`, PLAN.md §17n) — roughly
+5KB each, and deliberately in Postgres rather than object storage so one dump remains the
+whole backup at this scale.
 
 ---
 
