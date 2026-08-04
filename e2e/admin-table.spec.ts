@@ -6,6 +6,8 @@
 // §16f describes; the URL assertions hold for every table on the kit.
 import { test, expect } from "./fixtures";
 import {
+  ADMIN_EMAIL,
+  clearColumnOrder,
   createComment,
   createTestDoc,
   createTestPost,
@@ -460,6 +462,74 @@ test.describe("admin table kit", () => {
       expect(await positions()).toEqual(["third", "first"]);
     } finally {
       for (const email of [first, second, third]) await deleteTestUser(email);
+    }
+  });
+
+  // PLAN.md §16i — column visibility and order. /docs is the subject because it
+  // is the table converted to ColumnSpec; the behaviour is the kit's, not its.
+  test("columns hide, reorder and persist, and the fixed ones can't be dropped", async ({ page }) => {
+    const headers = async () =>
+      (await page.locator("table").first().locator("thead th").allTextContents()).map((t) =>
+        t.replace(/[▲▼\s]/g, ""),
+      );
+
+    try {
+      await page.goto("/docs");
+      // Two of the eight are alwaysVisible and render as icon-only headers, so
+      // they read as "" here — position is what matters for them.
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Visibility", "Created", "Length", ""]);
+
+      // Hiding: only the named movable columns survive, and the fixed pair
+      // still brackets them.
+      await page.goto("/docs?cols=title,length");
+      expect(await headers()).toEqual(["", "Title", "Length", ""]);
+
+      // Order is position in the list, so reversing the list reverses them.
+      await page.goto("/docs?cols=length,title");
+      expect(await headers()).toEqual(["", "Length", "Title", ""]);
+
+      // An unknown key is dropped rather than throwing — a renamed column in a
+      // bookmarked URL should degrade, not 500.
+      await page.goto("/docs?cols=title,no-such-column,length");
+      expect(await headers()).toEqual(["", "Title", "Length", ""]);
+
+      // colSpan follows the visible count instead of the literal it used to be.
+      await page.goto("/docs?cols=title&q=zzz-no-such-doc");
+      await expect(page.locator("tbody td[colspan]")).toHaveAttribute("colspan", "3");
+
+      // A sort naming a hidden column stays honoured — dropping it would
+      // silently change the result set. Only reachable by hand-editing a URL,
+      // which is exactly why it needs pinning.
+      const titlesFor = async (qs: string) => {
+        await page.goto(`/docs${qs}`);
+        return (await page.locator("table").first().locator("tbody tr").allTextContents()).map((t) => t.slice(0, 20));
+      };
+      const ascVisible = await titlesFor("?sort=length:asc");
+      expect(await titlesFor("?cols=title&sort=length:asc")).toEqual(ascVisible);
+      expect(await titlesFor("?cols=title&sort=length:desc")).toEqual([...ascVisible].reverse());
+
+      // The picker writes the URL, and the fixed columns are listed but locked.
+      await page.goto("/docs");
+      await page.getByText(/^Columns: \d+\/\d+$/).click();
+      await expect(page.getByLabel("select (always shown)")).toBeDisabled();
+      await expect(page.getByLabel("deleted (always shown)")).toBeDisabled();
+      // click(), not uncheck(): the checkbox is driven by `filters.cols`, which
+      // only changes once the navigation lands, so uncheck()'s immediate
+      // did-the-state-flip assertion races the round trip.
+      await page.locator("label").filter({ hasText: "Visibility" }).getByRole("checkbox").click();
+      await expect(page).toHaveURL(/cols=/);
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Created", "Length", ""]);
+
+      // Save as my default: the preference persists, and the URL stops
+      // carrying the override it was authored with.
+      await page.getByRole("button", { name: "Save as my default" }).click();
+      await expect(page).not.toHaveURL(/cols=/);
+      // The real proof — a fresh navigation with no ?cols= at all still hides it.
+      await page.goto("/docs");
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Created", "Length", ""]);
+    } finally {
+      // The shared admin is reused by every other spec, so this has to go back.
+      await clearColumnOrder(ADMIN_EMAIL);
     }
   });
 

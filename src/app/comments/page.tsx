@@ -5,7 +5,7 @@ import { canManagePosts, canEditAnyPost } from "@/lib/authz";
 import type { Prisma } from "@/generated/prisma/client";
 import { parseCommentsFilters, type CommentsSortKey } from "@/lib/comments-query";
 import { toURLSearchParams } from "@/lib/table-query";
-import { getDefaultPageSize } from "@/lib/user-preferences";
+import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
 import CommentsTable from "@/components/CommentsTable";
 import styles from "./page.module.css";
@@ -59,6 +59,20 @@ function buildOrderBy(sort: SortColumn<CommentsSortKey>[]): Prisma.CommentOrderB
         return { createdAt: dir };
       case "statusChanged":
         return { statusChangedAt: dir };
+      case "ipAddress":
+        return { ipAddress: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+      case "statusChangedBy":
+        // A to-one relation (statusChangedById is a plain FK, one moderator),
+        // so Prisma orders its own columns freely — same shape as
+        // /posts' editor sort through post_activity, no view needed here
+        // since statusChangedBy is already a real relation, not derived from
+        // a to-many. Null both when nobody has ever moderated the comment and
+        // when the moderator account itself has no name.
+        return { statusChangedBy: { name: { sort: dir, nulls: "last" } } };
+      case "editedAt":
+        return { editedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+      case "deletedAt":
+        return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
       case "deleted":
         // deletedByUserId is null for a non-deleted comment — order nulls
         // (not-deleted) first when ascending, last when descending, to
@@ -88,8 +102,8 @@ export default async function CommentsPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const defaultPageSize = await getDefaultPageSize(session.user.id);
-  const filters = parseCommentsFilters(urlSearchParams, defaultPageSize);
+  const prefs = await getTablePrefs(session.user.id, "comments");
+  const filters = parseCommentsFilters(urlSearchParams, prefs);
 
   // `baseWhere` is "everything this user could ever see here" (role scope +
   // deep links); `filterWhere` layers the UI filters on top of it. Kept
@@ -121,6 +135,11 @@ export default async function CommentsPage({
             post: { select: { id: true, slug: true, title: true } },
           },
         },
+        // A raw status_changed_by_id would be a bare cuid on screen — nobody
+        // else in this table shows one (commenterName/Email, postTitle are
+        // already resolved the same way), so this resolves to the same
+        // name-or-email fallback annotations use for their author column.
+        statusChangedBy: { select: { name: true, email: true } },
       },
     }),
     prisma.comment.count({ where }),
@@ -154,6 +173,10 @@ export default async function CommentsPage({
       threadStatus: comment.thread.status,
       createdAt: comment.createdAt,
       statusChangedAt: comment.statusChangedAt,
+      ipAddress: comment.ipAddress,
+      statusChangedByName: comment.statusChangedBy ? (comment.statusChangedBy.name ?? comment.statusChangedBy.email) : "",
+      editedAt: comment.editedAt,
+      deletedAt: comment.deletedAt,
       deleted: comment.deletedByUserId !== null,
       commenterCounts,
     };
@@ -162,7 +185,7 @@ export default async function CommentsPage({
   return (
     <main style={{ maxWidth: 1200, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1 className={styles.heading}>Comments</h1>
-      <CommentsTable rows={rows} totalCount={totalCount} filters={filters} defaultPageSize={defaultPageSize} />
+      <CommentsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
     </main>
   );
 }

@@ -1,0 +1,13 @@
+-- Site-wide default column order/visibility for the admin tables (PLAN.md
+-- §16i), same shape as User.column_order and the same reason: keyed by
+-- table, an ordered list of visible column keys, NULL distinct from `{}`
+-- ("no site default configured for any table" vs. "configured, and for this
+-- table it's empty" — though in practice a genuinely empty per-table list is
+-- never written, since the site-settings UI has nothing meaningful to save
+-- for a table shown with zero columns).
+--
+-- Sits below a user's own saved column_order in precedence: a user who has
+-- never configured a table falls through to this site default, which itself
+-- falls through to each column's own ColumnSpec.defaultHidden in code when
+-- neither is set.
+ALTER TABLE "site_settings" ADD COLUMN "default_column_order" jsonb;

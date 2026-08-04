@@ -4,7 +4,7 @@ import { prismaIncludingDeleted } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
 import type { Prisma } from "@/generated/prisma/client";
 import { coercePageSize, toURLSearchParams } from "@/lib/table-query";
-import { getDefaultPageSize } from "@/lib/user-preferences";
+import { getTablePrefs } from "@/lib/user-preferences";
 import { parseUsersFilters, type UsersFilters, type UsersSortKey } from "@/lib/users-query";
 import type { SortColumn } from "@/lib/table-sort";
 import UsersTable from "@/components/UsersTable";
@@ -47,6 +47,8 @@ function buildOrderBy(sort: SortColumn<UsersSortKey>[]): Prisma.UserOrderByWithR
         return { postAuthors: { _count: dir } };
       case "createdAt":
         return { createdAt: dir };
+      case "deletedAt":
+        return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
       case "deleted":
         return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
     }
@@ -72,8 +74,8 @@ export default async function UsersPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const defaultPageSize = await getDefaultPageSize(session.user.id);
-  const filters = parseUsersFilters(urlSearchParams, defaultPageSize);
+  const prefs = await getTablePrefs(session.user.id, "users");
+  const filters = parseUsersFilters(urlSearchParams, prefs);
   const where = buildFilterWhere(filters);
 
   const [users, totalCount] = await Promise.all([
@@ -103,13 +105,14 @@ export default async function UsersPage({
     image: user.image,
     createdAt: user.createdAt,
     postCount: user._count.postAuthors,
+    deletedAt: user.deletedAt,
     deleted: user.deletedByUserId !== null,
   }));
 
   return (
     <main style={{ maxWidth: 1200, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Users</h1>
-      <UsersTable rows={rows} totalCount={totalCount} filters={filters} defaultPageSize={defaultPageSize} />
+      <UsersTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
     </main>
   );
 }

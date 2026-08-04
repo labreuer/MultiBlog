@@ -6,7 +6,7 @@ import {
   parseSetParam,
   type BaseFilterSpec,
   type BaseFilters,
-  type PageSize,
+  type TablePrefs,
 } from "@/lib/table-query";
 
 // Shared between src/app/comments/page.tsx (parses searchParams into a
@@ -25,7 +25,21 @@ export const THREAD_STATUS_OPTIONS: ThreadStatus[] = ["ACTIVE", "DETACHED", "RES
 // per-commenter aggregate over comments outside the current filter, not a
 // plain column, so sorting by it server-side would need a correlated
 // subquery per row rather than a plain `orderBy`. Left display-only for now.
-export type CommentsSortKey = "post" | "commenter" | "status" | "threadStatus" | "created" | "statusChanged" | "deleted";
+// ipAddress/statusChangedBy/editedAt/deletedAt are plain Comment columns
+// (statusChangedBy resolved through its to-one relation), defaulted hidden
+// (§16l) — available without cluttering the default view.
+export type CommentsSortKey =
+  | "post"
+  | "commenter"
+  | "status"
+  | "threadStatus"
+  | "created"
+  | "statusChanged"
+  | "ipAddress"
+  | "statusChangedBy"
+  | "editedAt"
+  | "deletedAt"
+  | "deleted";
 const SORT_KEYS: readonly CommentsSortKey[] = [
   "post",
   "commenter",
@@ -33,6 +47,10 @@ const SORT_KEYS: readonly CommentsSortKey[] = [
   "threadStatus",
   "created",
   "statusChanged",
+  "ipAddress",
+  "statusChangedBy",
+  "editedAt",
+  "deletedAt",
   "deleted",
 ];
 export const DEFAULT_SORT: SortColumn<CommentsSortKey>[] = [{ key: "created", dir: "desc" }];
@@ -42,13 +60,13 @@ export type CommentsFilters = BaseFilters<CommentsSortKey> & {
   threadStatus: Set<ThreadStatus> | "ALL";
 };
 
-function spec(defaultPageSize: PageSize): BaseFilterSpec<CommentsSortKey> {
-  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, defaultPageSize };
+function spec(prefs: TablePrefs): BaseFilterSpec<CommentsSortKey> {
+  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
-export function parseCommentsFilters(searchParams: URLSearchParams, defaultPageSize: PageSize): CommentsFilters {
+export function parseCommentsFilters(searchParams: URLSearchParams, prefs: TablePrefs): CommentsFilters {
   return {
-    ...parseBaseFilters(searchParams, spec(defaultPageSize)),
+    ...parseBaseFilters(searchParams, spec(prefs)),
     status: parseSetParam(searchParams.get("status"), STATUS_OPTIONS),
     threadStatus: parseSetParam(searchParams.get("threadStatus"), THREAD_STATUS_OPTIONS),
   };
@@ -61,9 +79,9 @@ export function parseCommentsFilters(searchParams: URLSearchParams, defaultPageS
 export function buildCommentsQueryString(
   filters: CommentsFilters,
   extra: URLSearchParams,
-  defaultPageSize: PageSize,
+  prefs: TablePrefs,
 ): string {
-  const params = buildBaseQueryString(filters, extra, spec(defaultPageSize));
+  const params = buildBaseQueryString(filters, extra, spec(prefs));
   params.delete("status");
   params.delete("threadStatus");
 

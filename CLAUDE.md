@@ -36,8 +36,12 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
   through `pwsh` to set `AUTH_TRUST_HOST`/`AUTH_URL`, without which NextAuth rejects
   `localhost:3001` as an `UntrustedHost` under `next start`. See CACHING.md's
   2026-07-24 entry.
-- The user often runs `dev:all` themselves. If port 3000 is held by a non-preview node
-  process, don't kill it — open the browser pane directly on http://localhost:3000.
+- The user often runs `dev:all` themselves. **You may stop it** when the work needs it —
+  `npm run stop:all`, then restart via the preview tool. Standing permission, no need to
+  ask each time. Prefer attaching to what's already running (open the browser pane on
+  http://localhost:3000) when that would answer the question, since a restart costs a cold
+  recompile and can poison `.next` (see the Checks section); but a schema change or a new
+  Prisma model *requires* the restart, and asking is worse than doing it. Say that you did.
 
 ## Database
 

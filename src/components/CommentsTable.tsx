@@ -10,7 +10,7 @@ import {
   type CommentsFilters,
   buildCommentsQueryString,
 } from "@/lib/comments-query";
-import type { PageSize } from "@/lib/table-query";
+import { sameCols, type TablePrefs } from "@/lib/table-query";
 import {
   moderateComment,
   deleteComment,
@@ -32,6 +32,10 @@ import {
   type BulkAction,
 } from "@/components/table/BulkToolbar";
 import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
+import { ColumnPicker } from "@/components/table/ColumnPicker";
+import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
+import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
   DateFormatSelect,
@@ -42,7 +46,6 @@ import {
   RowActionButton,
   SearchBox,
   ShowDeletedToggle,
-  SortHeader,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 import styles from "./CommentsTable.module.css";
@@ -60,6 +63,12 @@ export type CommentRow = {
   threadStatus: ThreadStatus;
   createdAt: Date;
   statusChangedAt: Date | null;
+  ipAddress: string | null;
+  // "" when nobody has ever moderated the comment — resolved server-side from
+  // statusChangedBy's name-or-email, same fallback annotations use for author.
+  statusChangedByName: string;
+  editedAt: Date | null;
+  deletedAt: Date | null;
   deleted: boolean;
   commenterCounts: { submitted: number; inModeration: number; spam: number };
 };
@@ -144,19 +153,30 @@ function ActionCell({
   );
 }
 
-const SORTABLE_KEYS = ["post", "commenter", "status", "threadStatus", "created", "statusChanged", "deleted"] as const;
-const COLUMN_COUNT = 11;
+const SORTABLE_KEYS = [
+  "post",
+  "commenter",
+  "status",
+  "threadStatus",
+  "created",
+  "statusChanged",
+  "ipAddress",
+  "statusChangedBy",
+  "editedAt",
+  "deletedAt",
+  "deleted",
+] as const;
 
 export default function CommentsTable({
   rows,
   totalCount,
   filters,
-  defaultPageSize,
+  prefs,
 }: {
   rows: CommentRow[];
   totalCount: number;
   filters: CommentsFilters;
-  defaultPageSize: PageSize;
+  prefs: TablePrefs;
 }) {
   const router = useRouter();
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
@@ -165,7 +185,7 @@ export default function CommentsTable({
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
-    build: (next, extra) => buildCommentsQueryString(next, extra, defaultPageSize),
+    build: (next, extra) => buildCommentsQueryString(next, extra, prefs),
   });
   const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, rowStatusTitle, runWithStatus, runWithStatusMany } = useRowStatus();
@@ -205,6 +225,135 @@ export default function CommentsTable({
     });
   }
 
+  // Declared in the order they render by default; `?cols=` reorders and hides
+  // the movable ones from here (§16i).
+  const columns: ColumnSpec<CommentRow>[] = [
+    {
+      key: "select",
+      alwaysVisible: true,
+      header: "Select",
+      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
+      cell: (row) => (
+        <SelectRowCheckbox
+          checked={selectedIds.has(row.id)}
+          onChange={() => toggleRow(row.id)}
+          label={`comment from ${row.commenterName}`}
+        />
+      ),
+    },
+    {
+      key: "post",
+      header: "Post",
+      sortKey: "post",
+      headerClassName: styles.postColumn,
+      cell: (row) => <Link href={`/posts/${row.postId}/comments`}>{row.postTitle}</Link>,
+    },
+    {
+      key: "commenter",
+      header: "Commenter",
+      sortKey: "commenter",
+      cell: (row) => (
+        <>
+          {row.commenterName} <span style={{ color: "#666" }}>({row.commenterEmail})</span>
+        </>
+      ),
+    },
+    {
+      key: "comment",
+      header: "Comment",
+      cellProps: () => ({ className: styles.commentColumn }),
+      cell: (row) => row.bodyText,
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortKey: "status",
+      cellProps: (row) => ({ className: statusTextClass(row.status) }),
+      cell: (row) => row.status,
+    },
+    { key: "threadStatus", header: "Thread", sortKey: "threadStatus", cell: (row) => row.threadStatus },
+    {
+      key: "created",
+      header: "Created at",
+      sortKey: "created",
+      nowrap: true,
+      cell: (row) => formatDate(row.createdAt, dateFormat),
+    },
+    {
+      key: "statusChanged",
+      header: "Changed at",
+      sortKey: "statusChanged",
+      nowrap: true,
+      headerTitle: "Last moderation change",
+      cell: (row) => (row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""),
+    },
+    {
+      key: "commenterActivity",
+      header: "Commenter activity",
+      nowrap: true,
+      cell: (row) => (
+        <>
+          {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
+        </>
+      ),
+    },
+    {
+      key: "action",
+      header: "Action",
+      cell: (row) => <ActionCell comment={row} disabled={row.deleted} run={(action) => runWithStatus(row.id, action)} />,
+    },
+    // Defaulted hidden (§16l/§16i): real Comment columns, available on
+    // request. statusChangedBy is resolved server-side to a name/email
+    // rather than shown as a raw id, matching how every other identity in
+    // this table is already displayed.
+    {
+      key: "ipAddress",
+      header: "IP address",
+      sortKey: "ipAddress",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => row.ipAddress ?? "",
+    },
+    {
+      key: "statusChangedBy",
+      header: "Changed by",
+      sortKey: "statusChangedBy",
+      defaultHidden: true,
+      cell: (row) => row.statusChangedByName,
+    },
+    {
+      key: "editedAt",
+      header: "Edited at",
+      sortKey: "editedAt",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => (row.editedAt ? formatDate(row.editedAt, dateFormat) : ""),
+    },
+    {
+      key: "deletedAt",
+      header: "Deleted at",
+      sortKey: "deletedAt",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
+    },
+    {
+      key: "deleted",
+      alwaysVisible: true,
+      header: "Deleted",
+      renderHeader: () => <DeletedSortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort} />,
+      cell: (row) => (
+        <RowActionButton
+          deleted={row.deleted}
+          noun="comment"
+          disabled={rowPending}
+          onClick={() => handleDeleteToggle(row)}
+        />
+      ),
+    },
+  ];
+  const visibleColumns = resolveColumns(columns, filters.cols);
+
   return (
     <>
       <div className={adminStyles.filterRow}>
@@ -226,6 +375,17 @@ export default function CommentsTable({
           selected={filters.threadStatus}
           onChange={(next) => updateFilters({ threadStatus: next })}
         />
+        <ColumnPicker
+          columns={columns}
+          resolved={visibleColumns}
+          onChange={(cols) => navigate({ cols } as Partial<CommentsFilters>)}
+          onReset={() => navigate({ cols: null } as Partial<CommentsFilters>)}
+          onSaveDefault={async (cols) => {
+            await saveTableColumns("comments", cols);
+            navigate({ cols: null } as Partial<CommentsFilters>);
+          }}
+          isDefault={sameCols(filters.cols, prefs.cols)}
+        />
       </div>
 
       <BulkToolbar
@@ -241,84 +401,20 @@ export default function CommentsTable({
 
       <table className={adminStyles.table}>
         <thead>
-          <tr style={{ textAlign: "left" }}>
-            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
-            <SortHeader sortKey="post" sort={filters.sort} onSort={handleSort} className={styles.postColumn}>
-              Post
-            </SortHeader>
-            <SortHeader sortKey="commenter" sort={filters.sort} onSort={handleSort}>
-              Commenter
-            </SortHeader>
-            <th className={adminStyles.headerCell}>Comment</th>
-            <SortHeader sortKey="status" sort={filters.sort} onSort={handleSort}>
-              Status
-            </SortHeader>
-            <SortHeader sortKey="threadStatus" sort={filters.sort} onSort={handleSort}>
-              Thread
-            </SortHeader>
-            <SortHeader sortKey="created" sort={filters.sort} onSort={handleSort} nowrap>
-              Created at
-            </SortHeader>
-            <SortHeader
-              sortKey="statusChanged"
-              sort={filters.sort}
-              onSort={handleSort}
-              nowrap
-              title="Last moderation change"
-            >
-              Changed at
-            </SortHeader>
-            <th className={adminStyles.headerCell}>Commenter activity</th>
-            <th className={adminStyles.headerCell}>Action</th>
-            <DeletedSortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort} />
-          </tr>
+          <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
         </thead>
         <tbody>
           {displayRows.length === 0 && (
-            <EmptyRow colSpan={COLUMN_COUNT} message="(no comments matching the criteria)" />
+            <EmptyRow colSpan={visibleColumns.length} message="(no comments matching the criteria)" />
           )}
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-              <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`} title={rowStatusTitle(row.id)}>
-                <SelectRowCheckbox
-                  checked={selectedIds.has(row.id)}
-                  onChange={() => toggleRow(row.id)}
-                  label={`comment from ${row.commenterName}`}
-                />
-              </td>
-              <td className={adminStyles.cell}>
-                <Link href={`/posts/${row.postId}/comments`}>{row.postTitle}</Link>
-              </td>
-              <td className={adminStyles.cell}>
-                {row.commenterName} <span style={{ color: "#666" }}>({row.commenterEmail})</span>
-              </td>
-              <td className={adminStyles.cell} style={{ maxWidth: 320 }}>
-                {row.bodyText}
-              </td>
-              <td className={`${adminStyles.cell} ${statusTextClass(row.status)}`}>{row.status}</td>
-              <td className={adminStyles.cell}>{row.threadStatus}</td>
-              <td className={adminStyles.nowrapCell}>{formatDate(row.createdAt, dateFormat)}</td>
-              <td className={adminStyles.nowrapCell}>
-                {row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""}
-              </td>
-              <td className={adminStyles.nowrapCell}>
-                {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
-              </td>
-              <td className={adminStyles.cell}>
-                <ActionCell
-                  comment={row}
-                  disabled={row.deleted}
-                  run={(action) => runWithStatus(row.id, action)}
-                />
-              </td>
-              <td className={adminStyles.cell}>
-                <RowActionButton
-                  deleted={row.deleted}
-                  noun="comment"
-                  disabled={rowPending}
-                  onClick={() => handleDeleteToggle(row)}
-                />
-              </td>
+              <ColumnCells
+                row={row}
+                columns={visibleColumns}
+                statusClass={rowStatusClass(row.id)}
+                statusTitle={rowStatusTitle(row.id)}
+              />
             </tr>
           ))}
         </tbody>
@@ -339,7 +435,7 @@ export default function CommentsTable({
 
       <FilterHelp
         sortKeys={SORTABLE_KEYS}
-        defaultPageSize={defaultPageSize}
+        defaultPageSize={prefs.pageSize}
         searchDescription="Free-text search over the comment body and commenter name/email."
         filters={[
           {
@@ -363,7 +459,9 @@ export default function CommentsTable({
             The <strong>Commenter activity</strong> column reads {"{submitted} / {in moderation} / {spam}"} — counts of
             that commenter&apos;s non-deleted comments visible on this page (an author only sees counts scoped to their
             own posts), independent of the current status/thread-status/search filters. Display-only: sorting by it
-            would need a correlated subquery per row rather than a plain <code>ORDER BY</code>.
+            would need a correlated subquery per row rather than a plain <code>ORDER BY</code>.{" "}
+            <strong>IP address</strong>, <strong>Changed by</strong>, <strong>Edited at</strong> and{" "}
+            <strong>Deleted at</strong> are hidden by default (Columns picker, above).
           </p>
         }
       />

@@ -11,6 +11,14 @@
   min-width: 12em;
 }
 
+/* The Comment column's cell — a long body would otherwise stretch the row to
+   its full length. Was an inline style on the <td> before the ColumnSpec
+   conversion (§16i); a class instead, since ColumnSpec's cellProps only
+   carries className/onClick, not arbitrary style. */
+.commentColumn {
+  max-width: 320px;
+}
+
 .approve {
   background-color: #d4f5d4;
 }

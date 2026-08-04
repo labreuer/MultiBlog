@@ -9,7 +9,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { parseAnnotationsFilters, type AnnotationsSortKey } from "@/lib/annotations-query";
 import { toURLSearchParams } from "@/lib/table-query";
-import { getDefaultPageSize } from "@/lib/user-preferences";
+import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
 import AnnotationsTable, { type AnnotationRow } from "@/components/AnnotationsTable";
 
@@ -55,6 +55,16 @@ function buildOrderBy(sort: SortColumn<AnnotationsSortKey>[]): Prisma.Annotation
         return { createdAt: dir };
       case "edited":
         return { editedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+      case "status":
+        // DRAFT is excluded from this whole page (baseWhere, §13d), so the
+        // only values ever sorted here are LIVE and RAISED.
+        return { status: dir };
+      case "raisedAt":
+        return { raisedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+      case "resolvedAt":
+        return { resolvedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+      case "deletedAt":
+        return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
       case "deleted":
         return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
     }
@@ -80,8 +90,8 @@ export default async function AnnotationsPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const defaultPageSize = await getDefaultPageSize(session.user.id);
-  const filters = parseAnnotationsFilters(urlSearchParams, defaultPageSize);
+  const prefs = await getTablePrefs(session.user.id, "annotations");
+  const filters = parseAnnotationsFilters(urlSearchParams, prefs);
 
   const baseWhere: Prisma.AnnotationWhereInput = {
     AND: [
@@ -139,6 +149,10 @@ export default async function AnnotationsPage({
       isRoot,
       createdAt: a.createdAt,
       editedAt: a.editedAt,
+      status: a.status,
+      raisedAt: a.raisedAt,
+      resolvedAt: a.resolvedAt,
+      deletedAt: a.deletedAt,
       deleted: a.deletedByUserId !== null,
     };
   });
@@ -150,7 +164,7 @@ export default async function AnnotationsPage({
         rows={rows}
         totalCount={totalCount}
         filters={filters}
-        defaultPageSize={defaultPageSize}
+        prefs={prefs}
       />
     </main>
   );

@@ -32,7 +32,7 @@ export function coercePageSize(value: number): PageSize {
   return isPageSize(value) ? value : FALLBACK_PAGE_SIZE;
 }
 
-// The five params every admin table has. A table's own filter type extends
+// The six params every admin table has. A table's own filter type extends
 // this: `type PostsFilters = BaseFilters<PostsSortKey> & { … }`.
 export type BaseFilters<K extends string> = {
   deleted: boolean;
@@ -40,15 +40,34 @@ export type BaseFilters<K extends string> = {
   page: number;
   pageSize: PageSize;
   sort: SortColumn<K>[];
+  // Visible columns in display order (PLAN.md §16i) — one ordered list
+  // carrying both facts, since membership is visibility and position is
+  // order. `null` means "no opinion", i.e. fall back to the table's own
+  // declaration order.
+  //
+  // Deliberately *not* validated here. The valid keys are whatever the table
+  // component declares as ColumnSpecs, which this module has no business
+  // knowing; resolveColumns (src/components/table/column-spec.ts) drops
+  // unknown keys where that knowledge actually lives.
+  cols: string[] | null;
 };
+
+// This user's stored preferences for the table being parsed (§16b, §16i).
+// Both halves need them: parsing, to fill in an absent param, and
+// serializing, to know which value is redundant enough to leave out of the
+// URL. Grouped rather than passed as parallel positional arguments — there
+// are two now and the pattern is explicitly meant to grow.
+export type TablePrefs = {
+  pageSize: PageSize;
+  cols: string[] | null;
+};
+
+export const DEFAULT_TABLE_PREFS: TablePrefs = { pageSize: FALLBACK_PAGE_SIZE, cols: null };
 
 export type BaseFilterSpec<K extends string> = {
   sortKeys: readonly K[];
   defaultSort: SortColumn<K>[];
-  // This user's stored preference (§16b). Both halves need it: parsing, to
-  // fill in an absent ?pageSize=, and serializing, to know which value is
-  // redundant enough to leave out of the URL.
-  defaultPageSize: PageSize;
+  prefs: TablePrefs;
 };
 
 // Selection is either "every option" (the ALL checkbox, the default — no
@@ -86,6 +105,24 @@ function parseSortParam<K extends string>(
   return columns.length > 0 ? columns : defaultSort;
 }
 
+// An absent ?cols= means "whatever my preference is", exactly as ?pageSize=
+// does. An *empty* one (`?cols=`) falls back too rather than being honoured:
+// a table with no columns is unusable, and there is no way to get back to the
+// picker from one.
+function parseColsParam(value: string | null, defaultCols: string[] | null): string[] | null {
+  if (value === null) return defaultCols;
+  const keys = value
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+  return keys.length > 0 ? keys : defaultCols;
+}
+
+export function sameCols(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((key, i) => key === b[i]);
+}
+
 export function parseBaseFilters<K extends string>(
   searchParams: URLSearchParams,
   spec: BaseFilterSpec<K>,
@@ -94,8 +131,9 @@ export function parseBaseFilters<K extends string>(
     deleted: searchParams.get("deleted") === "1",
     q: searchParams.get("q") ?? "",
     page: parsePageParam(searchParams.get("page")),
-    pageSize: parsePageSizeParam(searchParams.get("pageSize"), spec.defaultPageSize),
+    pageSize: parsePageSizeParam(searchParams.get("pageSize"), spec.prefs.pageSize),
     sort: parseSortParam(searchParams.get("sort"), spec.sortKeys, spec.defaultSort),
+    cols: parseColsParam(searchParams.get("cols"), spec.prefs.cols),
   };
 }
 
@@ -115,6 +153,7 @@ export function buildBaseQueryString<K extends string>(
   params.delete("page");
   params.delete("pageSize");
   params.delete("sort");
+  params.delete("cols");
 
   if (filters.deleted) params.set("deleted", "1");
   if (filters.q.trim()) params.set("q", filters.q.trim());
@@ -122,11 +161,18 @@ export function buildBaseQueryString<K extends string>(
   // Omitted when it matches this user's own preference, not a constant — an
   // absent ?pageSize= means "whatever my preference is", so the same link
   // gives two admins their own page sizes (§16b).
-  if (filters.pageSize !== spec.defaultPageSize) params.set("pageSize", String(filters.pageSize));
+  if (filters.pageSize !== spec.prefs.pageSize) params.set("pageSize", String(filters.pageSize));
   const sortIsDefault =
     filters.sort.length === spec.defaultSort.length &&
     filters.sort.every((c, i) => c.key === spec.defaultSort[i].key && c.dir === spec.defaultSort[i].dir);
   if (!sortIsDefault) params.set("sort", filters.sort.map((c) => `${c.key}:${c.dir}`).join(","));
+  // Same rule as pageSize: written only when it differs from this user's
+  // stored preference. `null` is "no opinion" and can never need a param —
+  // serializing it as `?cols=` would be an empty column list, which is the one
+  // value parseColsParam refuses.
+  if (filters.cols !== null && !sameCols(filters.cols, spec.prefs.cols)) {
+    params.set("cols", filters.cols.join(","));
+  }
 
   return params;
 }

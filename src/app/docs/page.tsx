@@ -7,7 +7,7 @@ import { canEditAnyPost } from "@/lib/authz";
 import { createDoc } from "@/app/actions/docs";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { toURLSearchParams } from "@/lib/table-query";
-import { getDefaultPageSize } from "@/lib/user-preferences";
+import { getTablePrefs } from "@/lib/user-preferences";
 import { parseDocsFilters, type DocsFilters, type DocsSortKey } from "@/lib/docs-query";
 import type { SortColumn } from "@/lib/table-sort";
 import DocsTable from "@/components/DocsTable";
@@ -39,6 +39,12 @@ function buildOrderBy(sort: SortColumn<DocsSortKey>[]): Prisma.DocOrderByWithRel
         // and no per-row recomputation of doc_length. NOT NULL (a doc with no
         // body yet measures 0), so no nulls handling, unlike byline above.
         return { proseJsonLength: dir };
+      case "slug":
+        return { slug: dir };
+      case "updatedAt":
+        return { updatedAt: dir };
+      case "deletedAt":
+        return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
       case "deleted":
         // deletedByUserId is null for a live doc — nulls first when ascending
         // so live rows lead, matching every other admin table's convention
@@ -67,8 +73,8 @@ export default async function DocsPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const defaultPageSize = await getDefaultPageSize(session.user.id);
-  const filters = parseDocsFilters(urlSearchParams, defaultPageSize);
+  const prefs = await getTablePrefs(session.user.id, "docs");
+  const filters = parseDocsFilters(urlSearchParams, prefs);
 
   const canEditAny = canEditAnyPost(session.user.role);
   const where: Prisma.DocWhereInput = {
@@ -94,7 +100,9 @@ export default async function DocsPage({
         title: true,
         visibility: true,
         createdAt: true,
+        updatedAt: true,
         deletedByUserId: true,
+        deletedAt: true,
         proseJsonLength: true,
         // The byline is read from the same view that sorts it, so the
         // displayed and sorted expressions can't drift (§16e).
@@ -121,7 +129,9 @@ export default async function DocsPage({
     authors: doc.metrics?.byline ?? "",
     visibility: doc.visibility,
     createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
     length: doc.proseJsonLength,
+    deletedAt: doc.deletedAt,
     deleted: doc.deletedByUserId !== null,
     // Mirrors canUserEditDoc (src/lib/doc-authz.ts) without a per-row DB
     // round-trip — canEditAny already decided the WHERE clause above (an
@@ -147,7 +157,7 @@ export default async function DocsPage({
           </button>
         </form>
       </div>
-      <DocsTable rows={rows} totalCount={totalCount} filters={filters} defaultPageSize={defaultPageSize} />
+      <DocsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
     </main>
   );
 }

@@ -225,3 +225,58 @@
   vertical-align: top;
   border-bottom: 1px solid #eee;
 }
+
+/* Column picker (PLAN.md §16i). The drag affordances mirror
+   DocSettingsPanel.module.css's .draggableRow/.dragOver rather than inventing a
+   second visual language for the same gesture. */
+.columnPicker {
+  position: relative;
+  display: inline-block;
+}
+
+.columnPickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.columnRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.columnRowDraggable {
+  cursor: grab;
+}
+
+.columnDragHandle {
+  color: #999;
+  cursor: grab;
+}
+
+/* Fixed columns still list, so the picker shows the whole table rather than
+   implying the checkbox and action columns don't exist — just not editable. */
+.columnRowFixed {
+  color: #888;
+}
+
+.columnDragOver {
+  background: #eef4ff;
+  outline: 1px dashed #88a;
+}
+
+.columnPickerActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #eee;
+}

@@ -4004,17 +4004,36 @@ worth owning.
 - **Mutations only.** Staging *reads* (a cached page for offline viewing) is a different and much
   larger feature, excluded on purpose.
 
-### 16i. Phase 6 — column visibility and order (not built)
+### 16i. Phase 6 — column visibility and order
 
 Each table declares its columns as data — the kit already needs a per-table column list for the
-help panel and the bulk-action spec, and this extends it to a `ColumnSpec`:
+help panel and the bulk-action spec, and this extends it to a `ColumnSpec` (`src/components/
+table/column-spec.ts`):
 
 ```
-{ key, header, sortKey?, alwaysVisible?, defaultVisible?, cell(row) }
+{ key, header, sortKey?, nowrap?, headerClassName?, headerTitle?, alwaysVisible?, cell(row),
+  cellProps?(row), renderHeader?(), thRef? }
 ```
 
 `key` is a stable string, never the array index: a saved order that survives a column being added
-or removed has to name columns, not positions.
+or removed has to name columns, not positions. It is also what appears in `?cols=`, so it is a
+user-visible string kept short and lowercase.
+
+The last three fields are what the build added beyond the shape this section originally sketched,
+and each earns its place by being load-bearing somewhere real: `cellProps` lets `/docs`' Title cell
+stay a whole-cell click target rather than just the link inside it; `renderHeader` is for a header
+that isn't "label plus sort arrows" (the delete/restore column's icon button); `thRef` is what
+`/posts` measures to size its search box to the Title column. `headerClassName`/`headerTitle` cover
+the two columns (`/users`' Name, `/comments`' Changed at) whose `<th>` needs its own class or
+tooltip. None of these were guessable in advance — each surfaced only once an existing table's
+actual markup had to be expressed as data instead of hand-written JSX.
+
+`ColumnHeaderRow`/`ColumnCells` (`src/components/table/ColumnizedRows.tsx`) render a resolved
+column list as the `<thead>` row and each row's `<td>`s — the kit's half of "who owns which columns
+render", the cell content staying the table's own React expression either way (§16a's boundary,
+unchanged). Two things only these can do, now that order is user-controlled: the row-status border
+(§16f) goes on whichever column renders *first*, not a column a table names, and `colSpan` is
+`visibleColumns.length` rather than the literal every table used to hardcode.
 
 **State lives in the URL, like every other table parameter** — `?cols=title,authors,created` — with
 absent meaning "the default set, in declaration order". That choice falls out of the rest of the
@@ -4023,29 +4042,49 @@ wrong columns is a worse bug than a preference that doesn't persist. Two params 
 many, so a single ordered list carries both facts at once: membership is visibility, position is
 order.
 
-The durable half is `User.tableColumns`, a JSON column keyed by table
+The durable half is `User.columnOrder`, a JSON column keyed by table
 (`{ posts: ["title", "authors", ...] }`) — the same stored-default/temporary-override split page
 size uses in §16b, for the same reason, and the second customer that justifies the pattern. A
 "save as my default" control in the column picker writes it; the URL param overrides it for that
-navigation.
+navigation. (Named `columnOrder`, not `tableColumns`, once §16m added a second column of the same
+shape — see there for why.)
 
-The picker itself is the existing `MultiSelectDropdown` for visibility (it already renders a
-checkbox list with an All option) plus drag-to-reorder for order, reusing `PostSettingsPanel`'s
-`.draggableRow`/`.dragOver` pattern rather than inventing a second one.
+**Json rather than its own table**, which is the one part of this that looks like a shortcut and
+isn't. The value is read whole, written whole, and never queried into — nothing will ever ask
+"which users hide the Length column". Its shape is also "whatever columns that table happens to
+declare today", so a relational spelling would need a row per user per column, and would *still*
+have to tolerate rows naming columns that no longer exist. That tolerance is unavoidable either
+way; Json is the spelling where it costs nothing.
 
-Three things this must not break, all of which constrain it:
+**The picker (`ColumnPicker.tsx`) is its own component, not `MultiSelectDropdown` reused** — visibility
+and order turned out to be one interaction, not two: checking/unchecking a row changes `?cols=`'s
+membership and dragging changes its order, both writing the same list. Splitting them across two
+controls would have implied two params where §16i settled on one. The drag handling mirrors
+`DocSettingsPanel`'s `.draggableRow`/`.dragOver` pattern rather than inventing a second one — only a
+*visible* row is draggable there too, for the same reason: there is no meaningful position for a
+column that isn't shown. Fixed columns are still listed, disabled, so the picker describes the whole
+table rather than implying they don't exist.
+
+Three things this must not break, all of which constrained it and all of which hold as built:
 
 - **A column that carries a row action cannot be hidden into uselessness.** The delete/restore
   column and the selection checkbox are `alwaysVisible`; hiding the only way to act on a row is not
-  a customization.
-- **`colSpan` stops being a literal.** Every empty-state row currently hardcodes its column count
-  (`colSpan={11}`); with visibility in play that has to be computed from the visible column list.
+  a customization. (`/annotations` splits its status text from its action button into two separate
+  columns — a pre-existing quirk this conversion preserved rather than tidied — so only the button
+  column needed to be fixed there; the "Deleted" Yes/blank text is an ordinary movable column.)
+- **`colSpan` stops being a literal.** Handled by `ColumnCells`/`ColumnHeaderRow` above.
 - **Sorting by a hidden column.** A `?sort=` naming a column that `?cols=` excludes is reachable by
-  hand-editing a URL. The sort stays honoured — dropping it would silently change the result set —
-  but the picker shows the column as sorted, so the state is at least visible.
+  hand-editing a URL. `resolveColumns` only touches which columns *render* — the server-side
+  `buildOrderBy` never sees `?cols=` at all, so the sort stays honoured regardless of what's shown.
+  Covered by `e2e/admin-table.spec.ts`, which asserts the same row order with the sorted column
+  hidden as with it visible.
 
-Sequenced after §16g and independent of §16h; it touches the same `ColumnSpec` that the bulk-action
-work introduces, and doing it before staging keeps the two from colliding in the same files.
+One cost the build settled that was open when this was written: **a movable column absent from
+`?cols=` is hidden, including one shipped after a user already saved a preference for that table.**
+That falls straight out of the single-ordered-list design — membership *is* visibility — and there
+is no second "hidden" flag to distinguish "chose to hide this" from "this didn't exist yet". A user
+with a saved preference has to reopen the picker to see a newly added column. The alternative (a
+second param) is the two-param design this section rejected above.
 
 ### 16j. Build order
 
@@ -4055,7 +4094,9 @@ without leaving either an unused abstraction or a half-migrated table. Phase 4 (
 commit on top. Phase 3's derived-column sorting — the three views, `Doc.proseJsonLength` and its
 trigger, and the two foreign-key indexes the comment counts need — is a third: it is the only part
 that carries migrations, and separating it keeps a schema change out of a commit that is otherwise
-all application code. Phase 5 (§16h) and Phase 6 (§16i) are not built.
+all application code. Phase 6 (§16i) — `User.columnOrder`, its own migration, `ColumnSpec` and the
+picker, all five tables converted — is a fourth. Phase 5 (§16h) is not built. §16m's
+`defaultHidden` columns and `SiteSettings.defaultColumnOrder` land as a fifth, later commit.
 
 ### 16k. As built
 
@@ -4145,10 +4186,12 @@ themselves; they all call `docContentFromYdoc`, the same derivation `server/doc-
 
 - **`User.rowsPerPage` is only editable in `/users`, which is ADMIN-only.** An AUTHOR or
   EDITOR who can reach `/posts`, `/docs` and `/comments` has a preference they cannot
-  change; the `?pageSize=` override is their only recourse, and it doesn't persist. The
-  home for a self-service version is `/dashboard`, alongside whatever other per-account
-  preferences arrive — §16i's `User.tableColumns` will want exactly the same surface, which
-  is the argument for building it once, then, rather than twice.
+  change; the `?pageSize=` override is their only recourse, and it doesn't persist.
+  `User.columnOrder` (§16i) already got the self-service surface this one is missing —
+  `saveTableColumns` (`src/app/actions/table-preferences.ts`) is the app's first
+  self-service preference action, reachable from each table's own column picker — but it
+  is scattered one control per table rather than centralized. The home for both, done once
+  rather than per-table and per-preference, is a `/dashboard` settings surface.
 - **Each view is recomputed per query, and a sort has no `WHERE` to push down.** This is the
   cost that decides view-versus-column, so it is worth stating as a rule: reach for a view
   when a value is *awkward to reach* (a joined byline, a filtered count) and for a stored
@@ -4215,3 +4258,75 @@ themselves; they all call `docContentFromYdoc`, the same derivation `server/doc-
 - **`?q=` searches one or two obvious columns per table**, chosen to match what the old
   client-side filters did (title for posts/docs; name/email/initials for users). Postgres
   full-text search over post/doc *bodies* is a different feature and isn't attempted here.
+
+### 16m. Defaulted-hidden columns and a site-wide default
+
+§16i's audit was column-*visibility* mechanics; it didn't ask whether every DB column worth
+seeing was even offered as an option. It wasn't: several columns each table's query fetched (or
+could cheaply fetch) never reached `ColumnSpec` at all, so no `?cols=` value could ever show them.
+Added, all `defaultHidden: true` — present in the picker, absent from the default view:
+
+- `/posts`: `slug`, `moderationPolicy`, `deletedAt`.
+- `/docs`: `slug`, `updatedAt`, `deletedAt`.
+- `/users`: `deletedAt`.
+- `/comments`: `ipAddress`, `statusChangedBy` (sorts through the comment's own `statusChangedBy`
+  relation, the same to-one-relation `orderBy` pattern §16i's `post_activity`/`post_metrics` use,
+  just a direct FK rather than a view), `editedAt`, `deletedAt`.
+- `/annotations`: `raisedAt`, `resolvedAt`, `deletedAt`. `status` was added too, but *not*
+  `defaultHidden` — unlike the timestamp columns, it names a real workflow state (RAISED means the
+  doc's byline authors were emailed, §13d) with no other visibility anywhere in this table.
+
+`/posts`' query changed from an `include` to an explicit `select` naming every scalar except
+`proseJson` in the same pass — `include` fetches every scalar column of the model, so the page was
+already pulling each post's full body into the Node process on every load to serve a table that
+never rendered it; adding more `defaultHidden` scalars was the occasion to stop doing that, not a
+reason to add to it.
+
+**Why `defaultHidden` is a `ColumnSpec` field and not a second `?cols=`-adjacent param.** A column
+can be declared without deciding, in the same declaration, whether an admin encountering the table
+for the first time should see it by default — `defaultColumnKeys` (`column-spec.ts`) filters out
+`alwaysVisible` and `defaultHidden` columns and is the last-resort fallback, reached only when
+neither a user's saved preference nor a site default (below) has an opinion. It changes what "no
+preference" means without touching how a preference, once made, is stored or read.
+
+**The site-wide half.** A `defaultHidden` column is a per-column, code-level opinion — good enough
+until an admin wants, say, `deletedAt` visible by default for every user on `/posts`, not just
+their own account. `SiteSettings.defaultColumnOrder` (Json, keyed by table, identical shape to
+`User.columnOrder`: an ordered list of visible column keys) sits between the two: `getTablePrefs`
+(`src/lib/user-preferences.ts`) resolves a user's own `columnOrder` first, falls back to
+`getSiteDefaultColumnOrder` (`src/lib/site-settings.ts`) next, and only reaches `defaultColumnKeys`
+if neither has ever been set. Precedence, in order: `?cols=` (this navigation) > `User.columnOrder`
+(this admin's saved preference) > `SiteSettings.defaultColumnOrder` (site-wide) >
+`ColumnSpec.defaultHidden` (code fallback, if nobody has ever configured either of the above).
+
+**Same shape on purpose.** Both Json columns started out different — `columnOrder` an ordered
+visible-list, an earlier site-wide draft a hidden-*set* — until unifying them turned out to remove
+a parameter rather than add one: `resolveColumns` only ever needs one ordered list of visible keys
+regardless of which tier supplied it, so `columnOrderFor(stored, table)` (`src/lib/
+column-order.ts`) is the one parser both `getTablePrefs` and `getSiteDefaultColumnOrder` call, and
+`User.columnOrder` is named to match `SiteSettings.defaultColumnOrder` rather than keeping its
+original `tableColumns` name, once the shapes lined up. `AdminTableName` lives in this new file
+too (`user-preferences.ts` re-exports it for callers that predate the split), since it is what both
+columns are keyed by, not something that belongs to the user-preferences half alone.
+
+**Editing the site default (`/site-settings`) needs column identity a client component's closures
+can't give a server component.** Each table's real `ColumnSpec<Row>[]` lives inside that table's
+own React component — JSX headers, hooks-dependent cells, closures over local state — and
+`/site-settings` is a server component rendering a page for a table it never opens. Rather than
+splitting "column identity" from "cell renderer" across all five tables (out of scope for this
+pass), `src/lib/admin-table-columns.ts` hand-duplicates the movable columns' `key`/`label`/
+`defaultHidden` as plain data, deliberately and explicitly commented as a duplication that must be
+kept in step by hand: **adding, removing or renaming a movable column means updating both places.**
+`codeDefaultColumns` there mirrors `defaultColumnKeys`'s one-line rule against that static shape.
+
+`DefaultColumnsEditor` (`src/components/DefaultColumnsEditor.tsx`), the `/site-settings` control
+itself, edits visibility and order in one control, for the same reason `ColumnPicker` does:
+`SiteSettings.defaultColumnOrder` is a single ordered list where membership is visibility and
+position is order, so a second control would have nothing of its own to own. Checking/unchecking a
+row changes membership; dragging a checked row changes position — both write the same list,
+immediately, on every change (no separate save step, unlike `ColumnPicker`'s "save as my default":
+there is no draft/URL-param distinction for a site-wide setting to preview before committing). The
+drag handling reuses `ColumnPicker`'s own mechanics and CSS classes (`columnPickerList`/
+`columnRow`/`columnDragHandle`, `AdminTable.module.css`) rather than a second implementation of the
+same gesture — only a checked row is draggable there too, for the same reason: there is no
+meaningful position for a column that isn't shown.

@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { updateSiteDefaultModerationPolicy, updateSiteTrustThreshold } from "@/app/actions/site-settings";
 import { useRowStatus } from "@/components/table/use-row-status";
 import { CellError } from "@/components/table/TableControls";
+import { DefaultColumnsEditor } from "@/components/DefaultColumnsEditor";
+import type { AdminTableName } from "@/lib/column-order";
+import type { ColumnMeta } from "@/lib/admin-table-columns";
 import adminStyles from "@/components/table/AdminTable.module.css";
 
 export type SiteSettingsRow = {
@@ -123,16 +126,26 @@ function TrustThresholdCell({
   );
 }
 
+export type DefaultColumnsRow = {
+  table: AdminTableName;
+  label: string;
+  columns: ColumnMeta[];
+  /** The keys currently in the effective default (site override, or the code default if none), in order. */
+  initialChecked: string[];
+};
+
 export default function SiteSettingsTable({
   siteSettings,
   configRows,
   configLocation,
   configToChange,
+  defaultColumns,
 }: {
   siteSettings: SiteSettingsRow;
   configRows: ConfigRow[];
   configLocation: string;
   configToChange: string;
+  defaultColumns: DefaultColumnsRow[];
 }) {
   const { rowStatusClass, setStatus, runWithStatus } = useRowStatus();
 
@@ -178,6 +191,37 @@ export default function SiteSettingsTable({
               moderation policy is ALWAYS. Otherwise, this setting is inert.
             </td>
           </tr>
+        </tbody>
+      </table>
+
+      <h2 style={{ marginTop: "2rem" }}>Default columns per table</h2>
+      <p style={{ color: "#666" }}>
+        Which columns each admin table shows when nobody has picked their own (PLAN.md §16i) — an admin&apos;s own
+        &quot;Save as my default&quot; in a table&apos;s own Columns picker still overrides this. Order always
+        follows the table&apos;s own column order; only visibility is configurable here.
+      </p>
+      <table className={adminStyles.table}>
+        <thead>
+          <tr style={{ textAlign: "left" }}>
+            <th className={adminStyles.headerCell}>Table</th>
+            <th className={adminStyles.headerCell}>Default columns</th>
+          </tr>
+        </thead>
+        <tbody>
+          {defaultColumns.map((row) => (
+            // Each row is its own table's whole section (a checkbox/drag list, potentially several lines
+            // tall now that it's not height-capped) — the plain 1px `.row` divider disappears next to that
+            // much content, so this borrows the same 2px rule the header row uses to separate itself from
+            // the body, applied here between one table's section and the next.
+            <tr key={row.table} className={adminStyles.row} style={{ borderBottom: "2px solid #ddd" }}>
+              <td className={adminStyles.cell}>
+                <strong>{row.label}</strong>
+              </td>
+              <td className={adminStyles.cell}>
+                <DefaultColumnsEditor table={row.table} columns={row.columns} initialChecked={row.initialChecked} />
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
 

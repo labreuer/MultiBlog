@@ -34,7 +34,7 @@ import { docContentFromYdoc } from "@/lib/doc-content";
 import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
 // server/ isn't under src/, but it's still part of the one tsconfig project
 // (CLAUDE.md's ydoc-store note) — same relative-import style server/collab.ts
@@ -359,6 +359,18 @@ export async function getDocState(docId: string): Promise<DocState | null> {
     proseText: doc.proseJson ? extractText(doc.proseJson) : null,
     visibility: doc.visibility,
   };
+}
+
+/**
+ * Clear a throwaway user's stored admin-table column preferences (§16i).
+ *
+ * The shared e2e admin is reused by every spec, so a test that exercises
+ * "save as my default" has to put it back or it silently changes what every
+ * later spec sees on that table.
+ */
+export async function clearColumnOrder(email: string): Promise<void> {
+  assertSafe(email);
+  await prisma.user.updateMany({ where: { email }, data: { columnOrder: Prisma.DbNull } });
 }
 
 /** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), same check createTestYdoc's own spec makes for /ydoc-debug documents. */
@@ -753,6 +765,7 @@ const handlers = {
   createTestDoc,
   deleteTestDoc,
   getDocState,
+  clearColumnOrder,
   countDocYdocUpdates,
   createTestDocLink,
   deleteTestDocLinkGroup,

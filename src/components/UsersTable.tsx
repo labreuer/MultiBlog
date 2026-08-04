@@ -19,7 +19,7 @@ import {
   bulkSetUserModerationPolicy,
 } from "@/app/actions/users";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
-import { PAGE_SIZE_OPTIONS, type PageSize } from "@/lib/table-query";
+import { PAGE_SIZE_OPTIONS, sameCols, type PageSize, type TablePrefs } from "@/lib/table-query";
 import { type UsersFilters, buildUsersQueryString } from "@/lib/users-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
@@ -33,6 +33,10 @@ import {
   type BulkAction,
 } from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
+import { ColumnPicker } from "@/components/table/ColumnPicker";
+import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
+import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
   DateFormatSelect,
@@ -42,7 +46,6 @@ import {
   RowActionButton,
   SearchBox,
   ShowDeletedToggle,
-  SortHeader,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 
@@ -60,6 +63,7 @@ export type UserRow = {
   image: string | null;
   createdAt: Date;
   postCount: number;
+  deletedAt: Date | null;
   deleted: boolean;
 };
 
@@ -287,20 +291,20 @@ const SORTABLE_KEYS = [
   "rowsPerPage",
   "posts",
   "createdAt",
+  "deletedAt",
   "deleted",
 ] as const;
-const COLUMN_COUNT = 14;
 
 export default function UsersTable({
   rows,
   totalCount,
   filters,
-  defaultPageSize,
+  prefs,
 }: {
   rows: UserRow[];
   totalCount: number;
   filters: UsersFilters;
-  defaultPageSize: PageSize;
+  prefs: TablePrefs;
 }) {
   const router = useRouter();
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
@@ -309,7 +313,7 @@ export default function UsersTable({
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
-    build: (next, extra) => buildUsersQueryString(next, extra, defaultPageSize),
+    build: (next, extra) => buildUsersQueryString(next, extra, prefs),
   });
   const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, rowStatusTitle, setStatus, runWithStatus, runWithStatusMany } = useRowStatus();
@@ -360,6 +364,168 @@ export default function UsersTable({
     });
   }
 
+  // Declared in the order they render by default; `?cols=` reorders and hides
+  // the movable ones from here (§16i). Built in the component body rather than
+  // at module scope so a cell stays an ordinary React expression closing over
+  // dateFormat, the selection and the per-row edit/save wiring.
+  //
+  // "Comments" (between Posts and the url link) has never had a value — the
+  // cell was already always empty before this conversion, not something lost
+  // in it. Preserved as-is rather than fixed or dropped, since neither is what
+  // was asked for here.
+  const columns: ColumnSpec<UserRow>[] = [
+    {
+      key: "select",
+      alwaysVisible: true,
+      header: "Select",
+      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
+      cell: (row) => (
+        <SelectRowCheckbox
+          checked={selectedIds.has(row.id)}
+          onChange={() => toggleRow(row.id)}
+          label={`user ${row.email}`}
+        />
+      ),
+    },
+    {
+      key: "name",
+      header: "Name",
+      sortKey: "name",
+      headerClassName: adminStyles.nameColumn,
+      cell: (row) => (
+        <NameCell
+          userId={row.id}
+          name={row.name}
+          onEdit={() => setStatus(row.id, "edited" as RowStatus)}
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "email",
+      header: "Email",
+      sortKey: "email",
+      cell: (row) => (
+        <span
+          style={{ color: row.emailVerified ? "#0a5" : "#c00" }}
+          title={row.emailVerified ? `Verified: ${formatDate(row.emailVerified, dateFormat)}` : undefined}
+        >
+          {row.email}
+        </span>
+      ),
+    },
+    {
+      key: "adminInitials",
+      header: "Initials",
+      sortKey: "adminInitials",
+      cell: (row) => (
+        <AdminInitialsCell
+          userId={row.id}
+          adminInitials={row.adminInitials}
+          onEdit={() => setStatus(row.id, "edited" as RowStatus)}
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "role",
+      header: "Role",
+      sortKey: "role",
+      cell: (row) => (
+        <SelectCell
+          value={row.role}
+          options={Object.values(Role)}
+          save={(next) => updateUserRole(row.id, next)}
+          failureMessage="Failed to update role."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "image",
+      header: "Image",
+      cell: (row) =>
+        row.image ? (
+          // eslint-disable-next-line @next/next/no-img-element -- pre-existing; avatars are arbitrary remote URLs, not a fixed asset set.
+          <img src={row.image} alt="" width={32} height={32} style={{ borderRadius: "50%", objectFit: "cover" }} />
+        ) : (
+          ""
+        ),
+    },
+    {
+      key: "moderationPolicy",
+      header: "Moderation policy",
+      sortKey: "moderationPolicy",
+      cell: (row) => (
+        <SelectCell
+          value={row.moderationPolicy}
+          options={Object.values(ModerationPolicy)}
+          save={(next) => updateUserModerationPolicy(row.id, next)}
+          failureMessage="Failed to update moderation policy."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "rowsPerPage",
+      header: "Rows/page",
+      sortKey: "rowsPerPage",
+      nowrap: true,
+      headerTitle: "Default rows per page in every admin table",
+      cell: (row) => (
+        <SelectCell
+          value={row.rowsPerPage}
+          options={PAGE_SIZE_OPTIONS}
+          save={(next) => updateUserRowsPerPage(row.id, next)}
+          failureMessage="Failed to update rows per page."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "color",
+      header: "Color",
+      cell: (row) => (
+        <ColorCell userId={row.id} color={row.color} onEdit={() => setStatus(row.id, "edited" as RowStatus)} run={(action) => runWithStatus(row.id, action)} />
+      ),
+    },
+    {
+      key: "created",
+      header: "Created at",
+      sortKey: "createdAt",
+      nowrap: true,
+      cell: (row) => formatDate(row.createdAt, dateFormat),
+    },
+    {
+      key: "posts",
+      header: "Posts",
+      sortKey: "posts",
+      cell: (row) => (row.postCount > 0 ? <Link href={`/authors/${row.slug}`}>posts</Link> : ""),
+    },
+    { key: "comments", header: "Comments", cell: () => null },
+    { key: "url", header: "", cell: (row) => <Link href={`/users/${row.id}/slug`}>url</Link> },
+    // Defaulted hidden (§16l/§16i): the raw timestamp behind the existing
+    // Deleted action column's boolean.
+    {
+      key: "deletedAt",
+      header: "Deleted at",
+      sortKey: "deletedAt",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
+    },
+    {
+      key: "deleted",
+      alwaysVisible: true,
+      header: "Deleted",
+      renderHeader: () => <DeletedSortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort} />,
+      cell: (row) => (
+        <RowActionButton deleted={row.deleted} noun="user" disabled={pending} onClick={() => handleDeleteToggle(row)} />
+      ),
+    },
+  ];
+  const visibleColumns = resolveColumns(columns, filters.cols);
+
   return (
     <>
       <div className={adminStyles.filterRow}>
@@ -368,6 +534,17 @@ export default function UsersTable({
           onChange={onSearchChange}
           placeholder="Search name, email or initials …"
           label="Search users"
+        />
+        <ColumnPicker
+          columns={columns}
+          resolved={visibleColumns}
+          onChange={(cols) => navigate({ cols } as Partial<UsersFilters>)}
+          onReset={() => navigate({ cols: null } as Partial<UsersFilters>)}
+          onSaveDefault={async (cols) => {
+            await saveTableColumns("users", cols);
+            navigate({ cols: null } as Partial<UsersFilters>);
+          }}
+          isDefault={sameCols(filters.cols, prefs.cols)}
         />
       </div>
 
@@ -384,132 +561,22 @@ export default function UsersTable({
 
       <table className={adminStyles.table}>
         <thead>
-          <tr style={{ textAlign: "left" }}>
-            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
-            <SortHeader sortKey="name" sort={filters.sort} onSort={handleSort} className={adminStyles.nameColumn}>
-              Name
-            </SortHeader>
-            <SortHeader sortKey="email" sort={filters.sort} onSort={handleSort}>
-              Email
-            </SortHeader>
-            <SortHeader sortKey="adminInitials" sort={filters.sort} onSort={handleSort}>
-              Initials
-            </SortHeader>
-            <SortHeader sortKey="role" sort={filters.sort} onSort={handleSort}>
-              Role
-            </SortHeader>
-            <th className={adminStyles.headerCell}>Image</th>
-            <SortHeader sortKey="moderationPolicy" sort={filters.sort} onSort={handleSort}>
-              Moderation policy
-            </SortHeader>
-            <SortHeader sortKey="rowsPerPage" sort={filters.sort} onSort={handleSort} nowrap title="Default rows per page in every admin table">
-              Rows/page
-            </SortHeader>
-            <th className={adminStyles.headerCell}>Color</th>
-            <SortHeader sortKey="createdAt" sort={filters.sort} onSort={handleSort} nowrap>
-              Created at
-            </SortHeader>
-            <SortHeader sortKey="posts" sort={filters.sort} onSort={handleSort}>
-              Posts
-            </SortHeader>
-            <th className={adminStyles.headerCell}>Comments</th>
-            <th className={adminStyles.headerCell}></th>
-            <DeletedSortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort} />
-          </tr>
+          <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
         </thead>
         <tbody>
-          {displayRows.length === 0 && <EmptyRow colSpan={COLUMN_COUNT} message="No users matching the criteria." />}
-          {displayRows.map((row) => {
-            const cellProps = {
-              userId: row.id,
-              onEdit: () => setStatus(row.id, "edited" as RowStatus),
-              run: (action: () => Promise<void>) => runWithStatus(row.id, action),
-            };
-            return (
-              <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-                <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`} title={rowStatusTitle(row.id)}>
-                  <SelectRowCheckbox
-                    checked={selectedIds.has(row.id)}
-                    onChange={() => toggleRow(row.id)}
-                    label={`user ${row.email}`}
-                  />
-                </td>
-                <td className={adminStyles.cell}>
-                  <NameCell {...cellProps} name={row.name} />
-                </td>
-                <td className={adminStyles.cell}>
-                  <span
-                    style={{ color: row.emailVerified ? "#0a5" : "#c00" }}
-                    title={row.emailVerified ? `Verified: ${formatDate(row.emailVerified, dateFormat)}` : undefined}
-                  >
-                    {row.email}
-                  </span>
-                </td>
-                <td className={adminStyles.cell}>
-                  <AdminInitialsCell {...cellProps} adminInitials={row.adminInitials} />
-                </td>
-                <td className={adminStyles.cell}>
-                  <SelectCell
-                    value={row.role}
-                    options={Object.values(Role)}
-                    save={(next) => updateUserRole(row.id, next)}
-                    failureMessage="Failed to update role."
-                    run={cellProps.run}
-                  />
-                </td>
-                <td className={adminStyles.cell}>
-                  {row.image ? (
-                    <img
-                      src={row.image}
-                      alt=""
-                      width={32}
-                      height={32}
-                      style={{ borderRadius: "50%", objectFit: "cover" }}
-                    />
-                  ) : (
-                    ""
-                  )}
-                </td>
-                <td className={adminStyles.cell}>
-                  <SelectCell
-                    value={row.moderationPolicy}
-                    options={Object.values(ModerationPolicy)}
-                    save={(next) => updateUserModerationPolicy(row.id, next)}
-                    failureMessage="Failed to update moderation policy."
-                    run={cellProps.run}
-                  />
-                </td>
-                <td className={adminStyles.cell}>
-                  <SelectCell
-                    value={row.rowsPerPage}
-                    options={PAGE_SIZE_OPTIONS}
-                    save={(next) => updateUserRowsPerPage(row.id, next)}
-                    failureMessage="Failed to update rows per page."
-                    run={cellProps.run}
-                  />
-                </td>
-                <td className={adminStyles.cell}>
-                  <ColorCell {...cellProps} color={row.color} />
-                </td>
-                <td className={adminStyles.nowrapCell}>{formatDate(row.createdAt, dateFormat)}</td>
-                <td className={adminStyles.cell}>
-                  {row.postCount > 0 ? <Link href={`/authors/${row.slug}`}>posts</Link> : ""}
-                </td>
-                <td className={adminStyles.cell}></td>
-                <td className={adminStyles.cell}>
-                  <Link href={`/users/${row.id}/slug`}>url</Link>
-                </td>
-                <td className={adminStyles.cell}>
-                  <RowActionButton
-                    deleted={row.deleted}
-                    noun="user"
-                    disabled={pending}
-                    onClick={() => handleDeleteToggle(row)}
-                  />
-                </td>
-              </tr>
-            );
-          })}
+          {displayRows.length === 0 && (
+            <EmptyRow colSpan={visibleColumns.length} message="No users matching the criteria." />
+          )}
+          {displayRows.map((row) => (
+            <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
+              <ColumnCells
+                row={row}
+                columns={visibleColumns}
+                statusClass={rowStatusClass(row.id)}
+                statusTitle={rowStatusTitle(row.id)}
+              />
+            </tr>
+          ))}
         </tbody>
       </table>
       <CellError message={error} />
@@ -528,13 +595,13 @@ export default function UsersTable({
 
       <FilterHelp
         sortKeys={SORTABLE_KEYS}
-        defaultPageSize={defaultPageSize}
+        defaultPageSize={prefs.pageSize}
         searchDescription="Free-text search over name, email and admin initials."
         notes={
           <p style={{ marginTop: 8 }}>
             <strong>Rows/page</strong> is that account&apos;s own default page size for every admin table. A{" "}
             <code>?pageSize=</code> in the URL overrides it for that navigation only, without changing the stored
-            preference (PLAN.md §16b).
+            preference (PLAN.md §16b). <strong>Deleted at</strong> is hidden by default (Columns picker, above).
           </p>
         }
       />

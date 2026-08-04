@@ -4,7 +4,7 @@ import {
   parseBaseFilters,
   type BaseFilterSpec,
   type BaseFilters,
-  type PageSize,
+  type TablePrefs,
 } from "@/lib/table-query";
 
 // /posts' querystring vocabulary (PLAN.md §16e), the same split every admin
@@ -29,6 +29,11 @@ import {
 //
 // "events" needs no view: a plain relation count is exactly what `_count`
 // orders by.
+//
+// slug/moderationPolicy/deletedAt are plain Post columns, defaulted hidden
+// (§16l): available for anyone who wants them, without cluttering the table
+// every load. `deletedAt` is the raw timestamp, distinct from `deleted`'s
+// existing live/deleted-status sort.
 export type PostsSortKey =
   | "title"
   | "authors"
@@ -38,6 +43,9 @@ export type PostsSortKey =
   | "editor"
   | "lastEdit"
   | "created"
+  | "slug"
+  | "moderationPolicy"
+  | "deletedAt"
   | "deleted";
 const SORT_KEYS: readonly PostsSortKey[] = [
   "title",
@@ -48,24 +56,27 @@ const SORT_KEYS: readonly PostsSortKey[] = [
   "editor",
   "lastEdit",
   "created",
+  "slug",
+  "moderationPolicy",
+  "deletedAt",
   "deleted",
 ];
 export const DEFAULT_SORT: SortColumn<PostsSortKey>[] = [{ key: "created", dir: "desc" }];
 
 export type PostsFilters = BaseFilters<PostsSortKey>;
 
-function spec(defaultPageSize: PageSize): BaseFilterSpec<PostsSortKey> {
-  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, defaultPageSize };
+function spec(prefs: TablePrefs): BaseFilterSpec<PostsSortKey> {
+  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
-export function parsePostsFilters(searchParams: URLSearchParams, defaultPageSize: PageSize): PostsFilters {
-  return parseBaseFilters(searchParams, spec(defaultPageSize));
+export function parsePostsFilters(searchParams: URLSearchParams, prefs: TablePrefs): PostsFilters {
+  return parseBaseFilters(searchParams, spec(prefs));
 }
 
 export function buildPostsQueryString(
   filters: PostsFilters,
   extra: URLSearchParams,
-  defaultPageSize: PageSize,
+  prefs: TablePrefs,
 ): string {
-  return buildBaseQueryString(filters, extra, spec(defaultPageSize)).toString();
+  return buildBaseQueryString(filters, extra, spec(prefs)).toString();
 }

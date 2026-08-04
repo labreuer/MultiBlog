@@ -6,7 +6,7 @@ import { canManagePosts, canEditAnyPost } from "@/lib/authz";
 import { derivePostStatus } from "@/lib/post-status";
 import type { Prisma } from "@/generated/prisma/client";
 import { toURLSearchParams } from "@/lib/table-query";
-import { getDefaultPageSize } from "@/lib/user-preferences";
+import { getTablePrefs } from "@/lib/user-preferences";
 import { parsePostsFilters, type PostsFilters, type PostsSortKey } from "@/lib/posts-query";
 import type { SortColumn } from "@/lib/table-sort";
 import PostsTable from "@/components/PostsTable";
@@ -58,6 +58,12 @@ function buildOrderBy(sort: SortColumn<PostsSortKey>[]): Prisma.PostOrderByWithR
           : [{ activity: { lastEventAt: { sort: dir, nulls: "last" } } }];
       case "created":
         return [{ createdAt: dir }];
+      case "slug":
+        return [{ slug: dir }];
+      case "moderationPolicy":
+        return [{ moderationPolicy: dir }];
+      case "deletedAt":
+        return [{ deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } }];
       case "deleted":
         return [{ deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } }];
     }
@@ -83,8 +89,8 @@ export default async function PostsPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const defaultPageSize = await getDefaultPageSize(session.user.id);
-  const filters = parsePostsFilters(urlSearchParams, defaultPageSize);
+  const prefs = await getTablePrefs(session.user.id, "posts");
+  const filters = parsePostsFilters(urlSearchParams, prefs);
 
   const where: Prisma.PostWhereInput = {
     AND: [
@@ -99,7 +105,23 @@ export default async function PostsPage({
       orderBy: buildOrderBy(filters.sort),
       take: filters.pageSize,
       skip: (filters.page - 1) * filters.pageSize,
-      include: {
+      // Explicit select, not `include` — `include` fetches every Post scalar
+      // plus the named relations, and Post.proseJson is the entire post body.
+      // Nothing here renders it (a post's body is read on the public page,
+      // from this same column, by an entirely different query) — it was
+      // crossing from Postgres into this process on every /posts load for no
+      // reason. `/docs` already excludes its body the same way; this was the
+      // one admin table still pulling a full document body it never uses.
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        publishEventId: true,
+        moderationPolicy: true,
+        createdAt: true,
+        publishedAt: true,
+        deletedByUserId: true,
+        deletedAt: true,
         // Every derived column on this page is read from the view that sorts
         // it, so the displayed value and the sorted expression are the same
         // expression by construction. Sorting by one thing while displaying
@@ -144,6 +166,8 @@ export default async function PostsPage({
       // so these fall back only if the row is somehow missing entirely.
       approved: post.metrics?.approvedCount ?? 0,
       pending: post.metrics?.pendingCount ?? 0,
+      moderationPolicy: post.moderationPolicy,
+      deletedAt: post.deletedAt,
       deleted: post.deletedByUserId !== null,
     };
   });
@@ -154,7 +178,7 @@ export default async function PostsPage({
       <p>
         <Link href="/posts/new">+ New post</Link>
       </p>
-      <PostsTable rows={rows} totalCount={totalCount} filters={filters} defaultPageSize={defaultPageSize} />
+      <PostsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
     </main>
   );
 }

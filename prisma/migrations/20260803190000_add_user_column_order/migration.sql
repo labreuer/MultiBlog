@@ -1,0 +1,13 @@
+-- Per-user column visibility and order for the admin tables (PLAN.md §16i).
+--
+-- Nullable rather than `NOT NULL DEFAULT '{}'`: NULL means "this user has never
+-- expressed a preference", which is distinct from "{}" meaning "they have, and
+-- it is empty for every table". Only the first is a state the code should treat
+-- as 'use each table's declaration order', and collapsing the two would make a
+-- user who deliberately reset one table indistinguishable from a fresh one.
+--
+-- jsonb, not json: it is read as a whole object and never compared textually,
+-- so the binary form's key dedup and cheaper parse are free wins. Prisma's
+-- `Json` maps to jsonb by default on PostgreSQL, so the schema block needs no
+-- @db attribute for this to match.
+ALTER TABLE "user" ADD COLUMN "column_order" jsonb;

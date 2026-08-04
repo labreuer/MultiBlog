@@ -4,7 +4,7 @@ import {
   parseBaseFilters,
   type BaseFilterSpec,
   type BaseFilters,
-  type PageSize,
+  type TablePrefs,
 } from "@/lib/table-query";
 
 // The doc-side sibling of comments-query.ts (PLAN.md §12j) — a much smaller
@@ -17,21 +17,46 @@ import {
 // isn't a stored value (§12i: the annotated text is read from the doc's
 // prose_json through the mark, computed per row at render time), so there's
 // nothing a database ORDER BY could sort it by.
-export type AnnotationsSortKey = "doc" | "author" | "created" | "edited" | "deleted";
-const SORT_KEYS: readonly AnnotationsSortKey[] = ["doc", "author", "created", "edited", "deleted"];
+// status/raisedAt/resolvedAt/deletedAt are plain Annotation columns.
+// `status` (LIVE/RAISED — DRAFT is excluded from this whole page, §13d) is
+// shown by default, since it names a real workflow state (RAISED means the
+// doc's byline authors were emailed) that otherwise has no visibility
+// anywhere in this table. raisedAt/resolvedAt/deletedAt are defaulted
+// hidden (§16l).
+export type AnnotationsSortKey =
+  | "doc"
+  | "author"
+  | "created"
+  | "edited"
+  | "status"
+  | "raisedAt"
+  | "resolvedAt"
+  | "deletedAt"
+  | "deleted";
+const SORT_KEYS: readonly AnnotationsSortKey[] = [
+  "doc",
+  "author",
+  "created",
+  "edited",
+  "status",
+  "raisedAt",
+  "resolvedAt",
+  "deletedAt",
+  "deleted",
+];
 export const DEFAULT_SORT: SortColumn<AnnotationsSortKey>[] = [{ key: "created", dir: "desc" }];
 
 export type AnnotationsFilters = BaseFilters<AnnotationsSortKey>;
 
-function spec(defaultPageSize: PageSize): BaseFilterSpec<AnnotationsSortKey> {
-  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, defaultPageSize };
+function spec(prefs: TablePrefs): BaseFilterSpec<AnnotationsSortKey> {
+  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
 export function parseAnnotationsFilters(
   searchParams: URLSearchParams,
-  defaultPageSize: PageSize,
+  prefs: TablePrefs,
 ): AnnotationsFilters {
-  return parseBaseFilters(searchParams, spec(defaultPageSize));
+  return parseBaseFilters(searchParams, spec(prefs));
 }
 
 // Deep-link-only filters (?doc=, ?author=, ?user=) round-trip through the
@@ -39,7 +64,7 @@ export function parseAnnotationsFilters(
 export function buildAnnotationsQueryString(
   filters: AnnotationsFilters,
   extra: URLSearchParams,
-  defaultPageSize: PageSize,
+  prefs: TablePrefs,
 ): string {
-  return buildBaseQueryString(filters, extra, spec(defaultPageSize)).toString();
+  return buildBaseQueryString(filters, extra, spec(prefs)).toString();
 }

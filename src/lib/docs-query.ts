@@ -4,7 +4,7 @@ import {
   parseBaseFilters,
   type BaseFilterSpec,
   type BaseFilters,
-  type PageSize,
+  type TablePrefs,
 } from "@/lib/table-query";
 
 // /docs' querystring vocabulary (PLAN.md §16e).
@@ -21,20 +21,41 @@ import {
 //            recomputes per query, so sorting through one would walk every doc
 //            in the table on every page load. Storing it makes that one walk
 //            per collab flush instead (PLAN.md §16l).
-export type DocsSortKey = "title" | "authors" | "visibility" | "created" | "length" | "deleted";
-const SORT_KEYS: readonly DocsSortKey[] = ["title", "authors", "visibility", "created", "length", "deleted"];
+// slug/updatedAt/deletedAt are plain Doc columns, defaulted hidden (§16l) —
+// available without cluttering the default view.
+export type DocsSortKey =
+  | "title"
+  | "authors"
+  | "visibility"
+  | "created"
+  | "length"
+  | "slug"
+  | "updatedAt"
+  | "deletedAt"
+  | "deleted";
+const SORT_KEYS: readonly DocsSortKey[] = [
+  "title",
+  "authors",
+  "visibility",
+  "created",
+  "length",
+  "slug",
+  "updatedAt",
+  "deletedAt",
+  "deleted",
+];
 export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "created", dir: "desc" }];
 
 export type DocsFilters = BaseFilters<DocsSortKey>;
 
-function spec(defaultPageSize: PageSize): BaseFilterSpec<DocsSortKey> {
-  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, defaultPageSize };
+function spec(prefs: TablePrefs): BaseFilterSpec<DocsSortKey> {
+  return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
-export function parseDocsFilters(searchParams: URLSearchParams, defaultPageSize: PageSize): DocsFilters {
-  return parseBaseFilters(searchParams, spec(defaultPageSize));
+export function parseDocsFilters(searchParams: URLSearchParams, prefs: TablePrefs): DocsFilters {
+  return parseBaseFilters(searchParams, spec(prefs));
 }
 
-export function buildDocsQueryString(filters: DocsFilters, extra: URLSearchParams, defaultPageSize: PageSize): string {
-  return buildBaseQueryString(filters, extra, spec(defaultPageSize)).toString();
+export function buildDocsQueryString(filters: DocsFilters, extra: URLSearchParams, prefs: TablePrefs): string {
+  return buildBaseQueryString(filters, extra, spec(prefs)).toString();
 }

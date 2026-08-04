@@ -94,10 +94,8 @@ model User {
   moderationPolicy ModerationPolicy @default(INHERIT) @map("moderation_policy")
   color            String           @default("#5b8cff")
   adminInitials    String           @map("admin_initials")
-  // Default page size for every admin table (PLAN.md §16b). One of
-  // PAGE_SIZE_OPTIONS; a table's ?pageSize= param overrides it for that
-  // navigation only, without writing back here.
   rowsPerPage      Int              @default(25) @map("rows_per_page")
+  columnOrder      Json?            @map("column_order")
   createdAt        DateTime         @default(now()) @map("created_at")
   deletedByUserId  String?          @map("deleted_by_user_id")
   deletedAt        DateTime?        @map("deleted_at")
@@ -369,6 +367,7 @@ model SiteSettings {
   id                      Int              @id @default(1)
   defaultModerationPolicy ModerationPolicy @default(ALWAYS) @map("default_moderation_policy")
   trustThreshold          Int              @default(3) @map("trust_threshold")
+  defaultColumnOrder      Json?            @map("default_column_order")
 
   @@map("site_settings")
 }

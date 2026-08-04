@@ -96,3 +96,11 @@ not a fault, and logging every refused authorization at error level would bury t
 reporter inside `settleBulk`. That puts both classes of error — the ones Next handles and the
 ones this code deliberately swallows — through one seam that can later point at a provider,
 without committing to one now. Item 1 is independent and worth checking on the box regardless.
+
+---
+
+## Admin table kit: Phase 5 not built
+
+PLAN.md §16h (staging changes in IndexedDB, before they hit the server) was never
+implemented. §16j's build order lists it as the one phase skipped; §16i (column visibility/
+order) and §16m (site-wide defaults) both shipped without it.

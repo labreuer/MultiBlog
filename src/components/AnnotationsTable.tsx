@@ -4,8 +4,9 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { type DateFormat, formatDate } from "@/lib/format-date";
+import type { AnnotationStatus } from "@/generated/prisma/enums";
 import { type AnnotationsFilters, buildAnnotationsQueryString } from "@/lib/annotations-query";
-import type { PageSize } from "@/lib/table-query";
+import { sameCols, type TablePrefs } from "@/lib/table-query";
 import {
   deleteAnnotation,
   restoreAnnotation,
@@ -23,6 +24,10 @@ import {
   softDeleteBulkActions,
 } from "@/components/table/BulkToolbar";
 import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
+import { ColumnPicker } from "@/components/table/ColumnPicker";
+import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
+import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
   DateFormatSelect,
@@ -31,7 +36,6 @@ import {
   RowActionButton,
   SearchBox,
   ShowDeletedToggle,
-  SortHeader,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 
@@ -50,11 +54,26 @@ export type AnnotationRow = {
   isRoot: boolean;
   createdAt: Date;
   editedAt: Date | null;
+  // DRAFT is excluded from this whole table (§13d — a private note, invisible
+  // even to admins), so this is only ever LIVE or RAISED in practice.
+  status: AnnotationStatus;
+  raisedAt: Date | null;
+  resolvedAt: Date | null;
+  deletedAt: Date | null;
   deleted: boolean;
 };
 
-const SORTABLE_KEYS = ["doc", "author", "created", "edited", "deleted"] as const;
-const COLUMN_COUNT = 9;
+const SORTABLE_KEYS = [
+  "doc",
+  "author",
+  "created",
+  "edited",
+  "status",
+  "raisedAt",
+  "resolvedAt",
+  "deletedAt",
+  "deleted",
+] as const;
 
 // A much smaller sibling of CommentsTable (PLAN.md §12j): no status/thread-
 // status filters, no moderation buttons — the only action an annotation
@@ -63,12 +82,12 @@ export default function AnnotationsTable({
   rows,
   totalCount,
   filters,
-  defaultPageSize,
+  prefs,
 }: {
   rows: AnnotationRow[];
   totalCount: number;
   filters: AnnotationsFilters;
-  defaultPageSize: PageSize;
+  prefs: TablePrefs;
 }) {
   const router = useRouter();
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd HH:mm");
@@ -77,7 +96,7 @@ export default function AnnotationsTable({
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
-    build: (next, extra) => buildAnnotationsQueryString(next, extra, defaultPageSize),
+    build: (next, extra) => buildAnnotationsQueryString(next, extra, prefs),
   });
   const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
   const { rowStatusClass, rowStatusTitle, runWithStatus, runWithStatusMany } = useRowStatus();
@@ -111,6 +130,98 @@ export default function AnnotationsTable({
     });
   }
 
+  // Declared in the order they render by default; `?cols=` reorders and hides
+  // the movable ones from here (§16i).
+  //
+  // Unlike the other four tables, "Deleted" and the row action aren't the same
+  // column here: "Deleted" is an ordinary sortable Yes/blank status column, and
+  // the actual restore/delete button sits in its own unlabeled column after
+  // it — that split predates this conversion and is preserved as-is. Only the
+  // action column has to stay alwaysVisible; the status text is just a status.
+  const columns: ColumnSpec<AnnotationRow>[] = [
+    {
+      key: "select",
+      alwaysVisible: true,
+      header: "Select",
+      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
+      cell: (row) => (
+        <SelectRowCheckbox
+          checked={selectedIds.has(row.id)}
+          onChange={() => toggleRow(row.id)}
+          label={`annotation by ${row.authorName}`}
+        />
+      ),
+    },
+    { key: "doc", header: "Doc", sortKey: "doc", cell: (row) => <Link href={`/doc/${row.docSlug}`}>{row.docTitle}</Link> },
+    { key: "author", header: "Author", sortKey: "author", cell: (row) => row.authorName },
+    { key: "body", header: "Body", cell: (row) => row.bodyText },
+    {
+      key: "quote",
+      header: "Quote",
+      cell: (row) => (!row.isRoot ? "" : row.quote ? `“${row.quote}”` : <em>document-level</em>),
+    },
+    // Shown by default, not hidden: unlike the columns below, this names a
+    // real workflow state (RAISED means the doc's byline authors were
+    // emailed, §13d) that otherwise has zero visibility anywhere in this
+    // table.
+    { key: "status", header: "Status", sortKey: "status", cell: (row) => row.status },
+    {
+      key: "created",
+      header: "Created",
+      sortKey: "created",
+      nowrap: true,
+      cell: (row) => formatDate(row.createdAt, dateFormat),
+    },
+    {
+      key: "edited",
+      header: "Edited",
+      sortKey: "edited",
+      nowrap: true,
+      cell: (row) => (row.editedAt ? formatDate(row.editedAt, dateFormat) : ""),
+    },
+    { key: "deletedStatus", header: "Deleted", sortKey: "deleted", cell: (row) => (row.deleted ? "Yes" : "") },
+    // Defaulted hidden (§16l/§16i): real Annotation columns, available on
+    // request.
+    {
+      key: "raisedAt",
+      header: "Raised at",
+      sortKey: "raisedAt",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => (row.raisedAt ? formatDate(row.raisedAt, dateFormat) : ""),
+    },
+    {
+      key: "resolvedAt",
+      header: "Resolved at",
+      sortKey: "resolvedAt",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => (row.resolvedAt ? formatDate(row.resolvedAt, dateFormat) : ""),
+    },
+    {
+      key: "deletedAt",
+      header: "Deleted at",
+      sortKey: "deletedAt",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
+    },
+    {
+      key: "action",
+      alwaysVisible: true,
+      header: "",
+      cell: (row) => (
+        <RowActionButton
+          deleted={row.deleted}
+          noun="annotation"
+          disabled={pending}
+          onClick={() => handleDeleteToggle(row)}
+        />
+      ),
+    },
+  ];
+  const visibleColumns = resolveColumns(columns, filters.cols);
+
   return (
     <>
       <div className={adminStyles.filterRow}>
@@ -119,6 +230,17 @@ export default function AnnotationsTable({
           onChange={onSearchChange}
           placeholder="Search body or doc title…"
           label="Search annotations"
+        />
+        <ColumnPicker
+          columns={columns}
+          resolved={visibleColumns}
+          onChange={(cols) => navigate({ cols } as Partial<AnnotationsFilters>)}
+          onReset={() => navigate({ cols: null } as Partial<AnnotationsFilters>)}
+          onSaveDefault={async (cols) => {
+            await saveTableColumns("annotations", cols);
+            navigate({ cols: null } as Partial<AnnotationsFilters>);
+          }}
+          isDefault={sameCols(filters.cols, prefs.cols)}
         />
       </div>
 
@@ -135,60 +257,20 @@ export default function AnnotationsTable({
 
       <table className={adminStyles.table}>
         <thead>
-          <tr style={{ textAlign: "left" }}>
-            <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />
-            <SortHeader sortKey="doc" sort={filters.sort} onSort={handleSort}>
-              Doc
-            </SortHeader>
-            <SortHeader sortKey="author" sort={filters.sort} onSort={handleSort}>
-              Author
-            </SortHeader>
-            <th className={adminStyles.headerCell}>Body</th>
-            <th className={adminStyles.headerCell}>Quote</th>
-            <SortHeader sortKey="created" sort={filters.sort} onSort={handleSort} nowrap>
-              Created
-            </SortHeader>
-            <SortHeader sortKey="edited" sort={filters.sort} onSort={handleSort} nowrap>
-              Edited
-            </SortHeader>
-            <SortHeader sortKey="deleted" sort={filters.sort} onSort={handleSort}>
-              Deleted
-            </SortHeader>
-            <th className={adminStyles.headerCell}></th>
-          </tr>
+          <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
         </thead>
         <tbody>
           {displayRows.length === 0 && (
-            <EmptyRow colSpan={COLUMN_COUNT} message="No annotations matching the criteria." />
+            <EmptyRow colSpan={visibleColumns.length} message="No annotations matching the criteria." />
           )}
           {displayRows.map((row) => (
             <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-              <td className={`${adminStyles.cell} ${rowStatusClass(row.id)}`} title={rowStatusTitle(row.id)}>
-                <SelectRowCheckbox
-                  checked={selectedIds.has(row.id)}
-                  onChange={() => toggleRow(row.id)}
-                  label={`annotation by ${row.authorName}`}
-                />
-              </td>
-              <td className={adminStyles.cell}>
-                <Link href={`/doc/${row.docSlug}`}>{row.docTitle}</Link>
-              </td>
-              <td className={adminStyles.cell}>{row.authorName}</td>
-              <td className={adminStyles.cell}>{row.bodyText}</td>
-              <td className={adminStyles.cell}>
-                {!row.isRoot ? "" : row.quote ? `“${row.quote}”` : <em>document-level</em>}
-              </td>
-              <td className={adminStyles.nowrapCell}>{formatDate(row.createdAt, dateFormat)}</td>
-              <td className={adminStyles.nowrapCell}>{row.editedAt ? formatDate(row.editedAt, dateFormat) : ""}</td>
-              <td className={adminStyles.cell}>{row.deleted ? "Yes" : ""}</td>
-              <td className={adminStyles.cell}>
-                <RowActionButton
-                  deleted={row.deleted}
-                  noun="annotation"
-                  disabled={pending}
-                  onClick={() => handleDeleteToggle(row)}
-                />
-              </td>
+              <ColumnCells
+                row={row}
+                columns={visibleColumns}
+                statusClass={rowStatusClass(row.id)}
+                statusTitle={rowStatusTitle(row.id)}
+              />
             </tr>
           ))}
         </tbody>
@@ -209,7 +291,7 @@ export default function AnnotationsTable({
 
       <FilterHelp
         sortKeys={SORTABLE_KEYS}
-        defaultPageSize={defaultPageSize}
+        defaultPageSize={prefs.pageSize}
         searchDescription="Free-text search over the annotation body, doc title, and author name/email."
         deepLinks={[
           deepLinkEntry("doc", "A doc id; shows only that doc's annotations."),
@@ -219,7 +301,9 @@ export default function AnnotationsTable({
         notes={
           <p style={{ marginTop: 8 }}>
             The <strong>Quote</strong> column is display-only: the annotated text is read out of the doc through its
-            mark at render time (§12i), so there is no stored column to sort by.
+            mark at render time (§12i), so there is no stored column to sort by. <strong>Status</strong> shows by
+            default; <strong>Raised at</strong>, <strong>Resolved at</strong> and <strong>Deleted at</strong> are
+            hidden by default (Columns picker, above).
           </p>
         }
       />
