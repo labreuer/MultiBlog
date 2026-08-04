@@ -10,27 +10,8 @@
   gap: 0.6rem;
 }
 
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.avatarFallback {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
+/* .avatar/.avatarFallback moved to Avatar.module.css when the author page
+   became the third surface rendering one (PLAN.md §17n). */
 .name {
   font-weight: 600;
 }

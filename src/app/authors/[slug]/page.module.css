@@ -1,3 +1,14 @@
+/* Avatar beside the author's name. Flexbox rather than vertical-align, the
+   same reason STYLE.md gives for anything sitting next to a heading:
+   vertical-align centres against the parent's x-height, not its box, so it
+   drifts whenever the heading's font or line-height changes. */
+.authorHeading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
 .postHeading {
   display: flex;
   align-items: center;

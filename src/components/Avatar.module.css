@@ -1,0 +1,23 @@
+/* Width/height/font-size are set inline rather than here: they vary per
+   instance (40px in the contributor sidebar, 64px beside an author page's
+   h1), which is STYLE.md's stated bar for inline over a CSS Module value.
+   Everything that doesn't vary lives here. */
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.fallback {
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  /* The initials are decorative — the name they abbreviate is always
+     rendered next to them — so they must not be selectable as stray text
+     when a reader drags across the heading. */
+  user-select: none;
+}

@@ -4,8 +4,11 @@ import { renderToReactElement } from "@tiptap/static-renderer";
 import { blurbExtensions } from "@/lib/tiptap-schema";
 import { extractText } from "@/lib/diff";
 import { orcidUrl } from "@/lib/contributor-links";
-import { AVATAR_SIZE } from "@/lib/avatar-url";
+import Avatar from "./Avatar";
 import styles from "./ContributorCard.module.css";
+
+/** Rendered size in the sidebar — a quarter of the stored 160px, so it stays crisp at 2×. */
+const CARD_AVATAR_SIZE = 40;
 
 export type ContributorCardProps = {
   name: string;
@@ -40,29 +43,7 @@ export default function ContributorCard({ name, slug, avatarSrc, color, adminIni
     // card before asserting on its links.
     <div className={styles.card} data-contributor-slug={slug}>
       <div className={styles.header}>
-        {avatarSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element -- deliberately not next/image. A self-hosted avatar is already stored at exactly one size (160px WebP, src/lib/avatar.ts) behind a content-hashed immutable URL, so the optimizer would add a hop and a second cache layer to re-derive what ingestion already produced. The remote-URL fallback keeps the original reason too: arbitrary hosts would each need an images.remotePatterns entry.
-          <img
-            src={avatarSrc}
-            alt=""
-            width={AVATAR_SIZE}
-            height={AVATAR_SIZE}
-            // Intrinsic size is 160px but it renders at 40 — the attributes
-            // above reserve the right aspect ratio to avoid layout shift,
-            // and the CSS pins the displayed box.
-            className={styles.avatar}
-            // Not loading="lazy": the sidebar is above the fold at desktop
-            // widths, where deferring a ~5KB image buys nothing and only
-            // risks a visible pop-in. (It also never fired at all in headless
-            // Chrome, which would have made this untestable.) UsersTable's
-            // avatar column keeps lazy — that's a genuinely long list.
-            decoding="async"
-          />
-        ) : (
-          <div className={styles.avatarFallback} style={{ backgroundColor: color }} aria-hidden="true">
-            {adminInitials}
-          </div>
-        )}
+        <Avatar src={avatarSrc} color={color} initials={adminInitials} size={CARD_AVATAR_SIZE} />
         <div>
           <div>
             <Link href={`/authors/${slug}`} className={styles.name}>
