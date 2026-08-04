@@ -273,11 +273,17 @@ export default function SideBySideDocBody({
           linkId={editingLink.link.id}
           initialText={editingLink.link.text}
           initialOverrideColor={editingLink.link.overrideColor}
+          // Syncs app state only — does not close the popover. It fires from
+          // every autosave (every debounced edit, not just an explicit Save
+          // click, per PLAN.md §14i), so closing here would dismiss the
+          // popover out from under a still-editing user 600ms after their
+          // last keystroke. The explicit Save button closes itself instead
+          // (its own onSaved below), the same way Cancel already does.
           onUpdated={(patch) => {
             const updated = { ...editingLink.link, ...patch };
-            setEditingLink(null);
             onDocLinkUpdated?.(updated);
           }}
+          onSaved={() => setEditingLink(null)}
           onDeleted={() => {
             const { id } = editingLink.link;
             setEditingLink(null);
