@@ -2,6 +2,8 @@ import StarterKit from "@tiptap/starter-kit";
 import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
+import Bold from "@tiptap/extension-bold";
+import Italic from "@tiptap/extension-italic";
 import { getSchema, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
@@ -74,6 +76,28 @@ export const pmTitleSchema = getSchema(titleExtensions);
 // revisions.title (a plain string column, extracted as text on save), so
 // titleExtensions alone stays the schema for saved titles.
 export const titleAuthorHighlightExtensions = [...titleExtensions, AuthorHighlight];
+
+// The schema for a contributor's blurb (PLAN.md §17f) — a plain `User`
+// column, not a ydoc: one owner, no history, no concurrent editors, edited
+// from a single explicit Save on /dashboard rather than a live session.
+// `content: "paragraph"` is titleExtensions' trick reused for the same
+// reason — a one-line sidebar entry can't grow into a stack of paragraphs
+// structurally, not by CSS clamp. StarterKit is not an option here: every
+// node/mark in StarterKitOptions can be individually disabled *except*
+// `document` and `text` (checked against @tiptap/starter-kit@3.29.0's
+// types), so "exactly one paragraph" is only reachable by building the
+// extension list from scratch, same as titleExtensions already does. Bold
+// and Italic are the only marks — no Link: the contributor card already has
+// dedicated orcid/website fields, so the one link a blurb would plausibly
+// want is a field already, not something to parse out of prose.
+export const blurbExtensions = [Document.extend({ content: "paragraph" }), Paragraph, Text, Bold, Italic];
+
+// The plain prosemirror-model Schema counterpart of blurbExtensions, used by
+// the write path (actions/contributor.ts, actions/users.ts) to validate a
+// submitted blurb via nodeFromJSON — throws on any node/mark the schema
+// doesn't define, which is the whole of this column's write-side validation
+// (PLAN.md §17f: the schema *is* the validation, not an HTML allowlist).
+export const pmBlurbSchema = getSchema(blurbExtensions);
 
 // ProseMirror builds every non-empty node/mark `attrs` object via
 // `Object.create(null)` (computeAttrs, prosemirror-model), and Node/Mark#toJSON
