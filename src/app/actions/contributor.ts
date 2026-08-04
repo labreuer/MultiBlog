@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { pmBlurbSchema } from "@/lib/tiptap-schema";
 import { extractText } from "@/lib/diff";
 import { normalizeOrcid, normalizeWebsite } from "@/lib/contributor-links";
+import { storeAvatar, MAX_UPLOAD_BYTES } from "@/lib/avatar";
+import { avatarUrl } from "@/lib/avatar-url";
 import type { Prisma } from "@/generated/prisma/client";
 
 const MAX_BLURB_CHARS = 500;
@@ -43,7 +45,6 @@ function validateBlurb(blurb: JSONContent): Prisma.InputJsonValue {
 }
 
 export type ContributorProfileInput = {
-  image: string;
   blurb: JSONContent;
   order: string;
   orcid: string;
@@ -55,11 +56,6 @@ export type ContributorProfileInput = {
 // into, so there's no mechanism an autosave would even be reusing.
 export async function updateContributorProfile(input: ContributorProfileInput): Promise<void> {
   const userId = await requireListedContributor();
-
-  const trimmedImage = input.image.trim();
-  if (trimmedImage && !normalizeWebsite(trimmedImage)) {
-    throw new Error("Image URL must be a valid http(s) URL.");
-  }
 
   const trimmedOrcid = input.orcid.trim();
   const orcid = trimmedOrcid ? normalizeOrcid(trimmedOrcid) : null;
@@ -87,13 +83,57 @@ export async function updateContributorProfile(input: ContributorProfileInput): 
   await prisma.user.update({
     where: { id: userId },
     data: {
-      image: trimmedImage || null,
       contributorBlurb: blurb,
       contributorOrder: order,
       orcid,
       website,
     },
   });
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+}
+
+// The avatar is its own action rather than a field on the combined Save
+// above (PLAN.md §17n): it carries binary in a FormData, it applies
+// immediately rather than waiting for a Save the user might not press, and
+// its failure modes ("that isn't an image", "too large") are entirely its
+// own. Returns the new src so the panel can repoint its preview without a
+// round trip through the server component.
+//
+// Note there is no "avatar from URL" path, deliberately: having the *server*
+// fetch a user-supplied URL is textbook SSRF (internal addresses, cloud
+// metadata endpoints). Today the only URL fetch in this feature is the
+// sample-data seed's, against hardcoded constants. A remote `User.image`
+// still renders as a fallback, but the browser fetches that, not us.
+export async function uploadContributorAvatar(formData: FormData): Promise<{ src: string }> {
+  const userId = await requireListedContributor();
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    throw new Error("No file was selected.");
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error(`Image is too large (max ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB).`);
+  }
+
+  // The declared type is never trusted — processAvatar sniffs the real
+  // format by decoding — but rejecting an obviously-wrong one first gives a
+  // clearer message than sharp's decode failure would.
+  if (file.type && !file.type.startsWith("image/")) {
+    throw new Error("That file isn't an image.");
+  }
+
+  const { hash } = await storeAvatar(userId, new Uint8Array(await file.arrayBuffer()));
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+  return { src: avatarUrl(userId, hash) };
+}
+
+export async function removeContributorAvatar(): Promise<void> {
+  const userId = await requireListedContributor();
+  // deleteMany, not delete: removing an avatar that isn't there should be a
+  // no-op, not a P2025 the panel has to special-case.
+  await prisma.userAvatar.deleteMany({ where: { userId } });
   revalidatePath("/");
   revalidatePath("/dashboard");
 }

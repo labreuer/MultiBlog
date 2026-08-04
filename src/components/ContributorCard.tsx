@@ -4,12 +4,20 @@ import { renderToReactElement } from "@tiptap/static-renderer";
 import { blurbExtensions } from "@/lib/tiptap-schema";
 import { extractText } from "@/lib/diff";
 import { orcidUrl } from "@/lib/contributor-links";
+import { AVATAR_SIZE } from "@/lib/avatar-url";
 import styles from "./ContributorCard.module.css";
 
 export type ContributorCardProps = {
   name: string;
   slug: string;
-  image: string | null;
+  /**
+   * Already-resolved avatar `src` (resolveAvatarSrc, PLAN.md §17n) — a
+   * self-hosted /api/avatar/… path, a remote adapter URL, or null for the
+   * initials fallback. Resolved by the caller rather than here because this
+   * component is also rendered from the dashboard panel against unsaved
+   * form state, where there is no row to resolve from.
+   */
+  avatarSrc: string | null;
   color: string;
   adminInitials: string;
   orcid: string | null;
@@ -22,15 +30,30 @@ export type ContributorCardProps = {
 // panel's live preview (form state, not yet saved). One component for both
 // so the preview can't render something merely *resembling* the real thing
 // (PLAN.md §17e — the same argument AuthorByline already makes).
-export default function ContributorCard({ name, slug, image, color, adminInitials, orcid, website, blurb }: ContributorCardProps) {
+export default function ContributorCard({ name, slug, avatarSrc, color, adminInitials, orcid, website, blurb }: ContributorCardProps) {
   const hasBlurb = blurb && extractText(blurb).trim().length > 0;
 
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        {image ? (
-          // eslint-disable-next-line @next/next/no-img-element -- arbitrary remote avatar URLs, not a fixed asset set (same precedent as UsersTable.tsx's image column).
-          <img src={image} alt="" className={styles.avatar} />
+        {avatarSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element -- deliberately not next/image. A self-hosted avatar is already stored at exactly one size (160px WebP, src/lib/avatar.ts) behind a content-hashed immutable URL, so the optimizer would add a hop and a second cache layer to re-derive what ingestion already produced. The remote-URL fallback keeps the original reason too: arbitrary hosts would each need an images.remotePatterns entry.
+          <img
+            src={avatarSrc}
+            alt=""
+            width={AVATAR_SIZE}
+            height={AVATAR_SIZE}
+            // Intrinsic size is 160px but it renders at 40 — the attributes
+            // above reserve the right aspect ratio to avoid layout shift,
+            // and the CSS pins the displayed box.
+            className={styles.avatar}
+            // Not loading="lazy": the sidebar is above the fold at desktop
+            // widths, where deferring a ~5KB image buys nothing and only
+            // risks a visible pop-in. (It also never fired at all in headless
+            // Chrome, which would have made this untestable.) UsersTable's
+            // avatar column keeps lazy — that's a genuinely long list.
+            decoding="async"
+          />
         ) : (
           <div className={styles.avatarFallback} style={{ backgroundColor: color }} aria-hidden="true">
             {adminInitials}

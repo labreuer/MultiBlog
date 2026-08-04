@@ -52,6 +52,23 @@
   color: crimson;
 }
 
+.hint {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+/* A button that reads as a link — for a secondary action sitting inside a
+   line of explanatory text, where a bordered control would dominate it. */
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #c00;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .optOutRow {
   margin-top: 1.5rem;
 }

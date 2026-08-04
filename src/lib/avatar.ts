@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { prisma } from "./prisma";
+import { AVATAR_SIZE } from "./avatar-url";
 
 // Self-hosted contributor avatars (PLAN.md §17n) — the ingestion half. The
 // serving half is src/app/api/avatar/[userId]/[hash]/route.ts.
@@ -8,9 +9,6 @@ import { prisma } from "./prisma";
 // Server-only: `sharp` is a native module and `node:crypto` has no browser
 // equivalent, so nothing here may be imported from a "use client" component.
 // ContributorPanel gets the finished URL as a prop instead.
-
-/** Square edge length stored, in px. 4× the 40px card slot, so it also covers the panel preview and 2× displays without a second size. */
-export const AVATAR_SIZE = 160;
 
 /** Rejected before `sharp` ever sees the bytes — a cheap guard that doesn't require decoding anything. */
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;

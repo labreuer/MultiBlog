@@ -4,6 +4,7 @@ import type { JSONContent } from "@tiptap/core";
 import { auth, signOut } from "@/lib/auth";
 import { canManagePosts, isAdmin } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
+import { resolveAvatarSrc } from "@/lib/avatar-url";
 import SessionRefresh from "@/components/SessionRefresh";
 import ContributorPanel from "@/components/ContributorPanel";
 
@@ -31,6 +32,8 @@ export default async function DashboardPage() {
       contributorOrder: true,
       orcid: true,
       website: true,
+      // Hash only — never the bytes (PLAN.md §17n).
+      avatar: { select: { hash: true } },
     },
   });
 
@@ -65,7 +68,12 @@ export default async function DashboardPage() {
           slug={contributor.slug}
           color={contributor.color}
           adminInitials={contributor.adminInitials}
-          image={contributor.image}
+          avatarSrc={resolveAvatarSrc({
+            userId: session.user.id,
+            avatarHash: contributor.avatar?.hash,
+            image: contributor.image,
+          })}
+          hasUploadedAvatar={contributor.avatar !== null}
           contributorBlurb={contributor.contributorBlurb as JSONContent | null}
           contributorOrder={contributor.contributorOrder}
           orcid={contributor.orcid}

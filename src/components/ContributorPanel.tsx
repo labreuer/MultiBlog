@@ -1,12 +1,18 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { blurbExtensions, toPlainJSON } from "@/lib/tiptap-schema";
-import { updateContributorProfile, optOutAsContributor } from "@/app/actions/contributor";
+import {
+  updateContributorProfile,
+  optOutAsContributor,
+  uploadContributorAvatar,
+  removeContributorAvatar,
+} from "@/app/actions/contributor";
 import EditorToolbar from "./EditorToolbar";
 import ContributorCard from "./ContributorCard";
+import { AVATAR_SIZE } from "@/lib/avatar-url";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./ContributorPanel.module.css";
 
@@ -17,7 +23,10 @@ export type ContributorPanelProps = {
   slug: string;
   color: string;
   adminInitials: string;
-  image: string | null;
+  /** Resolved by the dashboard (resolveAvatarSrc) — a self-hosted path, a remote adapter URL, or null. */
+  avatarSrc: string | null;
+  /** Whether the current src is this app's own upload, i.e. whether "Remove" has anything to remove. */
+  hasUploadedAvatar: boolean;
   contributorBlurb: JSONContent | null;
   contributorOrder: number | null;
   orcid: string | null;
@@ -34,14 +43,19 @@ export default function ContributorPanel({
   slug,
   color,
   adminInitials,
-  image,
+  avatarSrc,
+  hasUploadedAvatar,
   contributorBlurb,
   contributorOrder,
   orcid,
   website,
 }: ContributorPanelProps) {
   const router = useRouter();
-  const [imageInput, setImageInput] = useState(image ?? "");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [currentAvatarSrc, setCurrentAvatarSrc] = useState(avatarSrc);
+  const [uploaded, setUploaded] = useState(hasUploadedAvatar);
+  const [avatarPending, startAvatarTransition] = useTransition();
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [orderInput, setOrderInput] = useState(contributorOrder !== null ? String(contributorOrder) : "");
   const [orcidInput, setOrcidInput] = useState(orcid ?? "");
   const [websiteInput, setWebsiteInput] = useState(website ?? "");
@@ -67,7 +81,6 @@ export default function ContributorPanel({
     startSaveTransition(async () => {
       try {
         await updateContributorProfile({
-          image: imageInput,
           // Round-tripped through JSON, not the raw getJSON() output: React's
           // Server Action encoder treats a null-prototype attrs object (which
           // ProseMirror's Node/Mark#toJSON can produce) as opaque and silently
@@ -81,6 +94,42 @@ export default function ContributorPanel({
         router.refresh();
       } catch (e) {
         setSaveError(e instanceof Error ? e.message : "Failed to save.");
+      }
+    });
+  }
+
+  function handleAvatarChange(file: File | undefined) {
+    if (!file) return;
+    setAvatarError(null);
+    startAvatarTransition(async () => {
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const { src } = await uploadContributorAvatar(formData);
+        setCurrentAvatarSrc(src);
+        setUploaded(true);
+        router.refresh();
+      } catch (e) {
+        setAvatarError(e instanceof Error ? e.message : "Failed to upload that image.");
+      } finally {
+        // Cleared so re-picking the *same* file still fires onChange — the
+        // obvious retry after a failed upload, which would otherwise appear
+        // to do nothing.
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    });
+  }
+
+  function handleAvatarRemove() {
+    setAvatarError(null);
+    startAvatarTransition(async () => {
+      try {
+        await removeContributorAvatar();
+        setCurrentAvatarSrc(null);
+        setUploaded(false);
+        router.refresh();
+      } catch (e) {
+        setAvatarError(e instanceof Error ? e.message : "Failed to remove the image.");
       }
     });
   }
@@ -102,8 +151,28 @@ export default function ContributorPanel({
       <h2 className={styles.heading}>Contributor profile</h2>
 
       <div className={styles.field}>
-        <label htmlFor="contributor-image">Image URL</label>
-        <input id="contributor-image" type="url" value={imageInput} onChange={(e) => setImageInput(e.target.value)} placeholder="https://…" />
+        <label htmlFor="contributor-avatar">Photo</label>
+        <input
+          id="contributor-avatar"
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          disabled={avatarPending}
+          onChange={(e) => handleAvatarChange(e.target.files?.[0])}
+        />
+        <p className={styles.hint}>
+          Stored on this site, resized to {AVATAR_SIZE}px square. Location data and other metadata are removed.
+          {uploaded && (
+            <>
+              {" "}
+              <button type="button" onClick={handleAvatarRemove} disabled={avatarPending} className={styles.linkButton}>
+                Remove photo
+              </button>
+            </>
+          )}
+        </p>
+        {avatarPending && <p className={styles.hint}>Working…</p>}
+        {avatarError && <p className={styles.error}>{avatarError}</p>}
       </div>
 
       <div className={styles.field}>
@@ -142,7 +211,7 @@ export default function ContributorPanel({
         <ContributorCard
           name={name}
           slug={slug}
-          image={imageInput.trim() || null}
+          avatarSrc={currentAvatarSrc}
           color={color}
           adminInitials={adminInitials}
           orcid={orcidInput.trim() || null}

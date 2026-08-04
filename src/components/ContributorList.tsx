@@ -19,7 +19,7 @@ export default async function ContributorList() {
           key={c.id}
           name={c.name}
           slug={c.slug}
-          image={c.image}
+          avatarSrc={c.avatarSrc}
           color={c.color}
           adminInitials={c.adminInitials}
           orcid={c.orcid}

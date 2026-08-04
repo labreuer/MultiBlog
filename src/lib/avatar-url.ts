@@ -1,5 +1,6 @@
-// The one place the self-hosted avatar URL shape is written down (PLAN.md
-// §17n). Deliberately its own module rather than living in avatar.ts:
+// The browser-safe half of the avatar feature (PLAN.md §17n): the URL shape,
+// the stored size, and the precedence rule. Deliberately its own module
+// rather than living in avatar.ts:
 // ContributorCard builds these URLs and is imported by ContributorPanel,
 // which is `"use client"` — so ContributorCard is compiled into the client
 // bundle too, and anything it imports must be browser-safe. avatar.ts pulls
@@ -12,6 +13,17 @@
 export function avatarUrl(userId: string, hash: string): string {
   return `/api/avatar/${userId}/${hash}`;
 }
+
+/**
+ * Square edge length stored and served, in px. 4× the 40px card slot, so one
+ * stored size also covers the dashboard preview and 2× displays without a
+ * second variant — which is what lets the render path skip `next/image`
+ * entirely (see ContributorCard's eslint-disable rationale).
+ *
+ * Lives here rather than in avatar.ts so the client bundle can read it for
+ * the `width`/`height` attributes without pulling in sharp.
+ */
+export const AVATAR_SIZE = 160;
 
 /**
  * Resolves what a contributor's avatar `src` should be, in precedence order:

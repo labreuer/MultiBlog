@@ -66,7 +66,8 @@ export type UserRow = {
   moderationPolicy: ModerationPolicy;
   rowsPerPage: PageSize;
   color: string;
-  image: string | null;
+  /** Resolved avatar src — self-hosted upload, else the adapter's remote URL, else null (PLAN.md §17n). */
+  avatarSrc: string | null;
   isListedContributor: boolean;
   contributorBlurb: JSONContent | null;
   contributorOrder: number | null;
@@ -574,9 +575,9 @@ export default function UsersTable({
       key: "image",
       header: "Image",
       cell: (row) =>
-        row.image ? (
-          // eslint-disable-next-line @next/next/no-img-element -- pre-existing; avatars are arbitrary remote URLs, not a fixed asset set.
-          <img src={row.image} alt="" width={32} height={32} style={{ borderRadius: "50%", objectFit: "cover" }} />
+        row.avatarSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a self-hosted avatar is already one fixed size behind an immutable URL, so the optimizer would only re-derive it; a remote fallback URL would need an images.remotePatterns entry per host. Same rationale as ContributorCard.
+          <img src={row.avatarSrc} alt="" width={32} height={32} style={{ borderRadius: "50%", objectFit: "cover" }} loading="lazy" />
         ) : (
           ""
         ),
