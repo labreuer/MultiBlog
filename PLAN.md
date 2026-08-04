@@ -3645,3 +3645,688 @@ deletion.
   comments) was deleted rather than backfilled into a doc — there was nothing worth preserving, and
   a backfill script would have had to get byline order, the title fragment, and a synthetic
   publication event right for a single throwaway row.
+
+## 16. Admin tables become one kit
+
+Six surfaces render a table of rows an admin acts on: `/posts`, `/docs`, `/users`, `/comments`,
+`/annotations`, and `/site-settings`. All of them ultimately need pagination, bulk operations,
+standardized search/filter parameters visible in the URL, and — eventually — the ability to stage
+changes locally when the connection is unreliable. This section builds that as one kit the six
+share, rather than a seventh copy per surface.
+
+### 16a. Why our own, and what "our own" means here
+
+There were two generations of table already. `/comments` (§11) and `/annotations` (§12j) are
+server-driven: filters, sort and pagination all live in the querystring, a `*-query.ts` module is
+the single place that knows the querystring's shape, and the server page turns it into a Prisma
+`where`/`orderBy`/`take`+`skip`. `/posts`, `/docs` and `/users` are the older generation: every row
+is shipped to the browser and sorted/filtered there, with sort state in `useState` and the
+show-deleted toggle in `sessionStorage`.
+
+So the kit is an **extraction, not an invention** — the second generation already is the design,
+and `/annotations` was built by copying `/comments`, which is the duplication this section stops
+before a third copy. A survey of table libraries (headless and rendering both) found none that
+supplies pagination, URL-serialized filters, bulk semantics and offline staging as a unit; each
+supplies at most the part we already own, and the row-level customization these tables carry —
+`UsersTable`'s six inline-edit cell types, `PostsTable`'s scheduled-countdown tooltip and
+width-tracking search box — is exactly what a rendering grid makes awkward.
+
+The kit is therefore **hooks plus small components, never a `<DataTable columns={...} />`**. Each
+table keeps its own `<thead>`/`<tbody>` JSX and its own cells; what it stops owning is the
+plumbing every table repeats. That boundary is the whole design: it is what keeps a cell an
+ordinary React component that calls a server action.
+
+`/site-settings` is deliberately out of scope. It is a form wearing table markup — a fixed pair of
+settings plus a read-only config list — with no rows to page, select, or sort. It takes the
+row-status border (§16f) and nothing else.
+
+### 16b. Rows per page: a stored default, a temporary override
+
+Page size is `10/25/50/100` everywhere. The chosen value is **per user, stored in the database**:
+`User.rowsPerPage`, defaulting to 25. Every table's server page reads it and uses it as that
+user's default page size; the rows-per-page dropdown in the pagination bar writes `?pageSize=` to
+the URL, which **overrides it temporarily** — for that URL, that navigation, that shared link —
+without touching the stored preference.
+
+This is why `pageSize` cannot be compared against a module-level constant when serializing the
+querystring: the param is omitted when it equals *this user's* default, not when it equals 25. The
+user's default is therefore threaded into both halves — `parse*Filters(searchParams, defaultPageSize)`
+on the server, and a `defaultPageSize` prop on the client table for the build half. A URL with no
+`pageSize` means "whatever my preference is", so the same bookmarked link gives two admins their
+own page sizes, which is the intent.
+
+Read from the database per request rather than baked into the session JWT: `id`/`role`/`color` are
+fixed at sign-in and go stale until sign-out (see `src/app/sign-in/NOTES.md`), and a preference the
+user just changed should apply on the next page load, not the next session.
+
+The preference is edited in `/users`, as a select cell in the row's own **Rows/page** column,
+alongside Role and Moderation policy. That surface is ADMIN-only, which is a real gap for everyone
+else — see §16l.
+
+### 16c. Phase 1 — the query-param kit
+
+`src/lib/table-query.ts` holds what `comments-query.ts` and `annotations-query.ts` had two copies
+of: the page-size options, and parsers/serializers for the five params every admin table has —
+`deleted`, `q`, `page`, `pageSize`, `sort`.
+
+```
+BaseFilters<K>                       = { deleted, q, page, pageSize, sort: SortColumn<K>[] }
+parseBaseFilters(sp, spec)           -> BaseFilters<K>
+buildBaseQueryString(f, extra, spec) -> URLSearchParams   // not a string — see below
+parseSetParam(value, options)        -> Set<T> | "ALL"
+```
+
+Each table's `*-query.ts` composes these into its own **fully typed** filter shape rather than
+receiving a generic bag:
+`CommentsFilters = BaseFilters<CommentsSortKey> & { status: Set<CommentStatus> | "ALL"; threadStatus: ... }`.
+A generic `Record<string, Set<string>>` for the multi-select params would have erased exactly the
+enum types that make the server's `where` builder safe, so the kit stops at the shared five and
+lets each table add its own with the primitives.
+
+`buildBaseQueryString` returns a `URLSearchParams`, not a string, so a table can set its own params
+on the result before serializing. The deep-link-only params (`?post=`, `?author=`, `?commenter=`,
+`?doc=`, `?user=`) keep round-tripping through the `extra` argument untouched.
+
+What stays per-table, because it is schema-specific and not plumbing: the sort-key list, the
+default sort, the `SortKey -> Prisma orderBy` mapping, the `filters -> Prisma where` mapping, and
+the deep-link `where`.
+
+### 16d. Phase 2 — the client kit
+
+`src/components/table/`, with `AdminTable.module.css` moving into it (it was already named for the
+shared concept rather than a component — see STYLE.md).
+
+Hooks:
+
+- `useTableFilters` — the `navigate` / `updateFilters` / debounced-search trio, plus the
+  search-draft state that resyncs when `filters.q` changes for an outside reason (back/forward, a
+  deep link). `updateFilters` resets to page 1; `navigate` does not, so Prev/Next can move the page
+  alone.
+- `useRevealedRows` — the visit-local overlay that keeps a just-deleted row visible until a real
+  navigation, generalized from `CommentsTable`. A `Map`, not the older tables' `Set` of ids: under
+  pagination the server refetch drops the row entirely, so the overlay has to carry the row itself,
+  not just a flag saying "show it" — **and its index**, so it goes back where it was rather than
+  onto the end. Appending is the obvious implementation and reads as a bug: delete the second of
+  four rows and it drops to the bottom, which looks like the table re-sorting itself. The index is
+  free to capture, since both reveal calls happen while `rows` still contains the row.
+
+  The alternative was to stop dropping these rows in SQL at all — hand the just-deleted ids back to
+  the server and widen the `WHERE`, so Postgres returns them in their sorted place. That is the more
+  truthful model (the row would be counted and paginated like any other) and it is the one to reach
+  for if a revealed row should ever be a *real* row. It was not taken here because it makes the ids
+  a sixth shared querystring param, and with that: bookmarkable URLs that resurrect rows for whoever
+  opens them, a `FilterHelp` entry for something no one types, a total that moves, and a revealed
+  row displacing a live one onto page 2. Three of the five tables also already use `where.OR` for
+  their search, so the new clause has to nest under `AND` or it silently disables the search box.
+  None of that is worth paying for a row the admin deleted a second ago, where nothing else on the
+  page has moved.
+- `useRowStatus` — §16f.
+- `useRowSelection` — §16g.
+
+Components: `SortHeader` (the `<th>`, its click/ctrl-click handling and the ▲/▼ + priority
+superscript), `SearchBox`, `MultiSelectDropdown` (promoted out of `CommentsTable`), `PaginationBar`,
+`DateFormatSelect`, `ShowDeletedToggle`, `RowActionButton` (the delete/restore icon toggle every
+table has), and `FilterHelp` — the querystring help panel, **generated from the same filter spec
+Phase 1 parses**, so the documented params cannot drift from the parsed ones the way a hand-written
+help table can.
+
+Three conventions STYLE.md's TODO left open are settled here, since the kit has to pick one:
+`.table` carries `margin: 1em 0`; the date-format and show-deleted controls are **siblings after
+`</table>`, not a `<tfoot>`** (a `<tfoot>` is for summary rows of the table's own data, not page
+controls — `UsersTable`'s `<tfoot>` goes); and every table renders its header row with a centered
+`.emptyRow` when there are no rows, rather than bailing to a bare `<p>`, because with pagination and
+filters present the controls must stay usable when a filter matches nothing.
+
+### 16e. Phase 3 — Posts, Docs and Users move server-side
+
+Each gets a `*-query.ts` (Phase 1), a rebuilt page (`where`/`orderBy`/`take`/`skip` plus a `count`),
+and a table rebuilt on the kit. Their sort and search move from React state into the URL, the
+`sessionStorage`-backed `useShowDeletedRows` retires in favour of the `deleted` param, and
+`useSortableRows`'s client-side sorting retires with it — only `nextSortColumns` (the
+click/ctrl-click toggle semantics) survives, which is what the URL-driven tables already used.
+
+`/users` gains a search box (name/email/initials), which it never had. Sorting by role stays in
+privilege order for free: Postgres orders an enum by declaration order, and `Role` is declared
+ADMIN → COMMENTER, which is what `ROLE_ORDER` spelled out client-side.
+
+**Sorting the derived columns.** Moving sort into Postgres means every sort key has to be something
+an `ORDER BY` can name, and several of these columns are not: they are derived from a to-many
+relation, or computed by a SQL function. Prisma's `orderBy` over a to-many offers exactly one
+member — `_count` (`PostPublicationEventOrderByRelationAggregateInput` and friends, generated,
+Prisma 7.9). A joined byline is not a count; "approved comments, excluding soft-deleted ones" is a
+*filtered* count `_count` cannot express either; and "who made the most recent publication event"
+is not an aggregate at all but an **argmax** — the actor of the row *having* the max — which no
+`orderBy` extension short of raw SQL could reach.
+
+What that wall is really about is *to-many* relations. Prisma orders a **to-one** relation's own
+columns freely, nested arbitrarily deep, which is how `/comments` sorts by post title and commenter
+name. So a **view keyed 1:1 on the base table's primary key** is a to-one relation, and turns each
+of these into a shape Prisma already handles:
+
+| Table | Column | Sorts through | Which is |
+|---|---|---|---|
+| `/posts` | Author(s) | `post_metrics.byline` | `string_agg` of `adminInitials` in byline order |
+| `/posts` | Comments | `post_metrics.approved_count`/`pending_count` | `count(*) FILTER` per status, excluding soft-deleted |
+| `/posts` | Last edit by/at | `post_activity.last_editor_name`/`last_event_at` | the argmax over `PostPublicationEvent` |
+| `/docs` | Author(s) | `doc_metrics.byline` | `string_agg`, as above |
+| `/docs` | Length | `Doc.proseJsonLength` | a stored column, not a view — §16l has the reasoning |
+
+Each view **also displays** the value it sorts (`include: { activity: true }` and friends, rather
+than a `take: 1` sub-select or a JS join over an authors include), so the sorted expression and the
+rendered one are the same expression. Sorting by one thing while showing another is the failure this
+rules out by construction rather than guards against — and it was the deciding factor against the
+cheaper alternative for Last edit: `Post.publishEvent` is already a to-one relation and needs no
+view, but it is nulled on unpublish and only ever points at a `PUBLISHED`/`SCHEDULED` row, so
+sorting by it while displaying "latest event of any type" would have read as a broken sort.
+
+`/posts`'s History column needs none of this (`_count: { publicationEvents }`), nor does `/users`'
+Posts column (`_count: { postAuthors }`) — those are plain relation counts, which Prisma does order
+by. Nothing here tries to make *every* column sortable: a comment's body text, an avatar, a colour
+swatch and an action button are not sort keys in any useful sense and stay plain `<th>`s, as does
+`/comments`' commenter-activity column for the reason §11 gives.
+
+The argmax view, which is the one worth writing out:
+
+```sql
+CREATE VIEW post_activity AS
+SELECT DISTINCT ON (e.post_id)
+       e.post_id, e.created_at AS last_event_at, COALESCE(u.name, u.email) AS last_editor_name
+FROM post_publication_event e LEFT JOIN "user" u ON u.id = e.actor_id
+ORDER BY e.post_id, e.created_at DESC, e.id DESC;
+```
+
+The `e.id DESC` tiebreaker matters more than it looks: `created_at` is not a unique ordering key, so
+without it *which* of two same-instant events won would be arbitrary. Not reachable today — each of
+the three `postPublicationEvent.create` sites writes one event per transaction, and `now()` is the
+transaction timestamp — but the view shouldn't depend on that continuing to hold. `id` is the
+primary key, so it breaks every tie by definition.
+
+`DISTINCT ON` is a PostgreSQL extension rather than standard SQL; the portable spelling is
+`ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC, id DESC)` filtered to `= 1`. Kept
+as `DISTINCT ON` deliberately: portability is not the binding constraint (`doc_length()`, Prisma's
+`mode: "insensitive"`, JSON path filtering and native enums would all have to move first), it is
+normally the cheaper plan on Postgres for top-1-per-group, and the choice is reversible for free —
+the schema block, the relation, `buildOrderBy` and the spec are identical either way, so swapping it
+is one `CREATE OR REPLACE VIEW` and no application code. `ROW_NUMBER()` would win on merit only if
+this ever needed top-*N* per post rather than top-1.
+
+`orderBy: { activity: { lastEventAt: { sort, nulls: "last" } } }` then just works, with the argmax
+happening in SQL where it belongs. A post with no events has no row in the view, which is why
+`PostActivity` is a nullable relation and both columns sort nulls-last — matching what the cell
+shows for such a post anyway.
+
+`post_metrics` and `doc_metrics` are the aggregate counterparts, and stay separate from
+`post_activity` rather than being folded into it: an argmax over `post_publication_event` and a
+`GROUP BY` over `post_author`/`comment` want different plans, and merging them would force one
+shape onto both while changing the row-presence semantics the nulls-last ordering depends on.
+The two differ from each other in the same way, and deliberately — `post_metrics` reads `FROM post`
+so every post has a row, while `doc_metrics` groups `doc_author`, so a doc with *no* authors has no
+row at all. Both render as the same empty cell and sort the same way, since each relation is
+optional and byline is ordered nulls-last either way; §16l has why `doc_metrics` is worth the
+difference.
+
+Two things Prisma views make you live with: they take `@unique`, never `@id` ("Views cannot have
+primary keys"), and **Prisma Migrate does not manage them** — `migrate diff` emits no DDL for a
+`view` block at all, so the `CREATE VIEW` lives in a hand-written migration exactly as
+`doc_length()` does, and changing it means a new migration rather than an edit to the schema block.
+The generated client will also happily *type* writes to a view that Postgres will reject.
+
+What each of these costs, and the measurements behind Length being a column instead: §16l.
+
+### 16f. Row state as a left border
+
+The `savedPulse` animation (`UsersTable`, `SiteSettingsTable`) is replaced by a persistent **3px
+left border on the row's first `<td>`**, driven by `useRowStatus`:
+
+| State | Border | Means |
+|---|---|---|
+| idle | transparent | nothing has happened to this row |
+| edited | gray | a field has been changed locally, not yet submitted |
+| saving | yellow | a server action is in flight |
+| error | red | the action failed |
+| saved | green | the action succeeded |
+
+Every row paints the border at all times, transparent when idle, so no row shifts horizontally when
+its state changes.
+
+A pulse is a momentary acknowledgement that is gone a second later; a border is a **standing record
+of what this visit touched**, which is what an admin editing several rows in a row actually wants.
+So `saved` persists until that row is edited again or the page navigates — there is no timer.
+`error` persists likewise, and keeps the existing per-cell error text underneath the control, which
+says *what* failed; the border only says *that* something did.
+
+The states are not all reachable from every control. A text cell commits on blur, so it passes
+through `edited` on its way; a `<select>` or color picker submits on change and goes straight to
+`saving`. Delete/restore is a mutation like any other and paints the same border, which is why this
+lives in the kit rather than in `UsersTable`.
+
+**A bulk action paints it too**, on every row it applied to — `runWithStatusMany`, the batch
+counterpart of `runWithStatus`, which `BulkToolbar` takes as a required prop rather than an optional
+one so a new table cannot quietly leave its bulk actions the only mutations on the surface with no
+per-row feedback. Two properties fall out of it, both deliberate:
+
+- **Only the rows the action actually applied to are marked.** §16g's rule is that a mixed selection
+  silently skips the rows an action doesn't apply to; marking only the rest means the border answers
+  *which of the rows I selected did that change?*, not merely *did something run?*. The skipped rows
+  stay idle.
+- **The mark outlives the selection.** `onDone()` clears the selection and refreshes immediately
+  afterwards, so a moment later nothing is checked any more — the border is then the only remaining
+  record of what the action covered, which is precisely the standing-record argument above applied
+  to a batch.
+
+- **Each row reports its own outcome, not the batch's.** The batched actions are not transactional
+  (§16k), so a selection mixing rows the caller may change with rows it may not — the normal case
+  for anyone who isn't ADMIN — half succeeds. That is why they return a `BulkResult`
+  (`src/lib/bulk-result.ts`) instead of `Promise<void>`: `Promise.all` rejects on the first bad id
+  and *discards which ids the rest were*, leaving the browser one bit for the whole batch and no
+  choice but to redden rows that saved. `Promise.allSettled` behind `settleBulk` changes only the
+  reporting — `Promise.all` already started every call, so the ones that were going to succeed
+  always did — and green now means *this row saved*.
+
+  A thrown action still reddens everything, and should: an unauthenticated caller or a dead network
+  is the case where the client genuinely doesn't know which rows are which.
+
+- **A red row carries its reason**, as a `title` on the same cell that paints the border — the only
+  place a *per-row* explanation can live when one toolbar serves N rows. The toolbar keeps the
+  summary (`3 of 8 failed …`), preserving §16f's split: border says *that*, text says *what*.
+
+  The message is filtered, not passed through. Next redacts the message of an error *thrown* from a
+  server action in production and a returned value gets no such treatment, so echoing
+  `reason.message` verbatim would route around that and put a Prisma query and absolute source
+  paths on an admin's screen. `describeFailure` passes through a plain `Error` — which is what this
+  codebase's own authorization guards throw — and collapses everything else to a generic string.
+
+  **The collapsed ones are logged, and that is not bookkeeping — it replaces something
+  `Promise.allSettled` took away.** Under `Promise.all` the first rejection propagated out of the
+  server action and Next logged it (with a digest in production, to correlate against). `allSettled`
+  captures the rejection, so nothing throws, so nothing is logged: without an explicit
+  `console.error` the only trace of a failure would be one generic sentence on an admin's screen.
+  Only the collapsed ones, though — a plain `Error` is a guard the admin reads in full, ordinary
+  feedback rather than a fault, and logging every refused authorization at error level would bury
+  the real ones. The row id is the correlation key: it is in the log line, and the UI reddens that
+  exact row.
+
+Beneath both, **`BulkToolbar` refreshes on the failure path too** — `onDone(ok)`, with every table
+refreshing regardless and clearing the selection only when `ok`. Skipping the refresh on failure
+left the rows that *had* saved showing their pre-action values next to a red border until someone
+reloaded, which made §16k's "a partial application is visible" untrue as written. Keeping the
+selection armed when anything fails is the other half: the action is re-runnable without re-picking
+the rows. Deletion's `onDeleted` overlay also runs either way, since the ids that did delete are
+gone from a `?deleted=0` refetch and would otherwise vanish mid-action — a row that *didn't* delete
+costs nothing there, because `useRevealedRows` drops an overlay entry as soon as `rows` contains
+that id again.
+
+### 16g. Phase 4 — selection and bulk actions
+
+`useRowSelection` (checkbox column, header select-all, the selected-id set) and `BulkToolbar` (the
+toolbar that appears once anything is selected). A table declares its bulk actions as data —
+`{ label, icon, applicableTo(row), run(ids) }` — and the toolbar renders them; the "silently skip
+rows the action doesn't apply to rather than erroring on a mixed selection" rule that
+`bulkModerateComments` established becomes the convention every bulk action follows. Skipping
+silently is only tolerable because §16f's border then marks exactly the rows that *were* affected —
+the two rules are a pair, and the second is what stops the first from being an admin wondering
+whether anything happened.
+
+Each table gets batched server actions of its own, each enforcing its own authorization — which is
+why the toolbar takes server actions rather than a table name. `/comments` keeps Approve/Pend/Spam;
+`/posts`, `/docs`, `/users` and `/annotations` get delete/restore, and `/users` also gets bulk role
+and moderation-policy changes.
+
+Selection stays **scoped to the current page**, as `/comments` already had it. Cross-page "select
+all N matching" remains deliberately unresolved; the shape it should take when it lands is a
+*filter-scoped* server action (`bulkModerateWhere(filters)`) rather than an id list, so no
+thousand-element array crosses the wire and the action means the same thing it displays.
+
+### 16h. Phase 5 — staging changes in IndexedDB (not built)
+
+The requirement is that a change survives a bad connection: an admin moderating on a train should be
+able to act, see what they did, and have it land when the network returns. Hand-rolled over plain
+IndexedDB, following `y-indexeddb`'s precedent (§11e) that the subtle parts of local persistence are
+worth owning.
+
+- A staged mutation is a serialized server-action call:
+  `{ id, table, action, args, rowIds, createdAt, status: pending|inflight|failed }`, in one object
+  store **keyed by the signed-in user's id**. The browser's cookie jar is shared across tabs, and
+  replaying user A's queue as user B is the same class of identity bleed the browser-pane notes in
+  CLAUDE.md warn about.
+- Actions route through `stageMutation()`. Online, it calls straight through and the queue is never
+  touched — the current code path, unchanged. On a network failure it enqueues and paints an
+  optimistic overlay: the generalization of `useRevealedRows` from "a deleted row stays visible" to
+  "a row shows its staged values", with a per-row pending marker and a queue banner
+  ("3 staged changes — retry / discard"). Staging a moderation decision silently would be worse
+  than failing loudly.
+- Replay on the `online` event, on visibility change, and on an interval: FIFO, one at a time,
+  dropping an entry only once its action resolves. A **server-rejected** mutation (as opposed to a
+  network failure) goes to `failed` for explicit discard — it must not retry forever.
+- Conflict policy is per-action and deliberately dumb: moderation and delete/restore are idempotent
+  last-write-wins; field edits are last-write-wins per field. No merge machinery. This is an admin
+  table, not a document — the ydoc stack already owns the hard version of this problem.
+- **Mutations only.** Staging *reads* (a cached page for offline viewing) is a different and much
+  larger feature, excluded on purpose.
+
+### 16i. Phase 6 — column visibility and order
+
+Each table declares its columns as data — the kit already needs a per-table column list for the
+help panel and the bulk-action spec, and this extends it to a `ColumnSpec` (`src/components/
+table/column-spec.ts`):
+
+```
+{ key, header, sortKey?, nowrap?, headerClassName?, headerTitle?, alwaysVisible?, cell(row),
+  cellProps?(row), renderHeader?(), thRef? }
+```
+
+`key` is a stable string, never the array index: a saved order that survives a column being added
+or removed has to name columns, not positions. It is also what appears in `?cols=`, so it is a
+user-visible string kept short and lowercase.
+
+The last three fields are what the build added beyond the shape this section originally sketched,
+and each earns its place by being load-bearing somewhere real: `cellProps` lets `/docs`' Title cell
+stay a whole-cell click target rather than just the link inside it; `renderHeader` is for a header
+that isn't "label plus sort arrows" (the delete/restore column's icon button); `thRef` is what
+`/posts` measures to size its search box to the Title column. `headerClassName`/`headerTitle` cover
+the two columns (`/users`' Name, `/comments`' Changed at) whose `<th>` needs its own class or
+tooltip. None of these were guessable in advance — each surfaced only once an existing table's
+actual markup had to be expressed as data instead of hand-written JSX.
+
+`ColumnHeaderRow`/`ColumnCells` (`src/components/table/ColumnizedRows.tsx`) render a resolved
+column list as the `<thead>` row and each row's `<td>`s — the kit's half of "who owns which columns
+render", the cell content staying the table's own React expression either way (§16a's boundary,
+unchanged). Two things only these can do, now that order is user-controlled: the row-status border
+(§16f) goes on whichever column renders *first*, not a column a table names, and `colSpan` is
+`visibleColumns.length` rather than the literal every table used to hardcode.
+
+**State lives in the URL, like every other table parameter** — `?cols=title,authors,created` — with
+absent meaning "the default set, in declaration order". That choice falls out of the rest of the
+section: a filtered, sorted, paginated view is already shareable, and a link that arrives with the
+wrong columns is a worse bug than a preference that doesn't persist. Two params would be one too
+many, so a single ordered list carries both facts at once: membership is visibility, position is
+order.
+
+The durable half is `User.columnOrder`, a JSON column keyed by table
+(`{ posts: ["title", "authors", ...] }`) — the same stored-default/temporary-override split page
+size uses in §16b, for the same reason, and the second customer that justifies the pattern. A
+"save as my default" control in the column picker writes it; the URL param overrides it for that
+navigation. (Named `columnOrder`, not `tableColumns`, once §16m added a second column of the same
+shape — see there for why.)
+
+**Json rather than its own table**, which is the one part of this that looks like a shortcut and
+isn't. The value is read whole, written whole, and never queried into — nothing will ever ask
+"which users hide the Length column". Its shape is also "whatever columns that table happens to
+declare today", so a relational spelling would need a row per user per column, and would *still*
+have to tolerate rows naming columns that no longer exist. That tolerance is unavoidable either
+way; Json is the spelling where it costs nothing.
+
+**The picker (`ColumnPicker.tsx`) is its own component, not `MultiSelectDropdown` reused** — visibility
+and order turned out to be one interaction, not two: checking/unchecking a row changes `?cols=`'s
+membership and dragging changes its order, both writing the same list. Splitting them across two
+controls would have implied two params where §16i settled on one. The drag handling mirrors
+`DocSettingsPanel`'s `.draggableRow`/`.dragOver` pattern rather than inventing a second one — only a
+*visible* row is draggable there too, for the same reason: there is no meaningful position for a
+column that isn't shown. Fixed columns are still listed, disabled, so the picker describes the whole
+table rather than implying they don't exist.
+
+Three things this must not break, all of which constrained it and all of which hold as built:
+
+- **A column that carries a row action cannot be hidden into uselessness.** The delete/restore
+  column and the selection checkbox are `alwaysVisible`; hiding the only way to act on a row is not
+  a customization. (`/annotations` splits its status text from its action button into two separate
+  columns — a pre-existing quirk this conversion preserved rather than tidied — so only the button
+  column needed to be fixed there; the "Deleted" Yes/blank text is an ordinary movable column.)
+- **`colSpan` stops being a literal.** Handled by `ColumnCells`/`ColumnHeaderRow` above.
+- **Sorting by a hidden column.** A `?sort=` naming a column that `?cols=` excludes is reachable by
+  hand-editing a URL. `resolveColumns` only touches which columns *render* — the server-side
+  `buildOrderBy` never sees `?cols=` at all, so the sort stays honoured regardless of what's shown.
+  Covered by `e2e/admin-table.spec.ts`, which asserts the same row order with the sorted column
+  hidden as with it visible.
+
+One cost the build settled that was open when this was written: **a movable column absent from
+`?cols=` is hidden, including one shipped after a user already saved a preference for that table.**
+That falls straight out of the single-ordered-list design — membership *is* visibility — and there
+is no second "hidden" flag to distinguish "chose to hide this" from "this didn't exist yet". A user
+with a saved preference has to reopen the picker to see a newly added column. The alternative (a
+second param) is the two-param design this section rejected above.
+
+### 16j. Build order
+
+Phase 1 (§16c) + Phase 2 (§16d) + Phase 3 (§16e), with §16b's `User.rowsPerPage` and §16f's
+row-status border, land as **one commit**: the kit and its first three consumers can't be split
+without leaving either an unused abstraction or a half-migrated table. Phase 4 (§16g) is a second
+commit on top. Phase 3's derived-column sorting — the three views, `Doc.proseJsonLength` and its
+trigger, and the two foreign-key indexes the comment counts need — is a third: it is the only part
+that carries migrations, and separating it keeps a schema change out of a commit that is otherwise
+all application code. Phase 6 (§16i) — `User.columnOrder`, its own migration, `ColumnSpec` and the
+picker, all five tables converted — is a fourth. Phase 5 (§16h) is not built. §16m's
+`defaultHidden` columns and `SiteSettings.defaultColumnOrder` land as a fifth, later commit.
+
+### 16k. As built
+
+New: `src/lib/table-query.ts` (the shared five params), `src/lib/user-preferences.ts`
+(`getDefaultPageSize`), `posts-query.ts`/`docs-query.ts`/`users-query.ts`, and
+`src/components/table/` — `use-table-filters.ts`, `use-revealed-rows.ts`, `use-row-status.ts`,
+`TableControls.tsx`, `FilterHelp.tsx`, and `AdminTable.module.css` moved in from
+`src/components/`.
+
+Deleted: `src/lib/use-show-deleted.ts` (the `deleted` param replaced it),
+`UsersTable.module.css` and `SiteSettingsTable.module.css` (each held nothing but its own
+copy of the `savedPulse` keyframes). `use-sortable-rows.ts` became `table-sort.ts`: the
+`useSortableRows` hook — which also *did* the sorting, client-side, over every row — had no
+callers once sorting became an `ORDER BY`, so only `nextSortColumns` and the two types
+survive. The file also lost its `"use client"`, since the server pages import `SortColumn`
+to build their `orderBy`.
+
+`e2e/admin-table.spec.ts` covers the border's idle → edited → saved path (asserting computed
+colors, not class names), the same path driven by a bulk action of each kind — including that a
+row the action skipped on a mixed selection stays idle — the querystring round-trip for
+search/sort/page size including the "a page size equal to your preference isn't written to the
+URL" rule, and that all five tables keep their header and controls when a filter matches nothing.
+
+`e2e/bulk-partial.spec.ts` covers the half-successful batch, which is the case the per-row border
+exists for and the one that is easiest to get wrong. It selects the signed-in admin's own row
+alongside a throwaway user and bulk-deletes: `deleteUser` refuses the first and completes the
+second, so the spec can assert green-on-one and red-on-the-other, the failed row's `title`
+carrying its reason, the deleted row rendering as deleted with no reload, and the selection
+surviving. That last one was verified by reverting the fix and watching the spec fail on exactly
+that assertion.
+
+Two deviations from the plan as written, both flagged when the work was reported:
+
+- `Doc.title` is stored empty for an untitled doc and rendered as "Untitled" (§12n). While
+  `/docs` sorted client-side it sorted the *rendered* string; server-side it sorts the
+  stored one, so untitled docs now sort as the empty string. Not worth a stored-title
+  change to preserve.
+- `/users`' Name column sorted by `name ?? email` client-side. Postgres can't express that
+  fallback mid-`ORDER BY`, so a nameless user now sorts as a null (kept last either way).
+
+**Phase 4** added `use-row-selection.ts` and `BulkToolbar.tsx`, and put a selection column on
+all five tables. `BulkAction` turned out to need two kinds, not one: `"button"` for a fixed
+verb (Approve, Delete) and `"select"` for "set every selected row to *this*" — `/users`' role
+and moderation policy and `/docs`' visibility have no single obvious value, so a button per
+option would have meant eight buttons in the toolbar. `softDeleteBulkActions()` builds the
+delete/restore pair every table ends with, since all five share soft-deletion.
+
+The new batched actions (`bulkDeletePosts`/`bulkRestorePosts`, `bulkDeleteDocs`/
+`bulkRestoreDocs`/`bulkSetDocVisibility`, `bulkDeleteUsers`/`bulkRestoreUsers`/
+`bulkSetUserRole`/`bulkSetUserModerationPolicy`, `bulkDeleteAnnotations`/
+`bulkRestoreAnnotations`) each delegate to the existing single-row action per id rather than
+issuing one bulk `updateMany`. That is deliberate and the reason is authorization: the
+per-row helpers carry guards a bulk path must not be able to sidestep — `deleteUser`'s "you
+can't delete your own account", `updateUserRole`'s "you can't remove your own admin role",
+`canUserEditPost`/`canUserEditDoc` per row. A `updateMany` over an id list would have had to
+restate all of them, correctly, in a second place. Not transactional, matching
+`bulkModerateComments`: a partial application is visible and re-runnable, and wrapping N
+independent soft-deletes in one transaction turns "9 of 10 worked" into "none did" without
+telling the caller more.
+
+The row-status border now sits on the selection checkbox's cell, since that became the first
+`<td>`. Still the row's leftmost edge, which is what the border is for.
+
+**The derived-column sorting** (§16e) is five migrations: `post_activity`, `post_metrics` and
+`doc_metrics`; the two foreign-key indexes `post_metrics`' comment counts need
+(`comment.thread_id`, `comment_thread.post_id` — Postgres indexes a primary key but never the
+referencing side of a foreign key); and `Doc.prose_json_length` with its trigger. On the
+application side that is three `view` blocks plus their relations, the `buildOrderBy` cases, and
+the pages reading each value from the thing that sorts it — which let `/posts` drop the `authors`
+and `threads` includes entirely (the latter pulled every comment of every post on the page into
+Node to count two statuses) and `/docs` drop its second `$queryRaw` round trip for `doc_length`.
+
+`e2e/admin-table.spec.ts` asserts the actual row order in both directions for every one of these
+columns. That is the only assertion that means anything here: a sort through a view fails by
+returning the wrong order, not by throwing.
+
+Two operational notes this surfaced, both in CLAUDE.md but easy to be bitten by anyway. Adding a
+view is adding a *model*, so a `next dev` started before `prisma generate` keeps the old client in
+module memory and every `/posts` query dies with `Unknown argument 'activity'` — restarting the dev
+server is the whole fix, regenerating alone is not. And a doc's `prose_json` is a cache with no
+recompute-on-read, so the three places that create a doc without a collab server in the loop
+(`scripts/seed-sample-data.ts`, `scripts/test-doc.ts`, `e2e/db-worker.ts`) have to write it
+themselves; they all call `docContentFromYdoc`, the same derivation `server/doc-cache.ts` uses, and
+`scripts/integrity/check-doc-integrity.ts` is what verifies they agree.
+
+### 16l. Known gaps
+
+- **`User.rowsPerPage` is only editable in `/users`, which is ADMIN-only.** An AUTHOR or
+  EDITOR who can reach `/posts`, `/docs` and `/comments` has a preference they cannot
+  change; the `?pageSize=` override is their only recourse, and it doesn't persist.
+  `User.columnOrder` (§16i) already got the self-service surface this one is missing —
+  `saveTableColumns` (`src/app/actions/table-preferences.ts`) is the app's first
+  self-service preference action, reachable from each table's own column picker — but it
+  is scattered one control per table rather than centralized. The home for both, done once
+  rather than per-table and per-preference, is a `/dashboard` settings surface.
+- **Each view is recomputed per query, and a sort has no `WHERE` to push down.** This is the
+  cost that decides view-versus-column, so it is worth stating as a rule: reach for a view
+  when a value is *awkward to reach* (a joined byline, a filtered count) and for a stored
+  column when it is *expensive to compute*. A view's per-query cost is not bounded by the
+  page size — ordering by one of its columns evaluates the expression for every row in the
+  table, however few end up on screen.
+
+  `/docs`' Length is the column where that bites, and the reason it is `Doc.proseJsonLength`
+  rather than `doc_metrics.length`. `doc_length` is a recursive walk over the whole document
+  body, measured here at **~52µs per 1k characters** (~2.1ms for a 40k-character doc, ~0.04ms
+  for a 500-character one). Through a view that lands in the two worst places: `/docs` would
+  recompute it for the page's 25 docs on *every* load, and sorting by it would walk every doc
+  in the table — around a second per page load at 1,000 docs of 20k characters, growing with
+  the corpus. The write side pays one walk per debounced collab flush. The other four columns
+  have no such asymmetry: a `string_agg` over a byline and a `count(*) FILTER` are cheap, and
+  `post_activity`'s argmax is served straight from `post_publication_event`'s existing
+  `(post_id, created_at)` index.
+
+  Three things that decided the column's shape, each checked rather than assumed:
+
+  - **A trigger, not a `GENERATED ... STORED` column.** The generated column is the better
+    mechanism on every axis but one — identical cost, and it *cannot* drift. Prisma reads and
+    sorts it correctly and `doc.create()` works (Prisma omits unnamed columns from the
+    INSERT). But `migrate diff` reads the generation expression as a column default and emits
+    `ALTER COLUMN "prose_json_length" DROP DEFAULT` permanently, so every future `migrate dev`
+    would offer to strip the generated-ness. A plain column plus a trigger diffs clean,
+    because Migrate doesn't introspect triggers. It wins by being invisible. (PG18's *virtual*
+    generated columns are out regardless — they reject user-defined functions.)
+  - **The trigger is narrowed to `UPDATE OF prose_json`**, so title/slug/visibility/soft-delete
+    writes don't pay the walk. Verified: a title-only update leaves a deliberately-corrupted
+    length untouched, while a body update recomputes it.
+  - **Nothing in the application feeds it.** `server/doc-cache.ts` writes `prose_json` and the
+    column follows — confirmed end to end by typing 31 characters into a live editor and
+    watching the flush land `31`.
+
+  What it costs: drift is possible where a view cannot drift, since a trigger can be bypassed
+  by `DISABLE TRIGGER`, a `COPY`, or a restore. `scripts/integrity/check-doc-integrity.ts`
+  has a table-wide `length-cache` check for that, reporting the stored and actual values and
+  the no-op write that repairs them. No index on the column: sorting an `int` is cheap enough
+  that one would be maintenance cost without a demonstrated need.
+- **A view that reads its own base table is scanned twice under a sort, and there is no knob
+  for it.** Postgres 18's self-join elimination is precisely the optimisation and cannot
+  help: it only fires on `INNER` joins, while Prisma emits a `LEFT JOIN` for a to-one
+  relation ordering regardless of how the relation's optionality is declared (it also refuses
+  a 1:1 with both sides required). `post_metrics` pays this — it reads `FROM post`, which is
+  the readable shape and gives every post a row. `doc_metrics` avoids it by grouping
+  `doc_author` instead, which is only possible because Length is a column rather than a view
+  expression; the same trick would work for `post_metrics` as a `FULL OUTER JOIN` of its two
+  aggregates, at the cost of readability and of making both counts nullable for a post with
+  authors but no comments. Not worth it for one avoided scan of a small table.
+- **Prisma issues the two halves of a view differently, and only one is a join.** An
+  `orderBy` through a view is a `LEFT JOIN`; an `include`/`select` of it is a separate
+  `WHERE <pk> IN (…)` query. Worth knowing because it means the display path costs one flat
+  round trip rather than anything per row — and because the two paths can therefore have
+  quite different plans for what looks like one query.
+- **Each view is a `previewFeatures = ["views"]` model Migrate won't manage**, so its DDL is
+  hand-written and has to be kept in step with the schema block by hand. There are three.
+- **Cross-page selection is still unresolved** (§16g). Selecting rows, paging, and coming
+  back keeps the selection in React state, so it survives — but the header checkbox only
+  ever means "this page", and there is no way to act on "all N matching".
+- **Every page load costs one extra query** for `getDefaultPageSize`. Narrow
+  (`select: { rowsPerPage: true }` by primary key) and deliberate — see §16b on why not the
+  JWT — but it is a per-request round-trip that did not exist before.
+- **`?q=` searches one or two obvious columns per table**, chosen to match what the old
+  client-side filters did (title for posts/docs; name/email/initials for users). Postgres
+  full-text search over post/doc *bodies* is a different feature and isn't attempted here.
+
+### 16m. Defaulted-hidden columns and a site-wide default
+
+§16i's audit was column-*visibility* mechanics; it didn't ask whether every DB column worth
+seeing was even offered as an option. It wasn't: several columns each table's query fetched (or
+could cheaply fetch) never reached `ColumnSpec` at all, so no `?cols=` value could ever show them.
+Added, all `defaultHidden: true` — present in the picker, absent from the default view:
+
+- `/posts`: `slug`, `moderationPolicy`, `deletedAt`.
+- `/docs`: `slug`, `updatedAt`, `deletedAt`.
+- `/users`: `deletedAt`.
+- `/comments`: `ipAddress`, `statusChangedBy` (sorts through the comment's own `statusChangedBy`
+  relation, the same to-one-relation `orderBy` pattern §16i's `post_activity`/`post_metrics` use,
+  just a direct FK rather than a view), `editedAt`, `deletedAt`.
+- `/annotations`: `raisedAt`, `resolvedAt`, `deletedAt`. `status` was added too, but *not*
+  `defaultHidden` — unlike the timestamp columns, it names a real workflow state (RAISED means the
+  doc's byline authors were emailed, §13d) with no other visibility anywhere in this table.
+
+`/posts`' query changed from an `include` to an explicit `select` naming every scalar except
+`proseJson` in the same pass — `include` fetches every scalar column of the model, so the page was
+already pulling each post's full body into the Node process on every load to serve a table that
+never rendered it; adding more `defaultHidden` scalars was the occasion to stop doing that, not a
+reason to add to it.
+
+**Why `defaultHidden` is a `ColumnSpec` field and not a second `?cols=`-adjacent param.** A column
+can be declared without deciding, in the same declaration, whether an admin encountering the table
+for the first time should see it by default — `defaultColumnKeys` (`column-spec.ts`) filters out
+`alwaysVisible` and `defaultHidden` columns and is the last-resort fallback, reached only when
+neither a user's saved preference nor a site default (below) has an opinion. It changes what "no
+preference" means without touching how a preference, once made, is stored or read.
+
+**The site-wide half.** A `defaultHidden` column is a per-column, code-level opinion — good enough
+until an admin wants, say, `deletedAt` visible by default for every user on `/posts`, not just
+their own account. `SiteSettings.defaultColumnOrder` (Json, keyed by table, identical shape to
+`User.columnOrder`: an ordered list of visible column keys) sits between the two: `getTablePrefs`
+(`src/lib/user-preferences.ts`) resolves a user's own `columnOrder` first, falls back to
+`getSiteDefaultColumnOrder` (`src/lib/site-settings.ts`) next, and only reaches `defaultColumnKeys`
+if neither has ever been set. Precedence, in order: `?cols=` (this navigation) > `User.columnOrder`
+(this admin's saved preference) > `SiteSettings.defaultColumnOrder` (site-wide) >
+`ColumnSpec.defaultHidden` (code fallback, if nobody has ever configured either of the above).
+
+**Same shape on purpose.** Both Json columns started out different — `columnOrder` an ordered
+visible-list, an earlier site-wide draft a hidden-*set* — until unifying them turned out to remove
+a parameter rather than add one: `resolveColumns` only ever needs one ordered list of visible keys
+regardless of which tier supplied it, so `columnOrderFor(stored, table)` (`src/lib/
+column-order.ts`) is the one parser both `getTablePrefs` and `getSiteDefaultColumnOrder` call, and
+`User.columnOrder` is named to match `SiteSettings.defaultColumnOrder` rather than keeping its
+original `tableColumns` name, once the shapes lined up. `AdminTableName` lives in this new file
+too (`user-preferences.ts` re-exports it for callers that predate the split), since it is what both
+columns are keyed by, not something that belongs to the user-preferences half alone.
+
+**Editing the site default (`/site-settings`) needs column identity a client component's closures
+can't give a server component.** Each table's real `ColumnSpec<Row>[]` lives inside that table's
+own React component — JSX headers, hooks-dependent cells, closures over local state — and
+`/site-settings` is a server component rendering a page for a table it never opens. Rather than
+splitting "column identity" from "cell renderer" across all five tables (out of scope for this
+pass), `src/lib/admin-table-columns.ts` hand-duplicates the movable columns' `key`/`label`/
+`defaultHidden` as plain data, deliberately and explicitly commented as a duplication that must be
+kept in step by hand: **adding, removing or renaming a movable column means updating both places.**
+`codeDefaultColumns` there mirrors `defaultColumnKeys`'s one-line rule against that static shape.
+
+`DefaultColumnsEditor` (`src/components/DefaultColumnsEditor.tsx`), the `/site-settings` control
+itself, edits visibility and order in one control, for the same reason `ColumnPicker` does:
+`SiteSettings.defaultColumnOrder` is a single ordered list where membership is visibility and
+position is order, so a second control would have nothing of its own to own. Checking/unchecking a
+row changes membership; dragging a checked row changes position — both write the same list,
+immediately, on every change (no separate save step, unlike `ColumnPicker`'s "save as my default":
+there is no draft/URL-param distinction for a site-wide setting to preview before committing). The
+drag handling reuses `ColumnPicker`'s own mechanics and CSS classes (`columnPickerList`/
+`columnRow`/`columnDragHandle`, `AdminTable.module.css`) rather than a second implementation of the
+same gesture — only a checked row is draggable there too, for the same reason: there is no
+meaningful position for a column that isn't shown.

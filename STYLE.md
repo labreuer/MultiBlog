@@ -22,27 +22,33 @@ from data, a measured width — not for fixed rules.
 Most of the existing surface (admin tables, editor, moderation queue, history views)
 still carries inline styles written under the old policy and isn't being migrated
 retroactively just for this — that's a separate, larger cleanup, not a correction to
-make in passing. `components/AdminTable.module.css`, `components/CommentsTable.module.css`,
+make in passing. `components/table/AdminTable.module.css`, `components/CommentsTable.module.css`,
 and `app/comments/page.module.css` are the first modules created under the corrected
 default (not pseudo-class/media-query driven, unlike everything below); the rest predate
 it. The first two are a deliberate pair, not a single file, and illustrate the "same name
 as the component, unless shared" clause above concretely:
 
-- `AdminTable.module.css` is named for the shared *concept* (styling common to the admin
-  tables — `PostsTable`, `UsersTable`, `CommentsTable`) rather than after one component,
-  even though `CommentsTable` is currently its only consumer — see the TODO at the bottom
-  before assuming it already applies everywhere that name suggests. Holds what's judged
-  generic: cell/header padding, sortable-column cursor, the soft-deleted-row `opacity`,
-  the shared delete/restore icon button, table margins, the filter-row layout, the
-  multi-select filter dropdown, and the pagination bar.
+- `table/AdminTable.module.css` is named for the shared *concept* (styling common to the
+  admin tables) rather than after one component. It was written that way while
+  `CommentsTable` was still its only consumer; every admin table uses it now, and it moved
+  into `components/table/` alongside the kit that owns it (see the admin-table kit section
+  below). Holds what's judged generic: cell/header padding, sortable-column cursor, the
+  soft-deleted-row `opacity`, the shared delete/restore icon button, table margins, the
+  filter-row layout, the multi-select filter dropdown, the pagination bar, the row-status
+  border, the bulk toolbar, and the querystring help panel.
 - `CommentsTable.module.css` is co-located and named for `CommentsTable.tsx` in the usual
   way, holding only what's judged comment-moderation-specific and unlikely to ever
-  generalize: the Approve/Pend/Spam colors (comment-status semantics that will never
-  apply to a post or a user row), the bulk-action toolbar, and the querystring help panel.
+  generalize: the Approve/Pend/Spam colors and matching status text colors (comment-status
+  semantics that will never apply to a post or a user row), plus `.postColumn`'s
+  claim-the-slack width trick. It originally also held the bulk-action toolbar and the
+  querystring help panel; both turned out to generalize after all and moved to the shared
+  file when every table grew them (PLAN.md §16d) — the "would this also make sense on
+  `PostsTable`?" test called those two wrong, which is worth remembering as evidence the
+  test is a judgment call rather than a rule.
 
 The dividing line was "would this style also make sense on `PostsTable`/`UsersTable` if
 they adopted the same pattern?" — not "is this reused more than once" (nothing here
-*is* reused yet, since `AdminTable.module.css` has one consumer). A style with a plausible
+*is* reused yet, since `AdminTable.module.css` had one consumer at the time). A style with a plausible
 future consumer among the other admin tables goes in the shared file; a style that
 encodes something specific to comment moderation doesn't, no matter how tempting it is to
 lump every table-adjacent style into one file:
@@ -95,6 +101,7 @@ value that two systems depend on invites drift.
 | Doc link highlight background / active / pulse | `color-mix(in srgb, var(--doc-link-color, #999) 25%, transparent)`, 45% when its group is active, pulses to 70% | `prose.module.css` `.doc-link-highlight`/`.doc-link-active`/`.pulse` — a third, separately-named custom property from `--thread-color` (same per-instance-color pattern, §14e's cascade: link override → group override → author color), kept distinct so devtools can tell the three anchor kinds apart at a glance |
 | Comment-form buttons | `#333` (Post comment) / `#666` (Cancel) | `CommentForm.module.css` `.submit`/`.cancel` |
 | Error text | `crimson` | form validation errors |
+| Row status border (edited / saving / error / saved) | `#999` / `#d4a017` / `#c00` / `#0a5` | `table/AdminTable.module.css` `.rowStatus*` — a 3px left border on a row's first cell (PLAN.md §16f). Reuses the muted, danger and success colors already in this table; `#d4a017` is the saturated amber quote highlighting was toned down from |
 | Danger/delete action | `#c00` (text/border, no fill) | `PostsTable.tsx`/`UsersTable.tsx` delete icon buttons, `PostSettingsPanel.module.css` `.deleteButton` — consistent across every soft-delete control in the admin/editor UI |
 | Diff view: insertion / deletion | `#0a5` on `#d4f7d4` / `#c00` on `#fbdada` | `history/[revisionNumber]/page.tsx` — not part of the palette above, ad hoc and only used there |
 | Drag-over highlight | `#eef4ff` background, `1px dashed #88a` outline | `PostSettingsPanel.module.css` `.dragOver` — ad hoc, only reordering UI so far |
@@ -211,40 +218,40 @@ by design, not by accident.
   plain fixed spacing around the two biggest visual blocks on the page, not tied to any
   sibling's own margin the way the "symmetric whitespace" pattern above is.
 
-## TODO
+## The admin-table kit (`components/table/`)
 
-- **Migrate `PostsTable.tsx` and `UsersTable.tsx` onto `AdminTable.module.css`.** Despite
-  the name, it's only wired into `CommentsTable.tsx` today — a deliberate scoping
-  decision (see the Approach section above), not yet a real shared abstraction. It now
-  holds only what's genuinely generic (`.cell`/`.headerCell`/`.sortableHeaderCell`/
-  `.nowrapCell`/`.nowrapSortableHeaderCell`, `.table`, `.row`/`.rowDeleted`, `.iconButton`/
-  `.iconButtonDanger`/`.iconButtonMuted`, `.emptyRow`, `.actionButton`, `.dateFormatRow`/
-  `.showDeletedRow`) — the comment-moderation-specific styles (`.approve`/`.pend`/`.spam`
-  colors, the filter dropdown, the bulk toolbar, the help panel) already live in the
-  separate, co-located `CommentsTable.module.css` instead, so they're not a migration
-  concern. Bringing the other two tables onto the shared file still means reconciling
-  real differences, not just swapping imports:
-  - `PostsTable`'s `<table>` has no margin at all (the spacing comes from the search
-    input above it, though `width: 100%`/`border-collapse: collapse` already match);
-    `UsersTable`'s has `margin-top: 1em` but no `margin-bottom`; `AdminTable.module.css`'s
-    `.table` currently has both. Pick one convention.
-  - **Inspect `<tfoot>` usage before copying either one.** `UsersTable` wraps its
-    date-format/show-deleted controls in `<tfoot><tr><td colSpan={11}>`;
-    `PostsTable` (and `CommentsTable`, following it) uses plain sibling `<p>`/`<div>`
-    elements after `</table>` instead — `.dateFormatRow`/`.showDeletedRow` in
-    `AdminTable.module.css` assume the latter. These aren't equivalent — figure out
-    which is actually right (semantically, `<tfoot>` is meant for summary rows *of the
-    table's own data*, not unrelated controls like a page-size dropdown) rather than
-    defaulting to whichever two of the three tables currently agree.
-  - Neither table has the "always render headers, centered empty-row" behavior
-    `CommentsTable` has (`.emptyRow`) — both still bail out to a bare `<p>No
-    posts/users yet.</p>` before the table renders at all. Decide whether that's worth
-    changing for consistency, or left alone as a deliberate difference (nothing forces
-    all three tables to handle "no rows" identically).
-  - `PostsTable`/`UsersTable` have no pagination or moderation-style multi-action
-    buttons today. `.paginationBar` moved to `AdminTable.module.css` on the same "would
-    this generalize" test as the filter dropdown above — either table could plausibly
-    paginate someday. `CommentsTable.module.css`'s `.approve`/`.pend`/`.spam` colors stay
-    comments-only regardless, though `.actionButton` (the generic border/padding
-    wrapper, in `AdminTable.module.css`) is available if either table ever grows its own
-    colored multi-action buttons.
+Every admin table — `/posts`, `/docs`, `/users`, `/comments`, `/annotations`, and
+`/site-settings` for the row-status border alone — now renders through one kit
+(PLAN.md §16). `AdminTable.module.css` moved into `components/table/` alongside it and is
+genuinely shared rather than aspirationally named. This section's earlier TODO listed four
+conventions to reconcile before that could happen; all four are settled, and the answers
+are worth keeping because they'll come up again:
+
+- **Table margins:** `.table` carries `margin: 1em 0`. `PostsTable` previously had none
+  (its spacing came from the search input above it) and `UsersTable` had only a
+  `margin-top`; the shared rule wins and neither special case survived.
+- **`<tfoot>` vs. sibling elements:** siblings after `</table>`. `UsersTable`'s
+  `<tfoot><tr><td colSpan={11}>` wrapper around its date-format/show-deleted controls is
+  gone. Semantically a `<tfoot>` is for summary rows *of the table's own data*, not page
+  controls, and `.dateFormatRow`/`.showDeletedRow` always assumed the sibling form.
+- **Empty state:** every table now renders its header row plus a centered `.emptyRow`
+  (`text-align: center`, `#666`) instead of bailing to a bare `<p>No posts yet.</p>`. With
+  filters and pagination present this stopped being a matter of taste: the controls that
+  produced an empty result have to stay on screen to undo it.
+- **Pagination and multi-action buttons:** `.paginationBar` and `.actionButton` are in the
+  shared file and used by all of them. `CommentsTable.module.css` keeps only what encodes
+  comment-moderation semantics — the `.approve`/`.pend`/`.spam` fills, the status text
+  colors, and `.postColumn`'s width trick.
+
+Two additions the kit brought with it:
+
+- **Row status** (`.rowStatusCell` + `.rowStatusEdited`/`.rowStatusSaving`/`.rowStatusError`/
+  `.rowStatusSaved`, PLAN.md §16f): a 3px left border on a row's first `<td>` — transparent
+  when idle, `#999` edited, `#d4a017` saving, `#c00` error, `#0a5` saved. It replaces the
+  `savedPulse` keyframe animation that `UsersTable.module.css` and
+  `SiteSettingsTable.module.css` each held a copy of (both files are gone). The colors are
+  the established palette above rather than new ones; the transparent idle border is load-
+  bearing, since without it a row would shift 3px sideways the first time it was touched.
+- **`.searchInput`, `.bulkToolbar`, `.bulkDangerSpacing`, and the `.help*` panel rules**
+  moved from `CommentsTable.module.css` into the shared file when the kit's `SearchBox`,
+  bulk toolbar and `FilterHelp` became components every table uses.

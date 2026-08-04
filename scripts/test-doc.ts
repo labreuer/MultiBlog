@@ -26,12 +26,16 @@
 
 import "dotenv/config";
 import * as Y from "yjs";
+import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prisma } from "../src/lib/prisma";
 import { uniqueDocSlug } from "../src/lib/doc-slug";
 import { docTitleOrFallback } from "../src/lib/doc-title";
+import { titleExtensions } from "../src/lib/tiptap-schema";
+import { docContentFromYdoc } from "../src/lib/doc-content";
 import { ydocIdForDoc, ydocIdForAnnotation } from "../src/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 import { DocVisibility } from "../src/generated/prisma/enums";
+import type { Prisma } from "../src/generated/prisma/client";
 
 const SAFE_EMAIL = /^[\w.+-]+@example\.com$/i;
 const VISIBILITY_VALUES = Object.values(DocVisibility);
@@ -73,10 +77,35 @@ async function create(authorEmail: string, title: string, visibility: DocVisibil
     },
   });
 
-  const emptyDoc = new Y.Doc();
-  const { ydoc, stateVector } = encodeYdocState(emptyDoc);
-  emptyDoc.destroy();
+  // The title is its own Yjs fragment (PLAN.md §3d) and *it*, not the column,
+  // is canonical: server/doc-cache.ts writes the fragment through to Doc.title
+  // on every store debounce, empty included (§12n). Create the ydoc without
+  // one and the title this script was asked for survives only until somebody
+  // opens the doc — the first flush silently renames it to "Untitled".
+  const seed = new Y.Doc();
+  const seededTitle = TiptapTransformer.toYdoc(
+    { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: title }] }] },
+    "title",
+    titleExtensions,
+  );
+  Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededTitle));
+  seededTitle.destroy();
+
+  const { ydoc, stateVector } = encodeYdocState(seed);
+  // Write the same cache the collab server would, through the same derivation
+  // (server/doc-cache.ts uses docContentFromYdoc too), so the row is
+  // self-consistent from creation rather than from first open. The body is
+  // legitimately empty here — this script seeds no content — so this mostly
+  // just pins the title, but it keeps all three doc creators
+  // (this, e2e/db-worker.ts, scripts/seed-sample-data.ts) producing identical
+  // state. scripts/integrity/check-doc-integrity.ts is what verifies that.
+  const cached = docContentFromYdoc(seed);
+  seed.destroy();
   await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
+  await prisma.doc.update({
+    where: { id: doc.id },
+    data: { proseJson: cached.proseJson as Prisma.InputJsonValue, title: cached.title },
+  });
 
   console.log(`Created doc "${doc.title}" (id=${doc.id}, slug=${doc.slug}) by ${authorEmail}, visibility=${visibility}`);
   console.log(`Edit: http://localhost:3000/doc/${doc.slug}/edit`);

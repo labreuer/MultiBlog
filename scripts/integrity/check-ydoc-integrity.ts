@@ -6,11 +6,17 @@
 // shows one document and its own history shows a different one, indefinitely,
 // with nothing failing loudly to say so.
 //
+// Scope: this script is about a ydoc's *internal* consistency and nothing else.
+// Whether a Doc row's cached columns (title, prose_json, prose_json_length)
+// still agree with the ydoc is check-doc-integrity.ts's job — see this folder's
+// README for why the two are split. Between them they cover the whole chain,
+// ydoc_update → ydoc.ydoc → doc.*, one link each.
+//
 // Usage:
-//   npx tsx scripts/check-ydoc-integrity.ts                      # every ydoc
-//   npx tsx scripts/check-ydoc-integrity.ts --doc=<docId>
-//   npx tsx scripts/check-ydoc-integrity.ts --annotation=<annotationId>
-//   npx tsx scripts/check-ydoc-integrity.ts --ydoc=<ydoc:...>
+//   npx tsx scripts/integrity/check-ydoc-integrity.ts            # every ydoc
+//   npx tsx scripts/integrity/check-ydoc-integrity.ts --doc=<docId>
+//   npx tsx scripts/integrity/check-ydoc-integrity.ts --annotation=<annotationId>
+//   npx tsx scripts/integrity/check-ydoc-integrity.ts --ydoc=<ydoc:...>
 //   ... --verbose        also print documents that pass
 //
 // The three id flags are conveniences for the same underlying row: a doc's
@@ -19,7 +25,9 @@
 // prefixed name. Exactly one may be given; with none, every ydoc is checked.
 //
 // Exits non-zero if any ERROR-level finding is reported, so it can gate a
-// deploy or run from cron. WARN-level findings do not affect the exit code.
+// deploy or run from cron. Every check here is ERROR-level: a blob that
+// disagrees with its own log is never "will sort itself out", unlike the cache
+// staleness check-doc-integrity.ts spends most of its time distinguishing.
 //
 // WHAT IT CHECKS
 //   1. log-not-empty  — a ydoc row with no ydoc_update rows has nothing to
@@ -40,11 +48,6 @@
 //      its own last_ydoc_update_id (§11b invariant 2). A wrong snapshot is
 //      worse than no snapshot: the replay slider rebuilds *from* it, so it
 //      silently corrupts every position at or after its mark.
-//   5. title-cache    — docs only. server/doc-cache.ts writes the ydoc's title
-//      fragment through to Doc.title on every store debounce, deliberately
-//      including the empty case (§12n). So a ydoc with no title fragment and a
-//      non-empty Doc.title is a title scheduled for deletion the next time
-//      anyone opens the doc — reported as a WARN, since nothing is corrupt yet.
 //
 // Cost: this replays every update of every document it checks, which is the
 // same work /ydoc-debug does for one document, times however many it covers.
@@ -52,11 +55,8 @@
 
 import "dotenv/config";
 import * as Y from "yjs";
-import { TiptapTransformer } from "@hocuspocus/transformer";
-import { prismaIncludingDeleted as prisma } from "../src/lib/prisma";
-import { ydocIdForDoc, ydocIdForAnnotation, docIdFromYdocId } from "../src/lib/ydoc-names";
-import { titleAuthorHighlightExtensions } from "../src/lib/tiptap-schema";
-import { extractText } from "../src/lib/diff";
+import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
+import { ydocIdForDoc, ydocIdForAnnotation } from "../../src/lib/ydoc-names";
 
 type Level = "error" | "warn";
 type Finding = { level: Level; ydocId: string; check: string; detail: string };
@@ -109,16 +109,6 @@ function isSelfSufficient(update: Uint8Array): boolean {
     return store?.pendingStructs == null;
   } finally {
     d.destroy();
-  }
-}
-
-/** Short, readable rendering of a title fragment's text. */
-function titleTextOf(doc: Y.Doc): string | null {
-  if (doc.getXmlFragment("title").length === 0) return null;
-  try {
-    return extractText(TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(doc, "title"));
-  } catch {
-    return null;
   }
 }
 
@@ -290,34 +280,6 @@ async function main() {
         });
       } finally {
         upTo.destroy();
-      }
-    }
-
-    // --- 5. title-cache (docs only) ---------------------------------------
-    const ownerDocId = docIdFromYdocId(row.id);
-    if (ownerDocId) {
-      const doc = await prisma.doc.findUnique({ where: { id: ownerDocId }, select: { title: true, slug: true } });
-      if (doc) {
-        const fragmentTitle = titleTextOf(replayDoc);
-        if (fragmentTitle === null && doc.title !== "") {
-          findings.push({
-            level: "warn",
-            ydocId: row.id,
-            check: "title-cache",
-            detail:
-              `ydoc has no title fragment but Doc.title is ${JSON.stringify(doc.title)} (/doc/${doc.slug}) — ` +
-              "server/doc-cache.ts will overwrite it with an empty string on the next store debounce.",
-          });
-        } else if (fragmentTitle !== null && fragmentTitle !== doc.title && verbose) {
-          findings.push({
-            level: "warn",
-            ydocId: row.id,
-            check: "title-cache",
-            detail:
-              `Doc.title ${JSON.stringify(doc.title)} is stale against the ydoc's ` +
-              `${JSON.stringify(fragmentTitle)} — the cache self-corrects on the next store.`,
-          });
-        }
       }
     }
 

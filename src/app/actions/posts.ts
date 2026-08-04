@@ -15,6 +15,7 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
+import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
 // the home page, author pages, and the post's own page are built from — all
@@ -397,4 +398,23 @@ export async function updatePostAuthorOrder(postId: string, orderedUserIds: stri
 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath("/posts");
+}
+
+// Bulk delete/restore (PLAN.md §16g). Thin wrappers over the same per-row
+// helper, so each row is authorized individually — a bulk action never gets a
+// weaker check than the single-row one it batches. Rows the action doesn't
+// apply to are filtered out client-side before the call (the BulkToolbar's
+// `applicableTo`), which is what "silently skip a mixed selection" means in
+// practice; anything that reaches here is expected to be actionable.
+//
+// Not a transaction, matching bulkModerateComments: a partial application on
+// an authorization failure mid-batch is visible and re-runnable, and wrapping
+// N independent soft-deletes in one just turns "9 of 10 worked" into "none
+// did" without making the caller any better informed.
+export async function bulkDeletePosts(postIds: string[]): Promise<BulkResult> {
+  return settleBulk(postIds, (id) => setPostDeleted(id, true));
+}
+
+export async function bulkRestorePosts(postIds: string[]): Promise<BulkResult> {
+  return settleBulk(postIds, (id) => setPostDeleted(id, false));
 }

@@ -1,7 +1,5 @@
 import type * as Y from "yjs";
-import { TiptapTransformer } from "@hocuspocus/transformer";
-import { docContentExtensions, titleAuthorHighlightExtensions } from "../src/lib/tiptap-schema";
-import { extractText } from "../src/lib/diff";
+import { docContentFromYdoc } from "../src/lib/doc-content";
 import { docIdFromYdocId } from "../src/lib/ydoc-names";
 import { prisma } from "../src/lib/prisma";
 import type { Prisma } from "../src/generated/prisma/client";
@@ -19,14 +17,15 @@ export async function updateDocCache(ydocId: string, document: Y.Doc): Promise<v
   const docId = docIdFromYdocId(ydocId);
   if (!docId) return;
 
+  // The derivation lives in docContentFromYdoc so the two places that seed a
+  // doc's ydoc without a collab server in the loop — scripts/seed-sample-data.ts
+  // and e2e/db-worker.ts's createTestDoc — can write exactly the same cache
+  // this would have written, rather than approximating it. When they drifted,
+  // the symptom was a doc reading 0 characters on /docs forever.
   let bodyJSON: unknown;
   let titleText: string;
   try {
-    bodyJSON = TiptapTransformer.extensions(docContentExtensions).fromYdoc(document, "default");
-    const titleFragment = document.getXmlFragment("title");
-    const titleJSON =
-      titleFragment.length > 0 ? TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(document, "title") : null;
-    titleText = titleJSON ? extractText(titleJSON) : "";
+    ({ proseJson: bodyJSON, title: titleText } = docContentFromYdoc(document));
   } catch (err) {
     console.error(`[doc-cache] ${ydocId} isn't TipTap-compatible, leaving prose_json unchanged:`, err);
     return;

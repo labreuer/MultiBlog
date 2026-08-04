@@ -10,6 +10,7 @@ import { canManageDocs, canUserEditDoc } from "@/lib/doc-authz";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
 import { DocVisibility } from "@/generated/prisma/enums";
+import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 async function requireEditableDocSession(docId: string) {
   const session = await auth();
@@ -192,4 +193,18 @@ export async function deleteDoc(docId: string): Promise<void> {
 
 export async function restoreDoc(docId: string): Promise<void> {
   await setDocDeleted(docId, false);
+}
+
+// Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are
+// per-row rather than one transaction.
+export async function bulkDeleteDocs(docIds: string[]): Promise<BulkResult> {
+  return settleBulk(docIds, (id) => setDocDeleted(id, true));
+}
+
+export async function bulkRestoreDocs(docIds: string[]): Promise<BulkResult> {
+  return settleBulk(docIds, (id) => setDocDeleted(id, false));
+}
+
+export async function bulkSetDocVisibility(docIds: string[], visibility: DocVisibility): Promise<BulkResult> {
+  return settleBulk(docIds, (id) => updateDocVisibility(id, visibility));
 }

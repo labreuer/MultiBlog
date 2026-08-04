@@ -3,7 +3,17 @@ import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/authz";
 import { getSiteSettings } from "@/lib/site-settings";
 import { SITE_TITLE } from "@/lib/site-config";
-import SiteSettingsTable, { type ConfigRow } from "@/components/SiteSettingsTable";
+import { columnOrderFor, type AdminTableName } from "@/lib/column-order";
+import { ADMIN_TABLE_COLUMNS, codeDefaultColumns } from "@/lib/admin-table-columns";
+import SiteSettingsTable, { type ConfigRow, type DefaultColumnsRow } from "@/components/SiteSettingsTable";
+
+const TABLE_LABELS: Record<AdminTableName, string> = {
+  posts: "/posts",
+  docs: "/docs",
+  users: "/users",
+  comments: "/comments",
+  annotations: "/annotations",
+};
 
 // One entry per exported constant in site-config.ts (see PLAN.md §6 for how
 // this page fits the moderation settings). Update this list alongside that
@@ -33,6 +43,16 @@ export default async function SiteSettingsPage() {
 
   const siteSettings = await getSiteSettings();
 
+  // One read of the whole SiteSettings row (already fetched above) decoded
+  // five ways, rather than five separate `getSiteDefaultColumnOrder` calls —
+  // each of those re-upserts/re-reads the same singleton row.
+  const defaultColumns: DefaultColumnsRow[] = (Object.keys(ADMIN_TABLE_COLUMNS) as AdminTableName[]).map((table) => ({
+    table,
+    label: TABLE_LABELS[table],
+    columns: ADMIN_TABLE_COLUMNS[table],
+    initialChecked: columnOrderFor(siteSettings.defaultColumnOrder, table) ?? codeDefaultColumns(table),
+  }));
+
   return (
     <main style={{ maxWidth: 1000, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Site settings</h1>
@@ -44,6 +64,7 @@ export default async function SiteSettingsPage() {
         configRows={CONFIG_ROWS}
         configLocation={CONFIG_LOCATION}
         configToChange={CONFIG_TO_CHANGE}
+        defaultColumns={defaultColumns}
       />
     </main>
   );

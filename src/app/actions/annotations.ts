@@ -11,6 +11,7 @@ import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
+import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 const MAX_BODY_LENGTH = 5000;
 
@@ -282,4 +283,14 @@ export async function restoreAnnotation(annotationId: string): Promise<void> {
   });
   revalidatePath(`/doc/${annotation.docId}`);
   revalidatePath("/annotations");
+}
+
+// Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are
+// per-row rather than one transaction.
+export async function bulkDeleteAnnotations(annotationIds: string[]): Promise<BulkResult> {
+  return settleBulk(annotationIds, (id) => deleteAnnotation(id));
+}
+
+export async function bulkRestoreAnnotations(annotationIds: string[]): Promise<BulkResult> {
+  return settleBulk(annotationIds, (id) => restoreAnnotation(id));
 }

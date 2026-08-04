@@ -10,7 +10,7 @@ import { extractText } from "@/lib/diff";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import CollabEditorBody from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
-import adminStyles from "./AdminTable.module.css";
+import adminStyles from "./table/AdminTable.module.css";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./YdocDebug.module.css";
 

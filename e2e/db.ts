@@ -129,6 +129,9 @@ export const createTestDoc = (...args: Parameters<DbHandlers["createTestDoc"]>):
 export const deleteTestDoc = (...args: Parameters<DbHandlers["deleteTestDoc"]>): Promise<void> =>
   call("deleteTestDoc", ...args);
 
+export const clearColumnOrder = (...args: Parameters<DbHandlers["clearColumnOrder"]>): Promise<void> =>
+  call("clearColumnOrder", ...args);
+
 export const getDocState = (...args: Parameters<DbHandlers["getDocState"]>): Promise<DocState | null> =>
   call("getDocState", ...args);
 
