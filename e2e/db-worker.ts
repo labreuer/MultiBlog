@@ -56,8 +56,23 @@ export async function createTestUser(opts: {
   /** approvedCount 100 — enough to clear any realistic trust threshold. */
   trusted?: boolean;
   forceModerate?: boolean;
+  /** Landing-page contributor fields (PLAN.md §17), preset without going through the self-service panel. */
+  isListedContributor?: boolean;
+  contributorOrder?: number | null;
+  orcid?: string | null;
+  website?: string | null;
 }): Promise<TestUser> {
-  const { email, name = email.split("@")[0], role = "ADMIN", trusted = false, forceModerate = false } = opts;
+  const {
+    email,
+    name = email.split("@")[0],
+    role = "ADMIN",
+    trusted = false,
+    forceModerate = false,
+    isListedContributor = false,
+    contributorOrder = null,
+    orcid = null,
+    website = null,
+  } = opts;
   assertSafe(email);
 
   // Delete-then-create rather than upsert: a leftover row from a killed run
@@ -75,6 +90,10 @@ export async function createTestUser(opts: {
       role,
       color: colorForSeed(email),
       adminInitials: name.slice(0, 2).toUpperCase(),
+      isListedContributor,
+      contributorOrder,
+      orcid,
+      website,
     },
   });
 
@@ -347,6 +366,35 @@ export async function deleteTestDoc(idOrSlug: string): Promise<void> {
   await prisma.ydoc.deleteMany({
     where: { id: { in: [ydocIdForDoc(doc.id), ...annotationIds.map(ydocIdForAnnotation)] } },
   });
+}
+
+// Landing-page contributor fields (PLAN.md §17) — read back after driving
+// the dashboard panel or the /users admin cells through the UI, to assert
+// the write actually persisted rather than just repainted. contributorBlurb
+// itself is reported only as extracted text (never the raw JSON) — nothing
+// here needs to inspect TipTap structure, only what a reader would see.
+export type ContributorFields = {
+  isListedContributor: boolean;
+  contributorOrder: number | null;
+  orcid: string | null;
+  website: string | null;
+  blurbText: string | null;
+};
+
+export async function getContributorFields(email: string): Promise<ContributorFields | null> {
+  assertSafe(email);
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: { isListedContributor: true, contributorOrder: true, orcid: true, website: true, contributorBlurb: true },
+  });
+  if (!user) return null;
+  return {
+    isListedContributor: user.isListedContributor,
+    contributorOrder: user.contributorOrder,
+    orcid: user.orcid,
+    website: user.website,
+    blurbText: user.contributorBlurb ? extractText(user.contributorBlurb as JSONContent) : null,
+  };
 }
 
 export type DocState = { title: string; proseText: string | null; visibility: DocVisibility };
@@ -791,6 +839,7 @@ const handlers = {
   createTestDoc,
   deleteTestDoc,
   getDocState,
+  getContributorFields,
   clearColumnOrder,
   getSiteDefaultColumnOrder,
   setSiteDefaultColumnOrder,

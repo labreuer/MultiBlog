@@ -104,3 +104,25 @@ without committing to one now. Item 1 is independent and worth checking on the b
 PLAN.md §16h (staging changes in IndexedDB, before they hit the server) was never
 implemented. §16j's build order lists it as the one phase skipped; §16i (column visibility/
 order) and §16m (site-wide defaults) both shipped without it.
+
+---
+
+## No public archive of older posts (PLAN.md §17d/§17m)
+
+The landing page now shows only the 10 most recent published posts (`take: 10`, added
+alongside the rest of §17). Before that it was unbounded, so this is a real behavior change:
+the 11th-newest post and everything older is reachable only via search, RSS, or a direct
+link — nothing on the site links to "older posts" from here. `/posts` is the admin table and
+isn't a public substitute. Worth a `/archive` (or paginated `/`) if this ever needs to be
+browsable rather than just searchable.
+
+---
+
+## No self-service profile page beyond the contributor panel (PLAN.md §17g/§17m)
+
+`/dashboard`'s contributor panel (added with §17) edits `image`/`contributorBlurb`/
+`contributorOrder`/`orcid`/`website` — but only for a user who is already `isListedContributor`,
+and only those five fields. `name`, `slug`, `color`, and `role` all remain admin-only
+(`/users`), and a user who has never been listed as a contributor has no self-service surface
+at all — not even to change their own display name. Whether that's worth a general profile
+page, or whether it's fine as-is for a small trusted-author blog, is unresolved.

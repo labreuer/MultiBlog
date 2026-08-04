@@ -101,7 +101,19 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
 - `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`,
   `NEXT_PUBLIC_COLLAB_URL`. Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
   `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
-  deployment's title survives `git pull` instead of living in a tracked file.
+  deployment's title survives `git pull` instead of living in a tracked file. Also optional:
+  `SITE_BANNER`/`SITE_BANNER_ASPECT`/`SITE_BANNER_ALT` (`src/lib/site-banner.ts`, PLAN.md
+  §17b) — the landing page's banner image, path plus aspect ratio plus alt text. Bare, not
+  `NEXT_PUBLIC_`, on purpose: unlike `NEXT_PUBLIC_SITE_TITLE`, these are read server-side
+  only, so changing them needs a **restart, not a rebuild** — and the image file itself
+  (`public/banner.*`, gitignored) needs neither, since `public/` is served straight from
+  disk at runtime.
+- The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
+  exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
+  own title is never shown, only its body. Seed one with `npx tsx scripts/seed-front-page.ts`
+  (create-if-absent, never clears anything). No `DocVisibility` check: a doc's `visibility`
+  still gates `/doc/<slug>` exactly as before, but the title alone is what makes its body
+  public here — see PLAN.md §17c for why gating on `SHARED` would be wrong.
 - Adding a **required** (non-nullable, no `@default`) column to a table that already has
   rows: `prisma migrate dev` normally prompts interactively for how to backfill existing
   rows, which doesn't work non-interactively. Instead, add the field nullable first and
@@ -309,14 +321,23 @@ blob makes the doc-side checks report faults that evaporate once it's repaired).
 - `body` gets implicit `overflow-y: auto` (side effect of its `overflow-x: hidden`), and
   `documentElement` is the effective scroller — use `window.scrollY`, not
   `body.scrollTop`, when checking scroll behavior.
-- TipTap v3's StarterKit already bundles Link and undo/redo: never add
-  `@tiptap/extension-link` separately, and pass `undoRedo: false` when combining with the
-  Collaboration extension. `@tiptap/extension-document`/`-paragraph`/`-text` *are* declared
-  deps, which isn't a violation of that: they're for the **title** editor
-  (`CollabTitleField.tsx`), which registers no StarterKit at all, so nothing is double-
-  registered. Pin them to the same exact version as `@tiptap/core` when installing —
-  `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0` exactly, and npm
-  fails the install.
+- TipTap v3's StarterKit already bundles Link, Bold and Italic (among others) and
+  undo/redo: never add any of those extensions **alongside StarterKit** in the same
+  schema, and pass `undoRedo: false` when combining StarterKit with the Collaboration
+  extension (`undoRedo` stays on wherever there's no `Collaboration` to own the history
+  stack instead — `blurbExtensions` below is the one schema in this codebase where that
+  inversion applies). `@tiptap/extension-document`/`-paragraph`/`-text` *are* declared
+  deps, which isn't a violation of that: they're for schemas built **without** StarterKit
+  at all, so nothing is double-registered — the **title** editor's `titleExtensions`
+  (`CollabTitleField.tsx`) and the **contributor blurb**'s `blurbExtensions`
+  (`ContributorPanel.tsx`, PLAN.md §17f), both constrained to `content: "paragraph"` so a
+  second block is structurally impossible. `blurbExtensions` also declares
+  `@tiptap/extension-bold`/`-italic` directly for the same reason — StarterKit has no
+  option to keep only `document`/`text` and drop everything else, so building the schema
+  from scratch is the only way to get "exactly one paragraph, a couple of marks, nothing
+  else". Pin every one of these to the same exact version as `@tiptap/core` when
+  installing — `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0`
+  exactly, and npm fails the install.
 - **TipTap v3's `setContent` takes an options object where v2 took a boolean**:
   `editor.commands.setContent(json, { emitUpdate: false })`, not `setContent(json, false)`.
   The v2 form is a type error (`Type 'false' has no properties in common with type
