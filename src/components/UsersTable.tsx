@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import type { JSONContent } from "@tiptap/core";
 import { type DateFormat, formatDate } from "@/lib/format-date";
+import { extractText } from "@/lib/diff";
 import {
   updateUserRole,
   updateUserModerationPolicy,
@@ -11,6 +13,10 @@ import {
   updateUserColor,
   updateUserName,
   updateUserAdminInitials,
+  updateUserIsListedContributor,
+  updateUserContributorOrder,
+  updateUserOrcid,
+  updateUserWebsite,
   deleteUser,
   restoreUser,
   bulkDeleteUsers,
@@ -61,6 +67,11 @@ export type UserRow = {
   rowsPerPage: PageSize;
   color: string;
   image: string | null;
+  isListedContributor: boolean;
+  contributorBlurb: JSONContent | null;
+  contributorOrder: number | null;
+  orcid: string | null;
+  website: string | null;
   createdAt: Date;
   postCount: number;
   deletedAt: Date | null;
@@ -166,6 +177,120 @@ function AdminInitialsCell({ userId, adminInitials, onEdit, run }: CellProps & {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
         style={{ width: 60, padding: "2px 4px" }}
+      />
+      <CellError message={error} />
+    </>
+  );
+}
+
+// A plain text cell that allows an empty value (unlike AdminInitialsCell),
+// used for the two contributor link fields — server-side validation
+// (normalizeOrcid/normalizeWebsite, shared with the self-service panel) is
+// what rejects a bad value; this just displays whatever error comes back.
+function TextFieldCell({
+  userId,
+  value,
+  placeholder,
+  width,
+  save,
+  failureMessage,
+  onEdit,
+  run,
+}: CellProps & { value: string; placeholder?: string; width?: number; save: (userId: string, next: string) => Promise<void>; failureMessage: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState(value);
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed === value) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await run(async () => {
+          await save(userId, trimmed);
+        });
+        setDraft(trimmed);
+        router.refresh();
+      } catch (err) {
+        setDraft(value);
+        setError(err instanceof Error ? err.message : failureMessage);
+      }
+    });
+  }
+
+  return (
+    <>
+      <input
+        type="text"
+        value={draft}
+        placeholder={placeholder}
+        disabled={pending}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          if (e.target.value.trim() !== value) onEdit();
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        style={{ width: width ?? "100%", padding: "2px 4px" }}
+      />
+      <CellError message={error} />
+    </>
+  );
+}
+
+// contributorOrder is a nullable Int — an empty field means "unset" (sorts
+// to the tail, PLAN.md §17e), not zero.
+function ContributorOrderCell({ userId, order, onEdit, run }: CellProps & { order: number | null }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const initial = order !== null ? String(order) : "";
+  const [draft, setDraft] = useState(initial);
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed === initial) return;
+    const next = trimmed === "" ? null : Number(trimmed);
+    if (next !== null && !Number.isInteger(next)) {
+      setDraft(initial);
+      setError("Order must be a whole number.");
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      try {
+        await run(async () => {
+          await updateUserContributorOrder(userId, next);
+        });
+        setDraft(trimmed);
+        router.refresh();
+      } catch (err) {
+        setDraft(initial);
+        setError(err instanceof Error ? err.message : "Failed to update order.");
+      }
+    });
+  }
+
+  return (
+    <>
+      <input
+        type="number"
+        step={1}
+        value={draft}
+        disabled={pending}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          if (e.target.value.trim() !== initial) onEdit();
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        style={{ width: 70, padding: "2px 4px" }}
       />
       <CellError message={error} />
     </>
@@ -290,6 +415,10 @@ const SORTABLE_KEYS = [
   "moderationPolicy",
   "rowsPerPage",
   "posts",
+  "isListedContributor",
+  "contributorOrder",
+  "orcid",
+  "website",
   "createdAt",
   "deletedAt",
   "deleted",
@@ -504,6 +633,82 @@ export default function UsersTable({
     },
     { key: "comments", header: "Comments", cell: () => null },
     { key: "url", header: "", cell: (row) => <Link href={`/users/${row.id}/slug`}>url</Link> },
+    // Landing-page contributor fields (PLAN.md §17i), defaulted hidden below.
+    {
+      key: "isListedContributor",
+      header: "Listed contributor",
+      sortKey: "isListedContributor",
+      defaultHidden: true,
+      cell: (row) => (
+        <SelectCell
+          value={row.isListedContributor ? "true" : "false"}
+          options={["true", "false"] as const}
+          optionLabel={(v) => (v === "true" ? "Yes" : "No")}
+          save={(next) => updateUserIsListedContributor(row.id, next === "true")}
+          failureMessage="Failed to update listed-contributor status."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "contributorOrder",
+      header: "Contributor order",
+      sortKey: "contributorOrder",
+      defaultHidden: true,
+      cell: (row) => (
+        <ContributorOrderCell
+          userId={row.id}
+          order={row.contributorOrder}
+          onEdit={() => setStatus(row.id, "edited" as RowStatus)}
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    // Json — Prisma's orderBy can't reach it, and a view keyed on this table
+    // isn't worth building for an ordering nobody needs (see users-query.ts).
+    // Shown as a plain-text excerpt, editable only from /dashboard's own
+    // panel — same "shown, not sorted, not inline-editable" shape as `image`.
+    {
+      key: "contributorBlurb",
+      header: "Contributor blurb",
+      defaultHidden: true,
+      cell: (row) => (row.contributorBlurb ? extractText(row.contributorBlurb).slice(0, 80) : ""),
+    },
+    {
+      key: "orcid",
+      header: "ORCID iD",
+      sortKey: "orcid",
+      defaultHidden: true,
+      cell: (row) => (
+        <TextFieldCell
+          userId={row.id}
+          value={row.orcid ?? ""}
+          placeholder="0000-0002-1825-0097"
+          width={160}
+          save={updateUserOrcid}
+          failureMessage="Failed to update ORCID iD."
+          onEdit={() => setStatus(row.id, "edited" as RowStatus)}
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "website",
+      header: "Website",
+      sortKey: "website",
+      defaultHidden: true,
+      cell: (row) => (
+        <TextFieldCell
+          userId={row.id}
+          value={row.website ?? ""}
+          placeholder="https://…"
+          save={updateUserWebsite}
+          failureMessage="Failed to update website."
+          onEdit={() => setStatus(row.id, "edited" as RowStatus)}
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
     // Defaulted hidden (§16l/§16i): the raw timestamp behind the existing
     // Deleted action column's boolean.
     {

@@ -54,6 +54,14 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "posts", label: "Posts" },
     { key: "comments", label: "Comments" },
     { key: "url", label: "URL (slug link)" },
+    // Landing-page contributor fields (PLAN.md §17i), all defaulted hidden
+    // per §16m so no existing admin's table silently widens by five columns.
+    // contributorBlurb carries no sortKey — see UsersTable.tsx's column def.
+    { key: "isListedContributor", label: "Listed contributor", defaultHidden: true },
+    { key: "contributorOrder", label: "Contributor order", defaultHidden: true },
+    { key: "contributorBlurb", label: "Contributor blurb", defaultHidden: true },
+    { key: "orcid", label: "ORCID iD", defaultHidden: true },
+    { key: "website", label: "Website", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   comments: [

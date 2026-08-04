@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
 import { changeUserSlug, revertUserSlug as revertUserSlugInDb } from "@/lib/user-slug";
 import { isPageSize } from "@/lib/table-query";
+import { normalizeOrcid, normalizeWebsite } from "@/lib/contributor-links";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
@@ -75,6 +76,54 @@ export async function updateUserRowsPerPage(userId: string, rowsPerPage: number)
   }
   await prisma.user.update({ where: { id: userId }, data: { rowsPerPage } });
   revalidatePath("/users");
+}
+
+// The only path that sets isListedContributor to true — actions/
+// contributor.ts's self-service optOutAsContributor can only clear it
+// (PLAN.md §17g/§17h/§17i). Admin can also clear it here, same as any other
+// admin-owned field; that's not the asymmetry, the asymmetry is that no
+// self-service action can set it.
+export async function updateUserIsListedContributor(userId: string, isListedContributor: boolean): Promise<void> {
+  await requireAdmin();
+  await prisma.user.update({ where: { id: userId }, data: { isListedContributor } });
+  revalidatePath("/users");
+  revalidatePath("/");
+}
+
+// Nullable — clearing it (empty string) sends a contributor to the tail of
+// the list rather than tying them at the front (PLAN.md §17e).
+export async function updateUserContributorOrder(userId: string, order: number | null): Promise<void> {
+  await requireAdmin();
+  if (order !== null && !Number.isInteger(order)) {
+    throw new Error("Order must be a whole number.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { contributorOrder: order } });
+  revalidatePath("/users");
+  revalidatePath("/");
+}
+
+export async function updateUserOrcid(userId: string, orcid: string): Promise<void> {
+  await requireAdmin();
+  const trimmed = orcid.trim();
+  const normalized = trimmed ? normalizeOrcid(trimmed) : null;
+  if (trimmed && !normalized) {
+    throw new Error("Invalid ORCID iD.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { orcid: normalized } });
+  revalidatePath("/users");
+  revalidatePath("/");
+}
+
+export async function updateUserWebsite(userId: string, website: string): Promise<void> {
+  await requireAdmin();
+  const trimmed = website.trim();
+  const normalized = trimmed ? normalizeWebsite(trimmed) : null;
+  if (trimmed && !normalized) {
+    throw new Error("Website must be a valid http(s) URL.");
+  }
+  await prisma.user.update({ where: { id: userId }, data: { website: normalized } });
+  revalidatePath("/users");
+  revalidatePath("/");
 }
 
 export async function updateUserSlug(userId: string, newSlug: string): Promise<{ slug: string }> {

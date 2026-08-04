@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { JSONContent } from "@tiptap/core";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
@@ -17,6 +18,8 @@ function buildFilterWhere(filters: UsersFilters): Prisma.UserWhereInput {
       { name: { contains: filters.q, mode: "insensitive" } },
       { email: { contains: filters.q, mode: "insensitive" } },
       { adminInitials: { contains: filters.q, mode: "insensitive" } },
+      { orcid: { contains: filters.q, mode: "insensitive" } },
+      { website: { contains: filters.q, mode: "insensitive" } },
     ];
   }
   return where;
@@ -45,6 +48,14 @@ function buildOrderBy(sort: SortColumn<UsersSortKey>[]): Prisma.UserOrderByWithR
         return { rowsPerPage: dir };
       case "posts":
         return { postAuthors: { _count: dir } };
+      case "isListedContributor":
+        return { isListedContributor: dir };
+      case "contributorOrder":
+        return { contributorOrder: { sort: dir, nulls: "last" } };
+      case "orcid":
+        return { orcid: { sort: dir, nulls: "last" } };
+      case "website":
+        return { website: { sort: dir, nulls: "last" } };
       case "createdAt":
         return { createdAt: dir };
       case "deletedAt":
@@ -103,6 +114,11 @@ export default async function UsersPage({
     rowsPerPage: coercePageSize(user.rowsPerPage),
     color: user.color,
     image: user.image,
+    isListedContributor: user.isListedContributor,
+    contributorBlurb: user.contributorBlurb as JSONContent | null,
+    contributorOrder: user.contributorOrder,
+    orcid: user.orcid,
+    website: user.website,
     createdAt: user.createdAt,
     postCount: user._count.postAuthors,
     deletedAt: user.deletedAt,

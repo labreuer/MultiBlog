@@ -18,6 +18,13 @@ import {
 // deletedAt is the one addition: a plain User column, defaulted hidden
 // (§16l) — the raw timestamp behind the existing Deleted action column's
 // boolean.
+// isListedContributor/contributorOrder/orcid/website (PLAN.md §17i) are
+// plain scalar User columns, so they sort the same way any other column
+// here does. contributorBlurb is deliberately absent — it's Json, which
+// Prisma's orderBy can't reach, and the view escape hatch (§16e/§16l) would
+// need a SQL text-extraction function over TipTap JSON for an ordering
+// nobody needs; see UsersTable.tsx's column def for the same rationale
+// `image` already sets a precedent for (shown, not sorted).
 export type UsersSortKey =
   | "name"
   | "email"
@@ -26,6 +33,10 @@ export type UsersSortKey =
   | "moderationPolicy"
   | "rowsPerPage"
   | "posts"
+  | "isListedContributor"
+  | "contributorOrder"
+  | "orcid"
+  | "website"
   | "createdAt"
   | "deletedAt"
   | "deleted";
@@ -37,6 +48,10 @@ const SORT_KEYS: readonly UsersSortKey[] = [
   "moderationPolicy",
   "rowsPerPage",
   "posts",
+  "isListedContributor",
+  "contributorOrder",
+  "orcid",
+  "website",
   "createdAt",
   "deletedAt",
   "deleted",
