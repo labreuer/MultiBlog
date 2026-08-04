@@ -1,4 +1,7 @@
 // Sample docs/posts/comments/annotations for a freshly rebuilt database.
+// Ada and Grace are also seeded as listed landing-page contributors (PLAN.md
+// §17e) — ORCID/website/image/blurb, so `/` has real-looking contributor
+// cards out of the box rather than an empty sidebar.
 //
 // Usage:
 //   npx tsx scripts/seed-sample-data.ts [--force]
@@ -44,7 +47,8 @@ import { colorForSeed } from "../src/lib/author-colors";
 import { uniqueUserSlug } from "../src/lib/user-slug";
 import { uniqueDocSlug } from "../src/lib/doc-slug";
 import { uniquePostSlug } from "../src/lib/post-slug";
-import { contentExtensions, titleExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
+import { contentExtensions, titleExtensions, pmDocContentSchema, pmBlurbSchema } from "../src/lib/tiptap-schema";
+import { normalizeOrcid, normalizeWebsite } from "../src/lib/contributor-links";
 import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
 import { postContentFromYdoc } from "../src/lib/post-content";
 import { docContentFromYdoc } from "../src/lib/doc-content";
@@ -68,17 +72,45 @@ function docFromText(text: string): JSONContent {
   };
 }
 
+// A one-paragraph, plain-text TipTap doc validated against blurbExtensions'
+// schema — the same "the schema is the validation" rule the real write path
+// (actions/contributor.ts, actions/users.ts) enforces (PLAN.md §17f), so a
+// typo here fails loudly instead of seeding a doc the app itself couldn't
+// have produced.
+function blurb(text: string): Prisma.InputJsonValue {
+  return pmBlurbSchema.nodeFromJSON(docFromText(text)).toJSON() as Prisma.InputJsonValue;
+}
+
 async function upsertUser(opts: {
   email: string;
   name: string;
   role: Role;
   initials: string;
+  // Landing-page contributor fields (PLAN.md §17e/§17f) — optional, and run
+  // through the same validators (normalizeOrcid/normalizeWebsite, blurb()
+  // above) the app's own write paths use, so an invalid value here is a
+  // script bug caught at seed time rather than bad data silently stored.
+  isListedContributor?: boolean;
+  orcidUrl?: string;
+  website?: string;
+  image?: string;
+  contributorBlurbText?: string;
 }): Promise<{ id: string; email: string; name: string }> {
   const existing = await prisma.user.findUnique({ where: { email: opts.email } });
   if (existing) {
     console.log(`  user ${opts.email} already exists — left alone`);
     return { id: existing.id, email: existing.email, name: existing.name ?? existing.email };
   }
+
+  const orcid = opts.orcidUrl ? normalizeOrcid(opts.orcidUrl) : null;
+  if (opts.orcidUrl && !orcid) {
+    throw new Error(`Invalid ORCID for ${opts.email}: ${opts.orcidUrl}`);
+  }
+  const website = opts.website ? normalizeWebsite(opts.website) : null;
+  if (opts.website && !website) {
+    throw new Error(`Invalid website for ${opts.email}: ${opts.website}`);
+  }
+
   const user = await prisma.user.create({
     data: {
       email: opts.email,
@@ -89,6 +121,11 @@ async function upsertUser(opts: {
       color: colorForSeed(opts.email),
       adminInitials: opts.initials,
       emailVerified: new Date(),
+      isListedContributor: opts.isListedContributor ?? false,
+      orcid,
+      website,
+      image: opts.image ?? null,
+      contributorBlurb: opts.contributorBlurbText ? blurb(opts.contributorBlurbText) : undefined,
     },
   });
   console.log(`  user ${user.email} (${opts.role})`);
@@ -429,8 +466,30 @@ async function main() {
 
   console.log("Users:");
   const luke = await upsertUser({ email: "labreuer@gmail.com", name: "Luke Breuer", role: "ADMIN", initials: "LB" });
-  const ada = await upsertUser({ email: "ada@sample.invalid", name: "Ada Lovelace", role: "EDITOR", initials: "AL" });
-  const grace = await upsertUser({ email: "grace@sample.invalid", name: "Grace Hopper", role: "AUTHOR", initials: "GH" });
+  const ada = await upsertUser({
+    email: "ada@sample.invalid",
+    name: "Ada Lovelace",
+    role: "EDITOR",
+    initials: "AL",
+    isListedContributor: true,
+    website: "https://en.wikipedia.org/wiki/Ada_Lovelace",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/Ada_Lovelace_daguerreotype_by_Antoine_Claudet_1843_-_cropped.png/330px-Ada_Lovelace_daguerreotype_by_Antoine_Claudet_1843_-_cropped.png",
+    contributorBlurbText:
+      "Mathematician and writer whose notes on Babbage's Analytical Engine include what is recognized as the first published algorithm intended for a machine.",
+  });
+  const grace = await upsertUser({
+    email: "grace@sample.invalid",
+    name: "Grace Hopper",
+    role: "AUTHOR",
+    initials: "GH",
+    isListedContributor: true,
+    orcidUrl: "https://orcid.org/0009-0007-6015-7076",
+    image:
+      "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Commodore_Grace_M._Hopper%2C_USN_%28covered%29_head_and_shoulders_crop.jpg/330px-Commodore_Grace_M._Hopper%2C_USN_%28covered%29_head_and_shoulders_crop.jpg",
+    contributorBlurbText:
+      "Pioneer of machine-independent programming languages and the first compiler; her work at the U.S. Navy led directly to COBOL.",
+  });
   const alan = await upsertUser({ email: "alan@sample.invalid", name: "Alan Turing", role: "AUTHORIZED", initials: "AT" });
   const usersByKey: Record<string, { id: string }> = { luke, ada, grace, alan };
 
