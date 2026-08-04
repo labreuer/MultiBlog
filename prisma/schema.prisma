@@ -100,6 +100,19 @@ model User {
   deletedByUserId  String?          @map("deleted_by_user_id")
   deletedAt        DateTime?        @map("deleted_at")
 
+  // Landing-page contributor list (PLAN.md §17e/§17f). isListedContributor is
+  // the only membership switch — self-service actions may clear it but never
+  // set it (§17g/§17h); only updateUserIsListedContributor (admin-gated) sets
+  // it true. contributorBlurb is TipTap JSON validated against pmBlurbSchema
+  // on write, not a ydoc — one owner, no history, no concurrent editors
+  // (§17f). contributorOrder is nullable (not @default(0)) so "unset" sorts
+  // to the tail via `nulls: "last"` instead of tying everyone at the front.
+  isListedContributor Boolean @default(false) @map("is_listed_contributor")
+  contributorBlurb    Json?   @map("contributor_blurb")
+  contributorOrder    Int?    @map("contributor_order")
+  orcid               String? @map("orcid")
+  website             String? @map("website")
+
   accounts             Account[]
   sessions             Session[]
   postAuthors          PostAuthor[]           @relation("PostAuthorUser")
