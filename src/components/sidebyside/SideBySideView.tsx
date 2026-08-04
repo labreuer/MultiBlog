@@ -151,6 +151,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           initialName={activeGroup?.name ?? null}
           initialText={activeGroup?.text ?? null}
           initialOverrideColor={activeGroup?.overrideColor ?? null}
+          userColor={userColor}
           visible={activeGroup ? !hiddenGroupIds.has(activeGroup.id) : true}
           onToggleVisible={(visible) => {
             if (!activeGroup) return;

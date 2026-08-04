@@ -17,6 +17,18 @@ type Props = {
   initialName: string | null;
   initialText: string | null;
   initialOverrideColor: string | null;
+  // The viewer's own author color, used as the swatch's default when this
+  // group has no override yet — never as a *persisted* value, only as what
+  // the picker opens on. It must be a chromatic color: the previous default,
+  // "#999999", is achromatic (R=G=B, HSV saturation exactly 0), and the hue
+  // slider in the native color picker cannot change an achromatic value —
+  // gray is gray at every hue. So dragging the rainbow slider on a fresh
+  // group produced no new value, hence no `input`/`change` event, hence no
+  // React onChange, hence overrideChecked stayed false and the debounced
+  // save wrote override_color: null. Every AUTHOR_COLOR_PALETTE entry has
+  // saturation > 0.47, which is why DocLinkPopover — defaulting to this same
+  // userColor — never had the bug. See PLAN.md §14e.
+  userColor: string;
   // Display? — only meaningful once the group exists (a draft has no
   // links yet to show or hide).
   visible: boolean;
@@ -40,6 +52,7 @@ export default function DocLinkGroupPanel({
   initialName,
   initialText,
   initialOverrideColor,
+  userColor,
   visible,
   onToggleVisible,
   onCreated,
@@ -53,7 +66,7 @@ export default function DocLinkGroupPanel({
   // the persisted override but leaves the swatch showing whatever color was
   // last picked, so re-checking it doesn't lose that choice.
   const [overrideChecked, setOverrideChecked] = useState(Boolean(initialOverrideColor));
-  const [colorValue, setColorValue] = useState(initialOverrideColor || "#999999");
+  const [colorValue, setColorValue] = useState(initialOverrideColor || userColor);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -74,7 +87,7 @@ export default function DocLinkGroupPanel({
     name: initialName ?? "",
     text: initialText ?? "",
     overrideChecked: Boolean(initialOverrideColor),
-    colorValue: initialOverrideColor || "#999999",
+    colorValue: initialOverrideColor || userColor,
   });
 
   async function flush() {
