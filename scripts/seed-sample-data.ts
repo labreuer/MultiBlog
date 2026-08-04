@@ -1,7 +1,9 @@
 // Sample docs/posts/comments/annotations for a freshly rebuilt database.
 // Ada and Grace are also seeded as listed landing-page contributors (PLAN.md
-// §17e) — ORCID/website/image/blurb, so `/` has real-looking contributor
-// cards out of the box rather than an empty sidebar.
+// §17e) — ORCID/website/blurb, plus an avatar fetched once and stored as
+// bytes in user_avatar (§17n), so `/` has real-looking contributor cards out
+// of the box rather than an empty sidebar. The avatar fetch is the only
+// network call this script makes, and it's non-fatal.
 //
 // Usage:
 //   npx tsx scripts/seed-sample-data.ts [--force]
@@ -49,6 +51,7 @@ import { uniqueDocSlug } from "../src/lib/doc-slug";
 import { uniquePostSlug } from "../src/lib/post-slug";
 import { contentExtensions, titleExtensions, pmDocContentSchema, pmBlurbSchema } from "../src/lib/tiptap-schema";
 import { normalizeOrcid, normalizeWebsite } from "../src/lib/contributor-links";
+import { storeAvatar } from "../src/lib/avatar";
 import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
 import { postContentFromYdoc } from "../src/lib/post-content";
 import { docContentFromYdoc } from "../src/lib/doc-content";
@@ -93,7 +96,12 @@ async function upsertUser(opts: {
   isListedContributor?: boolean;
   orcidUrl?: string;
   website?: string;
-  image?: string;
+  // Fetched and stored as bytes in user_avatar (PLAN.md §17n), not saved as
+  // a remote URL — the seeded database should exercise the same self-hosted
+  // path a real upload takes. Non-fatal if the fetch fails (offline, or
+  // Wikimedia rate-limiting a rebuild), same tolerance addAnnotation already
+  // shows toward the collab server being down.
+  avatarSourceUrl?: string;
   contributorBlurbText?: string;
 }): Promise<{ id: string; email: string; name: string }> {
   const existing = await prisma.user.findUnique({ where: { email: opts.email } });
@@ -124,12 +132,35 @@ async function upsertUser(opts: {
       isListedContributor: opts.isListedContributor ?? false,
       orcid,
       website,
-      image: opts.image ?? null,
       contributorBlurb: opts.contributorBlurbText ? blurb(opts.contributorBlurbText) : undefined,
     },
   });
   console.log(`  user ${user.email} (${opts.role})`);
+
+  if (opts.avatarSourceUrl) {
+    await seedAvatar(user.id, opts.avatarSourceUrl);
+  }
   return { id: user.id, email: user.email, name: opts.name };
+}
+
+// Fetches one avatar and stores it through the same storeAvatar() the
+// self-service upload uses — so the seeded rows are byte-for-byte what an
+// upload would have produced (160px WebP, EXIF stripped), not a shortcut
+// around the processing path.
+async function seedAvatar(userId: string, sourceUrl: string): Promise<void> {
+  try {
+    const response = await fetch(sourceUrl, {
+      // Wikimedia serves 403 to clients with no User-Agent.
+      headers: { "User-Agent": "MultiBlog sample-data seeder (local development)" },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const { hash, bytes } = await storeAvatar(userId, new Uint8Array(await response.arrayBuffer()));
+    console.log(`    avatar stored (${bytes.byteLength} bytes, hash ${hash.slice(0, 8)}…)`);
+  } catch (err) {
+    console.log(`    ! avatar not stored (${err instanceof Error ? err.message : "unknown error"}) — initials will render instead`);
+  }
 }
 
 async function createDoc(opts: {
@@ -473,7 +504,7 @@ async function main() {
     initials: "AL",
     isListedContributor: true,
     website: "https://en.wikipedia.org/wiki/Ada_Lovelace",
-    image:
+    avatarSourceUrl:
       "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/Ada_Lovelace_daguerreotype_by_Antoine_Claudet_1843_-_cropped.png/330px-Ada_Lovelace_daguerreotype_by_Antoine_Claudet_1843_-_cropped.png",
     contributorBlurbText:
       "Mathematician and writer whose notes on Babbage's Analytical Engine include what is recognized as the first published algorithm intended for a machine.",
@@ -485,7 +516,7 @@ async function main() {
     initials: "GH",
     isListedContributor: true,
     orcidUrl: "https://orcid.org/0009-0007-6015-7076",
-    image:
+    avatarSourceUrl:
       "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Commodore_Grace_M._Hopper%2C_USN_%28covered%29_head_and_shoulders_crop.jpg/330px-Commodore_Grace_M._Hopper%2C_USN_%28covered%29_head_and_shoulders_crop.jpg",
     contributorBlurbText:
       "Pioneer of machine-independent programming languages and the first compiler; her work at the U.S. Navy led directly to COBOL.",

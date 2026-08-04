@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
+import { prisma } from "./prisma";
 
 // Self-hosted contributor avatars (PLAN.md §17n) — the ingestion half. The
 // serving half is src/app/api/avatar/[userId]/[hash]/route.ts.
@@ -24,7 +25,12 @@ const MAX_INPUT_PIXELS = 50 * 1024 * 1024;
 export const AVATAR_CONTENT_TYPE = "image/webp";
 
 export type ProcessedAvatar = {
-  bytes: Buffer;
+  // Uint8Array<ArrayBuffer>, spelled out: Prisma 7 types a `Bytes` column as
+  // exactly that, while sharp hands back Node's Buffer — which is
+  // Uint8Array<ArrayBufferLike>, admitting SharedArrayBuffer, and so isn't
+  // assignable to it. Copying into a freshly allocated array once here keeps
+  // every call site free of the cast.
+  bytes: Uint8Array<ArrayBuffer>;
   contentType: string;
   hash: string;
   width: number;
@@ -56,9 +62,9 @@ export async function processAvatar(input: Uint8Array): Promise<ProcessedAvatar>
     throw new Error(`Image is too large (max ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB).`);
   }
 
-  let bytes: Buffer;
+  let encoded: Buffer;
   try {
-    bytes = await sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
+    encoded = await sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
       .rotate()
       .resize(AVATAR_SIZE, AVATAR_SIZE, { fit: "cover", position: "attention" })
       .webp({ quality: 82 })
@@ -69,6 +75,8 @@ export async function processAvatar(input: Uint8Array): Promise<ProcessedAvatar>
     throw new Error(`That file couldn't be read as an image. (${err instanceof Error ? err.message.split("\n")[0] : "unknown error"})`);
   }
 
+  const bytes = new Uint8Array(new ArrayBuffer(encoded.byteLength));
+  bytes.set(encoded);
   return {
     bytes,
     contentType: AVATAR_CONTENT_TYPE,
@@ -85,4 +93,30 @@ export async function processAvatar(input: Uint8Array): Promise<ProcessedAvatar>
  */
 export function avatarHash(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex").slice(0, 32);
+}
+
+/**
+ * Processes and stores one user's avatar, replacing any existing one.
+ *
+ * Shared by the self-service upload action and the sample-data seed so the
+ * two can't diverge on what actually lands in the row — the same reason
+ * actions/contributor.ts and actions/users.ts share contributor-links.ts's
+ * validators (PLAN.md §17i). Returns the stored hash, which the caller needs
+ * to build the new URL.
+ */
+export async function storeAvatar(userId: string, input: Uint8Array): Promise<ProcessedAvatar> {
+  const processed = await processAvatar(input);
+  const row = {
+    bytes: processed.bytes,
+    contentType: processed.contentType,
+    hash: processed.hash,
+    width: processed.width,
+    height: processed.height,
+  };
+  await prisma.userAvatar.upsert({
+    where: { userId },
+    update: row,
+    create: { userId, ...row },
+  });
+  return processed;
 }
