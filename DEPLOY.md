@@ -667,7 +667,9 @@ Daily `pg_dump` off-box (cron), and **test a restore once** — an untested back
 
 Ship the dumps somewhere off the box (Linode Object Storage / another host). The `postCollab`
 BYTEA and `postCollabUpdate` log are included in a normal `pg_dump`, so live editing state
-survives a restore.
+survives a restore. So are contributor avatars (`user_avatar.bytes`, PLAN.md §17n) — roughly
+5KB each, and deliberately in Postgres rather than object storage so one dump remains the
+whole backup at this scale.
 
 ---
 

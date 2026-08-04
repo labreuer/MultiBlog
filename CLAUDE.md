@@ -108,6 +108,26 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
   only, so changing them needs a **restart, not a rebuild** — and the image file itself
   (`public/banner.*`, gitignored) needs neither, since `public/` is served straight from
   disk at runtime.
+- **A contributor's avatar is bytes in `user_avatar`, not a URL** (PLAN.md §17n), served from
+  `/api/avatar/<userId>/<hash>` where `hash` is a content hash — so the URL changes whenever
+  the image does, which is what lets the route answer `Cache-Control: immutable` and use the
+  same hash as its `ETag`. Three things not to undo:
+  - **It's a separate table on purpose.** `src/app/users/page.tsx` queries with `include:` and
+    no `select:`, so every scalar column comes back; an avatar column on `user` would drag up
+    to 100 blobs into that page's payload silently. Any query that wants an avatar names
+    `avatar: { select: { hash: true } }` — never `bytes`, which only the route handler reads.
+  - **`User.image` stays a URL string.** It's the Auth.js adapter's field (`PrismaAdapter`),
+    populated from an OAuth profile; `resolveAvatarSrc` (`src/lib/avatar-url.ts`) prefers the
+    upload and falls back to it, then to the initials circle.
+  - **`src/lib/avatar.ts` is server-only** (`sharp`, `node:crypto`). `avatar-url.ts` holds the
+    browser-safe half, because `ContributorCard` builds these URLs and is imported by the
+    `"use client"` `ContributorPanel`, so it compiles into the client bundle too.
+  Uploads are always re-encoded (160px square WebP) rather than stored as sent — that's what
+  strips EXIF/GPS from a phone photo, and `.rotate()` bakes the orientation flag into the
+  pixels first so the strip doesn't leave it sideways. There is deliberately **no
+  "avatar from URL" path**: a server-side fetch of a user-supplied URL is SSRF. `sharp` is a
+  direct dependency pinned at the range its pre-existing `overrides` entry uses — npm rejects
+  a direct dep whose spec doesn't match its own override.
 - The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
   exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
   own title is never shown, only its body. Seed one with `npx tsx scripts/seed-front-page.ts`
@@ -121,6 +141,25 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
   migration is a plain `ALTER COLUMN ... SET NOT NULL` with no prompt, since every row
   already has a value by then. See `adminInitials`'s two migrations
   (`add_admin_initials_nullable`, `make_admin_initials_required`) for the pattern.
+- **Editing a migration file after it's been applied makes the next `migrate dev` demand a
+  full database reset** — and the message says so in a way that's easy to accept by reflex:
+  *"The migration `…` was modified after it was applied. We need to reset the `public`
+  schema … All data will be lost."* Prisma records a SHA-256 of each `migration.sql` in
+  `_prisma_migrations.checksum`, and any edit — including appending a hand-written backfill
+  to a file `migrate dev` just generated — invalidates it. **Do not reset a dev database
+  holding real content.** When the database genuinely already reflects the edited file (the
+  DDL ran, and the backfill was applied by hand), the schema and the file agree and only the
+  recorded checksum is stale, so correct that instead:
+  ```
+  sha256sum prisma/migrations/<name>/migration.sql
+  psql -U multiblog -h 127.0.0.1 -d multiblog \
+    -c "UPDATE _prisma_migrations SET checksum='<hash>' WHERE migration_name='<name>';"
+  ```
+  Take a `pg_dump` first (`.db-backups/`, the convention that directory exists for). Note the
+  `pg_dump` on `PATH` is the **14.2** one from the stopped `postgresql-x64-14` install and
+  refuses an 18.4 server (`server version mismatch`) — use
+  `"/c/Program Files/PostgreSQL/18/bin/pg_dump.exe"`. Better still, put the backfill in the
+  file *before* the first `migrate dev` run, or in its own follow-up migration.
 
 ## Checks & verification
 

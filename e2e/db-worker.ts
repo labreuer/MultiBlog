@@ -47,7 +47,7 @@ function assertSafe(email: string) {
   }
 }
 
-export type TestUser = { id: string; email: string; name: string; role: Role };
+export type TestUser = { id: string; email: string; name: string; role: Role; slug: string };
 
 export async function createTestUser(opts: {
   email: string;
@@ -109,7 +109,7 @@ export async function createTestUser(opts: {
     });
   }
 
-  return { id: user.id, email: user.email, name, role };
+  return { id: user.id, email: user.email, name, role, slug: user.slug };
 }
 
 /**
@@ -380,6 +380,28 @@ export type ContributorFields = {
   website: string | null;
   blurbText: string | null;
 };
+
+/**
+ * A user's stored avatar as facts rather than bytes (PLAN.md §17n) — enough
+ * for a spec to assert that an upload was re-encoded and resized, without
+ * shipping a blob back through the JSON stdio channel.
+ */
+export type AvatarFacts = { hash: string; contentType: string; width: number; height: number; byteLength: number };
+
+export async function getAvatarFacts(email: string): Promise<AvatarFacts | null> {
+  assertSafe(email);
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  if (!user) return null;
+  const avatar = await prisma.userAvatar.findUnique({ where: { userId: user.id } });
+  if (!avatar) return null;
+  return {
+    hash: avatar.hash,
+    contentType: avatar.contentType,
+    width: avatar.width,
+    height: avatar.height,
+    byteLength: avatar.bytes.byteLength,
+  };
+}
 
 export async function getContributorFields(email: string): Promise<ContributorFields | null> {
   assertSafe(email);
@@ -840,6 +862,7 @@ const handlers = {
   deleteTestDoc,
   getDocState,
   getContributorFields,
+  getAvatarFacts,
   clearColumnOrder,
   getSiteDefaultColumnOrder,
   setSiteDefaultColumnOrder,

@@ -4828,3 +4828,154 @@ so, since the next person to add a page will otherwise read three widths as thre
 - **The banner has no admin surface.** It is env plus a file on disk, which is right for a
   self-hosted single deployment and wrong the moment a non-technical editor wants to change
   it. `SiteSettings` is where that would go if it ever matters.
+
+### 17n. Avatars move off remote URLs and into Postgres
+
+`User.image` was a remote URL — originally the Auth.js adapter's field, and
+what §17e first rendered. That works, and for the seeded Wikimedia portraits it
+was defensible, but it has three costs that only grow:
+
+- **Every visitor's browser talks to a third party.** `next/font/google`
+  self-hosts at build time, so contributor avatars were the *only* third-party
+  runtime request on `/` — leaking each visitor's IP, User-Agent and Referer to
+  whoever hosts the image, on the one page everybody lands on.
+- **Link rot and hotlink blocking.** Wikimedia explicitly discourages
+  hotlinking; any host can rename, 403, or disappear.
+- **The host controls what renders.** A URL's contents can be swapped after the
+  fact, on the front page, with no change on our side. Low risk for Wikimedia;
+  a real vector for a contributor-supplied URL pointing somewhere they control.
+
+Avatars are now stored as bytes in Postgres and served from our own route.
+
+#### Why not base64 data URIs — the option that looks equivalent and isn't
+
+"Store it in the database" and "serve it as base64" are orthogonal decisions
+that are easy to weld together. Storing bytes is right here; inlining them as a
+data URI would have been wrong, and specifically wrong *because of this app*:
+
+`/` is an ISR-cached shared HTML artifact (`revalidate = 60`, §17a). A data URI
+becomes part of that payload — re-sent in full on every visit by every visitor,
+never separately cacheable, never eligible for an ETag, and re-serialized into
+the cache entry on every regeneration. With five contributors at ~5KB each
+that is ~25KB welded onto every page load, permanently, in exchange for saving
+some first-visit round trips that HTTP/2 multiplexing already made cheap.
+
+The counterargument is real but narrow: below ~1–4KB, inlining does save a
+round trip, and a 40px avatar is in that range. It is a cold-first-visit win
+only, and a blog front page is dominated by repeat visits.
+
+So: bytes in the database, served from a route, with the browser keeping its
+own cache entry. That is strictly better than the data URI on every axis they
+differ, and the only thing it costs is one route handler.
+
+#### The table, and the `SELECT *` trap it exists to prevent
+
+`user_avatar` is its own table rather than a `Bytes` column on `User`, for one
+concrete reason: `src/app/users/page.tsx` queries with `include:` and no
+`select:`, so Prisma returns **every scalar column**. An avatar column on
+`user` would drag up to 100 blobs (the max page size) into the RSC payload on
+every `/users` load, to render 32px circles — silently, because nothing in that
+query names the column. A separate table cannot be reached by a wide select on
+`user`, which turns "remember to deselect the blob" into "the blob is
+unreachable from here". Every query that *does* want it names `avatar: {
+select: { hash: true } }` and never `bytes`.
+
+`userId` is the primary key rather than a separate id: one avatar per user, and
+the lookup the route does on every request is then a primary-key hit.
+
+**`User.image` is deliberately untouched.** It belongs to the Auth.js adapter
+contract (`PrismaAdapter`, `src/lib/auth.ts`), which specifies a string URL and
+would populate it from an OAuth provider's profile. Retyping it would break
+that contract. `resolveAvatarSrc` (`src/lib/avatar-url.ts`) encodes the
+precedence: self-hosted upload → remote `User.image` → null, at which point the
+colored initials circle renders. Only `Credentials` is configured today, so the
+remote branch is dormant rather than a live privacy cost — but it is why
+"self-hosted avatars" is not the same claim as "no third-party image request is
+possible".
+
+#### The hash is what earns `immutable`
+
+The route is `/api/avatar/<userId>/<hash>`, where `hash` is a content hash of
+the stored bytes. Replacing an avatar changes the hash and therefore the URL,
+so the handler can answer `Cache-Control: public, max-age=31536000, immutable`
+without any risk of serving a stale image. The same hash is the `ETag`, so a
+conditional request answers 304.
+
+One case needs care rather than a rule. `/`'s HTML is cached for up to 60s, so
+a reader can hold HTML referencing a hash that was current when the page was
+generated and is not current now. 404ing that would show a broken image for the
+remainder of the window. Instead the handler serves the *current* bytes — the
+reader sees the right person's face — but downgrades to
+`max-age=0, must-revalidate`, because a URL whose content just moved has no
+business claiming immutability. Fresh hash and stale hash are the same lookup;
+only the header differs.
+
+The route is public and unauthenticated on purpose: the contributor list is
+public content, and `/` must not call `auth()` (§17a). Nothing there reads a
+session, so the response stays cacheable by any intermediary.
+
+#### Ingestion, and what it obliges
+
+`processAvatar` (`src/lib/avatar.ts`) re-encodes every upload through `sharp`
+to a 160px square WebP. Re-encoding is not an optimization here, it is the
+security and privacy step:
+
+- **EXIF, including GPS, is stripped** — `sharp` drops metadata on re-encode
+  unless `withMetadata()` is called. Uploaded phone photos routinely carry
+  coordinates, and this image is published publicly. Verified rather than
+  assumed: a test JPEG carrying 224 bytes of EXIF including GPS tags comes out
+  with zero.
+- **`.rotate()` with no argument bakes the EXIF orientation into the pixels**
+  *before* that metadata is discarded — otherwise a portrait phone photo would
+  be stored sideways.
+- **The format is sniffed, never trusted.** The declared content type of an
+  upload is attacker-controlled; `sharp` decodes the actual bytes and anything
+  it can't parse is rejected. (The declared type is still checked first, only
+  to produce a clearer message than a decode failure.)
+- A 5MB cap is enforced *before* decoding, and `limitInputPixels` caps the
+  decompression bomb at 50MP against `sharp`'s ~268MP default.
+
+160px is 4× the 40px card slot, so one stored size covers the dashboard preview
+and 2× displays without a second variant — which is what lets the render path
+skip `next/image` entirely. Routing an already-correctly-sized, content-hashed,
+immutably-cached WebP through the optimizer would add a hop and a second cache
+layer to re-derive what ingestion already produced. `ContributorCard` therefore
+keeps a plain `<img>` and an eslint-disable, with that as the stated reason —
+the *remote* fallback keeps the original reason too, since arbitrary hosts
+would each need an `images.remotePatterns` entry.
+
+**There is deliberately no "avatar from URL" path.** Having the server fetch a
+user-supplied URL is textbook SSRF — internal addresses, cloud metadata
+endpoints. The only URL fetch in this feature is
+`scripts/seed-sample-data.ts`'s, against hardcoded constants. A remote
+`User.image` still renders, but the *browser* fetches that, not us.
+
+#### The upload surface
+
+The dashboard panel's "Image URL" text field becomes a file input plus a
+"Remove photo" control, with its own action rather than a field on the combined
+Save (§17g): it carries binary in a `FormData`, it should apply immediately
+rather than waiting for a Save the user might not press, and its failure modes
+are entirely its own. The action returns the new URL so the preview can
+repoint without a round trip through the server component. Both actions sit
+behind the same `requireListedContributor` as the rest of the panel, and both
+`revalidatePath("/")`.
+
+The panel says, in the UI and not only here, that the image is stored on this
+site and that location data is removed — a claim the user should be able to
+read before uploading a photo of themselves.
+
+#### Known gaps
+
+- **`pg_dump` now carries the avatars.** DEPLOY.md §9's daily dump grows by
+  roughly 5KB per contributor — negligible at this scale, and consistent with
+  the ydoc `BYTEA` already riding along in the same dump, but it is a real
+  change to what backup means. Object storage would decouple them; at
+  single-Linode scale that is more moving parts than it is worth.
+- **No CSP is configured**, so the tighter `img-src 'self'` this now makes
+  possible isn't actually enforced anywhere yet.
+- **An admin cannot upload on someone else's behalf.** `/users` shows the
+  avatar but doesn't edit it, same as it always did for `image`.
+- **Avatars are never garbage collected beyond the `ON DELETE CASCADE`.**
+  Replacing an avatar overwrites the row, so there is no orphan accumulation —
+  but there is also no history, and no way to undo a replacement.

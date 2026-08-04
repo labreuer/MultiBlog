@@ -34,7 +34,11 @@ export default function ContributorCard({ name, slug, avatarSrc, color, adminIni
   const hasBlurb = blurb && extractText(blurb).trim().length > 0;
 
   return (
-    <div className={styles.card}>
+    // data-contributor-slug is a test hook, same convention as CommentNode's
+    // data-comment-id: the sidebar renders N of these and every one of them
+    // can carry an "ORCID iD"/"Website" link, so a spec has to scope to one
+    // card before asserting on its links.
+    <div className={styles.card} data-contributor-slug={slug}>
       <div className={styles.header}>
         {avatarSrc ? (
           // eslint-disable-next-line @next/next/no-img-element -- deliberately not next/image. A self-hosted avatar is already stored at exactly one size (160px WebP, src/lib/avatar.ts) behind a content-hashed immutable URL, so the optimizer would add a hop and a second cache layer to re-derive what ingestion already produced. The remote-URL fallback keeps the original reason too: arbitrary hosts would each need an images.remotePatterns entry.

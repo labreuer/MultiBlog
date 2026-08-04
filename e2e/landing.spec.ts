@@ -14,7 +14,7 @@
 // gitignored file, not app state this suite's fixtures control either way.
 import type { Browser, Page } from "@playwright/test";
 import { test, expect, signIn } from "./fixtures";
-import { createTestUser, deleteTestUser, getContributorFields, uniqueEmail } from "./db";
+import { createTestUser, deleteTestUser, getAvatarFacts, getContributorFields, uniqueEmail } from "./db";
 
 // A fresh browser context, not the shared `page`'s — the browser pane's
 // "tabs share one cookie jar" trap (CLAUDE.md) applies to Playwright pages
@@ -25,6 +25,20 @@ async function signedInAs(browser: Browser, email: string): Promise<Page> {
   const contributorPage = await context.newPage();
   await signIn(contributorPage, email);
   return contributorPage;
+}
+
+/**
+ * One contributor's card in the sidebar.
+ *
+ * Every assertion about a card's links has to go through this rather than
+ * through `aside` directly: the sample data (scripts/seed-sample-data.ts)
+ * seeds real contributors with their own ORCID/website links and avatars, so
+ * an unscoped `aside.getByRole("link", { name: "ORCID iD" })` matches
+ * whatever else is listed and trips strict mode. The spec must not depend on
+ * whether a dev database happens to be seeded.
+ */
+function cardFor(page: Page, slug: string) {
+  return page.locator(`[data-contributor-slug="${slug}"]`);
 }
 
 test("never shows the FRONT PAGE doc's own title", async ({ page }) => {
@@ -50,17 +64,17 @@ test("contributor sidebar lists an opted-in contributor and omits everyone else"
 
   try {
     await page.goto("/");
-    const aside = page.locator("aside");
-    await expect(aside.getByRole("link", { name: listed.name })).toBeVisible();
-    await expect(aside.getByRole("link", { name: "ORCID iD" })).toHaveAttribute(
+    const card = cardFor(page, listed.slug);
+    await expect(card.getByRole("link", { name: listed.name })).toBeVisible();
+    await expect(card.getByRole("link", { name: "ORCID iD" })).toHaveAttribute(
       "href",
       "https://orcid.org/0000-0002-1825-0097",
     );
     // createTestUser writes fields straight to the DB, not through
     // normalizeWebsite (that's the dashboard-panel test's job to exercise) —
     // so the href is exactly what was set, with no trailing slash added.
-    await expect(aside.getByRole("link", { name: "Website" })).toHaveAttribute("href", "https://example.com");
-    await expect(aside.getByRole("link", { name: unlisted.name })).toHaveCount(0);
+    await expect(card.getByRole("link", { name: "Website" })).toHaveAttribute("href", "https://example.com");
+    await expect(cardFor(page, unlisted.slug)).toHaveCount(0);
   } finally {
     await deleteTestUser(listedEmail);
     await deleteTestUser(unlistedEmail);
@@ -112,9 +126,9 @@ test("dashboard panel: self-service edits reach the front page; opting out clear
     expect(fields?.website).toBe("https://example.com/");
 
     await page.goto("/");
-    const aside = page.locator("aside");
-    await expect(aside.getByRole("link", { name: user.name })).toBeVisible();
-    await expect(aside.getByRole("link", { name: "ORCID iD" })).toHaveAttribute(
+    const card = cardFor(page, user.slug);
+    await expect(card.getByRole("link", { name: user.name })).toBeVisible();
+    await expect(card.getByRole("link", { name: "ORCID iD" })).toHaveAttribute(
       "href",
       "https://orcid.org/0000-0002-1825-0097",
     );
@@ -128,7 +142,95 @@ test("dashboard panel: self-service edits reach the front page; opting out clear
     expect(afterOptOut?.isListedContributor).toBe(false);
 
     await page.goto("/");
-    await expect(page.locator("aside").getByRole("link", { name: user.name })).toHaveCount(0);
+    await expect(cardFor(page, user.slug)).toHaveCount(0);
+  } finally {
+    await contributorPage?.context().close();
+    await deleteTestUser(email);
+  }
+});
+
+// A deliberately non-square PNG, built in-process so the spec owns its own
+// fixture rather than depending on a checked-in binary. 600x300 is enough to
+// prove the server resized *and* squared it; the payload is a valid PNG that
+// sharp will happily decode.
+async function makeTestPng(page: Page): Promise<Buffer> {
+  const dataUrl = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 600;
+    canvas.height = 300;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#0a5";
+    ctx.fillRect(0, 0, 600, 300);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(40, 40, 220, 220);
+    return canvas.toDataURL("image/png");
+  });
+  return Buffer.from(dataUrl.split(",")[1], "base64");
+}
+
+test("avatar upload: re-encodes and resizes, serves immutably, and removal falls back to initials", async ({
+  page,
+  browser,
+}) => {
+  const email = uniqueEmail("avatar-contributor");
+  const user = await createTestUser({
+    email,
+    name: `Avatar Contributor ${email.split("@")[0]}`,
+    isListedContributor: true,
+  });
+  let contributorPage: Page | null = null;
+
+  try {
+    contributorPage = await signedInAs(browser, email);
+    await contributorPage.goto("/dashboard");
+    await expect(contributorPage.getByRole("heading", { name: "Contributor profile" })).toBeVisible();
+
+    // No avatar yet → the initials circle, and nothing to remove.
+    await expect(contributorPage.getByRole("button", { name: "Remove photo" })).toHaveCount(0);
+
+    const png = await makeTestPng(contributorPage);
+    await contributorPage.getByLabel("Photo").setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: png });
+    await expect(contributorPage.getByRole("button", { name: "Remove photo" })).toBeVisible();
+
+    // Stored re-encoded and squared, never as the bytes that were uploaded
+    // (PLAN.md §17n) — this is also what proves EXIF can't survive.
+    const facts = await getAvatarFacts(email);
+    expect(facts).not.toBeNull();
+    expect(facts!.contentType).toBe("image/webp");
+    expect(facts!.width).toBe(160);
+    expect(facts!.height).toBe(160);
+
+    // The public page serves it from the content-hashed route, immutably.
+    await page.goto("/");
+    const avatar = cardFor(page, user.slug).locator("img");
+    await expect(avatar).toHaveAttribute("src", `/api/avatar/${user.id}/${facts!.hash}`);
+    // It actually decodes — a broken <img> would still satisfy the attribute.
+    await expect
+      .poll(() => avatar.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
+      .toBe(160);
+
+    const response = await page.request.get(`/api/avatar/${user.id}/${facts!.hash}`);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toBe("image/webp");
+    expect(response.headers()["cache-control"]).toContain("immutable");
+    expect(response.headers()["etag"]).toBe(`"${facts!.hash}"`);
+
+    // A URL carrying a hash that is no longer current still serves the
+    // person's actual avatar (so HTML cached inside `/`'s 60s ISR window
+    // doesn't show a broken image) but stops claiming immutability.
+    const stale = await page.request.get(`/api/avatar/${user.id}/${"0".repeat(32)}`);
+    expect(stale.status()).toBe(200);
+    expect(stale.headers()["cache-control"]).toContain("must-revalidate");
+
+    // Removal falls back to the colored initials circle.
+    await contributorPage.getByRole("button", { name: "Remove photo" }).click();
+    await expect(contributorPage.getByRole("button", { name: "Remove photo" })).toHaveCount(0);
+    expect(await getAvatarFacts(email)).toBeNull();
+
+    await page.goto("/");
+    const cardAfterRemoval = cardFor(page, user.slug);
+    await expect(cardAfterRemoval.getByRole("link", { name: user.name })).toBeVisible();
+    await expect(cardAfterRemoval.locator("img")).toHaveCount(0);
   } finally {
     await contributorPage?.context().close();
     await deleteTestUser(email);
