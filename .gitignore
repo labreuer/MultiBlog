@@ -62,3 +62,17 @@ next-env.d.ts
 # landing-page banner (src/lib/site-banner.ts, PLAN.md §17b) — deployment
 # content, not repository content, same reasoning as .env above
 /public/banner.*
+
+# site icons (scripts/build-icons.ts, docs/FAVICON.md) — deployment content,
+# not repository content, same reasoning as the banner above. src/app/icon.png
+# and src/app/icon1.png get Next's own build-time content hash in their
+# emitted <link> href, which is the whole point (see docs/FAVICON.md) — none
+# of that requires the files to be tracked. The master this script reads from
+# is also kept out of git; it's deployment content too, just not one Next
+# serves itself.
+/src/app/icon.png
+/src/app/icon1.png
+/src/app/apple-icon.png
+/public/favicon.ico
+/public/icons/
+/site-icons/

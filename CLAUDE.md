@@ -128,6 +128,7 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
   "avatar from URL" path**: a server-side fetch of a user-supplied URL is SSRF. `sharp` is a
   direct dependency pinned at the range its pre-existing `overrides` entry uses — npm rejects
   a direct dep whose spec doesn't match its own override.
+- Site icons (favicon/manifest): [docs/FAVICON.md](docs/FAVICON.md).
 - The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
   exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
   own title is never shown, only its body. Seed one with `npx tsx scripts/seed-front-page.ts`

@@ -378,8 +378,18 @@ npx prisma migrate deploy
 #    can't do this either (see that script's own header comment for details)
 npx tsx scripts/create-admin.ts <email> "<Your Name>" <initials> '<password>'
 
+# 6b. Site icons (docs/FAVICON.md) — gitignored, so `git clone` above brought none.
+#     Without this step the site simply has no favicon/manifest icons (Next
+#     emits no <link> tags for files that don't exist) rather than anything
+#     broken — safe to skip on a first deploy and come back to.
+scp master.png deploy@<host>:/srv/multiblog/site-icons/master.png
+npx tsx scripts/build-icons.ts
+
 # 7. Build the Next app  (NEXT_PUBLIC_COLLAB_URL must already be set — see §4 note;
-#    on the 1 GB Nanode, swap alone isn't enough — see the NODE_OPTIONS note in §2h)
+#    on the 1 GB Nanode, swap alone isn't enough — see the NODE_OPTIONS note in §2h.
+#    Icons must exist BEFORE this step if you want them: Next content-hashes
+#    src/app/icon.png et al. into the emitted <link> href at build time, not
+#    at request time — step 6b has to run first, not after.)
 NODE_OPTIONS="--max-old-space-size=3072" npm run build
 
 # 8. Install & start the systemd units (§6), configure nginx (§7), then verify (§8)
@@ -671,6 +681,13 @@ survives a restore. So are contributor avatars (`user_avatar.bytes`, PLAN.md §1
 5KB each, and deliberately in Postgres rather than object storage so one dump remains the
 whole backup at this scale.
 
+A `pg_dump`-only backup strategy misses whatever lives only on the box's filesystem, not in
+Postgres — a full recovery needs these backed up too:
+
+- `.env`
+- `public/banner.*` (the landing-page banner, PLAN.md §17b)
+- `site-icons/master.png` (site icons, docs/FAVICON.md)
+
 ---
 
 ## 10. Redeploy flow (subsequent deploys)
@@ -684,6 +701,11 @@ npx prisma migrate deploy          # applies any new migrations, no-op if none
 npm run build                      # re-inline NEXT_PUBLIC_* if any changed
 sudo systemctl restart multiblog-web multiblog-collab
 ```
+
+**Changing the site icon** (docs/FAVICON.md) isn't part of this flow — it's not triggered by a
+code change, so `git pull` won't touch it. Replace `site-icons/master.png` and run
+`npx tsx scripts/build-icons.ts` *before* the `npm run build` step above; the icon hash is
+computed at build time, so a redeploy that skips this just rebuilds with the same icons.
 
 These steps are packaged as `deploy/deploy.sh` (run it from `/srv/multiblog` as `deploy`). No
 zero-downtime story is needed at hobby scale — the restart blip is seconds. (Docker Compose

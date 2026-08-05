@@ -238,3 +238,46 @@ content hash buys for the CDN case, arrived at from the other direction.
 One deliberate non-caching consequence, recorded because it's the kind of thing
 that surprises later: the avatars now ride along in `pg_dump` (DEPLOY.md §9),
 roughly 5KB per contributor, exactly as the ydoc `BYTEA` already does.
+
+## 2026-08-05 — Site icons: the cache that "clear cache" doesn't clear
+
+Favicons don't live in the caches this file has otherwise been about. Chrome
+keeps them in a separate `Favicons` SQLite table keyed by page URL, with its
+own freshness heuristic — "Empty cache and hard reload" does not touch it, and
+neither does anything else short of the URL itself changing. That ruled out
+the shape every other piece of deployment content in this app uses
+(`SITE_BANNER`: gitignored file, stable `public/` path, restart to pick up a
+change) — a stable-path favicon is exactly the shape that gets stuck.
+
+The fix (docs/FAVICON.md) is a content hash in the URL, computed two
+different ways depending on who can see the bytes:
+
+- **`src/app/icon.png`, `icon1.png`, `apple-icon.png`** — Next's own
+  `next-metadata-image-loader.js` already content-hashes these into the
+  emitted `<link>` href at build time. Free, verified against `next@16.2.11`,
+  no code required.
+- **`public/icons/*.png`** (the manifest's PWA icons) — plain static files
+  under `public/` get none of that. `src/app/manifest.ts` hashes them itself
+  at request time (`createHash("sha256")` over the file bytes, `?v=<hash>`),
+  the same shape §17n's `avatarHash` uses minus the database — there's no row
+  to persist it in, so it's recomputed on read instead of stored on write.
+
+**One inversion worth remembering:** `public/favicon.ico` deliberately gets
+**no** `<link>` tag at all, unlike every hashed icon which gets one.
+`resolve-metadata.js` `unshift`s an `app/favicon.ico` to the *front* of the
+icon list — verified in the same version — so putting the file there instead
+of in `public/` would have handed browsers an unhashed, permanently-stable URL
+as a leading candidate, i.e. the exact staleness bug this entry is about,
+reintroduced by the file living one directory over from where it needed to.
+`public/favicon.ico` still exists and still isn't hashed, but nothing that
+reads our own HTML ever points at it — it only answers a bare probe from a
+client with no page to read a `<link>` from (a feed reader, a bare 404).
+
+**Measured, not assumed:** `Cache-Control` on both the hashed file-convention
+routes and `public/`'s static serving turned out to already be
+`max-age=0`(`, must-revalidate` on the metadata-image route specifically) —
+Next's own default, not something this app configured. So correctness here
+never actually depended on the hash; a browser revalidates on every
+navigation regardless. The hash's job is avoiding a redundant fetch once a
+given hash is already cached — real, but not the reason changing the icon
+now works where it didn't before.
