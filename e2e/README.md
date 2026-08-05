@@ -132,6 +132,18 @@ the admin account.
   reach for two tabs: they share a cookie jar, and the second sign-in silently
   re-authenticates the first (the same trap CLAUDE.md documents for the browser
   pane).
+- **`sendMail` is never stubbed or spied on.** Every address the suite creates
+  is `@example.com`, and `src/lib/mail.ts` refuses to deliver to that domain
+  unconditionally, in every environment — a guard in the seam itself, not
+  something the suite has to arrange (docs/EMAIL.md §2). A test that needs a
+  live invite/reset token reads it straight from the DB (`getInvites`,
+  `createTestInvite`) rather than parsing a logged email.
+- **`?cols=name,email,invite,inviteUrl`-style params are the reliable way to
+  assert on a `defaultHidden` admin-table column.** Membership in `cols` is
+  visibility (PLAN.md §16i), so a column that's hidden by default won't appear
+  just because a test navigates to the page — force it into the querystring
+  rather than relying on the ColumnPicker. `invite.spec.ts` does this for
+  `/users`' two invite columns.
 
 ## Why the DB helpers run in a child process
 

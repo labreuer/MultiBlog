@@ -21,6 +21,9 @@ page load. That is why `/docs`' Length is a stored, trigger-maintained column
 phases still unbuilt: PLAN.md §16 (§16e, §16l).
 Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
 [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
+Email delivery, rate limiting, and invites — why Resend, the `sendMail()` seam's contract,
+`user_invite`'s many-rows-per-user design, and what's deferred (verification, bulk
+invites): [docs/EMAIL.md](docs/EMAIL.md).
 
 ## Running
 
@@ -107,7 +110,14 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
   `NEXT_PUBLIC_`, on purpose: unlike `NEXT_PUBLIC_SITE_TITLE`, these are read server-side
   only, so changing them needs a **restart, not a rebuild** — and the image file itself
   (`public/banner.*`, gitignored) needs neither, since `public/` is served straight from
-  disk at runtime.
+  disk at runtime. Also optional: `RESEND_API_KEY`/`MAIL_FROM` (`src/lib/mail.ts`,
+  [docs/EMAIL.md](docs/EMAIL.md)) — bare, not `NEXT_PUBLIC_`, so also a restart not a
+  rebuild; unset keeps every environment on the logging stub. Any recipient on
+  `@example.com`/`@sample.invalid` is never delivered to in any environment regardless of
+  whether a key is set, so `npm run e2e` stays safe with a live key in `.env`. Also optional:
+  `RESEND_INVITE_TEMPLATE_ID` — a Resend Template id for the invite email specifically
+  (`sendUserInvite`, `src/app/actions/users.ts`); unset falls back to a plain text/subject
+  send rather than failing, so invites work with no template ever created in the dashboard.
 - **A contributor's avatar is bytes in `user_avatar`, not a URL** (PLAN.md §17n), served from
   `/api/avatar/<userId>/<hash>` where `hash` is a content hash — so the URL changes whenever
   the image does, which is what lets the route answer `Cache-Control: immutable` and use the

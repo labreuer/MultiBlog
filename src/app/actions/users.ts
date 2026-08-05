@@ -9,6 +9,11 @@ import { isPageSize } from "@/lib/table-query";
 import { normalizeOrcid, normalizeWebsite } from "@/lib/contributor-links";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
+import { generateToken } from "@/lib/tokens";
+import { INVITE_TTL_MS } from "@/lib/invite";
+import { sendMail } from "@/lib/mail";
+import { appUrl } from "@/lib/app-url";
+import { SITE_TITLE } from "@/lib/site-config";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -124,6 +129,78 @@ export async function updateUserWebsite(userId: string, website: string): Promis
   await prisma.user.update({ where: { id: userId }, data: { website: normalized } });
   revalidatePath("/users");
   revalidatePath("/");
+}
+
+// Emails userId a link to set a password and claim their (already-created)
+// account. Order matters: mint the token, send the mail, and only create the
+// UserInvite row once sendMail reports delivered — a row whose sentAt says
+// "sent" when delivery failed would be a lie in the audit log this table
+// exists to be. Full design: docs/EMAIL.md.
+export async function sendUserInvite(userId: string): Promise<{ url: string }> {
+  const adminId = await requireAdmin();
+
+  // prisma.user's soft-delete extension already hides a deleted row, so
+  // !user covers both "never existed" and "deleted" with one check.
+  const [user, admin] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, name: true } }),
+    // Read fresh rather than trusting the session: the JWT's jwt() callback
+    // only ever copies id/role/color at sign-in (src/app/sign-in/NOTES.md),
+    // never name/email, so session.user.name isn't reliably populated.
+    prisma.user.findUnique({ where: { id: adminId }, select: { email: true, name: true } }),
+  ]);
+  if (!user) {
+    throw new Error("That user no longer exists.");
+  }
+
+  // No-cron answer to expiry: sweep this user's own stale, unconsumed tokens
+  // whenever they're next invited, rather than a scheduled job. Expired rows
+  // for a user never re-invited keep their (unusable) raw token — see
+  // docs/EMAIL.md's residual-exposure note.
+  await prisma.userInvite.updateMany({
+    where: { userId, expiresAt: { lt: new Date() }, token: { not: null } },
+    data: { token: null },
+  });
+
+  const { raw, hash } = generateToken();
+  const url = appUrl(`/invite?token=${raw}`);
+
+  // RESEND_INVITE_TEMPLATE_ID names a Resend Template (docs/EMAIL.md §2)
+  // declaring exactly these three variables. Unset falls back to a plain
+  // text/subject send — same "absent env var, simplest degraded behavior"
+  // shape as RESEND_API_KEY/MAIL_FROM themselves, so this invite still works
+  // against a from-scratch deploy with no template ever created.
+  const templateId = process.env.RESEND_INVITE_TEMPLATE_ID;
+  const invitedByName = admin?.name ?? admin?.email ?? "An admin";
+
+  const result = templateId
+    ? await sendMail({
+        to: user.email,
+        template: {
+          id: templateId,
+          variables: { invitee: user.name ?? user.email, invited_by: invitedByName, invite_url: url },
+        },
+      })
+    : await sendMail({
+        to: user.email,
+        subject: `You've been invited to ${SITE_TITLE}`,
+        text: `${invitedByName} has invited you to claim your account: ${url}\n\nThis link expires in 14 days.`,
+      });
+  if (!result.delivered) {
+    throw new Error(`Couldn't send the invite: ${result.error ?? "unknown error"}`);
+  }
+
+  await prisma.userInvite.create({
+    data: {
+      userId,
+      invitedById: adminId,
+      token: raw,
+      tokenHash: hash,
+      expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+    },
+  });
+
+  revalidatePath("/users");
+  return { url };
 }
 
 export async function updateUserSlug(userId: string, newSlug: string): Promise<{ slug: string }> {

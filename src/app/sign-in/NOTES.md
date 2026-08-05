@@ -19,9 +19,13 @@ Auth.js (NextAuth) v5 with a credentials provider, `src/lib/auth.ts`. Email + bc
 GitHub/Google as optional. Roles come from `User.role`.
 
 Forgot-password flow: single-use hashed tokens, 1h expiry, enumeration-safe (the response
-is identical whether or not the address exists). No email provider is configured —
-`sendMail()` is a logging stub, so the reset link is written to the server log rather than
-sent. DEPLOY.md §4 covers what that means in production.
+is identical whether or not the address exists, including while a 60s resend cooldown is
+active), rate-limited per address. `sendMail()` sends through Resend when configured
+(`RESEND_API_KEY`/`MAIL_FROM`) and otherwise logs the link instead — see
+[docs/EMAIL.md](../../../docs/EMAIL.md) for the seam's contract, and DEPLOY.md §4 for what
+configuring it means in production. `User.emailVerified` is written by `acceptInvite`
+(admin-issued email invites, same doc) and by nothing in this file's own flows; it gates
+nothing anywhere today.
 
 ## The session is a JWT, baked once at sign-in
 

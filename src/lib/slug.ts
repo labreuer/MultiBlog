@@ -11,6 +11,7 @@ export const RESERVED_SLUGS = new Set([
   "doc",
   "docs",
   "forgot-password",
+  "invite",
   "posts",
   "reset-password",
   "rss.xml",

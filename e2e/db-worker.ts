@@ -35,7 +35,10 @@ import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
-import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, uniqueTitle, docFromText } from "./naming";
+import { generateToken } from "@/lib/tokens";
+import { INVITE_TTL_MS } from "@/lib/invite";
+import { appUrl } from "@/lib/app-url";
+import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, ADMIN_EMAIL, uniqueTitle, docFromText } from "./naming";
 // server/ isn't under src/, but it's still part of the one tsconfig project
 // (CLAUDE.md's ydoc-store note) — same relative-import style server/collab.ts
 // itself uses for src/lib.
@@ -441,6 +444,58 @@ export async function getDocState(docId: string): Promise<DocState | null> {
 export async function clearColumnOrder(email: string): Promise<void> {
   assertSafe(email);
   await prisma.user.updateMany({ where: { email }, data: { columnOrder: Prisma.DbNull } });
+}
+
+export type TestInvite = {
+  id: string;
+  token: string | null;
+  sentAt: string;
+  clickedAt: string | null;
+  acceptedAt: string | null;
+  expiresAt: string;
+  revokedAt: string | null;
+};
+
+/** Every UserInvite row for this user, most recent first — docs/EMAIL.md's audit-log property. */
+export async function getInvites(email: string): Promise<TestInvite[]> {
+  assertSafe(email);
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  if (!user) return [];
+  const invites = await prisma.userInvite.findMany({ where: { userId: user.id }, orderBy: { sentAt: "desc" } });
+  return invites.map((i) => ({
+    id: i.id,
+    token: i.token,
+    sentAt: i.sentAt.toISOString(),
+    clickedAt: i.clickedAt?.toISOString() ?? null,
+    acceptedAt: i.acceptedAt?.toISOString() ?? null,
+    expiresAt: i.expiresAt.toISOString(),
+    revokedAt: i.revokedAt?.toISOString() ?? null,
+  }));
+}
+
+/**
+ * Mints a UserInvite row straight in the DB, bypassing sendUserInvite/sendMail
+ * — e2e/invite.spec.ts's acceptance and history tests don't need a real send,
+ * only a live token to act on (the send path itself is covered by the one
+ * test that does drive "Send invite" through the UI).
+ */
+export async function createTestInvite(email: string, invitedByEmail: string = ADMIN_EMAIL): Promise<{ url: string }> {
+  assertSafe(email);
+  const [user, invitedBy] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true } }),
+    prisma.user.findUniqueOrThrow({ where: { email: invitedByEmail }, select: { id: true } }),
+  ]);
+  const { raw, hash } = generateToken();
+  await prisma.userInvite.create({
+    data: {
+      userId: user.id,
+      invitedById: invitedBy.id,
+      token: raw,
+      tokenHash: hash,
+      expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+    },
+  });
+  return { url: appUrl(`/invite?token=${raw}`) };
 }
 
 /**
@@ -890,6 +945,8 @@ const handlers = {
   getUserIdByEmail,
   countAllYdocs,
   sweepTestData,
+  getInvites,
+  createTestInvite,
 };
 
 export type DbHandlers = typeof handlers;
