@@ -168,3 +168,20 @@ why it would go unnoticed.
 
 Leaning (1) for that reason. Either way the e2e spec should grow the three cases alongside
 the exact-match one it already asserts.
+
+---
+
+## Email/invites: deferred work (see docs/EMAIL.md for each item's design)
+
+Design and reasoning live in [docs/EMAIL.md](docs/EMAIL.md) §7 — this is a pointer, not a
+restatement, so it doesn't drift out of sync with that file.
+
+- Email verification (double opt-in) — not built at all this pass.
+- Bulk "send invites to selected users" on `/users`.
+- Auto-sign-in immediately after accepting an invite (blocked on the same Auth.js v5
+  server-action `signIn` limitation `src/app/sign-in/NOTES.md` documents).
+- Richer HTML mail templates — `SendMailInput.html` exists but nothing sets it yet.
+- A global hourly send budget (needs a counter table; today's per-address/per-user
+  cooldowns bound damage per victim but not total volume).
+- A scheduled sweep for an expired, never-re-invited invite's raw token — today it's only
+  nulled when that user is invited again.

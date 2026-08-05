@@ -9,6 +9,7 @@ import { coercePageSize, toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import { parseUsersFilters, type UsersFilters, type UsersSortKey } from "@/lib/users-query";
 import type { SortColumn } from "@/lib/table-sort";
+import { appUrl } from "@/lib/app-url";
 import UsersTable from "@/components/UsersTable";
 
 function buildFilterWhere(filters: UsersFilters): Prisma.UserWhereInput {
@@ -101,8 +102,13 @@ export default async function UsersPage({
       // Bytes column here (PLAN.md §17n). The hash is pulled in explicitly;
       // the bytes are unreachable from this query by construction.
       include: {
-        _count: { select: { postAuthors: true } },
+        _count: { select: { postAuthors: true, invites: true } },
         avatar: { select: { hash: true } },
+        invites: {
+          orderBy: { sentAt: "desc" },
+          take: 1,
+          select: { token: true, sentAt: true, clickedAt: true, acceptedAt: true, expiresAt: true, revokedAt: true },
+        },
       },
     }),
     prismaIncludingDeleted.user.count({ where }),
@@ -129,6 +135,26 @@ export default async function UsersPage({
     website: user.website,
     createdAt: user.createdAt,
     postCount: user._count.postAuthors,
+    inviteCount: user._count.invites,
+    lastInvite: user.invites[0]
+      ? {
+          // Resolved here, not client-side: APP_URL is a bare (non-
+          // NEXT_PUBLIC_) env var, so it's unreachable from "use client" code
+          // — see src/lib/app-url.ts. Guarded on expiry too: an invite never
+          // re-sent keeps its raw token past expiresAt (docs/EMAIL.md's
+          // residual-exposure note), and this column shouldn't present that
+          // as a live link.
+          url:
+            user.invites[0].token && user.invites[0].expiresAt > new Date()
+              ? appUrl(`/invite?token=${user.invites[0].token}`)
+              : null,
+          sentAt: user.invites[0].sentAt,
+          clickedAt: user.invites[0].clickedAt,
+          acceptedAt: user.invites[0].acceptedAt,
+          expiresAt: user.invites[0].expiresAt,
+          revokedAt: user.invites[0].revokedAt,
+        }
+      : null,
     deletedAt: user.deletedAt,
     deleted: user.deletedByUserId !== null,
   }));

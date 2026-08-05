@@ -17,6 +17,7 @@ import {
   updateUserContributorOrder,
   updateUserOrcid,
   updateUserWebsite,
+  sendUserInvite,
   deleteUser,
   restoreUser,
   bulkDeleteUsers,
@@ -75,6 +76,16 @@ export type UserRow = {
   website: string | null;
   createdAt: Date;
   postCount: number;
+  inviteCount: number;
+  lastInvite: {
+    /** Absolute /invite?token=… URL, resolved server-side; null once consumed. */
+    url: string | null;
+    sentAt: Date;
+    clickedAt: Date | null;
+    acceptedAt: Date | null;
+    expiresAt: Date;
+    revokedAt: Date | null;
+  } | null;
   deletedAt: Date | null;
   deleted: boolean;
 };
@@ -408,6 +419,118 @@ function ColorCell({ userId, color, run }: CellProps & { color: string }) {
   );
 }
 
+// Sending real mail to a real person is the one action on this table that
+// isn't undoable — every other one (role, policy, delete/restore) reverses.
+// window.confirm appears nowhere in this codebase, so the inline two-step
+// confirm SlugManager/ContributorPanel use is the pattern here too.
+function InviteCell({
+  userId,
+  email,
+  disabled,
+  run,
+}: {
+  userId: string;
+  email: string;
+  disabled: boolean;
+  run: (action: () => Promise<void>) => Promise<void>;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  function send() {
+    setConfirming(false);
+    setError(null);
+    startTransition(async () => {
+      try {
+        await run(async () => {
+          await sendUserInvite(userId);
+        });
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to send invite.");
+      }
+    });
+  }
+
+  if (confirming) {
+    return (
+      <span style={{ color: "#666" }}>
+        Send to {email}?{" "}
+        <button type="button" onClick={send} disabled={pending} style={{ fontWeight: "bold", color: "#006400" }}>
+          Yes
+        </button>{" "}
+        /{" "}
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          disabled={pending}
+          style={{ fontWeight: "bold", color: "#8b0000" }}
+        >
+          No
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <button type="button" onClick={() => setConfirming(true)} disabled={disabled || pending}>
+        Send invite
+      </button>
+      <CellError message={error} />
+    </>
+  );
+}
+
+// No component state needed — the raw token is server-sourced (row data), the
+// simplification the "store raw until consumed" choice buys (docs/EMAIL.md).
+function InviteUrlCell({
+  invite,
+  count,
+  dateFormat,
+}: {
+  invite: UserRow["lastInvite"];
+  count: number;
+  dateFormat: DateFormat;
+}) {
+  if (!invite) return null;
+
+  const title = `${count} sent`;
+
+  if (invite.url) {
+    return (
+      <input
+        readOnly
+        value={invite.url}
+        title={title}
+        onFocus={(e) => e.currentTarget.select()}
+        style={{ width: "100%", fontSize: "0.8rem" }}
+      />
+    );
+  }
+
+  let status: { text: string; color: string };
+  if (invite.acceptedAt) {
+    status = { text: `accepted ${formatDate(invite.acceptedAt, dateFormat)}`, color: "#0a5" };
+  } else if (invite.revokedAt) {
+    status = { text: "revoked", color: "#666" };
+  } else if (invite.clickedAt) {
+    status = { text: `clicked ${formatDate(invite.clickedAt, dateFormat)}`, color: "#666" };
+  } else if (invite.expiresAt <= new Date()) {
+    status = { text: "expired", color: "#666" };
+  } else {
+    status = { text: `sent ${formatDate(invite.sentAt, dateFormat)}`, color: "#666" };
+  }
+
+  return (
+    <span title={title} style={{ color: status.color }}>
+      {status.text}
+    </span>
+  );
+}
+
 const SORTABLE_KEYS = [
   "name",
   "email",
@@ -710,6 +833,32 @@ export default function UsersTable({
         />
       ),
     },
+    // Invites (docs/EMAIL.md), both hidden by default. Neither sorts: one is
+    // a button, the other is a URL that only exists while the invite is
+    // still live — an action button and a transient value are each, on
+    // their own, reasons ColumnSpec's own doc gives for skipping sortKey.
+    {
+      key: "invite",
+      header: "Send invite",
+      defaultHidden: true,
+      nowrap: true,
+      headerTitle: "Emails this user a link to set a password and claim their account",
+      cell: (row) => (
+        <InviteCell
+          userId={row.id}
+          email={row.email}
+          disabled={row.deleted}
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "inviteUrl",
+      header: "Invite URL",
+      defaultHidden: true,
+      headerTitle: "The most recent invite's link, until it's accepted or revoked",
+      cell: (row) => <InviteUrlCell invite={row.lastInvite} count={row.inviteCount} dateFormat={dateFormat} />,
+    },
     // Defaulted hidden (§16l/§16i): the raw timestamp behind the existing
     // Deleted action column's boolean.
     {
@@ -807,7 +956,9 @@ export default function UsersTable({
           <p style={{ marginTop: 8 }}>
             <strong>Rows/page</strong> is that account&apos;s own default page size for every admin table. A{" "}
             <code>?pageSize=</code> in the URL overrides it for that navigation only, without changing the stored
-            preference (PLAN.md §16b). <strong>Deleted at</strong> is hidden by default (Columns picker, above).
+            preference (PLAN.md §16b). <strong>Deleted at</strong>, <strong>Send invite</strong> and{" "}
+            <strong>Invite URL</strong> are hidden by default (Columns picker, above). The invite URL disappears
+            once that invite is accepted or revoked — re-showing it means sending again.
           </p>
         }
       />

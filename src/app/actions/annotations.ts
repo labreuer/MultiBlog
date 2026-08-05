@@ -7,6 +7,7 @@ import { canUserReadDoc } from "@/lib/doc-authz";
 import { applyAnnotationMark, flushAnnotationCache, removeAnnotationMark } from "@/lib/annotation-admin";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
+import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
@@ -167,7 +168,7 @@ export async function postAnnotation(opts: {
     if (doc) {
       const raisedBy = session.user.name ?? session.user.email ?? "Someone";
       const subject = `${raisedBy} raised an annotation on "${docTitleOrFallback(doc.title)}"`;
-      const text = `${bodyText}\n\n${process.env.APP_URL ?? "http://localhost:3000"}/doc/${doc.slug}`;
+      const text = `${bodyText}\n\n${appUrl(`/doc/${doc.slug}`)}`;
       // One recipient per byline author, not a single multi-recipient
       // message — same reasoning src/app/actions/forgot-password.ts's own
       // one-off sendMail call has no need to weigh, but real here: nothing

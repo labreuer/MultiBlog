@@ -311,6 +311,10 @@ NEXT_PUBLIC_SITE_TITLE="<your blog's real name>"   # optional — omit to keep "
 SITE_BANNER="/banner.png"                   # optional — landing-page banner; omit to show none
 SITE_BANNER_ASPECT="4724 / 1609"            # optional — defaults to "3 / 1"
 SITE_BANNER_ALT=""                          # optional — empty is correct for a decorative banner
+
+RESEND_API_KEY="re_..."                     # optional — omit to keep sendMail() logging instead of sending
+MAIL_FROM="MultiBlog <noreply@your-domain>" # optional — required alongside RESEND_API_KEY to actually send
+RESEND_INVITE_TEMPLATE_ID="tmpl_..."        # optional — invite email only; omit for a plain text/subject send
 ```
 
 > **`AUTH_TRUST_HOST`/`AUTH_URL` are required behind a reverse proxy.** `src/lib/auth.ts`
@@ -345,9 +349,15 @@ The landing page's preamble paragraph(s) are separate from all of this — not a
 the body of whichever `Doc` is titled exactly `FRONT PAGE` (PLAN.md §17c). Seed one after the
 first deploy with `npx tsx scripts/seed-front-page.ts` (create-if-absent, safe to re-run).
 
-No email provider is wired (`sendMail()` is a logging stub), so password-reset emails aren't
-actually sent — the reset link just gets logged. `APP_URL` still matters for the RSS feed's
-absolute links and that logged link text.
+`RESEND_API_KEY`/`MAIL_FROM` (`src/lib/mail.ts`) wire real delivery through Resend — reset
+links, admin-issued invite links, and RAISED-annotation notifications all actually send once
+both are set; leaving either unset keeps every environment on the original logging stub, so
+a from-scratch deploy still works with no mail configuration at all. `APP_URL` matters
+regardless, for the RSS feed's absolute links and every mailed link's URL. **Before setting a
+real key, add the sending domain's SPF/DKIM/DMARC records** — Resend's dashboard emits the
+exact TXT records once the domain is added there, and this is the single biggest determinant
+of whether mail reaches an inbox rather than a spam folder or a hard rejection. Full design,
+the deliverability argument, and the invite feature: [docs/EMAIL.md](docs/EMAIL.md).
 
 `AUTH_SECRET` also signs the short-lived collab JWTs (`src/lib/collab-token.ts`), so the app
 and collab services **must share the same value** — both units point at this one `.env`.
@@ -680,6 +690,11 @@ BYTEA and `postCollabUpdate` log are included in a normal `pg_dump`, so live edi
 survives a restore. So are contributor avatars (`user_avatar.bytes`, PLAN.md §17n) — roughly
 5KB each, and deliberately in Postgres rather than object storage so one dump remains the
 whole backup at this scale.
+
+`user_invite.token` holds a live invite's raw link in plaintext (docs/EMAIL.md §5's
+deliberate trade — the value is nulled once accepted/revoked, but a pending invite's dump
+carries a working credential for as long as it stays unconsumed), so treat these dumps with
+the same care as `.env` below, not merely as application data.
 
 A `pg_dump`-only backup strategy misses whatever lives only on the box's filesystem, not in
 Postgres — a full recovery needs these backed up too:

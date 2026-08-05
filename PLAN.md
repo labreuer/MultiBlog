@@ -783,11 +783,13 @@ and **anchor remapping across revisions (steps 6–7)**.
 
 **Defaults I've assumed (say if you want different)**
 - Trust threshold = 3 approved comments before auto-approval (configurable site-wide).
-- Email is collected but not verified (no double opt-in) in v1.
+- Email is collected but not verified (no double opt-in) in v1 — deliberately still
+  deferred; see [docs/EMAIL.md](docs/EMAIL.md) §7 for the design and why.
 - Bylines are chosen from real user accounts (so author pages work), not free text.
 
 **Nothing blocking left.** All six original questions plus concurrency are settled. Remaining
-calls are tuning (trust threshold, email verification) and can change anytime.
+calls are tuning (trust threshold, email verification — [docs/EMAIL.md](docs/EMAIL.md) §7)
+and can change anytime.
 
 ---
 
@@ -1160,12 +1162,19 @@ Git history carries per-step detail.
       already-DETACHED fields. Purely to avoid a repeated no-op write on every future publish
       for as long as a post keeps a stale detached thread; behavior is identical either way,
       since `CommentThread` has no `updatedAt` for the no-op to have disturbed.
+21. **Real email delivery and admin-issued invites** — `sendMail()` now sends through
+    Resend (an unconfigured environment still just logs), and a new `user_invite` table
+    lets an admin email an already-created `User` a link to set a password and claim the
+    account, from two new `/users` columns. Design, the deliverability argument, and
+    what's still deferred (email verification, bulk invites): [docs/EMAIL.md](docs/EMAIL.md).
 
 **Deliberate deviations from §2–§6**
 
 - Comment bodies are **plain text** (`{"text": ...}` JSON), not rich TipTap content — no
   XSS surface, so the DOMPurify/strict-schema work is deferred until rich comments happen.
-- Email delivery is a **console-log stub** (`src/lib/mail.ts`) behind a `sendMail()` seam.
+- Email delivery is real (Resend, behind the same `sendMail()` seam — an unconfigured
+  environment still logs instead of sending), and admin-issued email invites let an
+  already-created `User` row claim its account. [docs/EMAIL.md](docs/EMAIL.md).
 - The revision **diff view** (history page) still uses a self-contained word-level LCS text
   diff (`src/lib/diff.ts`), not the ProseMirror-aware diff machinery — that's cosmetic (plain
   text is good enough for a human reading a diff) and unrelated to anchor remapping, which
@@ -2439,9 +2448,10 @@ never puts inline marks" requirement is what makes it visible enough to fix alon
 transition (moving an already-marked annotation back to private has to remove the mark too, for
 the same "DRAFT never has one" invariant).
 
-`sendMail` (`src/lib/mail.ts`) is a console-log stub today, not a real provider — RAISED is wired
-to call it per byline author and stamp `raisedAt` so the UI has something real to show, not an
-in-app notification inbox nobody asked for.
+`sendMail` (`src/lib/mail.ts`) is real delivery (Resend) behind the seam described in
+[docs/EMAIL.md](docs/EMAIL.md) — RAISED is wired to call it per byline author and stamp
+`raisedAt` so the UI has something real to show, not an in-app notification inbox nobody
+asked for.
 
 ### 13e. The formatting bar: hidden by default
 
@@ -2789,7 +2799,7 @@ itself. Two segments sidestep it entirely, and leave room for a future `/side-by
 renders a "pick the other doc" picker. Verified against `next@16.2.11`.
 
 **Kebab-case, because every other multi-word route here is** — `ydoc-debug`, `site-settings`,
-`forgot-password`. A URL is expensive to change later.
+`forgot-password`, `invite` ([docs/EMAIL.md](docs/EMAIL.md)). A URL is expensive to change later.
 
 `"side-by-side"` goes into `RESERVED_SLUGS` (`src/lib/slug.ts`). `src/app/[slug]/page.tsx` is the
 post catch-all, and `changeDocSlug` checks the same set, so without this a post or doc slugged

@@ -62,6 +62,10 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "contributorBlurb", label: "Contributor blurb", defaultHidden: true },
     { key: "orcid", label: "ORCID iD", defaultHidden: true },
     { key: "website", label: "Website", defaultHidden: true },
+    // Invites (docs/EMAIL.md), both defaulted hidden — same reasoning as the
+    // contributor fields above.
+    { key: "invite", label: "Send invite", defaultHidden: true },
+    { key: "inviteUrl", label: "Invite URL", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   comments: [

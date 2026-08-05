@@ -25,6 +25,7 @@ import type {
   DocLinkFields,
   ContributorFields,
   AvatarFacts,
+  TestInvite,
 } from "./db-worker";
 
 export type {
@@ -41,6 +42,7 @@ export type {
   DocLinkFields,
   ContributorFields,
   AvatarFacts,
+  TestInvite,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
@@ -135,6 +137,13 @@ export const deleteTestDoc = (...args: Parameters<DbHandlers["deleteTestDoc"]>):
 
 export const clearColumnOrder = (...args: Parameters<DbHandlers["clearColumnOrder"]>): Promise<void> =>
   call("clearColumnOrder", ...args);
+
+export const getInvites = (...args: Parameters<DbHandlers["getInvites"]>): Promise<TestInvite[]> =>
+  call("getInvites", ...args);
+
+export const createTestInvite = (
+  ...args: Parameters<DbHandlers["createTestInvite"]>
+): Promise<{ url: string }> => call("createTestInvite", ...args);
 
 export const getSiteDefaultColumnOrder = (
   ...args: Parameters<DbHandlers["getSiteDefaultColumnOrder"]>

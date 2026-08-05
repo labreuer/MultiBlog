@@ -2,7 +2,7 @@
 
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { hashResetToken } from "@/lib/tokens";
+import { hashToken } from "@/lib/tokens";
 
 export type ResetPasswordState = { error?: string; success?: boolean };
 
@@ -21,7 +21,7 @@ export async function resetPassword(
   }
 
   const record = await prisma.passwordResetToken.findUnique({
-    where: { tokenHash: hashResetToken(token) },
+    where: { tokenHash: hashToken(token) },
   });
   if (!record || record.expiresAt < new Date()) {
     return { error: "This reset link is invalid or has expired." };
