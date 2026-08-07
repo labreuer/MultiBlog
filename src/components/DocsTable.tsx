@@ -77,7 +77,7 @@ export default function DocsTable({
   totalCount: number;
   filters: DocsFilters;
   prefs: TablePrefs;
-  /** Whether to render the ADMIN-only "Show all docs" checkbox (PLAN.md §12p).
+  /** Whether to render the ADMIN-only "Show all docs" checkbox (docs/PERMISSIONS.md).
    * Without it the table lists what this viewer can already reach: their own
    * byline-authored docs, plus every SHARED doc for an ADMIN/EDITOR. */
   isAdmin: boolean;
@@ -278,11 +278,16 @@ export default function DocsTable({
 
       <ShowDeletedToggle checked={filters.deleted} onChange={(deleted) => updateFilters({ deleted })} />
       {isAdmin && (
-        <ShowDeletedToggle
-          checked={filters.showAllDocs}
-          onChange={(showAllDocs) => updateFilters({ showAllDocs })}
-          label="Show all docs (bypasses PRIVATE authorship for this listing only)"
-        />
+        <p className={styles.showAllDocsRow}>
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.showAllDocs}
+              onChange={(e) => updateFilters({ showAllDocs: e.target.checked })}
+            />{" "}
+            Show all docs (bypasses PRIVATE authorship for this listing only)
+          </label>
+        </p>
       )}
 
       <FilterHelp
@@ -300,7 +305,7 @@ export default function DocsTable({
             and <strong>Deleted at</strong> are hidden by default (Columns picker, above). This listing shows every{" "}
             <strong>SHARED</strong> doc to an ADMIN or EDITOR, plus the <strong>PRIVATE</strong> docs you carry a
             byline on. ADMIN accounts also get a &quot;Show all docs&quot; checkbox above, which adds everyone
-            else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (PLAN.md §12p).
+            else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md).
           </p>
         }
       />

@@ -8,3 +8,7 @@
 .titleCell:hover a {
   text-decoration: underline;
 }
+
+.showAllDocsRow {
+  margin-top: 8px;
+}
