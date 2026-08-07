@@ -132,6 +132,9 @@ export const deleteTestPost = (...args: Parameters<DbHandlers["deleteTestPost"]>
 export const createTestDoc = (...args: Parameters<DbHandlers["createTestDoc"]>): Promise<TestDoc> =>
   call("createTestDoc", ...args);
 
+export const addTestDocAuthor = (...args: Parameters<DbHandlers["addTestDocAuthor"]>): Promise<void> =>
+  call("addTestDocAuthor", ...args);
+
 export const deleteTestDoc = (...args: Parameters<DbHandlers["deleteTestDoc"]>): Promise<void> =>
   call("deleteTestDoc", ...args);
 
@@ -183,6 +186,10 @@ export const countDocYdocUpdates = (...args: Parameters<DbHandlers["countDocYdoc
 
 export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotationStates"]>): Promise<AnnotationState[]> =>
   call("getAnnotationStates", ...args);
+
+export const createTestAnnotation = (
+  ...args: Parameters<DbHandlers["createTestAnnotation"]>
+): Promise<{ id: string }> => call("createTestAnnotation", ...args);
 
 export const createComment = (...args: Parameters<DbHandlers["createComment"]>) => call("createComment", ...args);
 

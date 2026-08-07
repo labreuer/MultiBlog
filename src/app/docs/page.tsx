@@ -2,8 +2,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { canManageDocs } from "@/lib/doc-authz";
-import { canEditAnyPost } from "@/lib/authz";
+import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
+import { isAdmin } from "@/lib/authz";
 import { createDoc } from "@/app/actions/docs";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { toURLSearchParams } from "@/lib/table-query";
@@ -76,12 +76,29 @@ export default async function DocsPage({
   const prefs = await getTablePrefs(session.user.id, "docs");
   const filters = parseDocsFilters(urlSearchParams, prefs);
 
-  const canEditAny = canEditAnyPost(session.user.role);
-  const where: Prisma.DocWhereInput = {
-    AND: [
-      canEditAny ? {} : { authors: { some: { userId: session.user.id } } },
-      buildFilterWhere(filters),
+  // Which rows this table selects (docs/PERMISSIONS.md). It is its own query rather
+  // than a call into doc-authz.ts, so it has to restate that module's rule
+  // itself and stay in step with it:
+  //   - a SHARED doc is listed for any ADMIN/EDITOR, byline or not, matching
+  //     the doc canUserEditDoc lets them open and edit straight from a URL —
+  //     which is what keeps the table from hiding a doc its viewer can edit;
+  //   - a PRIVATE doc is listed for its byline authors;
+  //   - ADMIN alone can drop that scoping for this listing with the "Show all
+  //     docs" checkbox (?showAllDocs=1), an explicit per-visit opt-in stored
+  //     nowhere. It widens this query and only this query: a PRIVATE doc the
+  //     admin doesn't author still goes through canUserReadDoc/canUserEditDoc
+  //     on its own routes, which refuse it.
+  const viewerIsAdmin = isAdmin(session.user.role);
+  const viewerCanEditAnyShared = canEditAnySharedDoc(session.user.role);
+  const bypassAuthorScoping = viewerIsAdmin && filters.showAllDocs;
+  const authorScope: Prisma.DocWhereInput = {
+    OR: [
+      { authors: { some: { userId: session.user.id } } },
+      ...(viewerCanEditAnyShared ? [{ visibility: "SHARED" as const }] : []),
     ],
+  };
+  const where: Prisma.DocWhereInput = {
+    AND: [bypassAuthorScoping ? {} : authorScope, buildFilterWhere(filters)],
   };
 
   const [docs, totalCount] = await Promise.all([
@@ -133,11 +150,15 @@ export default async function DocsPage({
     length: doc.proseJsonLength,
     deletedAt: doc.deletedAt,
     deleted: doc.deletedByUserId !== null,
-    // Mirrors canUserEditDoc (src/lib/doc-authz.ts) without a per-row DB
-    // round-trip — canEditAny already decided the WHERE clause above (an
-    // AUTHOR only ever sees their own docs to begin with), so this is just
-    // that same check restated per row for the Edit column.
-    canEdit: canEditAny || doc.authors.some((a) => a.userId === session.user.id),
+    // Whether the Edit column renders a link, decided here rather than per
+    // row through canUserEditDoc (src/lib/doc-authz.ts), which costs a query
+    // apiece — these two terms are that function's rule. The "Show all docs"
+    // override has no say: it widens which rows are listed, not who may edit
+    // them, so a PRIVATE doc it brings into view carries no Edit link and the
+    // column agrees with what /doc/[slug]/edit would answer.
+    canEdit:
+      doc.authors.some((a) => a.userId === session.user.id) ||
+      (viewerCanEditAnyShared && doc.visibility === "SHARED"),
   }));
 
   return (
@@ -157,7 +178,7 @@ export default async function DocsPage({
           </button>
         </form>
       </div>
-      <DocsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
+      <DocsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} isAdmin={viewerIsAdmin} />
     </main>
   );
 }

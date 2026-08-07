@@ -46,16 +46,32 @@ const SORT_KEYS: readonly DocsSortKey[] = [
 ];
 export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "created", dir: "desc" }];
 
-export type DocsFilters = BaseFilters<DocsSortKey>;
+// showAllDocs (docs/PERMISSIONS.md) — an ADMIN-only opt-in that widens the listing
+// to every doc, including PRIVATE ones this user has no byline on. Parsed
+// unconditionally here, like any other filter; src/app/docs/page.tsx is where
+// the signed-in user's role is checked before it counts for anything, so a
+// non-admin appending ?showAllDocs=1 by hand gets the ordinary scoped
+// listing. It lives here rather than in the shared BaseFilters
+// (table-query.ts) because /docs is the only admin table whose rows carry an
+// authorship model at all.
+export type DocsFilters = BaseFilters<DocsSortKey> & {
+  showAllDocs: boolean;
+};
 
 function spec(prefs: TablePrefs): BaseFilterSpec<DocsSortKey> {
   return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
 export function parseDocsFilters(searchParams: URLSearchParams, prefs: TablePrefs): DocsFilters {
-  return parseBaseFilters(searchParams, spec(prefs));
+  return {
+    ...parseBaseFilters(searchParams, spec(prefs)),
+    showAllDocs: searchParams.get("showAllDocs") === "1",
+  };
 }
 
 export function buildDocsQueryString(filters: DocsFilters, extra: URLSearchParams, prefs: TablePrefs): string {
-  return buildBaseQueryString(filters, extra, spec(prefs)).toString();
+  const params = buildBaseQueryString(filters, extra, spec(prefs));
+  params.delete("showAllDocs");
+  if (filters.showAllDocs) params.set("showAllDocs", "1");
+  return params.toString();
 }

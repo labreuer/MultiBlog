@@ -347,6 +347,21 @@ export async function createTestDoc(opts: {
   return { id: cachedDoc.id, slug: cachedDoc.slug, title: cachedDoc.title };
 }
 
+/**
+ * Adds a co-author to an existing test doc. A PRIVATE doc admits its listed
+ * authors alone, whatever the role (docs/PERMISSIONS.md), so a spec putting two
+ * identities in one doc's editor — secondUser() alongside a fixture's
+ * draftDoc, say — has to give the second one a byline of its own first.
+ */
+export async function addTestDocAuthor(docId: string, email: string): Promise<void> {
+  assertSafe(email);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  const maxOrder = await prisma.docAuthor.aggregate({ where: { docId }, _max: { bylineOrder: true } });
+  await prisma.docAuthor.create({
+    data: { docId, userId: user.id, bylineOrder: (maxOrder._max.bylineOrder ?? -1) + 1 },
+  });
+}
+
 export async function deleteTestDoc(idOrSlug: string): Promise<void> {
   const doc = await prisma.doc.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
@@ -624,6 +639,29 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
     anchored: markedIds.has(a.id),
     deletedAt: a.deletedAt?.toISOString() ?? null,
   }));
+}
+
+/**
+ * A bare LIVE annotation row, straight into the DB.
+ *
+ * No mark is applied to the doc's ydoc, so this annotation is document-level
+ * rather than anchored (PLAN.md §12i) and `/annotations` renders an empty
+ * Quote for it. That is enough for anything asserting on which *rows* that
+ * table lists; a test that needs a real anchor wants the UI flow in
+ * doc.spec.ts instead, which needs the collab server running.
+ */
+export async function createTestAnnotation(opts: {
+  docId: string;
+  authorEmail: string;
+  bodyText: string;
+}): Promise<{ id: string }> {
+  const { docId, authorEmail, bodyText } = opts;
+  assertSafe(authorEmail);
+  const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
+  const annotation = await prisma.annotation.create({
+    data: { docId, userId: author.id, bodyText, status: "LIVE" },
+  });
+  return { id: annotation.id };
 }
 
 /**
@@ -914,6 +952,7 @@ const handlers = {
   createTestPost,
   deleteTestPost,
   createTestDoc,
+  addTestDocAuthor,
   deleteTestDoc,
   getDocState,
   getContributorFields,
@@ -928,6 +967,7 @@ const handlers = {
   getDocLinkGroupIds,
   getDocLinkFields,
   getAnnotationStates,
+  createTestAnnotation,
   createComment,
   createQuoteThread,
   getThread,

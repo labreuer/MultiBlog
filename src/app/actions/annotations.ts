@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
+import { isAdmin } from "@/lib/authz";
 import { applyAnnotationMark, flushAnnotationCache, removeAnnotationMark } from "@/lib/annotation-admin";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
@@ -250,7 +251,7 @@ async function requireOwnOrAdmin(annotationId: string) {
     throw new Error("Annotation not found.");
   }
   const isOwn = annotation.userId === session.user.id;
-  if (session.user.role !== "ADMIN" && !isOwn) {
+  if (!isAdmin(session.user.role) && !isOwn) {
     throw new Error("You don't have permission to modify this annotation.");
   }
   return { session, annotation };

@@ -35,3 +35,10 @@ export const DOC_MANAGER_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
 export function canManageDocs(role: Role): boolean {
   return DOC_MANAGER_ROLES.includes(role);
 }
+
+// canEditAnySharedDoc is deliberately *not* here, though it is just as pure a
+// role check as these. What earns a place in this file is a client consumer:
+// the two doc predicates above are here because SiteHeader needs them, not
+// because they concern docs. Nothing in the browser asks who may edit a
+// SHARED doc without a byline, so that one lives beside the rest of the doc
+// authorization rules in doc-authz.ts instead.

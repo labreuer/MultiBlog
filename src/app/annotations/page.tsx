@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
-import { canEditAnyPost } from "@/lib/authz";
 import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import type { Prisma } from "@/generated/prisma/client";
@@ -101,7 +100,21 @@ export default async function AnnotationsPage({
       // exclude it outright rather than relying on canManageDocs to gate
       // the whole page and stop there.
       { status: { not: "DRAFT" } },
-      canEditAnyPost(session.user.role) ? {} : { doc: { authors: { some: { userId: session.user.id } } } },
+      // Scoped to the docs this viewer may *read* — canUserReadDoc's rule
+      // (src/lib/doc-authz.ts) restated as a `where`, since Prisma has no way
+      // to share a predicate between a per-row check and a query filter:
+      // SHARED docs for anyone with canViewDocs, which the canManageDocs page
+      // gate above already implies, plus this viewer's own byline-authored
+      // PRIVATE ones.
+      //
+      // Readability rather than manage-ability is the bound that matters here
+      // because of what the query below selects: doc.proseJson, rendered as
+      // the Quote column, so a wider scope would put an excerpt of a PRIVATE
+      // doc's body in front of someone /doc/[slug] refuses outright
+      // (docs/PERMISSIONS.md). canUserAccessAnnotationYdoc
+      // (src/lib/annotation-authz.ts) delegates to canUserReadDoc for the
+      // same reason.
+      { OR: [{ doc: { authors: { some: { userId: session.user.id } } } }, { doc: { visibility: "SHARED" } }] },
       parseDeepLinkWhere(urlSearchParams),
     ],
   };

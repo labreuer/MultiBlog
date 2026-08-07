@@ -3,6 +3,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
+import { isAdmin } from "@/lib/authz";
 import { SAFE_COLOR } from "@/lib/safe-css";
 import type { DocLinkMark } from "@/lib/doc-link-anchor";
 
@@ -88,7 +89,7 @@ async function requireOwnOrAdminLink(linkId: string) {
     throw new Error("Doc link not found.");
   }
   const isOwn = link.userId === session.user.id;
-  if (session.user.role !== "ADMIN" && !isOwn) {
+  if (!isAdmin(session.user.role) && !isOwn) {
     throw new Error("You don't have permission to modify this doc link.");
   }
   return { session, link };
@@ -157,7 +158,7 @@ async function requireOwnOrAdminGroup(groupId: string) {
     throw new Error("Doc link group not found.");
   }
   const isOwn = group.userId === session.user.id;
-  if (session.user.role !== "ADMIN" && !isOwn) {
+  if (!isAdmin(session.user.role) && !isOwn) {
     throw new Error("You don't have permission to modify this doc link group.");
   }
   return { session, group };

@@ -3,6 +3,10 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+// Aliased because the local `isAdmin` below is the resolved boolean for this
+// viewer; role-checks.ts is safe in a client bundle by design (its own header
+// says so — authz.ts is not, since it imports prisma).
+import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import CommentForm from "./CommentForm";
 import { deleteComment } from "@/app/actions/comments";
 import styles from "./CommentNode.module.css";
@@ -47,7 +51,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
-  const isAdmin = session?.user?.role === "ADMIN";
+  const isAdmin = !!session?.user && isAdminRole(session.user.role);
   const [replying, setReplying] = useState(false);
   const [posted, setPosted] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);

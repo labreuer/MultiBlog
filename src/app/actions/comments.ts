@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canUserEditPost } from "@/lib/authz";
+import { canUserEditPost, isAdmin } from "@/lib/authz";
 import { derivePostStatus } from "@/lib/post-status";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
@@ -140,7 +140,7 @@ export async function submitComment(
   }
 
   const trimmedBody = body.trim();
-  const commenterIsAdmin = session?.user?.role === "ADMIN";
+  const commenterIsAdmin = !!session?.user && isAdmin(session.user.role);
   const isSpam = !commenterIsAdmin && (await checkSpam({ body: trimmedBody, displayName, email, ipAddress }));
 
   const siteSettings = await getSiteSettings();
@@ -221,7 +221,7 @@ async function deleteOne(userId: string, role: Role, commentId: string) {
   }
 
   const isOwnComment = comment.commenter.userId === userId;
-  if (role !== "ADMIN" && !isOwnComment) {
+  if (!isAdmin(role) && !isOwnComment) {
     throw new Error("You don't have permission to delete this comment.");
   }
 

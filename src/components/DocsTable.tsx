@@ -71,11 +71,16 @@ export default function DocsTable({
   totalCount,
   filters,
   prefs,
+  isAdmin,
 }: {
   rows: DocRow[];
   totalCount: number;
   filters: DocsFilters;
   prefs: TablePrefs;
+  /** Whether to render the ADMIN-only "Show all docs" checkbox (docs/PERMISSIONS.md).
+   * Without it the table lists what this viewer can already reach: their own
+   * byline-authored docs, plus every SHARED doc for an ADMIN/EDITOR. */
+  isAdmin: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -272,6 +277,18 @@ export default function DocsTable({
       />
 
       <ShowDeletedToggle checked={filters.deleted} onChange={(deleted) => updateFilters({ deleted })} />
+      {isAdmin && (
+        <p className={styles.showAllDocsRow}>
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.showAllDocs}
+              onChange={(e) => updateFilters({ showAllDocs: e.target.checked })}
+            />{" "}
+            Show all docs (bypasses PRIVATE authorship for this listing only)
+          </label>
+        </p>
+      )}
 
       <FilterHelp
         sortKeys={SORTABLE_KEYS}
@@ -285,7 +302,10 @@ export default function DocsTable({
             name. <strong>Length</strong> is a
             stored character count of the document body, measured in Postgres and kept current by a trigger, so sorting
             by it costs no more than sorting by a date (PLAN.md §16l). <strong>Slug</strong>, <strong>Updated</strong>{" "}
-            and <strong>Deleted at</strong> are hidden by default (Columns picker, above).
+            and <strong>Deleted at</strong> are hidden by default (Columns picker, above). This listing shows every{" "}
+            <strong>SHARED</strong> doc to an ADMIN or EDITOR, plus the <strong>PRIVATE</strong> docs you carry a
+            byline on. ADMIN accounts also get a &quot;Show all docs&quot; checkbox above, which adds everyone
+            else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md).
           </p>
         }
       />
