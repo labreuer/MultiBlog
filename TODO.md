@@ -185,3 +185,136 @@ restatement, so it doesn't drift out of sync with that file.
   cooldowns bound damage per victim but not total volume).
 - A scheduled sweep for an expired, never-re-invited invite's raw token — today it's only
   nulled when that user is invited again.
+
+---
+
+## `npm run e2e` fails ~1 run in 2 on a `useSession` 500 — the 2-worker mitigation has decayed
+
+**Status:** known failure mode with an existing mitigation that no longer holds. Not an app
+defect — every occurrence passes in isolation, and nothing here reaches production.
+
+### This is already documented, in `playwright.config.ts` — not CLAUDE.md
+
+Worth stating plainly because it is easy to go looking in the wrong file. `playwright.config.ts`
+lines 17–24 name this exact symptom and record the measurement behind `workers: 2`:
+
+> Two, not three. Three workers overload the *dev server*, not the machine: measured symptoms
+> were a public page 500ing with next-auth's "useSession must be wrapped in a
+> `<SessionProvider />`" during SSR, and server actions arriving with truncated bodies
+> ("Unexpected end of JSON input" on `/posts/[id]/edit`), neither reproducible in isolation and
+> neither an app defect. Failure rate was roughly 1 full run in 3.5 at three workers, 0 in 8 at
+> two — for the same ~50s wall clock, because the dev server is the bottleneck rather than the
+> parallelism.
+
+CLAUDE.md's *Checks & verification* section documents a **different** dev-server failure — a
+killed `next dev` poisoning `.next/dev` so the next start hangs compiling
+`/api/auth/[...nextauth]`, killing every spec in `auth.setup.ts`. Same neighbourhood, different
+fault: that one hangs and takes down the whole run, this one 500s a single page render.
+
+### The mechanism, verified against the installed package
+
+`node_modules/next-auth/react.js` (v5 beta):
+
+```js
+export const SessionContext = React.createContext?.(undefined);
+
+export function useSession(options) {
+    if (!SessionContext) {
+        throw new Error("React Context is unavailable in Server Components");   // :72
+    }
+    const value = React.useContext(SessionContext);
+    if (!value && process.env.NODE_ENV !== "production") {
+        throw new Error("[next-auth]: `useSession` must be wrapped in a <SessionProvider />"); // :77
+    }
+```
+
+Two things follow. The `:77` throw is **dev-only** by its own guard, which is why this has never
+been seen under `web-prod`. And the app's wiring is not at fault: `SessionProvider` wraps
+`{children}` in the root layout (`src/app/layout.tsx:34`), and `CommentForm`
+(`src/components/CommentForm.tsx:1,29`) is a plain `"use client"` component calling `useSession()`
+unconditionally. Under load the *consumer* transiently resolves a context the *provider* never
+wrote to — a compile/module-graph race inside `next dev`, not a missing provider.
+
+### What it looks like when it fires
+
+Always the same shape: a public post page (`/[slug]`) 500s server-side, and `gotoOk`
+(`e2e/fixtures.ts:209`) turns that into a readable failure by embedding the response body:
+
+```
+Error: GET /<slug> returned 500, expected 200. Response body:
+  …
+    at useSession (.next/dev/server/chunks/ssr/node_modules_….js:420:15)
+    at CommentForm (.next/dev/server/chunks/ssr/[root-of-the-server]_….js:612:183)
+    at gotoOk (e2e/fixtures.ts:214:11)
+    at e2e/publish.spec.ts:73:5
+```
+
+`gotoOk` is doing its job here — a bare status assertion would report only `500`. Keep it.
+
+### Why it is back: the mitigation was calibrated against a much smaller suite
+
+The "0 in 8 at two workers" measurement was taken at commit `968e077` (2026-07-25), when `e2e/`
+held **5 spec files**. It now holds **13** (89 tests across 15 files, counting `auth.setup.ts`
+and `cleanup.teardown.ts`), and a full run takes ~2.2–2.9 min rather than the ~50s that comment
+cites. Same two workers, roughly triple the sustained
+compile-and-render load on one `next dev` — so the headroom the worker count was chosen to buy
+has been spent by the suite growing into it.
+
+Observed 2026-08-06 across roughly six full-suite runs at `workers: 2`: two fully green, and at
+least three ending with `publish.spec.ts:48` ("edits made after publishing only reach the public
+page on republish") failing this way, each passing immediately when re-run alone.
+
+**Not to be confused with the `admin-table.spec.ts:476` failures from the same day**, which
+looked like the same thing and were not. Capturing that one's `error-context.md` showed an
+ordinary assertion diff — an `E2E doc …` row from another worker's fixture appearing between two
+of the three `/docs` page loads that test compared for exact equality — i.e. a cross-worker race
+on ambient rows, in the test itself, with no 500 and no `useSession` anywhere. Fixed by pinning
+that assertion to two docs the test creates and filters to with `?q=`. Worth recording as the
+cautionary case: two unrelated faults in one suite, both intermittent, both cleared by an
+isolated re-run, and the only thing that told them apart was reading the captured body.
+
+### Options, roughly in order of cost
+
+1. **`workers: 1` locally.** Certain to fix it; costs wall-clock on a suite that is already the
+   slowest check. Measure first — the config's own point is that the dev server, not the
+   parallelism, is the bottleneck, so 1 worker may cost far less than 2× and might even be near
+   parity now.
+2. **Run the suite against `next start`, not `next dev`.** Removes the whole class: the `:77`
+   throw is compiled out under `NODE_ENV=production`, and there is no on-demand compilation to
+   race. `.claude/launch.json` already defines `web-prod` (`next start` on :3001) for exactly the
+   "dev doesn't behave like prod" family of problems. Costs a `npm run build` before each run and
+   loses the fast edit-rerun loop, so it likely wants to be a second mode (`npm run e2e:prod`)
+   rather than a replacement — and it is the shape CI would want anyway.
+3. **Targeted retry.** `retries: 1` would paper over it, and `playwright.config.ts:27` explicitly
+   refuses that: *"a retry that turns a red run green hides exactly the collab/WS timing
+   regressions this suite exists to catch."* Do not do this without revisiting that decision on
+   its own terms.
+4. **Upstream.** Whether next-auth v5 beta still resolves `SessionContext` this way is worth a
+   look before building anything — `next-auth@^5.0.0-beta.32` is pinned to a beta, and this is
+   the kind of thing a later beta fixes outright.
+
+### Which throw it is — resolved 2026-08-06
+
+The `:77` one, **`[next-auth]: useSession must be wrapped in a <SessionProvider />`** — the
+same one `playwright.config.ts` recorded for the 3-worker era. Captured from a
+`publish.spec.ts:48` failure's `error-context.md`, whose bundled frame
+(`node_modules_….js:420:15`) lands between these two lines of the emitted chunk:
+
+```js
+418 | const value = …["useContext"](SessionContext);
+419 | if (!value && ("TURBOPACK compile-time value", "development") !== "production") {
+```
+
+So `SessionContext` is truthy and `useContext` returned undefined: a **context-value race**,
+not `:72`'s *"React Context is unavailable in Server Components"*, which would have meant a
+server/client module-graph split and a different fix. Both strings appear in the artifact
+because the error page prints the surrounding source — read the line number, not a grep.
+
+Line 419 also shows Turbopack inlining `NODE_ENV`, which is the direct evidence that this
+throw is compiled out of a production build. That is why `web-prod` cannot hit it, and why
+option 2 above removes the class rather than merely reducing its odds.
+
+**Capturing it again:** `gotoOk` embeds the response body, which lands in
+`test-results/<test-slug>/error-context.md` and in the HTML report (`npm run e2e:report`).
+**A later isolated re-run deletes that directory** — read it, or copy it out, before
+re-running anything.

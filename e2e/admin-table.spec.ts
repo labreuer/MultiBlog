@@ -380,10 +380,14 @@ test.describe("admin table kit", () => {
       const table = page.getByRole("table").first();
       const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
 
-      await page.goto(`/docs?q=${token}&sort=length:asc`);
+      // shortDoc/longDoc are bylined to two other throwaway admins and are
+      // PRIVATE, so the viewing admin's own scope excludes them (PLAN.md
+      // §12p). showAllDocs=1 is what puts both in the listing, which is what
+      // these cross-author sort assertions are comparing.
+      await page.goto(`/docs?q=${token}&sort=length:asc&showAllDocs=1`);
       expect(await titlesInOrder()).toEqual([shortDoc.title, longDoc.title]);
 
-      await page.goto(`/docs?q=${token}&sort=length:desc`);
+      await page.goto(`/docs?q=${token}&sort=length:desc&showAllDocs=1`);
       expect(await titlesInOrder()).toEqual([longDoc.title, shortDoc.title]);
 
       // The rendered number is doc_length's own count of the body text, which
@@ -393,16 +397,16 @@ test.describe("admin table kit", () => {
       // "Aaa Alpha" authors the short doc, "Zzz Omega" the long one, so the
       // byline order is the opposite of the length order — which is what
       // makes these two assertions independent of each other.
-      await page.goto(`/docs?q=${token}&sort=authors:asc`);
+      await page.goto(`/docs?q=${token}&sort=authors:asc&showAllDocs=1`);
       expect(await titlesInOrder()).toEqual([shortDoc.title, longDoc.title]);
 
-      await page.goto(`/docs?q=${token}&sort=authors:desc`);
+      await page.goto(`/docs?q=${token}&sort=authors:desc&showAllDocs=1`);
       expect(await titlesInOrder()).toEqual([longDoc.title, shortDoc.title]);
 
       await expect(page.getByRole("row").filter({ hasText: shortDoc.title })).toContainText("AA");
       await expect(page.getByRole("row").filter({ hasText: longDoc.title })).toContainText("ZZ");
 
-      await page.goto(`/docs?q=${token}`);
+      await page.goto(`/docs?q=${token}&showAllDocs=1`);
       await page.getByRole("columnheader", { name: "Length" }).click();
       await expect(page).toHaveURL(/sort=length%3Aasc/);
     } finally {
@@ -489,28 +493,45 @@ test.describe("admin table kit", () => {
     const originalSiteDefault = await getSiteDefaultColumnOrder();
     await setSiteDefaultColumnOrder(null);
 
+    // Bylined to the shared admin, so they need no override to be listed.
+    const colToken = `cols${Date.now()}`;
+    const shortDoc = await createTestDoc({
+      authorEmail: ADMIN_EMAIL,
+      title: uniqueTitle(`${colToken} shorter`),
+      bodyText: "Tiny.",
+    });
+    const longDoc = await createTestDoc({
+      authorEmail: ADMIN_EMAIL,
+      title: uniqueTitle(`${colToken} longer`),
+      bodyText: "A considerably longer body, so the two cannot tie on length.",
+    });
+
     try {
-      await page.goto("/docs");
+      // showAllDocs=1 throughout so the listing spans every doc in the
+      // database rather than the shared admin's own byline (PLAN.md §12p):
+      // these assertions are about column mechanics and want whatever rows
+      // happen to exist, not a particular set.
+      await page.goto("/docs?showAllDocs=1");
       // Two of the eight are alwaysVisible and render as icon-only headers, so
       // they read as "" here — position is what matters for them.
       expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Visibility", "Created", "Length", ""]);
 
       // Hiding: only the named movable columns survive, and the fixed pair
       // still brackets them.
-      await page.goto("/docs?cols=title,length");
+      await page.goto("/docs?cols=title,length&showAllDocs=1");
       expect(await headers()).toEqual(["", "Title", "Length", ""]);
 
       // Order is position in the list, so reversing the list reverses them.
-      await page.goto("/docs?cols=length,title");
+      await page.goto("/docs?cols=length,title&showAllDocs=1");
       expect(await headers()).toEqual(["", "Length", "Title", ""]);
 
       // An unknown key is dropped rather than throwing — a renamed column in a
       // bookmarked URL should degrade, not 500.
-      await page.goto("/docs?cols=title,no-such-column,length");
+      await page.goto("/docs?cols=title,no-such-column,length&showAllDocs=1");
       expect(await headers()).toEqual(["", "Title", "Length", ""]);
 
       // colSpan follows the visible count instead of the literal it used to be.
-      await page.goto("/docs?cols=title&q=zzz-no-such-doc");
+      await page.goto("/docs?cols=title&q=zzz-no-such-doc&showAllDocs=1");
       await expect(page.locator("tbody td[colspan]")).toHaveAttribute("colspan", "3");
 
       // A sort naming a hidden column stays honoured — dropping it would
@@ -527,6 +548,14 @@ test.describe("admin table kit", () => {
       // the same dev database (PLAN.md §17c) can be, where the `cols=title`
       // view (just "FRONT PAGE") and the full-columns view ("FRONT
       // PAGEeditLBPRIV…") produced different slices for the identical row.
+      // Pinned to this test's own two docs via ?q=, not the ambient listing.
+      // These are three separate page loads compared for exact equality, so
+      // against every doc in the database any row another worker creates or
+      // deletes between loads changes the result and fails the comparison —
+      // a real cross-worker race, not flakiness to retry away. Scoping to a
+      // token this test owns also lets the assertion be the stronger one:
+      // a known order rather than merely self-consistent snapshots. Same
+      // shape the doc_metrics test above uses for the same reason.
       const titlesFor = async (qs: string) => {
         await page.goto(`/docs${qs}`);
         return page
@@ -535,12 +564,13 @@ test.describe("admin table kit", () => {
           .locator("tbody tr")
           .evaluateAll((rows) => rows.map((row) => row.querySelectorAll("td")[1]?.textContent?.trim() ?? ""));
       };
-      const ascVisible = await titlesFor("?sort=length:asc");
-      expect(await titlesFor("?cols=title&sort=length:asc")).toEqual(ascVisible);
-      expect(await titlesFor("?cols=title&sort=length:desc")).toEqual([...ascVisible].reverse());
+      const ascending = [shortDoc.title, longDoc.title];
+      expect(await titlesFor(`?q=${colToken}&sort=length:asc`)).toEqual(ascending);
+      expect(await titlesFor(`?q=${colToken}&cols=title&sort=length:asc`)).toEqual(ascending);
+      expect(await titlesFor(`?q=${colToken}&cols=title&sort=length:desc`)).toEqual([...ascending].reverse());
 
       // The picker writes the URL, and the fixed columns are listed but locked.
-      await page.goto("/docs");
+      await page.goto("/docs?showAllDocs=1");
       await page.getByText(/^Columns: \d+\/\d+$/).click();
       await expect(page.getByLabel("select (always shown)")).toBeDisabled();
       await expect(page.getByLabel("deleted (always shown)")).toBeDisabled();
@@ -556,12 +586,14 @@ test.describe("admin table kit", () => {
       await page.getByRole("button", { name: "Save as my default" }).click();
       await expect(page).not.toHaveURL(/cols=/);
       // The real proof — a fresh navigation with no ?cols= at all still hides it.
-      await page.goto("/docs");
+      await page.goto("/docs?showAllDocs=1");
       expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Created", "Length", ""]);
     } finally {
       // The shared admin is reused by every other spec, so this has to go back.
       await clearColumnOrder(ADMIN_EMAIL);
       await setSiteDefaultColumnOrder(originalSiteDefault);
+      await deleteTestDoc(shortDoc.id);
+      await deleteTestDoc(longDoc.id);
     }
   });
 

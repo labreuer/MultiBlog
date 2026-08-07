@@ -20,7 +20,7 @@ import {
   QUOTED_BODY,
   QUOTED_TEXT,
 } from "./fixtures";
-import { countDocYdocUpdates, getDocState, getAnnotationStates } from "./db";
+import { countDocYdocUpdates, getDocState, getAnnotationStates, addTestDocAuthor } from "./db";
 import { uniqueTitle } from "./naming";
 
 test("+ New doc creates titleless and drops straight into the editor, no title-collecting page in between", async ({
@@ -210,6 +210,10 @@ test.describe("annotations", () => {
 test.describe("real-time collaboration", () => {
   test("body edits from one author appear in the other's editor", async ({ page, draftDoc, secondUser }) => {
     const { user: other, page: otherPage } = await secondUser();
+    // draftDoc is PRIVATE and bylined to the shared admin alone, and a
+    // PRIVATE doc's editor admits its listed authors only (PLAN.md §12p), so
+    // the second identity needs a byline of its own to get in.
+    await addTestDocAuthor(draftDoc.id, other.email);
 
     await page.goto(`/doc/${draftDoc.id}/edit`);
     await otherPage.goto(`/doc/${draftDoc.id}/edit`);
@@ -237,7 +241,8 @@ test.describe("real-time collaboration", () => {
   });
 
   test("the title is collaborative too, and its own Yjs fragment", async ({ page, draftDoc, secondUser }) => {
-    const { page: otherPage } = await secondUser();
+    const { user: other, page: otherPage } = await secondUser();
+    await addTestDocAuthor(draftDoc.id, other.email);
 
     await page.goto(`/doc/${draftDoc.id}/edit`);
     await otherPage.goto(`/doc/${draftDoc.id}/edit`);

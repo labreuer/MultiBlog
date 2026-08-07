@@ -3,6 +3,10 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+// Aliased because the local `isAdmin` below is the resolved boolean for this
+// viewer; role-checks.ts is safe in a client bundle by design (its own header
+// says so — authz.ts is not, since it imports prisma).
+import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
 import styles from "./AnnotationNode.module.css";
@@ -53,7 +57,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
   const router = useRouter();
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
-  const isAdmin = session?.user?.role === "ADMIN";
+  const isAdmin = !!session?.user && isAdminRole(session.user.role);
   // A reply's own DRAFT id, once "Reply" has created one (PLAN.md §13j
   // Phase 2) — null means the reply composer isn't open. Unlike the old
   // plain-textarea CommentForm, there's no separate "replying" boolean:

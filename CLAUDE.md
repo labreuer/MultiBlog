@@ -24,6 +24,9 @@ Authentication — session strategy, what the JWT bakes in, why sign-in is clien
 Email delivery, rate limiting, and invites — why Resend, the `sendMail()` seam's contract,
 `user_invite`'s many-rows-per-user design, and what's deferred (verification, bulk
 invites): [docs/EMAIL.md](docs/EMAIL.md).
+Who may do what, as tables over roles × doc visibility × byline membership, plus where each
+rule lives so it can be re-derived: [docs/PERMISSIONS.md](docs/PERMISSIONS.md). A `PRIVATE`
+doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12p).
 
 ## Running
 

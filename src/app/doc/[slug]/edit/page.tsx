@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
-import { canEditAnyPost } from "@/lib/authz";
+import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
 import DocEditor from "@/components/DocEditor";
 
 export default async function EditDocPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -27,8 +27,14 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
     notFound();
   }
 
+  // The rule canUserEditDoc states (src/lib/doc-authz.ts), evaluated against
+  // the visibility and authors this page has already loaded rather than
+  // through a second query: ADMIN/EDITOR edit any SHARED doc, and a PRIVATE
+  // doc is editable by its listed authors alone (PLAN.md §12p). /docs' "Show
+  // all docs" checkbox belongs to that listing and carries no weight here.
   const isOwner = doc.authors.some((a) => a.userId === session.user.id);
-  if (!canEditAnyPost(session.user.role) && !isOwner) {
+  const canEditShared = doc.visibility === "SHARED" && canEditAnySharedDoc(session.user.role);
+  if (!canEditShared && (!canManageDocs(session.user.role) || !isOwner)) {
     return (
       <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
         <h1>Forbidden</h1>

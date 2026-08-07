@@ -2,6 +2,7 @@
 // publishes a point in its backing doc's history. Editing happens at
 // /doc/[id]/edit, same as any doc.
 import { test, expect, bodyEditor, gotoOk, visibleText, waitForDocCollabReady } from "./fixtures";
+import { addTestDocAuthor } from "./db";
 
 // "Publish" without `exact` also matches "Publish as blog post" elsewhere.
 const PUBLISH = { name: "Publish", exact: true } as const;
@@ -97,7 +98,11 @@ test.describe("publish / unpublish", () => {
     draftPost,
     secondUser,
   }) => {
-    const { page: otherPage } = await secondUser();
+    const { user: other, page: otherPage } = await secondUser();
+    // The doc backing draftPost is PRIVATE and bylined to the shared admin
+    // alone, and a PRIVATE doc's editor admits its listed authors only
+    // (PLAN.md §12p), so the second identity needs a byline of its own.
+    await addTestDocAuthor(draftPost.docId, other.email);
 
     await page.goto(`/doc/${draftPost.docId}/edit`);
     await otherPage.goto(`/doc/${draftPost.docId}/edit`);

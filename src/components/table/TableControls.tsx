@@ -287,14 +287,19 @@ export function DateFormatSelect({
 export function ShowDeletedToggle({
   checked,
   onChange,
+  label = "Show deleted rows",
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
+  /** Overridable so one component serves both footer checkboxes — DocsTable
+   * renders a second with this set to its admin-only "Show all docs"
+   * override (PLAN.md §12p). */
+  label?: string;
 }) {
   return (
     <p className={styles.showDeletedRow}>
       <label>
-        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> Show deleted rows
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> {label}
       </label>
     </p>
   );
