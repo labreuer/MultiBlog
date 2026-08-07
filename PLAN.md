@@ -1790,9 +1790,29 @@ unauthenticated redirects to sign-in, a signed-in `COMMENTER` gets the inline "d
 permission" message.
 
 **Per-doc `visibility` is `PRIVATE` | `SHARED`.** `SHARED` is anyone with `canViewDocs`; `PRIVATE`
-is byline authors only, with no ADMIN/EDITOR bypass — §12p revised this from ADMIN/EDITOR always
-passing, once that stopped being the intended threat model. Kept an enum so a future public tier
-doesn't need a boolean→enum migration.
+is its listed `DocAuthor`s' alone, with no ADMIN/EDITOR bypass — the byline *is* the rule, and a
+role can't stand in for it. Kept an enum so a future public tier doesn't need a boolean→enum
+migration. The whole picture, as tables over roles × visibility × byline membership, is
+[docs/PERMISSIONS.md](docs/PERMISSIONS.md).
+
+**Editing a `SHARED` doc is the one place a role still substitutes for a byline**, and it gets its
+own predicate rather than borrowing the post side's:
+
+```ts
+export function canEditAnySharedDoc(role: Role): boolean { ... }   // src/lib/doc-authz.ts
+```
+
+Same two roles as `canEditAnyPost`, stated independently rather than delegating: a delegation
+would keep the coupling the split exists to break, where changing the post rule silently moves the
+doc rule with it. It lives in `doc-authz.ts`, not `role-checks.ts`, even though it is just as pure
+a role check — what earns a place in that file is a **client** consumer, which is why
+`canViewDocs`/`canManageDocs` sit there (`SiteHeader` imports them into the browser, where
+`doc-authz.ts` would drag Prisma along). Nothing client-side asks this question.
+
+`canUserEditDoc` reads the doc's own visibility in the same query as the author check rather than
+taking visibility as a parameter — which keeps the `PRIVATE`/`SHARED` distinction inside one
+function instead of rippling it through every call site (`docs.ts`, `posts.ts`, the token and
+replay routes, `/doc/[slug]/slug`).
 
 **The migration is one step, which is the point of not touching `COMMENTER`.** Postgres can't
 drop a value from an enum type, and `ALTER TYPE ... ADD VALUE` adds a value that **cannot be used
@@ -1824,10 +1844,29 @@ way, and the deferred fix, are in [src/app/sign-in/NOTES.md](src/app/sign-in/NOT
 
 | Route | Purpose |
 |---|---|
-| `/docs` | management table of docs, `canManageDocs` + own-byline scoping |
+| `/docs` | management table of docs, `canManageDocs` + own-byline scoping, widened by `SHARED` and the ADMIN override below |
 | `/doc/[slug]` | the live reading view, `canViewDocs` + per-doc `visibility` — embeds §11h's replay slider (§12n) |
 | `/doc/[slug]/edit` | the editor, `canUserEditDoc` |
-| `/annotations` | annotation browse/admin (§12j) |
+| `/annotations` | annotation browse/admin (§12j), scoped to the docs the viewer may *read* |
+
+**Both admin listings scope their own rows, in their own `where` clause, rather than through
+`readableDocsFor`/`editableDocsFor`** — so each restates §12e's rule itself, and each is a place
+the two can silently drift apart. `/annotations`' side of that is in §12j; `/docs` lists a
+viewer's own byline-authored docs **plus every `SHARED` doc for an ADMIN/EDITOR**, and omitting
+that second arm produces not a smaller listing but an incoherent one, hiding docs
+`canUserEditDoc` lets the same viewer open and edit straight from a URL.
+
+**`/docs` carries an ADMIN-only "Show all docs" checkbox** (`?showAllDocs=1`) — a per-visit URL
+toggle in the shape of the show-deleted-rows checkbox every admin table has (§16b), stored
+nowhere. It lifts the byline scoping for that listing and nothing else: it is not an argument to
+`canUserReadDoc`/`canUserEditDoc` and reaches no other surface, so an admin who ticks it and opens
+a `PRIVATE` doc they don't author still meets the same author-only check. EDITOR has no override.
+
+That it governs **which rows are listed, not what may be done to them**, extends to the table's own
+Edit column: `canEdit` restates `canUserEditDoc`'s rule per row with no override term, so a
+`PRIVATE` doc the checkbox reveals arrives with no Edit link rather than one leading to Forbidden.
+Reusing the same flag the `where` clause uses is the natural way to write that expression and
+produces exactly that dead link, with nothing in the row's appearance to reveal it.
 
 **`/doc/[slug]` and `/doc/[id]/edit` cannot literally be two different dynamic segment names.**
 Next.js rejects `app/doc/[slug]/page.tsx` alongside `app/doc/[id]/edit/page.tsx` at build time
@@ -1993,9 +2032,10 @@ filename.
 
 ### 12j. `/annotations`
 
-**A browse surface: everything written on docs, searchable, sortable, with deleted rows visible.**
-It is not a queue — the only action an annotation supports is deletion, and `CommentNode` already
-offers that inline. The page exists so annotations across all docs can be found at all.
+**A browse surface: everything written on the docs this viewer may read, searchable, sortable,
+with deleted rows visible.** It is not a queue — the only action an annotation supports is
+deletion, and `CommentNode` already offers that inline. The page exists so annotations across
+docs can be found at all.
 
 - **Columns:** Doc · Author (a `User`, always) · Body · Quote · Created · Edited · Deleted. The
   Quote cell reads the annotated text out of the doc's `prose_json` via the mark, and says
@@ -2005,7 +2045,17 @@ offers that inline. The page exists so annotations across all docs can be found 
   `use-sortable-rows`, and the deep-link-only filters (`?doc=`, `?author=`, `?user=`).
 - **Actions:** Delete / Restore, ADMIN or own annotation — the same rule `CommentNode` already
   applies inline (§10 item 15).
-- **Gate:** `canManageDocs`, with own-byline scoping for AUTHOR.
+- **Gate:** `canManageDocs` for the page; rows are scoped to the docs the viewer may *read* —
+  their own byline-authored ones plus every `SHARED` doc — restating §12e's rule in this page's
+  own `where`, since it doesn't go through `readableDocsFor`. **Readability, not
+  manage-ability, is the right bound**, and the Quote column is why: it reads out of the doc's
+  `prose_json`, so a scope any wider would show an excerpt of a `PRIVATE` doc's body to someone
+  `/doc/[slug]` refuses outright. `canUserAccessAnnotationYdoc` delegates to `canUserReadDoc`
+  for the same reason. `?doc=` and the other deep links are applied *after* this scope, not
+  instead of it.
+- **DRAFT annotations are excluded outright**, not merely scoped: §13a's decision is that
+  "keep private" holds even from an ADMIN, so the page filters `status: { not: "DRAFT" }`
+  rather than leaning on the page gate.
 
 Query-string parsing gets its own `annotations-query.ts`, since the option set it parses is the
 list above and nothing more. `use-sortable-rows`, `AdminTable.module.css` and the pagination
@@ -2288,6 +2338,17 @@ way rather than designed:
   real formatting in the selection. Fixed with `clearable: false` on the mark
   (`annotation-extension.ts`) — `Mark.create` has this option built in for exactly this case
   ("semantic marks that should survive clear formatting"), so no custom command was needed.
+- **`e2e/doc-visibility.spec.ts` pins §12e's rule and §12f's two listings**: an ADMIN/EDITOR
+  non-author is refused a `PRIVATE` doc for both read and edit, a listed author is not, `SHARED`
+  stays open to ADMIN/EDITOR regardless of byline, the `/docs` override is ADMIN-only and doesn't
+  carry into opening a doc, and `/annotations` withholds a `PRIVATE` doc's rows by listing and by
+  `?doc=` deep link. The `SHARED` cases are positive controls, not decoration — without them the
+  absence assertions would pass for the wrong reason.
+- **A doc fixture's second identity needs an explicit byline.** `e2e/db-worker.ts`'s
+  `addTestDocAuthor` exists because `secondUser()` — the collaboration specs' stand-in for "a
+  different person", defaulting to ADMIN — is not automatically an author of the doc it is handed,
+  and a `PRIVATE` doc admits only its byline. Any new spec putting two identities in one doc's
+  editor needs it.
 
 ### 12o. Known gaps
 
@@ -2323,80 +2384,6 @@ above might read.
   and `POST /api/doc/[id]/token` 404s on the missing lineage. Acceptable because deleting a
   `ydoc` row by hand is exactly the thing CLAUDE.md now warns against, not a path the app
   can reach on its own.
-
-### 12p. PRIVATE docs tighten to byline-authors-only (2026-08-05)
-
-The resulting permissions, as tables over roles × visibility × byline membership — including
-the surfaces this section doesn't touch — are in [docs/PERMISSIONS.md](docs/PERMISSIONS.md).
-
-§12e's original rule — `PRIVATE` readable/editable by byline authors *plus* ADMIN/EDITOR
-unconditionally — is gone. A `PRIVATE` doc is now readable and editable only by its listed
-`DocAuthor`s, for every role including ADMIN and EDITOR. `SHARED` is untouched: still anyone
-with `canViewDocs` to read, and ADMIN/EDITOR still edit any `SHARED` doc without being a listed
-author, exactly as before.
-
-**One admin-only escape hatch, deliberately narrow.** `/docs` gets a "Show all docs" checkbox,
-visible to ADMIN only, serialized as `?showAllDocs=1` — a plain per-visit URL toggle (the same
-shape as the show-deleted-rows checkbox every admin table already has, §16b), not a stored
-preference. Checking it lifts the byline scoping for that one listing only. It does **not**
-thread through to `canUserReadDoc`, `canUserEditDoc`, `readableDocsFor`, `editableDocsFor`, or
-any other surface — collab connections, annotations, doc-links, side-by-side, replay. An admin
-who checks the box and opens a `PRIVATE` doc they don't author still hits the same author-only
-check on `/doc/[slug]` and `/doc/[slug]/edit` as anyone else. EDITOR has no override at all.
-
-It governs **which rows are listed, not what may be done to them** — including in the table's own
-Edit column, whose `canEdit` is `canUserEditDoc`'s rule restated per row (own byline, or `SHARED`
-with an ADMIN/EDITOR viewer) with no override term in it. So a `PRIVATE` doc the checkbox brings
-into view arrives with no Edit link, rather than one leading straight to Forbidden. Worth stating
-because the natural way to write that expression — reusing the same flag the `where` clause uses
-— produces exactly that dead link, and nothing about the row's appearance would reveal it.
-
-**The `/docs` listing's own scoping is separate code from the two permission functions, and has
-to independently carve out `SHARED`.** `canUserEditDoc`/`editableDocsFor` (`src/lib/doc-authz.ts`)
-already preserve ADMIN/EDITOR's unconditional ability to edit any `SHARED` doc — that was never
-in question. But `/docs`' own `where` clause (`src/app/docs/page.tsx`) is bespoke, not built
-through `editableDocsFor`, and inherited the pre-existing code's all-or-nothing shape
-(`canEditAny ? {} : { authors: { some: { userId } } }`) unchanged apart from swapping the
-condition. The result, caught only after shipping: an ADMIN could open and edit a `SHARED` doc
-directly by URL but not see it listed in `/docs` unless they happened to author it. Fixed by
-giving the listing's own `where` the same `SHARED` carve-out
-(`OR: [{ authors: { some: { userId } } }, ...(canEditAnySharedDoc(role) ? [{ visibility: "SHARED" }] : [])]`)
-— worth recording because it's the shape of bug this kind of duplicated-but-not-shared
-authorization logic invites, not because the underlying rule was ever in doubt.
-
-**The doc rule got its own predicate.** That `SHARED` carve-out was originally written with
-`canEditAnyPost`, a post-domain check reused for docs because the two role sets coincide.
-`canEditAnySharedDoc` now names it on the doc side and states its roles independently rather
-than delegating — a delegation would keep the coupling worth breaking, where changing the
-post rule silently moves the doc rule too. `canEditAnyPost` stays where its name is accurate:
-`canUserEditPost`, `/posts`, post history, `/comments`.
-
-It lives in `src/lib/doc-authz.ts`, not `role-checks.ts`, even though it is just as pure a
-role check as anything in that file. What earns a place there is a **client** consumer:
-`canViewDocs`/`canManageDocs` are doc predicates sitting in `role-checks.ts` because
-`SiteHeader` imports them into the browser, where `authz.ts`/`doc-authz.ts` would drag
-Prisma along. Nothing client-side asks this question, and both halves of the rule it
-expresses live in `doc-authz.ts`, so re-exporting it through that module would have been
-indirection with no consumer to justify it. The full role × visibility × byline picture is
-[docs/PERMISSIONS.md](docs/PERMISSIONS.md).
-
-**Why the scope stops at PRIVATE.** The request was specifically to change `PRIVATE`'s access
-rule; `SHARED`'s was never in question, and `canUserEditDoc` originally made no distinction
-between the two at all (visibility never even reached its role check) — so the first pass at this
-tightened `SHARED`-doc editing by accident too, breaking every e2e spec exercising two identities
-(one of them an ADMIN who isn't a listed author) collaborating on a doc. `canUserEditDoc` now
-reads the doc's own visibility in the same query as the author check, rather than taking
-visibility as a parameter — keeps the fix to one function's internals instead of rippling into
-every call site (`docs.ts`, `posts.ts`, the token/replay routes, `/doc/[slug]/slug`).
-
-**e2e**: `e2e/doc-visibility.spec.ts` — an ADMIN/EDITOR non-author gets Forbidden on both
-`/doc/[slug]` and `/doc/[slug]/edit` for a `PRIVATE` doc; a listed AUTHOR still gets in; `SHARED`
-stays open to ADMIN/EDITOR regardless of authorship (the regression guard for the paragraph
-above); the `/docs` checkbox is ADMIN-only, lifts `PRIVATE` scoping for that listing, and doesn't
-carry over to actually opening the doc. `e2e/db-worker.ts` gained `addTestDocAuthor` — needed
-because `secondUser()` (real-time-collaboration specs' stand-in for "a different person",
-defaulting to ADMIN) is not automatically a listed author of whatever doc it's handed, which
-tightening `PRIVATE` access exposed in `doc.spec.ts` and `publish.spec.ts`.
 
 ## 13. Annotations become ydocs, with a TipTap editor of their own
 

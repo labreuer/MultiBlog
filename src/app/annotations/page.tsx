@@ -110,9 +110,10 @@ export default async function AnnotationsPage({
       // Readability rather than manage-ability is the bound that matters here
       // because of what the query below selects: doc.proseJson, rendered as
       // the Quote column, so a wider scope would put an excerpt of a PRIVATE
-      // doc's body in front of someone /doc/[slug] refuses outright (PLAN.md
-      // §12p). canUserAccessAnnotationYdoc (src/lib/annotation-authz.ts)
-      // delegates to canUserReadDoc for the same reason.
+      // doc's body in front of someone /doc/[slug] refuses outright
+      // (docs/PERMISSIONS.md). canUserAccessAnnotationYdoc
+      // (src/lib/annotation-authz.ts) delegates to canUserReadDoc for the
+      // same reason.
       { OR: [{ doc: { authors: { some: { userId: session.user.id } } } }, { doc: { visibility: "SHARED" } }] },
       parseDeepLinkWhere(urlSearchParams),
     ],

@@ -1,4 +1,4 @@
-// Per-doc access (PLAN.md §12p). A PRIVATE doc is readable and editable by
+// Per-doc access (docs/PERMISSIONS.md). A PRIVATE doc is readable and editable by
 // its listed DocAuthors alone, whatever the role; a SHARED doc is readable by
 // anyone with canViewDocs and editable by any ADMIN/EDITOR. Both rules live
 // in the same two functions (src/lib/doc-authz.ts), so both are pinned here.
@@ -18,7 +18,7 @@ import {
   uniqueTitle,
 } from "./db";
 
-test.describe("PRIVATE doc authorization (PLAN.md §12p)", () => {
+test.describe("PRIVATE doc authorization (docs/PERMISSIONS.md)", () => {
   test("an ADMIN who isn't a listed author can't read or edit a PRIVATE doc", async ({ secondUser }) => {
     const privateDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "PRIVATE", bodyText: "Secret." });
     const { page: adminPage } = await secondUser({ role: "ADMIN" });
@@ -88,7 +88,7 @@ test.describe("PRIVATE doc authorization (PLAN.md §12p)", () => {
   });
 });
 
-test.describe("/docs 'Show all docs' admin override (PLAN.md §12p)", () => {
+test.describe("/docs 'Show all docs' admin override (docs/PERMISSIONS.md)", () => {
   test("a PRIVATE doc the admin has no byline on appears only once the box is ticked, and stays shut", async ({
     page,
   }) => {
@@ -139,7 +139,7 @@ test.describe("/docs 'Show all docs' admin override (PLAN.md §12p)", () => {
 
   test("a SHARED doc someone else authored is listed, and editable, with the box unticked", async ({ page }) => {
     // /docs scopes its own rows rather than calling into doc-authz.ts, so it
-    // states the SHARED rule separately (PLAN.md §12p). This pins the two
+    // states the SHARED rule separately (docs/PERMISSIONS.md). This pins the two
     // together: a doc this admin can open and edit straight from a URL is
     // also in the table, whoever's byline it carries.
     const token = `sharedlist${Date.now()}`;
@@ -174,7 +174,7 @@ test.describe("/docs 'Show all docs' admin override (PLAN.md §12p)", () => {
   });
 });
 
-test.describe("/annotations is scoped to readable docs (PLAN.md §12p)", () => {
+test.describe("/annotations is scoped to readable docs (docs/PERMISSIONS.md)", () => {
   // /annotations selects doc.proseJson and renders an excerpt as its Quote
   // column, so its row scoping is a content-exposure boundary, not just a
   // convenience filter — an annotation listed here reveals its doc's title

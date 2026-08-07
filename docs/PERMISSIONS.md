@@ -7,10 +7,10 @@ check. The "Where each rule lives" section at the end lists every file consulted
 row here can be re-derived rather than trusted.
 
 Assumes PLAN.md §12e's two-doc-gates distinction (`canViewDocs` governs reading and
-annotating a `SHARED` doc; `canManageDocs` governs `/docs` management) and §12p's revision
-of it (a `PRIVATE` doc is readable and editable by its listed `DocAuthor`s alone, with no
-ADMIN/EDITOR bypass, and `/docs` carries an ADMIN-only "Show all docs" checkbox that widens
-that one listing). `/site-settings` is deliberately out of scope.
+annotating a `SHARED` doc; `canManageDocs` governs `/docs` management) and the per-doc
+`visibility` rule stated there — a `PRIVATE` doc readable and editable by its listed
+`DocAuthor`s alone, with no ADMIN/EDITOR bypass. §12f covers the two admin listings and the
+ADMIN-only "Show all docs" override. `/site-settings` is deliberately out of scope.
 
 **`PRIVATE`/`SHARED` is `Doc.visibility`.** Posts have no visibility column at all, so the
 four tables below are about docs and the surfaces derived from them. Post permissions vary
@@ -77,8 +77,8 @@ doc-independent, so it is callable directly but unreachable through the UI.
 
 ## 2. PRIVATE & not in `doc_author`
 
-The table §12p exists to produce: a `PRIVATE` doc is invisible to everyone but its byline,
-role notwithstanding.
+The table the whole rule exists to produce: a `PRIVATE` doc is invisible to everyone but its
+byline, role notwithstanding.
 
 | Permission | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER |
 |---|---|---|---|---|---|
@@ -194,6 +194,6 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
-`e2e/doc-visibility.spec.ts` pins the §12p rows specifically — the PRIVATE denials for
+`e2e/doc-visibility.spec.ts` pins these tables' load-bearing rows — the PRIVATE denials for
 ADMIN and EDITOR, the byline author's access, the `SHARED` carve-out, the `/docs` override's
 scope, and `/annotations`' content boundary.

@@ -349,7 +349,7 @@ export async function createTestDoc(opts: {
 
 /**
  * Adds a co-author to an existing test doc. A PRIVATE doc admits its listed
- * authors alone, whatever the role (PLAN.md §12p), so a spec putting two
+ * authors alone, whatever the role (docs/PERMISSIONS.md), so a spec putting two
  * identities in one doc's editor — secondUser() alongside a fixture's
  * draftDoc, say — has to give the second one a byline of its own first.
  */

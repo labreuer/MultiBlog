@@ -76,7 +76,7 @@ export default async function DocsPage({
   const prefs = await getTablePrefs(session.user.id, "docs");
   const filters = parseDocsFilters(urlSearchParams, prefs);
 
-  // Which rows this table selects (PLAN.md §12p). It is its own query rather
+  // Which rows this table selects (docs/PERMISSIONS.md). It is its own query rather
   // than a call into doc-authz.ts, so it has to restate that module's rule
   // itself and stay in step with it:
   //   - a SHARED doc is listed for any ADMIN/EDITOR, byline or not, matching

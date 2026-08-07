@@ -101,7 +101,7 @@ test.describe("publish / unpublish", () => {
     const { user: other, page: otherPage } = await secondUser();
     // The doc backing draftPost is PRIVATE and bylined to the shared admin
     // alone, and a PRIVATE doc's editor admits its listed authors only
-    // (PLAN.md §12p), so the second identity needs a byline of its own.
+    // (docs/PERMISSIONS.md), so the second identity needs a byline of its own.
     await addTestDocAuthor(draftPost.docId, other.email);
 
     await page.goto(`/doc/${draftPost.docId}/edit`);

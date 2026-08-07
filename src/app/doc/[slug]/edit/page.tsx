@@ -30,7 +30,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
   // The rule canUserEditDoc states (src/lib/doc-authz.ts), evaluated against
   // the visibility and authors this page has already loaded rather than
   // through a second query: ADMIN/EDITOR edit any SHARED doc, and a PRIVATE
-  // doc is editable by its listed authors alone (PLAN.md §12p). /docs' "Show
+  // doc is editable by its listed authors alone (docs/PERMISSIONS.md). /docs' "Show
   // all docs" checkbox belongs to that listing and carries no weight here.
   const isOwner = doc.authors.some((a) => a.userId === session.user.id);
   const canEditShared = doc.visibility === "SHARED" && canEditAnySharedDoc(session.user.role);

@@ -211,7 +211,7 @@ test.describe("real-time collaboration", () => {
   test("body edits from one author appear in the other's editor", async ({ page, draftDoc, secondUser }) => {
     const { user: other, page: otherPage } = await secondUser();
     // draftDoc is PRIVATE and bylined to the shared admin alone, and a
-    // PRIVATE doc's editor admits its listed authors only (PLAN.md §12p), so
+    // PRIVATE doc's editor admits its listed authors only (docs/PERMISSIONS.md), so
     // the second identity needs a byline of its own to get in.
     await addTestDocAuthor(draftDoc.id, other.email);
 

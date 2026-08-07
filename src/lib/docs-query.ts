@@ -46,7 +46,7 @@ const SORT_KEYS: readonly DocsSortKey[] = [
 ];
 export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "created", dir: "desc" }];
 
-// showAllDocs (PLAN.md §12p) — an ADMIN-only opt-in that widens the listing
+// showAllDocs (docs/PERMISSIONS.md) — an ADMIN-only opt-in that widens the listing
 // to every doc, including PRIVATE ones this user has no byline on. Parsed
 // unconditionally here, like any other filter; src/app/docs/page.tsx is where
 // the signed-in user's role is checked before it counts for anything, so a

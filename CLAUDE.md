@@ -26,7 +26,7 @@ Email delivery, rate limiting, and invites — why Resend, the `sendMail()` seam
 invites): [docs/EMAIL.md](docs/EMAIL.md).
 Who may do what, as tables over roles × doc visibility × byline membership, plus where each
 rule lives so it can be re-derived: [docs/PERMISSIONS.md](docs/PERMISSIONS.md). A `PRIVATE`
-doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12p).
+doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e).
 
 ## Running
 

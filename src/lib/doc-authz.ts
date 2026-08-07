@@ -5,7 +5,7 @@ import { canManageDocs, canViewDocs } from "@/lib/role-checks";
 
 export { canManageDocs, canViewDocs } from "@/lib/role-checks";
 
-// Per-doc access, on two axes (PLAN.md §12p):
+// Per-doc access, on two axes (docs/PERMISSIONS.md):
 //
 //   SHARED   read by anyone with canViewDocs; edit by ADMIN/EDITOR whatever
 //            the byline says, or by any listed author.

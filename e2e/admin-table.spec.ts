@@ -381,9 +381,9 @@ test.describe("admin table kit", () => {
       const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
 
       // shortDoc/longDoc are bylined to two other throwaway admins and are
-      // PRIVATE, so the viewing admin's own scope excludes them (PLAN.md
-      // §12p). showAllDocs=1 is what puts both in the listing, which is what
-      // these cross-author sort assertions are comparing.
+      // PRIVATE, so the viewing admin's own scope excludes them
+      // (docs/PERMISSIONS.md). showAllDocs=1 is what puts both in the listing,
+      // which is what these cross-author sort assertions are comparing.
       await page.goto(`/docs?q=${token}&sort=length:asc&showAllDocs=1`);
       expect(await titlesInOrder()).toEqual([shortDoc.title, longDoc.title]);
 
@@ -508,7 +508,7 @@ test.describe("admin table kit", () => {
 
     try {
       // showAllDocs=1 throughout so the listing spans every doc in the
-      // database rather than the shared admin's own byline (PLAN.md §12p):
+      // database rather than the shared admin's own byline (docs/PERMISSIONS.md):
       // these assertions are about column mechanics and want whatever rows
       // happen to exist, not a particular set.
       await page.goto("/docs?showAllDocs=1");
