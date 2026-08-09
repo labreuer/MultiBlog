@@ -254,7 +254,7 @@ export default function CommentsTable({
       sortKey: "commenter",
       cell: (row) => (
         <>
-          {row.commenterName} <span style={{ color: "#666" }}>({row.commenterEmail})</span>
+          {row.commenterName} <span style={{ color: "var(--text-secondary)" }}>({row.commenterEmail})</span>
         </>
       ),
     },

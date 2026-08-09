@@ -41,7 +41,7 @@ export default function InviteForm({ token, email }: { token: string; email: str
           Choose a password
           <input name="password" type="password" required minLength={8} autoComplete="new-password" />
         </label>
-        {state.error && <p style={{ color: "crimson" }}>{state.error}</p>}
+        {state.error && <p style={{ color: "var(--error)" }}>{state.error}</p>}
         <button type="submit" disabled={pending}>
           {pending ? "Saving..." : "Set password"}
         </button>

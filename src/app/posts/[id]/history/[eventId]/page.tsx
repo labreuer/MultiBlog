@@ -63,7 +63,7 @@ export default async function EventDiffPage({
       <p>
         <Link href={`/posts/${post.id}/history`}>Back to history</Link>
       </p>
-      <p style={{ color: "#666" }}>
+      <p style={{ color: "var(--text-secondary)" }}>
         {target.createdAt.toLocaleString()} · Diff against{" "}
         {previous ? `${previous.title} (${previous.createdAt.toLocaleString()})` : "(no earlier published version)"}
       </p>
@@ -71,7 +71,7 @@ export default async function EventDiffPage({
         style={{
           whiteSpace: "pre-wrap",
           fontFamily: "inherit",
-          border: "1px solid #ddd",
+          border: "1px solid var(--border)",
           borderRadius: 4,
           padding: 12,
         }}
@@ -79,14 +79,17 @@ export default async function EventDiffPage({
         {tokens.map((token, i) => {
           if (token.type === "insert") {
             return (
-              <span key={i} style={{ background: "#d4f7d4", color: "#0a5" }}>
+              <span key={i} style={{ background: "var(--fill-success)", color: "var(--success)" }}>
                 {token.value}
               </span>
             );
           }
           if (token.type === "delete") {
             return (
-              <span key={i} style={{ background: "#fbdada", color: "#c00", textDecoration: "line-through" }}>
+              <span
+                key={i}
+                style={{ background: "var(--fill-danger)", color: "var(--danger)", textDecoration: "line-through" }}
+              >
                 {token.value}
               </span>
             );

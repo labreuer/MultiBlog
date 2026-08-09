@@ -21,9 +21,14 @@ import {
   uniqueTitle,
 } from "./db";
 
-// The four border colors from AdminTable.module.css, as the browser reports
-// them. Asserting the computed color (rather than a class name) is what makes
-// this a test of what an admin actually sees.
+// The four row-status border colors, as the browser reports them — the
+// light-mode resolution of globals.css's --border-strong/--warning/--danger/
+// --success tokens (AdminTable.module.css's .rowStatus* rules). This suite
+// runs in the light-mode "chromium" project (no emulateMedia anywhere), and
+// every token's light value is byte-identical to what it replaced, so these
+// constants are unaffected by the dark-theme migration. Asserting the
+// computed color (rather than a class name) is what makes this a test of
+// what an admin actually sees.
 const IDLE = "rgba(0, 0, 0, 0)";
 const EDITED = "rgb(153, 153, 153)";
 const SAVED = "rgb(0, 170, 85)";

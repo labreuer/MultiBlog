@@ -9,7 +9,7 @@
   left: 0;
   right: 0;
   background: var(--background);
-  border-top: 1px solid #ccc;
+  border-top: 1px solid var(--border);
   padding: 0.5rem 1rem;
   z-index: 10;
 }
@@ -39,15 +39,15 @@
   width: 10px;
   height: 10px;
   padding: 0;
-  border: 1px solid #3366cc;
+  border: 1px solid var(--link);
   border-radius: 50%;
-  background: #fff;
+  background: var(--accent-wash);
   cursor: pointer;
   transform: translateX(-50%);
 }
 
 .snapshotDotActive {
-  background: #3366cc;
+  background: var(--link);
 }
 
 .positionLine,
@@ -57,11 +57,11 @@
 }
 
 .positionLine {
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .loadingLine {
-  color: #999;
+  color: var(--text-muted);
 }
 
 .snapshotLine {
@@ -71,11 +71,11 @@
 }
 
 .error {
-  color: crimson;
+  color: var(--error);
   font-size: 0.85rem;
 }
 
 .muted {
-  color: #999;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }

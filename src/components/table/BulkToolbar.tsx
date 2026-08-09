@@ -198,7 +198,7 @@ export function BulkToolbar<T extends { id: string }>({
           </button>
         );
       })}
-      {error && <span style={{ color: "crimson" }}>{error}</span>}
+      {error && <span style={{ color: "var(--error)" }}>{error}</span>}
     </div>
   );
 }

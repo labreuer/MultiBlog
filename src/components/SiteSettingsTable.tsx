@@ -152,7 +152,7 @@ export default function SiteSettingsTable({
   return (
     <>
       <h2 style={{ marginTop: "2rem" }}>DB settings</h2>
-      <p style={{ color: "#666" }}>
+      <p style={{ color: "var(--text-secondary)" }}>
         Stored in the database (<code>SiteSettings</code>) — edits below save immediately and take effect on the
         next request, no deploy needed.
       </p>
@@ -173,7 +173,7 @@ export default function SiteSettingsTable({
                 run={(action) => runWithStatus(POLICY_ROW, action)}
               />
             </td>
-            <td className={adminStyles.cell} style={{ color: "#666" }}>
+            <td className={adminStyles.cell} style={{ color: "var(--text-secondary)" }}>
               Moderation policy when neither author nor post overrides it.
             </td>
           </tr>
@@ -186,7 +186,7 @@ export default function SiteSettingsTable({
                 run={(action) => runWithStatus(THRESHOLD_ROW, action)}
               />
             </td>
-            <td className={adminStyles.cell} style={{ color: "#666" }}>
+            <td className={adminStyles.cell} style={{ color: "var(--text-secondary)" }}>
               Number of approved comments before a commenter is auto-approved, when a comment&apos;s resolved
               moderation policy is ALWAYS. Otherwise, this setting is inert.
             </td>
@@ -195,7 +195,7 @@ export default function SiteSettingsTable({
       </table>
 
       <h2 style={{ marginTop: "2rem" }}>Default columns per table</h2>
-      <p style={{ color: "#666" }}>
+      <p style={{ color: "var(--text-secondary)" }}>
         Which columns each admin table shows when nobody has picked their own (PLAN.md §16i) — an admin&apos;s own
         &quot;Save as my default&quot; in a table&apos;s own Columns picker still overrides this. Order always
         follows the table&apos;s own column order; only visibility is configurable here.
@@ -213,7 +213,7 @@ export default function SiteSettingsTable({
             // tall now that it's not height-capped) — the plain 1px `.row` divider disappears next to that
             // much content, so this borrows the same 2px rule the header row uses to separate itself from
             // the body, applied here between one table's section and the next.
-            <tr key={row.table} className={adminStyles.row} style={{ borderBottom: "2px solid #ddd" }}>
+            <tr key={row.table} className={adminStyles.row} style={{ borderBottom: "2px solid var(--border)" }}>
               <td className={adminStyles.cell}>
                 <strong>{row.label}</strong>
               </td>
@@ -226,7 +226,7 @@ export default function SiteSettingsTable({
       </table>
 
       <h2 style={{ marginTop: "2rem" }}>Config-file settings</h2>
-      <p style={{ color: "#666" }}>
+      <p style={{ color: "var(--text-secondary)" }}>
         Defined as plain constants in source, not the database — read-only here.
       </p>
       <table className={adminStyles.table}>
@@ -245,10 +245,10 @@ export default function SiteSettingsTable({
           ))}
         </tbody>
       </table>
-      <p style={{ color: "#666", marginTop: "0.5em" }}>
+      <p style={{ color: "var(--text-secondary)", marginTop: "0.5em" }}>
         Location: <code>{configLocation}</code>
       </p>
-      <p style={{ color: "#666", marginTop: "0.25em" }}>To change: {configToChange}</p>
+      <p style={{ color: "var(--text-secondary)", marginTop: "0.25em" }}>To change: {configToChange}</p>
     </>
   );
 }

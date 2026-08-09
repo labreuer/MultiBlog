@@ -1,5 +1,7 @@
 "use client";
 
+import { NEUTRAL_THREAD_COLOR } from "./author-colors";
+
 // A persistent colored bar standing in for a `border-left` that can't be
 // drawn on the target comment's own div — the design puts it in the margin
 // to the left of the whole comment <section> instead, still vertically
@@ -64,6 +66,6 @@ export function activatePseudoBorderForHash(hash: string) {
   const anchor = document.getElementById(hash);
   const commentDiv = anchor?.closest<HTMLElement>("[data-comment-id]");
   if (!commentDiv) return;
-  const color = commentDiv.closest<HTMLElement>("[data-thread-id]")?.dataset.threadColor ?? "#999";
+  const color = commentDiv.closest<HTMLElement>("[data-thread-id]")?.dataset.threadColor ?? NEUTRAL_THREAD_COLOR;
   placeBorder(section, commentDiv, color);
 }

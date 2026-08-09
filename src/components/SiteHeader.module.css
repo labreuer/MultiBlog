@@ -33,8 +33,9 @@
   top: 100%;
   left: 0;
   z-index: 10;
-  background: #fff;
-  border: 1px solid #ccc;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 6px 10px;
   margin-top: 4px;

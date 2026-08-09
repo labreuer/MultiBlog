@@ -6,7 +6,7 @@
 }
 
 .intro {
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 1.5rem;
 }
 
@@ -18,7 +18,7 @@
 }
 
 .section {
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1rem 1.25rem;
   margin-bottom: 1.5rem;
@@ -44,18 +44,18 @@
 }
 
 .bodyPreview {
-  border: 1px solid #eee;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 1rem;
   margin-bottom: 1rem;
 }
 
 .muted {
-  color: #999;
+  color: var(--text-muted);
 }
 
 .error {
-  color: crimson;
+  color: var(--error);
 }
 
 /* ---- title history ---- */
@@ -73,7 +73,7 @@
    document whose title is literally the words below. */
 .titleAbsent,
 .titleEmpty {
-  color: #999;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -107,26 +107,26 @@
   width: 10px;
   height: 10px;
   padding: 0;
-  border: 1px solid #3366cc;
+  border: 1px solid var(--link);
   border-radius: 50%;
-  background: #cfe0ff;
+  background: var(--accent-wash);
   transform: translateX(-50%);
   cursor: pointer;
 }
 
 .snapshotDotActive {
-  background: #3366cc;
+  background: var(--link);
 }
 
 .statusLine {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 0.8rem;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 0.75rem;
 }
 
 .positionLine {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 0.5rem;
 }

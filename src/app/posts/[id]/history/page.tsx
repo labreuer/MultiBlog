@@ -45,11 +45,11 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
         <Link href={`/posts/${post.id}/edit`}>Back to editor</Link>
       </p>
       {post.publicationEvents.length === 0 ? (
-        <p style={{ color: "#666" }}>No publish activity yet.</p>
+        <p style={{ color: "var(--text-secondary)" }}>No publish activity yet.</p>
       ) : (
         <ul style={{ listStyle: "none", padding: 0 }}>
           {post.publicationEvents.map((event) => (
-            <li key={event.id} style={{ padding: "8px 0", borderBottom: "1px solid #ddd" }}>
+            <li key={event.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
               {event.proseJson ? (
                 <Link href={`/posts/${post.id}/history/${event.id}`}>
                   {event.type} — {event.title}
@@ -57,8 +57,8 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
               ) : (
                 <span>{event.type}</span>
               )}{" "}
-              {event.id === post.publishEventId && <strong style={{ color: "green" }}>(current)</strong>}
-              <div style={{ color: "#666", fontSize: "0.9rem" }}>
+              {event.id === post.publishEventId && <strong style={{ color: "var(--success)" }}>(current)</strong>}
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                 {event.createdAt.toLocaleString()} by{" "}
                 {event.actor?.name ?? event.actor?.email ?? "system"}
                 {event.doc && ` — from doc “${event.doc.title || "Untitled"}”`}

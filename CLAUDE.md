@@ -383,6 +383,14 @@ blob makes the doc-side checks report faults that evaporate once it's repaired).
 - `globals.css` has `* { margin: 0; padding: 0 }` — it strips default list/blockquote
   styling everywhere. `src/styles/prose.module.css` restores it for rendered post content;
   any new surface rendering post content needs its `.prose` class.
+- **No hex/named color literal anywhere in `src/` outside `src/app/globals.css`,
+  `src/lib/author-colors.ts` (the author palette + `NEUTRAL_THREAD_COLOR`), and the handful
+  named in STYLE.md's Dark theme section.** Every color is one of `globals.css`'s tokens —
+  `style={{ color: "var(--text-secondary)" }}` is valid CSS and is the convention for inline
+  styles, not just CSS Modules. `light-dark()` only accepts `<color>` arguments, so a
+  percentage or other number that needs to change with scheme (the anchor-highlight tints)
+  goes through the `--dark: 0/1` flag and `calc()`, not `light-dark()` itself. Full rationale,
+  the token list, and the grep guard: STYLE.md's Dark theme section.
 - `body` gets implicit `overflow-y: auto` (side effect of its `overflow-x: hidden`), and
   `documentElement` is the effective scroller — use `window.scrollY`, not
   `body.scrollTop`, when checking scroll behavior.

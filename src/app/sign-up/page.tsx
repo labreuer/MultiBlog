@@ -25,7 +25,7 @@ export default function SignUpPage() {
           Password
           <input name="password" type="password" required minLength={8} autoComplete="new-password" />
         </label>
-        {state.error && <p style={{ color: "crimson" }}>{state.error}</p>}
+        {state.error && <p style={{ color: "var(--error)" }}>{state.error}</p>}
         <button type="submit" disabled={pending}>
           {pending ? "Creating..." : "Sign up"}
         </button>

@@ -1,4 +1,5 @@
 import { SAFE_COLOR } from "./safe-css";
+import { NEUTRAL_THREAD_COLOR } from "./author-colors";
 
 // PLAN.md §14e's three-level cascade: link override, then group override,
 // then the link's author's own color. Pure and client-safe (no prisma
@@ -11,5 +12,5 @@ export function cascadeDocLinkColor(
   authorColor: string,
 ): string {
   const color = linkOverrideColor ?? groupOverrideColor ?? authorColor;
-  return SAFE_COLOR.test(color) ? color : "#999";
+  return SAFE_COLOR.test(color) ? color : NEUTRAL_THREAD_COLOR;
 }

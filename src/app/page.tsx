@@ -54,13 +54,13 @@ export default async function Home() {
               const excerpt = post.proseJson ? extractText(post.proseJson).slice(0, 200) : "";
 
               return (
-                <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
+                <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
                   <h2 className={styles.postHeading}>
                     <Link href={`/${post.slug}`} className={styles.titleLink}>
                       {post.title}
                     </Link>
                   </h2>
-                  <p style={{ color: "#666", fontSize: "0.9rem" }}>
+                  <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                     <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
                     {post.publishedAt?.toLocaleDateString()}
                   </p>

@@ -20,7 +20,7 @@ export default function ForgotPasswordPage() {
             Email
             <input name="email" type="email" required autoComplete="email" />
           </label>
-          {state.error && <p style={{ color: "crimson" }}>{state.error}</p>}
+          {state.error && <p style={{ color: "var(--error)" }}>{state.error}</p>}
           <button type="submit" disabled={pending}>
             {pending ? "Sending..." : "Send reset link"}
           </button>

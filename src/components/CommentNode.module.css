@@ -5,7 +5,7 @@
 .nested {
   margin-left: 20px;
   padding-left: 14px;
-  border-left: 2px solid #e0e0e0;
+  border-left: 2px solid var(--border);
 }
 
 .meta {
@@ -20,12 +20,12 @@
 }
 
 .timestamp {
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.8rem;
 }
 
 .deleted {
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .replyButton {
@@ -33,7 +33,7 @@
   margin-top: 4px;
   border: none;
   background: none;
-  color: #666;
+  color: var(--text-secondary);
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
@@ -45,7 +45,7 @@
   margin-left: 8px;
   border: none;
   background: none;
-  color: #666;
+  color: var(--text-secondary);
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
@@ -60,7 +60,7 @@
   margin-left: 8px;
   border: none;
   background: none;
-  color: #800000;
+  color: var(--danger);
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
@@ -71,7 +71,7 @@
   margin-top: 4px;
   margin-left: 8px;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .confirmYes {
@@ -79,7 +79,7 @@
   font-weight: bold;
   border: none;
   background: none;
-  color: #006400;
+  color: var(--success);
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
@@ -90,13 +90,13 @@
   font-weight: bold;
   border: none;
   background: none;
-  color: #8b0000;
+  color: var(--danger);
   padding: 0;
   cursor: pointer;
   text-decoration: underline;
 }
 
 .error {
-  color: crimson;
+  color: var(--error);
   font-size: 0.85rem;
 }

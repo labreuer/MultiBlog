@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--on-author-color);
   font-weight: 600;
   /* The initials are decorative — the name they abbreviate is always
      rendered next to them — so they must not be selectable as stray text

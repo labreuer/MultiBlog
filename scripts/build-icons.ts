@@ -75,10 +75,10 @@
 // manifest.ts reads the two public/icons/ files itself and appends its own
 // content-hash query param, since files under public/ get none of Next's
 // automatic hashing — see that file for why. It also hardcodes the
-// manifest's theme_color/background_color to match whatever
-// --alpha-to-color produces here; the two aren't derived from a shared
-// source, so a non-default --alpha-to-color needs manifest.ts's
-// BACKGROUND_COLOR updated by hand to stay consistent.
+// manifest's background_color to match whatever --alpha-to-color produces
+// here; the two aren't derived from a shared source, so a non-default
+// --alpha-to-color needs manifest.ts's ICON_PLATE_COLOR updated by hand to
+// stay consistent.
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";

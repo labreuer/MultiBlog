@@ -1,7 +1,7 @@
 .panel {
   margin-top: 2rem;
   padding-top: 1.5rem;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--border);
 }
 
 .heading {
@@ -17,18 +17,18 @@
 
 .field label {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .field input {
   padding: 0.4rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 0.95rem;
 }
 
 .editorFrame {
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.4rem;
 }
@@ -49,12 +49,12 @@
 }
 
 .error {
-  color: crimson;
+  color: var(--error);
 }
 
 .hint {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 /* A button that reads as a link — for a secondary action sitting inside a
@@ -64,7 +64,7 @@
   border: none;
   padding: 0;
   font: inherit;
-  color: #c00;
+  color: var(--danger);
   cursor: pointer;
   text-decoration: underline;
 }
@@ -74,7 +74,7 @@
 }
 
 .optOutButton {
-  color: #c00;
+  color: var(--danger);
   background: none;
   border: none;
   cursor: pointer;
@@ -83,20 +83,20 @@
 }
 
 .confirmPrompt {
-  color: #c00;
+  color: var(--danger);
 }
 
 .previewHeading {
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .previewCard {
-  border: 1px dashed #ccc;
+  border: 1px dashed var(--border);
   border-radius: 4px;
   padding: 0.75rem;
   max-width: 280px;

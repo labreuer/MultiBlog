@@ -41,7 +41,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
           New password
           <input name="password" type="password" required minLength={8} autoComplete="new-password" />
         </label>
-        {state.error && <p style={{ color: "crimson" }}>{state.error}</p>}
+        {state.error && <p style={{ color: "var(--error)" }}>{state.error}</p>}
         <button type="submit" disabled={pending}>
           {pending ? "Resetting..." : "Reset password"}
         </button>

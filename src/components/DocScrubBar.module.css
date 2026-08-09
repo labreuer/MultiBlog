@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   background: var(--background);
-  border-top: 1px solid #ccc;
+  border-top: 1px solid var(--border);
   padding: 0.5rem 1rem;
   z-index: 10;
 }
@@ -37,14 +37,14 @@
 }
 
 .positionLine {
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .loadingLine {
-  color: #999;
+  color: var(--text-muted);
 }
 
 .error {
-  color: crimson;
+  color: var(--error);
   font-size: 0.85rem;
 }

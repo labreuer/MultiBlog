@@ -52,7 +52,7 @@ export default function SignInPage() {
           Password
           <input name="password" type="password" required autoComplete="current-password" />
         </label>
-        {error && <p style={{ color: "crimson" }}>{error}</p>}
+        {error && <p style={{ color: "var(--error)" }}>{error}</p>}
         <button type="submit" disabled={pending}>
           {pending ? "Signing in..." : "Sign in"}
         </button>

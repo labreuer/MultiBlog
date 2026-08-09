@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
 import SiteHeader from "@/components/SiteHeader";
@@ -21,6 +21,17 @@ export const metadata: Metadata = {
   alternates: {
     types: { "application/rss+xml": "/rss.xml" },
   },
+};
+
+// The only other place --background's two values are duplicated — see
+// ICON_PLATE_COLOR/THEME_COLOR in manifest.ts, which this must stay in sync
+// with by hand (the manifest spec has no per-scheme theme_color).
+export const viewport: Viewport = {
+  colorScheme: "light dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
 };
 
 export default function RootLayout({

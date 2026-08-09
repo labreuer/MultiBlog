@@ -5,6 +5,7 @@ import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { QuoteHighlight, type QuoteHighlightThread } from "@/lib/quote-highlight-extension";
 import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
+import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import CommentForm from "./CommentForm";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -28,7 +29,7 @@ type Props = {
 // pointed at, then fades it back out.
 function flashHighlight(element: HTMLElement, color: string) {
   element.style.transition = "background-color 0.3s ease-in";
-  element.style.backgroundColor = `color-mix(in srgb, ${color} 35%, white)`;
+  element.style.backgroundColor = `color-mix(in srgb, ${color} var(--anchor-tint-active, 45%), transparent)`;
   window.setTimeout(() => {
     element.style.transition = "background-color 1.5s ease-out";
     element.style.backgroundColor = "";
@@ -48,7 +49,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
         onIndicatorClick: (threadId) => {
           const targets = document.querySelectorAll<HTMLElement>(`[data-thread-id="${threadId}"]`);
           if (targets.length === 0) return;
-          const color = threads.find((t) => t.id === threadId)?.color ?? "#999";
+          const color = threads.find((t) => t.id === threadId)?.color ?? NEUTRAL_THREAD_COLOR;
           targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
           targets.forEach((target) => flashHighlight(target, color));
           activatePseudoBordersForThread(threadId, color);
@@ -113,14 +114,15 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
             left: pending.left,
             zIndex: 20,
             width: 280,
-            background: "#fff",
-            border: "1px solid #ccc",
+            background: "var(--surface)",
+            color: "var(--foreground)",
+            border: "1px solid var(--border)",
             borderRadius: 4,
             padding: 12,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            boxShadow: "0 2px 8px var(--shadow-color)",
           }}
         >
-          <p style={{ fontSize: "0.85rem", color: "#666", marginBottom: 4 }}>
+          <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: 4 }}>
             Commenting on: “
             {pending.quotedText.length > 80 ? `${pending.quotedText.slice(0, 80)}…` : pending.quotedText}”
           </p>

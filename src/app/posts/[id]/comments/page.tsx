@@ -47,12 +47,12 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
       ) : (
         <ul style={{ listStyle: "none", padding: 0 }}>
           {pending.map((comment) => (
-            <li key={comment.id} style={{ padding: "12px 0", borderBottom: "1px solid #ddd" }}>
+            <li key={comment.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
               <p style={{ fontWeight: "bold", marginBottom: 2 }}>
                 {comment.commenter.displayName}{" "}
-                <span style={{ fontWeight: "normal", color: "#666" }}>({comment.commenter.email})</span>
+                <span style={{ fontWeight: "normal", color: "var(--text-secondary)" }}>({comment.commenter.email})</span>
               </p>
-              <p style={{ color: "#666", fontSize: "0.85rem", marginBottom: 4 }}>
+              <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: 4 }}>
                 {comment.createdAt.toLocaleString()}
                 {comment.ipAddress && ` · ${comment.ipAddress}`}
               </p>

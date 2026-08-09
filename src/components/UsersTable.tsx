@@ -412,7 +412,7 @@ function ColorCell({ userId, color, run }: CellProps & { color: string }) {
         type="color"
         defaultValue={color}
         disabled={pending}
-        style={{ width: 40, height: 24, padding: 0, border: "1px solid #ddd", cursor: "pointer" }}
+        style={{ width: 40, height: 24, padding: 0, border: "1px solid var(--border)", cursor: "pointer" }}
       />
       <CellError message={error} />
     </>
@@ -456,9 +456,9 @@ function InviteCell({
 
   if (confirming) {
     return (
-      <span style={{ color: "#666" }}>
+      <span style={{ color: "var(--text-secondary)" }}>
         Send to {email}?{" "}
-        <button type="button" onClick={send} disabled={pending} style={{ fontWeight: "bold", color: "#006400" }}>
+        <button type="button" onClick={send} disabled={pending} style={{ fontWeight: "bold", color: "var(--success)" }}>
           Yes
         </button>{" "}
         /{" "}
@@ -466,7 +466,7 @@ function InviteCell({
           type="button"
           onClick={() => setConfirming(false)}
           disabled={pending}
-          style={{ fontWeight: "bold", color: "#8b0000" }}
+          style={{ fontWeight: "bold", color: "var(--danger)" }}
         >
           No
         </button>
@@ -513,15 +513,15 @@ function InviteUrlCell({
 
   let status: { text: string; color: string };
   if (invite.acceptedAt) {
-    status = { text: `accepted ${formatDate(invite.acceptedAt, dateFormat)}`, color: "#0a5" };
+    status = { text: `accepted ${formatDate(invite.acceptedAt, dateFormat)}`, color: "var(--success)" };
   } else if (invite.revokedAt) {
-    status = { text: "revoked", color: "#666" };
+    status = { text: "revoked", color: "var(--text-secondary)" };
   } else if (invite.clickedAt) {
-    status = { text: `clicked ${formatDate(invite.clickedAt, dateFormat)}`, color: "#666" };
+    status = { text: `clicked ${formatDate(invite.clickedAt, dateFormat)}`, color: "var(--text-secondary)" };
   } else if (invite.expiresAt <= new Date()) {
-    status = { text: "expired", color: "#666" };
+    status = { text: "expired", color: "var(--text-secondary)" };
   } else {
-    status = { text: `sent ${formatDate(invite.sentAt, dateFormat)}`, color: "#666" };
+    status = { text: `sent ${formatDate(invite.sentAt, dateFormat)}`, color: "var(--text-secondary)" };
   }
 
   return (
@@ -660,7 +660,7 @@ export default function UsersTable({
       sortKey: "email",
       cell: (row) => (
         <span
-          style={{ color: row.emailVerified ? "#0a5" : "#c00" }}
+          style={{ color: row.emailVerified ? "var(--success)" : "var(--danger)" }}
           title={row.emailVerified ? `Verified: ${formatDate(row.emailVerified, dateFormat)}` : undefined}
         >
           {row.email}

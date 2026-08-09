@@ -8,7 +8,7 @@
   font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
   font-size: 1.125rem;
   line-height: 1.5;
-  color: #222;
+  color: var(--foreground);
 }
 
 .prose :global(p) {
@@ -35,8 +35,8 @@
 .prose :global(blockquote) {
   margin: 0 0 1.25em;
   padding-left: 1rem;
-  border-left: 3px solid #ccc;
-  color: #555;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
 }
 
 /* Quote-anchoring decorations (step 6) — set as literal class names by a
@@ -47,7 +47,7 @@
    ProseMirror can only paint one background per span, so an ambiguous
    overlap goes neutral instead of arbitrarily picking one author's color. */
 .prose :global(.quote-highlight) {
-  background: color-mix(in srgb, var(--thread-color, #999) 25%, transparent);
+  background: color-mix(in srgb, var(--thread-color, var(--text-muted)) var(--anchor-tint), transparent);
   border-radius: 2px;
 }
 
@@ -61,8 +61,8 @@
   margin-left: 2px;
   border: none;
   border-radius: 9px;
-  background: var(--thread-color, #999);
-  color: #fff;
+  background: var(--thread-color, var(--text-muted));
+  color: var(--on-author-color);
   font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
@@ -70,7 +70,7 @@
 }
 
 .prose :global(.quote-indicator:hover) {
-  background: color-mix(in srgb, var(--thread-color, #999) 80%, black);
+  background: color-mix(in srgb, var(--thread-color, var(--text-muted)) 80%, var(--shade-target));
 }
 
 /* Triggered from the comments section's jump-to-quote arrow (see
@@ -85,10 +85,10 @@
 @keyframes quoteHighlightPulse {
   0%,
   100% {
-    background-color: color-mix(in srgb, var(--thread-color, #999) 25%, transparent);
+    background-color: color-mix(in srgb, var(--thread-color, var(--text-muted)) var(--anchor-tint), transparent);
   }
   50% {
-    background-color: color-mix(in srgb, var(--thread-color, #999) 55%, transparent);
+    background-color: color-mix(in srgb, var(--thread-color, var(--text-muted)) var(--anchor-tint-pulse), transparent);
   }
 }
 
@@ -105,7 +105,7 @@
    view, though only the reading view (CommentSection) currently supplies
    real author colors — see AnnotationColorStyles.tsx. */
 .prose :global(.annotation-highlight) {
-  background: color-mix(in srgb, var(--thread-color, #ffc800) 28%, transparent);
+  background: color-mix(in srgb, var(--thread-color, #ffc800) var(--anchor-tint), transparent);
   border-radius: 2px;
   cursor: pointer;
 }
@@ -117,10 +117,10 @@
 @keyframes annotationHighlightPulse {
   0%,
   100% {
-    background-color: color-mix(in srgb, var(--thread-color, #ffc800) 28%, transparent);
+    background-color: color-mix(in srgb, var(--thread-color, #ffc800) var(--anchor-tint), transparent);
   }
   50% {
-    background-color: color-mix(in srgb, var(--thread-color, #ffc800) 55%, transparent);
+    background-color: color-mix(in srgb, var(--thread-color, #ffc800) var(--anchor-tint-pulse), transparent);
   }
 }
 
@@ -132,8 +132,8 @@
    background wash keeps it visually distinct from .annotation-highlight's
    already-posted look. */
 .prose :global(.pending-annotation) {
-  background: color-mix(in srgb, var(--thread-color, #999) 18%, transparent);
-  border-bottom: 2px dashed var(--thread-color, #999);
+  background: color-mix(in srgb, var(--thread-color, var(--text-muted)) var(--anchor-tint-weak), transparent);
+  border-bottom: 2px dashed var(--thread-color, var(--text-muted));
 }
 
 /* PLAN.md §14f — /side-by-side suppresses annotation highlights visually,
@@ -159,13 +159,13 @@
    .doc-link-active) is the one-shot flash triggered by
    QuoteThreadHeader.jumpToQuote's pattern, reused verbatim. */
 .prose :global(.doc-link-highlight) {
-  background: color-mix(in srgb, var(--doc-link-color, #999) 25%, transparent);
+  background: color-mix(in srgb, var(--doc-link-color, var(--text-muted)) var(--anchor-tint), transparent);
   border-radius: 2px;
   cursor: pointer;
 }
 
 .prose :global(.doc-link-highlight.doc-link-active) {
-  background: color-mix(in srgb, var(--doc-link-color, #999) 45%, transparent);
+  background: color-mix(in srgb, var(--doc-link-color, var(--text-muted)) var(--anchor-tint-active), transparent);
 }
 
 .prose :global(.doc-link-highlight.doc-link-active.pulse) {
@@ -175,9 +175,9 @@
 @keyframes docLinkPulse {
   0%,
   100% {
-    background-color: color-mix(in srgb, var(--doc-link-color, #999) 45%, transparent);
+    background-color: color-mix(in srgb, var(--doc-link-color, var(--text-muted)) var(--anchor-tint-active), transparent);
   }
   50% {
-    background-color: color-mix(in srgb, var(--doc-link-color, #999) 70%, transparent);
+    background-color: color-mix(in srgb, var(--doc-link-color, var(--text-muted)) var(--anchor-tint-pulse), transparent);
   }
 }

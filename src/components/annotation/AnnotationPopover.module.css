@@ -15,15 +15,16 @@
   position: fixed;
   z-index: 20;
   width: 280px;
-  background: #fff;
-  border: 1px solid #ccc;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px var(--shadow-color);
 }
 
 .quotedText {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 4px;
 }

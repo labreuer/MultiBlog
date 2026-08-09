@@ -212,7 +212,7 @@ export default function SideBySideDocBody({
   }, [editingLink, chooser]);
 
   if (error) {
-    return <p style={{ color: "crimson" }}>{error}</p>;
+    return <p style={{ color: "var(--error)" }}>{error}</p>;
   }
 
   const { pending, placement, popoverRef } = selection;

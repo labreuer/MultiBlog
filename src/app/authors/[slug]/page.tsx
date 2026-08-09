@@ -86,18 +86,18 @@ export default async function AuthorPage({ params }: { params: Promise<{ slug: s
           <h1>{author.user.name ?? "Author"}</h1>
         </div>
         {author.posts.length === 0 ? (
-          <p style={{ color: "#666" }}>No published posts yet.</p>
+          <p style={{ color: "var(--text-secondary)" }}>No published posts yet.</p>
         ) : (
           author.posts.map((post) => {
             const excerpt = post.proseJson ? extractText(post.proseJson).slice(0, 200) : "";
             return (
-              <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
+              <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
                 <h2 className={styles.postHeading}>
                   <Link href={`/${post.slug}`} className={styles.titleLink}>
                     {post.title}
                   </Link>
                 </h2>
-                <p style={{ color: "#666", fontSize: "0.9rem" }}>{post.publishedAt?.toLocaleDateString()}</p>
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>{post.publishedAt?.toLocaleDateString()}</p>
                 <p>
                   {excerpt}
                   {excerpt.length === 200 ? "…" : ""}

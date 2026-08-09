@@ -1,14 +1,15 @@
 .wrapper {
   margin-top: 8px;
   padding: 8px 10px;
-  border: 1px dashed #ccc;
+  border: 1px dashed var(--border);
   border-radius: 4px;
-  background: #fafafa;
+  background: var(--surface-muted);
+  color: var(--foreground);
 }
 
 .heading {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 6px;
 }
 
@@ -29,7 +30,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #444;
+  color: var(--foreground);
 }
 
 .editButton {
@@ -37,7 +38,7 @@
   font-size: 0.8rem;
   border: none;
   background: none;
-  color: #333;
+  color: var(--foreground);
   cursor: pointer;
   text-decoration: underline;
   flex-shrink: 0;

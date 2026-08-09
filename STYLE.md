@@ -71,52 +71,130 @@ value that two systems depend on invites drift.
 
 ## Global baseline (`globals.css`)
 
-- `--foreground: #171717` / `--background: #ffffff` (dark mode: `#ededed` / `#0a0a0a`,
-  via `prefers-color-scheme`). Only `body` actually consumes these; most pages don't
-  yet respect dark mode beyond this.
+- Every color in the app is a token defined once in `globals.css`, driven by
+  the OS's `prefers-color-scheme` via CSS `light-dark()` — see the Dark theme
+  section below for the full model. `--foreground`/`--background` are the
+  longest-standing tokens; every other role (surfaces, borders, status
+  colors, the link color, the anchor-highlight tints) has its own. There is
+  no untokenized color left in `src/` outside `globals.css` itself,
+  `lib/author-colors.ts` (the author palette + the `NEUTRAL_THREAD_COLOR`
+  fallback), `lib/safe-css.ts` (a validation regex), `manifest.ts`, and
+  `layout.tsx`'s `viewport.themeColor` — see the grep guard in the Dark
+  theme section for the enforced allow-list.
 - `body` font: `Arial, Helvetica, sans-serif` — the sitewide default. Individual page
   containers currently override this (see Typography below); nothing has unified it.
 - `* { margin: 0; padding: 0; box-sizing: border-box; }` — a hard reset. Anything
   rendering list/blockquote content needs to restore spacing explicitly (see
   `prose.module.css`, and the CLAUDE.md gotcha about it).
-- Links: `a { color: #3366cc; text-decoration: none; }`, `a:hover { text-decoration:
+- Links: `a { color: var(--link); text-decoration: none; }`, `a:hover { text-decoration:
   underline; }` — sitewide default for **every** link except post titles (below).
 
 ## Color palette
 
-| Role | Value | Where |
-|---|---|---|
-| Default link | `#3366cc` | `globals.css`, sitewide |
-| Post title (home/author listings) | `#000` (black), underline only on `:hover` | `page.module.css` `.titleLink` — deliberate override of the default link color |
-| Body text | `#171717` (`--foreground`) | `globals.css` |
-| Secondary/meta text (dates, bylines, empty states) | `#666` | pervasive — `page.tsx`, `search/page.tsx`, `CommentNode`, history/comments admin pages, etc. |
-| Muted/placeholder text | `#999` | detached-thread notices, collab-cursor fallback color, "nothing to show" states, the doc editor's "Untitled" title placeholder (`DocEditor.module.css`) |
-| Light divider (between list/article rows, and under a byline) | `1px solid #eee` | every post-listing `<article>` (`page.tsx`, `authors/[id]/page.tsx`, `search/page.tsx`); also the byline rule on both reading views (`app/[slug]/page.module.css`, `app/doc/[slug]/page.module.css`) |
-| Stronger border (panels, table headers, comment-admin rows) | `1px solid #ddd` | `PostsTable.tsx`, `SiteHeader.tsx`, admin comments/history pages |
-| Nested-reply rail | `2px solid #e0e0e0` | `CommentNode.module.css` `.nested` |
-| Quote-thread marker/highlight/badge (active) | `var(--thread-color, #999)` — see note below | `QuoteThreadHeader.module.css`, `prose.module.css` `.quote-highlight`/`.quote-indicator` |
-| Quote-thread marker (detached) | `#999`, fixed (not `--thread-color`-driven) | `QuoteThreadHeader.module.css` |
-| Quote highlight background / pulse | `color-mix(in srgb, var(--thread-color, #999) 25%, transparent)`, pulses to 55% | `prose.module.css` |
-| Annotation highlight background / pulse | `rgba(255, 200, 0, 0.28)`, pulses to `0.55` alpha | `prose.module.css` `.annotation-highlight` — flat amber, not `--thread-color`-driven: unlike a quote thread, an annotation isn't multi-colored per commenter (PLAN.md §12i) |
-| Doc link highlight background / active / pulse | `color-mix(in srgb, var(--doc-link-color, #999) 25%, transparent)`, 45% when its group is active, pulses to 70% | `prose.module.css` `.doc-link-highlight`/`.doc-link-active`/`.pulse` — a third, separately-named custom property from `--thread-color` (same per-instance-color pattern, §14e's cascade: link override → group override → author color), kept distinct so devtools can tell the three anchor kinds apart at a glance |
-| Comment-form buttons | `#333` (Post comment) / `#666` (Cancel) | `CommentForm.module.css` `.submit`/`.cancel` |
-| Error text | `crimson` | form validation errors |
-| Row status border (edited / saving / error / saved) | `#999` / `#d4a017` / `#c00` / `#0a5` | `table/AdminTable.module.css` `.rowStatus*` — a 3px left border on a row's first cell (PLAN.md §16f). Reuses the muted, danger and success colors already in this table; `#d4a017` is the saturated amber quote highlighting was toned down from |
-| Danger/delete action | `#c00` (text/border, no fill) | `PostsTable.tsx`/`UsersTable.tsx` delete icon buttons, `PostSettingsPanel.module.css` `.deleteButton` — consistent across every soft-delete control in the admin/editor UI |
-| Diff view: insertion / deletion | `#0a5` on `#d4f7d4` / `#c00` on `#fbdada` | `history/[revisionNumber]/page.tsx` — not part of the palette above, ad hoc and only used there |
-| Drag-over highlight | `#eef4ff` background, `1px dashed #88a` outline | `PostSettingsPanel.module.css` `.dragOver` — ad hoc, only reordering UI so far |
-| Moderation action buttons (Approve / Pend / Spam) | light fill per action — `#d4f5d4` / `#faf3c0` / `#f8d4d4` — with a shared `1px solid #999` border and `2px` padding | `CommentsTable.module.css` `.approve`/`.pend`/`.spam` (the colors — comment-status-specific) + `AdminTable.module.css` `.actionButton` (the border/padding wrapper — generic), used together by `ActionCell` — same neutral-gray border on all three so the fill color alone (not the border) carries the meaning |
+| Token | Light | Dark | Role | Where |
+|---|---|---|---|---|
+| `--background` | `#ffffff` | `#0a0a0a` | Page background | `body` |
+| `--surface` | `#ffffff` | `#1e1e1e` | Elevated panel/popover background | `SiteHeader`'s nav dropdown, `EditorChrome`'s quote menu, every annotation/doc-link popover, `AdminTable`'s sticky filter dropdown |
+| `--surface-muted` | `#f6f6f6` | `#161616` | Recessed panel background | `AdminTable`'s bulk toolbar, `DocLinkGroupPanel`, `OwnDraftsList` |
+| `--surface-hover` | `#f0f0f0` | `#2b2b2b` | Hover state on an elevated surface | `EditorChrome`'s quote-menu item hover, `DocLinkChooser`'s candidate hover |
+| `--foreground` | `#171717` | `#ededed` | Body text | `globals.css`, `.prose`, post title links (deliberate override of the default link color) |
+| `--text-secondary` | `#666666` | `#a0a0a0` | Secondary/meta text (dates, bylines, empty states) | pervasive |
+| `--text-muted` | `#999999` | `#8a8a8a` | Muted/placeholder text, and the `--thread-color`/`--doc-link-color` fallback | detached-thread notices, the doc editor's "Untitled" placeholder, collab-caret fallback |
+| `--border-subtle` | `#eeeeee` | `#242424` | Light divider (between list/article rows, under a byline) | every post-listing `<article>`, both reading views' byline rule |
+| `--border` | `#d4d4d4` | `#3d3d3d` | Standard panel/input border | most `1px solid` rules in the app — collapses the old `#ccc`/`#ddd`/`#e0e0e0` |
+| `--border-strong` | `#999999` | `#6a6a6a` | Heavier border where more presence is needed | `AdminTable`'s `.actionButton`, `SiteHeader`'s nav separator glyphs, dashed drop-target outlines |
+| `--link` | `#3366cc` | `#7aa7ff` | Default link color | `globals.css`, sitewide. `#3366cc` fails AA (~3.4:1) on the dark background; `#7aa7ff` is ~9:1 |
+| `--accent-wash` / `--accent-outline` | `#eaf1ff` / `#8888aa` | `#16233d` / `#6b7fb0` | Drag-over / selected-state highlight | `AdminTable`/`PostSettingsPanel`/`DocSettingsPanel` `.dragOver`, `YdocDebug`'s snapshot dot |
+| `--success` | `#00aa55` | `#3ddc84` | Success text/status | `CommentsTable`'s Approved status, diff insertions, publish-history "(current)" |
+| `--warning` / `--warning-text` | `#d4a017` / `#8a6d00` | `#e0b13a` / `#e5c351` | Warning border / warning text | row-status "saving" border / `CommentsTable`'s Pending status text — separate tokens because `#d4a017` alone fails AA as text |
+| `--danger` | `#cc0000` | `#ff6b6b` | Danger/delete action | soft-delete controls, `CommentsTable`'s Spam status, diff deletions |
+| `--error` | `crimson` | `#ff7b7b` | Form validation error text | every form's error paragraph |
+| `--fill-success` / `--fill-warning` / `--fill-danger` | `#d4f5d4` / `#faf3c0` / `#f8d4d4` | dark-tinted equivalents | Moderation action fills, diff insertion/deletion backgrounds | `CommentsTable.module.css` `.approve`/`.pend`/`.spam`, `history/[eventId]/page.tsx` |
+| `--shadow-color` | `rgba(0,0,0,.15)` | `rgba(0,0,0,.6)` | Popover box-shadow | every fixed-position popover |
+| `--on-author-color` | `#ffffff` (both) | | Text/glyph on a solid `User.color` fill | quote-indicator badge, `Avatar`'s initials fallback, collab-caret name label — scheme-independent on purpose |
+| `--shade-target` | `#000000` | `#ffffff` | The "shade toward" endpoint for a hover built with `color-mix()` | `.quote-indicator:hover` — "darken on hover" becomes "lighten on hover" on dark without duplicating the rule |
+| `--anchor-tint*` (`-weak`/plain/`-active`/`-pulse`) | 18%/26%/45%/60% | 34%/44%/62%/80%, via `calc(base% + var(--dark) * delta%)` | The alpha strength for every quote/annotation/doc-link highlight tint | `prose.module.css`'s 12 `color-mix()` sites, `AuthorHighlightStyles.tsx`, `AnnotatableArticle.tsx`'s flash |
+
+`--dark` (`0`/`1`, flipped by the same `prefers-color-scheme` query) is the one non-color
+switch — `light-dark()` only accepts `<color>` arguments, so a percentage that needs to shift
+with scheme goes through `calc()` against `--dark` instead. See the Dark theme section.
 
 Quote-thread coloring was originally one fixed muted amber (`#b8935a`, itself toned down
 from an earlier, more saturated `#fff3b0`/`#d4a017` — see git history), the same for every
 thread. It's now **one real color per thread** — the thread-opener's `User.color`, or a
 seeded fallback for anonymous commenters (PLAN.md §10 item 13) — carried as an inline
 `--thread-color` custom property rather than a CSS Modules class, since there's one value
-per *thread instance*, not a small fixed set of states. The `#999` fallback above is what
-renders when that property is left unset: either a decoration span shared by threads of
-different colors (a single span can only paint one background, so an ambiguous overlap
-goes neutral rather than picking one author arbitrarily) or, coincidentally, the same shade
-used for the unrelated "detached" state.
+per *thread instance*, not a small fixed set of states. `--text-muted` is what renders when
+that property is left unset: either a decoration span shared by threads of different colors
+(a single span can only paint one background, so an ambiguous overlap goes neutral rather
+than picking one author arbitrarily) or, coincidentally, the same shade used for the
+unrelated "detached" state. `QuoteThreadHeader.module.css` used to fall back to a separate
+literal (`#b8935a`) here instead of the shared muted gray — that inconsistency is gone; both
+now fall back to `--text-muted`.
+
+## Dark theme
+
+OS-driven only (`prefers-color-scheme`) — no toggle, no `data-theme`, no persisted
+preference. Every color token above is declared once, as
+`light-dark(<light-value>, <dark-value>)`, on `:root { color-scheme: light dark; }`. That's
+what lets a single declaration carry both values instead of a `@media` block per token: the
+UA resolves `light-dark()` against the element's *used* `color-scheme`, so setting it on
+`:root` (or later, `<html>`) flips every consumer at once.
+
+- **`light-dark()` accepts `<color>` arguments only** — `light-dark(26%, 44%)` is invalid.
+  The five anchor-tint percentages therefore go through a separate mechanism: a numeric
+  `--dark: 0` (flipped to `1` inside the one remaining `@media (prefers-color-scheme: dark)`
+  block in `globals.css`), read via `calc(base% + var(--dark) * delta%)`. That block is the
+  *only* scheme-conditional CSS left in the app — everything else is a plain `light-dark()`
+  token.
+- **A future toggle is a one-line change, not a redesign**: add
+  `html[data-theme="dark"] { color-scheme: dark; --dark: 1; }` (and the light equivalent).
+  `color-scheme` inherits and `light-dark()` resolves against the consuming element's used
+  value, not `:root`'s literally, so this flips every token below it with no other edits.
+- **Any rule that sets `background` must also set `color`.** A background-only rule
+  (`CommentsTable`'s `.approve`/`.pend`/`.spam`, `AdminTable`'s `.dropdownPanel`/
+  `.bulkToolbar`) inverts into unreadable light-on-light the moment the foreground flips
+  independently of it. Every surface token pairing in this codebase follows this rule now;
+  keep it that way for anything new.
+- **Browsers below the `light-dark()` floor** (Safari <17.5, Chrome <123, Firefox <120) don't
+  fail gracefully. Custom properties parse permissively, so the declarations are *stored*;
+  the break is at substitution, where "invalid at computed-value time" takes the *inherited*
+  value for an inherited property (`color` silently inherits — harmless) or the *initial*
+  value otherwise (`background` silently becomes `transparent`, `border` silently
+  disappears). `globals.css` guards against this with an `@supports not (color:
+  light-dark(#000, #fff))` block restating every token's light value directly — delete it as
+  a unit once the floor is comfortable. `color-scheme` itself is supported far earlier
+  (Chrome 81/Safari 13/Firefox 96), so without the guard an unsupporting browser would render
+  dark native form controls on top of a broken light page.
+- **The grep guard** — this should return nothing outside the allow-listed files named in
+  the Global baseline section above:
+  ```
+  rg -n -e '#[0-9a-fA-F]{3,8}\b' -e '\b(white|black|crimson|silver|gray|grey|green|red|blue)\b' \
+     -g 'src/**/*.{css,ts,tsx}' -g '!src/app/globals.css' -g '!src/lib/author-colors.ts' \
+     -g '!src/lib/safe-css.ts' -g '!src/app/manifest.ts' -g '!src/app/layout.tsx' src
+  ```
+  The one intentional literal inside `prose.module.css` is the `#ffc800` amber fallback on
+  `.annotation-highlight` (three sites) — a deliberate "no author color arrived yet" signal,
+  not an oversight.
+
+Known limitations of the "per-scheme alpha only" approach (author colors and the
+`AUTHOR_COLOR_PALETTE` are unchanged; only the highlight *alpha* strengthens on dark — no
+luminance/contrast computation was added):
+
+1. **Perceived emphasis varies by author color.** A 44%-alpha wash of a dark palette entry
+   (e.g. `#845ef7`) reads noticeably fainter over `#0a0a0a` than a light one (`#fab005`) at
+   the same alpha, and the ordering reverses on light backgrounds. If this ever needs
+   correcting, clamp lightness at consumption time — `oklch(from var(--thread-color)
+   clamp(0.55, l, 0.8) c h)` — rather than editing the palette.
+2. **White-on-author-color contrast is unchanged and unfixed.** `.quote-indicator`,
+   `Avatar`'s initials fallback, and the collab-caret name label all paint `--on-author-color`
+   (fixed white) over an arbitrary `User.color`; a light palette entry can be as low as
+   ~1.8:1. Pre-existing, orthogonal to dark mode — not something this pass addressed.
+3. **Stacked highlights get heavier on dark** (a span carrying both a quote highlight and an
+   annotation mark composites two strengthened tints), which can cut into text contrast.
+4. `--anchor-tint-pulse`'s collapse (55%/70% → one 60%→80% token) weakens the doc-link pulse
+   flash relative to before (Δ15 vs. the old Δ25). If it reads too thin in practice, the fix
+   is a sixth token used only at that one site, not a broader retune.
 
 ## Typography
 
@@ -126,7 +204,7 @@ Two competing font stacks are in play, both deliberate:
   `Georgia, "Iowan Old Style", "Palatino Linotype", serif` — set on `.prose` (shared
   editor/render typography, `prose.module.css`), the post `<h1>` (`[slug]/page.module.css`
   `.title`), and the comments `<h2>` (`CommentSection.module.css` `.heading`). Chosen for
-  reading comfort; `.prose` also sets `font-size: 1.125rem; line-height: 1.7`.
+  reading comfort; `.prose` also sets `font-size: 1.125rem; line-height: 1.5`.
 - **UI chrome** (nav, forms, byline metadata): system sans-serif —
   `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` on page containers — or
   simply inherits the global `Arial, Helvetica, sans-serif` body default where no

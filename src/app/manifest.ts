@@ -26,12 +26,21 @@ async function hashedIconUrl(relPath: string): Promise<string | null> {
   }
 }
 
-// Matches WHITE_BACKGROUND in scripts/build-icons.ts — the opaque
-// background the maskable icons are composited onto (icon.png and friends
-// stay transparent; maskable can't, see that script's header comment).
-// Kept as a literal rather than imported: the build script isn't something
-// manifest.ts (which runs in the request/build path) should depend on.
-const BACKGROUND_COLOR = "#ffffff";
+// The manifest spec has no per-scheme theme_color — the scheme-aware
+// equivalent for a non-installed visit is the <meta name="theme-color"> pair
+// in layout.tsx's `viewport` export, which this must stay in sync with.
+//
+// Two constants, not one, because "browser/OS chrome color" and "the plate
+// the maskable icons are composited onto" are unrelated jobs that happened
+// to share a value. ICON_PLATE_COLOR matches WHITE_BACKGROUND in
+// scripts/build-icons.ts (icon.png and friends stay transparent; maskable
+// can't, see that script's header comment) — kept as a literal rather than
+// imported, since the build script isn't something manifest.ts (which runs
+// in the request/build path) should depend on. Flipping either to a dark
+// value would be wrong: theme_color would look off for light-preferring
+// users, and background_color would break its coupling to the icon plate.
+const ICON_PLATE_COLOR = "#ffffff";
+const THEME_COLOR = "#ffffff";
 
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
   const [any192, any512, maskable192, maskable512] = await Promise.all(
@@ -50,8 +59,8 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     name: SITE_TITLE,
     short_name: SITE_TITLE,
     icons,
-    theme_color: BACKGROUND_COLOR,
-    background_color: BACKGROUND_COLOR,
+    theme_color: THEME_COLOR,
+    background_color: ICON_PLATE_COLOR,
     display: "standalone",
   };
 }

@@ -35,7 +35,7 @@ export default function SiteHeader() {
         justifyContent: "space-between",
         alignItems: "center",
         padding: "1rem",
-        borderBottom: "1px solid #ddd",
+        borderBottom: "1px solid var(--border)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -44,7 +44,7 @@ export default function SiteHeader() {
         </Link>
         {session?.user && canManagePosts(session.user.role) && (
           <>
-            <span aria-hidden="true" style={{ color: "#ccc" }}>
+            <span aria-hidden="true" style={{ color: "var(--border-strong)" }}>
               |
             </span>
             <span className={styles.navGroup}>
@@ -62,7 +62,7 @@ export default function SiteHeader() {
         )}
         {session?.user && canManageDocs(session.user.role) && (
           <>
-            <span aria-hidden="true" style={{ color: "#ccc" }}>
+            <span aria-hidden="true" style={{ color: "var(--border-strong)" }}>
               |
             </span>
             <span className={styles.navGroup}>
@@ -80,11 +80,11 @@ export default function SiteHeader() {
         )}
         {session?.user && isAdmin(session.user.role) && (
           <>
-            <span aria-hidden="true" style={{ color: "#ccc" }}>
+            <span aria-hidden="true" style={{ color: "var(--border-strong)" }}>
               |
             </span>
             <Link href="/users">Manage Users</Link>
-            <span aria-hidden="true" style={{ color: "#ccc" }}>
+            <span aria-hidden="true" style={{ color: "var(--border-strong)" }}>
               |
             </span>
             <Link href="/site-settings">Site Settings</Link>

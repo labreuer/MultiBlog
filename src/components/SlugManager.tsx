@@ -165,7 +165,7 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
           </>
         )}
       </p>
-      <p style={{ color: "#666", fontSize: "0.9rem", marginTop: "0.5em" }}>
+      <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "0.5em" }}>
         Auto-generated url: {urlPrefix}/{standardSlug}
         {standardSlug === slug ? (
           " — matches the current url."
@@ -178,7 +178,7 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
           </>
         )}
       </p>
-      <p style={{ color: "#666", fontSize: "0.85rem", marginTop: "1em" }}>
+      <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: "1em" }}>
         Urls may contain lowercase letters, numbers, and hyphens. Anything else — spaces,
         punctuation, uppercase — is converted automatically, and repeated or leading/trailing
         hyphens are trimmed.
@@ -198,17 +198,17 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
           <button type="button" onClick={cancelEditing} disabled={pending}>
             Cancel
           </button>
-          {changeError && <p style={{ color: "crimson", fontSize: "0.85rem" }}>{changeError}</p>}
+          {changeError && <p style={{ color: "var(--error)", fontSize: "0.85rem" }}>{changeError}</p>}
         </div>
       )}
 
       <h2 style={{ fontSize: "1rem", marginTop: 24 }}>Past urls</h2>
       {rows.length === 0 ? (
-        <p style={{ color: "#666" }}>No past urls.</p>
+        <p style={{ color: "var(--text-secondary)" }}>No past urls.</p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
           <thead>
-            <tr style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
+            <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
               <th style={{ padding: "4px 8px 4px 0" }}>Url</th>
               <th style={{ padding: "4px 8px 4px 0" }}>Changed on</th>
               <th></th>
@@ -217,11 +217,11 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
           </thead>
           <tbody>
             {rows.map((row, i) => (
-              <tr key={row.slug} style={{ borderBottom: "1px solid #eee" }}>
+              <tr key={row.slug} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                 <td style={{ padding: "4px 8px 4px 0" }}>
                   {urlPrefix}/{row.slug}
                 </td>
-                <td style={{ padding: "4px 8px 4px 0", color: "#666" }}>{new Date(row.createdAt).toLocaleString()}</td>
+                <td style={{ padding: "4px 8px 4px 0", color: "var(--text-secondary)" }}>{new Date(row.createdAt).toLocaleString()}</td>
                 <td style={{ padding: "4px 8px 4px 0" }}>
                   {i === rows.length - 1 && (
                     <button type="button" onClick={handleRevert} disabled={pending}>
@@ -231,13 +231,13 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
                 </td>
                 <td style={{ padding: "4px 0" }}>
                   {confirmingDeleteSlug === row.slug ? (
-                    <span style={{ color: "#666" }}>
+                    <span style={{ color: "var(--text-secondary)" }}>
                       Delete?{" "}
                       <button
                         type="button"
                         onClick={() => handleDeleteHistory(row.slug)}
                         disabled={pending}
-                        style={{ fontWeight: "bold", color: "#006400" }}
+                        style={{ fontWeight: "bold", color: "var(--success)" }}
                       >
                         Yes
                       </button>{" "}
@@ -246,13 +246,18 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
                         type="button"
                         onClick={() => setConfirmingDeleteSlug(null)}
                         disabled={pending}
-                        style={{ fontWeight: "bold", color: "#8b0000" }}
+                        style={{ fontWeight: "bold", color: "var(--danger)" }}
                       >
                         No
                       </button>
                     </span>
                   ) : (
-                    <button type="button" onClick={() => setConfirmingDeleteSlug(row.slug)} disabled={pending} style={{ color: "#c00" }}>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDeleteSlug(row.slug)}
+                      disabled={pending}
+                      style={{ color: "var(--danger)" }}
+                    >
                       Delete
                     </button>
                   )}
@@ -262,8 +267,8 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
           </tbody>
         </table>
       )}
-      {revertError && <p style={{ color: "crimson", fontSize: "0.85rem" }}>{revertError}</p>}
-      {deleteError && <p style={{ color: "crimson", fontSize: "0.85rem" }}>{deleteError}</p>}
+      {revertError && <p style={{ color: "var(--error)", fontSize: "0.85rem" }}>{revertError}</p>}
+      {deleteError && <p style={{ color: "var(--error)", fontSize: "0.85rem" }}>{deleteError}</p>}
     </div>
   );
 }

@@ -26,11 +26,11 @@
 }
 
 .arrowActive {
-  fill: var(--thread-color, #b8935a);
+  fill: var(--thread-color, var(--text-muted));
 }
 
 .arrowDetached {
-  fill: #999;
+  fill: var(--text-muted);
 }
 
 .bar {
@@ -38,11 +38,11 @@
 }
 
 .barActive {
-  background-color: var(--thread-color, #b8935a);
+  background-color: var(--thread-color, var(--text-muted));
 }
 
 .barDetached {
-  background-color: #999;
+  background-color: var(--text-muted);
 }
 
 .quote {
@@ -52,11 +52,11 @@
 }
 
 .quoteActive {
-  color: #555;
+  color: var(--text-secondary);
 }
 
 .quoteDetached {
-  color: #777;
+  color: var(--text-muted);
 }
 
 /* Per PLAN.md §5: a detached thread (its quote was edited or removed in a
@@ -64,13 +64,13 @@
    notice and a way to see the quote in its original context. */
 .detachedNotice {
   font-size: 0.78rem;
-  color: #999;
+  color: var(--text-muted);
   margin: 2px 0 0 18px;
 }
 
 .contextToggle {
   font: inherit;
-  color: #777;
+  color: var(--text-muted);
   background: none;
   border: none;
   padding: 0;
@@ -80,7 +80,7 @@
 
 .contextText {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--text-secondary);
   margin: 4px 0 0 18px;
   font-style: italic;
 }

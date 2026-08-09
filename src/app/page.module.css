@@ -39,7 +39,7 @@
 }
 
 .titleLink {
-  color: #000;
+  color: var(--foreground);
   text-decoration: none;
 }
 

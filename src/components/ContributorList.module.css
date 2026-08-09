@@ -6,7 +6,7 @@
 
 .heading {
   font-size: 1rem;
-  color: #666;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

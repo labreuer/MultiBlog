@@ -196,7 +196,7 @@ export default function PostsTable({
         row.status === "published" && row.publishedAt ? (
           <Link href={`/${row.slug}`}>{formatDate(row.publishedAt, dateFormat)}</Link>
         ) : row.status === "scheduled" && row.publishedAt ? (
-          <span style={{ color: "#666" }} title={`Scheduled: ${formatCountdown(row.publishedAt)}`}>
+          <span style={{ color: "var(--text-secondary)" }} title={`Scheduled: ${formatCountdown(row.publishedAt)}`}>
             {formatDate(row.publishedAt, dateFormat)}
           </span>
         ) : (

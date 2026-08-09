@@ -29,7 +29,7 @@ export default function ModerateCommentButtons({ commentId }: { commentId: strin
       <button type="button" onClick={() => handle("spam")} disabled={pending}>
         Mark as spam
       </button>
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
+      {error && <p style={{ color: "var(--error)" }}>{error}</p>}
     </div>
   );
 }

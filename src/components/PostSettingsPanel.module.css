@@ -1,6 +1,6 @@
 .details {
   margin-top: 12px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
   flex: 0 0 auto;
 }
@@ -31,7 +31,7 @@
 .label {
   font-weight: 600;
   font-size: 0.85rem;
-  color: #444;
+  color: var(--foreground);
 }
 
 .detailsTable {
@@ -68,22 +68,23 @@
 }
 
 .dragHandle {
-  color: #999;
+  color: var(--text-muted);
   cursor: grab;
 }
 
 .dragOver {
-  background: #eef4ff;
-  outline: 1px dashed #88a;
+  background: var(--accent-wash);
+  outline: 1px dashed var(--accent-outline);
+  color: var(--foreground);
 }
 
 .roleTag {
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 
 .errorMessage {
-  color: crimson;
+  color: var(--error);
 }
 
 .revisionsTable {
@@ -96,9 +97,9 @@
   text-align: left;
   font-weight: 600;
   font-size: 0.85rem;
-  color: #444;
+  color: var(--foreground);
   padding: 2px 12px 2px 0;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--border);
 }
 
 .revisionsTable td {
@@ -117,6 +118,6 @@
 .deleteButton {
   align-self: flex-start;
   padding: 6px 10px;
-  color: #c00;
-  border-color: #c00;
+  color: var(--danger);
+  border-color: var(--danger);
 }

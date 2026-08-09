@@ -20,37 +20,37 @@
 }
 
 .approve {
-  background-color: #d4f5d4;
+  background-color: var(--fill-success);
 }
 
 .approve:hover:not(:disabled) {
-  background-color: #9fdf9f;
+  background-color: color-mix(in srgb, var(--fill-success) 65%, var(--success));
 }
 
 .pend {
-  background-color: #faf3c0;
+  background-color: var(--fill-warning);
 }
 
 .pend:hover:not(:disabled) {
-  background-color: #e8d873;
+  background-color: color-mix(in srgb, var(--fill-warning) 65%, var(--warning));
 }
 
 .spam {
-  background-color: #f8d4d4;
+  background-color: var(--fill-danger);
 }
 
 .spam:hover:not(:disabled) {
-  background-color: #ee9c9c;
+  background-color: color-mix(in srgb, var(--fill-danger) 65%, var(--danger));
 }
 
 .statusApproved {
-  color: #0a5;
+  color: var(--success);
 }
 
 .statusPending {
-  color: #8a6d00;
+  color: var(--warning-text);
 }
 
 .statusSpam {
-  color: #c00;
+  color: var(--danger);
 }

@@ -5,16 +5,17 @@
   position: fixed;
   z-index: 20;
   width: 280px;
-  background: #fff;
-  border: 1px solid #ccc;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px var(--shadow-color);
 }
 
 .heading {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 6px;
 }
 
@@ -26,12 +27,13 @@
   border: none;
   border-radius: 3px;
   background: transparent;
+  color: inherit;
   cursor: pointer;
   font-size: 0.85rem;
 }
 
 .candidate:hover {
-  background: #f0f0f0;
+  background: var(--surface-hover);
 }
 
 .swatch {

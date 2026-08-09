@@ -17,22 +17,23 @@
   position: fixed;
   z-index: 20;
   width: 260px;
-  background: #fff;
-  border: 1px solid #ccc;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px var(--shadow-color);
 }
 
 .quotedText {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 8px;
 }
 
 .groupNote {
   font-size: 0.8rem;
-  color: #888;
+  color: var(--text-muted);
   margin-bottom: 8px;
 }
 
@@ -58,7 +59,7 @@
    currently applied" via desaturation and a dashed outline. */
 .colorInputInactive {
   filter: grayscale(1) opacity(0.5);
-  outline: 1px dashed #999;
+  outline: 1px dashed var(--border-strong);
 }
 
 .buttonRow {
@@ -71,7 +72,7 @@
 }
 
 .error {
-  color: crimson;
+  color: var(--error);
   font-size: 0.8rem;
   margin-top: 6px;
 }

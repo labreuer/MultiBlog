@@ -52,7 +52,7 @@ async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; static
   if (result.ok) {
     return { bodyJSON: result.bodyJSON, staticBody: result.body };
   }
-  return { bodyJSON: EMPTY_DOC, staticBody: <p style={{ color: "crimson" }}>{result.error}</p> };
+  return { bodyJSON: EMPTY_DOC, staticBody: <p style={{ color: "var(--error)" }}>{result.error}</p> };
 }
 
 // Dynamic for the same reasons /doc/[slug]/page.tsx is (§12f): per-user

@@ -88,7 +88,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
       bodyJSON = result.bodyJSON;
       staticBody = result.body;
     } else {
-      staticBody = <p style={{ color: "crimson" }}>{result.error}</p>;
+      staticBody = <p style={{ color: "var(--error)" }}>{result.error}</p>;
     }
     scratch.destroy();
   }

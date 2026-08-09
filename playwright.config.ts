@@ -45,6 +45,17 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ADMIN_STORAGE_STATE },
       dependencies: ["setup"],
+      testIgnore: /dark-mode\.spec\.ts/,
+    },
+    // Scoped to one spec via testMatch, not the whole suite — duplicating
+    // every test under a second color scheme would roughly double wall clock
+    // for near-zero incremental coverage, since nothing else in the suite
+    // asserts on color (STYLE.md's Dark theme section).
+    {
+      name: "chromium-dark",
+      testMatch: /dark-mode\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], storageState: ADMIN_STORAGE_STATE, colorScheme: "dark" },
+      dependencies: ["setup"],
     },
   ],
   // `reuseExistingServer` is unconditional rather than `!process.env.CI`: the

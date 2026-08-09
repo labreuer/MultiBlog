@@ -1,5 +1,5 @@
 .frame {
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 4px;
   margin-top: 8px;
 }
@@ -19,11 +19,11 @@
   font-style: italic;
   border: none;
   background: none;
-  color: #999;
+  color: var(--text-muted);
   padding: 2px 10px 6px;
   cursor: pointer;
 }
 
 .toolbarToggle:hover {
-  color: #666;
+  color: var(--text-secondary);
 }

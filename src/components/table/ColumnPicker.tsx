@@ -154,7 +154,7 @@ export function ColumnPicker<Row>({
           <button type="button" onClick={onReset} disabled={saving}>
             Reset
           </button>
-          {saveError && <span style={{ color: "crimson" }}>{saveError}</span>}
+          {saveError && <span style={{ color: "var(--error)" }}>{saveError}</span>}
         </div>
       </div>
     </details>

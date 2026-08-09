@@ -24,7 +24,7 @@
 
 .blurb {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .blurb p {

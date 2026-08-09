@@ -1,12 +1,109 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+
+  /* light-dark() takes two <color>s and nothing else, so the color-mix()
+     strengths in prose.module.css can't use it directly. --dark is the one
+     non-color scheme switch, read through calc() where a percentage needs to
+     shift with scheme — and the sole reason a prefers-color-scheme query
+     still exists in this file. A future toggle stays a one-rule change:
+       html[data-theme="dark"]  { color-scheme: dark;  --dark: 1; }
+       html[data-theme="light"] { color-scheme: light; --dark: 0; }
+     (color-scheme inherits, and light-dark() resolves against the consuming
+     element's used color-scheme, not :root's, so that flips every token
+     below without touching this block.) */
+  --dark: 0;
+
+  /* surfaces — on dark: page < muted < surface < hover, so an elevated panel
+     is *lighter* than the page and a hover is lighter still */
+  --background: light-dark(#ffffff, #0a0a0a);
+  --surface: light-dark(#ffffff, #1e1e1e);
+  --surface-muted: light-dark(#f6f6f6, #161616);
+  --surface-hover: light-dark(#f0f0f0, #2b2b2b);
+
+  /* text */
+  --foreground: light-dark(#171717, #ededed);
+  --text-secondary: light-dark(#666666, #a0a0a0);
+  --text-muted: light-dark(#999999, #8a8a8a);
+
+  /* borders */
+  --border-subtle: light-dark(#eeeeee, #242424);
+  --border: light-dark(#d4d4d4, #3d3d3d);
+  --border-strong: light-dark(#999999, #6a6a6a);
+
+  /* accent */
+  --link: light-dark(#3366cc, #7aa7ff);
+  --accent-wash: light-dark(#eaf1ff, #16233d);
+  --accent-outline: light-dark(#8888aa, #6b7fb0);
+
+  /* status */
+  --success: light-dark(#00aa55, #3ddc84);
+  --warning: light-dark(#d4a017, #e0b13a);
+  --warning-text: light-dark(#8a6d00, #e5c351);
+  --danger: light-dark(#cc0000, #ff6b6b);
+  --error: light-dark(crimson, #ff7b7b);
+
+  /* status fills (hovers derived at the call site with color-mix()) */
+  --fill-success: light-dark(#d4f5d4, #16351f);
+  --fill-warning: light-dark(#faf3c0, #3a3316);
+  --fill-danger: light-dark(#f8d4d4, #3d1a1a);
+
+  /* misc */
+  --shadow-color: light-dark(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.6));
+  --on-author-color: #ffffff; /* text/glyph on a solid User.color fill —
+                                  scheme-independent on purpose */
+  --shade-target: light-dark(#000000, #ffffff); /* "shade toward" for hover
+                                  states built with color-mix() */
+
+  /* anchor tint strengths — quote/annotation/doc-link highlight alphas,
+     stronger on dark since they mix toward transparent over a dark page */
+  --anchor-tint-weak: calc(18% + var(--dark) * 16%); /* 18% -> 34% */
+  --anchor-tint: calc(26% + var(--dark) * 18%); /* 26% -> 44% */
+  --anchor-tint-active: calc(45% + var(--dark) * 17%); /* 45% -> 62% */
+  --anchor-tint-pulse: calc(60% + var(--dark) * 20%); /* 60% -> 80% */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --dark: 1;
+  }
+}
+
+/* Fallback for browsers without light-dark() support (below Safari 17.5 /
+   Chrome 123 / Firefox 120). Custom properties parse permissively, so the
+   light-dark() declarations above are stored even where they can't resolve —
+   the failure is at substitution, where "invalid at computed-value time"
+   takes the inherited value for an inherited property (color: silently
+   inherits, harmless) or the initial value otherwise (background: silently
+   becomes transparent, border: silently disappears). This block restores
+   exactly today's light-mode appearance rather than a partially-broken one.
+   Must come after :root so it wins on source order. Delete as a unit once
+   the floor is comfortable. */
+@supports not (color: light-dark(#000, #fff)) {
+  :root {
+    color-scheme: light;
+    --background: #ffffff;
+    --surface: #ffffff;
+    --surface-muted: #f6f6f6;
+    --surface-hover: #f0f0f0;
+    --foreground: #171717;
+    --text-secondary: #666666;
+    --text-muted: #999999;
+    --border-subtle: #eeeeee;
+    --border: #d4d4d4;
+    --border-strong: #999999;
+    --link: #3366cc;
+    --accent-wash: #eaf1ff;
+    --accent-outline: #8888aa;
+    --success: #00aa55;
+    --warning: #d4a017;
+    --warning-text: #8a6d00;
+    --danger: #cc0000;
+    --error: crimson;
+    --fill-success: #d4f5d4;
+    --fill-warning: #faf3c0;
+    --fill-danger: #f8d4d4;
+    --shadow-color: rgba(0, 0, 0, 0.15);
+    --shade-target: #000000;
   }
 }
 
@@ -46,16 +143,10 @@ body {
 }
 
 a {
-  color: #3366cc;
+  color: var(--link);
   text-decoration: none;
 }
 
 a:hover {
   text-decoration: underline;
-}
-
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
 }

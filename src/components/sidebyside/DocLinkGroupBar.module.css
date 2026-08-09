@@ -10,7 +10,7 @@
 }
 
 .count {
-  color: #666;
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -18,5 +18,5 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #666;
+  color: var(--text-secondary);
 }

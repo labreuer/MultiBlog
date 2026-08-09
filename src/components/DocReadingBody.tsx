@@ -49,7 +49,7 @@ export default function DocReadingBody({ docId, initialBodyJSON, staticBody, ove
   });
 
   if (error) {
-    return <p style={{ color: "crimson" }}>{error}</p>;
+    return <p style={{ color: "var(--error)" }}>{error}</p>;
   }
 
   return (

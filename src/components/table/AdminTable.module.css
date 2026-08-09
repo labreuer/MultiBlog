@@ -5,12 +5,12 @@
 
 .headerCell {
   padding: 6px 12px;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid var(--border);
 }
 
 .sortableHeaderCell {
   padding: 6px 12px;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid var(--border);
   cursor: pointer;
   user-select: none;
 }
@@ -23,13 +23,13 @@
 
 .nowrapHeaderCell {
   padding: 6px 12px;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid var(--border);
   white-space: nowrap;
 }
 
 .nowrapSortableHeaderCell {
   padding: 6px 12px;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid var(--border);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -43,7 +43,7 @@
 }
 
 .row {
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .rowDeleted {
@@ -55,24 +55,26 @@
   border: none;
   padding: 4px;
   cursor: pointer;
+  color: inherit;
 }
 
 .iconButtonDanger {
-  color: #c00;
+  color: var(--danger);
 }
 
 .iconButtonMuted {
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .emptyRow {
   text-align: center;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .actionButton {
-  border: 1px solid #999;
+  border: 1px solid var(--border-strong);
   padding: 2px;
+  color: var(--foreground);
 }
 
 .dateFormatRow {
@@ -99,7 +101,7 @@
 .dropdownSummary {
   cursor: pointer;
   padding: 6px 10px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
   list-style: none;
 }
@@ -107,8 +109,9 @@
 .dropdownPanel {
   position: absolute;
   z-index: 1;
-  background: white;
-  border: 1px solid #ccc;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 8px;
   margin-top: 4px;
@@ -145,30 +148,30 @@
    replacing the momentary savedPulse animation with a standing record of
    what this visit touched. Every row carries the border at all times,
    transparent when idle, so a row never shifts horizontally as its state
-   changes. Colors are the established palette (STYLE.md): #999 muted, #d4a017
-   the project's amber, #c00 danger, #0a5 success. */
+   changes. Colors are the established palette (STYLE.md): --border-strong
+   muted, --warning the project's amber, --danger, --success. */
 .rowStatusCell {
   border-left: 3px solid transparent;
 }
 
 .rowStatusEdited {
-  border-left-color: #999;
+  border-left-color: var(--border-strong);
 }
 
 .rowStatusSaving {
-  border-left-color: #d4a017;
+  border-left-color: var(--warning);
 }
 
 .rowStatusError {
-  border-left-color: #c00;
+  border-left-color: var(--danger);
 }
 
 .rowStatusSaved {
-  border-left-color: #0a5;
+  border-left-color: var(--success);
 }
 
 .cellError {
-  color: crimson;
+  color: var(--error);
   font-size: 0.8rem;
 }
 
@@ -176,8 +179,9 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  background: #f5f5f5;
-  border: 1px solid #ddd;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 8px 12px;
   margin-bottom: 8px;
@@ -193,7 +197,7 @@
 .helpPanel {
   margin-top: 1em;
   margin-bottom: 1em;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 8px 12px;
 }
@@ -206,7 +210,7 @@
 .helpBody {
   margin-top: 8px;
   font-size: 0.9rem;
-  color: #333;
+  color: var(--foreground);
 }
 
 .helpTable {
@@ -217,13 +221,13 @@
 
 .helpHeaderCell {
   padding: 4px 8px;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid var(--border);
 }
 
 .helpCell {
   padding: 4px 8px;
   vertical-align: top;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* Column picker (PLAN.md §16i). The drag affordances mirror
@@ -257,19 +261,20 @@
 }
 
 .columnDragHandle {
-  color: #999;
+  color: var(--text-muted);
   cursor: grab;
 }
 
 /* Fixed columns still list, so the picker shows the whole table rather than
    implying the checkbox and action columns don't exist — just not editable. */
 .columnRowFixed {
-  color: #888;
+  color: var(--text-muted);
 }
 
 .columnDragOver {
-  background: #eef4ff;
-  outline: 1px dashed #88a;
+  background: var(--accent-wash);
+  outline: 1px dashed var(--accent-outline);
+  color: var(--foreground);
 }
 
 .columnPickerActions {
@@ -278,5 +283,5 @@
   align-items: center;
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-subtle);
 }

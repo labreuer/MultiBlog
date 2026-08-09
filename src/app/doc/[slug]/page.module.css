@@ -29,10 +29,10 @@
    .byline) — same secondary-meta color and light divider, so a doc and a
    post read the same way below their titles. */
 .byline {
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.85rem;
   letter-spacing: 0.02em;
   padding-bottom: 0.75rem;
   margin-bottom: 1.5rem;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-subtle);
 }

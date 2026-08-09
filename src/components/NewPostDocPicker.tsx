@@ -23,7 +23,7 @@ export default function NewPostDocPicker({ docs }: { docs: ReadableDoc[] }) {
           ))}
         </select>
       </label>
-      {state.error && <p style={{ color: "crimson" }}>{state.error}</p>}
+      {state.error && <p style={{ color: "var(--error)" }}>{state.error}</p>}
       <button type="submit" disabled={pending}>
         {pending ? "Creating..." : "Create post"}
       </button>

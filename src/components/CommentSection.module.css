@@ -2,7 +2,7 @@
   position: relative;
   margin-top: 3rem;
   padding-top: 2rem;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--border);
 }
 
 .heading {
@@ -12,5 +12,5 @@
 }
 
 .empty {
-  color: #666;
+  color: var(--text-secondary);
 }

@@ -83,7 +83,7 @@ export function DeletedSortHeader<K extends string>({
         title="Sort by deleted status"
         className={styles.iconButton}
       >
-        <IconTrash size={16} color="#000" style={{ verticalAlign: "middle" }} />
+        <IconTrash size={16} style={{ verticalAlign: "middle" }} />
         {sortIndicator(sort, sortKey)}
       </button>
     </th>

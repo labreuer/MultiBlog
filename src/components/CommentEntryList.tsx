@@ -48,7 +48,7 @@ export default function CommentEntryList({ entries, postId }: Props) {
   return (
     <>
       <div style={{ margin: "12px 0" }}>
-        <label style={{ fontSize: "0.85rem", color: "#555" }}>
+        <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
           Sort by:{" "}
           <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
             <option value="datetime">Comment date</option>

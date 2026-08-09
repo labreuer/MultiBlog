@@ -47,9 +47,9 @@ export default async function SearchPage({
         </form>
 
         {!query ? (
-          <p style={{ color: "#666" }}>Enter a search term above.</p>
+          <p style={{ color: "var(--text-secondary)" }}>Enter a search term above.</p>
         ) : results.length === 0 ? (
-          <p style={{ color: "#666" }}>
+          <p style={{ color: "var(--text-secondary)" }}>
             No posts match &ldquo;{query}&rdquo;.
           </p>
         ) : (
@@ -57,11 +57,11 @@ export default async function SearchPage({
             const excerpt = text.slice(0, 200);
 
             return (
-              <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid #eee" }}>
+              <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
                 <h2>
                   <Link href={`/${post.slug}`}>{post.title}</Link>
                 </h2>
-                <p style={{ color: "#666", fontSize: "0.9rem" }}>
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                   <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
                   {post.publishedAt?.toLocaleDateString()}
                 </p>

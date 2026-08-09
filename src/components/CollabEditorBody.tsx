@@ -11,6 +11,7 @@ import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { Annotation } from "@/lib/annotation-extension";
 import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
+import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import EditorToolbar from "./EditorToolbar";
@@ -54,11 +55,11 @@ type Props = {
 function renderCaret(user: Record<string, unknown>): HTMLElement {
   const caret = document.createElement("span");
   caret.classList.add(styles.collabCaret);
-  caret.style.borderColor = typeof user.color === "string" ? user.color : "#999";
+  caret.style.borderColor = typeof user.color === "string" ? user.color : NEUTRAL_THREAD_COLOR;
 
   const label = document.createElement("div");
   label.classList.add(styles.collabCaretLabel);
-  label.style.backgroundColor = typeof user.color === "string" ? user.color : "#999";
+  label.style.backgroundColor = typeof user.color === "string" ? user.color : NEUTRAL_THREAD_COLOR;
   label.textContent = typeof user.name === "string" ? user.name : "Anonymous";
 
   caret.appendChild(label);
@@ -142,7 +143,7 @@ export default function CollabEditorBody({
         authorId,
         chars,
         name: authorColors[authorId]?.name ?? authorId,
-        color: authorColors[authorId]?.color ?? "#999",
+        color: authorColors[authorId]?.color ?? NEUTRAL_THREAD_COLOR,
       })),
     );
   }, [authorCharCounts, authorColors, onAuthorStats]);
