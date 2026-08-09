@@ -8,6 +8,7 @@ import { renderYdocDoc, type YdocRenderResult } from "@/lib/ydoc-render";
 import { titleAuthorHighlightExtensions } from "@/lib/tiptap-schema";
 import { extractText } from "@/lib/diff";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
+import { getCollabUrl } from "@/lib/collab-url";
 import CollabEditorBody from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
 import adminStyles from "./table/AdminTable.module.css";
@@ -762,7 +763,7 @@ function EditView({
         detachIndexeddb = attachIndexeddb(ydoc, documentName, lineage);
 
         instance = new HocuspocusProvider({
-          url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
+          url: getCollabUrl(),
           name: documentName,
           document: ydoc,
           token,

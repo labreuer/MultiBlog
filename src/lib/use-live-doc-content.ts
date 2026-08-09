@@ -6,6 +6,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useEditor, type Editor, type JSONContent } from "@tiptap/react";
 import type { Extensions } from "@tiptap/core";
 import { docContentExtensions } from "./tiptap-schema";
+import { getCollabUrl } from "./collab-url";
 import { renderYdocDoc } from "./ydoc-render";
 import { PendingAnnotation } from "./pending-annotation-extension";
 
@@ -273,7 +274,7 @@ export function useLiveDocContent({
         ydoc.on("update", applyUpdate);
 
         instance = new HocuspocusProvider({
-          url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
+          url: getCollabUrl(),
           name: documentName,
           document: ydoc,
           token: fetchToken,

@@ -104,8 +104,20 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   file importing `prisma` from `./src/lib/prisma` (same as `server/collab.ts` does) and run
   it with `npx tsx that-file.ts` from the project root; delete the file afterward.
 - Dev account `labreuer@gmail.com` has role ADMIN.
-- `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`,
-  `NEXT_PUBLIC_COLLAB_URL`. Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
+- `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`. Optional:
+  `NEXT_PUBLIC_COLLAB_URL` — leave unset for local dev; `src/lib/collab-url.ts`'s `getCollabUrl()`
+  (the one function every client-side `HocuspocusProvider` call goes through) derives
+  `ws://<the page's own host>:1234` per request instead, so the same running dev server
+  works from `localhost` *and* a LAN IP (e.g. testing from a phone) with no restart. Set it
+  explicitly only for a real deployment (a different host/subdomain, or `wss://`) — once set,
+  it pins every client to that one value, same as before. `next.config.ts`'s
+  `allowedDevOrigins` is the separate, unrelated setting for letting a non-localhost origin
+  reach the Next dev server itself (HMR, RSC) at all — needed for the same phone-on-LAN case,
+  but for the web server rather than the collab one, and it does need a **restart** (not
+  `getCollabUrl()`'s zero-restart) since it's read at `next dev` startup. `COLLAB_PORT` is bare,
+  not `NEXT_PUBLIC_`, so it isn't readable client-side at all — `getCollabUrl()`'s `:1234`
+  fallback is a literal, same as the `process.env.NEXT_PUBLIC_COLLAB_URL` reads it replaced.
+  Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
   `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
   deployment's title survives `git pull` instead of living in a tracked file. Also optional:
   `SITE_BANNER`/`SITE_BANNER_ASPECT`/`SITE_BANNER_ALT` (`src/lib/site-banner.ts`, PLAN.md

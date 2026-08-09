@@ -5,6 +5,7 @@ import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
+import { getCollabUrl } from "@/lib/collab-url";
 import { UNTITLED_DOC } from "@/lib/doc-title";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
@@ -104,7 +105,7 @@ export default function DocEditor({
         detachIndexeddb = attachIndexeddb(ydoc, documentName, lineage);
 
         instance = new HocuspocusProvider({
-          url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
+          url: getCollabUrl(),
           name: documentName,
           document: ydoc,
           token: fetchToken,
@@ -144,7 +145,7 @@ export default function DocEditor({
         // from this pre-connection div to the live editor doesn't flip an
         // untitled doc's title between two different grays.
         <div className={`${styles.titleInput} ${styles.titleInputDisabled}`}>
-          {title || <span style={{ color: "#999" }}>{UNTITLED_DOC}</span>}
+          {title || <span style={{ color: "var(--text-muted)" }}>{UNTITLED_DOC}</span>}
         </div>
       )}
       <p className={styles.statusLine}>

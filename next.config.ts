@@ -10,6 +10,13 @@ const nextConfig: NextConfig = {
   // layer resolve it through Node's own require cache instead.
   // https://github.com/yjs/yjs/issues/438
   serverExternalPackages: ["yjs"],
+  // Next 15+ blocks cross-origin dev requests by default (HMR, RSC) as a CSRF
+  // guard against a malicious site on the LAN reaching your dev server. Your
+  // own devices on the same network need an explicit allowlist entry — this
+  // is a LAN IP, not a public one, so it's safe to commit rather than putting
+  // it behind an env var. Add another entry here (or use a wildcard like
+  // "192.168.1.*") if it changes or a second device needs it.
+  allowedDevOrigins: ["192.168.1.63"],
 };
 
 export default nextConfig;

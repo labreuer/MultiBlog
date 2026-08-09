@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import AnnotationBody from "./AnnotationBody";
+import { getCollabUrl } from "@/lib/collab-url";
 import { useDocPresence } from "./doc-presence-context";
 import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import styles from "./AnnotationComposer.module.css";
@@ -104,7 +105,7 @@ export default function LiveAnnotationComposer({
         firstToken = token;
 
         instance = new HocuspocusProvider({
-          url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
+          url: getCollabUrl(),
           name: documentName,
           document: ydoc,
           token: fetchToken,

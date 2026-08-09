@@ -7,6 +7,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
+import { getCollabUrl } from "@/lib/collab-url";
 import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import SideBySideDocBody from "./SideBySideDocBody";
@@ -116,7 +117,7 @@ export default function DocColumn({
       setLineage({ documentName, lineageMs });
 
       instance = new HocuspocusProvider({
-        url: process.env.NEXT_PUBLIC_COLLAB_URL ?? "ws://localhost:1234",
+        url: getCollabUrl(),
         name: documentName,
         document: ydoc,
         token: fetchToken,
