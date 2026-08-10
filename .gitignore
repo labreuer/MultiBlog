@@ -76,3 +76,8 @@ next-env.d.ts
 /public/favicon.ico
 /public/icons/
 /site-icons/
+
+# Etherpad import inputs: a dump of somebody else's pad database and the
+# author->email mapping derived from it. Both are real data, not fixtures.
+dirty.db
+etherpad-authors.json
