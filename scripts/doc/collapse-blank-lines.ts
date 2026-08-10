@@ -49,6 +49,23 @@
 // pre-existing title/fragment disagreement with a different one. Any such
 // disagreement is reported instead, for check-doc-integrity.ts to adjudicate.
 //
+// Doc.updated_at IS PRESERVED; ydoc.updated_at AND ydoc_update.created_at ARE NOT
+// Of the three timestamps this touches, only doc.updated_at is a claim about the
+// *document* — it is the date under the byline on /doc/<slug> and the "Updated"
+// column on /docs. Tidying whitespace is not editorial activity, so that one is
+// read before the write and put back after it.
+//
+// The other two are storage bookkeeping and are left truthful. ydoc_update gets
+// a genuinely new row, and backdating its created_at would put a lie in an
+// append-only log the scrub bar renders (replay itself orders by id, so the
+// damage would be a visibly non-monotonic timeline rather than a broken one).
+// ydoc.updated_at is only read by /ydoc-debug's ten-most-recent listing, which
+// is ADMIN-only and whose whole job is to say what changed last — pinning it
+// back would be both a lie and less useful. Nothing compares the three (neither
+// integrity checker looks at updated_at at all) and nothing caches on them, so
+// the divergence costs nothing. Note the y-indexeddb lineage key is
+// ydoc.created_at, not updated_at (PLAN.md §11e), and is untouched either way.
+//
 // ---------------------------------------------------------------------------
 // "AS THE FIRST LISTED AUTHOR"
 //
@@ -450,12 +467,33 @@ async function main() {
           where: { id: ydocId },
           data: { ydoc: Buffer.from(ydoc), stateVector: Buffer.from(stateVector) },
         });
+
+        // Read inside the transaction, not from the `targets` query above: the
+        // web server may still be running (only the collab port is checked),
+        // and a doc's updated_at can move under a title edit in between.
+        const before = await tx.doc.findUnique({
+          where: { id: target.id },
+          select: { updatedAt: true },
+        });
+
         // prose_json only — Doc.title is left to the title fragment's own
         // cache path, see the header. prose_json_length is the trigger's.
         await tx.doc.update({
           where: { id: target.id },
           data: { proseJson: after.proseJson as Prisma.InputJsonValue },
         });
+
+        // Put updated_at back where it was. Doc.updatedAt is @updatedAt, which
+        // Prisma applies client-side, so the update above stamps it with now()
+        // whether or not the column is named — the same reason
+        // import-etherpad.ts backdates it by hand. Raw SQL because there is no
+        // way to tell Prisma Client not to. Naming only updated_at also keeps
+        // the doc_sync_prose_json_length trigger out of it: it is declared
+        // BEFORE INSERT OR UPDATE **OF prose_json**, so this statement does not
+        // re-fire it.
+        if (before) {
+          await tx.$executeRaw`UPDATE "doc" SET "updated_at" = ${before.updatedAt} WHERE "id" = ${target.id}`;
+        }
       });
     }
 
