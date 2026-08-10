@@ -86,12 +86,16 @@ Regression coverage: `e2e/session-refresh.spec.ts` drives a promotion and a dele
 checks in both cases that the change is still invisible elsewhere until `/dashboard` is
 visited.
 
-## Why the form uses client `signIn`, not a server action
+## Why the form uses client `signIn` — and still keeps a server action
 
-`page.tsx` calls `signIn` from `next-auth/react` with `redirect: false` and then
+`sign-in-form.tsx` calls `signIn` from `next-auth/react` with `redirect: false` and then
 `router.push("/dashboard")`. It previously used a `"use server"` action wrapping the
 server-side `signIn` with `useActionState` — which is the Auth.js v5 / Next.js docs pattern,
 and which broke in production on 2026-07-31.
+
+The form nonetheless still carries `action={signInAction}`, for a reason unrelated to
+sessions — see *The `action` is load-bearing even though it never runs* below. Read both
+sections before touching either half.
 
 The failure: `SiteHeader` is a client component reading `useSession()`, and `SessionProvider`
 lives in the **root layout**, above every navigation boundary. A server action's redirect is
@@ -118,6 +122,50 @@ was the half that broke.
 
 Regression coverage: `e2e/auth.setup.ts` asserts the header shows "Sign out" right after the
 redirect, with no reload. It's the setup project, so it gates the whole suite.
+
+## The `action` is load-bearing even though it never runs
+
+`<form action={signInAction} onSubmit={handleSubmit}>`. With JavaScript on, `handleSubmit`
+calls `preventDefault()` and `signInAction` (`src/app/actions/sign-in.ts`) never executes —
+so the section above still describes what actually happens for essentially every user. The
+`action` is there for the browser that can't run any of it.
+
+**A form with only an `onSubmit` handler submits as GET.** That is the browser default, and
+with JavaScript disabled there is nothing to prevent it — so from 2026-07-31 (the commit
+above, which removed the server action and with it the form's `method`) until this was
+fixed, a no-JS sign-in navigated to `/sign-in?email=…&password=…`. A password in the query
+string is in the URL bar, in browser history, in the `Referer` header sent to every
+third-party resource the next page loads, and in the access log of every proxy in front of
+the app. The sibling forms (`/sign-up`, `/forgot-password`, `/reset-password`) never had the
+bug purely because they kept their server actions.
+
+The mechanics worth not re-deriving, both checked against `react-dom` 19.2.8's source rather
+than docs:
+
+- **`preventDefault()` genuinely suppresses the action**, and not by luck of ordering.
+  React's form-action plugin (`extractEvents$1`) is called *last*, after the `onSubmit`
+  listeners are already on the dispatch queue, and the listener it pushes re-reads
+  `nativeEvent.defaultPrevented` when its turn comes — passing `null` in the action slot of
+  `startHostTransition` when it's set. So there is no double sign-in, and no race.
+- **Never also pass `method`/`encType` by hand.** React derives both from
+  `action.$$FORM_ACTION` (which Next attaches to a server action reference, and which is
+  what makes progressive enhancement work at all) and dev-warns if they're passed too. The
+  server-rendered markup is `<form action="" method="POST" enctype="multipart/form-data">`
+  plus a hidden action-id field.
+
+`page.tsx` is a server component that reads `?error=1` and seeds the form's initial error,
+with the client half split out into `sign-in-form.tsx` — the same shape `/reset-password`
+already uses. That split is required rather than stylistic: a failed no-JS sign-in is a
+fresh document load, and `useSearchParams()` would never resolve for a browser that can't
+run React, so the client component can't be the thing that reads the flag. `signInAction`
+redirects with a bare flag and not the submitted email, which would be a smaller version of
+the same leak. The cost is that `/sign-in` is now dynamically rendered; it's a form page
+that nothing caches, so this is not the class of concern DEPLOY.md §8 and CACHING.md track.
+
+Regression coverage: `e2e/sign-in-nojs.spec.ts` runs with `javaScriptEnabled: false` and
+asserts the form's `method`, a working sign-in, and that neither the password nor the string
+`password` reaches the URL. `e2e/auth.setup.ts` covers the JavaScript-on path and so is what
+would catch the server action firing when it shouldn't.
 
 ## Why the header isn't server-rendered instead
 
