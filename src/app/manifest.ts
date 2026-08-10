@@ -32,14 +32,18 @@ async function hashedIconUrl(relPath: string): Promise<string | null> {
 //
 // Two constants, not one, because "browser/OS chrome color" and "the plate
 // the maskable icons are composited onto" are unrelated jobs that happened
-// to share a value. ICON_PLATE_COLOR matches WHITE_BACKGROUND in
-// scripts/build-icons.ts (icon.png and friends stay transparent; maskable
-// can't, see that script's header comment) — kept as a literal rather than
-// imported, since the build script isn't something manifest.ts (which runs
-// in the request/build path) should depend on. Flipping either to a dark
-// value would be wrong: theme_color would look off for light-preferring
-// users, and background_color would break its coupling to the icon plate.
-const ICON_PLATE_COLOR = "#ffffff";
+// to share a value. ICON_PLATE_COLOR matches the --alpha-to-color the
+// site-icons/master.png ink-chip art is built with (scripts/build-icons.ts's
+// default is white; this deployment overrides it to the chip's own ink,
+// #171717, since the master already bakes in a solid rounded-square chip —
+// compositing that onto a white plate for the maskable renditions would ring
+// the chip in a visible white square once the OS crops to its own
+// squircle/circle) — kept as a literal rather than imported, since the build
+// script isn't something manifest.ts (which runs in the request/build path)
+// should depend on. THEME_COLOR stays white regardless: it's the browser/OS
+// chrome color for light-preferring users, unrelated to the icon plate, and
+// flipping it would look wrong for them.
+const ICON_PLATE_COLOR = "#171717";
 const THEME_COLOR = "#ffffff";
 
 export default async function manifest(): Promise<MetadataRoute.Manifest> {

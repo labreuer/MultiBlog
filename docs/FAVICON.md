@@ -123,7 +123,10 @@ one:
   background color this script can pick that's correct for every possible
   master image. `manifest.ts`'s `theme_color`/`background_color` aren't
   derived from this flag automatically; a non-default `--alpha-to-color`
-  needs that file's `BACKGROUND_COLOR` updated by hand to stay consistent.
+  needs that file's `ICON_PLATE_COLOR` updated by hand to stay consistent.
+  Its `THEME_COLOR` is a separate constant and does *not* follow — that one
+  is browser/OS chrome color for light-preferring users, an unrelated job
+  that merely started out sharing a value with the plate.
 - **Whether a given master reads clearly once transparent is a property of
   that artwork, not of this script.** A master with a very dark interior
   fill can end up close to invisible against a dark browser tab strip once
