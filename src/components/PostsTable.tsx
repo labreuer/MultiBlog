@@ -213,7 +213,7 @@ export default function PostsTable({
           {row.pending > 0 && (
             <>
               {" "}
-              <Link href={`/posts/${row.id}/comments`}>(in moderation {row.pending})</Link>
+              <Link href={`/posts/${row.id}/comments`}>({row.pending})</Link>
             </>
           )}
         </>

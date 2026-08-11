@@ -340,8 +340,8 @@ test.describe("admin table kit", () => {
       // cell offers no moderation link at all.
       const betaRow = page.getByRole("row").filter({ hasText: beta.title });
       const alphaRow = page.getByRole("row").filter({ hasText: alpha.title });
-      await expect(betaRow).toContainText("in moderation 1");
-      await expect(alphaRow).not.toContainText("in moderation");
+      await expect(betaRow.getByRole("link", { name: "(1)" })).toBeVisible();
+      await expect(alphaRow.getByRole("link", { name: /^\(\d+\)$/ })).toHaveCount(0);
 
       await page.goto(`/posts?q=${token}`);
       await page.getByRole("columnheader", { name: "Comments" }).click();

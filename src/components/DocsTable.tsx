@@ -3,7 +3,14 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { deleteDoc, restoreDoc, bulkDeleteDocs, bulkRestoreDocs, bulkSetDocVisibility } from "@/app/actions/docs";
+import {
+  deleteDoc,
+  restoreDoc,
+  bulkDeleteDocs,
+  bulkRestoreDocs,
+  bulkSetDocVisibility,
+  updateDocVisibility,
+} from "@/app/actions/docs";
 import { formatDate } from "@/lib/format-date";
 import { DocVisibility } from "@/generated/prisma/enums";
 import { type DocsFilters, buildDocsQueryString } from "@/lib/docs-query";
@@ -31,6 +38,7 @@ import {
   PaginationBar,
   RowActionButton,
   SearchBox,
+  SelectCell,
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
@@ -148,7 +156,21 @@ export default function DocsTable({
       cell: (row) => row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>,
     },
     { key: "authors", header: "Author(s)", sortKey: "authors", cell: (row) => row.authors },
-    { key: "visibility", header: "Visibility", sortKey: "visibility", cell: (row) => row.visibility },
+    {
+      key: "visibility",
+      header: "Visibility",
+      sortKey: "visibility",
+      cell: (row) => (
+        <SelectCell
+          value={row.visibility}
+          options={Object.values(DocVisibility)}
+          disabled={row.deleted || !row.canEdit}
+          save={(next) => updateDocVisibility(row.id, next)}
+          failureMessage="Failed to update visibility."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
     {
       key: "updatedAt",
       header: "Updated",
