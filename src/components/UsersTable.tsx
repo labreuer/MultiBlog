@@ -724,6 +724,10 @@ export default function UsersTable({
       header: "Rows/page",
       sortKey: "rowsPerPage",
       nowrap: true,
+      // Defaulted hidden (§16m): a per-account preference, not information
+      // about the person — an admin scanning /users is almost never looking
+      // for it, and it stays one checkbox away in the picker.
+      defaultHidden: true,
       headerTitle: "Default rows per page in every admin table",
       cell: (row) => (
         <SelectCell
@@ -755,7 +759,9 @@ export default function UsersTable({
       sortKey: "posts",
       cell: (row) => (row.postCount > 0 ? <Link href={`/authors/${row.slug}`}>posts</Link> : ""),
     },
-    { key: "comments", header: "Comments", cell: () => null },
+    // Defaulted hidden (§16m) — it renders nothing at all (no sortKey, a null
+    // cell), so it cost a column of width for an empty one every load.
+    { key: "comments", header: "Comments", defaultHidden: true, cell: () => null },
     { key: "url", header: "", cell: (row) => <Link href={`/users/${row.id}/slug`}>url</Link> },
     // Landing-page contributor fields (PLAN.md §17i), defaulted hidden below.
     {

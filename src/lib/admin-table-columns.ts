@@ -49,11 +49,11 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "role", label: "Role" },
     { key: "image", label: "Image" },
     { key: "moderationPolicy", label: "Moderation policy" },
-    { key: "rowsPerPage", label: "Rows/page" },
+    { key: "rowsPerPage", label: "Rows/page", defaultHidden: true },
     { key: "color", label: "Color" },
     { key: "created", label: "Created at" },
     { key: "posts", label: "Posts" },
-    { key: "comments", label: "Comments" },
+    { key: "comments", label: "Comments", defaultHidden: true },
     { key: "url", label: "URL (slug link)" },
     // Landing-page contributor fields (PLAN.md §17i), all defaulted hidden
     // per §16m so no existing admin's table silently widens by five columns.
