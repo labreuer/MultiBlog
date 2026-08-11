@@ -35,6 +35,23 @@
   white-space: nowrap;
 }
 
+/* Scrolls a too-wide table in place. Wraps only <table> on purpose: widening
+   this to take in .filterRow would make it a clipping ancestor for
+   ColumnPicker's and AuthorFilterPanel's position:absolute panels, since
+   overflow-x: auto also computes overflow-y: auto (popover-placement.ts
+   documents the same trap for /side-by-side). Does nothing on its own —
+   globals.css's `body > main` rule is what leaves anything to overflow.
+   STYLE.md, "Narrow viewports and horizontal overflow". */
+.tableScroll {
+  overflow-x: auto;
+}
+
+/* Belt and braces, not a diagnosed fix; free when the table already fits.
+   STYLE.md, "Narrow viewports and horizontal overflow". */
+.tableScroll > table {
+  min-width: min-content;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

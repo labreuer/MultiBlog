@@ -310,6 +310,77 @@ by design, not by accident.
   plain fixed spacing around the two biggest visual blocks on the page, not tied to any
   sibling's own margin the way the "symmetric whitespace" pattern above is.
 
+## Narrow viewports and horizontal overflow
+
+Added 2026-08-11, after a wide admin table turned out to be unreachable on a phone —
+columns past the right edge were clipped with no scrollbar in either direction. Two
+separate causes, in two files; both halves are needed and neither is obvious from the
+other's symptom.
+
+### `body > main { width: 100%; min-width: 0 }` (`globals.css`)
+
+`body` is a column flex container (it needs a definite height so the editor's
+`flex-grow` children have a budget — see the Global baseline section), so every page's
+`<main>` is a flex item. Every page also gives it `margin: <n>rem auto` inline. Left
+alone, main sizes itself to its *content* rather than to the viewport, and because
+`body` carries `overflow-x: hidden` the excess is silently clipped instead of becoming
+a scrollbar. Anything inside main then lays out against that inflated width, so a
+scroll container inside it has nothing to overflow — which is why the table wrapper
+below does nothing without this rule.
+
+- **`width: 100%`** — cross-axis `auto` margins suppress a flex item's default
+  `align-self: stretch`, so main falls back to fit-content, which floors at its
+  content's min-content width. Measured in Chromium at a 390px viewport: main 775px.
+- **`min-width: 0`** — WebKit only. A flex item's `min-width: auto` is a content-based
+  automatic minimum; per [CSS Sizing](https://www.w3.org/TR/css-sizing-3/) that applies
+  to the **main** axis, which for a column container is vertical, so on `width` it
+  should resolve to `0`. iOS Safari applies it on the cross axis anyway, flooring main
+  at min-content *even with `width: 100%` set*, after which main's own inline
+  `max-width` caps the result. Measured on an iPhone: `body` 390px, `main` **1000px** —
+  i.e. exactly its `max-width`.
+
+The general `min-width: 0` flexbox trap is very widely documented, but almost always
+for **row** containers, where the automatic minimum is on `width` legitimately.
+`DocColumn.module.css` carries the same note for the grid-item version.
+
+**This cannot be reproduced locally.** Chromium and Playwright's WebKit both size main
+to 390px without `min-width: 0`; only a real iOS device shows 1000px. Verify a change
+here on a phone, not in the browser pane or a WebKit Playwright project.
+
+The per-page inline `max-width` still caps main on wide screens and the `auto` margins
+still centre it, so desktop layout is unchanged.
+
+### `.tableScroll` (`AdminTable.module.css`)
+
+Wraps the `<table>` — and *only* the table — in an `overflow-x: auto` box, so a table
+too wide for the viewport scrolls in place. Scoped that tightly on purpose:
+`ColumnPicker`'s and `AuthorFilterPanel`'s `position: absolute` panels live in
+`.filterRow` above it, and an `overflow-x: auto` ancestor becomes a clipping ancestor
+for them (CSS can't leave one axis visible while the other isn't, so `overflow-x: auto`
+also computes `overflow-y: auto`). `popover-placement.ts` documents the same trap for
+`/side-by-side`.
+
+Its table also gets `min-width: min-content` — belt and braces rather than a diagnosed
+fix. A table in a scroll container has no business being squeezed below the width its
+cells need, and saying so outright means the behaviour doesn't rest on `width: 100%`
+overflowing its container, which is engine-dependent enough not to rely on. Free when
+the table already fits, since `min-content` is below `100%` then.
+
+### Regression coverage
+
+`e2e/admin-table.spec.ts`'s "a narrow viewport scrolls the table instead of clipping
+it" drives all five tables at 390px and asserts main never exceeds the viewport, the
+wrapper really scrolls, and the page itself doesn't scroll sideways. It guards the
+`width: 100%` half only — verified to fail without it (main 945px vs a 390px viewport).
+The `min-width: 0` half is untestable locally, per above.
+
+### Adding a new wide surface
+
+Anything that can exceed the viewport (a table, a code block, a diagram) belongs in its
+own `overflow-x: auto` container. Don't reach for a `@media` breakpoint: `overflow-x`
+is self-activating and needs no width threshold, which is why this section defines none.
+The existing breakpoints (900px, 480px) are for *reflowing* layouts, not overflow.
+
 ## The admin-table kit (`components/table/`)
 
 Every admin table — `/posts`, `/docs`, `/users`, `/comments`, `/annotations`, and

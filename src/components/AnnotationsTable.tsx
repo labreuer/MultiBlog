@@ -255,26 +255,28 @@ export default function AnnotationsTable({
         }}
       />
 
-      <table className={adminStyles.table}>
-        <thead>
-          <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
-        </thead>
-        <tbody>
-          {displayRows.length === 0 && (
-            <EmptyRow colSpan={visibleColumns.length} message="No annotations matching the criteria." />
-          )}
-          {displayRows.map((row) => (
-            <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-              <ColumnCells
-                row={row}
-                columns={visibleColumns}
-                statusClass={rowStatusClass(row.id)}
-                statusTitle={rowStatusTitle(row.id)}
-              />
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className={adminStyles.tableScroll}>
+        <table className={adminStyles.table}>
+          <thead>
+            <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
+          </thead>
+          <tbody>
+            {displayRows.length === 0 && (
+              <EmptyRow colSpan={visibleColumns.length} message="No annotations matching the criteria." />
+            )}
+            {displayRows.map((row) => (
+              <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
+                <ColumnCells
+                  row={row}
+                  columns={visibleColumns}
+                  statusClass={rowStatusClass(row.id)}
+                  statusTitle={rowStatusTitle(row.id)}
+                />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <CellError message={error} />
 
       <PaginationBar

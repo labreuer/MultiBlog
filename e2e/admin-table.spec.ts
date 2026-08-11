@@ -631,6 +631,38 @@ test.describe("admin table kit", () => {
     }
   });
 
+  // Guards the `width: 100%` half of globals.css's `body > main` rule: without
+  // it main sizes to the table (775px at a 390px viewport) and the overhang is
+  // clipped unreachably rather than scrolled. The companion `min-width: 0` is a
+  // WebKit-only deviation no local browser reproduces, so nothing here can
+  // cover it. STYLE.md, "Narrow viewports and horizontal overflow".
+  test("a narrow viewport scrolls the table instead of clipping it", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 664 });
+    for (const path of ["/posts", "/docs", "/users", "/comments", "/annotations"]) {
+      await page.goto(path);
+      await page.waitForSelector("table");
+      const m = await page.evaluate(() => {
+        const table = document.querySelector("table")!;
+        const wrap = table.parentElement!;
+        return {
+          innerWidth: window.innerWidth,
+          mainWidth: Math.round(document.querySelector("main")!.getBoundingClientRect().width),
+          overflowX: getComputedStyle(wrap).overflowX,
+          clientWidth: wrap.clientWidth,
+          scrollWidth: wrap.scrollWidth,
+          docScrollWidth: document.documentElement.scrollWidth,
+        };
+      });
+      // main tracks the viewport rather than its own content.
+      expect(m.mainWidth, `${path}: main should not exceed the viewport`).toBeLessThanOrEqual(m.innerWidth);
+      // The table lives in a real scroll container...
+      expect(m.overflowX, `${path}: table wrapper should scroll horizontally`).toBe("auto");
+      // ...and the overflow is inside it, not spilling out to be clipped.
+      expect(m.scrollWidth, `${path}: table should overflow its wrapper`).toBeGreaterThan(m.clientWidth);
+      expect(m.docScrollWidth, `${path}: page itself must not scroll sideways`).toBeLessThanOrEqual(m.innerWidth);
+    }
+  });
+
   // The Authors filter (src/lib/author-filter.ts) — a checkbox panel of
   // ADMIN/EDITOR/AUTHOR users plus a combining mode, mirrored into
   // ?authors=/?authorMode= like every other criterion these tables carry.

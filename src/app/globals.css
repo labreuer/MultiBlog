@@ -136,6 +136,24 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Keeps every page's <main> at the viewport's width rather than its content's:
+   without this a wide admin table inflates main past the viewport, and body's
+   `overflow-x: hidden` clips the excess unreachably instead of scrolling it —
+   so AdminTable.module.css's `.tableScroll` has nothing to overflow.
+
+   Both declarations are load-bearing, against two different causes.
+   `min-width: 0` especially will look like a no-op if you check: it fixes a
+   WebKit-only deviation that neither Chromium nor Playwright's WebKit
+   reproduces, found on a real iPhone. Don't drop it because a desktop browser
+   renders fine without it.
+
+   Rationale, measurements and how to verify:
+   STYLE.md, "Narrow viewports and horizontal overflow". */
+body > main {
+  width: 100%;
+  min-width: 0;
+}
+
 * {
   box-sizing: border-box;
   padding: 0;
