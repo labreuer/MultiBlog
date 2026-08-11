@@ -1,14 +1,85 @@
+/* The header is one horizontally-scrolling row on a narrow viewport: the brand
+   stays put and everything else scrolls past it. Same reasoning as the admin
+   tables' .tableScroll — STYLE.md, "Narrow viewports and horizontal overflow". */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The one fixed landmark: never shrinks, never scrolls. flex-shrink: 0 is what
+   keeps the site name and its separator on screen while the row behind them
+   moves. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.brandLink {
+  font-weight: bold;
+  text-decoration: none;
+  color: inherit;
+}
+
+/* min-width: 0 is load-bearing: as a flex item this would otherwise be floored
+   at its content's width by the automatic minimum size and never scroll at all.
+   Unlike the `body > main` case in globals.css this is the row-flex, main-axis
+   version — i.e. the spec-compliant one every engine agrees on.
+
+   The scrollbar is hidden deliberately: this row is only ever wide enough to
+   scroll on a phone, where the affordance is the swipe rather than the bar, and
+   a permanent horizontal scrollbar under the site header reads as breakage. The
+   cost is that a desktop mouse has no visible grab target if the window is
+   narrow enough to overflow — shift+wheel and trackpad swipe still work. */
+.scroller {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+
+.scroller::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+/* width: max-content lets the row exceed .scroller and scroll; min-width: 100%
+   makes it fill instead when it fits, so justify-content: space-between still
+   pushes the account nav to the right edge on a desktop. */
+.scrollRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.navLeft,
+.navRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.separator {
+  color: var(--border-strong);
+}
+
 /* Nav items with a dropdown ("Posts" → Comments, "Docs" → Annotations) — same
    <details>/<summary> shape as CommentsTable.tsx's MultiSelectDropdown
    (AdminTable.module.css's .dropdownWrapper/.dropdownSummary/.dropdownPanel),
    but that file is scoped to admin tables (STYLE.md) and this is plain nav
    chrome, hence its own copy rather than a cross-import. */
 
-/* The positioning context for .dropdownPanel below — not .dropdownWrapper
-   itself (which only wraps the caret), so the panel's left edge lines up
-   with the group's own link rather than with the caret next to it. */
+/* No longer position: relative — .dropdownPanel is fixed now (see below), so
+   this is just the measurement target SiteHeader reads to place it, and the box
+   holding the link and its caret together. */
 .navGroup {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -28,16 +99,19 @@
   display: none;
 }
 
+/* position: fixed, not absolute: .scroller above is an overflow-x: auto scroll
+   container, and CSS can't leave one axis visible while the other isn't — so
+   overflow-y computes to auto too and an absolutely-positioned panel dropping
+   below the header would be clipped by it. Fixed escapes any such ancestor;
+   the price is that top/left have to be set from JS, which SiteHeader does on
+   toggle and again whenever the row scrolls under it. */
 .dropdownPanel {
-  position: absolute;
-  top: 100%;
-  left: 0;
+  position: fixed;
   z-index: 10;
   background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 6px 10px;
-  margin-top: 4px;
   white-space: nowrap;
 }

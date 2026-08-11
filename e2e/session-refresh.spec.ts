@@ -14,8 +14,9 @@ import { setTestUserRole, deleteTestUser } from "./db";
 // SiteHeader reads via useSession) was refreshed, not just the server render.
 // Scoped to the header on purpose: /dashboard renders its own "Manage users"
 // link behind the same role check, and getByRole name matching is
-// case-insensitive, so an unscoped locator matches both and trips strict mode.
-const adminLink = (page: Page) => page.locator("header").getByRole("link", { name: "Manage Users" });
+// case-insensitive *and* substring-based, so an unscoped locator still matches
+// both ("Users" is inside "Manage users") and trips strict mode.
+const adminLink = (page: Page) => page.locator("header").getByRole("link", { name: "Users", exact: true });
 
 /**
  * Visits /dashboard and waits for its refresh to actually land.
