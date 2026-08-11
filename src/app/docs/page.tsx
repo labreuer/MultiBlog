@@ -43,12 +43,11 @@ function buildOrderBy(sort: SortColumn<DocsSortKey>[]): Prisma.DocOrderByWithRel
         return { slug: dir };
       case "updatedAt":
         return { updatedAt: dir };
+      case "updatedBy":
+        return { updatedBy: { name: { sort: dir, nulls: "last" } } };
       case "deletedAt":
         return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
       case "deleted":
-        // deletedByUserId is null for a live doc — nulls first when ascending
-        // so live rows lead, matching every other admin table's convention
-        // for this column.
         return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
     }
   });
@@ -128,6 +127,10 @@ export default async function DocsPage({
         // test, not a display value. The User join this used to carry (for
         // adminInitials) is the view's job now.
         authors: { select: { userId: true } },
+        // A raw updated_by_user_id would be a bare cuid on screen; resolved to
+        // the same name-or-email fallback /comments' Changed by and
+        // /annotations' Author already use.
+        updatedBy: { select: { name: true, email: true } },
       },
     }),
     prismaIncludingDeleted.doc.count({ where }),
@@ -147,6 +150,7 @@ export default async function DocsPage({
     visibility: doc.visibility,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
+    updatedByName: doc.updatedBy ? (doc.updatedBy.name ?? doc.updatedBy.email) : "",
     length: doc.proseJsonLength,
     deletedAt: doc.deletedAt,
     deleted: doc.deletedByUserId !== null,

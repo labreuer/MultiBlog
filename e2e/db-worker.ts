@@ -437,15 +437,25 @@ export async function getContributorFields(email: string): Promise<ContributorFi
   };
 }
 
-export type DocState = { title: string; proseText: string | null; visibility: DocVisibility };
+export type DocState = {
+  title: string;
+  proseText: string | null;
+  visibility: DocVisibility;
+  /** Doc.updatedBy's email, or null when nothing has attributed an update yet. */
+  updatedByEmail: string | null;
+};
 
 export async function getDocState(docId: string): Promise<DocState | null> {
-  const doc = await prisma.doc.findUnique({ where: { id: docId } });
+  const doc = await prisma.doc.findUnique({
+    where: { id: docId },
+    include: { updatedBy: { select: { email: true } } },
+  });
   if (!doc) return null;
   return {
     title: doc.title,
     proseText: doc.proseJson ? extractText(doc.proseJson) : null,
     visibility: doc.visibility,
+    updatedByEmail: doc.updatedBy?.email ?? null,
   };
 }
 

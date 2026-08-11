@@ -44,6 +44,7 @@ export type DocRow = {
   visibility: DocVisibility;
   createdAt: Date;
   updatedAt: Date;
+  updatedByName: string;
   // Character count, read straight off Doc.proseJsonLength — a stored column
   // kept current by a Postgres trigger, not something computed here, so a
   // doc's full body never has to reach this component to show its length
@@ -62,6 +63,7 @@ const SORTABLE_KEYS = [
   "length",
   "slug",
   "updatedAt",
+  "updatedBy",
   "deletedAt",
   "deleted",
 ] as const;
@@ -158,6 +160,17 @@ export default function DocsTable({
       // docs-query.ts): "what changed recently" is a more useful landing view
       // for this table than "what was made first".
       cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
+    },
+    {
+      key: "updatedBy",
+      header: "Updated by",
+      sortKey: "updatedBy",
+      nowrap: true,
+      // Paired with Updated and shown by default alongside it, the same way
+      // /posts shows "Last edit by" next to "Last edit at" — the timestamp on
+      // its own doesn't answer who, and this table now leads with recency.
+      // Blank for a doc nothing has updated since the column existed.
+      cell: (row) => row.updatedByName,
     },
     {
       key: "length",

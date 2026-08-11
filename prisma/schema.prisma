@@ -129,6 +129,7 @@ model User {
   slugHistory          UserSlugHistory[]
   ydocSnapshots        YdocSnapshot[]         @relation("YdocSnapshotUser")
   docAuthors           DocAuthor[]
+  docUpdates           Doc[]                  @relation("DocUpdatedBy")
   docDeletions         Doc[]                  @relation("DocDeletedBy")
   annotations          Annotation[]           @relation("AnnotationAuthor")
   annotationDeletions  Annotation[]           @relation("AnnotationDeletedBy")
@@ -562,10 +563,13 @@ model Doc {
   proseJsonLength Int           @default(0) @map("prose_json_length")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
+  // Updated when Prisma would update updatedAt. Sloppy with concurrent writes.
+  updatedByUserId String?       @map("updated_by_user_id")
   deletedByUserId String?       @map("deleted_by_user_id")
   deletedAt       DateTime?     @map("deleted_at")
 
   authors           DocAuthor[]
+  updatedBy         User?                  @relation("DocUpdatedBy", fields: [updatedByUserId], references: [id])
   deletedBy         User?                  @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory       DocSlugHistory[]
   annotations       Annotation[]

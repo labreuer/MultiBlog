@@ -111,6 +111,7 @@ export async function ydocOnChange({ documentName, update, connection }: onChang
 export async function ydocOnStoreDocument({
   documentName,
   document,
+  lastContext,
 }: onStoreDocumentPayload<YdocContext>): Promise<void> {
   if (isDegraded(documentName)) {
     warnDegradedOnce(documentName, "onStoreDocument");
@@ -122,7 +123,13 @@ export async function ydocOnStoreDocument({
   // ydoc (a doc's vs. an annotation's own namespace, mutually exclusive by
   // construction), so both are safe to call unconditionally for every
   // ydoc-stack document, including a bare /ydoc-debug one that matches neither.
-  await updateDocCache(documentName, document);
+  //
+  // lastContext is Hocuspocus's own "whichever connection most recently drove
+  // this document" — the verified identity from onAuthenticate, not anything
+  // a client asserts. It is deliberately the *only* attribution available at
+  // this point: the store hook is debounced, so several authors' edits can
+  // coalesce into one flush and this names whichever was last.
+  await updateDocCache(documentName, document, lastContext?.userId);
   await updateAnnotationCache(documentName, document);
 }
 

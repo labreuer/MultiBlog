@@ -38,7 +38,12 @@ export async function uniqueDocSlug(title: string, excludeDocId?: string): Promi
 
 // Renames a doc's slug, recording the old one in DocSlugHistory. No-ops if
 // newSlugInput normalizes to the doc's current slug.
-export async function changeDocSlug(docId: string, newSlugInput: string): Promise<string> {
+//
+// updatedByUserId is threaded in from the calling action rather than read
+// here: this module has no session (it's plain lib code, also reachable from
+// scripts), and the write below moves Doc.updatedAt regardless — see the
+// note above updateDocVisibility (src/app/actions/docs.ts).
+export async function changeDocSlug(docId: string, newSlugInput: string, updatedByUserId: string): Promise<string> {
   const newSlug = slugify(newSlugInput, "doc");
   if (RESERVED_SLUGS.has(newSlug)) {
     throw new Error(`"${newSlug}" is a reserved path and can't be used as a doc url.`);
@@ -56,14 +61,15 @@ export async function changeDocSlug(docId: string, newSlugInput: string): Promis
       throw new Error(`Url "${newSlug}" is already in use.`);
     }
     await tx.docSlugHistory.create({ data: { docId, slug: doc.slug } });
-    await tx.doc.update({ where: { id: docId }, data: { slug: newSlug } });
+    await tx.doc.update({ where: { id: docId }, data: { slug: newSlug, updatedByUserId } });
     return newSlug;
   });
 }
 
 // Swaps a doc's slug back to its most recent past one — see
 // revertPostSlug (src/lib/post-slug.ts) for the full rationale, identical here.
-export async function revertDocSlug(docId: string): Promise<string> {
+// updatedByUserId as in changeDocSlug above.
+export async function revertDocSlug(docId: string, updatedByUserId: string): Promise<string> {
   return prismaIncludingDeleted.$transaction(async (tx) => {
     const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true } });
     if (!doc) {
@@ -77,7 +83,7 @@ export async function revertDocSlug(docId: string): Promise<string> {
     if (Date.now() - lastHistory.createdAt.getTime() >= REVERT_DISCARD_WINDOW_MS) {
       await tx.docSlugHistory.create({ data: { docId, slug: doc.slug } });
     }
-    await tx.doc.update({ where: { id: docId }, data: { slug: lastHistory.slug } });
+    await tx.doc.update({ where: { id: docId }, data: { slug: lastHistory.slug, updatedByUserId } });
     return lastHistory.slug;
   });
 }

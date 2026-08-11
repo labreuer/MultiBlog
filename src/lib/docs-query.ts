@@ -34,6 +34,7 @@ export type DocsSortKey =
   | "length"
   | "slug"
   | "updatedAt"
+  | "updatedBy"
   | "deletedAt"
   | "deleted";
 const SORT_KEYS: readonly DocsSortKey[] = [
@@ -44,6 +45,7 @@ const SORT_KEYS: readonly DocsSortKey[] = [
   "length",
   "slug",
   "updatedAt",
+  "updatedBy",
   "deletedAt",
   "deleted",
 ];
