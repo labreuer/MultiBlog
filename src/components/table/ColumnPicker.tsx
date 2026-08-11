@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
+import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import type { ColumnSpec } from "./column-spec";
 import { pickerColumns } from "./column-spec";
 import styles from "./AdminTable.module.css";
@@ -40,18 +41,7 @@ export function ColumnPicker<Row>({
   const [saving, startSaving] = useTransition();
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Same trick MultiSelectDropdown uses: <details> has no native close-on-
-  // outside-click, and nothing else needs to react to open/closed, so the DOM
-  // node's `.open` is set directly instead of being lifted into state.
-  useEffect(() => {
-    function handlePointerDown(e: MouseEvent) {
-      if (detailsRef.current && !detailsRef.current.contains(e.target as Node)) {
-        detailsRef.current.open = false;
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
+  useCloseOnOutsideClick(detailsRef);
 
   const listed = pickerColumns(columns, resolved);
   const visibleKeys = resolved.filter((column) => !column.alwaysVisible).map((column) => column.key);

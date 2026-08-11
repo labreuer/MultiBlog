@@ -46,12 +46,14 @@ import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec"
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
+  CheckboxCell,
   DateFormatSelect,
   DeletedSortHeader,
   EmptyRow,
   PaginationBar,
   RowActionButton,
   SearchBox,
+  SelectCell,
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
@@ -304,61 +306,6 @@ function ContributorOrderCell({ userId, order, onEdit, run }: CellProps & { orde
         }}
         style={{ width: 70, padding: "2px 4px" }}
       />
-      <CellError message={error} />
-    </>
-  );
-}
-
-// A <select> commits on change, so unlike the text cells it never passes
-// through the gray "edited" state — it goes straight to saving.
-function SelectCell<T extends string | number>({
-  value,
-  options,
-  optionLabel,
-  disabled,
-  save,
-  failureMessage,
-  run,
-}: {
-  value: T;
-  options: readonly T[];
-  optionLabel?: (option: T) => string;
-  disabled?: boolean;
-  save: (next: T) => Promise<void>;
-  failureMessage: string;
-  run: (action: () => Promise<void>) => Promise<void>;
-}) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <>
-      <select
-        value={value}
-        disabled={disabled || pending}
-        onChange={(e) => {
-          const raw = e.target.value;
-          const next = (typeof value === "number" ? Number(raw) : raw) as T;
-          setError(null);
-          startTransition(async () => {
-            try {
-              await run(async () => {
-                await save(next);
-              });
-              router.refresh();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : failureMessage);
-            }
-          });
-        }}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {optionLabel ? optionLabel(option) : option}
-          </option>
-        ))}
-      </select>
       <CellError message={error} />
     </>
   );
@@ -724,6 +671,10 @@ export default function UsersTable({
       header: "Rows/page",
       sortKey: "rowsPerPage",
       nowrap: true,
+      // Defaulted hidden (§16m): a per-account preference, not information
+      // about the person — an admin scanning /users is almost never looking
+      // for it, and it stays one checkbox away in the picker.
+      defaultHidden: true,
       headerTitle: "Default rows per page in every admin table",
       cell: (row) => (
         <SelectCell
@@ -755,8 +706,10 @@ export default function UsersTable({
       sortKey: "posts",
       cell: (row) => (row.postCount > 0 ? <Link href={`/authors/${row.slug}`}>posts</Link> : ""),
     },
-    { key: "comments", header: "Comments", cell: () => null },
-    { key: "url", header: "", cell: (row) => <Link href={`/users/${row.id}/slug`}>url</Link> },
+    // Defaulted hidden (§16m) — it renders nothing at all (no sortKey, a null
+    // cell), so it cost a column of width for an empty one every load.
+    { key: "comments", header: "Comments", defaultHidden: true, cell: () => null },
+    { key: "url", header: "Slug", defaultHidden: true, cell: (row) => <Link href={`/users/${row.id}/slug`}>url</Link> },
     // Landing-page contributor fields (PLAN.md §17i), defaulted hidden below.
     {
       key: "isListedContributor",
@@ -764,11 +717,9 @@ export default function UsersTable({
       sortKey: "isListedContributor",
       defaultHidden: true,
       cell: (row) => (
-        <SelectCell
-          value={row.isListedContributor ? "true" : "false"}
-          options={["true", "false"] as const}
-          optionLabel={(v) => (v === "true" ? "Yes" : "No")}
-          save={(next) => updateUserIsListedContributor(row.id, next === "true")}
+        <CheckboxCell
+          checked={row.isListedContributor}
+          save={(next) => updateUserIsListedContributor(row.id, next)}
           failureMessage="Failed to update listed-contributor status."
           run={(action) => runWithStatus(row.id, action)}
         />
@@ -914,26 +865,28 @@ export default function UsersTable({
         }}
       />
 
-      <table className={adminStyles.table}>
-        <thead>
-          <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
-        </thead>
-        <tbody>
-          {displayRows.length === 0 && (
-            <EmptyRow colSpan={visibleColumns.length} message="No users matching the criteria." />
-          )}
-          {displayRows.map((row) => (
-            <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-              <ColumnCells
-                row={row}
-                columns={visibleColumns}
-                statusClass={rowStatusClass(row.id)}
-                statusTitle={rowStatusTitle(row.id)}
-              />
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className={adminStyles.tableScroll}>
+        <table className={adminStyles.table}>
+          <thead>
+            <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
+          </thead>
+          <tbody>
+            {displayRows.length === 0 && (
+              <EmptyRow colSpan={visibleColumns.length} message="No users matching the criteria." />
+            )}
+            {displayRows.map((row) => (
+              <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
+                <ColumnCells
+                  row={row}
+                  columns={visibleColumns}
+                  statusClass={rowStatusClass(row.id)}
+                  statusTitle={rowStatusTitle(row.id)}
+                />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <CellError message={error} />
 
       <PaginationBar

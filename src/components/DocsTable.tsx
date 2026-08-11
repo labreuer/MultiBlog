@@ -3,7 +3,14 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { deleteDoc, restoreDoc, bulkDeleteDocs, bulkRestoreDocs, bulkSetDocVisibility } from "@/app/actions/docs";
+import {
+  deleteDoc,
+  restoreDoc,
+  bulkDeleteDocs,
+  bulkRestoreDocs,
+  bulkSetDocVisibility,
+  updateDocVisibility,
+} from "@/app/actions/docs";
 import { formatDate } from "@/lib/format-date";
 import { DocVisibility } from "@/generated/prisma/enums";
 import { type DocsFilters, buildDocsQueryString } from "@/lib/docs-query";
@@ -21,6 +28,7 @@ import {
 } from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
+import { AuthorFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
 import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
 import { saveTableColumns } from "@/app/actions/table-preferences";
@@ -31,6 +39,7 @@ import {
   PaginationBar,
   RowActionButton,
   SearchBox,
+  SelectCell,
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
@@ -44,6 +53,7 @@ export type DocRow = {
   visibility: DocVisibility;
   createdAt: Date;
   updatedAt: Date;
+  updatedByName: string;
   // Character count, read straight off Doc.proseJsonLength — a stored column
   // kept current by a Postgres trigger, not something computed here, so a
   // doc's full body never has to reach this component to show its length
@@ -62,6 +72,7 @@ const SORTABLE_KEYS = [
   "length",
   "slug",
   "updatedAt",
+  "updatedBy",
   "deletedAt",
   "deleted",
 ] as const;
@@ -72,6 +83,7 @@ export default function DocsTable({
   filters,
   prefs,
   isAdmin,
+  authorOptions,
 }: {
   rows: DocRow[];
   totalCount: number;
@@ -81,6 +93,8 @@ export default function DocsTable({
    * Without it the table lists what this viewer can already reach: their own
    * byline-authored docs, plus every SHARED doc for an ADMIN/EDITOR. */
   isAdmin: boolean;
+  /** Every ADMIN/EDITOR/AUTHOR, for the Authors filter panel (src/lib/author-filter.ts). */
+  authorOptions: AuthorOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -146,13 +160,43 @@ export default function DocsTable({
       cell: (row) => row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>,
     },
     { key: "authors", header: "Author(s)", sortKey: "authors", cell: (row) => row.authors },
-    { key: "visibility", header: "Visibility", sortKey: "visibility", cell: (row) => row.visibility },
     {
-      key: "created",
-      header: "Created",
-      sortKey: "created",
+      key: "visibility",
+      header: "Visibility",
+      sortKey: "visibility",
+      cell: (row) => (
+        <SelectCell
+          value={row.visibility}
+          options={Object.values(DocVisibility)}
+          disabled={row.deleted || !row.canEdit}
+          save={(next) => updateDocVisibility(row.id, next)}
+          failureMessage="Failed to update visibility."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    {
+      key: "updatedAt",
+      header: "Updated",
+      sortKey: "updatedAt",
       nowrap: true,
-      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
+      // The ordinary Postgres row-update timestamp — distinct from Length,
+      // which only tracks the body's own trigger-maintained cache. Shown by
+      // default in Created's old spot, and the default sort key (DEFAULT_SORT,
+      // docs-query.ts): "what changed recently" is a more useful landing view
+      // for this table than "what was made first".
+      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
+    },
+    {
+      key: "updatedBy",
+      header: "Updated by",
+      sortKey: "updatedBy",
+      nowrap: true,
+      // Paired with Updated and shown by default alongside it, the same way
+      // /posts shows "Last edit by" next to "Last edit at" — the timestamp on
+      // its own doesn't answer who, and this table now leads with recency.
+      // Blank for a doc nothing has updated since the column existed.
+      cell: (row) => row.updatedByName,
     },
     {
       key: "length",
@@ -162,17 +206,16 @@ export default function DocsTable({
       cell: (row) => row.length.toLocaleString(),
     },
     // Defaulted hidden (§16l/§16i): real Doc columns available on request.
-    // slug is otherwise unused here (Title/Edit link on row.id); updatedAt is
-    // the ordinary Postgres row-update timestamp — distinct from Length,
-    // which only tracks the body's own trigger-maintained cache.
+    // slug is otherwise unused here (Title/Edit link on row.id). created
+    // moved here, defaulted hidden, when updatedAt took its old spot above.
     { key: "slug", header: "Slug", sortKey: "slug", defaultHidden: true, cell: (row) => row.slug },
     {
-      key: "updatedAt",
-      header: "Updated",
-      sortKey: "updatedAt",
+      key: "created",
+      header: "Created",
+      sortKey: "created",
       nowrap: true,
       defaultHidden: true,
-      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
+      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
     },
     {
       key: "deletedAt",
@@ -217,6 +260,12 @@ export default function DocsTable({
     <>
       <div className={adminStyles.filterRow}>
         <SearchBox value={searchDraft} onChange={onSearchChange} placeholder="Search title …" label="Search title" />
+        <AuthorFilterPanel
+          options={authorOptions}
+          selected={filters.authors}
+          mode={filters.authorMode}
+          onChange={(next) => updateFilters(next)}
+        />
         <ColumnPicker
           columns={columns}
           resolved={visibleColumns}
@@ -245,26 +294,28 @@ export default function DocsTable({
         }}
       />
 
-      <table className={adminStyles.table}>
-        <thead>
-          <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
-        </thead>
-        <tbody>
-          {displayRows.length === 0 && (
-            <EmptyRow colSpan={visibleColumns.length} message="No docs matching the criteria." />
-          )}
-          {displayRows.map((row) => (
-            <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
-              <ColumnCells
-                row={row}
-                columns={visibleColumns}
-                statusClass={rowStatusClass(row.id)}
-                statusTitle={rowStatusTitle(row.id)}
-              />
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className={adminStyles.tableScroll}>
+        <table className={adminStyles.table}>
+          <thead>
+            <ColumnHeaderRow columns={visibleColumns} sort={filters.sort} onSort={handleSort} />
+          </thead>
+          <tbody>
+            {displayRows.length === 0 && (
+              <EmptyRow colSpan={visibleColumns.length} message="No docs matching the criteria." />
+            )}
+            {displayRows.map((row) => (
+              <tr key={row.id} className={`${adminStyles.row} ${row.deleted ? adminStyles.rowDeleted : ""}`}>
+                <ColumnCells
+                  row={row}
+                  columns={visibleColumns}
+                  statusClass={rowStatusClass(row.id)}
+                  statusTitle={rowStatusTitle(row.id)}
+                />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <CellError message={error} />
 
       <PaginationBar
@@ -294,6 +345,31 @@ export default function DocsTable({
         sortKeys={SORTABLE_KEYS}
         defaultPageSize={prefs.pageSize}
         searchDescription="Free-text search over the doc title."
+        filters={[
+          {
+            param: "authors",
+            meaning: (
+              <>
+                Comma-separated user slugs, combined per <code>authorMode</code>. A slug that no longer names a live
+                ADMIN/EDITOR/AUTHOR account is dropped rather than honoured, so a stale bookmark widens back to the
+                unfiltered listing instead of going blank.
+              </>
+            ),
+            control: "Authors dropdown",
+          },
+          {
+            param: "authorMode",
+            meaning: (
+              <>
+                How <code>authors</code> is applied. <code>ANY</code> (the default) — at least one of the checked
+                authors. <code>ALL</code> — every one of them, others allowed. <code>EXACTLY</code> — that byline and
+                nobody else. <code>NONE</code> — none of them, including rows with no byline at all. Ignored while
+                nothing is checked.
+              </>
+            ),
+            control: "Match dropdown, at the foot of the Authors panel",
+          },
+        ]}
         notes={
           <p style={{ marginTop: 8 }}>
             Every column here sorts except <strong>Edit</strong>, which is a link rather than a value.{" "}
@@ -306,6 +382,12 @@ export default function DocsTable({
             <strong>SHARED</strong> doc to an ADMIN or EDITOR, plus the <strong>PRIVATE</strong> docs you carry a
             byline on. ADMIN accounts also get a &quot;Show all docs&quot; checkbox above, which adds everyone
             else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md).
+            The <strong>Authors</strong> filter narrows this listing; it never widens it. Without &quot;Show all
+            docs&quot; the listing is still your own bylines plus every SHARED doc, so filtering on someone else&apos;s
+            name returns the SHARED docs they co-author and not their PRIVATE ones — and your own name under{" "}
+            <code>NONE</code> is a quick &quot;docs I&apos;m not on&quot;. A byline naming a deleted account still
+            counts for <code>EXACTLY</code>, matching what the Author(s) column prints, so such a doc can&apos;t be
+            matched exactly by the remaining authors alone.
           </p>
         }
       />

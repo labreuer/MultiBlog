@@ -13,7 +13,7 @@ import type { Prisma } from "../src/generated/prisma/client";
 // nothing here throws into the Hocuspocus hook that calls it (§11c's rule):
 // a document that isn't TipTap-shaped, or any other failure, is logged and
 // dropped, leaving prose_json exactly as stale as it already was.
-export async function updateDocCache(ydocId: string, document: Y.Doc): Promise<void> {
+export async function updateDocCache(ydocId: string, document: Y.Doc, updatedByUserId?: string): Promise<void> {
   const docId = docIdFromYdocId(ydocId);
   if (!docId) return;
 
@@ -47,6 +47,12 @@ export async function updateDocCache(ydocId: string, document: Y.Doc): Promise<v
         // and no seeded title fragment, so this runs from the first store
         // debounce, not just on a later clear.
         title: titleText,
+        // Doc.updatedAt moves on this write regardless (Prisma applies
+        // @updatedAt client-side), so updated_by_user_id is set here to say
+        // who moved it. Omitted rather than nulled when the caller has no
+        // user to name — a store flush with no context behind it (a shutdown
+        // drain) shouldn't erase the last real editor.
+        ...(updatedByUserId ? { updatedByUserId } : {}),
       },
     });
   } catch (err) {

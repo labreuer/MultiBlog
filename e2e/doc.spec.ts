@@ -21,6 +21,7 @@ import {
   QUOTED_TEXT,
 } from "./fixtures";
 import { countDocYdocUpdates, getDocState, getAnnotationStates, addTestDocAuthor } from "./db";
+import { ADMIN_EMAIL } from "./naming";
 import { uniqueTitle } from "./naming";
 
 test("+ New doc creates titleless and drops straight into the editor, no title-collecting page in between", async ({
@@ -91,6 +92,13 @@ test("editing a doc updates its title/prose_json cache on the store debounce", a
     .poll(async () => (await getDocState(draftDoc.id))?.proseText, { timeout: 15_000 })
     .toBe("Cached by the collab server, not saved by hand.");
   expect((await getDocState(draftDoc.id))?.title).toBe("Retitled live");
+
+  // The same flush attributes the edit: Doc.updatedBy comes from the
+  // Hocuspocus connection's own verified context (ydocOnStoreDocument's
+  // lastContext), not from anything the client asserts. Deliberately a
+  // last-writer-wins value under concurrent editing — see schema.prisma — so
+  // this asserts it only where a single identity did all the typing.
+  expect((await getDocState(draftDoc.id))?.updatedByEmail).toBe(ADMIN_EMAIL);
 });
 
 test("a reader's already-open tab sees an author's edit with no reload", async ({ page, sharedDoc, secondUser }) => {

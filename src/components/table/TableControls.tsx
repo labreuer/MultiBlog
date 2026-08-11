@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { IconTrash, IconTrashOff } from "@tabler/icons-react";
+import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import { DATE_FORMATS, type DateFormat } from "@/lib/format-date";
 import { PAGE_SIZE_OPTIONS, type PageSize } from "@/lib/table-query";
 import type { SortColumn } from "@/lib/table-sort";
@@ -119,6 +121,106 @@ export function RowActionButton({
   );
 }
 
+// A <select> commits on change, so unlike a text cell it never passes
+// through the gray "edited" state — it goes straight to saving.
+export function SelectCell<T extends string | number>({
+  value,
+  options,
+  optionLabel,
+  disabled,
+  save,
+  failureMessage,
+  run,
+}: {
+  value: T;
+  options: readonly T[];
+  optionLabel?: (option: T) => string;
+  disabled?: boolean;
+  save: (next: T) => Promise<void>;
+  failureMessage: string;
+  run: (action: () => Promise<void>) => Promise<void>;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <>
+      <select
+        value={value}
+        disabled={disabled || pending}
+        onChange={(e) => {
+          const raw = e.target.value;
+          const next = (typeof value === "number" ? Number(raw) : raw) as T;
+          setError(null);
+          startTransition(async () => {
+            try {
+              await run(async () => {
+                await save(next);
+              });
+              router.refresh();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : failureMessage);
+            }
+          });
+        }}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {optionLabel ? optionLabel(option) : option}
+          </option>
+        ))}
+      </select>
+      <CellError message={error} />
+    </>
+  );
+}
+
+// The boolean counterpart to SelectCell — same commit-on-change, straight-
+// to-saving shape, just a checkbox instead of a two-option <select>.
+export function CheckboxCell({
+  checked,
+  disabled,
+  save,
+  failureMessage,
+  run,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  save: (next: boolean) => Promise<void>;
+  failureMessage: string;
+  run: (action: () => Promise<void>) => Promise<void>;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled || pending}
+        onChange={(e) => {
+          const next = e.target.checked;
+          setError(null);
+          startTransition(async () => {
+            try {
+              await run(async () => {
+                await save(next);
+              });
+              router.refresh();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : failureMessage);
+            }
+          });
+        }}
+      />
+      <CellError message={error} />
+    </>
+  );
+}
+
 export function CellError({ message }: { message: string | null }) {
   if (!message) return null;
   return <div className={styles.cellError}>{message}</div>;
@@ -165,20 +267,7 @@ export function MultiSelectDropdown<T extends string>({
 }) {
   const summary = selected === "ALL" ? "All" : options.filter((o) => selected.has(o)).join(", ") || "All";
   const detailsRef = useRef<HTMLDetailsElement>(null);
-
-  // <details> has no native "close on outside click" behavior — only toggles
-  // via its own <summary>. Set .open directly on the DOM node (rather than
-  // lifting it into React state) since nothing else here needs to react to
-  // open/closed.
-  useEffect(() => {
-    function handlePointerDown(e: MouseEvent) {
-      if (detailsRef.current && !detailsRef.current.contains(e.target as Node)) {
-        detailsRef.current.open = false;
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
+  useCloseOnOutsideClick(detailsRef);
 
   return (
     <details ref={detailsRef} className={styles.dropdownWrapper}>

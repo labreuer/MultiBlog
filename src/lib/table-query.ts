@@ -79,6 +79,32 @@ export function parseSetParam<T extends string>(value: string | null, all: reado
   return parts.length > 0 ? new Set(parts) : "ALL";
 }
 
+// The data-vocabulary counterpart to parseSetParam, for a multi-select whose
+// options are rows (the /docs and /posts Authors filter, src/lib/author-filter.ts)
+// rather than a fixed schema enum. `parseSetParam` can't serve here: it treats
+// an absent/empty selection as "every option" (ALL), which is right for a
+// closed enum but wrong for authors — empty has to mean "no filter", not
+// "everyone". `known` is the server-fetched allowlist; anything in `value`
+// that isn't in it is dropped rather than honoured, and the return order
+// follows `known`, not the URL, so the same people always serialize back to
+// the same querystring however they were checked.
+export function parseSlugListParam(value: string | null, known: readonly string[]): string[] {
+  if (!value) return [];
+  const wanted = new Set(value.split(",").map((v) => v.trim()).filter(Boolean));
+  return known.filter((slug) => wanted.has(slug));
+}
+
+// How a set of checked authors combines (src/lib/author-filter.ts). Uppercase
+// to match the other multi-value params, whose values are schema enums
+// (?status=PENDING,…).
+export const AUTHOR_MODES = ["ANY", "ALL", "EXACTLY", "NONE"] as const;
+export type AuthorMode = (typeof AUTHOR_MODES)[number];
+export const DEFAULT_AUTHOR_MODE: AuthorMode = "ANY";
+
+export function parseAuthorMode(value: string | null): AuthorMode {
+  return (AUTHOR_MODES as readonly string[]).includes(value ?? "") ? (value as AuthorMode) : DEFAULT_AUTHOR_MODE;
+}
+
 function parsePageSizeParam(value: string | null, defaultPageSize: PageSize): PageSize {
   const n = Number(value);
   return isPageSize(n) ? n : defaultPageSize;
@@ -141,7 +167,11 @@ export function parseBaseFilters<K extends string>(
 // params (a table's multi-selects) on the result before serializing. Params
 // this doesn't know about — the deep-link-only filters (?post=, ?author=,
 // ?commenter=, ?doc=, ?user=) — round-trip through `extra` untouched, which
-// is what keeps a deep link alive across a sort or page change.
+// is what keeps a deep link alive across a sort or page change. Note ?author=
+// here is a single userId ("comments on posts this user wrote", /comments
+// only) and is deliberately distinct from /docs' and /posts' own ?authors=/
+// ?authorMode= filter params, which those two tables parse and serialize
+// themselves rather than leaving to `extra`.
 export function buildBaseQueryString<K extends string>(
   filters: BaseFilters<K>,
   extra: URLSearchParams,

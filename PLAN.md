@@ -4338,7 +4338,9 @@ could cheaply fetch) never reached `ColumnSpec` at all, so no `?cols=` value cou
 Added, all `defaultHidden: true` — present in the picker, absent from the default view:
 
 - `/posts`: `slug`, `moderationPolicy`, `deletedAt`.
-- `/docs`: `slug`, `updatedAt`, `deletedAt`.
+- `/docs`: `slug`, `deletedAt`, and (since §16n below) `created` — `updatedAt` swapped into its
+  spot instead, shown and sorted by default. `updatedAt` was itself `defaultHidden` when this
+  list was first built.
 - `/users`: `deletedAt`.
 - `/comments`: `ipAddress`, `statusChangedBy` (sorts through the comment's own `statusChangedBy`
   relation, the same to-one-relation `orderBy` pattern §16i's `post_activity`/`post_metrics` use,
@@ -4401,6 +4403,74 @@ drag handling reuses `ColumnPicker`'s own mechanics and CSS classes (`columnPick
 `columnRow`/`columnDragHandle`, `AdminTable.module.css`) rather than a second implementation of the
 same gesture — only a checked row is draggable there too, for the same reason: there is no
 meaningful position for a column that isn't shown.
+
+### 16n. /docs defaults to Updated, not Created
+
+`/docs`' default view and default sort (`DEFAULT_SORT`, `docs-query.ts`) both pointed at
+`created`/`createdAt`. Swapped for `updatedAt`, in the same declared position `created` used to
+hold (`DocsTable.tsx`'s `ColumnSpec` list, and its mirror in `admin-table-columns.ts` — §16m's
+"adding, removing or renaming a movable column means updating both places" applies to swapping
+one's `defaultHidden`/position too) — `created` moved to where `updatedAt` used to sit, now
+`defaultHidden`. Both were already sortable, already selected server-side, and already plain
+`Doc` columns (`created`/`updatedAt` both existed as `DocsSortKey`s and `ColumnSpec`s before this;
+nothing new was added, only which one is the default). Rationale: an admin landing on `/docs` is
+almost always there to see what's changed lately, not what was created first — a stale-sorted-by-
+creation-date table buries anything just edited under a pile of untouched old docs, however
+recently `Doc.updatedAt` moved.
+
+### 16o. Doc.updatedBy — who last moved updatedAt
+
+`Doc.updatedAt` says *when* a doc last changed; `Doc.updatedByUserId` (migration
+`add_doc_updated_by`, nullable FK to `User`, relation `DocUpdatedBy`) says *who*, and `/docs`
+shows it as an "Updated by" column beside Updated — the pair `/posts` already has as "Last edit
+at"/"Last edit by".
+
+**Deliberately last-writer-wins, not an audit trail.** `updatedAt` is `@updatedAt`, which Prisma
+applies client-side to *any* update of the row, so the rule is simply "every write that moves
+`updatedAt` also names who moved it" — otherwise Updated advances while Updated by still credits
+an older edit, which reads worse than either value alone. That covers the doc server actions
+(`createDoc`, `updateDocVisibility`, `setDocDeleted`, and `changeDocSlug`/`revertDocSlug`, which
+take a `updatedByUserId` argument since `src/lib/doc-slug.ts` has no session of its own) and, the
+one that matters, the collab store-debounce flush.
+
+That last one is where the imprecision is, and it is accepted rather than overlooked.
+`updateDocCache` (`server/doc-cache.ts`) is called from `ydocOnStoreDocument`, whose payload
+offers only `lastContext` — Hocuspocus's "whichever connection most recently drove this
+document," verified at `onAuthenticate`, never client-asserted. The hook is debounced, so two
+authors typing at once coalesce into one flush and this records whichever happened to be last.
+`Doc.updatedBy` is *defined* to accept that. This column is a cheap "who touched it last" for a
+listing, and the schema comment says so.
+
+Anything wanting real per-author attribution already has better mechanisms, and it is worth being
+precise about what they are — **`ydoc_update` is not one of them.** That table is `id`/`ydoc_id`/
+`update`/`created_at`: raw Yjs bytes and a timestamp, no `user_id` (unlike `ydoc_snapshot`, which
+does carry one). What exists instead is: the `authorHighlight` marks in the doc's own Yjs state,
+which are exact and per *character*; and, per update, the clientID an update's bytes encode
+(`Y.parseUpdateMeta(update).from`) resolved through the top-level `clients` `Y.Map` that §11d
+keeps *inside* the document (`String(clientID) → userId`, written once per client by
+`attributeUpdate`). That second one is a Yjs read, not a join — it needs the document
+materialized, it goes ambiguous on a merged update carrying more than one origin client (which
+`attributeUpdate` declines to guess at), and clientIDs are per session rather than per user. All
+of which is why `Doc.updatedBy` is a plain FK column and not a view over the update log.
+
+`updatedByUserId` is **omitted, not nulled**, when a caller has no user to name (a store flush
+during a shutdown drain, a seeding script, an import) — erasing the last real editor would be
+worse than leaving a slightly stale one. Nullable for the same reason plus rows predating the
+column; `/docs` renders those as a blank cell and sorts them last in either direction, and the
+sort goes through the to-one relation exactly as `/comments`' `statusChangedBy` does — a plain
+FK needs no view.
+
+**Backfilling the rows that predate it.** `scripts/doc/backfill-updated-by.ts` fills a NULL
+`updated_by_user_id` by running the two-hop derivation above in reverse: materialize the ydoc for
+its `clients` map, and — only when that map names more than one user — walk `ydoc_update`
+newest-first for the latest update whose origin clientID is in it. A single-editor doc needs no
+walk, which is most of them. It refuses to guess where the map is empty (a doc seeded straight
+into the ydoc tables by `seed-sample-data.ts`/`seed-front-page.ts` has no `clients` entries at
+all) rather than falling back to the byline: a byline says who *may* edit, not who did. The write
+is raw SQL naming only that one column, so `@updatedAt` doesn't move and the
+`doc_sync_prose_json_length` trigger doesn't fire, and it carries `AND updated_by_user_id IS NULL`
+so a concurrent collab flush's fresher value wins — which is why, unlike
+`collapse-blank-lines.ts`, it needn't have the collab server stopped.
 
 ## 17. The landing page
 

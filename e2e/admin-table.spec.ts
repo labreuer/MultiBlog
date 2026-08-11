@@ -7,6 +7,8 @@
 import { test, expect } from "./fixtures";
 import {
   ADMIN_EMAIL,
+  addTestDocAuthor,
+  addTestPostAuthor,
   clearColumnOrder,
   createComment,
   createTestDoc,
@@ -340,8 +342,8 @@ test.describe("admin table kit", () => {
       // cell offers no moderation link at all.
       const betaRow = page.getByRole("row").filter({ hasText: beta.title });
       const alphaRow = page.getByRole("row").filter({ hasText: alpha.title });
-      await expect(betaRow).toContainText("in moderation 1");
-      await expect(alphaRow).not.toContainText("in moderation");
+      await expect(betaRow.getByRole("link", { name: "(1)" })).toBeVisible();
+      await expect(alphaRow.getByRole("link", { name: /^\(\d+\)$/ })).toHaveCount(0);
 
       await page.goto(`/posts?q=${token}`);
       await page.getByRole("columnheader", { name: "Comments" }).click();
@@ -518,8 +520,20 @@ test.describe("admin table kit", () => {
       // happen to exist, not a particular set.
       await page.goto("/docs?showAllDocs=1");
       // Two of the eight are alwaysVisible and render as icon-only headers, so
-      // they read as "" here — position is what matters for them.
-      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Visibility", "Created", "Length", ""]);
+      // they read as "" here — position is what matters for them. Updated
+      // sits in Created's old spot (default-hidden now) since the admin-
+      // tables rework: "what changed recently" over "what was made first".
+      expect(await headers()).toEqual([
+        "",
+        "Title",
+        "Edit",
+        "Author(s)",
+        "Visibility",
+        "Updated",
+        "Updatedby",
+        "Length",
+        "",
+      ]);
 
       // Hiding: only the named movable columns survive, and the fixed pair
       // still brackets them.
@@ -584,7 +598,7 @@ test.describe("admin table kit", () => {
       // did-the-state-flip assertion races the round trip.
       await page.locator("label").filter({ hasText: "Visibility" }).getByRole("checkbox").click();
       await expect(page).toHaveURL(/cols=/);
-      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Created", "Length", ""]);
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Updated", "Updatedby", "Length", ""]);
 
       // Save as my default: the preference persists, and the URL stops
       // carrying the override it was authored with.
@@ -592,7 +606,7 @@ test.describe("admin table kit", () => {
       await expect(page).not.toHaveURL(/cols=/);
       // The real proof — a fresh navigation with no ?cols= at all still hides it.
       await page.goto("/docs?showAllDocs=1");
-      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Created", "Length", ""]);
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Updated", "Updatedby", "Length", ""]);
     } finally {
       // The shared admin is reused by every other spec, so this has to go back.
       await clearColumnOrder(ADMIN_EMAIL);
@@ -615,5 +629,219 @@ test.describe("admin table kit", () => {
       await expect(page.getByRole("button", { name: "◀ Prev", exact: true })).toBeDisabled();
       await expect(page.getByRole("button", { name: "Next ▶", exact: true })).toBeDisabled();
     }
+  });
+
+  // Guards the `width: 100%` half of globals.css's `body > main` rule: without
+  // it main sizes to the table (775px at a 390px viewport) and the overhang is
+  // clipped unreachably rather than scrolled. The companion `min-width: 0` is a
+  // WebKit-only deviation no local browser reproduces, so nothing here can
+  // cover it. STYLE.md, "Narrow viewports and horizontal overflow".
+  test("a narrow viewport scrolls the table instead of clipping it", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 664 });
+    for (const path of ["/posts", "/docs", "/users", "/comments", "/annotations"]) {
+      await page.goto(path);
+      await page.waitForSelector("table");
+      const m = await page.evaluate(() => {
+        const table = document.querySelector("table")!;
+        const wrap = table.parentElement!;
+        return {
+          innerWidth: window.innerWidth,
+          mainWidth: Math.round(document.querySelector("main")!.getBoundingClientRect().width),
+          overflowX: getComputedStyle(wrap).overflowX,
+          clientWidth: wrap.clientWidth,
+          scrollWidth: wrap.scrollWidth,
+          docScrollWidth: document.documentElement.scrollWidth,
+        };
+      });
+      // main tracks the viewport rather than its own content.
+      expect(m.mainWidth, `${path}: main should not exceed the viewport`).toBeLessThanOrEqual(m.innerWidth);
+      // The table lives in a real scroll container...
+      expect(m.overflowX, `${path}: table wrapper should scroll horizontally`).toBe("auto");
+      // ...and the overflow is inside it, not spilling out to be clipped.
+      expect(m.scrollWidth, `${path}: table should overflow its wrapper`).toBeGreaterThan(m.clientWidth);
+      expect(m.docScrollWidth, `${path}: page itself must not scroll sideways`).toBeLessThanOrEqual(m.innerWidth);
+    }
+  });
+
+  // The Authors filter (src/lib/author-filter.ts) — a checkbox panel of
+  // ADMIN/EDITOR/AUTHOR users plus a combining mode, mirrored into
+  // ?authors=/?authorMode= like every other criterion these tables carry.
+  test.describe("Authors filter", () => {
+    test("the four modes over /docs", async ({ page }) => {
+      const token = `authfilter${Date.now()}`;
+      const alphaEmail = uniqueEmail("authfilter-alpha");
+      const betaEmail = uniqueEmail("authfilter-beta");
+      const gammaEmail = uniqueEmail("authfilter-gamma");
+      const alpha = await createTestUser({ email: alphaEmail, name: "Filter Alpha", role: "ADMIN" });
+      const beta = await createTestUser({ email: betaEmail, name: "Filter Beta", role: "ADMIN" });
+      await createTestUser({ email: gammaEmail, name: "Filter Gamma", role: "ADMIN" });
+
+      // docA {alpha} · docAB {alpha, beta} · docB {beta} · docC {gamma}. All
+      // PRIVATE and bylined to throwaway admins, so showAllDocs=1 is what
+      // puts them all in scope (same reason the doc_metrics test above uses
+      // it) — the filter itself is exercised on top of that, not instead.
+      const docA = await createTestDoc({ authorEmail: alphaEmail, title: uniqueTitle(`${token} A`) });
+      const docAB = await createTestDoc({ authorEmail: alphaEmail, title: uniqueTitle(`${token} AB`) });
+      await addTestDocAuthor(docAB.id, betaEmail);
+      const docB = await createTestDoc({ authorEmail: betaEmail, title: uniqueTitle(`${token} B`) });
+      const docC = await createTestDoc({ authorEmail: gammaEmail, title: uniqueTitle(`${token} C`) });
+
+      try {
+        const table = page.getByRole("table").first();
+        const titles = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+        const base = `/docs?q=${token}&sort=title:asc&showAllDocs=1`;
+
+        // ANY is the default with no authorMode param at all.
+        await page.goto(`${base}&authors=${alpha.slug}`);
+        expect(await titles()).toEqual([docA.title, docAB.title]);
+
+        // ANY over two slugs is a union, not an intersection.
+        await page.goto(`${base}&authors=${alpha.slug},${beta.slug}&authorMode=ANY`);
+        expect(await titles()).toEqual([docA.title, docAB.title, docB.title]);
+
+        // ALL is an AND-of-somes, not `some: { in }` — docB (beta alone) drops out.
+        await page.goto(`${base}&authors=${alpha.slug},${beta.slug}&authorMode=ALL`);
+        expect(await titles()).toEqual([docAB.title]);
+
+        // EXACTLY on alpha alone excludes docAB — the `every` clause, the one
+        // case that actually separates EXACTLY from ALL.
+        await page.goto(`${base}&authors=${alpha.slug}&authorMode=EXACTLY`);
+        expect(await titles()).toEqual([docA.title]);
+
+        // EXACTLY over the full multi-author byline.
+        await page.goto(`${base}&authors=${alpha.slug},${beta.slug}&authorMode=EXACTLY`);
+        expect(await titles()).toEqual([docAB.title]);
+
+        // NONE excludes docAB too, not just docA.
+        await page.goto(`${base}&authors=${alpha.slug}&authorMode=NONE`);
+        expect(await titles()).toEqual([docB.title, docC.title]);
+
+        // An empty selection is no filter at all, whatever the mode says.
+        await page.goto(`${base}&authorMode=EXACTLY`);
+        expect(await titles()).toEqual([docA.title, docAB.title, docB.title, docC.title]);
+
+        // A slug that names nobody is dropped rather than filtered on — the
+        // grid must degrade to unfiltered, not go blank.
+        await page.goto(`${base}&authors=not-a-real-slug`);
+        expect(await titles()).toEqual([docA.title, docAB.title, docB.title, docC.title]);
+      } finally {
+        await deleteTestDoc(docA.id);
+        await deleteTestDoc(docAB.id);
+        await deleteTestDoc(docB.id);
+        await deleteTestDoc(docC.id);
+        await deleteTestUser(alphaEmail);
+        await deleteTestUser(betaEmail);
+        await deleteTestUser(gammaEmail);
+      }
+    });
+
+    // The security-relevant case: the filter is one more AND term over
+    // whatever the viewer could already see, never a way around that scope.
+    test("composes with, and never escapes, /docs' PRIVATE-doc scoping", async ({ page }) => {
+      const token = `authscope${Date.now()}`;
+      const authorEmail = uniqueEmail("authscope-author");
+      const author = await createTestUser({ email: authorEmail, name: "Scope Author", role: "ADMIN" });
+      const doc = await createTestDoc({ authorEmail, title: uniqueTitle(`${token} doc`) });
+
+      try {
+        // No showAllDocs=1 here: the viewing admin has no byline on this
+        // PRIVATE doc, so it's out of scope, and the author filter can only
+        // narrow what's already in scope — not search around it.
+        await page.goto(`/docs?q=${token}&authors=${author.slug}`);
+        await expect(page.getByText(/no docs matching the criteria/i)).toBeVisible();
+
+        // NONE especially: it reads like a negation of the scope, and isn't
+        // one — it still can't surface a doc the viewer can't already reach.
+        await page.goto(`/docs?q=${token}&authors=${author.slug}&authorMode=NONE`);
+        await expect(page.getByText(/no docs matching the criteria/i)).toBeVisible();
+      } finally {
+        await deleteTestDoc(doc.id);
+        await deleteTestUser(authorEmail);
+      }
+    });
+
+    test("the Authors panel writes the URL, survives navigation, and clears", async ({ page }) => {
+      const token = `authpanel${Date.now()}`;
+      const email = uniqueEmail("authpanel");
+      const user = await createTestUser({ email, name: "Panel Author", role: "ADMIN" });
+      const doc = await createTestDoc({ authorEmail: email, title: uniqueTitle(`${token} doc`) });
+
+      try {
+        await page.goto(`/docs?q=${token}&showAllDocs=1`);
+
+        await page.getByText(/^Authors: /).click();
+        await expect(page.getByLabel("Panel Author")).toBeVisible();
+        // The shared e2e admin (auth.setup.ts) is itself ADMIN, so it's a
+        // checkbox in its own filter panel — with the "(me)" suffix.
+        await expect(page.getByText("E2E Admin (me)")).toBeVisible();
+
+        await page.getByLabel("Panel Author").click();
+        await expect(page).toHaveURL(new RegExp(`authors=${user.slug}`));
+        // A filter change resets to page 1, same as every other filter.
+        await expect(page).not.toHaveURL(/[?&]page=/);
+
+        // The panel stays open across that navigation (an uncontrolled
+        // <details>), so the mode select is still reachable with no reopen.
+        await page.getByLabel("Author match mode").selectOption("EXACTLY");
+        await expect(page).toHaveURL(/authorMode=EXACTLY/);
+        await expect(page.getByLabel("Panel Author")).toBeVisible();
+
+        await page.getByRole("button", { name: "Clear author filter" }).click();
+        await expect(page).not.toHaveURL(/authors=/);
+        // Clear only empties the checks — the mode is left alone.
+        await expect(page).toHaveURL(/authorMode=EXACTLY/);
+
+        // Outside click closes the panel.
+        await page.getByRole("heading", { name: "Docs" }).click();
+        await expect(page.getByLabel("Panel Author")).toBeHidden();
+      } finally {
+        await deleteTestDoc(doc.id);
+        await deleteTestUser(email);
+      }
+    });
+
+    // Smaller mirror on /posts: the mode logic is duplicated per page
+    // (buildFilterWhere in each of src/app/docs/page.tsx and
+    // src/app/posts/page.tsx), so this is what would catch the two drifting.
+    test("/posts' author filter, all four modes", async ({ page }) => {
+      const token = `authpost${Date.now()}`;
+      const alphaEmail = uniqueEmail("authpost-alpha");
+      const betaEmail = uniqueEmail("authpost-beta");
+      const alpha = await createTestUser({ email: alphaEmail, name: "Post Alpha", role: "ADMIN" });
+      const beta = await createTestUser({ email: betaEmail, name: "Post Beta", role: "ADMIN" });
+
+      const postA = await createTestPost({ authorEmail: alphaEmail, title: uniqueTitle(`${token} A`) });
+      const postAB = await createTestPost({ authorEmail: alphaEmail, title: uniqueTitle(`${token} AB`) });
+      await addTestPostAuthor(postAB.id, betaEmail);
+
+      try {
+        const table = page.getByRole("table").first();
+        const titles = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+        const base = `/posts?q=${token}&sort=title:asc`;
+
+        await page.goto(`${base}&authors=${alpha.slug}`);
+        expect(await titles()).toEqual([postA.title, postAB.title]);
+
+        await page.goto(`${base}&authors=${alpha.slug},${beta.slug}&authorMode=ALL`);
+        expect(await titles()).toEqual([postAB.title]);
+
+        await page.goto(`${base}&authors=${alpha.slug}&authorMode=EXACTLY`);
+        expect(await titles()).toEqual([postA.title]);
+
+        await page.goto(`${base}&authors=${alpha.slug}&authorMode=NONE`);
+        expect(await titles()).toEqual([]);
+
+        // The panel is actually rendered — /posts gained its first extra
+        // server-computed prop for this, so a missed wiring would otherwise
+        // only show as "the param silently does nothing".
+        await page.goto(`/posts?q=${token}`);
+        await expect(page.getByText(/^Authors: /)).toBeVisible();
+      } finally {
+        await deleteTestPost(postA.id);
+        await deleteTestPost(postAB.id);
+        await deleteTestUser(alphaEmail);
+        await deleteTestUser(betaEmail);
+      }
+    });
   });
 });

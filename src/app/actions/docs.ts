@@ -58,6 +58,7 @@ export async function createDoc(): Promise<void> {
       data: {
         slug: crypto.randomUUID(),
         title: "",
+        updatedByUserId: session.user.id,
         authors: { create: { userId: session.user.id, bylineOrder: 0 } },
       },
     });
@@ -80,20 +81,28 @@ export async function createDoc(): Promise<void> {
   redirect(`/doc/${doc.id}/edit`);
 }
 
+// Every write below that moves Doc.updatedAt also names who moved it
+// (Doc.updatedByUserId). updatedAt is @updatedAt, so Prisma bumps it on any
+// update to the row whether or not the column is named — leaving updatedBy
+// out would let "Updated" advance while "Updated by" still credited an older
+// edit, which reads worse on /docs than either value alone.
 export async function updateDocVisibility(docId: string, visibility: DocVisibility): Promise<void> {
-  await requireEditableDocSession(docId);
+  const { session } = await requireEditableDocSession(docId);
   if (!Object.values(DocVisibility).includes(visibility)) {
     throw new Error("Invalid visibility.");
   }
-  await prisma.doc.update({ where: { id: docId }, data: { visibility } });
+  await prisma.doc.update({
+    where: { id: docId },
+    data: { visibility, updatedByUserId: session.user.id },
+  });
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath(`/doc/${docId}`);
 }
 
 export async function updateDocSlug(docId: string, newSlug: string): Promise<{ slug: string }> {
-  const { doc } = await requireEditableDocSession(docId);
+  const { session, doc } = await requireEditableDocSession(docId);
   const oldSlug = doc.slug;
-  const slug = await changeDocSlug(docId, newSlug);
+  const slug = await changeDocSlug(docId, newSlug, session.user.id);
 
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath(`/doc/${docId}/slug`);
@@ -110,9 +119,9 @@ export async function deleteDocSlugHistory(docId: string, slug: string): Promise
 }
 
 export async function revertDocSlug(docId: string): Promise<{ slug: string }> {
-  const { doc } = await requireEditableDocSession(docId);
+  const { session, doc } = await requireEditableDocSession(docId);
   const oldSlug = doc.slug;
-  const slug = await revertDocSlugInDb(docId);
+  const slug = await revertDocSlugInDb(docId, session.user.id);
 
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath(`/doc/${docId}/slug`);
@@ -182,7 +191,9 @@ async function setDocDeleted(docId: string, deleted: boolean): Promise<void> {
   }
   await prisma.doc.update({
     where: { id: docId },
-    data: deleted ? { deletedByUserId: session.user.id, deletedAt: new Date() } : { deletedByUserId: null, deletedAt: null },
+    data: deleted
+      ? { deletedByUserId: session.user.id, deletedAt: new Date(), updatedByUserId: session.user.id }
+      : { deletedByUserId: null, deletedAt: null, updatedByUserId: session.user.id },
   });
   revalidatePath("/docs");
 }

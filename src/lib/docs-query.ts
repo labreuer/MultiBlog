@@ -1,7 +1,11 @@
 import type { SortColumn } from "@/lib/table-sort";
 import {
   buildBaseQueryString,
+  parseAuthorMode,
   parseBaseFilters,
+  parseSlugListParam,
+  DEFAULT_AUTHOR_MODE,
+  type AuthorMode,
   type BaseFilterSpec,
   type BaseFilters,
   type TablePrefs,
@@ -21,8 +25,11 @@ import {
 //            recomputes per query, so sorting through one would walk every doc
 //            in the table on every page load. Storing it makes that one walk
 //            per collab flush instead (PLAN.md §16l).
-// slug/updatedAt/deletedAt are plain Doc columns, defaulted hidden (§16l) —
-// available without cluttering the default view.
+// slug/created/deletedAt are plain Doc columns, defaulted hidden (§16l) —
+// available without cluttering the default view. updatedAt is shown (and
+// sorted) by default instead of created: "what changed recently" is a more
+// useful landing view for this table than "what was made first" (PLAN.md
+// admin-tables rework).
 export type DocsSortKey =
   | "title"
   | "authors"
@@ -31,6 +38,7 @@ export type DocsSortKey =
   | "length"
   | "slug"
   | "updatedAt"
+  | "updatedBy"
   | "deletedAt"
   | "deleted";
 const SORT_KEYS: readonly DocsSortKey[] = [
@@ -41,10 +49,11 @@ const SORT_KEYS: readonly DocsSortKey[] = [
   "length",
   "slug",
   "updatedAt",
+  "updatedBy",
   "deletedAt",
   "deleted",
 ];
-export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "created", dir: "desc" }];
+export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "updatedAt", dir: "desc" }];
 
 // showAllDocs (docs/PERMISSIONS.md) — an ADMIN-only opt-in that widens the listing
 // to every doc, including PRIVATE ones this user has no byline on. Parsed
@@ -56,16 +65,30 @@ export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "created", dir: "
 // authorship model at all.
 export type DocsFilters = BaseFilters<DocsSortKey> & {
   showAllDocs: boolean;
+  // The Authors filter (src/lib/author-filter.ts) — slugs, sanitized against
+  // whatever listAuthorFilterOptions returned for this request, and how they
+  // combine. Empty `authors` means no filter, whatever `authorMode` says.
+  authors: string[];
+  authorMode: AuthorMode;
 };
 
 function spec(prefs: TablePrefs): BaseFilterSpec<DocsSortKey> {
   return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
-export function parseDocsFilters(searchParams: URLSearchParams, prefs: TablePrefs): DocsFilters {
+// `knownAuthorSlugs` is the server-fetched allowlist (listAuthorFilterOptions
+// mapped to slugs) — a slug in the URL that isn't in it is dropped rather
+// than honoured (parseSlugListParam, table-query.ts).
+export function parseDocsFilters(
+  searchParams: URLSearchParams,
+  prefs: TablePrefs,
+  knownAuthorSlugs: readonly string[],
+): DocsFilters {
   return {
     ...parseBaseFilters(searchParams, spec(prefs)),
     showAllDocs: searchParams.get("showAllDocs") === "1",
+    authors: parseSlugListParam(searchParams.get("authors"), knownAuthorSlugs),
+    authorMode: parseAuthorMode(searchParams.get("authorMode")),
   };
 }
 
@@ -73,5 +96,9 @@ export function buildDocsQueryString(filters: DocsFilters, extra: URLSearchParam
   const params = buildBaseQueryString(filters, extra, spec(prefs));
   params.delete("showAllDocs");
   if (filters.showAllDocs) params.set("showAllDocs", "1");
+  params.delete("authors");
+  params.delete("authorMode");
+  if (filters.authors.length > 0) params.set("authors", filters.authors.join(","));
+  if (filters.authorMode !== DEFAULT_AUTHOR_MODE) params.set("authorMode", filters.authorMode);
   return params.toString();
 }

@@ -109,7 +109,7 @@ import * as Y from "yjs";
 import { docContentFromYdoc } from "../../src/lib/doc-content";
 import { ydocIdForDoc } from "../../src/lib/ydoc-names";
 import { encodeYdocState } from "../../server/ydoc-store";
-import { prisma } from "../../src/lib/prisma";
+import { prisma, prismaIncludingDeleted } from "../../src/lib/prisma";
 import type { Prisma } from "../../src/generated/prisma/client";
 import {
   CONTAINERS,
@@ -240,8 +240,15 @@ async function main() {
     console.warn(`WARNING: collab port ${collabPort} is in use and --force was given.\n`);
   }
 
-  const all = await prisma.doc.findMany({
-    where: includeDeleted ? {} : { deletedAt: null },
+  // prismaIncludingDeleted, not prisma: the extended client (src/lib/prisma.ts)
+  // silently ANDs `deletedByUserId: null` into every doc *read*, so going
+  // through it would make --include-deleted a no-op — the filter it is meant
+  // to lift would be reapplied underneath. Filtering on deletedByUserId here
+  // rather than deletedAt for the same reason: that is the column the
+  // soft-delete convention treats as authoritative (§4), and the one the
+  // extension itself uses.
+  const all = await prismaIncludingDeleted.doc.findMany({
+    where: includeDeleted ? {} : { deletedByUserId: null },
     select: {
       id: true,
       slug: true,
@@ -461,7 +468,13 @@ async function main() {
     if (!dryRun) {
       const update = emitted.length === 1 ? emitted[0] : Y.mergeUpdates(emitted);
       const { ydoc, stateVector } = encodeYdocState(state);
-      await prisma.$transaction(async (tx) => {
+      // prismaIncludingDeleted for the same reason as the target query above,
+      // and here it is load-bearing rather than cosmetic: the `before` read
+      // below is a *read*, so on the extended client a soft-deleted doc
+      // (reachable via --include-deleted) would come back null, `before` would
+      // be falsy, and the updated_at restore would be silently skipped —
+      // bumping the very timestamp this block exists to preserve.
+      await prismaIncludingDeleted.$transaction(async (tx) => {
         await tx.ydocUpdate.create({ data: { ydocId, update: Buffer.from(update) } });
         await tx.ydoc.update({
           where: { id: ydocId },
