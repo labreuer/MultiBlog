@@ -9,6 +9,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import { parseDocsFilters, type DocsFilters, type DocsSortKey } from "@/lib/docs-query";
+import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import DocsTable from "@/components/DocsTable";
 import styles from "./page.module.css";
@@ -17,6 +18,11 @@ function buildFilterWhere(filters: DocsFilters): Prisma.DocWhereInput {
   const where: Prisma.DocWhereInput = {};
   if (!filters.deleted) where.deletedByUserId = null;
   if (filters.q) where.title = { contains: filters.q, mode: "insensitive" };
+  // The Authors filter narrows this listing; it never widens it (see
+  // authorFilterWhere's header comment for the four modes' semantics, and
+  // this file's authorScope for why NONE in particular can't be used to
+  // escape PRIVATE-doc scoping).
+  Object.assign(where, authorFilterWhere(filters.authors, filters.authorMode) as Prisma.DocWhereInput);
   return where;
 }
 
@@ -72,8 +78,17 @@ export default async function DocsPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const prefs = await getTablePrefs(session.user.id, "docs");
-  const filters = parseDocsFilters(urlSearchParams, prefs);
+  // Run concurrently — the option list is independent of prefs/filters, so
+  // fetching it costs no extra latency in series.
+  const [prefs, authorOptions] = await Promise.all([
+    getTablePrefs(session.user.id, "docs"),
+    listAuthorFilterOptions(session.user.id),
+  ]);
+  const filters = parseDocsFilters(
+    urlSearchParams,
+    prefs,
+    authorOptions.map((o) => o.slug),
+  );
 
   // Which rows this table selects (docs/PERMISSIONS.md). It is its own query rather
   // than a call into doc-authz.ts, so it has to restate that module's rule
@@ -182,7 +197,14 @@ export default async function DocsPage({
           </button>
         </form>
       </div>
-      <DocsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} isAdmin={viewerIsAdmin} />
+      <DocsTable
+        rows={rows}
+        totalCount={totalCount}
+        filters={filters}
+        prefs={prefs}
+        isAdmin={viewerIsAdmin}
+        authorOptions={authorOptions}
+      />
     </main>
   );
 }

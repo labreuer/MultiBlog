@@ -8,6 +8,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import { parsePostsFilters, type PostsFilters, type PostsSortKey } from "@/lib/posts-query";
+import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import PostsTable from "@/components/PostsTable";
 
@@ -15,6 +16,9 @@ function buildFilterWhere(filters: PostsFilters): Prisma.PostWhereInput {
   const where: Prisma.PostWhereInput = {};
   if (!filters.deleted) where.deletedByUserId = null;
   if (filters.q) where.title = { contains: filters.q, mode: "insensitive" };
+  // Composes with, and only ever narrows, the permission scoping below — see
+  // authorFilterWhere's header comment for the four modes' semantics.
+  Object.assign(where, authorFilterWhere(filters.authors, filters.authorMode) as Prisma.PostWhereInput);
   return where;
 }
 
@@ -89,8 +93,17 @@ export default async function PostsPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const prefs = await getTablePrefs(session.user.id, "posts");
-  const filters = parsePostsFilters(urlSearchParams, prefs);
+  // Run concurrently — the option list is independent of prefs/filters, so
+  // fetching it costs no extra latency in series.
+  const [prefs, authorOptions] = await Promise.all([
+    getTablePrefs(session.user.id, "posts"),
+    listAuthorFilterOptions(session.user.id),
+  ]);
+  const filters = parsePostsFilters(
+    urlSearchParams,
+    prefs,
+    authorOptions.map((o) => o.slug),
+  );
 
   const where: Prisma.PostWhereInput = {
     AND: [
@@ -178,7 +191,7 @@ export default async function PostsPage({
       <p>
         <Link href="/posts/new">+ New post</Link>
       </p>
-      <PostsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
+      <PostsTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} authorOptions={authorOptions} />
     </main>
   );
 }

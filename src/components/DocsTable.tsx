@@ -28,6 +28,7 @@ import {
 } from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
+import { AuthorFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
 import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
 import { saveTableColumns } from "@/app/actions/table-preferences";
@@ -82,6 +83,7 @@ export default function DocsTable({
   filters,
   prefs,
   isAdmin,
+  authorOptions,
 }: {
   rows: DocRow[];
   totalCount: number;
@@ -91,6 +93,8 @@ export default function DocsTable({
    * Without it the table lists what this viewer can already reach: their own
    * byline-authored docs, plus every SHARED doc for an ADMIN/EDITOR. */
   isAdmin: boolean;
+  /** Every ADMIN/EDITOR/AUTHOR, for the Authors filter panel (src/lib/author-filter.ts). */
+  authorOptions: AuthorOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -256,6 +260,12 @@ export default function DocsTable({
     <>
       <div className={adminStyles.filterRow}>
         <SearchBox value={searchDraft} onChange={onSearchChange} placeholder="Search title …" label="Search title" />
+        <AuthorFilterPanel
+          options={authorOptions}
+          selected={filters.authors}
+          mode={filters.authorMode}
+          onChange={(next) => updateFilters(next)}
+        />
         <ColumnPicker
           columns={columns}
           resolved={visibleColumns}
@@ -333,6 +343,31 @@ export default function DocsTable({
         sortKeys={SORTABLE_KEYS}
         defaultPageSize={prefs.pageSize}
         searchDescription="Free-text search over the doc title."
+        filters={[
+          {
+            param: "authors",
+            meaning: (
+              <>
+                Comma-separated user slugs, combined per <code>authorMode</code>. A slug that no longer names a live
+                ADMIN/EDITOR/AUTHOR account is dropped rather than honoured, so a stale bookmark widens back to the
+                unfiltered listing instead of going blank.
+              </>
+            ),
+            control: "Authors dropdown",
+          },
+          {
+            param: "authorMode",
+            meaning: (
+              <>
+                How <code>authors</code> is applied. <code>ANY</code> (the default) — at least one of the checked
+                authors. <code>ALL</code> — every one of them, others allowed. <code>EXACTLY</code> — that byline and
+                nobody else. <code>NONE</code> — none of them, including rows with no byline at all. Ignored while
+                nothing is checked.
+              </>
+            ),
+            control: "Match dropdown, at the foot of the Authors panel",
+          },
+        ]}
         notes={
           <p style={{ marginTop: 8 }}>
             Every column here sorts except <strong>Edit</strong>, which is a link rather than a value.{" "}
@@ -345,6 +380,12 @@ export default function DocsTable({
             <strong>SHARED</strong> doc to an ADMIN or EDITOR, plus the <strong>PRIVATE</strong> docs you carry a
             byline on. ADMIN accounts also get a &quot;Show all docs&quot; checkbox above, which adds everyone
             else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md).
+            The <strong>Authors</strong> filter narrows this listing; it never widens it. Without &quot;Show all
+            docs&quot; the listing is still your own bylines plus every SHARED doc, so filtering on someone else&apos;s
+            name returns the SHARED docs they co-author and not their PRIVATE ones — and your own name under{" "}
+            <code>NONE</code> is a quick &quot;docs I&apos;m not on&quot;. A byline naming a deleted account still
+            counts for <code>EXACTLY</code>, matching what the Author(s) column prints, so such a doc can&apos;t be
+            matched exactly by the remaining authors alone.
           </p>
         }
       />

@@ -36,6 +36,14 @@ export function canManageDocs(role: Role): boolean {
   return DOC_MANAGER_ROLES.includes(role);
 }
 
+// Who may carry a byline on a doc or post — the option list for the /docs and
+// /posts Authors filter (src/lib/author-filter.ts), and what the two edit
+// pages already hardcode inline when deciding who's eligible to be added as a
+// co-author. Coincides with DOC_MANAGER_ROLES/POST_MANAGER_ROLES today, and is
+// named separately because it answers a different question: what a byline may
+// *name*, not who may *manage*.
+export const BYLINE_ELIGIBLE_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
+
 // canEditAnySharedDoc is deliberately *not* here, though it is just as pure a
 // role check as these. What earns a place in this file is a client consumer:
 // the two doc predicates above are here because SiteHeader needs them, not

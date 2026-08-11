@@ -1,32 +1,18 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import { canManagePosts, canManageDocs, isAdmin } from "@/lib/role-checks";
 import { SITE_TITLE } from "@/lib/site-config";
+import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import styles from "./SiteHeader.module.css";
 
 export default function SiteHeader() {
   const { data: session } = useSession();
   const postsMenuRef = useRef<HTMLDetailsElement>(null);
   const docsMenuRef = useRef<HTMLDetailsElement>(null);
-
-  // <details> has no native "close on outside click" — same fix as
-  // CommentsTable.tsx's MultiSelectDropdown: set .open directly on the DOM
-  // node rather than lifting it into React state, since nothing else here
-  // needs to react to open/closed.
-  useEffect(() => {
-    function handlePointerDown(e: MouseEvent) {
-      for (const ref of [postsMenuRef, docsMenuRef]) {
-        if (ref.current && !ref.current.contains(e.target as Node)) {
-          ref.current.open = false;
-        }
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
+  useCloseOnOutsideClick(postsMenuRef, docsMenuRef);
 
   return (
     <header

@@ -20,6 +20,7 @@ import {
 } from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
+import { AuthorFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
 import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
 import { saveTableColumns } from "@/app/actions/table-preferences";
@@ -125,11 +126,14 @@ export default function PostsTable({
   totalCount,
   filters,
   prefs,
+  authorOptions,
 }: {
   rows: PostRow[];
   totalCount: number;
   filters: PostsFilters;
   prefs: TablePrefs;
+  /** Every ADMIN/EDITOR/AUTHOR, for the Authors filter panel (src/lib/author-filter.ts). */
+  authorOptions: AuthorOption[];
 }) {
   const router = useRouter();
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
@@ -308,6 +312,12 @@ export default function PostsTable({
           label="Search title"
           width={titleWidth ?? undefined}
         />
+        <AuthorFilterPanel
+          options={authorOptions}
+          selected={filters.authors}
+          mode={filters.authorMode}
+          onChange={(next) => updateFilters(next)}
+        />
         <ColumnPicker
           columns={columns}
           resolved={visibleColumns}
@@ -370,6 +380,31 @@ export default function PostsTable({
         sortKeys={SORTABLE_KEYS}
         defaultPageSize={prefs.pageSize}
         searchDescription="Free-text search over the post title."
+        filters={[
+          {
+            param: "authors",
+            meaning: (
+              <>
+                Comma-separated user slugs, combined per <code>authorMode</code>. A slug that no longer names a live
+                ADMIN/EDITOR/AUTHOR account is dropped rather than honoured, so a stale bookmark widens back to the
+                unfiltered listing instead of going blank.
+              </>
+            ),
+            control: "Authors dropdown",
+          },
+          {
+            param: "authorMode",
+            meaning: (
+              <>
+                How <code>authors</code> is applied. <code>ANY</code> (the default) — at least one of the checked
+                authors. <code>ALL</code> — every one of them, others allowed. <code>EXACTLY</code> — that byline and
+                nobody else. <code>NONE</code> — none of them, including rows with no byline at all. Ignored while
+                nothing is checked.
+              </>
+            ),
+            control: "Match dropdown, at the foot of the Authors panel",
+          },
+        ]}
         notes={
           <p style={{ marginTop: 8 }}>
             Every column here sorts. Four do so through a database view, because each is derived from a to-many
@@ -379,7 +414,9 @@ export default function PostsTable({
             joined in SQL, and approved/pending counts that exclude deleted comments. Sorting by{" "}
             <strong>Comments</strong> orders by the approved count, using the moderation count only to break ties
             (PLAN.md §16e). <strong>Slug</strong>, <strong>Moderation policy</strong> and <strong>Deleted at</strong>{" "}
-            are hidden by default (Columns picker, above) but sort like any other column.
+            are hidden by default (Columns picker, above) but sort like any other column. The{" "}
+            <strong>Authors</strong> filter composes with the same scoping the rest of this table uses — an AUTHOR
+            still sees only their own posts, whoever is checked.
           </p>
         }
       />

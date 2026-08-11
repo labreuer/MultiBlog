@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { IconTrash, IconTrashOff } from "@tabler/icons-react";
+import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import { DATE_FORMATS, type DateFormat } from "@/lib/format-date";
 import { PAGE_SIZE_OPTIONS, type PageSize } from "@/lib/table-query";
 import type { SortColumn } from "@/lib/table-sort";
@@ -266,20 +267,7 @@ export function MultiSelectDropdown<T extends string>({
 }) {
   const summary = selected === "ALL" ? "All" : options.filter((o) => selected.has(o)).join(", ") || "All";
   const detailsRef = useRef<HTMLDetailsElement>(null);
-
-  // <details> has no native "close on outside click" behavior — only toggles
-  // via its own <summary>. Set .open directly on the DOM node (rather than
-  // lifting it into React state) since nothing else here needs to react to
-  // open/closed.
-  useEffect(() => {
-    function handlePointerDown(e: MouseEvent) {
-      if (detailsRef.current && !detailsRef.current.contains(e.target as Node)) {
-        detailsRef.current.open = false;
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
+  useCloseOnOutsideClick(detailsRef);
 
   return (
     <details ref={detailsRef} className={styles.dropdownWrapper}>

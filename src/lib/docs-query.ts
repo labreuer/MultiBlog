@@ -1,7 +1,11 @@
 import type { SortColumn } from "@/lib/table-sort";
 import {
   buildBaseQueryString,
+  parseAuthorMode,
   parseBaseFilters,
+  parseSlugListParam,
+  DEFAULT_AUTHOR_MODE,
+  type AuthorMode,
   type BaseFilterSpec,
   type BaseFilters,
   type TablePrefs,
@@ -61,16 +65,30 @@ export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "updatedAt", dir:
 // authorship model at all.
 export type DocsFilters = BaseFilters<DocsSortKey> & {
   showAllDocs: boolean;
+  // The Authors filter (src/lib/author-filter.ts) — slugs, sanitized against
+  // whatever listAuthorFilterOptions returned for this request, and how they
+  // combine. Empty `authors` means no filter, whatever `authorMode` says.
+  authors: string[];
+  authorMode: AuthorMode;
 };
 
 function spec(prefs: TablePrefs): BaseFilterSpec<DocsSortKey> {
   return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
-export function parseDocsFilters(searchParams: URLSearchParams, prefs: TablePrefs): DocsFilters {
+// `knownAuthorSlugs` is the server-fetched allowlist (listAuthorFilterOptions
+// mapped to slugs) — a slug in the URL that isn't in it is dropped rather
+// than honoured (parseSlugListParam, table-query.ts).
+export function parseDocsFilters(
+  searchParams: URLSearchParams,
+  prefs: TablePrefs,
+  knownAuthorSlugs: readonly string[],
+): DocsFilters {
   return {
     ...parseBaseFilters(searchParams, spec(prefs)),
     showAllDocs: searchParams.get("showAllDocs") === "1",
+    authors: parseSlugListParam(searchParams.get("authors"), knownAuthorSlugs),
+    authorMode: parseAuthorMode(searchParams.get("authorMode")),
   };
 }
 
@@ -78,5 +96,9 @@ export function buildDocsQueryString(filters: DocsFilters, extra: URLSearchParam
   const params = buildBaseQueryString(filters, extra, spec(prefs));
   params.delete("showAllDocs");
   if (filters.showAllDocs) params.set("showAllDocs", "1");
+  params.delete("authors");
+  params.delete("authorMode");
+  if (filters.authors.length > 0) params.set("authors", filters.authors.join(","));
+  if (filters.authorMode !== DEFAULT_AUTHOR_MODE) params.set("authorMode", filters.authorMode);
   return params.toString();
 }
