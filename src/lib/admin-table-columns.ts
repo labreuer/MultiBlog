@@ -35,10 +35,10 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "edit", label: "Edit" },
     { key: "authors", label: "Author(s)" },
     { key: "visibility", label: "Visibility" },
-    { key: "created", label: "Created" },
+    { key: "updatedAt", label: "Updated" },
     { key: "length", label: "Length" },
     { key: "slug", label: "Slug", defaultHidden: true },
-    { key: "updatedAt", label: "Updated", defaultHidden: true },
+    { key: "created", label: "Created", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   users: [

@@ -21,8 +21,11 @@ import {
 //            recomputes per query, so sorting through one would walk every doc
 //            in the table on every page load. Storing it makes that one walk
 //            per collab flush instead (PLAN.md §16l).
-// slug/updatedAt/deletedAt are plain Doc columns, defaulted hidden (§16l) —
-// available without cluttering the default view.
+// slug/created/deletedAt are plain Doc columns, defaulted hidden (§16l) —
+// available without cluttering the default view. updatedAt is shown (and
+// sorted) by default instead of created: "what changed recently" is a more
+// useful landing view for this table than "what was made first" (PLAN.md
+// admin-tables rework).
 export type DocsSortKey =
   | "title"
   | "authors"
@@ -44,7 +47,7 @@ const SORT_KEYS: readonly DocsSortKey[] = [
   "deletedAt",
   "deleted",
 ];
-export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "created", dir: "desc" }];
+export const DEFAULT_SORT: SortColumn<DocsSortKey>[] = [{ key: "updatedAt", dir: "desc" }];
 
 // showAllDocs (docs/PERMISSIONS.md) — an ADMIN-only opt-in that widens the listing
 // to every doc, including PRIVATE ones this user has no byline on. Parsed

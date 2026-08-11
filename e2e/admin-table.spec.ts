@@ -518,8 +518,10 @@ test.describe("admin table kit", () => {
       // happen to exist, not a particular set.
       await page.goto("/docs?showAllDocs=1");
       // Two of the eight are alwaysVisible and render as icon-only headers, so
-      // they read as "" here — position is what matters for them.
-      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Visibility", "Created", "Length", ""]);
+      // they read as "" here — position is what matters for them. Updated
+      // sits in Created's old spot (default-hidden now) since the admin-
+      // tables rework: "what changed recently" over "what was made first".
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Visibility", "Updated", "Length", ""]);
 
       // Hiding: only the named movable columns survive, and the fixed pair
       // still brackets them.
@@ -584,7 +586,7 @@ test.describe("admin table kit", () => {
       // did-the-state-flip assertion races the round trip.
       await page.locator("label").filter({ hasText: "Visibility" }).getByRole("checkbox").click();
       await expect(page).toHaveURL(/cols=/);
-      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Created", "Length", ""]);
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Updated", "Length", ""]);
 
       // Save as my default: the preference persists, and the URL stops
       // carrying the override it was authored with.
@@ -592,7 +594,7 @@ test.describe("admin table kit", () => {
       await expect(page).not.toHaveURL(/cols=/);
       // The real proof — a fresh navigation with no ?cols= at all still hides it.
       await page.goto("/docs?showAllDocs=1");
-      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Created", "Length", ""]);
+      expect(await headers()).toEqual(["", "Title", "Edit", "Author(s)", "Updated", "Length", ""]);
     } finally {
       // The shared admin is reused by every other spec, so this has to go back.
       await clearColumnOrder(ADMIN_EMAIL);

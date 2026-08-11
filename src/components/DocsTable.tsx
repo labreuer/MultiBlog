@@ -148,11 +148,16 @@ export default function DocsTable({
     { key: "authors", header: "Author(s)", sortKey: "authors", cell: (row) => row.authors },
     { key: "visibility", header: "Visibility", sortKey: "visibility", cell: (row) => row.visibility },
     {
-      key: "created",
-      header: "Created",
-      sortKey: "created",
+      key: "updatedAt",
+      header: "Updated",
+      sortKey: "updatedAt",
       nowrap: true,
-      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
+      // The ordinary Postgres row-update timestamp — distinct from Length,
+      // which only tracks the body's own trigger-maintained cache. Shown by
+      // default in Created's old spot, and the default sort key (DEFAULT_SORT,
+      // docs-query.ts): "what changed recently" is a more useful landing view
+      // for this table than "what was made first".
+      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
     },
     {
       key: "length",
@@ -162,17 +167,16 @@ export default function DocsTable({
       cell: (row) => row.length.toLocaleString(),
     },
     // Defaulted hidden (§16l/§16i): real Doc columns available on request.
-    // slug is otherwise unused here (Title/Edit link on row.id); updatedAt is
-    // the ordinary Postgres row-update timestamp — distinct from Length,
-    // which only tracks the body's own trigger-maintained cache.
+    // slug is otherwise unused here (Title/Edit link on row.id). created
+    // moved here, defaulted hidden, when updatedAt took its old spot above.
     { key: "slug", header: "Slug", sortKey: "slug", defaultHidden: true, cell: (row) => row.slug },
     {
-      key: "updatedAt",
-      header: "Updated",
-      sortKey: "updatedAt",
+      key: "created",
+      header: "Created",
+      sortKey: "created",
       nowrap: true,
       defaultHidden: true,
-      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
+      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
     },
     {
       key: "deletedAt",

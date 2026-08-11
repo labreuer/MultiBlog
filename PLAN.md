@@ -4338,7 +4338,9 @@ could cheaply fetch) never reached `ColumnSpec` at all, so no `?cols=` value cou
 Added, all `defaultHidden: true` — present in the picker, absent from the default view:
 
 - `/posts`: `slug`, `moderationPolicy`, `deletedAt`.
-- `/docs`: `slug`, `updatedAt`, `deletedAt`.
+- `/docs`: `slug`, `deletedAt`, and (since §16n below) `created` — `updatedAt` swapped into its
+  spot instead, shown and sorted by default. `updatedAt` was itself `defaultHidden` when this
+  list was first built.
 - `/users`: `deletedAt`.
 - `/comments`: `ipAddress`, `statusChangedBy` (sorts through the comment's own `statusChangedBy`
   relation, the same to-one-relation `orderBy` pattern §16i's `post_activity`/`post_metrics` use,
@@ -4402,7 +4404,19 @@ drag handling reuses `ColumnPicker`'s own mechanics and CSS classes (`columnPick
 same gesture — only a checked row is draggable there too, for the same reason: there is no
 meaningful position for a column that isn't shown.
 
-## 17. The landing page
+### 16n. /docs defaults to Updated, not Created
+
+`/docs`' default view and default sort (`DEFAULT_SORT`, `docs-query.ts`) both pointed at
+`created`/`createdAt`. Swapped for `updatedAt`, in the same declared position `created` used to
+hold (`DocsTable.tsx`'s `ColumnSpec` list, and its mirror in `admin-table-columns.ts` — §16m's
+"adding, removing or renaming a movable column means updating both places" applies to swapping
+one's `defaultHidden`/position too) — `created` moved to where `updatedAt` used to sit, now
+`defaultHidden`. Both were already sortable, already selected server-side, and already plain
+`Doc` columns (`created`/`updatedAt` both existed as `DocsSortKey`s and `ColumnSpec`s before this;
+nothing new was added, only which one is the default). Rationale: an admin landing on `/docs` is
+almost always there to see what's changed lately, not what was created first — a stale-sorted-by-
+creation-date table buries anything just edited under a pile of untouched old docs, however
+recently `Doc.updatedAt` moved.
 
 `/` has been a bare list of published posts since the first week — `src/app/page.tsx`, a
 680px column, inline styles, every published post unbounded. This section turns it into an
