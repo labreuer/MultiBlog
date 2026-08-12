@@ -7,9 +7,27 @@
 .content {
   padding: 8px 10px;
   min-height: 4em;
+  display: flex;
+  flex-direction: column;
+  /* Same resize: both as CommentForm.module.css's .textarea. `resize` only
+     takes effect on a box whose `overflow` isn't `visible`; overflow-y: auto
+     is otherwise a no-op until content actually exceeds a manually-dragged
+     height, since min-height with no `height` set already lets this box grow
+     with typed content the way it did before. Widening past this box's
+     normal width overflows its container exactly as a widened .textarea
+     would — the popover panel already grows to match (AnnotationPopover.
+     module.css has no fixed width), same as AnnotatableArticle.tsx's. */
+  resize: both;
+  overflow-y: auto;
 }
 
-.content :global(.ProseMirror) {
+/* .tiptap is the actual contenteditable ProseMirror node (see
+   EditorChrome.module.css's identical fix) — without flex: 1 1 auto here,
+   it's only as tall as its content, so an empty composer shows a 4em box
+   with just the top line clickable/editable and dead space below it that
+   looks like part of the editor but isn't. */
+.content :global(.tiptap) {
+  flex: 1 1 auto;
   outline: none;
 }
 

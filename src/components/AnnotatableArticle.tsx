@@ -113,7 +113,13 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
             top: pending.top + 6,
             left: pending.left,
             zIndex: 20,
-            width: 280,
+            // No `width` — with only `left` set, an absolutely positioned box
+            // with `width: auto` shrink-to-fits its content (CSS2.1 §10.3.7),
+            // so dragging the textarea's resize handle (CommentForm.module.css
+            // .textarea) grows this box right along with it instead of the
+            // textarea overflowing a fixed-width panel. minWidth keeps the
+            // pre-resize footprint identical to the old fixed 280px.
+            minWidth: 280,
             background: "var(--surface)",
             color: "var(--foreground)",
             border: "1px solid var(--border)",
