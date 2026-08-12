@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 // viewer; role-checks.ts is safe in a client bundle by design (its own header
 // says so — authz.ts is not, since it imports prisma).
 import { isAdmin as isAdminRole } from "@/lib/role-checks";
+import LocalTime from "./LocalTime";
 import CommentForm from "./CommentForm";
 import { deleteComment } from "@/app/actions/comments";
 import styles from "./CommentNode.module.css";
@@ -100,7 +101,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
           <p className={styles.meta}>
             <span className={styles.name}>{comment.displayName}</span>
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
-              {new Date(comment.createdAt).toLocaleString()}
+              <LocalTime value={comment.createdAt} />
             </a>
           </p>
           <p>{comment.bodyText}</p>

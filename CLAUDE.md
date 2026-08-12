@@ -393,6 +393,22 @@ blob makes the doc-side checks report faults that evaporate once it's repaired).
 
 ## Gotchas
 
+- **Never call `toLocaleString()`/`toLocaleDateString()` on a date in a `"use client"`
+  component.** It reads the *runtime's* locale and timezone, and the App Router renders client
+  components on the server too — so it runs once during SSR on the box (UTC) and again during
+  hydration in the browser (the reader's zone), producing different text and a React #418
+  hydration mismatch that discards and re-renders the whole subtree. Use
+  `src/components/LocalTime.tsx`: `<LocalTime value={...} />` by default, or its `useLocalTime`
+  hook where an element can't go (inside a template literal, or as an `<option>`'s text, where
+  a nested `<time>` is invalid HTML — being a hook it can't be called in a `.map()` either, so
+  render a small per-item component, as `YdocDebug`'s `DocOption` does). The identical call in
+  a **Server** Component is fine and must not be "fixed" — it's formatted once and shipped as a
+  finished string in the RSC payload (`app/doc/[slug]/page.tsx` does this deliberately). Only a
+  client component's copy renders on both sides. A call site whose data arrives from a
+  client-side fetch is also fine, since it was never in the SSR HTML — that's why the scrub bars
+  and most of `YdocDebug` were left alone. This class is **invisible to every local check**,
+  including `npm run e2e` and `web-prod`: locally the dev server and the browser are one
+  machine and so always agree. Same reason PLAN.md §13m's collab bug survived to production.
 - `globals.css` has `* { margin: 0; padding: 0 }` — it strips default list/blockquote
   styling everywhere. `src/styles/prose.module.css` restores it for rendered post content;
   any new surface rendering post content needs its `.prose` class.

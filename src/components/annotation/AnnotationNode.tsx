@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 // viewer; role-checks.ts is safe in a client bundle by design (its own header
 // says so — authz.ts is not, since it imports prisma).
 import { isAdmin as isAdminRole } from "@/lib/role-checks";
+import LocalTime from "../LocalTime";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
 import styles from "./AnnotationNode.module.css";
@@ -125,7 +126,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
           <p className={styles.meta}>
             <span className={styles.name}>{annotation.displayName}</span>
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
-              {new Date(annotation.createdAt).toLocaleString()}
+              <LocalTime value={annotation.createdAt} />
             </a>
           </p>
           <div>{annotation.body}</div>

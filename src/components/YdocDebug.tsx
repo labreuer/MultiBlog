@@ -9,6 +9,7 @@ import { titleAuthorHighlightExtensions } from "@/lib/tiptap-schema";
 import { extractText } from "@/lib/diff";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
+import { useLocalTime } from "./LocalTime";
 import CollabEditorBody from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
 import adminStyles from "./table/AdminTable.module.css";
@@ -59,6 +60,23 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
+// One component per option rather than the timestamp inline, for two reasons:
+// useLocalTime is a hook and so can't be called inside the `.map()`, and an
+// `<option>`'s content must be text — a nested `<time>` (what <LocalTime />
+// renders) would be invalid HTML here. This is the only list in this file
+// whose rows are server-rendered: `docs` seeds from the `initialDocs` prop,
+// while every other timestamped table below hangs off `detail`/`result`,
+// which start null and arrive from a client-side fetch — so they were never
+// in the SSR output and can't mismatch. See TODO.md's React #418 entry.
+function DocOption({ doc }: { doc: DocSummary }) {
+  const updated = useLocalTime(doc.updatedAt);
+  return (
+    <option value={doc.id}>
+      {doc.id} — updated {updated}
+    </option>
+  );
+}
+
 export default function YdocDebug({ initialDocs, userId, userName, userColor }: Props) {
   const [docs, setDocs] = useState<DocSummary[]>(initialDocs);
   const [selectedId, setSelectedId] = useState<string | null>(initialDocs[0]?.id ?? null);
@@ -103,9 +121,7 @@ export default function YdocDebug({ initialDocs, userId, userName, userColor }: 
         <select id="ydoc-select" value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value || null)}>
           {docs.length === 0 && <option value="">No documents yet</option>}
           {docs.map((doc) => (
-            <option key={doc.id} value={doc.id}>
-              {doc.id} — updated {new Date(doc.updatedAt).toLocaleString()}
-            </option>
+            <DocOption key={doc.id} doc={doc} />
           ))}
         </select>
         <button type="button" onClick={handleNewDocument} disabled={creating}>
