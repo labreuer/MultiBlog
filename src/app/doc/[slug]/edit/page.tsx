@@ -3,6 +3,9 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
+import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
+import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
+import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
 import DocEditor from "@/components/DocEditor";
 
 export default async function EditDocPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -43,25 +46,40 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
     );
   }
 
-  const eligibleUsers = await prisma.user.findMany({
-    where: { role: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
-    select: { id: true, name: true, email: true, role: true },
-    orderBy: { name: "asc" },
-  });
+  const [eligibleUsers, threads] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: { name: "asc" },
+    }),
+    getDocAnnotationsAsThreads(doc.id),
+  ]);
+
+  // PLAN.md §18c — the editing view shows presently-anchored annotations
+  // beside the text and nothing else, so the general-discussion threads are
+  // dropped here rather than shipped and then hidden. This is a cheap
+  // pre-filter on a store-debounce snapshot, not the decision: which marks
+  // actually exist is re-resolved against the live document on every
+  // measurement (EditorAnnotationRail), which is the only answer that stays
+  // true while someone is typing.
+  const annotations = buildAnnotationEntries(threads).filter((entry) => entry.quotedText !== "");
 
   return (
-    <DocEditor
-      docId={doc.id}
-      slug={doc.slug}
-      initialTitle={doc.title}
-      visibility={doc.visibility}
-      createdAt={doc.createdAt}
-      userId={session.user.id}
-      userName={session.user.name ?? session.user.email ?? "Anonymous"}
-      userColor={session.user.color}
-      authorIds={doc.authors.map((a) => a.userId)}
-      eligibleUsers={eligibleUsers}
-      initialDeleted={doc.deletedByUserId !== null}
-    />
+    <MarginNotesProvider>
+      <DocEditor
+        docId={doc.id}
+        slug={doc.slug}
+        initialTitle={doc.title}
+        visibility={doc.visibility}
+        createdAt={doc.createdAt}
+        userId={session.user.id}
+        userName={session.user.name ?? session.user.email ?? "Anonymous"}
+        userColor={session.user.color}
+        authorIds={doc.authors.map((a) => a.userId)}
+        eligibleUsers={eligibleUsers}
+        initialDeleted={doc.deletedByUserId !== null}
+        annotations={annotations}
+      />
+    </MarginNotesProvider>
   );
 }

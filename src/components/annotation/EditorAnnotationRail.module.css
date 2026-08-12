@@ -1,0 +1,8 @@
+/* The rail's own card list (PLAN.md §18c). Full height so the coordinate
+   space its absolutely positioned cards sit in matches the editor column
+   beside it — unlike the reading views' rail, whose height the layout hook
+   computes from the last card, this one is a fixed window and the hook
+   deliberately leaves its height alone. */
+.rail {
+  height: 100%;
+}

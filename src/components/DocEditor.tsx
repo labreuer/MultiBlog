@@ -4,12 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
+import type { Editor } from "@tiptap/react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
 import { UNTITLED_DOC } from "@/lib/doc-title";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
 import DocSettingsPanel, { type EligibleUser } from "./DocSettingsPanel";
+import EditorAnnotationRail from "./annotation/EditorAnnotationRail";
+import type { AnnotationEntry } from "./annotation/AnnotationList";
+import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import styles from "./DocEditor.module.css";
 
@@ -25,6 +29,12 @@ type Props = {
   authorIds: string[];
   eligibleUsers: EligibleUser[];
   initialDeleted: boolean;
+  // Rendered beside the editor, above the margin-notes breakpoint only
+  // (PLAN.md §18c). Server-built like the reading view's, and pre-filtered
+  // there to quote-anchored threads — which mark still exists is then decided
+  // per measurement against the live document, since this is the surface
+  // where that changes under you.
+  annotations: AnnotationEntry[];
 };
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -49,6 +59,7 @@ export default function DocEditor({
   authorIds,
   eligibleUsers,
   initialDeleted,
+  annotations,
 }: Props) {
   const [title, setTitle] = useState(initialTitle);
   const [deleted, setDeleted] = useState(initialDeleted);
@@ -56,6 +67,15 @@ export default function DocEditor({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [authorStats, setAuthorStats] = useState<AuthorStat[]>([]);
+  // CollabEditorBody's onEditorReady, finally used for something: the
+  // annotation rail is a sibling of the editor, not a child, so this is how
+  // it gets something to measure against.
+  const [bodyEditor, setBodyEditor] = useState<Editor | null>(null);
+
+  // No separate `ready` flag to gate on, unlike the reading views: this
+  // editor is visible from the moment it exists — there's no static copy for
+  // it to hide behind — so having an editor at all *is* being measurable.
+  useRegisterMarginNotesEditor(bodyEditor, bodyEditor !== null);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ydoc = useMemo(() => new Y.Doc(), [docId]);
@@ -128,64 +148,73 @@ export default function DocEditor({
 
   return (
     <div className={styles.container}>
-      {provider ? (
-        <CollabTitleField
-          ydoc={ydoc}
-          userId={userId}
-          userName={userName}
-          userColor={userColor}
-          editable={!deleted}
-          className={`${styles.titleInput} ${deleted ? styles.titleInputDisabled : ""}`}
-          placeholder={UNTITLED_DOC}
-          onTitleChange={setTitle}
-          onEditorReady={() => {}}
+      <div className={styles.mainColumn}>
+        {provider ? (
+          <CollabTitleField
+            ydoc={ydoc}
+            userId={userId}
+            userName={userName}
+            userColor={userColor}
+            editable={!deleted}
+            className={`${styles.titleInput} ${deleted ? styles.titleInputDisabled : ""}`}
+            placeholder={UNTITLED_DOC}
+            onTitleChange={setTitle}
+            onEditorReady={() => {}}
+          />
+        ) : (
+          // Same fallback text/color as the placeholder above, so the swap
+          // from this pre-connection div to the live editor doesn't flip an
+          // untitled doc's title between two different grays.
+          <div className={`${styles.titleInput} ${styles.titleInputDisabled}`}>
+            {title || <span style={{ color: "var(--text-muted)" }}>{UNTITLED_DOC}</span>}
+          </div>
+        )}
+        <p className={styles.statusLine}>
+          {connectionStatus === "connected"
+            ? "🟢 Live"
+            : connectionStatus === "connecting"
+              ? "🟡 Connecting…"
+              : "🔴 Disconnected"}
+          {authorStats.length > 0 && " ("}
+          {authorStats.map((author, i) => (
+            <span key={author.authorId}>
+              {i > 0 && ", "}
+              <span style={{ color: author.color }}>{author.name}</span>
+            </span>
+          ))}
+          {authorStats.length > 0 && ")"}
+        </p>
+        {provider ? (
+          <CollabEditorBody
+            provider={provider}
+            ydoc={ydoc}
+            userId={userId}
+            userName={userName}
+            userColor={userColor}
+            editable={!deleted}
+            onEditorReady={setBodyEditor}
+            onAuthorStats={setAuthorStats}
+          />
+        ) : (
+          <p>Connecting to live editor…</p>
+        )}
+        {error && <p className={styles.errorMessage}>{error}</p>}
+        <p className={styles.docNote}>
+          <Link href={`/doc/${slug}`}>View and Annotate</Link>
+        </p>
+        <DocSettingsPanel
+          docId={docId}
+          visibility={visibility}
+          createdAt={createdAt}
+          authorIds={authorIds}
+          eligibleUsers={eligibleUsers}
+          deleted={deleted}
+          onDeletedChange={setDeleted}
         />
-      ) : (
-        // Same fallback text/color as the placeholder above, so the swap
-        // from this pre-connection div to the live editor doesn't flip an
-        // untitled doc's title between two different grays.
-        <div className={`${styles.titleInput} ${styles.titleInputDisabled}`}>
-          {title || <span style={{ color: "var(--text-muted)" }}>{UNTITLED_DOC}</span>}
-        </div>
-      )}
-      <p className={styles.statusLine}>
-        {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
-        {authorStats.length > 0 && " ("}
-        {authorStats.map((author, i) => (
-          <span key={author.authorId}>
-            {i > 0 && ", "}
-            <span style={{ color: author.color }}>{author.name}</span>
-          </span>
-        ))}
-        {authorStats.length > 0 && ")"}
-      </p>
-      {provider ? (
-        <CollabEditorBody
-          provider={provider}
-          ydoc={ydoc}
-          userId={userId}
-          userName={userName}
-          userColor={userColor}
-          editable={!deleted}
-          onEditorReady={() => {}}
-          onAuthorStats={setAuthorStats}
-        />
-      ) : (
-        <p>Connecting to live editor…</p>
-      )}
-      {error && <p className={styles.errorMessage}>{error}</p>}
-      <p className={styles.docNote}>
-        <Link href={`/doc/${slug}`}>View and Annotate</Link>
-      </p>
-      <DocSettingsPanel
-        docId={docId}
-        visibility={visibility}
-        createdAt={createdAt}
-        authorIds={authorIds}
-        eligibleUsers={eligibleUsers}
-        deleted={deleted}
-        onDeletedChange={setDeleted}
-      />
+      </div>
+      <div className={styles.rail}>
+        <EditorAnnotationRail entries={annotations} docId={docId} />
+      </div>
     </div>
   );
 }

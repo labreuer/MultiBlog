@@ -1,3 +1,8 @@
+/* A row, with the editor column and (above the breakpoint) the annotation
+   rail beside it. The flex-column behaviour every child below relies on moved
+   to .mainColumn — see its note; the height budget itself is unchanged, since
+   `flex: 1 1 auto` + `min-height: 0` still resolve against body's 100vh
+   exactly as before (STYLE.md's Global baseline). */
 .container {
   width: 100%;
   max-width: 800px;
@@ -6,9 +11,45 @@
   font-family: sans-serif;
   box-sizing: border-box;
   display: flex;
-  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* Everything that used to be .container's own column layout. Its height comes
+   from the row's default `align-items: stretch`, which is what keeps it
+   definite — and therefore keeps .editorFrame's `flex-grow` fed. `min-width:
+   0` is the row-container half of the trap STYLE.md documents: without it a
+   long unbroken line in the body would widen this past its share. */
+.mainColumn {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* PLAN.md §18c — annotations anchored in the text currently on screen. No
+   narrow fallback by design: below the breakpoint this renders nothing at
+   all, rather than a list under the editor. `overflow: hidden` clips a card
+   whose anchor is scrolling out of the frame, backing up the layout hook's
+   own bounds check. */
+.rail {
+  display: none;
+}
+
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1180px;
+    gap: 2.5rem;
+  }
+
+  .rail {
+    display: block;
+    position: relative;
+    flex: 0 0 340px;
+    min-height: 0;
+    overflow: hidden;
+  }
 }
 
 /* A contenteditable (CollabTitleField), not an <input> — same border as
