@@ -379,7 +379,34 @@ The `min-width: 0` half is untestable locally, per above.
 Anything that can exceed the viewport (a table, a code block, a diagram) belongs in its
 own `overflow-x: auto` container. Don't reach for a `@media` breakpoint: `overflow-x`
 is self-activating and needs no width threshold, which is why this section defines none.
-The existing breakpoints (900px, 480px) are for *reflowing* layouts, not overflow.
+The existing breakpoints (900px, 480px, 1200px) are for *reflowing* layouts, not overflow.
+
+## Breakpoints and centred-column widths
+
+Three reflow breakpoints, each with one job:
+
+| Breakpoint | Reflows |
+| --- | --- |
+| `max-width: 480px` | Touch targets and padding (editor toolbar, `DocEditor`) |
+| `max-width: 900px` | `/side-by-side`'s two doc columns stack (PLAN.md §14f); the landing page's contributor rail drops below the posts (§17l) |
+| `min-width: 1200px` | Comments/annotations move from below the article into a margin rail (§18) |
+
+The 1200px one is written **mobile-first** — single column by default, two columns
+inside `@media (min-width: 1200px)` — where the other two are max-width. That is not
+drift: `src/lib/margin-notes-layout.ts`'s `MARGIN_NOTES_MEDIA_QUERY` is matched at
+runtime by the positioning hook, and a `max-width: 1199px` mirror in CSS would be the
+same rule spelled as its off-by-one complement, which is exactly how the two drift apart
+later. Anything else keying JS off a breakpoint should do the same.
+
+Four centred-column widths now, and they are one decision rather than four:
+
+- **680px** — listings.
+- **800px** — full text (`/[slug]`, `/doc/[slug]`, `DocEditor`). This is *the* reading
+  measure and never changes; every wider number below is 800 plus something.
+- **1040px** — a listings-width main column plus the landing page's 280px contributor
+  rail and its gap (§17l).
+- **1180px** — 800 + 2.5rem + a 340px margin-notes rail (§18). Applied only inside the
+  1200px breakpoint, so the reading column itself is untouched at every narrower width.
 
 ## The admin-table kit (`components/table/`)
 

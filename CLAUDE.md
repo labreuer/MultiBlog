@@ -19,6 +19,17 @@ than merely awkward to reach — a view recomputes per query, and sorting throug
 page load. That is why `/docs`' Length is a stored, trigger-maintained column
 (`Doc.proseJsonLength`) and not a view column. Rationale, measurements, costs and the
 phases still unbuilt: PLAN.md §16 (§16e, §16l).
+Above 1200px, comments and annotations sit in a right-hand rail, each card level with the
+passage it belongs to (PLAN.md §18) — `src/components/margin-notes/` plus the pure packing
+rule in `src/lib/margin-notes-layout.ts`. Below that breakpoint every surface falls back to
+the stacked list it had before, and so does a page whose JS never runs: the `.anchored`
+class is toggled from JS, never from a `@media` block. **CSS owns the two-column grid, JS
+owns only the vertical alignment** — so don't move the column layout into JS to "simplify",
+that split is what keeps the rail server-rendered in the right place. The two sides resolve
+an anchor differently and can't share that step: a post comment reads its stored
+`anchorFrom`, a doc annotation has no stored offset at all and must be *found* in the live
+document (`src/lib/annotation-marks.ts`, §12i). Never position a doc annotation off
+`Doc.proseJson` — it's a store-debounce snapshot, stale by seconds while anyone is typing.
 Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
 [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 Email delivery, rate limiting, and invites — why Resend, the `sendMail()` seam's contract,

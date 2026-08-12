@@ -5206,3 +5206,170 @@ read before uploading a photo of themselves.
 - **Avatars are never garbage collected beyond the `ON DELETE CASCADE`.**
   Replacing an avatar overwrites the row, so there is no orphan accumulation —
   but there is also no history, and no way to undo a replacement.
+
+## 18. Margin notes: comments and annotations beside the text they belong to
+
+Built 2026-08-12. A comment thread and an annotation both already know exactly which
+passage they belong to, and both spent that knowledge on a quoted-text header at the top
+of an entry in a list below the article. The reader had to hold the mapping across a
+scroll. Above 1200px there is room not to ask, so each card is positioned level with its
+own quote.
+
+Everything below the breakpoint is unchanged — same stacked list, same order, same
+markup minus a couple of wrapper divs. This is a reflow breakpoint in STYLE.md's sense
+(alongside 900px and 480px), not an overflow fix.
+
+### 18a. Why this is a JS layout and CSS only does half of it
+
+Where a passage lands on screen depends on its content and the viewport width. It cannot
+be declared, only measured — `editor.view.coordsAtPos()` against a live editor, which
+every reading surface here already mounts and already calls for its selection popover.
+
+The split that matters: **CSS owns the two-column grid, JS owns the vertical alignment.**
+So the rail is in the right column from first paint, server-rendered, and only the
+per-card `top` waits for hydration. `useMediaQuery`'s server snapshot is a hard `false`
+(there is no `matchMedia` during SSR), which would otherwise mean the whole rail popped
+into place after hydration rather than just settling.
+
+Three modules, deliberately separable:
+
+- **`src/lib/margin-notes-layout.ts`** — the packing rule alone, pure and DOM-free. Sort
+  by where each card wants to be, then walk down placing each at the lower of its own
+  wish and the previous card's bottom. Exact alignment wherever there is room; a stable
+  cascade wherever there isn't. The invariant worth more than any single card's
+  precision: **no card ever appears above one whose anchor is earlier in the document.**
+  Anchorless cards sort last and keep their input order, so a rail reads as "everything
+  anchored, in document order, then everything that isn't".
+- **`src/components/margin-notes/use-margin-notes-layout.ts`** — the measuring, and the
+  triggers. Positions are written straight to `element.style`, never held in React
+  state. Position depends on post-paint measurements, and the doc surfaces re-measure on
+  every remote keystroke; a render per measurement would be the wrong shape.
+  `pseudo-border.ts` already sets that precedent for the same reason.
+- **`src/components/margin-notes/margin-notes-context.tsx`** — carries the editor from
+  the article to the rail. They are siblings under the page on every surface that has
+  both, so no prop can reach across — the same problem `DocPresenceProvider` solves for
+  awareness (§13i). Its change channel is a plain listener set, not a state counter:
+  bumping state on every remote keystroke would re-render the article *and* every card,
+  to move cards that are moved imperatively anyway.
+
+Recompute triggers are: the editor mounting, `window.resize`, a `ResizeObserver` on the
+container, on every card, and on the editor's own DOM node (a card growing when a reply
+composer opens; the article reflowing on a late font), the editor's `update` event, and
+the context's channel. All funnel through one `requestAnimationFrame` gate.
+
+**The degradation is deliberate.** The `.anchored` class is toggled from JS, not from a
+`@media` block, so a page whose script fails renders the plain stacked list rather than
+a pile of cards at the container's origin.
+
+### 18b. Two ways to answer "where is this anchored", because the two sides differ
+
+This is the one place the post and doc sides genuinely cannot share code, and the
+asymmetry is old (§5 vs. §12i) rather than anything this section introduced.
+
+- **A post comment** has stored integer offsets (`anchorFrom`/`anchorTo`) into an
+  immutable published snapshot. Resolving a card is a direct `coordsAtPos(anchorFrom)`.
+  `from`, not `to` — the card lines up with where the quote *starts*.
+- **A doc annotation** has no stored offset at all. Its anchor is an `annotation` mark
+  inside the doc's own ydoc, so it has to be *found*: `collectAnnotationMarkRanges`
+  (`src/lib/annotation-marks.ts`) walks the live ProseMirror document once per pass and
+  returns every id's current range.
+
+Scanning the live document rather than trusting the server matters more than it looks.
+`getDocAnnotationsAsThreads` decides quoted-vs-general against `Doc.proseJson`, which is
+a store-debounce snapshot and therefore stale by seconds whenever anyone is typing. That
+is fine for deciding whether to draw a quote header; it is not fine for deciding which
+paragraph a card sits beside. Reading the editor means a card follows its text as an
+author edits above it.
+
+`DocReadingBody` needs one wire `AnnotatableArticle` does not: remote content arrives via
+`setContent(…, { emitUpdate: false })`, so the editor's own `update` event never fires
+and cards would stay where the *previous* body put them. `onContentPushed` — the surface's
+existing choke point for exactly this class of bug — now reports to the layout alongside
+re-resolving the pending selection.
+
+A thread whose anchor can't be resolved (a `DETACHED` comment thread, whose offsets are
+frozen against a revision that isn't on screen; an annotation whose mark is gone, §12h)
+is simply absent from the map and falls to the end of the rail — which is where the
+quoted-text sort already put it.
+
+**The sort dropdown stays visible when anchored.** It no longer decides where a card
+goes, but it still orders the anchorless ones at the end of the rail, and a control that
+disappears on a viewport change is worse than an inert one.
+
+### 18c. The doc editor's rail is narrower on purpose
+
+An author revising a passage had to leave for the reading view to see what had been said
+about it. The editing view now carries a rail too — but three deliberate differences,
+only the last of which needed new machinery:
+
+- **Presently-anchored only, and nothing below.** No general-discussion bucket, no card
+  for an annotation whose mark is gone, and no stacked list under the editor at any
+  width: below the breakpoint `EditorAnnotationRail` renders nothing at all. The editing
+  view answers "what is attached to the text in front of me", and an annotation with no
+  mark has no answer to give there — where the reading view, which is also where
+  annotations are *composed*, does have to account for it.
+- **Read-only cards.** `AnnotationNode` gained a `readOnly` prop that drops Reply and
+  Delete, inherited by replies so a subtree can't be half-interactive. Creating
+  annotations from the editor is not built (and is not wanted yet); a reply is a
+  creation.
+- **A window, not a list.** The doc body scrolls inside its own frame here
+  (`EditorChrome.module.css`'s `.editorContent`), not with the page. That is the one
+  structural difference: on a page-scrolled surface the article and the rail move
+  together, so a card's offset within its container is invariant under scroll, whereas
+  here it is not. The layout hook's `bounds` option covers it and this is its only
+  caller — cards track the internal scroll, and one whose anchor has left the frame is
+  hidden rather than pinned to an edge.
+
+`CollabEditorBody` marks that scroll frame with `data-editor-scroll`
+(`src/components/editor-scroll.ts`). An attribute rather than a class because CSS-module
+names are hashed per build and so aren't addressable from a `querySelector` in another
+module; a shared constant rather than a literal because two components have to agree on
+it and neither should import the other.
+
+`DocEditor`'s container became a flex **row**, with the column behaviour every child
+relies on moved down to `.mainColumn`. The height budget is unaffected: `.mainColumn`'s
+height comes from the row's default `align-items: stretch`, which is definite, so
+`.editorFrame`'s `flex-grow` still has something to grow into (STYLE.md's Global
+baseline). `CollabEditorBody`'s `onEditorReady`, which this page passed an empty function
+for since it was written, is what the rail measures against.
+
+### 18d. Prepared, not built: reconciling attached vs. detached against the live document
+
+`collectAnnotationMarkRanges` answers "which annotations are presently anchored, and
+where" against the live document — which is exactly the input a doc-side equivalent of
+the post side's remap-on-publish (§5) would need. Today nothing consumes it that way:
+an annotation whose mark is gone still degrades to document-level via §12h's per-render
+derivation from `Doc.proseJson`, and no status is written anywhere.
+
+It is built as a shared module rather than inline in each surface specifically so that
+when something does consume it, there is **one** definition of "presently anchored"
+rather than three drifting ones. Two things a future phase will have to decide, neither
+of which this section prejudges:
+
+- **Who writes, and when.** Every reader's browser has this map, and letting each one
+  persist a correction is N clients last-writer-wins on the field whose whole job is
+  precision — §14d already documents that trap for doc-link anchors and resolves it by
+  only ever persisting from a *write*-mode surface. The doc editor's rail is now such a
+  surface, which is the natural place for it.
+- **Whether a mark that reappears un-detaches.** Undo exists; an author deleting an
+  annotated sentence and immediately undoing it should not have cost the annotation its
+  anchor. That argues for the status being derived-and-cached rather than a latched
+  one-way transition, unlike §12h's current one-way degrade.
+
+### 18e. Known gaps
+
+- **No collision handling between a card and the rail's own header.** A quote in the
+  first line of the article resolves above the card list's top and is clamped to 0,
+  which sits it directly under the rail's heading and composer rather than level with
+  its quote. Correct in the sense that it can't go higher; imprecise in the sense that
+  the quote is not where the card points.
+- **The rail doesn't scroll independently on the reading surfaces.** A document with
+  many anchored comments makes the rail as tall as the article, which is intended, but
+  a document with *one* comment near the end leaves a tall empty column. Sticky
+  positioning would fix the latter and break the former.
+- **No e2e coverage.** The positioning is measured geometry, which is exactly what a
+  spec can assert on (`boundingBox()` per card versus per highlight) and exactly what a
+  reviewer cannot check by reading. `packMarginNotes` being pure is half of that debt
+  already paid; nothing exercises it yet.
+- **340px is fixed.** The rail doesn't grow on a very wide viewport, so a 2560px screen
+  gets more whitespace rather than roomier cards.
