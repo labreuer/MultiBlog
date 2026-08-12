@@ -354,3 +354,92 @@ option 2 above removes the class rather than merely reducing its odds.
 `test-results/<test-slug>/error-context.md` and in the HTML report (`npm run e2e:report`).
 **A later isolated re-run deletes that directory** — read it, or copy it out, before
 re-running anything.
+
+---
+
+## (optional) Bind the doc reading editor through `Collaboration`, so a pending selection maps instead of being re-searched
+
+**Status:** the cheap mitigation shipped (see "what this replaces" below); this is the
+structural fix, and it is genuinely optional — nothing is broken once the mitigation is in,
+the anchor is just weaker than the one the collaborative carets already enjoy.
+
+### The observation that prompted it
+
+A remote collaborator's *caret and selection* survive arbitrary edits, including edits
+**inside** the selected range, with no marks in the document. A reader's in-progress
+annotation selection on `/doc/[slug]` does not. Both are "a range in a shared document";
+only one is robust. The difference is entirely in how the range is named.
+
+### How the carets do it — Yjs relative positions, in awareness
+
+`y-prosemirror` encodes each awareness cursor as
+`absolutePositionToRelativePosition(...)`, which bottoms out in
+`Y.createRelativePositionFromTypeIndex` (`node_modules/y-prosemirror/dist/y-prosemirror.cjs`
+:362 and :1426).
+
+A `Y.RelativePosition` is not an integer. It names a specific CRDT item — which client
+inserted this run of characters, at what clock — plus an association. Yjs item ids are
+permanent and the sequence is a total order over items, so the reference never needs
+remapping:
+
+- **Insert before it** — same item, different computed index; the index is recomputed on
+  read (`relativePositionToAbsolutePosition`). Nothing to map.
+- **Insert inside the range** — each endpoint is anchored to its own item, neither of which
+  moved. The range simply contains more. This is the property that looks impossible from
+  the outside.
+- **Delete the anchored item** — it becomes a tombstone and the position still resolves to
+  where the tombstone sits.
+
+It lives in the **awareness** channel: ephemeral, per-client, never persisted into the ydoc.
+So the position is not stored in the document, but it *points at* the document's internal
+CRDT identity — which is exactly what an integer offset and a text search cannot do.
+
+### Why PLAN.md §12h's rejection of relative positions does not apply here
+
+§12h rejected `Y.RelativePosition` for **annotation anchors** and was right to:
+`createAbsolutePositionFromRelativePosition` returns null once the item has been collected
+into a `GC` struct, so a durable anchor needs `gc: false`, and a living doc with no revisions
+would accumulate a tombstone per deletion forever.
+
+That reasoning is about **persisted** anchors. A pending selection lives for seconds in one
+client's memory. The GC hazard requires the anchored item to be deleted *and* collected —
+and if the reader's selected text was deleted, closing the composer is the correct outcome
+anyway. So the trade-off that makes marks right for annotations does not carry over to the
+in-progress selection.
+
+### Root cause
+
+`src/lib/use-live-doc-content.ts` pushes remote content in with
+`setContent(…, { emitUpdate: false })` — a wholesale document replace — so ProseMirror's
+`tr.mapping` is discarded on every remote update. That mapping is what makes the *editor*
+surface robust for free (y-prosemirror dispatches real transactions there), and it is why
+this problem is reading-view-only. `useSelectionPopover`'s `reresolve` is a recovery attempt
+using a strictly weaker instrument than either mapping or relative positions.
+
+### The prerequisite, which is the actual work
+
+**`setContent` is load-bearing: `DocScrubBar` pushes historical bodies into that same
+editor** (`overrideBodyJSON`). You cannot do that into a `Collaboration`-bound editor without
+writing history into the live shared doc. So step one is decoupling the scrub preview onto its
+own editor instance, and only then can the live reading editor take a real binding
+(`editable: false`, no `CollaborationCaret` — §12g's "no remote carets for a reader" becomes
+true by omission rather than by construction, which is a small documentation change, not a
+behavior one).
+
+Once bound, both the pending decoration and the selection map automatically and none of the
+re-resolution code is needed on this path at all.
+
+### Not a third option
+
+Keeping `setContent` and carrying the selection as a `RelativePosition` pair *sounds* like a
+cheaper middle road and collapses into the same work: converting a ProseMirror position to a
+Yjs index needs y-prosemirror's `ProsemirrorMapping`, which only exists when `ySyncPlugin` is
+installed — i.e. when the editor is bound. Worth writing down so it is not re-proposed.
+
+### What this replaces
+
+The shipped mitigation makes `reresolve` re-anchor to the occurrence **nearest the previous
+offset** rather than bailing whenever the quoted text is not globally unique, and lets the
+search match across block boundaries. That covers the whole "someone typed above me" class,
+which was the common failure. What it still cannot do is survive an edit *to the selected
+text itself* — a relative position can, which is the only reason this entry exists.

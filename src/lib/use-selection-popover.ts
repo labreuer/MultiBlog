@@ -126,6 +126,15 @@ export function useSelectionPopover({
   // `apply`) already tracks an ordinary transaction; this is the explicit
   // fallback for the case that doesn't hold — a setContent call whose diff
   // isn't a simple insert/delete around the selection.
+  //
+  // The `stillValid` fast path only holds while nothing *before* the selection
+  // changed, since these are absolute offsets: a single character typed in an
+  // earlier paragraph shifts them and sends every re-resolution down the
+  // search path below, even though nothing about the selection itself moved.
+  // That is why the search has to be forgiving rather than strict — see
+  // TODO.md's "(optional) Bind the doc reading editor through Collaboration"
+  // for why the offsets are absolute in the first place, and what would
+  // retire this function entirely.
   function reresolve(liveEditor: Editor) {
     const current = pendingRef.current;
     if (!current) return;
@@ -134,19 +143,48 @@ export function useSelectionPopover({
       current.to <= doc.content.size && doc.textBetween(current.from, current.to, " ") === current.quotedText;
     if (stillValid) return;
 
-    const container = containerRef.current;
-    const occurrences = container ? findQuoteOccurrences(doc, current.quotedText) : [];
-    if (occurrences.length === 1 && container) {
-      const { from, to } = occurrences[0];
-      setPending({ from, to, quotedText: current.quotedText });
-      openAt(liveEditor, to);
-      setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
-    } else {
-      // No unique match any more — the selected text changed underneath the
+    // A selection that began at the very end of a block — dragging from the
+    // tail of one paragraph into the next — captures a *leading* block
+    // separator, because textBetween emits one on arriving at the second
+    // block while the first contributes no characters. No document range
+    // reads back as that string (findQuoteOccurrences' own note says why), so
+    // the raw search finds nothing and the only sensible reading is to
+    // re-anchor to the text without it. The trimmed quote is adopted, not
+    // just searched with, so `pending` stays self-consistent for the next
+    // re-resolution.
+    let quotedText = current.quotedText;
+    let occurrences = findQuoteOccurrences(doc, quotedText);
+    if (occurrences.length === 0) {
+      const trimmed = quotedText.replace(/^\s+/, "");
+      if (trimmed && trimmed !== quotedText) {
+        occurrences = findQuoteOccurrences(doc, trimmed);
+        if (occurrences.length > 0) quotedText = trimmed;
+      }
+    }
+
+    if (occurrences.length === 0) {
+      // The selected text is genuinely gone — edited or deleted underneath the
       // reader. Close the popover rather than leave it pointing at a range
       // that no longer means what it did.
       clear(liveEditor);
+      return;
     }
+
+    // Nearest to where the selection last was, rather than insisting on a
+    // unique match. Requiring uniqueness meant an edit anywhere above a quote
+    // that appears more than once in the document closed a composer someone
+    // was typing into — and the more ordinary the quoted phrase, the more
+    // likely that was. Proximity is the right tie-break because the common
+    // case is precisely a small offset shift: the reader's own occurrence is
+    // the one nearest the offsets it just had. It can still pick wrong among
+    // several near-identical neighbours, which is a strictly better failure
+    // than discarding the reader's work.
+    const best = occurrences.reduce((closest, occurrence) =>
+      Math.abs(occurrence.from - current.from) < Math.abs(closest.from - current.from) ? occurrence : closest,
+    );
+    setPending({ from: best.from, to: best.to, quotedText });
+    openAt(liveEditor, best.to);
+    setPendingAnnotation(liveEditor.view, { from: best.from, to: best.to, color: userColor });
   }
 
   // Dismiss the pending selection on a click outside the reading surface. The

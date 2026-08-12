@@ -80,11 +80,23 @@ function contextMatches(doc: PMNode, occ: { from: number; to: number }, mark: Do
 //      filter by before/after context, use the survivor if exactly one
 //      remains; zero, or still ambiguous → unanchored.
 // A selection spanning more than one block node skips step 2 entirely and
-// degrades straight to unanchored on a step-1 mismatch —
-// findQuoteOccurrences cannot match across a block boundary (its own header
-// comment says why: a paragraph break costs two ProseMirror positions but
-// emits one separator character, undercounting the from+len window once per
-// boundary).
+// degrades straight to unanchored on a step-1 mismatch.
+//
+// **The reason this guard existed is gone.** It was here because
+// findQuoteOccurrences could not match across a block boundary — its old
+// sliding `from + len` window undercounted by one position per boundary — so
+// step 2 could only ever return nothing for a multi-block anchor. That
+// limitation was removed when the search was rewritten to flatten the
+// document and map matches back to positions (see its header), and the new
+// implementation is property-tested to find every real selectable range,
+// multi-block ones included.
+//
+// The guard is therefore now conservatism rather than necessity: dropping it
+// would let a multi-block doc link re-anchor instead of degrading, with
+// contextMatches doing the disambiguation exactly as it does for single-block
+// links. Left in place only because that is a behavior change to §14's
+// surface, which the change that obsoleted it was not about. `mark.blocks`
+// stays in the stored anchor format regardless.
 export function resolveAnchor(doc: PMNode, mark: DocLinkMark): ResolvedAnchor {
   if (mark.to <= doc.content.size && doc.textBetween(mark.from, mark.to, " ") === mark.text) {
     return { anchored: true, from: mark.from, to: mark.to };
