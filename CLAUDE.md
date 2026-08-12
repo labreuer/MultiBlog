@@ -36,6 +36,10 @@ stored offset at all and must be *found* in the live document
 (`src/lib/annotation-marks.ts`, §12i). Never position a doc annotation off `Doc.proseJson`
 — it's a store-debounce snapshot, stale by seconds while anyone is typing; it's fine as the
 *seed* for which cards start in the rail, and nothing more.
+How a remark stays attached to a passage while the passage moves — all four strategies this
+codebase uses, the ones it doesn't, and how to pick: [docs/COLLAB.md](docs/COLLAB.md). Read it
+before adding a fifth or "fixing" an anchor that looks fragile; several of the fragile-looking
+ones are deliberate, and one plausible fix has already been tried and reverted as too brittle.
 Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
 [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 Email delivery, rate limiting, and invites — why Resend, the `sendMail()` seam's contract,

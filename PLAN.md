@@ -596,41 +596,22 @@ renamed after creation, with the old slug preserved as a redirect source rather 
 
 ## 5. Quote anchoring & surviving revisions (the mechanism)
 
-**Creating a comment on a quote**
-1. Reader selects text in the published article. The client reads the selection's
-   ProseMirror positions `{from, to}` in the *current* revision's coordinates, plus the
-   plain quoted text.
-2. POST creates a `comment_thread` with `anchored_revision_id = current`, `anchor_from`,
-   `anchor_to`, `quoted_text`, then the first `comment`.
+**Moved to [docs/COLLAB.md](docs/COLLAB.md) §1.** That file is now the single place every
+anchoring strategy in this codebase is described and compared — this section, §12h/§12i's
+mark, §13f's pending selection and §14a/§14d's external blob were four answers to one
+question, written up in four places, and a reader wanting to add a fifth had to find all of
+them first.
 
-**Rendering the indicator**
-- On a published post we load the current revision's doc + all active threads.
-- A ProseMirror plugin builds **decorations**: an inline highlight over each
-  `[anchor_from, anchor_to)` range and a small gutter/inline marker (e.g. a count badge)
-  where one or more threads land. Clicking opens the thread panel.
-- Decorations are display-only, so this never alters stored content.
+What stays here is the decision, since the rest of this document refers back to it: a post
+comment stores **absolute offsets into an immutable published snapshot** plus the quoted
+text, renders through display-only **decorations** that never touch stored content, and is
+carried forward on each publish by diffing the old and new documents with
+`prosemirror-recreate` and mapping the endpoints through the resulting `Mapping`. A thread
+whose quote no longer survives becomes `DETACHED` — still listed, no longer highlighted —
+and is re-tried on every later publish rather than being stuck there (§10 item 20).
 
-**Surviving a new revision**
-- On publish, compare previous doc → new doc. We don't capture live editing steps from the
-  reader's perspective, so we reconstruct the change set between the two stored docs with
-  `prosemirror-recreate` (→ steps) and build a `Mapping`.
-- For each thread: map `anchor_from`/`anchor_to` through the Mapping.
-  - Range still has positive length → update positions, set `anchored_revision_id = new`.
-  - Range collapsed (the quoted text was deleted) → set `status = detached`.
-- Optional safety net: if mapping looks suspicious, fuzzy-match `quoted_text` against the
-  new doc to re-anchor.
-
-**What the reader sees (decided)**
-- **Every** comment thread — active or detached — always appears in the comment list at the
-  bottom of the post. Detached threads are never hidden.
-- **Active** threads also get the inline highlight + indicator next to the quoted passage.
-- **Detached** threads have no inline indicator (the text is gone). When the reader clicks
-  "jump to quote" on a detached thread, instead of scrolling we show a notice that the
-  quoted passage was edited or removed in a later revision, and offer to show the quote in
-  the context of the revision it was made against.
-
-This is the standard ProseMirror pattern (decorations + position mapping) and keeps the
-content layer and the comment layer cleanly separated.
+This works because the target never moves. Docs have no publish step and no snapshot to
+anchor against, which is the whole reason §12i reaches for something else.
 
 ---
 
@@ -1925,18 +1906,13 @@ mode to guard against.
 exists so the choice reads as a decision rather than an accident, since GC is the one Yjs setting
 an annotation design can be wrecked by.
 
-**It costs nothing, because the anchor is content.** The design GC *would* break is anchoring by
-`Y.RelativePosition`, which names an item id:
-`createAbsolutePositionFromRelativePosition` returns `null` once that item has been collected
-into a `GC` struct rather than surviving as a tombstone, so keeping such an anchor resolvable
-means `gc: false`. §12i's mark has no such failure mode — it is not a pointer into the document,
-it *is* part of the document, so it moves with its text, merges under concurrent editing, and is
-collected only when the text it decorates is. GC never strands it.
-
-**It buys a doc that doesn't grow forever.** `gc: false` means `ydoc.ydoc` accumulates a tombstone
-per deletion for the life of the document. A post could afford that, since its life is punctuated
-by revisions; a living document's whole premise is that it never is, so the entity that most
-needs bounded growth is exactly the one that would pay most for turning GC off.
+**The reasoning moved to [docs/COLLAB.md](docs/COLLAB.md)** — "Why `gc: true`, and what it rules
+out" under §2, plus §5 for the `Y.RelativePosition` design this rules out and §8 for what the
+never-truncated update log would let a recovery path do. In brief, and enough to act on: GC
+costs nothing here because the anchor is *content* rather than a pointer into it, so it moves
+with its text and is collected only when that text is; `gc: false` would buy resolvable
+item-id anchors at the price of a tombstone per deletion for the life of a document whose
+whole premise is that it never ends.
 
 **Losing the mark degrades the annotation; it does not delete it.** Delete the annotated text and
 the mark goes with it, and nothing in the document references that annotation's id any more. The
@@ -1945,12 +1921,10 @@ that doc** — it moves out of the margin and into the doc's general discussion,
 about is whatever its body says. That is the entire defined behavior, and it is derived per render
 (§12i), not a stored state.
 
-**It is one-way, and recovery is deferred.** Retyping the same words does not restore the mark;
-re-marking is an edit somebody has to make. `ydoc_update` is never truncated (§11b), so the state
-in which the mark still existed is reconstructible — replay to before the deletion, read the
-mark's range, and you have both where the annotation lived and what it covered. That is a real
-path and the reason the log matters here, but it is **not being built now, and may never be**
-(§12m).
+**It is one-way, and recovery is deferred** — still true, still not built (§12m). COLLAB.md §8 is
+where the recovery path is worked out: `ydoc_update` is never truncated (§11b), so the state in
+which the mark still existed is reconstructible, and item ids are shared across the whole history,
+which makes that worth more than a replay-and-read.
 
 **Never flip `gc` for a doc that has already loaded with it on.** One load with GC on collects
 tombstones permanently, so a future `gc: false` experiment is one-way per document and would have
@@ -2541,12 +2515,19 @@ color, in `prose.module.css`, consistent with the by-author annotation coloring 
 
 **The trap:** `LiveDocBody`'s live tap calls `setContent` on every incoming update (§12n's own
 "two implementation details" entry), which rebuilds the doc and discards any decoration along
-with it. Each time `setContent` runs while a pending range exists, the range is re-resolved:
-verify `textBetween(from, to)` still equals the captured text; on a mismatch, fall back to a
-unique-occurrence search; failing that, drop the decoration and surface "the selected text
-changed." That is the same logic `handleApplyAnnotationMark`'s `findQuoteOccurrences` already
-implements server-side — it moves from `server/ydoc-hooks.ts` into a shared `src/lib/` module so
-both the client-side re-resolution and the server-side mark application call the same function.
+with it — and with it ProseMirror's own `tr.mapping`, which is what makes this a non-problem on
+the editor surface. Each time `setContent` runs while a pending range exists, the range is
+re-resolved against the text instead. `findQuoteOccurrences` therefore lives in a shared
+`src/lib/` module rather than in `server/ydoc-hooks.ts`, so the client-side re-resolution and the
+server-side mark application call one function.
+
+**How weak that anchor actually is — and the two better options — moved to
+[docs/COLLAB.md](docs/COLLAB.md) §4**, with §5 (relative positions, and why binding this editor
+is gated on decoupling the scrub preview) and §6 (carrying the anchor in awareness, which suits
+a transient selection better than durable anchoring does). The short version worth having here:
+an edit *before* the selection invalidates the offsets even though nothing about the selection
+moved, and the text-search fallback then keeps it only if the quote is unique in the whole
+document.
 
 ### 13g. Moving a draft to the bottom composer
 
@@ -2818,20 +2799,11 @@ section adds a surface beside them and touches shared code only where noted.
 
 ### 14a. Why the anchor lives outside the document
 
-§12i put an annotation's anchor *inside* the doc's ydoc as a TipTap mark, and the `Annotation`
-model's schema comment says so with some pride: no anchor columns, no `quotedText`, "nothing here
-that could fall out of sync with the document." A doc link cannot have that, for a reason that is
-structural rather than a matter of taste:
-
-- **A mark lives in exactly one document; a link joins two.** The mark design needs *two* marks
-  per link, in two different ydocs, and immediately invents a failure mode neither annotations nor
-  quotes have: the half-applied pair, where one side's mark landed and the other's didn't. There is
-  no transaction spanning two Yjs documents to close that window.
-- **Applying a mark is a write to the document.** Side-by-side explicitly serves readers who may be
-  unable to edit either doc. §13 gets around this by having the *server* apply the mark over a
-  privileged channel (`applyAnnotationMark` → `ANNOTATION_MARK_PATH`), which would work here too —
-  and would couple doc links to a running collab server on day one, for a feature whose entire
-  state is otherwise ordinary rows.
+**Moved to [docs/COLLAB.md](docs/COLLAB.md) §3**, alongside the three other anchoring strategies
+it is a deliberate departure from. The two structural reasons in one line each: **a mark lives in
+exactly one document and a link joins two** (the mark design needs two marks in two ydocs, with no
+transaction spanning them to close the half-applied window), and **applying a mark is a write**,
+which side-by-side's readers may not be entitled to make.
 
 So the anchor is external, and the price is drift: an external offset is a claim about a document
 that keeps changing underneath it. §14d is that price paid in full, and it is the single largest
@@ -2972,15 +2944,12 @@ URL shared between people with different access. See §14n.
 
 ### 14d. Anchor drift and repair
 
-Resolution runs per link, per content change, in this order — cheapest first, because the first step
-is the overwhelmingly common case:
-
-1. `to <= doc.content.size && doc.textBetween(from, to, " ") === mark.text` → use the stored offsets
-   as-is. O(1).
-2. Otherwise `findQuoteOccurrences(doc, mark.text)`. Exactly one occurrence → use it. More than one
-   → filter by `mark.before`/`mark.after` and use the survivor if exactly one remains. Zero, or
-   still ambiguous → the link is **unanchored**.
-3. Memoize on `(doc identity, links identity)`.
+**The resolution order and its costs moved to [docs/COLLAB.md](docs/COLLAB.md) §3**, so that the
+repair policy sits next to the alternatives it was chosen over — in particular COLLAB.md §7/§8,
+which are what this should become if it is ever revisited. The three steps, for reference:
+stored offsets if they still read as `mark.text` (O(1), the common case) → otherwise
+`findQuoteOccurrences` with `before`/`after` as the tie-break → memoize on
+`(doc identity, links identity)`.
 
 Step 3 is not an optimization, it is load-bearing. The read column calls `setContent` on *every*
 incoming ydoc update — every remote keystroke — and `findQuoteOccurrences` is O(doc × text) with no
