@@ -663,6 +663,18 @@ model Annotation {
   editedAt           DateTime?        @map("edited_at")
   deletedByUserId    String?          @map("deleted_by_user_id")
   deletedAt          DateTime?        @map("deleted_at")
+  // PLAN.md §12p/§13 — which ydoc_update the author's view showed when they
+  // posted (postAnnotation, src/app/actions/annotations.ts): the client's
+  // own scrub position when known precisely (annotating while scrub-frozen),
+  // else the log's tail at post time. Metadata only, never resolved as a
+  // position — it drives "jump the scrubber to roughly here," nothing reads
+  // it as an anchor. No relation column on purpose: same plain-BigInt
+  // precedent as YdocSnapshot.lastYdocUpdateId, and a FK into ydoc_update
+  // would need ON DELETE SET NULL forever (the log is never truncated, but
+  // there's nothing here worth a join for). Null for every row from before
+  // this column existed, and for a reply/annotation whose fallback lookup
+  // came back empty (a doc with no update log yet).
+  ydocUpdateId       BigInt?          @map("ydoc_update_id")
 
   doc       Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
   parent    Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])

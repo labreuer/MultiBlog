@@ -5,13 +5,16 @@ import type { JSONContent } from "@tiptap/react";
 import { extractText } from "@/lib/diff";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { useReplayScrub, type ReplayPayload } from "./YdocDebug";
+import { useRegisterDocScrubSeek } from "./DocScrubContext";
 import styles from "./DocScrubBar.module.css";
 
 // `live` is true exactly when the slider sits at the newest update — PLAN.md
 // §12's frozen reading view uses it (and only it) to decide whether scrubbing
 // is the reason the view is frozen, rather than re-deriving "at the end" from
-// the slider's own index.
-export type ScrubbedState = { bodyJSON: JSONContent; title: string; live: boolean };
+// the slider's own index. `updateId` is that same position's ydoc_update id
+// (§12p/§13) — the precise value an annotation posted while scrub-frozen
+// records, rather than falling back to the doc's tail at post time.
+export type ScrubbedState = { bodyJSON: JSONContent; title: string; live: boolean; updateId: string | null };
 
 type Props = {
   docId: string;
@@ -108,8 +111,23 @@ function LoadedScrubBar({
     // The title fragment has no fallback of its own (PLAN.md §12n) — same
     // "Untitled" render-time rule as everywhere else that shows a doc's title.
     const title = docTitleOrFallback(renderResult.titleJSON ? extractText(renderResult.titleJSON) : "");
-    onScrub({ bodyJSON: renderResult.bodyJSON, title, live: index === total - 1 });
-  }, [renderResult, onScrub, index, total]);
+    onScrub({ bodyJSON: renderResult.bodyJSON, title, live: index === total - 1, updateId: current?.id.toString() ?? null });
+  }, [renderResult, onScrub, index, total, current]);
+
+  // PLAN.md §12p/§13 — registers "jump the slider to this ydoc_update id"
+  // for AnnotationNode's "at this revision" control, reached through
+  // DocScrubContext since the two are sibling subtrees in page.tsx.
+  // useCallback keeps this stable across the re-render every scrub tick
+  // causes — see useRegisterDocScrubSeek's own note on why an unstable
+  // function there would re-render the whole page on every drag.
+  const seekToUpdateId = useCallback(
+    (updateId: string) => {
+      const targetIndex = replay.updates.findIndex((u) => u.id === updateId);
+      if (targetIndex !== -1) seek(targetIndex);
+    },
+    [replay, seek],
+  );
+  useRegisterDocScrubSeek(seekToUpdateId);
 
   // Skips on mount — useReplayScrub already starts at the live end
   // (PLAN.md §12), so there's nothing to reset yet. Only an actual change in

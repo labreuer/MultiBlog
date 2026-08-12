@@ -10,6 +10,7 @@ import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "../LocalTime";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
+import { useDocScrub } from "../DocScrubContext";
 import styles from "./AnnotationNode.module.css";
 
 export type AnnotationNodeData = {
@@ -23,6 +24,10 @@ export type AnnotationNodeData = {
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
+  // PLAN.md §12p/§13 — which ydoc_update this was posted against, or null
+  // for a row from before the column existed. Metadata, not an anchor —
+  // drives the "at this revision" control below, nothing else.
+  ydocUpdateId: string | null;
   replies: AnnotationNodeData[];
 };
 
@@ -83,6 +88,10 @@ export default function AnnotationNode({ annotation, docId, depth = 0, readOnly 
   // visible "[deleted]" feedback instead of it just silently vanishing. A
   // fresh page load never sets this, so the collapse rule still applies there.
   const [justDeleted, setJustDeleted] = useState(false);
+  // Null outside a DocScrubProvider (the doc editor's rail has none) or
+  // before the reading view's scrub bar has been touched at all — both
+  // supported states, see useDocScrub's own note.
+  const seekToUpdateId = useDocScrub();
   const anchorId = anchorName(annotation.displayName, annotation.createdAt);
   const isDeleted = annotation.deletedByUserId !== null || justDeleted;
 
@@ -135,6 +144,16 @@ export default function AnnotationNode({ annotation, docId, depth = 0, readOnly 
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
               <LocalTime value={annotation.createdAt} />
             </a>
+            {annotation.ydocUpdateId && seekToUpdateId && (
+              <button
+                type="button"
+                className={styles.revisionButton}
+                title="Scrub the reading view back to this annotation's revision"
+                onClick={() => seekToUpdateId(annotation.ydocUpdateId!)}
+              >
+                at this revision
+              </button>
+            )}
           </p>
           <div>{annotation.body}</div>
           {!readOnly && !posted && !replyDraftId && (

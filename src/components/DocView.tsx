@@ -44,6 +44,11 @@ export default function DocView({ docId, initialTitle, initialBodyJSON, staticBo
   // why this isn't just `scrubbed !== null` (the mount-time seed already
   // pushes a `live: true` state before any drag).
   const scrubFrozen = scrubbed !== null && !scrubbed.live;
+  // Only meaningful while scrub-frozen — a selection-only freeze has no
+  // scrub position to report, and a live scrub position is already stale by
+  // the time postAnnotation would use it, so the server's own tail lookup
+  // (PLAN.md §12p/§13) is the better answer there.
+  const scrubUpdateId = scrubFrozen ? (scrubbed?.updateId ?? null) : null;
 
   const handleReturnToLive = () => {
     setScrubbed(null);
@@ -61,6 +66,7 @@ export default function DocView({ docId, initialTitle, initialBodyJSON, staticBo
         overrideBodyJSON={scrubbed?.bodyJSON ?? null}
         userColor={userColor}
         scrubFrozen={scrubFrozen}
+        scrubUpdateId={scrubUpdateId}
         onReturnToLive={handleReturnToLive}
       />
       {canEdit && <DocScrubBar docId={docId} onScrub={setScrubbed} resetSignal={resetSignal} />}

@@ -10,7 +10,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
-import { ydocIdForAnnotation } from "@/lib/ydoc-names";
+import { ydocIdForAnnotation, ydocIdForDoc } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
@@ -85,6 +85,13 @@ export async function postAnnotation(opts: {
   // authors emailed and raisedAt stamped; nothing else about visibility or
   // the mark differs from a plain LIVE post.
   raise?: boolean;
+  // PLAN.md §12p/§13 — the ydoc_update the author's own view showed, string
+  // because BigInt doesn't survive a server-action boundary. Supplied by the
+  // inline popover only when it knows precisely (annotating while
+  // scrub-frozen, DocView threads DocScrubBar's own position down); every
+  // other caller (the bottom composer, a reply) omits it and falls back to
+  // the doc's own update-log tail below.
+  ydocUpdateId?: string;
 }): Promise<{ error?: string }> {
   const session = await auth();
   if (!session?.user) {
@@ -134,9 +141,25 @@ export async function postAnnotation(opts: {
     return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
 
+  // The client's own position when it knew one precisely; otherwise the
+  // doc's update-log tail as of right now. A malformed client value (should
+  // never happen, but this is a server action) falls through to the same
+  // tail lookup rather than failing the whole post over metadata.
+  let ydocUpdateId: bigint | null = null;
+  if (opts.ydocUpdateId !== undefined) {
+    try {
+      ydocUpdateId = BigInt(opts.ydocUpdateId);
+    } catch {
+      ydocUpdateId = null;
+    }
+  }
+  if (ydocUpdateId === null) {
+    ydocUpdateId = await ydocStore.maxUpdateId(ydocIdForDoc(annotation.docId));
+  }
+
   await prisma.annotation.update({
     where: { id: annotation.id },
-    data: opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" },
+    data: { ...(opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" }), ydocUpdateId },
   });
 
   // Only a root annotation ever carries a mark — a reply is just a comment

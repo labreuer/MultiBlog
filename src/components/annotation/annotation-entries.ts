@@ -35,6 +35,7 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
       createdAt: a.createdAt,
       deletedByUserId: a.deletedByUserId,
       commenterUserId: a.commenterUserId,
+      ydocUpdateId: a.ydocUpdateId,
       replies: [],
     });
   }

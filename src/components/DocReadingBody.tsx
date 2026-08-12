@@ -27,6 +27,12 @@ type Props = {
   // §12) — one of the two independent reasons this view freezes, the other
   // being a held selection, tracked below via `selection.pending`.
   scrubFrozen?: boolean;
+  // The ydoc_update id `scrubFrozen`'s position corresponds to, or null when
+  // not scrub-frozen (PLAN.md §12p/§13) — passed straight through to
+  // AnnotationPopover so an annotation posted from here records precisely
+  // what the author was looking at, rather than the server's own
+  // point-of-posting fallback.
+  scrubUpdateId?: string | null;
   // Clicking FROZEN — clears the scrub override and reports it back up so
   // DocView can also reset the scrub bar's own slider position.
   onReturnToLive?: () => void;
@@ -72,6 +78,7 @@ export default function DocReadingBody({
   overrideBodyJSON,
   userColor,
   scrubFrozen = false,
+  scrubUpdateId = null,
   onReturnToLive,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -162,6 +169,7 @@ export default function DocReadingBody({
           from={selection.pending.from}
           to={selection.pending.to}
           quotedText={selection.pending.quotedText}
+          ydocUpdateId={scrubUpdateId}
           onPosted={() => selection.clear()}
           onCancel={() => selection.clear()}
         />

@@ -24,6 +24,12 @@ export type AnnotationComment = {
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
+  // PLAN.md §12p/§13 — which ydoc_update this was posted against, stringified
+  // for the client boundary (BigInt isn't serializable). Metadata only — see
+  // the column's own comment in schema.prisma — not present until
+  // postAnnotation writes it, so null for a DRAFT and for anything posted
+  // before this column existed.
+  ydocUpdateId: string | null;
 };
 
 export type AnnotationThread = {
@@ -112,6 +118,7 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
         createdAt: a.createdAt.toISOString(),
         deletedByUserId: a.deletedByUserId,
         commenterUserId: a.userId,
+        ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
       })),
     });
   }

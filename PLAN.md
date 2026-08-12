@@ -2846,6 +2846,38 @@ host, and `applyAnnotationMark` treats a non-JSON 200 as `applied: false` rather
 instance of the pattern, which suggests the general rule is worth stating: **a best-effort call
 may swallow a failure's *effect on control flow*, never its *existence in the log*.**
 
+### 13n. `ydoc_update_id`: which revision an annotation was written against
+
+**Metadata, not a second anchor.** `Annotation.ydocUpdateId BigInt?` records which
+`ydoc_update` row was current when the annotation was posted — deliberately *not* the
+`anchor_from`/`anchor_to`/`quoted_text` trio COLLAB.md §7 ("anchoring to a scrub-reachable
+state") speculates as a full second anchor-resolution path with its own materialize-diff-remap
+resolver. That stays unbuilt. The in-ydoc `annotation` mark (§12i) is still the only thing that
+answers "where is this now" — `ydoc_update_id` only ever answers "what did the reader see when
+they wrote this," and drives one thing: a scrubber jump.
+
+**Written in `postAnnotation`** (`src/app/actions/annotations.ts`), for every posted
+annotation, root or reply — not gated to roots the way the mark itself is, since "what was I
+looking at" is meaningful for a reply too, even though a reply carries no anchor of its own.
+The inline popover on a scrub-frozen reading view supplies its own scrub position precisely
+(threaded `ScrubbedState.updateId` → `DocView` → `DocReadingBody` → `AnnotationPopover` →
+`LiveAnnotationComposer`); every other caller (the bottom composer, a reply, the doc editor once
+§18 gains one) omits it, and the action falls back to `ydocStore.maxUpdateId` — the log's tail
+at the moment of posting. BigInt never crosses a server-action boundary — stringified in
+`annotation-data.ts`'s `getDocAnnotationsAsThreads` before it ever reaches a client component.
+
+**Reading it back** is `AnnotationNode`'s "at this revision" control, beside the existing
+timestamp permalink — visible only when the annotation has an id *and* something is registered
+to seek with. That second condition is real, not decorative: `src/components/
+DocScrubContext.tsx` (`DocScrubProvider`/`useDocScrub`/`useRegisterDocScrubSeek`) is the same
+cross-sibling-subtree shape `AnnotationMoveProvider`/`DocPresenceProvider` already use, because
+`AnnotationSection` and `DocView` are siblings in `page.tsx`, not parent/child — and
+`DocScrubBar`'s `LoadedScrubBar` only has a `ydoc_update.id → slider index` mapping to register
+*after* its own replay has loaded, which (§12) doesn't happen until the reader has actually
+touched the scrub bar once. Before that, or on `/doc/[slug]/edit` (no `DocScrubProvider` at
+all), the control simply doesn't render — the same null-is-supported convention
+`useMarginNotes()` established, not a broken state to guard against.
+
 ## 14. Side-by-side docs, joined by doc links
 
 **Decided:** a third doc surface — two docs rendered in parallel columns at

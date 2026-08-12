@@ -33,7 +33,9 @@ don't move the column layout into JS to "simplify", that split is what keeps the
 server-rendered in the right place. The two sides resolve an anchor differently and can't
 share that step: a post comment reads its stored `anchorFrom`, a doc annotation has no
 stored offset at all and must be *found* in the live document
-(`src/lib/annotation-marks.ts`, §12i). Never position a doc annotation off `Doc.proseJson`
+(`src/lib/annotation-marks.ts`, §12i) — `Annotation.ydocUpdateId` (§12p/§13n) doesn't change
+this: it's which revision the annotation was written against, read only to drive a scrubber
+jump, never resolved as a position. Never position a doc annotation off `Doc.proseJson`
 — it's a store-debounce snapshot, stale by seconds while anyone is typing; it's fine as the
 *seed* for which cards start in the rail, and nothing more.
 How a remark stays attached to a passage while the passage moves — all four strategies this

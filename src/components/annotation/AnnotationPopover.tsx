@@ -18,6 +18,9 @@ type Props = {
   from: number;
   to: number;
   quotedText: string;
+  // PLAN.md §12p/§13 — the reading view's own scrub position when known
+  // precisely, threaded straight through to LiveAnnotationComposer.
+  ydocUpdateId?: string | null;
   onPosted: () => void;
   onCancel: () => void;
 };
@@ -38,6 +41,7 @@ export default function AnnotationPopover({
   from,
   to,
   quotedText,
+  ydocUpdateId = null,
   onPosted,
   onCancel,
 }: Props) {
@@ -85,6 +89,7 @@ export default function AnnotationPopover({
           anchorFrom={from}
           anchorTo={to}
           quotedText={quotedText}
+          ydocUpdateId={ydocUpdateId}
           onPosted={onPosted}
           onCancel={onCancel}
           onMoveToBottom={() => {

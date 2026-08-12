@@ -16,6 +16,10 @@ type Props = {
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
+  // PLAN.md §12p/§13 — passed straight to postAnnotation; absent from every
+  // caller but the inline popover on a scrub-frozen reading view, which is
+  // the only one that ever knows a position more precise than "just now".
+  ydocUpdateId?: string | null;
   onPosted: () => void;
   onCancel: () => void;
   // PLAN.md §13g — present only from the inline popover, absent from the
@@ -45,6 +49,7 @@ export default function LiveAnnotationComposer({
   anchorFrom,
   anchorTo,
   quotedText,
+  ydocUpdateId,
   onPosted,
   onCancel,
   onMoveToBottom,
@@ -134,7 +139,14 @@ export default function LiveAnnotationComposer({
     const result =
       visibility === "private"
         ? await saveDraftAnnotation(annotationId)
-        : await postAnnotation({ annotationId, anchorFrom, anchorTo, quotedText, raise: visibility === "raise" });
+        : await postAnnotation({
+            annotationId,
+            anchorFrom,
+            anchorTo,
+            quotedText,
+            raise: visibility === "raise",
+            ydocUpdateId: ydocUpdateId ?? undefined,
+          });
     setPending(false);
     if (result.error) {
       setError(result.error);
