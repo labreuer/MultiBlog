@@ -5408,10 +5408,10 @@ only the last of which needed new machinery:
   view answers "what is attached to the text in front of me", and an annotation with no
   mark has no answer to give there — where the reading view, which is also where
   annotations are *composed*, does have to account for it.
-- **Read-only cards.** `AnnotationNode` gained a `readOnly` prop that drops Reply and
-  Delete, inherited by replies so a subtree can't be half-interactive. Creating
-  annotations from the editor is not built (and is not wanted yet); a reply is a
-  creation.
+- ~~Read-only cards.~~ **As built (§18f): interactive.** `AnnotationNode`'s `readOnly`
+  prop is gone — this was its only caller — so Reply and Delete work from the editor the
+  same as from the reading view. Creating annotations from the editor is now built too;
+  see §18f.
 - **A window, not a list.** The doc body scrolls inside its own frame here
   (`EditorChrome.module.css`'s `.editorContent`), not with the page. That is the one
   structural difference: on a page-scrolled surface the article and the rail move
@@ -5481,3 +5481,57 @@ of which this section prejudges:
   already paid; nothing exercises it yet.
 - **340px is fixed.** The rail doesn't grow on a very wide viewport, so a 2560px screen
   gets more whitespace rather than roomier cards.
+
+### 18f. Annotating from the doc editor
+
+§18c's rail could show what had already been said; an author still had to leave for the
+reading view to say something new. Building the composing half required an anchor that
+survives the thing the reading view's own selection can't: a collaborator editing *inside*
+the range while the composer sits open. That is precisely COLLAB.md §5's Yjs relative
+positions, and precisely why they went unbuilt until now — the reading view has no
+`ySyncPlugin` binding to convert against, and the doc editor does.
+
+**The pieces, each new:**
+
+- `src/lib/yjs-relative-anchor.ts` — this codebase's first app-level `Y.RelativePosition`
+  code (`captureRelativeRange`/`resolveRelativeRange`). Everywhere else a relative
+  position is used, it's inside y-prosemirror's own internals (`CollaborationCaret`'s
+  awareness cursor). Never serialized, on purpose — see COLLAB.md §5 and the file's own
+  header for the `gc: true` reasoning that rules a persisted one out.
+- `src/lib/use-editor-annotation-widget.ts` — the editor's counterpart to
+  `useSelectionPopover`, same shape (capture/reresolve/clear/placement/popoverRef) but no
+  text-search fallback: `reresolve` either still resolves the captured range or the
+  content is gone, full stop. Adds `resolveAnchor`, called once at submit time rather than
+  composing time — the actual payoff, since it means the final anchor reflects whatever
+  concurrent typing happened while the composer was open, with no re-verification pass.
+- `provisionalPlacement` moved out of `use-selection-popover.ts` into
+  `popover-placement.ts` as a shared export — both hooks need the identical two-phase
+  bootstrap (a same-batch provisional placement so the popover exists in the DOM before
+  its real size can be measured), and it was pure geometry with no reason to live under
+  one hook's file.
+- `CollabEditorBody` gained `onSelectionUpdate`/`onContentUpdate` passthroughs (it had
+  neither — only the reading view's `useLiveDocContent` did) and registers
+  `PendingAnnotation`, the same view-only decoration the reading view uses, unconditionally
+  — harmless on every other embedder.
+- `AnnotationPopover`/`LiveAnnotationComposer` gained two optional props rather than a
+  parallel composer: `allowMoveToBottom` (false here — no bottom composer on this page)
+  and `resolveAnchor`. `LiveAnnotationComposer.handleSubmit` treats `resolveAnchor` as
+  authoritative over the literal `anchorFrom`/`anchorTo` props when present, including
+  posting document-level (not falling back to the stale literals) when it resolves to
+  null.
+- `DocEditor` wires the widget to `.mainColumn` as both the click-outside and
+  popover-bounds region (no wrapping div, so `DocEditor.module.css`'s flex-height chain
+  is untouched), gates it on `useMediaQuery("(min-width: 480px)")` — STYLE.md's existing
+  narrow breakpoint, chosen over the literal "iPhone 12 Pro Max portrait" (428px) spec so
+  this isn't a fifth undocumented width — and feeds `provider.awareness` into
+  `DocPresenceProvider`, which `edit/page.tsx` now wraps the page in (alongside
+  `AnnotationMoveProvider`, required because `AnnotationPopover` calls `useAnnotationMove()`
+  unconditionally regardless of `allowMoveToBottom`).
+- `EditorAnnotationRail`'s cards lost `readOnly` — Reply and Delete work there now, same
+  as the reading view. `AnnotationNode`'s `readOnly` prop is gone entirely (that rail was
+  its only caller).
+
+**Not built:** presence for an in-progress *widget* (as opposed to an already-open
+composer) — §13i's "someone is writing an annotation" line still only appears once a
+draft row exists, same gap noted there for the inline popover. A not-yet-posted selection
+has no stable identity to hang a presence marker on until then.

@@ -19,6 +19,20 @@ export type PopoverPlacement = { top: number; left: number };
 /** 0.5em against the root's 16px — §14i's offset from the selection itself. */
 export const POPOVER_GAP = 8;
 
+/**
+ * The preferred (unclamped) spot for a popover about to open at `anchor` —
+ * good enough to render at for one layout pass, which is what makes
+ * `placePopover`'s measured placement possible: the popover has to exist in
+ * the DOM before its size can be read. Deliberately skips clamping rather
+ * than guessing a size, so the only thing ever painted is either this or
+ * the fully-measured result. Shared by every popover that needs this
+ * two-phase bootstrap (useSelectionPopover, useEditorAnnotationWidget)
+ * rather than each re-deriving it.
+ */
+export function provisionalPlacement(anchor: PopoverAnchor, gap: number = POPOVER_GAP): PopoverPlacement {
+  return { top: anchor.bottom + gap, left: anchor.left + gap };
+}
+
 export function placePopover(
   anchor: PopoverAnchor,
   size: PopoverSize,

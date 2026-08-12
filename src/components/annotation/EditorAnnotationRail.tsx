@@ -18,7 +18,7 @@ type Props = {
 
 // Annotations shown alongside the doc *editor* (PLAN.md §18c), so an author
 // revising a passage can see what has already been said about it without
-// leaving for the reading view. Three deliberate differences from
+// leaving for the reading view. Two deliberate differences from
 // AnnotationList, which serves the reading view:
 //
 // - **Presently-anchored only, and nothing below.** No general-discussion
@@ -26,9 +26,6 @@ type Props = {
 //   list under the editor at any width. The editing view answers "what is
 //   attached to the text in front of me", and an annotation with no mark has
 //   no answer to give here.
-// - **Read-only cards.** No Reply, no Delete — see AnnotationNode's readOnly.
-//   Creating annotations from the editor is not built yet, and a reply is a
-//   creation.
 // - **A window, not a list.** The editor's body scrolls inside its own frame
 //   (EditorChrome.module.css's .editorContent) rather than with the page, so
 //   this rail is a fixed-height viewport onto the visible text: cards track
@@ -97,7 +94,7 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
             context={null}
             color={entry.color}
           />
-          <AnnotationNode annotation={entry.root} docId={docId} readOnly />
+          <AnnotationNode annotation={entry.root} docId={docId} />
         </div>
       ))}
     </div>

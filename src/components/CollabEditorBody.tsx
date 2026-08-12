@@ -9,6 +9,7 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { Annotation } from "@/lib/annotation-extension";
+import { PendingAnnotation } from "@/lib/pending-annotation-extension";
 import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
@@ -46,6 +47,16 @@ type Props = {
   // anchors the moment anyone typed) but paints over its highlight the same
   // way the read column does.
   suppressAnnotations?: boolean;
+  // PLAN.md §18/COLLAB.md §5 — the doc editor's own selection-to-annotation
+  // widget (useEditorAnnotationWidget), wired straight to useEditor's own
+  // selection hook. No default: every other embedder (post editors,
+  // /side-by-side, /ydoc-debug) simply never had one.
+  onSelectionUpdate?: (editor: Editor) => void;
+  // Fired synchronously on every local or remote transaction that changes
+  // the doc — separate from the debounced author-stats walk below, since a
+  // widget repositioning off a stale pixel offset for 400ms would visibly
+  // lag the text it's supposed to track.
+  onContentUpdate?: (editor: Editor) => void;
 };
 
 // A thin colored bar rather than the library default's always-visible name
@@ -78,6 +89,8 @@ export default function CollabEditorBody({
   onAuthorStats,
   ariaLabel = "Post body",
   suppressAnnotations = false,
+  onSelectionUpdate,
+  onContentUpdate,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
@@ -97,6 +110,10 @@ export default function CollabEditorBody({
       // correctly here too (PLAN.md §12i) — posts never get one applied,
       // and an unused mark type in the schema costs nothing.
       Annotation,
+      // View-only decoration (PLAN.md §13f) — never touches the ydoc, so
+      // registering it unconditionally doesn't drift this schema from the
+      // reading view's. Harmless on embedders with no selection widget.
+      PendingAnnotation,
     ],
     // Matches the title field's own aria-label/role. Two contenteditables
     // share this page, and without distinct accessible names the only thing
@@ -105,6 +122,7 @@ export default function CollabEditorBody({
     editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {
+      onContentUpdate?.(e);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         const { authorIds: ids, charsByAuthor } = perfMeasure("author-highlight walk", () =>
@@ -114,6 +132,7 @@ export default function CollabEditorBody({
         setAuthorCharCounts(charsByAuthor);
       }, AUTHOR_STATS_DEBOUNCE_MS);
     },
+    onSelectionUpdate: ({ editor: e }) => onSelectionUpdate?.(e),
   });
 
   useEffect(() => {

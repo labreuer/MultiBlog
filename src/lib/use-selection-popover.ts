@@ -4,25 +4,13 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "re
 import type { Editor } from "@tiptap/react";
 import { setPendingAnnotation } from "./pending-annotation-extension";
 import { findQuoteOccurrences } from "./quote-occurrences";
-import { placePopover, popoverBoundsFor, POPOVER_GAP, type PopoverPlacement } from "./popover-placement";
+import { placePopover, popoverBoundsFor, provisionalPlacement, type PopoverPlacement } from "./popover-placement";
 
 export type PendingSelection = {
   from: number;
   to: number;
   quotedText: string;
 };
-
-/**
- * The preferred (unclamped) spot for a popover about to open at `pos` — good
- * enough to render at for one layout pass, which is what makes the measured
- * placement possible: the popover has to exist in the DOM before its size can
- * be read. Deliberately skips clamping rather than guessing a size, so the
- * only thing ever painted is either this or the fully-measured result.
- */
-function provisionalPlacement(liveEditor: Editor, pos: number): PopoverPlacement {
-  const coords = liveEditor.view.coordsAtPos(pos);
-  return { top: coords.bottom + POPOVER_GAP, left: coords.left + POPOVER_GAP };
-}
 
 export type SelectionPopover = {
   // No top/left on the selection itself — where its popover sits is derived
@@ -94,7 +82,7 @@ export function useSelectionPopover({
   }, [pending]);
 
   function openAt(liveEditor: Editor, pos: number) {
-    setPlacement(provisionalPlacement(liveEditor, pos));
+    setPlacement(provisionalPlacement(liveEditor.view.coordsAtPos(pos)));
   }
 
   function clear(liveEditor?: Editor | null) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
@@ -8,14 +8,25 @@ import type { Editor } from "@tiptap/react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
 import { UNTITLED_DOC } from "@/lib/doc-title";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { useEditorAnnotationWidget } from "@/lib/use-editor-annotation-widget";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
 import DocSettingsPanel, { type EligibleUser } from "./DocSettingsPanel";
 import EditorAnnotationRail from "./annotation/EditorAnnotationRail";
+import AnnotationPopover from "./annotation/AnnotationPopover";
+import { useDocPresence } from "./annotation/doc-presence-context";
 import type { AnnotationEntry } from "./annotation/AnnotationList";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import styles from "./DocEditor.module.css";
+
+// PLAN.md §18/COLLAB.md §5 — below this width there's nowhere sensible to
+// float the selection widget (no gutter, no room beside the text). Reuses
+// STYLE.md's existing 480px breakpoint rather than the literal "iPhone 12
+// Pro Max portrait" (428px) the feature was specced against, which would be
+// a fifth undocumented width for a difference nothing depends on.
+const ANNOTATION_WIDGET_MEDIA_QUERY = "(min-width: 480px)";
 
 type Props = {
   docId: string;
@@ -71,6 +82,21 @@ export default function DocEditor({
   // annotation rail is a sibling of the editor, not a child, so this is how
   // it gets something to measure against.
   const [bodyEditor, setBodyEditor] = useState<Editor | null>(null);
+  // A ref alongside the state above — useEditorAnnotationWidget's handlers
+  // run off editor events (outside React's render cycle) and would
+  // otherwise close over whichever `bodyEditor` was current when first
+  // wired, same reason use-live-doc-content.ts's editorRef exists.
+  const editorRef = useRef<Editor | null>(null);
+  useEffect(() => {
+    editorRef.current = bodyEditor;
+  }, [bodyEditor]);
+  // The click-outside-closes and popover-bounds region for the selection
+  // widget — .mainColumn rather than a wrapping div, so nothing here alters
+  // DocEditor.module.css's flex-height chain (STYLE.md's flex-grow trap).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { setAwareness } = useDocPresence();
+  const widget = useEditorAnnotationWidget({ editorRef, containerRef, userColor });
+  const wideEnoughForWidget = useMediaQuery(ANNOTATION_WIDGET_MEDIA_QUERY);
 
   // No separate `ready` flag to gate on, unlike the reading views: this
   // editor is visible from the moment it exists — there's no static copy for
@@ -146,9 +172,28 @@ export default function DocEditor({
     };
   }, [docId, ydoc]);
 
+  // PLAN.md §13i — publishes this connection's awareness onto
+  // DocPresenceProvider (edit/page.tsx wraps DocEditor in one, alongside
+  // AnnotationMoveProvider), the same channel the reading view's read-only
+  // tap already exposes there, so "someone is writing an annotation" works
+  // between the editor and readers without a second channel.
+  useEffect(() => {
+    setAwareness(provider?.awareness ?? null);
+    return () => setAwareness(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setAwareness is a context setter (stable)
+  }, [provider]);
+
+  // Resolved fresh for display (the "Annotating: ..." header and the
+  // fallback anchorFrom/anchorTo AnnotationPopover never actually falls back
+  // to here, since resolveAnchor below is always supplied) — not read from
+  // any state the widget hook holds, for the same reason submit time
+  // resolves fresh: showing a stale position while someone else edits above
+  // the selection would be exactly the bug Phase 3 exists to avoid.
+  const widgetAnchor = widget.pending && bodyEditor ? widget.resolveAnchor(bodyEditor) : null;
+
   return (
     <div className={styles.container}>
-      <div className={styles.mainColumn}>
+      <div className={styles.mainColumn} ref={containerRef}>
         {provider ? (
           <CollabTitleField
             ydoc={ydoc}
@@ -194,9 +239,26 @@ export default function DocEditor({
             editable={!deleted}
             onEditorReady={setBodyEditor}
             onAuthorStats={setAuthorStats}
+            onSelectionUpdate={widget.capture}
+            onContentUpdate={widget.reresolve}
           />
         ) : (
           <p>Connecting to live editor…</p>
+        )}
+        {wideEnoughForWidget && widget.pending && widget.placement && widgetAnchor && (
+          <AnnotationPopover
+            elementRef={widget.popoverRef}
+            docId={docId}
+            top={widget.placement.top}
+            left={widget.placement.left}
+            from={widgetAnchor.from}
+            to={widgetAnchor.to}
+            quotedText={widget.pending.quotedText}
+            allowMoveToBottom={false}
+            resolveAnchor={() => (editorRef.current ? widget.resolveAnchor(editorRef.current) : null)}
+            onPosted={() => widget.clear()}
+            onCancel={() => widget.clear()}
+          />
         )}
         {error && <p className={styles.errorMessage}>{error}</p>}
         <p className={styles.docNote}>

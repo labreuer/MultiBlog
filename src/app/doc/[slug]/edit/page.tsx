@@ -6,6 +6,8 @@ import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
 import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
+import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
+import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import DocEditor from "@/components/DocEditor";
 
 export default async function EditDocPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -65,21 +67,33 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
   const annotations = buildAnnotationEntries(threads).filter((entry) => entry.quotedText !== "");
 
   return (
-    <MarginNotesProvider>
-      <DocEditor
-        docId={doc.id}
-        slug={doc.slug}
-        initialTitle={doc.title}
-        visibility={doc.visibility}
-        createdAt={doc.createdAt}
-        userId={session.user.id}
-        userName={session.user.name ?? session.user.email ?? "Anonymous"}
-        userColor={session.user.color}
-        authorIds={doc.authors.map((a) => a.userId)}
-        eligibleUsers={eligibleUsers}
-        initialDeleted={doc.deletedByUserId !== null}
-        annotations={annotations}
-      />
-    </MarginNotesProvider>
+    // AnnotationMoveProvider: required by AnnotationPopover's own
+    // useAnnotationMove() call, even though DocEditor always passes it
+    // allowMoveToBottom={false} — there is no bottom composer on this page
+    // for a draft to move to, but the hook throws outside a provider
+    // regardless of whether that path is ever reached.
+    // DocPresenceProvider: PLAN.md §13i's presence channel, fed
+    // provider.awareness by DocEditor itself here (the reading view instead
+    // feeds it its own read-only tap) — same channel either way.
+    <DocPresenceProvider>
+      <AnnotationMoveProvider>
+        <MarginNotesProvider>
+          <DocEditor
+            docId={doc.id}
+            slug={doc.slug}
+            initialTitle={doc.title}
+            visibility={doc.visibility}
+            createdAt={doc.createdAt}
+            userId={session.user.id}
+            userName={session.user.name ?? session.user.email ?? "Anonymous"}
+            userColor={session.user.color}
+            authorIds={doc.authors.map((a) => a.userId)}
+            eligibleUsers={eligibleUsers}
+            initialDeleted={doc.deletedByUserId !== null}
+            annotations={annotations}
+          />
+        </MarginNotesProvider>
+      </AnnotationMoveProvider>
+    </DocPresenceProvider>
   );
 }

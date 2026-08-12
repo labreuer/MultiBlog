@@ -20,6 +20,13 @@ type Props = {
   // caller but the inline popover on a scrub-frozen reading view, which is
   // the only one that ever knows a position more precise than "just now".
   ydocUpdateId?: string | null;
+  // PLAN.md §18/COLLAB.md §5 — present only from the doc editor's own
+  // selection widget. When set, this is authoritative over anchorFrom/
+  // anchorTo at submit time: those two are what the selection was when
+  // composing *started*, exactly the stale value Phase 3 exists to stop
+  // trusting. A null result (the anchored text is gone) posts document-level
+  // rather than falling back to the stale offsets.
+  resolveAnchor?: () => { from: number; to: number } | null;
   onPosted: () => void;
   onCancel: () => void;
   // PLAN.md §13g — present only from the inline popover, absent from the
@@ -50,6 +57,7 @@ export default function LiveAnnotationComposer({
   anchorTo,
   quotedText,
   ydocUpdateId,
+  resolveAnchor,
   onPosted,
   onCancel,
   onMoveToBottom,
@@ -136,13 +144,20 @@ export default function LiveAnnotationComposer({
   async function handleSubmit() {
     setPending(true);
     setError(null);
+    // resolveAnchor, when present, is authoritative — see its own prop
+    // comment. `resolved` undefined (no resolveAnchor at all) falls back to
+    // the literal props; `resolved` null (resolveAnchor ran and found
+    // nothing) posts document-level rather than reusing the stale literals.
+    const resolved = resolveAnchor?.();
+    const finalAnchorFrom = resolveAnchor ? resolved?.from : anchorFrom;
+    const finalAnchorTo = resolveAnchor ? resolved?.to : anchorTo;
     const result =
       visibility === "private"
         ? await saveDraftAnnotation(annotationId)
         : await postAnnotation({
             annotationId,
-            anchorFrom,
-            anchorTo,
+            anchorFrom: finalAnchorFrom,
+            anchorTo: finalAnchorTo,
             quotedText,
             raise: visibility === "raise",
             ydocUpdateId: ydocUpdateId ?? undefined,

@@ -21,6 +21,16 @@ type Props = {
   // PLAN.md §12p/§13 — the reading view's own scrub position when known
   // precisely, threaded straight through to LiveAnnotationComposer.
   ydocUpdateId?: string | null;
+  // False on the doc editor (PLAN.md §18/COLLAB.md §5) — there is no bottom
+  // composer there for a draft to move to.
+  allowMoveToBottom?: boolean;
+  // PLAN.md §18/COLLAB.md §5 — present only from the doc editor's own
+  // selection widget, which captured `from`/`to` as Y.RelativePositions
+  // rather than trusting the offsets above to still be right by the time
+  // the reader clicks Post. Threaded straight through to
+  // LiveAnnotationComposer, which is where it actually matters (submit
+  // time, not composer-open time).
+  resolveAnchor?: () => { from: number; to: number } | null;
   onPosted: () => void;
   onCancel: () => void;
 };
@@ -42,6 +52,8 @@ export default function AnnotationPopover({
   to,
   quotedText,
   ydocUpdateId = null,
+  allowMoveToBottom = true,
+  resolveAnchor,
   onPosted,
   onCancel,
 }: Props) {
@@ -90,12 +102,17 @@ export default function AnnotationPopover({
           anchorTo={to}
           quotedText={quotedText}
           ydocUpdateId={ydocUpdateId}
+          resolveAnchor={resolveAnchor}
           onPosted={onPosted}
           onCancel={onCancel}
-          onMoveToBottom={() => {
-            setMovedDraft({ id: draftId, anchorFrom: from, anchorTo: to, quotedText });
-            onCancel();
-          }}
+          onMoveToBottom={
+            allowMoveToBottom
+              ? () => {
+                  setMovedDraft({ id: draftId, anchorFrom: from, anchorTo: to, quotedText });
+                  onCancel();
+                }
+              : undefined
+          }
         />
       ) : (
         <div className={composerStyles.buttonRow}>
@@ -107,9 +124,11 @@ export default function AnnotationPopover({
           >
             {pending ? "Opening…" : "Annotate"}
           </button>
-          <button type="button" onClick={handleMoveToBottom} disabled={pending} className={composerStyles.moveToBottom}>
-            Move to bottom ⤓
-          </button>
+          {allowMoveToBottom && (
+            <button type="button" onClick={handleMoveToBottom} disabled={pending} className={composerStyles.moveToBottom}>
+              Move to bottom ⤓
+            </button>
+          )}
           <button type="button" onClick={onCancel} className={composerStyles.cancel}>
             Cancel
           </button>

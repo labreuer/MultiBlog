@@ -35,13 +35,6 @@ type Props = {
   annotation: AnnotationNodeData;
   docId: string;
   depth?: number;
-  // Drops every action (Reply, Delete) and shows the annotation as text
-  // alone. Set by the doc editor's rail (PLAN.md §18c), where annotations are
-  // shown for orientation while writing but not composed: a reply is itself a
-  // creation, and the editing view deliberately opens no path to one yet.
-  // Inherited by replies rather than re-passed, so a subtree can't be
-  // half-interactive.
-  readOnly?: boolean;
 };
 
 // A permalink id for the annotation — down to the second is enough that a
@@ -66,7 +59,7 @@ export function hasNonDeletedDescendant(annotation: AnnotationNodeData): boolean
 
 // The doc-side sibling of CommentNode (PLAN.md §13c) — un-shared from it now
 // that an annotation and a post comment no longer share a rendering problem.
-export default function AnnotationNode({ annotation, docId, depth = 0, readOnly = false }: Props) {
+export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
@@ -100,7 +93,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0, readOnly 
   }
 
   const isOwnAnnotation = viewerId !== null && annotation.commenterUserId === viewerId;
-  const canDelete = !readOnly && (isAdmin || isOwnAnnotation);
+  const canDelete = isAdmin || isOwnAnnotation;
   // Admin power being used on someone else's annotation gets a visibly
   // different (maroon) button; deleting your own, even as an admin, is just
   // the normal action.
@@ -156,7 +149,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0, readOnly 
             )}
           </p>
           <div>{annotation.body}</div>
-          {!readOnly && !posted && !replyDraftId && (
+          {!posted && !replyDraftId && (
             <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
               {replyPending ? "Opening…" : "Reply"}
             </button>
@@ -202,7 +195,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0, readOnly 
         />
       )}
       {annotation.replies.map((reply) => (
-        <AnnotationNode key={reply.id} annotation={reply} docId={docId} depth={depth + 1} readOnly={readOnly} />
+        <AnnotationNode key={reply.id} annotation={reply} docId={docId} depth={depth + 1} />
       ))}
     </div>
   );

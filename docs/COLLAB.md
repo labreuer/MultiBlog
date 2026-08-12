@@ -2,7 +2,7 @@
 
 How a remark stays attached to the passage it is about, while the passage moves.
 
-This codebase answers that question **four different ways**, on four different surfaces, and
+This codebase answers that question **five different ways**, on five different surfaces, and
 the differences are deliberate rather than accidental. This file is where the mechanisms and
 their trade-offs live; PLAN.md keeps the chronology and the build order and points here.
 
@@ -11,9 +11,9 @@ their trade-offs live; PLAN.md keeps the chronology and the build order and poin
 - Present strategies: [post comments](#1-post-comments--stored-offsets-remapped-on-publish) ·
   [doc annotations](#2-doc-annotations--a-mark-inside-the-ydoc) ·
   [doc links](#3-doc-links--an-external-blob-repaired-by-search) ·
-  [the in-progress selection](#4-the-in-progress-selection--offsets-plus-a-re-resolve)
-- Not built: [relative positions](#5-yjs-relative-positions) ·
-  [awareness-carried anchors](#6-anchors-carried-in-the-awareness-channel) ·
+  [the in-progress selection, reading view](#4-the-in-progress-selection--offsets-plus-a-re-resolve) ·
+  [the in-progress selection, doc editor](#5-yjs-relative-positions)
+- Not built: [awareness-carried anchors](#6-anchors-carried-in-the-awareness-channel) ·
   [scrub-state anchoring](#7-anchoring-to-a-scrub-reachable-state) ·
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
 - [Comparison](#comparison) · [Choosing](#choosing)
@@ -298,10 +298,6 @@ prosemirror-model internals.
 The direction that does not have this problem is [§5](#5-yjs-relative-positions): stop naming
 the position with text at all.
 
----
-
-# Strategies not built
-
 ## 5. Yjs relative positions
 
 **What it is.** `Y.RelativePosition` names a specific CRDT item — which client inserted this run
@@ -316,35 +312,54 @@ permanent and the sequence is a total order over items, so the reference never n
 - **Delete the anchored item** — it becomes a tombstone and the position still resolves to where
   the tombstone sits, until GC collects it.
 
-**This is already running in this codebase**, for carets. `y-prosemirror` encodes each awareness
-cursor as `absolutePositionToRelativePosition(...)`, which bottoms out in
+**This was already running in this codebase**, for carets, before any of the below — `y-prosemirror`
+encodes each awareness cursor as `absolutePositionToRelativePosition(...)`, which bottoms out in
 `Y.createRelativePositionFromTypeIndex` (`node_modules/y-prosemirror/dist/y-prosemirror.cjs`
 :362, :1426). Nothing about a collaborator's caret is stored in the document; it points *at* the
 document's internal CRDT identity, which is exactly what an offset and a text search cannot do.
 
-**Why it was rejected for annotation anchors, and why that does not settle the question.**
+**Built (PLAN.md §18, doc editor selection widget) for the *transient* case — the persisted-anchor
+rejection below is unchanged.** `src/lib/yjs-relative-anchor.ts` is this codebase's first
+app-level `Y.RelativePosition` code (everything above ran entirely inside y-prosemirror's own
+internals). `captureRelativeRange`/`resolveRelativeRange` back the doc editor's own
+selection-to-annotation widget (`use-editor-annotation-widget.ts`, `CollabEditorBody.tsx`): the
+selection is captured as a relative range the instant it's made, and resolved fresh against the
+live document both on every remote/local transaction (for repositioning the widget) and again at
+submit time (for the mark actually applied) — no text-search fallback, and, per the CRDT
+property above, correct even when a collaborator edits *inside* the selected range while the
+composer sits open, which no offset-based scheme in this file can do.
+
+**Why it was rejected for a *persisted* annotation anchor, and why that still holds.**
 [§12h's GC decision](#why-gc-true-and-what-it-rules-out) rules it out for a **persisted** anchor:
 a durable relative position needs `gc: false`, and a living document would accumulate a tombstone
-per deletion forever. That reasoning is sound and still holds. It does **not** transfer to a
-selection that lives for seconds in one client's memory: the GC hazard requires the anchored item
-to be deleted *and* collected, and if the reader's selected text was deleted, closing the
-composer is the correct outcome anyway.
+per deletion forever. That reasoning is sound and still holds — the doc editor's own widget never
+serializes a `RelativeRange` anywhere, exactly because of it (see the file's own header comment).
+It does **not** transfer to a selection that lives for seconds in one client's memory: the GC
+hazard requires the anchored item to be deleted *and* collected, and if the reader's selected
+text was deleted, closing the composer is the correct outcome anyway.
 
-**The prerequisite, which is the actual work.** The reading view pushes remote content in with
-`setContent(…, { emitUpdate: false })` — a wholesale document replace — so `tr.mapping` is
-discarded on every update. Converting a ProseMirror position to a Yjs index needs y-prosemirror's
-`ProsemirrorMapping`, which only exists when `ySyncPlugin` is installed, i.e. when the editor is
-bound through `Collaboration`. So "keep `setContent`, just store a `RelativePosition`" is not a
-cheaper middle road; it collapses into the same work. Worth writing down so it is not
-re-proposed.
+**The prerequisite, and why it splits the two reading surfaces from the editor.** Converting a
+ProseMirror position to a Yjs index needs y-prosemirror's `ProsemirrorMapping`, which only exists
+when `ySyncPlugin` is installed, i.e. when the editor is bound through `Collaboration`. The doc
+*editor* (`CollabEditorBody.tsx`) is — hence the widget above. **Neither reading view is.** Both
+push remote content in with `setContent(…, { emitUpdate: false })` — a wholesale document replace
+— which discards ProseMirror's own `tr.mapping` on every update, so "keep `setContent`, just
+store a `RelativePosition`" is not a cheaper middle road there; it collapses into the same work
+§4's `reresolve` already does. Worth stating plainly so it is not re-proposed for either reading
+surface as a small patch.
 
 Binding the reading editor (`editable: false`, no `CollaborationCaret`) would make both the
-pending decoration and the selection map automatically and retire `reresolve` entirely. **But
-`setContent` is load-bearing:** `DocScrubBar` pushes historical bodies into that same editor, and
-you cannot do that into a `Collaboration`-bound editor without writing history into the live
-shared document. Decoupling the scrub preview onto its own editor instance is step one, not an
-afterthought. (PLAN.md §12g's "no remote carets for a reader" becomes true by omission rather
-than by construction — a documentation change, not a behavioural one.)
+pending decoration and the selection map automatically and retire `reresolve` entirely — still
+not done, still blocked on the same conflict: **`setContent` is load-bearing there.**
+`DocScrubBar` pushes historical bodies into that same editor, and you cannot do that into a
+`Collaboration`-bound editor without writing history into the live shared document. Decoupling
+the scrub preview onto its own editor instance is step one, not an afterthought. (PLAN.md §12g's
+"no remote carets for a reader" becomes true by omission rather than by construction — a
+documentation change, not a behavioural one.)
+
+---
+
+# Strategies not built
 
 ## 6. Anchors carried in the awareness channel
 
