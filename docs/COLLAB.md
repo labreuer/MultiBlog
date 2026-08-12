@@ -480,11 +480,8 @@ original operation. Two consequences:
   on demand only.
 - **"Who changed it?"** Yjs items carry a `clientID` and `ydoc_update` rows carry `created_at`, so
   a detach notice could say *Alice edited this passage 10 minutes ago* rather than *the text
-  changed*. **Caveat, and it is a real gap:** `ydoc_update` has **no `user_id` column** —
-  attribution lives in the Yjs `clientID` inside the update bytes, and nothing persists a
-  clientID → user mapping. The `authorHighlight` marks in the document are a separate, already-
-  present attribution channel that does carry a real user id; whether to join the two, or add a
-  column, is unresolved.
+  changed*. The clientID → user mapping this needs already exists — see
+  [Attribution](#attribution-and-why-ydoc_update-has-no-user_id) below.
 - **Un-detaching.** Because detachment could be *derived* from the log rather than latched, an
   author who deletes an annotated sentence and immediately undoes it need not have cost the
   annotation its anchor. This is the same lesson as §5's `DETACHED`-as-terminal bug, reached from
@@ -502,6 +499,108 @@ original operation. Two consequences:
   is fine for repair and forensics, and wrong for per-keystroke resolution — which argues for
   keeping a cheap live anchor (a mark) *and* a version-stamped one for repair, rather than
   replacing one with the other.
+
+### Attribution, and why `ydoc_update` has no `user_id`
+
+Three attribution channels already exist, in increasing precision:
+
+1. **`Doc.updatedByUserId`** — "who touched it last", for a listing. PLAN.md §16o.
+2. **The `clients` `Y.Map`** — a top-level `String(clientID) → userId` map kept *inside* each
+   document, written server-side by `attributeUpdate` (`server/ydoc-hooks.ts`) once per client,
+   from the identity `onAuthenticate` verified. This is the clientID → user mapping §8 needs.
+3. **`authorHighlight` marks** — exact, per character, carried in the document itself.
+
+**Why there is no `ydoc_update.user_id`, and why it is not the same objection as §16o's.**
+`Doc.updatedByUserId`'s imprecision is **temporal**: the store hook is debounced, so several
+authors' edits coalesce into one flush and it records whichever connection was last. Bounded,
+documented, and the column is defined to accept it.
+
+A per-row column would not inherit *that* — `ydoc_update` rows are appended in `onChange`, per
+update, un-debounced, each with one connection's verified identity to hand. It would inherit a
+**compositional** ambiguity instead, which is worse: one update's bytes can carry items authored
+by several clients. `Y.parseUpdateMeta(update).from` is a *set*, and a client restoring content
+from IndexedDB or reconnecting after offline work legitimately sends a state diff containing
+items other clients authored. `attributeUpdate` already declines to guess when `from.size !== 1`;
+a single FK column would have to pick one and be wrong — while *looking* like an audit trail, and
+so inviting exactly the queries it cannot answer. It would also be a lossy cache of something the
+bytes already answer exactly, and per row.
+
+#### The `clients` map: concurrency
+
+**It adds almost nothing to what Hocuspocus already handles, and that is structural rather than
+lucky.**
+
+- **No key contention, ever.** A key is a clientID; a clientID belongs to exactly one `Y.Doc`
+  instance; only that connection's server-side write ever touches it. The classic `Y.Map` hazard
+  — two writers on one key, last-write-wins silently discarding one — cannot arise.
+- **The write is server-authored inside `document.transact()`** on the same Hocuspocus `Document`
+  every client update lands on, so it serialises through Yjs's existing machinery. No new lock,
+  no new ordering rule, no second write path.
+- **A sibling root type, which is a shape already in use** — the title fragment (§3d) is the same
+  pattern. TipTap's `Collaboration` binds one named fragment, so the map is invisible to the
+  editor schema, and it is replicated, persisted and conflict-resolved by the identical code path
+  as the text.
+
+Four things that *are* new to this design. Three are closed; the third is not, and is the sharpest
+edge here:
+
+1. **A self-triggering loop** — writing to the doc fires `onChange`. Closed by
+   `if (!connection) return`, since a server-side write has no connection. Worth knowing because
+   the obvious extension (write on awareness instead of on change) would reopen it.
+2. **Read-before-write across an await** — there is none: the `has` / `transact` pair is
+   synchronous, and the re-check inside the transaction is belt-and-braces rather than load-bearing.
+3. **Entries must never be deleted.** Nothing states this as an invariant and it is easy to
+   violate. `attachIndexeddb` means a tab can hold updates authored under a *previous* `Y.Doc`'s
+   clientID; a reload mints a new clientID while the old content keeps the old one. A future
+   "prune stale clients" compaction would silently destroy attribution for all historical content,
+   and the damage would surface only in a backfill or a forensic query, long afterwards.
+4. **Ordering versus content** — a consumer materialising at exactly the update that introduced a
+   client can see content whose clientID is not yet in the map. Tolerate it, don't assume it away;
+   `scripts/doc/backfill-updated-by.ts` already refuses to guess rather than falling back.
+
+Note what the map deliberately does *not* record: `attributeUpdate` only fires on a doc-changing
+update, so a pure reader never gets an entry, and neither does a server-applied annotation mark.
+It is "who has edited", not "who has connected".
+
+#### The `clients` map: performance
+
+**The hot path is free.** Steady state per update is `socketClientIds.get(socketId)` then
+`clients.has(key)` — two hash lookups, then return. The write happens at most once per
+(connection, document). Two costs sit slightly off that path: the fallback when awareness has not
+yet been seen for a socket calls `Y.parseUpdateMeta(update)`, which is O(update size) per update
+until the first awareness message arrives; and `isNewDistinctUser` is `[...clients.values()]`,
+O(map size), but only on the write path.
+
+**The real cost is the sync payload, and it is larger than it looks.** Measured (Yjs 13,
+`gc: true`, a stringified clientID key and a cuid value):
+
+| entries | map bytes | per entry |
+| --- | --- | --- |
+| 100 | 4.9 KB | 49 B |
+| 1,000 | 49 KB | 49 B |
+| 5,000 | 245 KB | 49 B |
+| 20,000 | 980 KB | 49 B |
+
+Exactly linear at **49 B per entry**. For scale, a 20,000-character body encodes to ~20 KB — so
+**about 400 accumulated clientIDs already match the size of the document they attribute**, and
+this rides in the `ydoc` blob every reader downloads on every cold open, and in every
+`ydoc_snapshot`.
+
+Growth is per *editing session*: a new `Y.Doc` mints a new random clientID on every reload or
+reconnect, but only an editing client is ever recorded. Five authors editing three times a day
+for a year is roughly 3,700 entries, about 180 KB. Overwriting a key does **not** accumulate —
+measured, 5,000 overwrites of one key encode to 60 B total, because superseded values are
+collected. Only distinct keys persist, which is precisely the growth axis above.
+
+**If the payload ever matters**, the natural alternative is a Postgres table
+`ydoc_client(ydoc_id, client_id, user_id, first_seen)`: same no-contention property (a unique
+key), same append-only semantics, zero sync payload, at the price of a second write path. The
+in-document version buys two things over it — it needs no separate write, riding a transaction
+that is already happening; and it is *as of* any materialised historical state for free. The
+second advantage is smaller than it sounds, because entries are immutable: "the mapping as of
+update N" and "the current mapping restricted to clients present at N" are the same set. Not a
+reason to move it today, but the direction to move if a long-lived document's cold open ever
+starts to hurt.
 
 ---
 
