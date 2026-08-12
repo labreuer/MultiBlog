@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "./AnnotationNode";
 import QuoteThreadHeader from "../QuoteThreadHeader";
@@ -30,6 +31,14 @@ type Props = {
 // to un-share.
 export default function AnnotationList({ entries, docId }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
+  // Seeded from the server's snapshot answer — `quotedText` is non-empty
+  // exactly when `Doc.proseJson` still carried the mark at the last store
+  // debounce — then corrected by the live scan below. Seeding rather than
+  // starting empty keeps the first anchored render right for the common case;
+  // trusting it beyond that is what §18b says not to do.
+  const [anchoredIds, setAnchoredIds] = useState<Set<string>>(
+    () => new Set(entries.filter((entry) => entry.quotedText !== "").map((entry) => entry.root.id)),
+  );
 
   // Puts a pseudo-border next to whatever annotation the page loaded
   // pointing at (its timestamp permalink hash), and keeps it in sync as the
@@ -62,8 +71,8 @@ export default function AnnotationList({ entries, docId }: Props) {
   // above it, instead of pointing where the last store debounce saw it.
   //
   // A thread whose mark is gone (§12h — degraded to document-level) simply
-  // isn't in the map, and lands at the end of the rail with the
-  // general-discussion threads, which is where it already sorted.
+  // isn't in the map, which drops it out of the rail and back into the list
+  // below, alongside the general-discussion threads.
   const resolveTops = useCallback(
     (editor: Editor) => {
       const ranges = collectAnnotationMarkRanges(editor.state.doc);
@@ -83,13 +92,52 @@ export default function AnnotationList({ entries, docId }: Props) {
     [sorted],
   );
 
-  const ids = useMemo(() => sorted.map((entry) => entry.root.id), [sorted]);
-  const { anchored, containerRef } = useMarginNotesLayout({ resolveTops, ids });
+  const railIds = useMemo(
+    () => sorted.filter((entry) => anchoredIds.has(entry.root.id)).map((entry) => entry.root.id),
+    [sorted, anchoredIds],
+  );
+
+  const { anchored, containerRef, railElement } = useMarginNotesLayout({
+    resolveTops,
+    ids: railIds,
+    onAnchoredIdsChange: setAnchoredIds,
+  });
+
+  const inRail = (entry: AnnotationEntry) => anchored && anchoredIds.has(entry.root.id);
+  const belowEntries = sorted.filter((entry) => !inRail(entry));
+  const railEntries = sorted.filter(inRail);
+
+  const renderEntry = (entry: AnnotationEntry) => {
+    // A deleted root with no live descendants renders nothing (see
+    // AnnotationNode) — its quoted-text header would otherwise be left
+    // dangling above empty space with no annotation underneath it.
+    const rootRendersNothing =
+      entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
+
+    return (
+      <div
+        key={entry.root.id}
+        data-thread-id={entry.threadId}
+        data-thread-color={entry.color}
+        data-margin-note-id={entry.root.id}
+        className={marginStyles.entry}
+      >
+        {entry.quotedText && !rootRendersNothing && (
+          <QuoteThreadHeader
+            threadId={entry.threadId}
+            quotedText={entry.quotedText}
+            status="ACTIVE"
+            context={null}
+            color={entry.color}
+          />
+        )}
+        <AnnotationNode annotation={entry.root} docId={docId} />
+      </div>
+    );
+  };
 
   return (
     <>
-      {/* Kept in both layouts — see CommentEntryList's note on why an inert
-          control beats a disappearing one. */}
       <div style={{ margin: "12px 0" }}>
         <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
           Sort by:{" "}
@@ -100,36 +148,21 @@ export default function AnnotationList({ entries, docId }: Props) {
         </label>
       </div>
 
-      <div ref={containerRef} className={`${marginStyles.list} ${anchored ? marginStyles.anchored : ""}`}>
-        {sorted.map((entry) => {
-          // A deleted root with no live descendants renders nothing (see
-          // AnnotationNode) — its quoted-text header would otherwise be left
-          // dangling above empty space with no annotation underneath it.
-          const rootRendersNothing =
-            entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
+      <div className={marginStyles.list}>{belowEntries.map(renderEntry)}</div>
 
-          return (
-            <div
-              key={entry.root.id}
-              data-thread-id={entry.threadId}
-              data-thread-color={entry.color}
-              data-margin-note-id={entry.root.id}
-              className={marginStyles.entry}
-            >
-              {entry.quotedText && !rootRendersNothing && (
-                <QuoteThreadHeader
-                  threadId={entry.threadId}
-                  quotedText={entry.quotedText}
-                  status="ACTIVE"
-                  context={null}
-                  color={entry.color}
-                />
-              )}
-              <AnnotationNode annotation={entry.root} docId={docId} />
-            </div>
-          );
-        })}
-      </div>
+      {/* See CommentEntryList's note: the cards move, the ownership doesn't. */}
+      {anchored &&
+        railElement &&
+        createPortal(
+          <div
+            ref={containerRef}
+            data-pseudo-border-root
+            className={`${marginStyles.list} ${marginStyles.anchored}`}
+          >
+            {railEntries.map(renderEntry)}
+          </div>,
+          railElement,
+        )}
     </>
   );
 }

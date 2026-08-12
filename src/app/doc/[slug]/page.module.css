@@ -29,6 +29,13 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Empty in the markup — AnnotationList portals the presently-anchored cards
+   in. See app/[slug]/page.module.css's .rail for why it is `display: none`
+   rather than merely empty below the breakpoint. */
+.rail {
+  display: none;
+}
+
 @media (min-width: 1200px) {
   .container {
     width: 1180px;
@@ -45,10 +52,9 @@
     min-width: 0;
   }
 
-  .rail > section {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: none;
+  .rail {
+    display: block;
+    min-width: 0;
   }
 }
 

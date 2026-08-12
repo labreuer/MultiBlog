@@ -5215,7 +5215,16 @@ of an entry in a list below the article. The reader had to hold the mapping acro
 scroll. Above 1200px there is room not to ask, so each card is positioned level with its
 own quote.
 
-Everything below the breakpoint is unchanged — same stacked list, same order, same
+**Only the anchored cards move.** `CommentSection` and `AnnotationSection` stay exactly
+where they were, below the article, and keep everything that isn't a placeable card: the
+`<h2>`, the comment form / annotation composer, the own-drafts list, the sort dropdown,
+and every entry that has no live anchor — a general-discussion thread, a `DETACHED`
+comment thread, an annotation whose mark is gone (§12h). The rail is not "the comment
+section, relocated"; it is a second destination for the subset of cards that can point
+at something. That keeps the authoring surface where a reader already knows to look for
+it, and means the rail never has chrome of its own competing with the article beside it.
+
+Everything below the breakpoint is unchanged — one stacked list, same order, same
 markup minus a couple of wrapper divs. This is a reflow breakpoint in STYLE.md's sense
 (alongside 900px and 480px), not an overflow fix.
 
@@ -5238,19 +5247,37 @@ Three modules, deliberately separable:
   wish and the previous card's bottom. Exact alignment wherever there is room; a stable
   cascade wherever there isn't. The invariant worth more than any single card's
   precision: **no card ever appears above one whose anchor is earlier in the document.**
-  Anchorless cards sort last and keep their input order, so a rail reads as "everything
-  anchored, in document order, then everything that isn't".
+  The packer still handles anchorless cards (they sort last, keeping their input order),
+  which the reading surfaces no longer send it — they keep those below instead. The doc
+  editor's rail is the caller that relies on it, via `bounds` rather than by placing
+  them; keeping the case in the pure function costs nothing and means the rule doesn't
+  have to be re-derived if a surface ever wants "anchored first, then the rest".
 - **`src/components/margin-notes/use-margin-notes-layout.ts`** — the measuring, and the
   triggers. Positions are written straight to `element.style`, never held in React
   state. Position depends on post-paint measurements, and the doc surfaces re-measure on
   every remote keystroke; a render per measurement would be the wrong shape.
   `pseudo-border.ts` already sets that precedent for the same reason.
-- **`src/components/margin-notes/margin-notes-context.tsx`** — carries the editor from
-  the article to the rail. They are siblings under the page on every surface that has
-  both, so no prop can reach across — the same problem `DocPresenceProvider` solves for
-  awareness (§13i). Its change channel is a plain listener set, not a state counter:
-  bumping state on every remote keystroke would re-render the article *and* every card,
-  to move cards that are moved imperatively anyway.
+- **`src/components/margin-notes/margin-notes-context.tsx`** — carries two things across
+  subtrees that are siblings under the page and so have no prop between them, the same
+  problem `DocPresenceProvider` solves for awareness (§13i): the article's **editor**
+  (only it knows where a quote landed) and the rail's **DOM node** (see the portal
+  below). Its change channel is a plain listener set, not a state counter: bumping state
+  on every remote keystroke would re-render the article *and* every card, to move cards
+  that are moved imperatively anyway.
+
+**The anchored cards are portaled, not re-rendered elsewhere.** `CommentEntryList` and
+`AnnotationList` still own every entry — the sort order, the permalink/`hashchange`
+effect, and the comment/annotation tree rendering — and `createPortal` moves the DOM of
+the anchored subset into the rail without moving that ownership. Splitting the list into
+two sibling components instead would have forked all three, and would have needed the
+sort state lifted into a third place to keep the two halves consistent.
+
+`pseudo-border.ts` gained multi-root support for the same reason: a card can now sit in
+either the section or the rail, and a bar placed unconditionally in the section would
+mark a rail card in the wrong column, at an offset measured against a container it isn't
+in. It now resolves `target.closest("[data-comment-section], [data-pseudo-border-root]")`
+and appends there; `clearPseudoBorders` went document-wide, which it always effectively
+was ("at most one activation on the page").
 
 Recompute triggers are: the editor mounting, `window.resize`, a `ResizeObserver` on the
 container, on every card, and on the editor's own DOM node (a card growing when a reply
@@ -5289,12 +5316,25 @@ re-resolving the pending selection.
 
 A thread whose anchor can't be resolved (a `DETACHED` comment thread, whose offsets are
 frozen against a revision that isn't on screen; an annotation whose mark is gone, §12h)
-is simply absent from the map and falls to the end of the rail — which is where the
-quoted-text sort already put it.
+is simply absent from the map, which is exactly the signal that keeps it in the section
+below rather than in the rail.
 
-**The sort dropdown stays visible when anchored.** It no longer decides where a card
-goes, but it still orders the anchorless ones at the end of the rail, and a control that
-disappears on a viewport change is worse than an inert one.
+**Which ids are anchored is the one thing that goes through React state**, because it
+decides what renders *where* rather than merely where it sits — unlike the positions,
+which are written straight to the DOM. `useMarginNotesLayout`'s `onAnchoredIdsChange`
+fires only when the resolved set actually changes, never on the per-keystroke passes that
+find the same set, so the common case costs no renders at all.
+
+That state is **seeded from data, not from zero**: a post comment from
+`anchorFrom !== null && status === "ACTIVE"`, an annotation from the server's
+`quotedText !== ""`. Both are computed from props, so SSR and the first client render
+agree, and the first anchored render is already correct in the overwhelmingly common
+case instead of flinging half the list across the page a frame later. Seeding is all
+those values are trusted for — §18b above is why the live scan then overrides them.
+
+**The sort dropdown stays visible and keeps working.** It orders the section below, which
+is now its only real job, and a control that disappears on a viewport change would be
+worse than one whose effect is partial.
 
 ### 18c. The doc editor's rail is narrower on purpose
 
@@ -5358,11 +5398,19 @@ of which this section prejudges:
 
 ### 18e. Known gaps
 
-- **No collision handling between a card and the rail's own header.** A quote in the
-  first line of the article resolves above the card list's top and is clamped to 0,
-  which sits it directly under the rail's heading and composer rather than level with
-  its quote. Correct in the sense that it can't go higher; imprecise in the sense that
-  the quote is not where the card points.
+- **The split only happens after hydration**, so a wide viewport paints the whole list
+  in the section once and then lifts the anchored cards out of it. There is no way
+  around this without knowing the viewport server-side: `useMediaQuery`'s server snapshot
+  must be `false`. The same reading views already swap a static body for an editor on
+  `ready`, which is a larger visible change accepted for the same reason, and the split
+  is deliberately gated on the *same* flag rather than on a separate one so the two
+  settle together rather than in sequence.
+- **An entry moving between the rail and the section remounts its subtree.** React sees
+  a different parent, so an open reply composer or an in-progress delete confirmation on
+  that card is discarded. Only reachable when an author's edit removes or restores the
+  marked text while a reader has that exact card open — rare, and the alternative
+  (rendering both destinations and hiding one) would duplicate every permalink `id` in
+  the document.
 - **The rail doesn't scroll independently on the reading surfaces.** A document with
   many anchored comments makes the rail as tall as the article, which is intended, but
   a document with *one* comment near the end leaves a tall empty column. Sticky

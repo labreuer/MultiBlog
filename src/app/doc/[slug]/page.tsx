@@ -17,7 +17,7 @@ import CompareWithPicker from "@/components/CompareWithPicker";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
-import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
+import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -104,9 +104,11 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
           carry either across on its own. */}
       <DocPresenceProvider>
         <AnnotationMoveProvider>
-          {/* Carries DocReadingBody's editor across to AnnotationSection so
-              each annotation card can sit level with the text it marks
-              (PLAN.md §18). Inside AnnotationMoveProvider rather than outside
+          {/* PLAN.md §18. AnnotationSection stays exactly where it was —
+              below the doc, heading and composer and sort control included,
+              along with every annotation whose mark is gone — and only the
+              presently-anchored cards are portaled out into the rail beside
+              the text. Inside AnnotationMoveProvider rather than outside
               because "move to bottom" spans the same two subtrees and there
               is no reason for two different nesting orders. */}
           <MarginNotesProvider>
@@ -148,10 +150,9 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                     </div>
                   }
                 />
-              </div>
-              <div className={styles.rail}>
                 <AnnotationSection docId={doc.id} />
               </div>
+              <MarginNotesRail className={styles.rail} />
             </div>
           </MarginNotesProvider>
         </AnnotationMoveProvider>

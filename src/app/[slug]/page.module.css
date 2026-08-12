@@ -35,6 +35,15 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Empty in the markup — CommentEntryList portals the anchored cards in
+   (PLAN.md §18). Absent entirely below the breakpoint, where every card stays
+   in CommentSection: the layout hook gates on the same query, so the column
+   is never displayed without being laid out (a `display: none` grid item
+   measures as zero, which would place every card against the wrong origin). */
+.rail {
+  display: none;
+}
+
 @media (min-width: 1200px) {
   /* 800 reading column + 2.5rem gap + 340 rail. A fourth documented
      centred-column width alongside STYLE.md's 680/800/1040 — the reading
@@ -46,9 +55,9 @@
   .layout {
     grid-template-columns: minmax(0, 800px) 340px;
     gap: 2.5rem;
-    /* The rail is as tall as its own content (the layout hook gives the card
-       list an explicit height); stretching it would do nothing useful and
-       would make its top border, suppressed below, harder to reason about. */
+    /* The rail is as tall as its own content — the layout hook gives the
+       portaled card list an explicit height, since absolutely positioned
+       children contribute none. Stretching it would do nothing useful. */
     align-items: start;
     justify-content: center;
   }
@@ -60,17 +69,8 @@
     min-width: 0;
   }
 
-  /* CommentSection's own separator rule is a divider between the article
-     above and the comments below. Beside the article it separates nothing,
-     so the rail suppresses it rather than CommentSection branching on a
-     layout it can't see. */
-  .rail > section {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: none;
-  }
-
-  .footerRow {
-    grid-column: 1 / -1;
+  .rail {
+    display: block;
+    min-width: 0;
   }
 }

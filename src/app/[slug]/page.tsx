@@ -11,7 +11,7 @@ import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
-import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
+import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -110,10 +110,12 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
   return (
     <div className={styles.container}>
       <main className={styles.main}>
-        {/* Carries the article's editor across to CommentSection, which is a
-            sibling here rather than a child (PLAN.md §18) — on a wide enough
-            viewport each comment card is positioned level with the passage it
-            quotes, and only the editor knows where that is. */}
+        {/* PLAN.md §18. CommentSection stays exactly where it was — below the
+            article, heading and form and sort control included — and only the
+            cards whose quotes are still in the text are portaled out into the
+            rail beside it. This carries the two things that crossing needs:
+            the article's editor (only it knows where a quote landed) and the
+            rail's DOM node. */}
         <MarginNotesProvider>
           <div className={styles.layout}>
             <div className={styles.mainColumn}>
@@ -130,16 +132,12 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
                 threads={quoteHighlights}
                 staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
               />
-            </div>
-            <div className={styles.rail}>
               <CommentSection postId={post.id} />
+              <p>
+                <Link href="/">← Back to all posts</Link>
+              </p>
             </div>
-            {/* Spans both columns rather than sitting under the article, so
-                the single-column order stays article → comments → back link
-                exactly as it was before the rail existed. */}
-            <p className={styles.footerRow}>
-              <Link href="/">← Back to all posts</Link>
-            </p>
+            <MarginNotesRail className={styles.rail} />
           </div>
         </MarginNotesProvider>
       </main>

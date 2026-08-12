@@ -15,12 +15,10 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { MARGIN_NOTES_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 
 // The seam between the surface that *renders* the text (AnnotatableArticle,
-// DocReadingBody, CollabEditorBody) and the surface that renders the cards
-// beside it (CommentEntryList, AnnotationList, EditorAnnotationRail). They
-// are siblings on every page that has both — the article is inside one
-// server-rendered column and the rail inside another — so no prop can carry
-// an editor handle across, the same reason DocPresenceProvider exists for
-// awareness (PLAN.md §13i).
+// DocReadingBody, CollabEditorBody), the column the anchored cards are drawn
+// in, and the section those cards are authored in — three subtrees that are
+// siblings on every page that has them, so no prop can reach across. The same
+// problem DocPresenceProvider solves for awareness (PLAN.md §13i).
 type MarginNotesContextValue = {
   // Null until the article's editor has actually mounted and painted.
   // Measuring a `display: none` editor (both reading views hide theirs behind
@@ -28,6 +26,11 @@ type MarginNotesContextValue = {
   // deliberately gated on ready rather than on the editor object existing.
   editor: Editor | null;
   setEditor: (editor: Editor | null) => void;
+  // The empty column beside the article. Only *anchored* cards go here, and
+  // they arrive by portal from the comment/annotation section that owns them
+  // — see the entry lists for why they're not simply rendered here.
+  railElement: HTMLElement | null;
+  setRailElement: (element: HTMLElement | null) => void;
   // A plain listener set rather than a state counter. The doc reading view
   // pushes a new document into its editor on every remote keystroke, and
   // bumping React state for that would re-render the whole subtree under this
@@ -42,6 +45,7 @@ const MarginNotesContext = createContext<MarginNotesContextValue | null>(null);
 
 export function MarginNotesProvider({ children }: { children: ReactNode }) {
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [railElement, setRailElement] = useState<HTMLElement | null>(null);
   const listenersRef = useRef(new Set<() => void>());
   const wide = useMediaQuery(MARGIN_NOTES_MEDIA_QUERY);
 
@@ -58,8 +62,8 @@ export function MarginNotesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ editor, setEditor, subscribe, notifyContentChanged, wide }),
-    [editor, subscribe, notifyContentChanged, wide],
+    () => ({ editor, setEditor, railElement, setRailElement, subscribe, notifyContentChanged, wide }),
+    [editor, railElement, subscribe, notifyContentChanged, wide],
   );
 
   return <MarginNotesContext.Provider value={value}>{children}</MarginNotesContext.Provider>;
@@ -71,6 +75,22 @@ export function MarginNotesProvider({ children }: { children: ReactNode }) {
 // embedder having to.
 export function useMarginNotes(): MarginNotesContextValue | null {
   return useContext(MarginNotesContext);
+}
+
+// The column itself: an empty div whose only job is to exist at the right
+// place in the grid and hand its DOM node to whichever entry list is going to
+// portal cards into it.
+export function MarginNotesRail({ className }: { className?: string }) {
+  const setRailElement = useContext(MarginNotesContext)?.setRailElement;
+
+  const ref = useCallback(
+    (element: HTMLDivElement | null) => {
+      setRailElement?.(element);
+    },
+    [setRailElement],
+  );
+
+  return <div className={className} ref={ref} />;
 }
 
 // Called by whichever component owns the article's editor. Split out so the
