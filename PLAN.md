@@ -596,41 +596,22 @@ renamed after creation, with the old slug preserved as a redirect source rather 
 
 ## 5. Quote anchoring & surviving revisions (the mechanism)
 
-**Creating a comment on a quote**
-1. Reader selects text in the published article. The client reads the selection's
-   ProseMirror positions `{from, to}` in the *current* revision's coordinates, plus the
-   plain quoted text.
-2. POST creates a `comment_thread` with `anchored_revision_id = current`, `anchor_from`,
-   `anchor_to`, `quoted_text`, then the first `comment`.
+**Moved to [docs/COLLAB.md](docs/COLLAB.md) §1.** That file is now the single place every
+anchoring strategy in this codebase is described and compared — this section, §12h/§12i's
+mark, §13f's pending selection and §14a/§14d's external blob were four answers to one
+question, written up in four places, and a reader wanting to add a fifth had to find all of
+them first.
 
-**Rendering the indicator**
-- On a published post we load the current revision's doc + all active threads.
-- A ProseMirror plugin builds **decorations**: an inline highlight over each
-  `[anchor_from, anchor_to)` range and a small gutter/inline marker (e.g. a count badge)
-  where one or more threads land. Clicking opens the thread panel.
-- Decorations are display-only, so this never alters stored content.
+What stays here is the decision, since the rest of this document refers back to it: a post
+comment stores **absolute offsets into an immutable published snapshot** plus the quoted
+text, renders through display-only **decorations** that never touch stored content, and is
+carried forward on each publish by diffing the old and new documents with
+`prosemirror-recreate` and mapping the endpoints through the resulting `Mapping`. A thread
+whose quote no longer survives becomes `DETACHED` — still listed, no longer highlighted —
+and is re-tried on every later publish rather than being stuck there (§10 item 20).
 
-**Surviving a new revision**
-- On publish, compare previous doc → new doc. We don't capture live editing steps from the
-  reader's perspective, so we reconstruct the change set between the two stored docs with
-  `prosemirror-recreate` (→ steps) and build a `Mapping`.
-- For each thread: map `anchor_from`/`anchor_to` through the Mapping.
-  - Range still has positive length → update positions, set `anchored_revision_id = new`.
-  - Range collapsed (the quoted text was deleted) → set `status = detached`.
-- Optional safety net: if mapping looks suspicious, fuzzy-match `quoted_text` against the
-  new doc to re-anchor.
-
-**What the reader sees (decided)**
-- **Every** comment thread — active or detached — always appears in the comment list at the
-  bottom of the post. Detached threads are never hidden.
-- **Active** threads also get the inline highlight + indicator next to the quoted passage.
-- **Detached** threads have no inline indicator (the text is gone). When the reader clicks
-  "jump to quote" on a detached thread, instead of scrolling we show a notice that the
-  quoted passage was edited or removed in a later revision, and offer to show the quote in
-  the context of the revision it was made against.
-
-This is the standard ProseMirror pattern (decorations + position mapping) and keeps the
-content layer and the comment layer cleanly separated.
+This works because the target never moves. Docs have no publish step and no snapshot to
+anchor against, which is the whole reason §12i reaches for something else.
 
 ---
 
@@ -1925,18 +1906,13 @@ mode to guard against.
 exists so the choice reads as a decision rather than an accident, since GC is the one Yjs setting
 an annotation design can be wrecked by.
 
-**It costs nothing, because the anchor is content.** The design GC *would* break is anchoring by
-`Y.RelativePosition`, which names an item id:
-`createAbsolutePositionFromRelativePosition` returns `null` once that item has been collected
-into a `GC` struct rather than surviving as a tombstone, so keeping such an anchor resolvable
-means `gc: false`. §12i's mark has no such failure mode — it is not a pointer into the document,
-it *is* part of the document, so it moves with its text, merges under concurrent editing, and is
-collected only when the text it decorates is. GC never strands it.
-
-**It buys a doc that doesn't grow forever.** `gc: false` means `ydoc.ydoc` accumulates a tombstone
-per deletion for the life of the document. A post could afford that, since its life is punctuated
-by revisions; a living document's whole premise is that it never is, so the entity that most
-needs bounded growth is exactly the one that would pay most for turning GC off.
+**The reasoning moved to [docs/COLLAB.md](docs/COLLAB.md)** — "Why `gc: true`, and what it rules
+out" under §2, plus §5 for the `Y.RelativePosition` design this rules out and §8 for what the
+never-truncated update log would let a recovery path do. In brief, and enough to act on: GC
+costs nothing here because the anchor is *content* rather than a pointer into it, so it moves
+with its text and is collected only when that text is; `gc: false` would buy resolvable
+item-id anchors at the price of a tombstone per deletion for the life of a document whose
+whole premise is that it never ends.
 
 **Losing the mark degrades the annotation; it does not delete it.** Delete the annotated text and
 the mark goes with it, and nothing in the document references that annotation's id any more. The
@@ -1945,12 +1921,10 @@ that doc** — it moves out of the margin and into the doc's general discussion,
 about is whatever its body says. That is the entire defined behavior, and it is derived per render
 (§12i), not a stored state.
 
-**It is one-way, and recovery is deferred.** Retyping the same words does not restore the mark;
-re-marking is an edit somebody has to make. `ydoc_update` is never truncated (§11b), so the state
-in which the mark still existed is reconstructible — replay to before the deletion, read the
-mark's range, and you have both where the annotation lived and what it covered. That is a real
-path and the reason the log matters here, but it is **not being built now, and may never be**
-(§12m).
+**It is one-way, and recovery is deferred** — still true, still not built (§12m). COLLAB.md §8 is
+where the recovery path is worked out: `ydoc_update` is never truncated (§11b), so the state in
+which the mark still existed is reconstructible, and item ids are shared across the whole history,
+which makes that worth more than a replay-and-read.
 
 **Never flip `gc` for a doc that has already loaded with it on.** One load with GC on collects
 tombstones permanently, so a future `gc: false` experiment is one-way per document and would have
@@ -2541,12 +2515,19 @@ color, in `prose.module.css`, consistent with the by-author annotation coloring 
 
 **The trap:** `LiveDocBody`'s live tap calls `setContent` on every incoming update (§12n's own
 "two implementation details" entry), which rebuilds the doc and discards any decoration along
-with it. Each time `setContent` runs while a pending range exists, the range is re-resolved:
-verify `textBetween(from, to)` still equals the captured text; on a mismatch, fall back to a
-unique-occurrence search; failing that, drop the decoration and surface "the selected text
-changed." That is the same logic `handleApplyAnnotationMark`'s `findQuoteOccurrences` already
-implements server-side — it moves from `server/ydoc-hooks.ts` into a shared `src/lib/` module so
-both the client-side re-resolution and the server-side mark application call the same function.
+with it — and with it ProseMirror's own `tr.mapping`, which is what makes this a non-problem on
+the editor surface. Each time `setContent` runs while a pending range exists, the range is
+re-resolved against the text instead. `findQuoteOccurrences` therefore lives in a shared
+`src/lib/` module rather than in `server/ydoc-hooks.ts`, so the client-side re-resolution and the
+server-side mark application call one function.
+
+**How weak that anchor actually is — and the two better options — moved to
+[docs/COLLAB.md](docs/COLLAB.md) §4**, with §5 (relative positions, and why binding this editor
+is gated on decoupling the scrub preview) and §6 (carrying the anchor in awareness, which suits
+a transient selection better than durable anchoring does). The short version worth having here:
+an edit *before* the selection invalidates the offsets even though nothing about the selection
+moved, and the text-search fallback then keeps it only if the quote is unique in the whole
+document.
 
 ### 13g. Moving a draft to the bottom composer
 
@@ -2818,20 +2799,11 @@ section adds a surface beside them and touches shared code only where noted.
 
 ### 14a. Why the anchor lives outside the document
 
-§12i put an annotation's anchor *inside* the doc's ydoc as a TipTap mark, and the `Annotation`
-model's schema comment says so with some pride: no anchor columns, no `quotedText`, "nothing here
-that could fall out of sync with the document." A doc link cannot have that, for a reason that is
-structural rather than a matter of taste:
-
-- **A mark lives in exactly one document; a link joins two.** The mark design needs *two* marks
-  per link, in two different ydocs, and immediately invents a failure mode neither annotations nor
-  quotes have: the half-applied pair, where one side's mark landed and the other's didn't. There is
-  no transaction spanning two Yjs documents to close that window.
-- **Applying a mark is a write to the document.** Side-by-side explicitly serves readers who may be
-  unable to edit either doc. §13 gets around this by having the *server* apply the mark over a
-  privileged channel (`applyAnnotationMark` → `ANNOTATION_MARK_PATH`), which would work here too —
-  and would couple doc links to a running collab server on day one, for a feature whose entire
-  state is otherwise ordinary rows.
+**Moved to [docs/COLLAB.md](docs/COLLAB.md) §3**, alongside the three other anchoring strategies
+it is a deliberate departure from. The two structural reasons in one line each: **a mark lives in
+exactly one document and a link joins two** (the mark design needs two marks in two ydocs, with no
+transaction spanning them to close the half-applied window), and **applying a mark is a write**,
+which side-by-side's readers may not be entitled to make.
 
 So the anchor is external, and the price is drift: an external offset is a claim about a document
 that keeps changing underneath it. §14d is that price paid in full, and it is the single largest
@@ -2972,15 +2944,12 @@ URL shared between people with different access. See §14n.
 
 ### 14d. Anchor drift and repair
 
-Resolution runs per link, per content change, in this order — cheapest first, because the first step
-is the overwhelmingly common case:
-
-1. `to <= doc.content.size && doc.textBetween(from, to, " ") === mark.text` → use the stored offsets
-   as-is. O(1).
-2. Otherwise `findQuoteOccurrences(doc, mark.text)`. Exactly one occurrence → use it. More than one
-   → filter by `mark.before`/`mark.after` and use the survivor if exactly one remains. Zero, or
-   still ambiguous → the link is **unanchored**.
-3. Memoize on `(doc identity, links identity)`.
+**The resolution order and its costs moved to [docs/COLLAB.md](docs/COLLAB.md) §3**, so that the
+repair policy sits next to the alternatives it was chosen over — in particular COLLAB.md §7/§8,
+which are what this should become if it is ever revisited. The three steps, for reference:
+stored offsets if they still read as `mark.text` (O(1), the common case) → otherwise
+`findQuoteOccurrences` with `before`/`after` as the tie-break → memoize on
+`(doc identity, links identity)`.
 
 Step 3 is not an optimization, it is load-bearing. The read column calls `setContent` on *every*
 incoming ydoc update — every remote keystroke — and `findQuoteOccurrences` is O(doc × text) with no
@@ -5206,3 +5175,218 @@ read before uploading a photo of themselves.
 - **Avatars are never garbage collected beyond the `ON DELETE CASCADE`.**
   Replacing an avatar overwrites the row, so there is no orphan accumulation —
   but there is also no history, and no way to undo a replacement.
+
+## 18. Margin notes: comments and annotations beside the text they belong to
+
+Built 2026-08-12. A comment thread and an annotation both already know exactly which
+passage they belong to, and both spent that knowledge on a quoted-text header at the top
+of an entry in a list below the article. The reader had to hold the mapping across a
+scroll. Above 1200px there is room not to ask, so each card is positioned level with its
+own quote.
+
+**Only the anchored cards move.** `CommentSection` and `AnnotationSection` stay exactly
+where they were, below the article, and keep everything that isn't a placeable card: the
+`<h2>`, the comment form / annotation composer, the own-drafts list, the sort dropdown,
+and every entry that has no live anchor — a general-discussion thread, a `DETACHED`
+comment thread, an annotation whose mark is gone (§12h). The rail is not "the comment
+section, relocated"; it is a second destination for the subset of cards that can point
+at something. That keeps the authoring surface where a reader already knows to look for
+it, and means the rail never has chrome of its own competing with the article beside it.
+
+Everything below the breakpoint is unchanged — one stacked list, same order, same
+markup minus a couple of wrapper divs. This is a reflow breakpoint in STYLE.md's sense
+(alongside 900px and 480px), not an overflow fix.
+
+### 18a. Why this is a JS layout and CSS only does half of it
+
+Where a passage lands on screen depends on its content and the viewport width. It cannot
+be declared, only measured — `editor.view.coordsAtPos()` against a live editor, which
+every reading surface here already mounts and already calls for its selection popover.
+
+The split that matters: **CSS owns the two-column grid, JS owns the vertical alignment.**
+So the rail is in the right column from first paint, server-rendered, and only the
+per-card `top` waits for hydration. `useMediaQuery`'s server snapshot is a hard `false`
+(there is no `matchMedia` during SSR), which would otherwise mean the whole rail popped
+into place after hydration rather than just settling.
+
+Three modules, deliberately separable:
+
+- **`src/lib/margin-notes-layout.ts`** — the packing rule alone, pure and DOM-free. Sort
+  by where each card wants to be, then walk down placing each at the lower of its own
+  wish and the previous card's bottom. Exact alignment wherever there is room; a stable
+  cascade wherever there isn't. The invariant worth more than any single card's
+  precision: **no card ever appears above one whose anchor is earlier in the document.**
+  The packer still handles anchorless cards (they sort last, keeping their input order),
+  which the reading surfaces no longer send it — they keep those below instead. The doc
+  editor's rail is the caller that relies on it, via `bounds` rather than by placing
+  them; keeping the case in the pure function costs nothing and means the rule doesn't
+  have to be re-derived if a surface ever wants "anchored first, then the rest".
+- **`src/components/margin-notes/use-margin-notes-layout.ts`** — the measuring, and the
+  triggers. Positions are written straight to `element.style`, never held in React
+  state. Position depends on post-paint measurements, and the doc surfaces re-measure on
+  every remote keystroke; a render per measurement would be the wrong shape.
+  `pseudo-border.ts` already sets that precedent for the same reason.
+- **`src/components/margin-notes/margin-notes-context.tsx`** — carries two things across
+  subtrees that are siblings under the page and so have no prop between them, the same
+  problem `DocPresenceProvider` solves for awareness (§13i): the article's **editor**
+  (only it knows where a quote landed) and the rail's **DOM node** (see the portal
+  below). Its change channel is a plain listener set, not a state counter: bumping state
+  on every remote keystroke would re-render the article *and* every card, to move cards
+  that are moved imperatively anyway.
+
+**The anchored cards are portaled, not re-rendered elsewhere.** `CommentEntryList` and
+`AnnotationList` still own every entry — the sort order, the permalink/`hashchange`
+effect, and the comment/annotation tree rendering — and `createPortal` moves the DOM of
+the anchored subset into the rail without moving that ownership. Splitting the list into
+two sibling components instead would have forked all three, and would have needed the
+sort state lifted into a third place to keep the two halves consistent.
+
+`pseudo-border.ts` gained multi-root support for the same reason: a card can now sit in
+either the section or the rail, and a bar placed unconditionally in the section would
+mark a rail card in the wrong column, at an offset measured against a container it isn't
+in. It now resolves `target.closest("[data-comment-section], [data-pseudo-border-root]")`
+and appends there; `clearPseudoBorders` went document-wide, which it always effectively
+was ("at most one activation on the page").
+
+Recompute triggers are: the editor mounting, `window.resize`, a `ResizeObserver` on the
+container, on every card, and on the editor's own DOM node (a card growing when a reply
+composer opens; the article reflowing on a late font), the editor's `update` event, and
+the context's channel. All funnel through one `requestAnimationFrame` gate.
+
+**The degradation is deliberate.** The `.anchored` class is toggled from JS, not from a
+`@media` block, so a page whose script fails renders the plain stacked list rather than
+a pile of cards at the container's origin.
+
+### 18b. Two ways to answer "where is this anchored", because the two sides differ
+
+This is the one place the post and doc sides genuinely cannot share code, and the
+asymmetry is old (§5 vs. §12i) rather than anything this section introduced.
+
+- **A post comment** has stored integer offsets (`anchorFrom`/`anchorTo`) into an
+  immutable published snapshot. Resolving a card is a direct `coordsAtPos(anchorFrom)`.
+  `from`, not `to` — the card lines up with where the quote *starts*.
+- **A doc annotation** has no stored offset at all. Its anchor is an `annotation` mark
+  inside the doc's own ydoc, so it has to be *found*: `collectAnnotationMarkRanges`
+  (`src/lib/annotation-marks.ts`) walks the live ProseMirror document once per pass and
+  returns every id's current range.
+
+Scanning the live document rather than trusting the server matters more than it looks.
+`getDocAnnotationsAsThreads` decides quoted-vs-general against `Doc.proseJson`, which is
+a store-debounce snapshot and therefore stale by seconds whenever anyone is typing. That
+is fine for deciding whether to draw a quote header; it is not fine for deciding which
+paragraph a card sits beside. Reading the editor means a card follows its text as an
+author edits above it.
+
+`DocReadingBody` needs one wire `AnnotatableArticle` does not: remote content arrives via
+`setContent(…, { emitUpdate: false })`, so the editor's own `update` event never fires
+and cards would stay where the *previous* body put them. `onContentPushed` — the surface's
+existing choke point for exactly this class of bug — now reports to the layout alongside
+re-resolving the pending selection.
+
+A thread whose anchor can't be resolved (a `DETACHED` comment thread, whose offsets are
+frozen against a revision that isn't on screen; an annotation whose mark is gone, §12h)
+is simply absent from the map, which is exactly the signal that keeps it in the section
+below rather than in the rail.
+
+**Which ids are anchored is the one thing that goes through React state**, because it
+decides what renders *where* rather than merely where it sits — unlike the positions,
+which are written straight to the DOM. `useMarginNotesLayout`'s `onAnchoredIdsChange`
+fires only when the resolved set actually changes, never on the per-keystroke passes that
+find the same set, so the common case costs no renders at all.
+
+That state is **seeded from data, not from zero**: a post comment from
+`anchorFrom !== null && status === "ACTIVE"`, an annotation from the server's
+`quotedText !== ""`. Both are computed from props, so SSR and the first client render
+agree, and the first anchored render is already correct in the overwhelmingly common
+case instead of flinging half the list across the page a frame later. Seeding is all
+those values are trusted for — §18b above is why the live scan then overrides them.
+
+**The sort dropdown stays visible and keeps working.** It orders the section below, which
+is now its only real job, and a control that disappears on a viewport change would be
+worse than one whose effect is partial.
+
+### 18c. The doc editor's rail is narrower on purpose
+
+An author revising a passage had to leave for the reading view to see what had been said
+about it. The editing view now carries a rail too — but three deliberate differences,
+only the last of which needed new machinery:
+
+- **Presently-anchored only, and nothing below.** No general-discussion bucket, no card
+  for an annotation whose mark is gone, and no stacked list under the editor at any
+  width: below the breakpoint `EditorAnnotationRail` renders nothing at all. The editing
+  view answers "what is attached to the text in front of me", and an annotation with no
+  mark has no answer to give there — where the reading view, which is also where
+  annotations are *composed*, does have to account for it.
+- **Read-only cards.** `AnnotationNode` gained a `readOnly` prop that drops Reply and
+  Delete, inherited by replies so a subtree can't be half-interactive. Creating
+  annotations from the editor is not built (and is not wanted yet); a reply is a
+  creation.
+- **A window, not a list.** The doc body scrolls inside its own frame here
+  (`EditorChrome.module.css`'s `.editorContent`), not with the page. That is the one
+  structural difference: on a page-scrolled surface the article and the rail move
+  together, so a card's offset within its container is invariant under scroll, whereas
+  here it is not. The layout hook's `bounds` option covers it and this is its only
+  caller — cards track the internal scroll, and one whose anchor has left the frame is
+  hidden rather than pinned to an edge.
+
+`CollabEditorBody` marks that scroll frame with `data-editor-scroll`
+(`src/components/editor-scroll.ts`). An attribute rather than a class because CSS-module
+names are hashed per build and so aren't addressable from a `querySelector` in another
+module; a shared constant rather than a literal because two components have to agree on
+it and neither should import the other.
+
+`DocEditor`'s container became a flex **row**, with the column behaviour every child
+relies on moved down to `.mainColumn`. The height budget is unaffected: `.mainColumn`'s
+height comes from the row's default `align-items: stretch`, which is definite, so
+`.editorFrame`'s `flex-grow` still has something to grow into (STYLE.md's Global
+baseline). `CollabEditorBody`'s `onEditorReady`, which this page passed an empty function
+for since it was written, is what the rail measures against.
+
+### 18d. Prepared, not built: reconciling attached vs. detached against the live document
+
+`collectAnnotationMarkRanges` answers "which annotations are presently anchored, and
+where" against the live document — which is exactly the input a doc-side equivalent of
+the post side's remap-on-publish (§5) would need. Today nothing consumes it that way:
+an annotation whose mark is gone still degrades to document-level via §12h's per-render
+derivation from `Doc.proseJson`, and no status is written anywhere.
+
+It is built as a shared module rather than inline in each surface specifically so that
+when something does consume it, there is **one** definition of "presently anchored"
+rather than three drifting ones. Two things a future phase will have to decide, neither
+of which this section prejudges:
+
+- **Who writes, and when.** Every reader's browser has this map, and letting each one
+  persist a correction is N clients last-writer-wins on the field whose whole job is
+  precision — §14d already documents that trap for doc-link anchors and resolves it by
+  only ever persisting from a *write*-mode surface. The doc editor's rail is now such a
+  surface, which is the natural place for it.
+- **Whether a mark that reappears un-detaches.** Undo exists; an author deleting an
+  annotated sentence and immediately undoing it should not have cost the annotation its
+  anchor. That argues for the status being derived-and-cached rather than a latched
+  one-way transition, unlike §12h's current one-way degrade.
+
+### 18e. Known gaps
+
+- **The split only happens after hydration**, so a wide viewport paints the whole list
+  in the section once and then lifts the anchored cards out of it. There is no way
+  around this without knowing the viewport server-side: `useMediaQuery`'s server snapshot
+  must be `false`. The same reading views already swap a static body for an editor on
+  `ready`, which is a larger visible change accepted for the same reason, and the split
+  is deliberately gated on the *same* flag rather than on a separate one so the two
+  settle together rather than in sequence.
+- **An entry moving between the rail and the section remounts its subtree.** React sees
+  a different parent, so an open reply composer or an in-progress delete confirmation on
+  that card is discarded. Only reachable when an author's edit removes or restores the
+  marked text while a reader has that exact card open — rare, and the alternative
+  (rendering both destinations and hiding one) would duplicate every permalink `id` in
+  the document.
+- **The rail doesn't scroll independently on the reading surfaces.** A document with
+  many anchored comments makes the rail as tall as the article, which is intended, but
+  a document with *one* comment near the end leaves a tall empty column. Sticky
+  positioning would fix the latter and break the former.
+- **No e2e coverage.** The positioning is measured geometry, which is exactly what a
+  spec can assert on (`boundingBox()` per card versus per highlight) and exactly what a
+  reviewer cannot check by reading. `packMarginNotes` being pure is half of that debt
+  already paid; nothing exercises it yet.
+- **340px is fixed.** The rail doesn't grow on a very wide viewport, so a 2560px screen
+  gets more whitespace rather than roomier cards.

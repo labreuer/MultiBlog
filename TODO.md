@@ -354,3 +354,23 @@ option 2 above removes the class rather than merely reducing its odds.
 `test-results/<test-slug>/error-context.md` and in the HTML report (`npm run e2e:report`).
 **A later isolated re-run deletes that directory** — read it, or copy it out, before
 re-running anything.
+
+---
+
+## (optional) A pending selection is anchored by offsets plus a text search
+
+**Status:** open, and deliberately optional — nothing is broken, the anchor is just weaker than
+the one the collaborative carets already enjoy. A cheap mitigation was tried on 2026-08-12 and
+reverted as too brittle.
+
+**Moved to [docs/COLLAB.md](docs/COLLAB.md)**, which is now where every anchoring strategy and
+trade-off lives rather than being spread across here and PLAN.md. Read
+[§4](docs/COLLAB.md#4-the-in-progress-selection--offsets-plus-a-re-resolve) for the present
+failure envelope and the reverted fix, then [§5](docs/COLLAB.md#5-yjs-relative-positions) for
+the structural fix and its one real prerequisite: `DocScrubBar` pushes historical bodies through
+the same `setContent` path that discards the mapping, so decoupling the scrub preview onto its
+own editor comes first.
+
+[§6](docs/COLLAB.md#6-anchors-carried-in-the-awareness-channel) is the alternative worth
+weighing against it — it fits this case better than durable anchoring does, and would make an
+in-progress selection visible to other people on the page, which no option here does today.

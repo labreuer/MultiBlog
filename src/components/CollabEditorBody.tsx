@@ -15,6 +15,7 @@ import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import EditorToolbar from "./EditorToolbar";
+import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import styles from "./EditorChrome.module.css";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -156,8 +157,13 @@ export default function CollabEditorBody({
     <div className={styles.editorFrame}>
       <AuthorHighlightStyles colors={authorColors} />
       <EditorToolbar editor={editor} disabled={!editable} />
+      {/* The attribute marks this as *the* scrolling box for the body, which
+          the doc editor's annotation rail (PLAN.md §18c) needs in order to
+          know which band of text is on screen — the page doesn't scroll here,
+          this does. Harmless on the embedders that have no rail. */}
       <EditorContent
         editor={editor}
+        {...{ [EDITOR_SCROLL_ATTRIBUTE]: "" }}
         className={`${styles.editorContent} ${proseStyles.prose} ${suppressAnnotations ? proseStyles.noAnnotations : ""}`}
       />
     </div>

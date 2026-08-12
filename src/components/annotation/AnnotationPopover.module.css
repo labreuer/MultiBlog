@@ -14,7 +14,11 @@
 .popover {
   position: fixed;
   z-index: 20;
-  width: 280px;
+  /* No `width` — see AnnotatableArticle.tsx's matching comment: with only
+     `top`/`left` set, the box shrink-to-fits its content, so it grows with
+     whatever it's wrapping instead of clipping it. min-width keeps the
+     same default footprint the old fixed 280px gave. */
+  min-width: 280px;
   background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);

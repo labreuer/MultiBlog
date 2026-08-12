@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import type { Editor } from "@tiptap/react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "./AnnotationNode";
 import QuoteThreadHeader from "../QuoteThreadHeader";
+import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
+import { collectAnnotationMarkRanges } from "@/lib/annotation-marks";
 import { activatePseudoBorderForHash } from "@/lib/pseudo-border";
+import marginStyles from "../margin-notes/MarginNotes.module.css";
 
 export type AnnotationEntry = {
   threadId: string;
@@ -26,6 +31,14 @@ type Props = {
 // to un-share.
 export default function AnnotationList({ entries, docId }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
+  // Seeded from the server's snapshot answer — `quotedText` is non-empty
+  // exactly when `Doc.proseJson` still carried the mark at the last store
+  // debounce — then corrected by the live scan below. Seeding rather than
+  // starting empty keeps the first anchored render right for the common case;
+  // trusting it beyond that is what §18b says not to do.
+  const [anchoredIds, setAnchoredIds] = useState<Set<string>>(
+    () => new Set(entries.filter((entry) => entry.quotedText !== "").map((entry) => entry.root.id)),
+  );
 
   // Puts a pseudo-border next to whatever annotation the page loaded
   // pointing at (its timestamp permalink hash), and keeps it in sync as the
@@ -37,14 +50,91 @@ export default function AnnotationList({ entries, docId }: Props) {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const sorted = [...entries].sort((a, b) => {
-    if (sortMode === "quoteIndex") {
-      const aIndex = a.anchorFrom ?? Infinity;
-      const bIndex = b.anchorFrom ?? Infinity;
-      if (aIndex !== bIndex) return aIndex - bIndex;
-    }
-    return new Date(a.root.createdAt).getTime() - new Date(b.root.createdAt).getTime();
+  const sorted = useMemo(
+    () =>
+      [...entries].sort((a, b) => {
+        if (sortMode === "quoteIndex") {
+          const aIndex = a.anchorFrom ?? Infinity;
+          const bIndex = b.anchorFrom ?? Infinity;
+          if (aIndex !== bIndex) return aIndex - bIndex;
+        }
+        return new Date(a.root.createdAt).getTime() - new Date(b.root.createdAt).getTime();
+      }),
+    [entries, sortMode],
+  );
+
+  // Where CommentEntryList reads a stored offset, this has to *find* the
+  // anchor: a doc annotation's anchor is a mark inside the doc's own ydoc
+  // (PLAN.md §12i), which is why `entry.anchorFrom` is null for every one of
+  // these. Scanning the live editor rather than trusting the server's
+  // `quotedText` also means the card follows the text as an author edits
+  // above it, instead of pointing where the last store debounce saw it.
+  //
+  // A thread whose mark is gone (§12h — degraded to document-level) simply
+  // isn't in the map, which drops it out of the rail and back into the list
+  // below, alongside the general-discussion threads.
+  const resolveTops = useCallback(
+    (editor: Editor) => {
+      const ranges = collectAnnotationMarkRanges(editor.state.doc);
+      const tops = new Map<string, number>();
+      for (const entry of sorted) {
+        const range = ranges.get(entry.threadId);
+        if (!range) continue;
+        try {
+          tops.set(entry.root.id, editor.view.coordsAtPos(range.from).top);
+        } catch {
+          // A position the current document can't resolve; treated as
+          // anchorless, same as a missing mark.
+        }
+      }
+      return tops;
+    },
+    [sorted],
+  );
+
+  const railIds = useMemo(
+    () => sorted.filter((entry) => anchoredIds.has(entry.root.id)).map((entry) => entry.root.id),
+    [sorted, anchoredIds],
+  );
+
+  const { anchored, containerRef, railElement } = useMarginNotesLayout({
+    resolveTops,
+    ids: railIds,
+    onAnchoredIdsChange: setAnchoredIds,
   });
+
+  const inRail = (entry: AnnotationEntry) => anchored && anchoredIds.has(entry.root.id);
+  const belowEntries = sorted.filter((entry) => !inRail(entry));
+  const railEntries = sorted.filter(inRail);
+
+  const renderEntry = (entry: AnnotationEntry) => {
+    // A deleted root with no live descendants renders nothing (see
+    // AnnotationNode) — its quoted-text header would otherwise be left
+    // dangling above empty space with no annotation underneath it.
+    const rootRendersNothing =
+      entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
+
+    return (
+      <div
+        key={entry.root.id}
+        data-thread-id={entry.threadId}
+        data-thread-color={entry.color}
+        data-margin-note-id={entry.root.id}
+        className={marginStyles.entry}
+      >
+        {entry.quotedText && !rootRendersNothing && (
+          <QuoteThreadHeader
+            threadId={entry.threadId}
+            quotedText={entry.quotedText}
+            status="ACTIVE"
+            context={null}
+            color={entry.color}
+          />
+        )}
+        <AnnotationNode annotation={entry.root} docId={docId} />
+      </div>
+    );
+  };
 
   return (
     <>
@@ -58,33 +148,21 @@ export default function AnnotationList({ entries, docId }: Props) {
         </label>
       </div>
 
-      {sorted.map((entry) => {
-        // A deleted root with no live descendants renders nothing (see
-        // AnnotationNode) — its quoted-text header would otherwise be left
-        // dangling above empty space with no annotation underneath it.
-        const rootRendersNothing =
-          entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
+      <div className={marginStyles.list}>{belowEntries.map(renderEntry)}</div>
 
-        return (
+      {/* See CommentEntryList's note: the cards move, the ownership doesn't. */}
+      {anchored &&
+        railElement &&
+        createPortal(
           <div
-            key={entry.root.id}
-            data-thread-id={entry.threadId}
-            data-thread-color={entry.color}
-            style={{ marginTop: 24 }}
+            ref={containerRef}
+            data-pseudo-border-root
+            className={`${marginStyles.list} ${marginStyles.anchored}`}
           >
-            {entry.quotedText && !rootRendersNothing && (
-              <QuoteThreadHeader
-                threadId={entry.threadId}
-                quotedText={entry.quotedText}
-                status="ACTIVE"
-                context={null}
-                color={entry.color}
-              />
-            )}
-            <AnnotationNode annotation={entry.root} docId={docId} />
-          </div>
-        );
-      })}
+            {railEntries.map(renderEntry)}
+          </div>,
+          railElement,
+        )}
     </>
   );
 }

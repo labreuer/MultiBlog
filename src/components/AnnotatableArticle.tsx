@@ -5,8 +5,10 @@ import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { QuoteHighlight, type QuoteHighlightThread } from "@/lib/quote-highlight-extension";
 import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
+import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import CommentForm from "./CommentForm";
+import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 
 type PendingSelection = {
@@ -23,18 +25,6 @@ type Props = {
   threads: QuoteHighlightThread[];
   staticContent: ReactNode;
 };
-
-// Briefly tints the target thread's section a light version of the
-// thread's own color so it's obvious which comment(s) the quote indicator
-// pointed at, then fades it back out.
-function flashHighlight(element: HTMLElement, color: string) {
-  element.style.transition = "background-color 0.3s ease-in";
-  element.style.backgroundColor = `color-mix(in srgb, ${color} var(--anchor-tint-active, 45%), transparent)`;
-  window.setTimeout(() => {
-    element.style.transition = "background-color 1.5s ease-out";
-    element.style.backgroundColor = "";
-  }, 1000);
-}
 
 export default function AnnotatableArticle({ postId, doc, threads, staticContent }: Props) {
   const [ready, setReady] = useState(false);
@@ -89,6 +79,12 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
     // page reload.
   }, [threads]);
 
+  // Lets CommentSection's cards sit level with the passages they quote
+  // (PLAN.md §18). Gated on `ready` because until then this editor is
+  // `display: none` behind the SSR'd static copy below, and coordsAtPos on a
+  // hidden editor measures zeroes.
+  useRegisterMarginNotesEditor(editor, ready);
+
   useEffect(() => {
     if (!pending) return;
     const handleClick = (event: MouseEvent) => {
@@ -113,7 +109,13 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
             top: pending.top + 6,
             left: pending.left,
             zIndex: 20,
-            width: 280,
+            // No `width` — with only `left` set, an absolutely positioned box
+            // with `width: auto` shrink-to-fits its content (CSS2.1 §10.3.7),
+            // so dragging the textarea's resize handle (CommentForm.module.css
+            // .textarea) grows this box right along with it instead of the
+            // textarea overflowing a fixed-width panel. minWidth keeps the
+            // pre-resize footprint identical to the old fixed 280px.
+            minWidth: 280,
             background: "var(--surface)",
             color: "var(--foreground)",
             border: "1px solid var(--border)",

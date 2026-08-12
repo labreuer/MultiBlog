@@ -17,6 +17,7 @@ import CompareWithPicker from "@/components/CompareWithPicker";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
+import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -103,43 +104,57 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
           carry either across on its own. */}
       <DocPresenceProvider>
         <AnnotationMoveProvider>
-          <DocView
-            docId={doc.id}
-            initialTitle={docTitleOrFallback(doc.title)}
-            initialBodyJSON={bodyJSON}
-            staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
-            canEdit={canEdit}
-            userColor={session.user.color}
-            byline={
-              // A <div>, not <p> — <form> isn't valid inside <p> (HTML
-              // rejects it; React hydrates it anyway and then warns), same
-              // reason docs/page.tsx's own create-doc form isn't wrapped in
-              // one. .byline's styling (page.module.css) is purely visual,
-              // so the tag swap changes nothing about how this renders.
-              <div className={styles.byline}>
-                <AuthorByline
-                  authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
-                  showPrefix={false}
+          {/* PLAN.md §18. AnnotationSection stays exactly where it was —
+              below the doc, heading and composer and sort control included,
+              along with every annotation whose mark is gone — and only the
+              presently-anchored cards are portaled out into the rail beside
+              the text. Inside AnnotationMoveProvider rather than outside
+              because "move to bottom" spans the same two subtrees and there
+              is no reason for two different nesting orders. */}
+          <MarginNotesProvider>
+            <div className={styles.layout}>
+              <div className={styles.mainColumn}>
+                <DocView
+                  docId={doc.id}
+                  initialTitle={docTitleOrFallback(doc.title)}
+                  initialBodyJSON={bodyJSON}
+                  staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
+                  canEdit={canEdit}
+                  userColor={session.user.color}
+                  byline={
+                    // A <div>, not <p> — <form> isn't valid inside <p> (HTML
+                    // rejects it; React hydrates it anyway and then warns), same
+                    // reason docs/page.tsx's own create-doc form isn't wrapped in
+                    // one. .byline's styling (page.module.css) is purely visual,
+                    // so the tag swap changes nothing about how this renders.
+                    <div className={styles.byline}>
+                      <AuthorByline
+                        authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
+                        showPrefix={false}
+                      />
+                      {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
+                          §12k), so "last edited" is the only date that means anything.
+                          Short date visible, full timestamp on hover. */}
+                      <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
+                      <CompareWithPicker docId={doc.id} otherDocs={otherDocs} />
+                      {/* PLAN.md §15d — the doc-page entry point into post
+                          creation, alongside the /posts/new picker. Bound with the
+                          extra leading arg the way any parameterized form action
+                          is; createPostFromDoc redirects to the new post's editor
+                          on success. */}
+                      {canEdit && (
+                        <form action={createPostFromDoc.bind(null, doc.id)} style={{ display: "inline" }}>
+                          <button type="submit">Publish as blog post</button>
+                        </form>
+                      )}
+                    </div>
+                  }
                 />
-                {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
-                    §12k), so "last edited" is the only date that means anything.
-                    Short date visible, full timestamp on hover. */}
-                <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
-                <CompareWithPicker docId={doc.id} otherDocs={otherDocs} />
-                {/* PLAN.md §15d — the doc-page entry point into post
-                    creation, alongside the /posts/new picker. Bound with the
-                    extra leading arg the way any parameterized form action
-                    is; createPostFromDoc redirects to the new post's editor
-                    on success. */}
-                {canEdit && (
-                  <form action={createPostFromDoc.bind(null, doc.id)} style={{ display: "inline" }}>
-                    <button type="submit">Publish as blog post</button>
-                  </form>
-                )}
+                <AnnotationSection docId={doc.id} />
               </div>
-            }
-          />
-          <AnnotationSection docId={doc.id} />
+              <MarginNotesRail className={styles.rail} />
+            </div>
+          </MarginNotesProvider>
         </AnnotationMoveProvider>
       </DocPresenceProvider>
     </main>

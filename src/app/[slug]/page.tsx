@@ -11,6 +11,7 @@ import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
+import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -109,21 +110,36 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
   return (
     <div className={styles.container}>
       <main className={styles.main}>
-        <h1 className={styles.title}>{post.title}</h1>
-        <p className={styles.byline}>
-          <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
-          {post.publishedAt?.toLocaleDateString()}
-        </p>
-        <AnnotatableArticle
-          postId={post.id}
-          doc={doc}
-          threads={quoteHighlights}
-          staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
-        />
-        <CommentSection postId={post.id} />
-        <p>
-          <Link href="/">← Back to all posts</Link>
-        </p>
+        {/* PLAN.md §18. CommentSection stays exactly where it was — below the
+            article, heading and form and sort control included — and only the
+            cards whose quotes are still in the text are portaled out into the
+            rail beside it. This carries the two things that crossing needs:
+            the article's editor (only it knows where a quote landed) and the
+            rail's DOM node. */}
+        <MarginNotesProvider>
+          <div className={styles.layout}>
+            <div className={styles.mainColumn}>
+              <h1 className={styles.title}>{post.title}</h1>
+              <p className={styles.byline}>
+                <AuthorByline
+                  authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
+                />
+                {post.publishedAt?.toLocaleDateString()}
+              </p>
+              <AnnotatableArticle
+                postId={post.id}
+                doc={doc}
+                threads={quoteHighlights}
+                staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
+              />
+              <CommentSection postId={post.id} />
+              <p>
+                <Link href="/">← Back to all posts</Link>
+              </p>
+            </div>
+            <MarginNotesRail className={styles.rail} />
+          </div>
+        </MarginNotesProvider>
       </main>
     </div>
   );

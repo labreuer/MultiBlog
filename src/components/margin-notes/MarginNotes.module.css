@@ -1,0 +1,28 @@
+/* The card list shared by every margin-notes surface (PLAN.md §18):
+   CommentEntryList, AnnotationList, and EditorAnnotationRail. Only two
+   states, and the switch between them is a class toggled from JS rather than
+   a `@media` block — use-margin-notes-layout.ts adds .anchored only once
+   there is a wide viewport *and* a measurable editor, so a page whose script
+   never runs degrades to the stacked list rather than to a pile of cards at
+   the container's origin. */
+
+.list {
+  position: relative;
+}
+
+/* 24px matches the spacing these entries carried as inline `marginTop` before
+   they became positionable — moved into a class only because an inline style
+   would win over .anchored's reset below. */
+.entry {
+  margin-top: 24px;
+}
+
+.list.anchored > .entry {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Overwritten per card by the layout hook; a real value here rather than
+     `auto` so a card is never drawn at its flow position for a frame. */
+  top: 0;
+  margin-top: 0;
+}
