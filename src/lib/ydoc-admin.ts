@@ -1,19 +1,12 @@
 import type { Role } from "@/generated/prisma/enums";
 import { signYdocToken } from "./ydoc-token";
+import { collabHttpOrigin } from "./collab-http-origin";
 import { YDOC_SNAPSHOT_PATH } from "./ydoc-names";
 
 // Server-to-server channel from the Next app to the Hocuspocus server for the
-// ydoc stack's one admin operation — parallels collab-admin.ts's
-// replaceCollabDoc, kept as a separate file rather than added to that one so
-// the two stacks stay independent end to end (PLAN.md §11).
-//
-// NEXT_PUBLIC_COLLAB_URL is a websocket URL (ws://host:port); the same
-// Hocuspocus process serves plain HTTP on that origin, so the only
-// difference is the scheme.
-function collabHttpOrigin(): string {
-  const wsUrl = process.env.NEXT_PUBLIC_COLLAB_URL ?? `ws://localhost:${process.env.COLLAB_PORT ?? 1234}`;
-  return wsUrl.replace(/^ws/, "http").replace(/\/$/, "");
-}
+// ydoc stack's one admin operation — the same idiom annotation-admin.ts uses,
+// sharing collabHttpOrigin with it (see that module for why the origin is the
+// loopback address and not NEXT_PUBLIC_COLLAB_URL).
 
 /**
  * Takes a snapshot of a ydoc-stack document through the running collab

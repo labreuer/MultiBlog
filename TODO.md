@@ -6,6 +6,42 @@ the box or the toolchain belongs in CLAUDE.md or DEPLOY.md instead.
 
 ---
 
+## Server/client environment divergence has no check covering it
+
+**Status:** two instances found and fixed on 2026-08-11; the *class* is still untested, and one
+known instance is still open (below).
+
+Both bugs that day were production-only **by construction** rather than by timing or load —
+they depend on the server and the browser being different machines, which locally they never
+are. `npm run e2e` and `web-prod` cannot catch either, and never will:
+
+- **PLAN.md §13m** — the collab HTTP origin. Broken only when `NEXT_PUBLIC_COLLAB_URL` is set,
+  which it deliberately never is in dev.
+- **React #418 hydration mismatch** — `toLocaleString()` on a date inside a `"use client"`
+  component, which reads the runtime's locale and timezone and so renders differently during
+  SSR (UTC on the box) than during hydration (the reader's zone). Fixed by
+  `src/components/LocalTime.tsx`; the rule and the two traps around it are in CLAUDE.md's
+  Gotchas, since it's a standing convention rather than an open item.
+
+**What's actually open:**
+
+1. **`DocsTable.tsx:206` — `row.length.toLocaleString()` on a *number*.** Same class, still
+   present. `DocsTable` is a client component fed by `app/docs/page.tsx`, so it is
+   server-rendered, and number grouping is locale-dependent (`1,234` vs `1.234`). It diverges
+   only for a viewer whose *locale* differs from the box's, not their timezone — so unlike the
+   date case it does not fire for an en-US reader against an en-US-defaulted server, which is
+   why it has not been seen. Not folded into the `LocalTime` fix because the trade-off differs:
+   for a number there is no "correct" per-viewer answer worth a two-pass render, so pinning the
+   locale (`toLocaleString("en-US")`) is probably right, and that is a decision rather than a
+   mechanical substitution.
+
+2. **No check covers the class.** A CI job running the suite with a UTC server and a non-UTC,
+   non-en-US browser locale would catch every instance of both shapes at once — Playwright sets
+   both per-context (`timezoneId`, `locale`), so this is a config change rather than new specs.
+   Nothing today varies either, so every future instance lands in production the same way.
+
+---
+
 ## Observability of swallowed bulk-action failures
 
 **Status:** partly resolved. The failures *are* logged and *are* retrievable in production.

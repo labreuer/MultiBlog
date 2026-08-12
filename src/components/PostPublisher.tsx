@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { publishPostFromDoc, schedulePostFromDoc, unpublishPost } from "@/app/actions/posts";
+import { useLocalTime } from "./LocalTime";
 import PostSnapshotScrubBar, { type ScrubSelection } from "./PostSnapshotScrubBar";
 import PostSettingsPanel, { type EligibleUser } from "./PostSettingsPanel";
 import type { ModerationPolicy } from "@/generated/prisma/enums";
@@ -58,6 +59,11 @@ export default function PostPublisher({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(initialDeleted);
+
+  // Unconditionally, above every branch — the two uses below are conditional
+  // and a hook can't be. useLocalTime returns "" for a null value, which is
+  // exactly the case those branches already guard against anyway.
+  const publishedAtLocal = useLocalTime(publishedAt);
 
   const currentDoc = useMemo(
     () => editableDocs.find((d) => d.id === selectedDocId) ?? { id: selectedDocId, slug: selectedDocId, title: "" },
@@ -214,8 +220,8 @@ export default function PostPublisher({
       {error && <p className={styles.errorMessage}>{error}</p>}
 
       <p className={styles.revisionNote}>
-        {postStatus === "published" && publishedAt && `Published ${publishedAt.toLocaleString()}. `}
-        {postStatus === "scheduled" && publishedAt && `Scheduled for ${publishedAt.toLocaleString()}. `}
+        {postStatus === "published" && publishedAt && `Published ${publishedAtLocal}. `}
+        {postStatus === "scheduled" && publishedAt && `Scheduled for ${publishedAtLocal}. `}
         {postStatus === "draft" && "Not published yet. "}
         <Link href={`/posts/${postId}/history`}>Publication history</Link>
       </p>

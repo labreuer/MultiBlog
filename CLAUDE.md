@@ -117,6 +117,19 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   `getCollabUrl()`'s zero-restart) since it's read at `next dev` startup. `COLLAB_PORT` is bare,
   not `NEXT_PUBLIC_`, so it isn't readable client-side at all — `getCollabUrl()`'s `:1234`
   fallback is a literal, same as the `process.env.NEXT_PUBLIC_COLLAB_URL` reads it replaced.
+  **`NEXT_PUBLIC_COLLAB_URL` is the browser's answer only.** The Next *server* also calls the
+  collab process directly over plain HTTP (`/admin/ydoc-snapshot`, `/admin/annotation-mark`,
+  `/admin/annotation-unmark`, `/admin/annotation-flush`); that origin comes from
+  `src/lib/collab-http-origin.ts` — `COLLAB_INTERNAL_URL` (optional, bare) falling back to
+  `http://127.0.0.1:${COLLAB_PORT}` — and must **never** be derived from
+  `NEXT_PUBLIC_COLLAB_URL`. It was, and the bug was invisible locally and total in production:
+  the public URL is `wss://<host>/collab`, nginx forwards `/collab/...` unrewritten, the
+  handler matches on `/admin/...`, and Hocuspocus answers an unmatched path with a
+  **`200 "Welcome to Hocuspocus!"`** — so all four endpoints silently no-opped while the
+  websocket worked fine. Symptom was "Annotation can't be empty." on every annotation. PLAN.md
+  §13m has the full account; the generalizable half is that a `NEXT_PUBLIC_` var answers "how
+  does the *browser* reach this", which is the wrong question for a server-to-server call and
+  happens to give the same answer as the right one only until a reverse proxy exists.
   Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
   `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
   deployment's title survives `git pull` instead of living in a tracked file. Also optional:
@@ -380,6 +393,22 @@ blob makes the doc-side checks report faults that evaporate once it's repaired).
 
 ## Gotchas
 
+- **Never call `toLocaleString()`/`toLocaleDateString()` on a date in a `"use client"`
+  component.** It reads the *runtime's* locale and timezone, and the App Router renders client
+  components on the server too — so it runs once during SSR on the box (UTC) and again during
+  hydration in the browser (the reader's zone), producing different text and a React #418
+  hydration mismatch that discards and re-renders the whole subtree. Use
+  `src/components/LocalTime.tsx`: `<LocalTime value={...} />` by default, or its `useLocalTime`
+  hook where an element can't go (inside a template literal, or as an `<option>`'s text, where
+  a nested `<time>` is invalid HTML — being a hook it can't be called in a `.map()` either, so
+  render a small per-item component, as `YdocDebug`'s `DocOption` does). The identical call in
+  a **Server** Component is fine and must not be "fixed" — it's formatted once and shipped as a
+  finished string in the RSC payload (`app/doc/[slug]/page.tsx` does this deliberately). Only a
+  client component's copy renders on both sides. A call site whose data arrives from a
+  client-side fetch is also fine, since it was never in the SSR HTML — that's why the scrub bars
+  and most of `YdocDebug` were left alone. This class is **invisible to every local check**,
+  including `npm run e2e` and `web-prod`: locally the dev server and the browser are one
+  machine and so always agree. Same reason PLAN.md §13m's collab bug survived to production.
 - `globals.css` has `* { margin: 0; padding: 0 }` — it strips default list/blockquote
   styling everywhere. `src/styles/prose.module.css` restores it for rendered post content;
   any new surface rendering post content needs its `.prose` class.

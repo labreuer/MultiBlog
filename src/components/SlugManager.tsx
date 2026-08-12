@@ -7,6 +7,7 @@ import { updatePostSlug, deletePostSlugHistory, revertPostSlug } from "@/app/act
 import { updateUserSlug, deleteUserSlugHistory, revertUserSlug } from "@/app/actions/users";
 import { updateDocSlug, deleteDocSlugHistory, revertDocSlug } from "@/app/actions/docs";
 import { REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
+import LocalTime from "./LocalTime";
 
 export type SlugHistoryRow = { slug: string; createdAt: string };
 
@@ -221,7 +222,9 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
                 <td style={{ padding: "4px 8px 4px 0" }}>
                   {urlPrefix}/{row.slug}
                 </td>
-                <td style={{ padding: "4px 8px 4px 0", color: "var(--text-secondary)" }}>{new Date(row.createdAt).toLocaleString()}</td>
+                <td style={{ padding: "4px 8px 4px 0", color: "var(--text-secondary)" }}>
+                  <LocalTime value={row.createdAt} />
+                </td>
                 <td style={{ padding: "4px 8px 4px 0" }}>
                   {i === rows.length - 1 && (
                     <button type="button" onClick={handleRevert} disabled={pending}>
