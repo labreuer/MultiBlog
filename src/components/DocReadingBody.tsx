@@ -4,6 +4,10 @@ import { useRef, type ReactNode } from "react";
 import { EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
 import { useSelectionPopover } from "@/lib/use-selection-popover";
+import { AnnotationClick } from "@/lib/annotation-click-extension";
+import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
+import { flashHighlight } from "@/lib/flash-highlight";
+import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import proseStyles from "@/styles/prose.module.css";
@@ -18,6 +22,30 @@ type Props = {
   // down rather than read here via useSession() — see DocView.tsx.
   userColor: string;
 };
+
+// Clicking an annotation-highlighted span jumps to (and briefly tints) its
+// entry in AnnotationSection below, plus a persistent author-colored
+// pseudo-border — the doc-side mirror of AnnotatableArticle's quote-
+// indicator badge click. AnnotationList already tags each entry's root div
+// with data-thread-id/data-thread-color (same attributes CommentEntryList
+// uses), so this needs no data of its own beyond the clicked mark's id.
+// Module scope, not a component closure: it reads nothing but the DOM at
+// click time, so there's no per-render state for useLiveDocContent's
+// once-only useEditor construction (see use-live-doc-content.ts) to go
+// stale over — unlike AnnotatableArticle's onIndicatorClick, which reads
+// `threads` and so is rebound via that editor's own [threads] deps array.
+function jumpToAnnotationEntry(ids: string[]) {
+  const id = ids[0];
+  if (!id) return;
+  const targets = document.querySelectorAll<HTMLElement>(`[data-thread-id="${id}"]`);
+  if (targets.length === 0) return;
+  const color = targets[0].dataset.threadColor ?? NEUTRAL_THREAD_COLOR;
+  targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
+  targets.forEach((target) => flashHighlight(target, color));
+  activatePseudoBordersForThread(id, color);
+}
+
+const annotationClickExtensions = [AnnotationClick.configure({ onHit: jumpToAnnotationEntry })];
 
 // The reading view at /doc/[slug] (PLAN.md §12g): live doc content, where
 // selecting text offers to annotate it.
@@ -44,6 +72,7 @@ export default function DocReadingBody({ docId, initialBodyJSON, staticBody, ove
     overrideBodyJSON,
     editorRef,
     setAwareness,
+    extensions: annotationClickExtensions,
     onSelectionUpdate: selection.capture,
     onContentPushed: selection.reresolve,
   });

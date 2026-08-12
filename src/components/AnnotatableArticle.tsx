@@ -5,6 +5,7 @@ import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { QuoteHighlight, type QuoteHighlightThread } from "@/lib/quote-highlight-extension";
 import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
+import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import CommentForm from "./CommentForm";
 import proseStyles from "@/styles/prose.module.css";
@@ -23,18 +24,6 @@ type Props = {
   threads: QuoteHighlightThread[];
   staticContent: ReactNode;
 };
-
-// Briefly tints the target thread's section a light version of the
-// thread's own color so it's obvious which comment(s) the quote indicator
-// pointed at, then fades it back out.
-function flashHighlight(element: HTMLElement, color: string) {
-  element.style.transition = "background-color 0.3s ease-in";
-  element.style.backgroundColor = `color-mix(in srgb, ${color} var(--anchor-tint-active, 45%), transparent)`;
-  window.setTimeout(() => {
-    element.style.transition = "background-color 1.5s ease-out";
-    element.style.backgroundColor = "";
-  }, 1000);
-}
 
 export default function AnnotatableArticle({ postId, doc, threads, staticContent }: Props) {
   const [ready, setReady] = useState(false);
