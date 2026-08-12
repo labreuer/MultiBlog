@@ -33,8 +33,22 @@ type Props = {
 // hence the wrapper.
 export default function DocView({ docId, initialTitle, initialBodyJSON, staticBody, byline, canEdit, userColor }: Props) {
   const [scrubbed, setScrubbed] = useState<ScrubbedState | null>(null);
+  // Bumped on "return to live" (PLAN.md §12) so DocScrubBar's slider seeks
+  // back to the end instead of sitting at whatever historical position it
+  // was left at while the body it drives has already snapped back to live.
+  const [resetSignal, setResetSignal] = useState(0);
 
   const title = scrubbed?.title ?? initialTitle;
+  // Scrubbing freezes the view exactly while it's showing something other
+  // than the live end — not merely while a scrub bar is mounted, which is
+  // why this isn't just `scrubbed !== null` (the mount-time seed already
+  // pushes a `live: true` state before any drag).
+  const scrubFrozen = scrubbed !== null && !scrubbed.live;
+
+  const handleReturnToLive = () => {
+    setScrubbed(null);
+    setResetSignal((n) => n + 1);
+  };
 
   return (
     <>
@@ -46,8 +60,10 @@ export default function DocView({ docId, initialTitle, initialBodyJSON, staticBo
         staticBody={staticBody}
         overrideBodyJSON={scrubbed?.bodyJSON ?? null}
         userColor={userColor}
+        scrubFrozen={scrubFrozen}
+        onReturnToLive={handleReturnToLive}
       />
-      {canEdit && <DocScrubBar docId={docId} onScrub={setScrubbed} />}
+      {canEdit && <DocScrubBar docId={docId} onScrub={setScrubbed} resetSignal={resetSignal} />}
     </>
   );
 }

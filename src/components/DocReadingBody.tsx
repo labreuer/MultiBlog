@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useRef, useSyncExternalStore, type ReactNode } from "react";
 import { EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
 import { useSelectionPopover } from "@/lib/use-selection-popover";
@@ -12,6 +12,7 @@ import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
+import styles from "./DocReadingBody.module.css";
 
 type Props = {
   docId: string;
@@ -22,6 +23,13 @@ type Props = {
   // The viewer's own color (PLAN.md §13f), resolved server-side and passed
   // down rather than read here via useSession() — see DocView.tsx.
   userColor: string;
+  // True while DocView's scrub bar sits anywhere but the live end (PLAN.md
+  // §12) — one of the two independent reasons this view freezes, the other
+  // being a held selection, tracked below via `selection.pending`.
+  scrubFrozen?: boolean;
+  // Clicking FROZEN — clears the scrub override and reports it back up so
+  // DocView can also reset the scrub bar's own slider position.
+  onReturnToLive?: () => void;
 };
 
 // Clicking an annotation-highlighted span jumps to (and briefly tints) its
@@ -57,7 +65,15 @@ const annotationClickExtensions = [AnnotationClick.configure({ onHit: jumpToAnno
 // where before, whether it rendered an AnnotationPopover depended on a prop,
 // and its pending-selection state was shared with a doc-link popover whose
 // positioning convention silently diverged from this one's.
-export default function DocReadingBody({ docId, initialBodyJSON, staticBody, overrideBodyJSON, userColor }: Props) {
+export default function DocReadingBody({
+  docId,
+  initialBodyJSON,
+  staticBody,
+  overrideBodyJSON,
+  userColor,
+  scrubFrozen = false,
+  onReturnToLive,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Declared here so both hooks below can take it as an input — see
   // useLiveDocContent's note on why it owns neither end of that.
@@ -67,11 +83,17 @@ export default function DocReadingBody({ docId, initialBodyJSON, staticBody, ove
 
   const selection = useSelectionPopover({ editorRef, containerRef, userColor });
 
-  const { editor, ready, synced, error } = useLiveDocContent({
+  // The view's other freeze reason (PLAN.md §12) — any non-empty selection,
+  // not merely one whose popover happens to be open, since the two are set
+  // together by `selection.capture`.
+  const frozen = scrubFrozen || selection.pending !== null;
+
+  const { editor, ready, synced, error, frozenUpdates } = useLiveDocContent({
     docId,
     initialBodyJSON,
     ariaLabel: "Post body",
     overrideBodyJSON,
+    frozen,
     editorRef,
     setAwareness,
     extensions: annotationClickExtensions,
@@ -87,18 +109,46 @@ export default function DocReadingBody({ docId, initialBodyJSON, staticBody, ove
     },
   });
 
+  const frozenUpdateCount = useSyncExternalStore(
+    frozenUpdates.subscribe,
+    frozenUpdates.getSnapshot,
+    frozenUpdates.getSnapshot,
+  );
+
   // Lets AnnotationSection's cards sit level with the text they mark
   // (PLAN.md §18). Same ready-gating as AnnotatableArticle's: until then this
   // editor is display:none behind the SSR'd static body.
   useRegisterMarginNotesEditor(editor, ready);
+
+  function handleUnfreeze() {
+    selection.clear();
+    onReturnToLive?.();
+  }
 
   if (error) {
     return <p style={{ color: "var(--error)" }}>{error}</p>;
   }
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div ref={containerRef} className={`${styles.container} ${frozen ? styles.frozen : ""}`}>
       {synced && <span data-testid="live-doc-synced" style={{ display: "none" }} />}
+      {frozen && (
+        <div className={styles.flagTrack}>
+          <button
+            type="button"
+            className={styles.flag}
+            title="switch to live view"
+            aria-label={
+              frozenUpdateCount > 0
+                ? `Switch to live view (${frozenUpdateCount} update${frozenUpdateCount === 1 ? "" : "s"} arrived while frozen)`
+                : "Switch to live view"
+            }
+            onClick={handleUnfreeze}
+          >
+            FROZEN{frozenUpdateCount > 0 && ` (+${frozenUpdateCount})`}
+          </button>
+        </div>
+      )}
       <div style={{ display: ready ? "none" : "block" }}>{staticBody}</div>
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />

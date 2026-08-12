@@ -2359,6 +2359,65 @@ above might read.
   `ydoc` row by hand is exactly the thing CLAUDE.md now warns against, not a path the app
   can reach on its own.
 
+### 12p. The frozen reading view
+
+**Problem.** `useLiveDocContent` pushes every remote Yjs update straight into the reading
+editor via `setContent`. Right for passive reading, wrong the moment a reader is doing
+something with the current text: dragging `DocScrubBar`'s slider (the next remote keystroke
+silently overwrote the historical body it was showing — there was no "return to live" control
+because none seemed needed), or holding a selection about to become an annotation (which
+`useSelectionPopover.reresolve` then has to re-find by text search after the fact).
+
+**The fix stops rendering, not receiving.** `useLiveDocContent` gains a `frozen: boolean`
+option. Its `ydoc.on("update", …)` listener keeps firing on every remote change either way —
+the Y.Doc always has everything — but while `frozen` is true the handler counts the update
+instead of calling `setContent`. Unfreezing runs one catch-up render and zeroes the count.
+Two independent reasons OR together into `frozen`, both owned by the reading surfaces rather
+than the hook itself:
+
+- **Scrub.** `DocScrubBar`'s `ScrubbedState` carries `live: boolean` (`index === total - 1`).
+  `DocView` freezes only when scrubbed *and not live* — the slider's own mount-time seed
+  already reports `live: true` before any drag, so merely mounting the bar never freezes
+  anything.
+- **Selection.** Any non-empty selection in the reading view, i.e. `useSelectionPopover`'s
+  `pending !== null` — not merely an open annotation popover, since the two are set together.
+
+**The count is updates, not keystrokes.** Yjs batches, so "(+N)" on the FROZEN flag counts
+`update` events received while frozen, not characters typed — the only number available for
+free on a read-only tap, which never sees individual row ids. Exposed off the hook as a
+listener-set pair (`frozenUpdates: { subscribe, getSnapshot }`), read via
+`useSyncExternalStore`, rather than React state — the same reasoning §18a's
+`margin-notes-context.tsx` already applies to its own per-keystroke signal: state here would
+re-render the whole reading surface on every remote update arriving during a long freeze,
+to reposition one badge.
+
+**Clicking FROZEN** clears both reasons at once — `useSelectionPopover.clear()`, plus
+`DocView` resetting `scrubbed` to `null` and bumping a `resetSignal` that `DocScrubBar` uses
+to seek its own slider back to the live end, so the slider's visible position and the body
+it drives never disagree.
+
+**The chrome is CSS, not scroll-tracked JS.** `DocReadingBody`'s container carries a permanent
+(usually transparent) `border-left` plus matching padding, so freezing only ever changes a
+border color, never reflows the article. The flag itself sits in a full-height absolutely
+positioned track (`top: 0; bottom: 0`, not `height: 100%` — a percentage height on an
+absolutely positioned box resolves to `auto` when its containing block's own height is auto,
+which this one is) at `position: sticky; top: 0`. Sticky inside a full-height track is what
+gives "top of the document area, then top of the viewport once scrolled past" for free.
+Rotation is `writing-mode: vertical-rl` plus `rotate(180deg)`, not `rotate(-90deg)` — both read
+bottom-to-top, but only the `writing-mode` form keeps a real layout box for sticky positioning
+and hit-testing to work against.
+
+**Tokens.** `--frozen`/`--frozen-text` (`globals.css`, STYLE.md's table) — darker blue in light
+theme, lighter in dark, the reverse of this file's usual "brighter on dark for legibility"
+rule, because it's a solid fill rather than text on the page background.
+
+**Known consequence, not fixed here.** A selection held through a freeze produces `from`/`to`
+measured against the frozen document, while `handleApplyAnnotationMark` verifies them against
+the live one — that path already degrades correctly (verify quoted text → unique-occurrence
+search → document-level), freezing just widens the window slightly. A real fix needs Yjs
+relative positions and the precondition (a `Collaboration`-bound editor) COLLAB.md §5 names for
+them cheaply, which the reading view doesn't have.
+
 ## 13. Annotations become ydocs, with a TipTap editor of their own
 
 **Decided:** an annotation's body stops being a plain-text `Json` column and becomes its own

@@ -1,0 +1,62 @@
+/* The frozen reading view (PLAN.md §12). The left border is always present,
+   at zero opacity, so freezing changes only a color rather than reflowing
+   the article text every time it toggles. padding-left is just breathing
+   room between the border and the text — not reserved space for the flag,
+   which lives outside this border entirely (see .flagTrack). */
+.container {
+  position: relative;
+  border-left: 1px solid transparent;
+  padding-left: 3px;
+}
+
+.frozen {
+  border-left-color: var(--frozen);
+}
+
+/* Spans the article's full (resolved) height via top/bottom rather than
+   `height: 100%` — a percentage height on an absolutely positioned box
+   computes to `auto` when its containing block's own height is itself auto,
+   which .container's is. top/bottom both set sidesteps that: the browser
+   resolves .container's height from its in-flow content first, then lays
+   this out against the result. `pointer-events: none` keeps the empty part
+   of the track from intercepting clicks on the article beside it; .flag
+   re-enables them for itself.
+   `left` is negative — the other side of .container's border from the text,
+   in the gutter beside the reading column — rather than 0, which would sit
+   the flag between the border and the article. On a viewport narrower than
+   roughly 800px + this width, .container has no gutter to poke into and
+   body's overflow-x: hidden clips the flag; accepted, since the border
+   itself still signals the frozen state even where the flag is clipped. */
+.flagTrack {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1.25rem;
+  width: 1.25rem;
+  pointer-events: none;
+}
+
+/* position: sticky inside a full-height track is what gives "top of the
+   document area, then top of the viewport once scrolled past" with no
+   scroll listener — the plain CSS behavior the freeze feature asks for. */
+.flag {
+  position: sticky;
+  top: 0;
+  width: 100%;
+  writing-mode: vertical-rl;
+  /* Both -90deg and this read bottom-to-top; only the rotate(180deg) form
+     keeps a real layout box, which sticky positioning, the width above, and
+     hit-testing all depend on. */
+  transform: rotate(180deg);
+  background: var(--frozen);
+  color: var(--frozen-text);
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.6em 0.15em;
+  pointer-events: auto;
+  white-space: nowrap;
+}
