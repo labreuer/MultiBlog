@@ -11,6 +11,7 @@ import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
+import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -109,21 +110,38 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
   return (
     <div className={styles.container}>
       <main className={styles.main}>
-        <h1 className={styles.title}>{post.title}</h1>
-        <p className={styles.byline}>
-          <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
-          {post.publishedAt?.toLocaleDateString()}
-        </p>
-        <AnnotatableArticle
-          postId={post.id}
-          doc={doc}
-          threads={quoteHighlights}
-          staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
-        />
-        <CommentSection postId={post.id} />
-        <p>
-          <Link href="/">← Back to all posts</Link>
-        </p>
+        {/* Carries the article's editor across to CommentSection, which is a
+            sibling here rather than a child (PLAN.md §18) — on a wide enough
+            viewport each comment card is positioned level with the passage it
+            quotes, and only the editor knows where that is. */}
+        <MarginNotesProvider>
+          <div className={styles.layout}>
+            <div className={styles.mainColumn}>
+              <h1 className={styles.title}>{post.title}</h1>
+              <p className={styles.byline}>
+                <AuthorByline
+                  authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
+                />
+                {post.publishedAt?.toLocaleDateString()}
+              </p>
+              <AnnotatableArticle
+                postId={post.id}
+                doc={doc}
+                threads={quoteHighlights}
+                staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
+              />
+            </div>
+            <div className={styles.rail}>
+              <CommentSection postId={post.id} />
+            </div>
+            {/* Spans both columns rather than sitting under the article, so
+                the single-column order stays article → comments → back link
+                exactly as it was before the rail existed. */}
+            <p className={styles.footerRow}>
+              <Link href="/">← Back to all posts</Link>
+            </p>
+          </div>
+        </MarginNotesProvider>
       </main>
     </div>
   );

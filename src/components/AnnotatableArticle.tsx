@@ -8,6 +8,7 @@ import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
 import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import CommentForm from "./CommentForm";
+import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 
 type PendingSelection = {
@@ -77,6 +78,12 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
     // navigation) would never show its own highlight/badge until an actual
     // page reload.
   }, [threads]);
+
+  // Lets CommentSection's cards sit level with the passages they quote
+  // (PLAN.md §18). Gated on `ready` because until then this editor is
+  // `display: none` behind the SSR'd static copy below, and coordsAtPos on a
+  // hidden editor measures zeroes.
+  useRegisterMarginNotesEditor(editor, ready);
 
   useEffect(() => {
     if (!pending) return;

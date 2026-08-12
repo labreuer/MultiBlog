@@ -24,3 +24,53 @@
   margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--border-subtle);
 }
+
+/* Single column by default and two columns only above the breakpoint — the
+   mobile-first direction so the `@media` string here is character-identical
+   to MARGIN_NOTES_MEDIA_QUERY (src/lib/margin-notes-layout.ts), which the
+   positioning hook matches on. A `max-width: 1199px` mirror would say the
+   same thing in a form that can silently drift from it. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1200px) {
+  /* 800 reading column + 2.5rem gap + 340 rail. A fourth documented
+     centred-column width alongside STYLE.md's 680/800/1040 — the reading
+     column itself is unchanged at 800px, and the extra is the rail. */
+  .container {
+    max-width: 1180px;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 800px) 340px;
+    gap: 2.5rem;
+    /* The rail is as tall as its own content (the layout hook gives the card
+       list an explicit height); stretching it would do nothing useful and
+       would make its top border, suppressed below, harder to reason about. */
+    align-items: start;
+    justify-content: center;
+  }
+
+  /* STYLE.md's "Narrow viewports and horizontal overflow" — a grid item's
+     automatic minimum is content-based, so a long unbroken line in the
+     article would otherwise widen the column past its track. */
+  .mainColumn {
+    min-width: 0;
+  }
+
+  /* CommentSection's own separator rule is a divider between the article
+     above and the comments below. Beside the article it separates nothing,
+     so the rail suppresses it rather than CommentSection branching on a
+     layout it can't see. */
+  .rail > section {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .footerRow {
+    grid-column: 1 / -1;
+  }
+}
