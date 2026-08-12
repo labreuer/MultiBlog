@@ -21,10 +21,19 @@ export default function QuoteThreadHeader({ threadId, quotedText, status, contex
   const detached = status === "DETACHED";
 
   const jumpToQuote = () => {
-    // ~= matches one word in a space-separated attribute value — needed
-    // since overlapping quotes get split into shared segments tagged with
-    // every thread ID that applies to them (see quote-highlight-extension).
-    const targets = document.querySelectorAll<HTMLElement>(`[data-thread-ids~="${threadId}"]`);
+    // Shared by both reading surfaces (comments and annotations), which
+    // anchor their quoted range in the article differently: a post's quote
+    // is a decoration, tagged data-thread-ids (~= word-match, since
+    // overlapping quotes get split into shared segments carrying every
+    // thread ID that applies — see quote-highlight-extension); a doc's
+    // annotation is a mark in the document itself, tagged data-annotation-id
+    // (exact match — a mark never merges several ids onto one span the way a
+    // decoration segment does), keyed by the thread's own id (the root
+    // annotation's id — see getDocAnnotationsAsThreads). One querySelectorAll
+    // covers both since a given page only ever renders one kind.
+    const targets = document.querySelectorAll<HTMLElement>(
+      `[data-thread-ids~="${threadId}"], [data-annotation-id="${threadId}"]`,
+    );
     if (targets.length === 0) {
       return;
     }
