@@ -2195,13 +2195,11 @@ Smaller implementation notes worth recording against the design text above:
   (`SiteHeader.module.css`), not the two flat "Manage Docs" / "Manage Annotations" links this
   started as.
 - **The annotation-mark endpoint's fallback search** (`findQuoteOccurrences`,
-  `server/ydoc-hooks.ts`) was a plain `O(document size × quotedText length)` scan, not the
+  `server/ydoc-hooks.ts`) is a plain `O(document size × quotedText length)` scan, not the
   smarter position-mapped walk first sketched — chosen for correctness-by-construction (it
-  reused `Node.textBetween`'s own separator handling rather than reimplementing it) at the
-  cost of not matching a quote that spans a block boundary. **Superseded 2026-08-12** (§14d):
-  it is now the position-mapped walk after all, `O(document size)`, and it *does* reimplement
-  the separator rule — which is why that rule is spelled out at length in its header and
-  checked against `textBetween` by property test rather than assumed.
+  reuses `Node.textBetween`'s own separator handling rather than reimplementing it) at the
+  cost of not matching a quote that spans a block boundary. Acceptable for a fallback that
+  only runs when the primary offsets already missed.
 - **`annotation.user_id` is `ON DELETE RESTRICT`.** Real users are never hard-deleted in this
   app (soft-delete only), so this is inert in production; it did surface against
   `scripts/test-user.ts delete` and the e2e suite's `deleteTestUser`, both fixed to remove a
@@ -3014,18 +3012,13 @@ ever write it, and a stored status would drift from the document exactly like th
 
 Two failure modes that the annotation path never meets:
 
-- ~~**`findQuoteOccurrences` cannot match a selection spanning block boundaries**~~ — **fixed
-  2026-08-12**, in the pass §14m anticipated. The old sliding `from + len` window under-counted
-  once per boundary (a paragraph break costs two ProseMirror positions but emits one separator
-  character); the search now flattens the document once, keeping each character's own range, and
-  maps a string match back to positions — so a boundary costs whatever it actually costs. It is
-  property-tested for soundness (every range returned reads back as exactly the query) and
-  completeness (every range a reader can select is findable again) across single/multi-paragraph,
-  empty-paragraph, blockquote, list and split-mark documents.
-  **`mark.blocks > 1` still skips step 2** (`doc-link-anchor.ts`), which is now conservatism
-  rather than necessity — dropping it would let a multi-block doc link re-anchor with
-  `contextMatches` disambiguating exactly as it does for single-block links. Left as a separate
-  decision because it changes this section's behavior, which the shared fix did not.
+- **`findQuoteOccurrences` cannot match a selection spanning block boundaries**, as its own header
+  comment says: a paragraph break costs two ProseMirror positions but emits one separator
+  character, so the `from + len` window under-counts once per boundary. Readers comparing two
+  documents will absolutely select across paragraphs. For this section: `mark.blocks > 1` skips
+  step 2 entirely and degrades straight to unanchored on any mismatch. Generalizing
+  `findQuoteOccurrences` is a shared change that would improve annotations too, and belongs in its
+  own pass (§14m).
 - **First paint resolves against `Doc.proseJson`, which is a store-debounce cache.** A link created
   against the live editor and then loaded fresh lands on the *lagging* copy, so step 1 misses more
   often right after an edit than intuition suggests. Step 2 covers it; the point is not to read the
@@ -3437,9 +3430,8 @@ documentation shape).
 - **Live propagation of links between users** (§14a). Needs either a `doc_link:` ydoc or polling;
   both are larger than this section and neither is needed to make the feature useful to one person
   at a time.
-- ~~**Generalizing `findQuoteOccurrences` across block boundaries** (§14d)~~ — **done 2026-08-12**,
-  as its own pass exactly as this predicted. See §14d for what changed and for the one thing left
-  behind on purpose (`mark.blocks > 1`).
+- **Generalizing `findQuoteOccurrences` across block boundaries** (§14d). A shared change that would
+  improve annotations too, so it deserves its own pass rather than riding in here.
 - **Doc links on the ordinary `/doc/[slug]` page.** They do not show there in this section, which
   means a link created side-by-side is invisible in the single-doc view. Stated rather than implied.
 - **A draggable column splitter, a swap-sides control, and group permalinks.**
