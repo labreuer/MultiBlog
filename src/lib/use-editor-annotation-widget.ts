@@ -60,6 +60,25 @@ export function useEditorAnnotationWidget({
   }, [pending]);
 
   function clear(liveEditor?: Editor | null) {
+    // A full no-op — no state update, no dispatch — when there's nothing
+    // pending to clear. Load-bearing, not a micro-optimization: `capture`
+    // calls this on *every* onSelectionUpdate with an empty selection,
+    // which on this editor (unlike the reading view's) fires on every
+    // keystroke, not just a mouse drag. Two hazards that matter only on an
+    // actively-typed, Collaboration-bound editor, neither of which applies
+    // on the reading view this shape was borrowed from: (1) `setPending`/
+    // `setResolvedTo` re-render CollabEditorBody's whole subtree on every
+    // keystroke even when the value doesn't change, racing React's
+    // reconciliation against ProseMirror's own DOM ownership of the
+    // contenteditable; (2) `setPendingAnnotation` dispatches a transaction
+    // on the same view, reentering the editor's own dispatchTransaction
+    // while it's still unwinding the transaction that triggered this
+    // callback (ProseMirror's dispatch is documented as not reentrant-safe).
+    // Both were live suspects in a cursor-desync failure caught by
+    // e2e/quote-anchoring.spec.ts's "an edit outside the quote moves the
+    // anchor" case, 2026-08-12 — this guard removes both at once rather
+    // than resolving which one was the actual cause.
+    if (pendingRef.current === null) return;
     setPending(null);
     setResolvedTo(null);
     const target = liveEditor ?? editorRef.current;

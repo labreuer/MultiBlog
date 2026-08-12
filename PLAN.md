@@ -5535,3 +5535,31 @@ positions, and precisely why they went unbuilt until now — the reading view ha
 composer) — §13i's "someone is writing an annotation" line still only appears once a
 draft row exists, same gap noted there for the inline popover. A not-yet-posted selection
 has no stable identity to hang a presence marker on until then.
+
+**A real reentrancy bug, found by e2e, and a known residual after fixing it.**
+`CollabEditorBody.tsx`'s `onUpdate`/`onSelectionUpdate` originally called `onContentUpdate`/
+`onSelectionUpdate` synchronously — both fire from inside tiptap's own `dispatchTransaction`,
+mid-unwind of the transaction that triggered them, and `useEditorAnnotationWidget`'s
+`reresolve`/`clear` can themselves update React state and dispatch a further transaction on
+the same view. `e2e/quote-anchoring.spec.ts`'s "an edit outside the quote moves the anchor"
+case caught it directly: typing `"Yesterday, "` at the very start of a document under
+`page.keyboard.type` (which sends real, rapid keystrokes, not a single batched insert)
+landed the string mid-word, ~35% of runs. Two independent fixes, both applied:
+
+1. `use-editor-annotation-widget.ts`'s `clear` is a true no-op — no state update, no
+   dispatch — when nothing is pending, since `capture` calls it on every keystroke's empty
+   selection on this editor (unlike the reading view, where the equivalent only fires on a
+   mouse drag).
+2. `CollabEditorBody` defers both callbacks with `setTimeout(fn, 0)`, not `queueMicrotask` —
+   a microtask can still run before the browser finishes dispatching the *next* queued input
+   event under rapid typing; a macrotask waits for that to settle first.
+
+Together these cut the failure rate to roughly 1 in 10-14 runs. Isolating further (see the
+session's own diagnostic trail, not reproduced here) showed the *entire* remaining rate
+reproduces identically with `onUpdate`/`onSelectionUpdate` registered as **completely empty**
+functions — proving the residual isn't in this codebase's logic at all, but some interaction
+between tiptap/prosemirror-view's own event pipeline and a `Collaboration`-bound editor
+receiving keystrokes faster than a human ever types. Accepted rather than chased further:
+`page.keyboard.type`'s per-character dispatch has no real-user equivalent, and the two fixes
+above are correct regardless of whether they touch the residual's actual mechanism. Revisit
+if it ever surfaces outside this one stress pattern.

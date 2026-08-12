@@ -122,7 +122,21 @@ export default function CollabEditorBody({
     editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {
-      onContentUpdate?.(e);
+      // setTimeout(0), not queueMicrotask: onUpdate fires from inside
+      // tiptap's own dispatchTransaction, mid-unwind of the transaction
+      // that triggered it. onContentUpdate (useEditorAnnotationWidget's
+      // reresolve) can itself update React state and, when a range no
+      // longer resolves, dispatch a transaction on this same view — doing
+      // either synchronously here reenters dispatchTransaction, which
+      // ProseMirror documents as unsafe. A microtask still runs before the
+      // browser has finished dispatching the *next* queued input event
+      // under rapid typing; a macrotask waits for that to fully settle
+      // first, at negligible cost since nothing reads the widget's
+      // position before the next paint anyway. Observed as a real, if
+      // intermittent, cursor/content desync during active typing without
+      // this — e2e/quote-anchoring.spec.ts's "an edit outside the quote
+      // moves the anchor" case, 2026-08-12.
+      if (onContentUpdate) setTimeout(() => onContentUpdate(e), 0);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         const { authorIds: ids, charsByAuthor } = perfMeasure("author-highlight walk", () =>
@@ -132,7 +146,10 @@ export default function CollabEditorBody({
         setAuthorCharCounts(charsByAuthor);
       }, AUTHOR_STATS_DEBOUNCE_MS);
     },
-    onSelectionUpdate: ({ editor: e }) => onSelectionUpdate?.(e),
+    // Same reentrancy hazard and same fix as onUpdate above.
+    onSelectionUpdate: ({ editor: e }) => {
+      if (onSelectionUpdate) setTimeout(() => onSelectionUpdate(e), 0);
+    },
   });
 
   useEffect(() => {

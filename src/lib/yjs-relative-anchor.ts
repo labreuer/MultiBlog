@@ -1,6 +1,13 @@
 import * as Y from "yjs";
 import { ySyncPluginKey, absolutePositionToRelativePosition, relativePositionToAbsolutePosition } from "y-prosemirror";
 import type { Editor } from "@tiptap/react";
+import type { Node as PMNode } from "@tiptap/pm/model";
+
+// y-prosemirror's own `ProsemirrorMapping` type (dist/src/lib.d.ts) isn't
+// re-exported from the package's public entry point, only from an internal
+// path this codebase otherwise never reaches into — this is that type's
+// actual shape, restated rather than imported from an unsupported deep path.
+type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>;
 
 // COLLAB.md §5 — this codebase's first app-level Y.RelativePosition code.
 // Everywhere else a relative position is used, it's entirely inside
@@ -25,7 +32,7 @@ export type RelativeRange = { from: Y.RelativePosition; to: Y.RelativePosition }
 // codebase push content with `setContent` instead (§12g) and have no
 // binding at all — `null` is the honest answer there, not a bug to work
 // around, and every caller has to handle it.
-function syncState(editor: Editor): { type: Y.XmlFragment; doc: Y.Doc; binding: { mapping: Map<unknown, unknown> } } | null {
+function syncState(editor: Editor): { type: Y.XmlFragment; doc: Y.Doc; binding: { mapping: ProsemirrorMapping } } | null {
   const state = ySyncPluginKey.getState(editor.state);
   return state?.binding ? state : null;
 }
