@@ -10,6 +10,7 @@ import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
+import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 
 type Props = {
@@ -62,6 +63,7 @@ export default function DocReadingBody({ docId, initialBodyJSON, staticBody, ove
   // useLiveDocContent's note on why it owns neither end of that.
   const editorRef = useRef<Editor | null>(null);
   const { setAwareness } = useDocPresence();
+  const marginNotes = useMarginNotes();
 
   const selection = useSelectionPopover({ editorRef, containerRef, userColor });
 
@@ -74,8 +76,21 @@ export default function DocReadingBody({ docId, initialBodyJSON, staticBody, ove
     setAwareness,
     extensions: annotationClickExtensions,
     onSelectionUpdate: selection.capture,
-    onContentPushed: selection.reresolve,
+    onContentPushed: (liveEditor) => {
+      selection.reresolve(liveEditor);
+      // Content arrives here through setContent with `emitUpdate: false`, so
+      // the editor's own "update" event never fires and the margin-notes
+      // layout would keep every card at the position the *previous* body put
+      // it. This is that layout's only signal on this surface — a remote
+      // keystroke reflows the article, which moves every anchor below it.
+      marginNotes?.notifyContentChanged();
+    },
   });
+
+  // Lets AnnotationSection's cards sit level with the text they mark
+  // (PLAN.md §18). Same ready-gating as AnnotatableArticle's: until then this
+  // editor is display:none behind the SSR'd static body.
+  useRegisterMarginNotesEditor(editor, ready);
 
   if (error) {
     return <p style={{ color: "var(--error)" }}>{error}</p>;

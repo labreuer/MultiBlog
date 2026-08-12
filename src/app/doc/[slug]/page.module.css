@@ -19,6 +19,39 @@
   padding-bottom: 5rem;
 }
 
+/* Mirrors app/[slug]/page.module.css exactly — same breakpoint, same track
+   sizes, same reasons; see that file's comments. Duplicated rather than
+   shared because the two pages' containers differ (this one is the <main>
+   itself, with its own 4rem margin) and a shared class would have to carry
+   both. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1200px) {
+  .container {
+    width: 1180px;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 800px) 340px;
+    gap: 2.5rem;
+    align-items: start;
+    justify-content: center;
+  }
+
+  .mainColumn {
+    min-width: 0;
+  }
+
+  .rail > section {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+}
+
 .forbidden {
   max-width: 480px;
   margin: 4rem auto;
