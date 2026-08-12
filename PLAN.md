@@ -2720,6 +2720,92 @@ oversights:
   called either afterward, so keeping them around would have been dead code with no path back
   to it.
 
+### 13m. The server→collab HTTP origin, and the production-only bug it caused
+
+Found 2026-08-11 on the dev deployment, reported as *"Annotation can't be empty."* on every
+attempt to annotate a selection. Worth recording in full, because nothing about the symptom
+pointed at the cause and the whole class was invisible to every local check.
+
+**The mechanism.** Four endpoints are served by the collab process over plain HTTP on its
+websocket port — `/admin/ydoc-snapshot` (§11d), `/admin/annotation-mark` (§12i),
+`/admin/annotation-unmark` (§13d), `/admin/annotation-flush` (§13j Phase 3). The Next process
+calls them server-to-server. Both callers (`src/lib/annotation-admin.ts`,
+`src/lib/ydoc-admin.ts`) derived the origin from **`NEXT_PUBLIC_COLLAB_URL`** by rewriting the
+scheme:
+
+```ts
+const wsUrl = process.env.NEXT_PUBLIC_COLLAB_URL ?? `ws://localhost:${process.env.COLLAB_PORT ?? 1234}`;
+return wsUrl.replace(/^ws/, "http").replace(/\/$/, "");
+```
+
+In dev that var is unset (deliberately — CLAUDE.md's env notes, so `getCollabUrl()` can derive
+a per-request host), so the fallback applies and the origin is right. In production DEPLOY.md
+§4 sets it to `wss://<app-host>/collab`, because the browser reaches the websocket through
+nginx on one host and one cert. The rewrite yields `https://<app-host>/collab`, so the POST
+goes to `https://<app-host>/collab/admin/annotation-flush`. DEPLOY.md §7's
+`location /collab { proxy_pass http://127.0.0.1:1234; }` has **no URI part**, which in nginx
+means the request URI is forwarded *unmodified* — so the collab process receives
+`/collab/admin/annotation-flush`, and `server/collab.ts`'s `onRequest` tests
+`request.url?.startsWith("/admin/annotation-flush")`, which is false. The request falls
+through to Hocuspocus's default handler, verified in `@hocuspocus/server`'s source:
+
+```js
+await this.hocuspocus.hooks("onRequest", { request, response, instance: this.hocuspocus });
+response.writeHead(200, { "Content-Type": "text/plain" });
+response.end("Welcome to Hocuspocus!");
+```
+
+**A 200.** Every caller therefore saw a successful response to a request that did nothing.
+
+**Why it presented as an empty annotation.** `postAnnotation` flushes the annotation's ydoc
+cache and reads `bodyText` straight back, retrying twice at 150 ms. With the flush a no-op, the
+only thing that ever writes `bodyText` is Hocuspocus's own store debounce (~2 s after the last
+keystroke), so anyone who typed and clicked Post inside that window was refused with
+*"Annotation can't be empty."* — and anyone who happened to pause first succeeded, which is
+what made it read as flaky rather than broken.
+
+**Three properties made this expensive to find, each worth generalizing:**
+
+- **The websocket was unaffected**, because Hocuspocus upgrades on any path. Live editing,
+  presence, and the annotation editor's own sync all worked perfectly, which ruled out the
+  collab server in the obvious first pass.
+- **It could not reproduce locally at all** — not a timing or load difference, but a
+  *configuration* difference: the broken branch is only taken when `NEXT_PUBLIC_COLLAB_URL` is
+  set, and it is never set in dev. `npm run e2e` and `web-prod` both miss it for the same
+  reason. This is a different failure class from the ones CLAUDE.md's Checks section covers
+  (dev-only faults that production doesn't have); this is production-only by construction.
+- **Every failure was swallowed.** `flushAnnotationCache` and `removeAnnotationMark` ignored
+  the response entirely; `snapshotYdoc` checked `response.ok`, which was true. Only
+  `applyAnnotationMark` would eventually have complained, and in the worst way — it called
+  `response.json()` on `"Welcome to Hocuspocus!"`, so once the empty-body error was out of the
+  way, posting an anchored annotation would have thrown a `SyntaxError` out of the server
+  action and surfaced as a generic 500. Same root cause, a completely different-looking bug.
+
+**The fix, and why it's the loopback address rather than a corrected path.** Both callers now
+share `src/lib/collab-http-origin.ts`, which resolves
+`COLLAB_INTERNAL_URL ?? http://127.0.0.1:${COLLAB_PORT ?? 1234}` and never reads
+`NEXT_PUBLIC_COLLAB_URL`. Adding an nginx rewrite (or a path prefix the handler also accepts)
+would have worked too, and is worse on every axis: a server-to-server call between two
+processes on the same box has no business making a TLS handshake and a proxy hop to reach a
+port it can dial directly, and routing it through the public origin means the `/admin/*`
+endpoints are internet-reachable — token-guarded, but unreachable beats guarded.
+`COLLAB_INTERNAL_URL` exists for the one case the default can't serve, a collab server on a
+different host; bare rather than `NEXT_PUBLIC_`, so it's a restart and not a rebuild.
+
+The structural point, which is what makes this more than a typo: **a `NEXT_PUBLIC_` variable
+names how the *browser* reaches something, and is the wrong input to any server-to-server
+call by definition.** The two answers coincide in dev and diverge exactly when a reverse proxy
+appears. `collab-url.ts` (client) and `collab-http-origin.ts` (server) are now the only two
+places that decide a collab address, and neither can be reached from the other's side.
+
+Both remaining swallow-points now `console.error` on a non-`ok` response and on an unreachable
+host, and `applyAnnotationMark` treats a non-JSON 200 as `applied: false` rather than throwing
+— so the next occurrence of anything in this family lands in
+`journalctl -u multiblog-web` instead of nowhere. That is the same argument TODO.md's
+"Observability of swallowed bulk-action failures" makes about `settleBulk`; this is the second
+instance of the pattern, which suggests the general rule is worth stating: **a best-effort call
+may swallow a failure's *effect on control flow*, never its *existence in the log*.**
+
 ## 14. Side-by-side docs, joined by doc links
 
 **Decided:** a third doc surface — two docs rendered in parallel columns at

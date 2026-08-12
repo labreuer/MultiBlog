@@ -117,6 +117,19 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   `getCollabUrl()`'s zero-restart) since it's read at `next dev` startup. `COLLAB_PORT` is bare,
   not `NEXT_PUBLIC_`, so it isn't readable client-side at all — `getCollabUrl()`'s `:1234`
   fallback is a literal, same as the `process.env.NEXT_PUBLIC_COLLAB_URL` reads it replaced.
+  **`NEXT_PUBLIC_COLLAB_URL` is the browser's answer only.** The Next *server* also calls the
+  collab process directly over plain HTTP (`/admin/ydoc-snapshot`, `/admin/annotation-mark`,
+  `/admin/annotation-unmark`, `/admin/annotation-flush`); that origin comes from
+  `src/lib/collab-http-origin.ts` — `COLLAB_INTERNAL_URL` (optional, bare) falling back to
+  `http://127.0.0.1:${COLLAB_PORT}` — and must **never** be derived from
+  `NEXT_PUBLIC_COLLAB_URL`. It was, and the bug was invisible locally and total in production:
+  the public URL is `wss://<host>/collab`, nginx forwards `/collab/...` unrewritten, the
+  handler matches on `/admin/...`, and Hocuspocus answers an unmatched path with a
+  **`200 "Welcome to Hocuspocus!"`** — so all four endpoints silently no-opped while the
+  websocket worked fine. Symptom was "Annotation can't be empty." on every annotation. PLAN.md
+  §13m has the full account; the generalizable half is that a `NEXT_PUBLIC_` var answers "how
+  does the *browser* reach this", which is the wrong question for a server-to-server call and
+  happens to give the same answer as the right one only until a reverse proxy exists.
   Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
   `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
   deployment's title survives `git pull` instead of living in a tracked file. Also optional:

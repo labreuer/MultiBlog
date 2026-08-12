@@ -305,6 +305,7 @@ AUTH_URL="https://<app-host>"               # canonical https origin
 APP_URL="https://<app-host>"                # absolute links (reset links, RSS)
 COLLAB_PORT=1234
 NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"   # path-based; see note below
+COLLAB_INTERNAL_URL="http://127.0.0.1:1234"        # optional — only if collab is on another host
 
 NEXT_PUBLIC_SITE_TITLE="<your blog's real name>"   # optional — omit to keep "MultiBlog"
 
@@ -329,6 +330,23 @@ RESEND_INVITE_TEMPLATE_ID="tmpl_..."        # optional — invite email only; om
 > `LiveHistoryViewer.tsx`). It **must** be set to the final `wss://` URL *before* you build —
 > changing it later requires a rebuild, not just a service restart. Same discipline for
 > anything else `NEXT_PUBLIC_`, including `NEXT_PUBLIC_SITE_TITLE` below.
+
+> **`NEXT_PUBLIC_COLLAB_URL` describes how the *browser* reaches collab, and nothing else.**
+> The Next server also talks to the collab process directly, over plain HTTP, for four
+> endpoints (`/admin/ydoc-snapshot`, `/admin/annotation-mark`, `/admin/annotation-unmark`,
+> `/admin/annotation-flush`). Those go to `COLLAB_INTERNAL_URL`, defaulting to
+> `http://127.0.0.1:${COLLAB_PORT}` — **leave it unset** in the standard single-box layout
+> above; set it only if the collab server runs on a different host. It is bare, not
+> `NEXT_PUBLIC_`, so changing it is a restart, not a rebuild.
+>
+> This used to be derived from `NEXT_PUBLIC_COLLAB_URL` by rewriting `wss://` to `https://`,
+> which produced `https://<app-host>/collab/admin/…`. `location /collab` below has no URI part,
+> so nginx forwards the path unmodified and the collab server — which matches on
+> `/admin/…` — never recognized it, answering Hocuspocus's default `200 Welcome to Hocuspocus!`
+> instead. Every one of those endpoints was a silent no-op in production while the websocket
+> worked fine; the visible symptom was *"Annotation can't be empty."* on posting an annotation.
+> Fixed 2026-08-11 — see PLAN.md §13m. **If you are upgrading past that commit, nothing in
+> `.env` needs to change; you do need a rebuild + restart of `multiblog-web`.**
 
 `NEXT_PUBLIC_SITE_TITLE` (`src/lib/site-config.ts`) is env-sourced for the same reason as
 `SITE_BANNER*` below — a real deployment's identity should live in this gitignored file, not

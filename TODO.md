@@ -6,6 +6,96 @@ the box or the toolchain belongs in CLAUDE.md or DEPLOY.md instead.
 
 ---
 
+## Hydration mismatch (React #418) from `toLocaleString()` in client components
+
+**Status:** diagnosed, not fixed. Observed 2026-08-11 on the dev deployment as
+`Minified React error #418` in the console on every load of `/doc/<id>` for a doc that has
+annotations. Cosmetically silent — React recovers — but it discards and re-renders the whole
+annotation subtree on the client on every page load.
+
+### Cause
+
+[`AnnotationNode.tsx:128`](src/components/annotation/AnnotationNode.tsx#L128), inside a
+`"use client"` component:
+
+```tsx
+{new Date(annotation.createdAt).toLocaleString()}
+```
+
+`toLocaleString()` with no arguments reads the **runtime's** default locale and timezone.
+`AnnotationSection` is an async Server Component that loads the annotations and passes them
+into `AnnotationList` → `AnnotationNode`, both client components — which in the App Router
+means that line runs **twice**: once during SSR on the box (Linode default TZ, i.e. UTC) and
+once during hydration in the browser (the reader's locale and TZ). The two strings differ, so
+React throws a text-level hydration mismatch:
+
+> Hydration failed because the server rendered %s didn't match the client. As a result this
+> tree will be regenerated on the client.
+
+Confirmed against React's own `codes.json` for `react-dom@19.2.8`. In production React passes
+only `"text"` or `"HTML"` as that `%s` (`react-dom-client.production.js:2735-2745`), so the
+console URL ends `?args[]=text` and carries no further detail — see the note on diagnosis
+below before reaching for a build.
+
+**The near-identical line in [`doc/[slug]/page.tsx:127`](src/app/doc/[slug]/page.tsx#L127) is
+not a bug**, and the distinction is the whole point: that one is in a *Server* Component, so
+it is formatted once and shipped as a finished string in the RSC payload. Only the
+client-component copy renders on both sides. Anything that greps for `toLocaleString` and
+"fixes" both has misread it.
+
+### Why no local check catches this, and why that is familiar
+
+It is **production-only by construction**, not by timing or load: locally the Next server and
+the browser are the *same machine*, so they share a locale and a timezone and always agree.
+`npm run e2e` and `web-prod` both miss it for that reason and always will.
+
+That is the same shape as the collab-origin bug (PLAN.md §13m) — a divergence between the
+server's environment and the client's that simply does not exist when both are one laptop.
+Worth treating as a standing class rather than two incidents: **anything whose value is
+computed independently on both sides of a hydration boundary is untested here.** A CI job that
+runs the suite with `TZ=UTC` on the server and a non-UTC browser locale would cover the whole
+class; nothing today does.
+
+### Other affected call sites — audit before fixing
+
+Only call sites that are *both* in a client component *and* rendered during SSR can mismatch;
+one whose data arrives from a client-side fetch after mount cannot, since it isn't in the SSR
+HTML at all. Confirmed and unconfirmed, as of 2026-08-11:
+
+- **Confirmed** — [`AnnotationNode.tsx:128`](src/components/annotation/AnnotationNode.tsx#L128).
+- **Near-certain, same shape, not verified** — [`CommentNode.tsx:103`](src/components/CommentNode.tsx#L103),
+  which would put this on every public post page carrying comments.
+- **Unverified** — `SlugManager.tsx:224`, `PostPublisher.tsx:217-218`, `DocScrubBar.tsx:108`,
+  `PostSnapshotScrubBar.tsx:128,146`, and the several in `YdocDebug.tsx`. Each needs the
+  SSR-vs-client-fetch question answered individually; `YdocDebug`'s in particular are likely
+  safe, since that page loads its lists after mount.
+
+### Fixing it
+
+The current *visible* behavior in production is already local time — React recovers by
+client-rendering the subtree — so a fix that changes what the reader sees is a regression, not
+a fix. That rules out the two cheapest options: formatting to a fixed `timeZone: "UTC"` (makes
+everyone read UTC) and `suppressHydrationWarning` (React then keeps the *server's* text and
+only corrects it if something later re-renders, which is worse than today and unreliable).
+
+Suggested: one small shared `<LocalTime iso={...} />` client component that renders a
+deterministic string on both sides of hydration and swaps to `toLocaleString()` in a
+`useEffect` after mount, then point every confirmed call site at it. Preserves today's result,
+removes the error and the subtree re-render, and gives the codebase one place to decide date
+formatting instead of nine.
+
+### Diagnosing the next one — do not build an unminified bundle
+
+Recorded because it is the obvious first instinct and it does not work. React's detailed
+hydration diff is **not** a minification casualty; it is code that exists only in
+`react-dom-client.development.js`. A source-mapped or unminified *production* bundle still
+yields nothing past "server rendered HTML didn't match the client". To get the real diff
+against real production data, run `next dev` on the box against the same `.env` on a spare
+port (`npm run dev -- -p 3002`) and reach it through an SSH tunnel — a dev *server*, not an
+unminified prod build.
+
+---
+
 ## Observability of swallowed bulk-action failures
 
 **Status:** partly resolved. The failures *are* logged and *are* retrievable in production.
