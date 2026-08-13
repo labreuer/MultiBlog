@@ -46,7 +46,12 @@ export async function applyAnnotationMark(opts: {
   from: number;
   to: number;
   quotedText: string;
-}): Promise<{ applied: boolean }> {
+  // PLAN.md §13n — `markUpdateId` is the `ydoc_update` row that now carries
+  // the mark, stringified because BigInt doesn't survive JSON. Null whenever
+  // `applied` is false, and also whenever the collab server couldn't name one
+  // (a degraded append path): the caller keeps its earlier stamp rather than
+  // inventing one.
+}): Promise<{ applied: boolean; markUpdateId: string | null }> {
   const { docId, userId, role, annotationId, from, to, quotedText } = opts;
   const documentName = ydocIdForDoc(docId);
   const token = await signYdocToken({ sub: userId, documentName, role });
@@ -60,12 +65,12 @@ export async function applyAnnotationMark(opts: {
     });
   } catch (err) {
     console.error(`[annotation-admin] annotation-mark unreachable for ${documentName}:`, err);
-    return { applied: false };
+    return { applied: false, markUpdateId: null };
   }
 
   if (!response.ok) {
     console.error(`[annotation-admin] annotation-mark returned ${response.status} for ${documentName}`);
-    return { applied: false };
+    return { applied: false, markUpdateId: null };
   }
 
   // Not just `await response.json()`. A 200 whose body isn't JSON is exactly
@@ -76,10 +81,10 @@ export async function applyAnnotationMark(opts: {
   // not-applied keeps the annotation posting either way; the log line is what
   // makes it findable.
   try {
-    return (await response.json()) as { applied: boolean };
+    return (await response.json()) as { applied: boolean; markUpdateId: string | null };
   } catch (err) {
     console.error(`[annotation-admin] annotation-mark answered non-JSON for ${documentName} — is the endpoint routed correctly?`, err);
-    return { applied: false };
+    return { applied: false, markUpdateId: null };
   }
 }
 

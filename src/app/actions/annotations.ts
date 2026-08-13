@@ -300,7 +300,7 @@ export async function postAnnotation(opts: {
   // which is what makes this branch's use of `docId` safe without a second
   // root check of its own.
   if (anchorRequested && anchorMode === "mark") {
-    await applyAnnotationMark({
+    const { applied, markUpdateId } = await applyAnnotationMark({
       docId: annotation.docId,
       userId: session.user.id,
       role: session.user.role,
@@ -309,8 +309,31 @@ export async function postAnnotation(opts: {
       to: opts.anchorTo!,
       quotedText: opts.quotedText!,
     });
-    // No branch on the result — same reasoning as submitAnnotation above:
-    // whether or not the mark landed, LIVE is already correct either way.
+    // LIVE is already correct whether or not the mark landed — that part is
+    // unchanged. What the result *is* now read for is the stamp.
+    //
+    // PLAN.md §13n — a mark is applied as an update strictly after the state
+    // its author was looking at, so stamping that earlier state named a
+    // revision where the annotation provably isn't attached yet: "at this
+    // revision" scrubbed to a document with no such mark in it, and the card
+    // fell out of the margin rail on arrival. Re-stamping to the update that
+    // carries the mark makes the stamp mean, for both mechanisms, *the
+    // earliest revision at which this annotation is locatable* — which is
+    // what the control was always trying to show.
+    //
+    // Only on success. A mark that never landed leaves the annotation
+    // document-level, and its original stamp ("what the author was looking
+    // at") stays the most honest thing available.
+    if (applied && markUpdateId) {
+      try {
+        await prisma.annotation.update({
+          where: { id: annotation.id },
+          data: { ydocUpdateId: BigInt(markUpdateId) },
+        });
+      } catch (err) {
+        console.error(`[annotations] couldn't re-stamp ${annotation.id} to its mark's update:`, err);
+      }
+    }
   }
 
   if (opts.raise) {

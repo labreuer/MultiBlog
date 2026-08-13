@@ -405,7 +405,23 @@ export async function handleApplyAnnotationMark(
     await connection.disconnect();
   }
 
-  send(response, 200, JSON.stringify({ applied }));
+  // PLAN.md §13n — which `ydoc_update` row now carries the mark, so the
+  // caller can stamp the annotation with a revision it is actually
+  // *locatable* at. A mark is applied as an update strictly after the state
+  // the author was looking at, so stamping that earlier state gave "at this
+  // revision" a document where the annotation provably isn't attached yet.
+  //
+  // Read after the transact, through the same append-queue barrier the store
+  // debounce uses, so the row is guaranteed to exist rather than merely to
+  // have been queued.
+  //
+  // Slightly generous under concurrency: another client's edit landing
+  // between the transact and this read makes it *their* row id. Harmless in
+  // the direction that matters — any id at or after the mark's own row
+  // contains the mark, which is the whole property being bought.
+  const markUpdateId = applied ? await drainAppends(documentName) : null;
+
+  send(response, 200, JSON.stringify({ applied, markUpdateId: markUpdateId?.toString() ?? null }));
 }
 
 // Every contiguous run of text carrying markName/attrName === attrValue —

@@ -24,7 +24,7 @@ indefinitely, with nothing failing. That is what these exist to make loud.
 |---|---|---|
 | `check-ydoc-integrity.ts` | does the stored blob match a replay of its own update log? | ERROR — a divergence here means the document and its history disagree |
 | `check-doc-integrity.ts` | do the Doc columns match the stored blob? | mostly WARN, since a cache legitimately trails the ydoc by one debounce; `length-cache` is an ERROR because nothing explains or fixes it |
-| `check-annotation-anchors.ts` | replay to an annotation's stamp — is its quote actually there? | ERROR, except a missing stamp (WARN: rows predating the column are legitimately in that state) |
+| `check-annotation-anchors.ts` | replay to an annotation's stamp — is it actually anchored there? (its quote, for a column anchor; its mark, for a mark anchor) | ERROR, except a missing stamp (WARN: rows predating the column are legitimately in that state) |
 
 Run all three:
 

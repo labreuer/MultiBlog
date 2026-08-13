@@ -2869,6 +2869,22 @@ may swallow a failure's *effect on control flow*, never its *existence in the lo
 annotation was posted. It answers "what did the reader see when they wrote this," and drove
 exactly one thing at the time: a scrubber jump.
 
+> **The stamp's meaning, in one line, since it now has two derivations:** *the earliest revision
+> at which this annotation is locatable.* For a column-anchored one that is the version its
+> author was looking at, because the offsets are true there (§13q). For a mark-anchored one it is
+> the update that **carries the mark** — which is strictly *after* what the author saw, because
+> the collab server applies the mark as its own update. Stamping the earlier state was a real
+> bug rather than a nuance: "at this revision" scrubbed to the one document where the annotation
+> provably isn't attached, and the card dropped out of the margin rail the moment you clicked it.
+> Measured on a real doc before the fix — at update 64951 (an annotation's own stamp) the
+> document carried four annotation marks and not that annotation's; its own first appears at
+> 65049. `postAnnotation` re-stamps after a successful `applyAnnotationMark`;
+> `scripts/backfill-mark-annotation-stamps.ts` fixed the rows written before that, and
+> `check-annotation-anchors.ts`'s `mark-at-stamp` is the standing guard.
+>
+> Only on success: a mark that never landed leaves the annotation document-level, and its
+> original stamp stays the most honest value available.
+
 > **Also superseded in part by §13q**, which is what the paragraph below stopped being true of:
 > the tail is now the *fallback*, not the normal case. A reading-view annotation is stamped with
 > the version its author was actually looking at, converted from a Yjs snapshot the client

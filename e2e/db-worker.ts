@@ -735,6 +735,31 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
   );
 }
 
+/**
+ * PLAN.md §13n — replays a doc to an annotation's own stamp and reports
+ * whether its mark is there. The mark-anchored counterpart of
+ * `quoteMatchesAtStamp` below, and the property `postAnnotation`'s re-stamp
+ * exists to establish: "at this revision" has to land on a revision where the
+ * annotation is attached.
+ */
+export async function markPresentAtStamp(docId: string, annotationId: string): Promise<boolean> {
+  const a = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { ydocUpdateId: true },
+  });
+  if (!a?.ydocUpdateId) return false;
+  let ydoc: Y.Doc | null = null;
+  try {
+    ydoc = await materializeYdocAt(ydocIdForDoc(docId), a.ydocUpdateId);
+    const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(ydoc, "default") as JSONContent;
+    return collectMarkAttrValues(json, "annotation", "id").includes(annotationId);
+  } catch {
+    return false;
+  } finally {
+    ydoc?.destroy();
+  }
+}
+
 // The same replay-and-compare check-annotation-anchors.ts does, for one row,
 // so a spec can assert the invariant at the exact moment it posted rather
 // than trusting a bulk script run later.
@@ -1091,6 +1116,7 @@ const handlers = {
   getDocLinkGroupIds,
   getDocLinkFields,
   getAnnotationStates,
+  markPresentAtStamp,
   createTestAnnotation,
   createComment,
   createQuoteThread,

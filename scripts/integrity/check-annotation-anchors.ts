@@ -44,6 +44,14 @@
 //   4. mechanism-xor   — a row must be anchored by columns *or* by a mark in
 //      the doc's ydoc, never both (§13o). Both would be two sources of truth
 //      for one position, with nothing saying which wins.
+//   5. mark-at-stamp   — the mark-anchored counterpart of check 3, and the
+//      postcondition of scripts/backfill-mark-annotation-stamps.ts. An
+//      annotation whose mark is in the live document must also have it at its
+//      own stamp: the stamp is what "at this revision" scrubs to, and a
+//      revision predating the mark shows a document the annotation is
+//      provably not attached to (§13n). Only checked when the mark exists
+//      *somewhere* — one that never landed is document-level, which is a
+//      state the system renders rather than a fault.
 //
 // Cost: one replay per distinct (ydoc, stamp) pair, memoised — several
 // annotations on one doc at one stamp cost one materialisation, not one each.
@@ -152,6 +160,36 @@ async function main() {
     if (anchored && marked) {
       report("error", a.id, "mechanism-xor", "has both stored offsets and a mark in the doc's ydoc");
     }
+
+    // Check 5. Independent of the column checks below, and deliberately not
+    // gated on `anchored` — this is the other mechanism's version of the same
+    // question.
+    if (!anchored && marked && a.ydocUpdateId !== null) {
+      checked++;
+      const node = await nodeAt(ydocIdForDoc(a.docId), a.ydocUpdateId, false);
+      if (!node) {
+        report("error", a.id, "mark-at-stamp", `couldn't replay the doc to ${a.ydocUpdateId}`);
+      } else {
+        const atStamp = collectMarkAttrValues(
+          JSON.parse(JSON.stringify(node.toJSON())) as JSONContent,
+          "annotation",
+          "id",
+        );
+        if (!atStamp.includes(a.id)) {
+          report(
+            "error",
+            a.id,
+            "mark-at-stamp",
+            `its mark is in the live doc but not at its stamp (${a.ydocUpdateId}) — ` +
+              `"at this revision" would scrub to a document it isn't attached to; ` +
+              `run scripts/backfill-mark-annotation-stamps.ts`,
+          );
+        } else if (verbose) {
+          console.log(`  ok  ${a.id}  mark present at its stamp ${a.ydocUpdateId}`);
+        }
+      }
+    }
+
     if (!anchored) continue;
     checked++;
 
@@ -217,7 +255,7 @@ async function main() {
   const warns = findings.filter((f) => f.level === "warn");
 
   console.log(
-    `\nchecked ${checked} column-anchored annotation(s) of ${annotations.length} total — ` +
+    `\nchecked ${checked} anchored annotation(s) of ${annotations.length} total — ` +
       `${errors.length} error(s), ${warns.length} warning(s)`,
   );
   for (const f of [...errors, ...warns]) {

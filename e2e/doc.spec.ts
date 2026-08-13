@@ -28,7 +28,13 @@ import {
   QUOTED_BODY,
   QUOTED_TEXT,
 } from "./fixtures";
-import { countDocYdocUpdates, getDocState, getAnnotationStates, addTestDocAuthor } from "./db";
+import {
+  countDocYdocUpdates,
+  getDocState,
+  getAnnotationStates,
+  markPresentAtStamp,
+  addTestDocAuthor,
+} from "./db";
 import { ADMIN_EMAIL } from "./naming";
 import { uniqueTitle } from "./naming";
 
@@ -446,6 +452,17 @@ test.describe("annotations", () => {
         quotedText: "",
         bodyText: "Annotated while editing.",
       });
+
+    // PLAN.md §13n — the stamp names a revision the annotation is actually
+    // *locatable* at. A mark is applied as an update strictly after the state
+    // its author was looking at, so stamping that earlier state pointed "at
+    // this revision" at a document with no such mark, and the card fell out
+    // of the margin rail the moment you clicked it. Asserted by replaying to
+    // the stamp and looking, which is what makes this about the property
+    // rather than about which id happens to be current.
+    const [marked] = await getAnnotationStates(sharedDoc.id);
+    expect(marked.ydocUpdateId).not.toBeNull();
+    expect(await markPresentAtStamp(sharedDoc.id, marked.id)).toBe(true);
   });
 });
 
