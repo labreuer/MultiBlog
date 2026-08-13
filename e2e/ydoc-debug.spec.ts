@@ -254,3 +254,50 @@ test("the replay slider scrubs the log, marks snapshots, and rebuilds from the n
     await deleteTestYdoc(doc.id);
   }
 });
+
+// The mark tables after Clients (one per mark type actually present in the
+// ydoc, first 10 runs each). Worth covering because the whole point of the
+// view is to report what a document *contains* rather than what the schema
+// says it may contain — a table that quietly showed nothing would look
+// identical to a document that genuinely has no marks.
+test("the mark tables list each mark type present, with its own attrs as columns", async ({ page }) => {
+  const doc = await createTestYdoc();
+  try {
+    await gotoOk(page, "/ydoc-debug");
+    await page.getByLabel("Document").selectOption(doc.id);
+
+    // Typing is what produces marks here: CollabEditorBody tags every
+    // keystroke with an authorHighlight carrying the typist's id (PLAN.md
+    // §12k), so a doc that has been edited at all has one to find.
+    await page.getByRole("button", { name: "Switch to editing" }).click();
+    await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: LIVE_TIMEOUT });
+    await bodyEditor(page).click();
+    await page.keyboard.type("marked up text");
+    await expect.poll(() => countYdocUpdates(doc.id)).toBeGreaterThan(1);
+
+    await page.getByRole("button", { name: "Switch to read-only" }).click();
+    await page.getByRole("button", { name: "Refresh" }).click();
+
+    const table = page.getByTestId("mark-table-authorHighlight");
+    await expect(table).toBeVisible();
+    // The attribute is discovered from the mark, not hardcoded in the view —
+    // so the column existing is the assertion that that discovery works.
+    await expect(table.getByRole("columnheader", { name: "authorId" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "Where" })).toBeVisible();
+
+    // Attributed to the signed-in admin, and found in the body fragment.
+    const adminId = await getUserIdByEmail(ADMIN_EMAIL);
+    expect(adminId).not.toBeNull();
+    const firstRow = table.getByRole("row").nth(1);
+    await expect(firstRow).toContainText(adminId!);
+    await expect(firstRow).toContainText("body");
+
+    // A type with no marks present gets no table at all, rather than an
+    // empty one — `annotation` is in this editor's schema but never applied
+    // to a /ydoc-debug document.
+    await expect(page.getByTestId("mark-table-annotation")).toHaveCount(0);
+  } finally {
+    await page.goto("about:blank").catch(() => {});
+    await deleteTestYdoc(doc.id);
+  }
+});
