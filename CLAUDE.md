@@ -46,7 +46,16 @@ other and never both; a null `anchorFrom` *is* "look for a mark instead".
 `Annotation.ydocUpdateId` is no longer metadata-only: it's the version stamp those offsets
 were measured against, and `quotedText` is derived server-side against exactly that state —
 so replaying to it reproduces the quote by construction. It still drives the scrubber jump
-it always did. Never position a doc annotation off `Doc.proseJson` — it's a store-debounce
+it always did. Since §13q it names **the version the annotator was looking at**, not the
+log's tail at post time: the client captures a `Y.snapshot` in the same synchronous tick it
+reads the selection offsets (later is wrong — the freeze withholds the *render* while the
+Y.Doc keeps advancing), and `resolveUpdateIdForSnapshot` converts it. A bare state vector
+can't do this — deletions advance no clock, so ~10% of updates are invisible to one — and
+`Y.encodeStateVectorFromUpdate` is the wrong primitive for reading a *delta*'s clocks, which
+it answers with silence rather than an error. What keeps the conversion cheap is
+`Ydoc.lastUpdateId`, written by the store debounce beside the blob and state vector it
+already wrote: a rolling checkpoint the walk starts from. `scripts/integrity/check-annotation-anchors.ts`
+is what verifies the whole arrangement still holds. Never position a doc annotation off `Doc.proseJson` — it's a store-debounce
 snapshot, stale by seconds while anyone is typing; it's fine as the *seed* for which cards
 start in the rail, and nothing more.
 **A reply's anchor points into its parent annotation's body, not the doc** (§13p) — same
@@ -390,10 +399,13 @@ duplicated, slugs are claimed through the transaction (`claimSlug` — `uniqueDo
 `uniqueUserSlug` query the global client and can't see rows the same import just created),
 the `ydoc` blob is always recomputed as `Y.mergeUpdates` over the rows being written rather
 than copied from a source, and `@updatedAt` columns need raw SQL to backdate. Afterwards,
-`scripts/integrity/` is the acceptance test — run both of its checks, ydoc first (a bad
-blob makes the doc-side checks report faults that evaporate once it's repaired). See
-[scripts/integrity/README.md](scripts/integrity/README.md) for which link of the
-`ydoc_update → ydoc.ydoc → doc.*` chain each one covers.
+`scripts/integrity/` is the acceptance test — run all three of its checks, ydoc first (a bad
+blob makes the doc- and annotation-side checks report faults that evaporate once it's
+repaired). See [scripts/integrity/README.md](scripts/integrity/README.md) for which link of
+the `ydoc_update → ydoc.ydoc → doc.*` chain each one covers, and why
+`check-annotation-anchors` is the odd one out: it verifies a *claim written down once*
+("at update N, characters [a, b) read exactly this") rather than a derived value, which is
+why nothing recomputes it and why a break there is silent.
 
 ### Performance measurement
 

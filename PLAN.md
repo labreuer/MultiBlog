@@ -2869,6 +2869,12 @@ may swallow a failure's *effect on control flow*, never its *existence in the lo
 annotation was posted. It answers "what did the reader see when they wrote this," and drove
 exactly one thing at the time: a scrubber jump.
 
+> **Also superseded in part by §13q**, which is what the paragraph below stopped being true of:
+> the tail is now the *fallback*, not the normal case. A reading-view annotation is stamped with
+> the version its author was actually looking at, converted from a Yjs snapshot the client
+> captures at selection time. The scrub-frozen path below is unchanged and still wins where it
+> applies.
+
 **Written in `postAnnotation`** (`src/app/actions/annotations.ts`), for every posted
 annotation, root or reply — not gated to roots the way the mark itself is, since "what was I
 looking at" is meaningful for a reply too, even though a reply carries no anchor of its own.
@@ -3117,6 +3123,93 @@ grants a writable connection to any doc reader for a non-`DRAFT` annotation, so 
 structural stops a body from changing under an anchor. The stamp is what would resolve that when
 it happens, and it is stored. `/annotations`' Quote column shows a reply's quote now, but the
 table still has no way to say *what* a quote is a quote of.
+
+### 13q. The stamp becomes the version the annotator saw
+
+**Decided:** `Annotation.ydocUpdateId` names the document state the annotator was *looking at*,
+not the log's tail at the moment they clicked Post. The client captures a Yjs snapshot when it
+reads the selection; the server converts that to a `ydoc_update.id`.
+
+**This is an accuracy and semantics change, not a correctness fix**, and the distinction sets
+the budget. `captureAnnotationAnchor` (§13o) resolves the offsets *against whatever it stamps*
+and stores its own `textBetween`, so the triple has always been self-consistent with the stamped
+state — that never depended on the stamp being right. What a post-time tail broke was two other
+things: "at this revision" jumped to a state the reader had never seen, and verification fell to
+a whole-document text search whenever anyone had edited in between, which is where an anchor
+lands on the wrong occurrence.
+
+**A client cannot name its own update id**, which is worth stating because every workaround
+looks plausible until traced. `ydoc_update.id` is a *global* sequence, so one document's ids are
+non-contiguous and "N plus the seven updates I have seen since" is not computable. The sync
+payload is one merged `encodeStateAsUpdate`, so it carries no row boundaries. And `prose_json`
+re-encoded into a `Y.Doc` mints fresh structs under a new client id, CRDT-incomparable with the
+live document. docs/COLLAB.md's 2026-08-13 entry has the full load → sync → select → post →
+resolve timeline; what remains is that the client can state its version exactly in Yjs's own
+terms and in no other.
+
+**A snapshot, not a state vector**, and this cost a wrong implementation to learn. A state vector
+summarises insertions only — deletions advance no peer's clock — so two documents differing by a
+deletion encode identically. Measured on a real corpus: **9.5% of `ydoc_update` rows carry no
+structs at all**, in runs of up to 22 consecutive, so a vector alone leaves the answer ambiguous
+across a whole run. `Y.snapshot` pairs the vector with the delete set and closes it — verified
+4/4 exact inside a real deletion run, where clocks alone collapse every position in it to one id.
+
+**`Y.encodeStateVectorFromUpdate` is the wrong primitive and fails silently.** It answers "what
+vector would a document built from this update *alone* have", and a delta's structs cannot
+integrate standalone, so it returns empty for every row after the first — 1350 of 1353 on the
+document tested. The walk then accepted any prefix and resolved completely different states to
+one id, which reads as corrupt data and is not. Reading `decodeUpdate().structs` directly is what
+that function gets mistaken for.
+
+**Capture happens in the same synchronous tick as reading the offsets.** From the moment a
+selection exists the surface is frozen, and `useLiveDocContent` withholds the *render* while
+continuing to apply updates to the Y.Doc — so a version captured any later names something the
+reader was never shown. `reresolve` re-versions as well as re-positions, since it runs only after
+a `setContent` moved the text and the offsets then describe the new document.
+
+**The rejected alternative.** The collab server could broadcast the current id after every append
+(Hocuspocus has `broadcastStateless` for exactly this) and let clients stamp what they last
+heard. That is one extra message per Yjs update, permanently, on the busiest path there is, to
+serve an event that happens a few times a day. The snapshot puts all of its cost at post time
+and adds nothing to the append path.
+
+**What made the walk affordable** is this section's other half: the store debounce now writes
+`Ydoc.lastUpdateId` beside the blob and state vector it already wrote, making that row a rolling
+checkpoint never more than one debounce behind head. The resolver starts there. Before it
+existed the walk began at the newest `ydoc_snapshot` the client covered — and snapshots are
+created deliberately, never implicitly (§11b), so a doc that has never been published has none
+and the walk covered its whole lifetime: 1219 rows on a real document. **This is what retired
+opportunistic snapshotting**, which had been designed to solve exactly that and would have
+reversed §11b's invariant to do it.
+
+Latency was the constraint on writing it, and the two writes sit on different paths.
+`appendUpdate` records the id its insert returns as a side effect, and nothing on the per-update
+path awaits it — the broadcast to peers has already happened. `onStoreDocument`, already async
+and already writing, drains the per-document append queue first. Backwards, that stamps content
+with an id older than itself, and a consumer replaying to it sees less than the cache shows.
+
+**Cost, measured:** 2ms on the head fast path (nobody edited between load and post — the
+overwhelmingly common case), 15ms to walk 1219 rows with no checkpoint at all. Header decode
+only; nothing is applied.
+
+**Replies keep the tail, deliberately.** A reply's anchor targets its parent annotation's ydoc
+(§13p), which the client has no live connection to — an annotation body renders from its
+`proseJson` cache, not a tap. Nothing edits a posted body today, so the tail *is* what the reader
+saw. `Annotation.proseJsonUpdateId` is the seam for when that changes.
+
+**As built.** `src/lib/ydoc-version-client.ts` (capture), `src/lib/ydoc-version.ts`
+(resolution), `Ydoc.lastUpdateId` / `Doc.proseJsonUpdateId` / `Annotation.proseJsonUpdateId`
+(migration `add_ydoc_version_stamps`), `drainAppends`, and
+`scripts/integrity/check-annotation-anchors.ts` — which pins the invariant all of this rests on,
+and was written first for that reason.
+
+**Known gaps.** The append-queue drain is not covered by a test: locally an insert resolves in
+under a millisecond against a seconds-long debounce, so the window never opens, and removing the
+drain leaves the assertion passing. Kept on reasoning, recorded at the function. Existing rows
+are left null rather than backfilled — the honest value is "unknown", and a guess is
+indistinguishable from a real stamp while sending the walk somewhere wrong. And nothing consumes
+the stamp as a *resolution* input yet: COLLAB.md §7's materialize-and-diff repair is still
+unbuilt, and this is the half that makes it buildable.
 
 ## 14. Side-by-side docs, joined by doc links
 
