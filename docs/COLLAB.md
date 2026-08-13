@@ -20,7 +20,7 @@ and the build order and points here.
 - Not built: [awareness-carried anchors](#6-anchors-carried-in-the-awareness-channel) ·
   [scrub-state anchoring](#7-anchoring-to-a-scrub-reachable-state) (partly built as §2b) ·
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
-- [Comparison](#comparison) · [Choosing](#choosing)
+- [Comparison](#comparison) · [Choosing](#choosing) · [Log](#log)
 
 ---
 
@@ -797,3 +797,116 @@ Rules of thumb, in the order they actually decide things:
 (pending selection), §13o (the mark/column split and why a reader stopped writing marks), §13p
 (a reply anchored into the annotation it answers), §14a/§14d (doc links) ·
 [docs/PERMISSIONS.md](PERMISSIONS.md) for who may annotate what.
+
+---
+
+# Log
+
+Dated entries, appended rather than folded into the sections above — each one is a design
+question asked and answered against the state of this file at the time, usually about a change
+that has *not* been made. Folding them in would state as settled things that are still
+proposals; deleting them would lose the reasoning that decided against, or deferred, each one.
+Same convention CACHING.md and PERFORMANCE.md use.
+
+## 2026-08-13 — What changes if annotation bodies become mutable
+
+Asked while weighing whether to keep one read-only editor per rendered annotation (PLAN.md §13p)
+or fall back to a static render plus one editor mounted on interaction. The measured cost of the
+eager design is ~0.7s of added main-thread work at 30 annotations on a 4×-throttled production
+build, so the static-plus-lazy option was the likely direction — and every argument for it rests
+on a posted annotation's body being immutable, which it is only in practice.
+
+**The question.**
+
+> How do things change if annotations are mutable? Note that we do have
+> `annotation.ydoc_update_id` and can deploy the same freeze logic — the instant some text is
+> selected in an annotation, the reply is against that version and not anything which is being
+> concurrently edited or edited later. The same logic which attempts to re-anchor
+> annotations-on-docs can be used to re-anchor annotations-on-annotations.
+
+**Short answer.** The re-anchoring generalizes for free — it is already literally the same code.
+The freeze does less than it appears to. And the hard part is not anchoring at all.
+
+### The re-anchoring reuse is already running, and has never executed
+
+`AnnotationHighlight` is registered on `AnnotationBodyReader` today, three tiers and all, and it
+is genuinely document-agnostic: `resolveAnchorInDoc` takes a `PMNode` and nothing in the tiering
+knows whether it came from a doc or an annotation body. What is missing is not the logic but the
+*input* — no live tap pushes content into an annotation body, so `tr.docChanged` never fires and
+tiers 1–3 have never run on that path. Making bodies mutable would exercise existing code rather
+than require new code, but it would be exercising it for the first time.
+
+One refinement it would want. Tier 3's "one full scan, then leave the anchor detached, retry only
+on the next anchor push" exists because `findQuoteOccurrences` is O(document × quote) and a doc is
+large. An annotation body is 100–5000 characters, where a full scan is cheap enough to run
+continuously — so the detached-is-sticky rule should be *relaxed* for annotation bodies, letting a
+reply re-attach live as its parent is edited back toward what it quoted.
+
+### Freezing the view is not freezing the anchor's coordinate system
+
+Freezing on selection is right, for the reason [§2b](#2b-doc-annotations-from-a-reading-view--offsets-against-a-stamped-update)
+and the doc reading view already have it (`frozen = scrubFrozen || selection.pending !== null`):
+remote updates arrive via `setContent`, which destroys the selection outright, so without a freeze
+anyone typing anywhere in the body cancels an in-progress reply.
+
+But it does not by itself make the anchor mean what it looks like it means. Today `postAnnotation`
+stamps `maxUpdateId` **at post time**, not at selection time — the client supplies its own id only
+in the scrub-frozen case. So even a frozen view measures offsets against state *N* and stamps state
+*N+k*. What keeps that safe is not the freeze; it is `captureAnnotationAnchor` resolving the
+client's offsets against the *stamped* state and storing its own `textBetween` at the result, so
+the triple ends up self-consistent with whatever it stamped no matter what drifted in between.
+
+Getting what the question describes — the reply anchored to the version the reader actually saw —
+requires capturing the stamp **at selection time**, and that needs something not currently
+available client-side: `ydoc_update.id` is a server-side row id, and the doc side only ever learns
+one from `DocScrubBar`'s replay index. So it is a round trip at selection time, or the id has to
+ride along on the connection. Worth building, but a real addition rather than a configuration of
+the existing freeze.
+
+### Where the performance answer lands
+
+It survives, and awareness turns out to supply the missing piece:
+
+- Reply highlights can still be pre-split into the static render server-side for every annotation
+  **nobody is currently editing**, which is nearly all of them nearly all of the time.
+- An annotation under active edit needs a live editor, because its `proseJson` is a store-debounce
+  cache — exactly the "fine for deciding *whether*, wrong for deciding *where*" hazard at the top
+  of this file. A highlight drawn from it would sit on visibly wrong characters while someone
+  types.
+- PLAN.md §13i already publishes "someone is writing an annotation" onto the doc's awareness.
+  That is the mount trigger: go live for the annotation under the pointer, plus any the awareness
+  channel reports as being edited.
+
+So ~1–2 live editors rather than N. Note what this does with
+[§6](#6-anchors-carried-in-the-awareness-channel): it uses awareness as a transport for a *mount
+decision* rather than as an anchor, which sidesteps that section's "untrusted, must not become the
+authority" limit entirely — a forged or stale hint costs one unnecessary editor and nothing else.
+
+### The genuinely harder parts, in order
+
+1. **Permissions, not anchoring.** `canUserAccessAnnotationYdoc` already returns `canUserReadDoc`
+   for any non-`DRAFT` annotation, so *anyone who can read the doc already holds a writable
+   connection to anyone's annotation*. Harmless while no UI opens one; the moment bodies are
+   mutable it means any reader can rewrite any annotation. Author-only, author + ADMIN, or
+   genuinely collaborative is a [PERMISSIONS.md](PERMISSIONS.md) decision, and it — not the
+   anchors — is the real gate on this feature.
+2. **`Annotation.proseJson` joins `Doc.proseJson` as a staleness hazard.** It is a store-debounce
+   cache today that happens to always be current because nobody types into a posted annotation.
+   `annotation-entries.ts` renders straight from it. Every rule about never positioning off
+   `Doc.proseJson` starts applying to it.
+3. **The `ydoc_update_id` overload gets thinner.** It already answers "which log is my anchor
+   measured against" (PLAN.md §13p). Under mutability one would plausibly also want "which doc
+   revision was I reading when I replied" — two questions, one column. This is where the
+   `anchor_update_id` option §13p weighed and declined deserves a second look: the argument
+   against it was that the two values coincide for every root annotation, which stops being true
+   here.
+
+### The upside worth naming
+
+An annotation body is the **best available place to build [§7](#7-anchoring-to-a-scrub-reachable-state)'s
+unbuilt half**, the materialize-and-diff repair. The reason it is deferred for docs is cost:
+materializing and diffing a 50k-character document per resolution is server work on every render.
+Materializing a 500-character annotation ydoc is nothing. So mutable annotations would not merely
+inherit the weaker text-search repair — they are the case where the strong version finally becomes
+affordable, and where the version stamp already stored on every row starts earning its keep
+instead of only recording intent.
