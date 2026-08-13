@@ -911,3 +911,80 @@ Materializing a 500-character annotation ydoc is nothing. So mutable annotations
 inherit the weaker text-search repair — they are the case where the strong version finally becomes
 affordable, and where the version stamp already stored on every row starts earning its keep
 instead of only recording intent.
+
+## 2026-08-13 — How a client names the version it annotated against
+
+Asked while building the change that makes `Annotation.ydoc_update_id` mean *the version the
+annotator saw* rather than *the version the server resolved against* (PLAN.md §13q). The
+question was mechanical and the answer turned out to be a flat no, which is worth writing down
+because the alternatives all look plausible until traced.
+
+**The question.**
+
+> Tell me how a client which (1) loaded `prose_json` and `ydoc_update_id`, then (2) got some
+> ydoc from Hocuspocus, is going to figure out precisely which `ydoc_update_id` it is at, once
+> it stops applying updates (because the document/annotation is frozen, because text was
+> selected).
+
+### The timeline
+
+| | what happens | what the client can name |
+|---|---|---|
+| **T0** SSR | page ships `prose_json` (content as of update **N**) and **N**; the editor is seeded with it, the `Y.Doc` is still empty | **N**, exactly |
+| **T1** sync | SyncStep1 with an empty state vector, server replies with **one merged `encodeStateAsUpdate`** covering everything; `Y.Doc` jumps to head **H₁** and re-renders | nothing — no ids and no row boundaries arrived |
+| **T2** live updates | each remote update is applied *and* rendered in the same synchronous handler | nothing new |
+| **T3** selection | `capture()` reads `from`/`to`/`quotedText` **and** takes `Y.encodeSnapshot(Y.snapshot(ydoc))` in the same tick; the freeze begins | its exact version, as a snapshot |
+| **T4** post | sends `{anchorFrom, anchorTo, quotedText, atSnapshot}` | still no id |
+| **T5** server | `resolveUpdateIdForSnapshot` walks the log; `captureAnnotationAnchor` materialises there | the id, exactly |
+
+T3 is the load-bearing step and its ordering is not incidental. Offsets and snapshot are read in
+the same synchronous tick, so they describe one instant; JS being single-threaded is what
+guarantees no update interleaves between them. And it has to be *then* rather than at post time,
+because from T3 onward the freeze keeps applying updates to the `Y.Doc` while withholding the
+render — so the document and what the reader is looking at deliberately diverge.
+
+### Why the client cannot do better, however much it is told
+
+- **`ydoc_update.id` is a global sequence** shared by every document, so one document's ids are
+  non-contiguous. "N plus the seven updates I have seen since" is not computable client-side.
+- **The sync payload is one merged update**, so even the boundary between "everything before
+  sync" and "the individual updates after it" does not correspond to rows.
+- **`prose_json` is content, not a version.** Re-encoding ProseMirror JSON into a `Y.Doc` mints
+  fresh structs under a new client id, CRDT-incomparable with the live document — so the client
+  cannot diff what it loaded against what it holds.
+
+What it *can* do is state its version exactly in Yjs's own terms and let the server convert. That
+conversion is exact for three specific reasons: per-peer clocks strictly increase within a
+document's log, the delete set closes the deletion-only gap (9.5% of rows in a real corpus carry
+no structs at all), and the `ydoc` row's checkpoint gives the walk a base near head.
+
+### What the loaded `N` is actually for
+
+Not the client. Two server-side uses:
+
+- **The walk's base.** Writing `prose_json`, `ydoc`, `state_vector` and the update id *together*
+  at the store debounce makes the `ydoc` row a rolling checkpoint never more than one debounce
+  behind head. That turns the resolver's worst case from "walk the document's lifetime" into
+  "walk a few seconds", and it is why opportunistic snapshotting was designed and then dropped —
+  it existed to solve a problem this removes.
+- **A free assertion.** The resolved id should never be **< N**: the client necessarily synced to
+  at least what SSR served it.
+
+The stamping has to stay off the hot path. `ydocOnChange` records the id its insert returns as a
+side effect and never awaits it — the broadcast to peers has already happened. `onStoreDocument`,
+already async and already writing, drains the per-document append queue first. Getting that
+backwards stamps `prose_json` with an id *older* than the content it describes, and a consumer
+replaying to that id would see less than the cache shows.
+
+### The one window where "exact" is not available
+
+Between a peer's keystroke and its `ydoc_update` insert resolving, every synced client holds
+content that exists in **no row**, so a snapshot taken then names a state no id can. It closes on
+its own — the snapshot is captured at T3 and resolved at T5, with a human typing an annotation in
+between, so milliseconds of in-flight insert lose to seconds of typing.
+
+The residual is a *failed* append (`isCircuitOpen`/`markDegraded`), where the insert never lands.
+Then the client stays permanently ahead of the log, the walk consumes every row and returns the
+tail, and the anchor resolves against a state missing those characters — degrading to the same
+text search everything else here degrades to. Worth recognising as the persistence layer already
+reporting itself degraded, rather than as anything about anchoring.
