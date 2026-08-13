@@ -18,7 +18,7 @@ import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
-import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
+import { resolveAnchorInDoc } from "../src/lib/annotation-anchors";
 import { annotationIdFromYdocId } from "../src/lib/ydoc-names";
 import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
 import { materializeYdocAt } from "../src/lib/ydoc-snapshot";
@@ -370,15 +370,11 @@ export async function handleApplyAnnotationMark(
       const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(document, "default");
       const node = pmDocContentSchema.nodeFromJSON(json);
 
-      let range: { from: number; to: number } | null = null;
-      if (from >= 0 && to <= node.content.size && to > from && node.textBetween(from, to, " ") === quotedText) {
-        range = { from, to };
-      } else {
-        const occurrences = findQuoteOccurrences(node, quotedText);
-        if (occurrences.length === 1) {
-          range = occurrences[0];
-        }
-      }
+      // The same verify-then-unique-search rule the reading views' own
+      // capture uses (src/lib/annotation-anchors.ts) — shared rather than
+      // restated so the two mechanisms can't come to disagree about what
+      // "this quote is still here" means (PLAN.md §13o).
+      const range = resolveAnchorInDoc(node, from, to, quotedText);
       if (!range) {
         return;
       }

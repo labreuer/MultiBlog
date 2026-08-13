@@ -16,6 +16,11 @@ type Props = {
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
+  // PLAN.md §13o — which anchoring mechanism this composer's surface uses.
+  // Defaults to "columns" (either reading view); only the doc editor's own
+  // popover passes "mark", because only it already holds a writable
+  // connection to the document the mark would be written into.
+  anchorMode?: "mark" | "columns";
   // PLAN.md §12p/§13 — passed straight to postAnnotation; absent from every
   // caller but the inline popover on a scrub-frozen reading view, which is
   // the only one that ever knows a position more precise than "just now".
@@ -56,6 +61,7 @@ export default function LiveAnnotationComposer({
   anchorFrom,
   anchorTo,
   quotedText,
+  anchorMode = "columns",
   ydocUpdateId,
   resolveAnchor,
   onPosted,
@@ -156,6 +162,7 @@ export default function LiveAnnotationComposer({
         ? await saveDraftAnnotation(annotationId)
         : await postAnnotation({
             annotationId,
+            anchorMode,
             anchorFrom: finalAnchorFrom,
             anchorTo: finalAnchorTo,
             quotedText,

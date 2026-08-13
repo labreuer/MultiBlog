@@ -10,6 +10,8 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
+import { docContentExtensions, pmDocContentSchema } from "@/lib/tiptap-schema";
 import { ydocIdForAnnotation, ydocIdForDoc } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
@@ -70,16 +72,33 @@ export async function createDraftAnnotation(
 // Flips a DRAFT to LIVE (or RAISED — PLAN.md §13d) — the live ydoc editor
 // (AnnotationBody) has already been writing the real content in via the
 // collab server the whole time (server/annotation-cache.ts's store debounce
-// keeps proseJson/bodyText current), so this only changes visibility and,
-// for a root annotation with a captured selection, applies the mark
-// (row-first-mark-second, same ordering §12i's original submitAnnotation
-// established — a mark naming a still-DRAFT row would be
-// visible-but-unreadable to anyone who resolved it before this update
-// commits).
+// keeps proseJson/bodyText current), so this only changes visibility and
+// records the anchor, if the composer captured one.
+//
+// PLAN.md §13o — *how* it records that anchor is the one thing this action
+// branches on, and it branches on `anchorMode`, which names the surface the
+// annotation was composed on rather than anything about the author:
+//
+//   - "mark" — the doc editor. Applies the in-ydoc mark exactly as before
+//     (row-first-mark-second, the ordering §12i's original submitAnnotation
+//     established: a mark naming a still-DRAFT row would be
+//     visible-but-unreadable to anyone who resolved it before this commits),
+//     and writes no columns.
+//   - "columns" — either reading view, and the default. Writes
+//     anchorFrom/anchorTo/quotedText and touches the document not at all.
+//     A reader annotating a doc no longer causes a write to it.
 export async function postAnnotation(opts: {
   annotationId: string;
+  // PLAN.md §13o. Defaults to "columns": every caller but the doc editor's
+  // own popover is a reading surface, and a caller that forgets to say
+  // should get the mechanism that can't mutate the document.
+  anchorMode?: "mark" | "columns";
   anchorFrom?: number;
   anchorTo?: number;
+  // The client's own reading of its selection. In "mark" mode the collab
+  // server verifies the offsets against it; in "columns" mode
+  // captureAnnotationAnchor does. Never stored as sent either way — §12i's
+  // "a request field only, never a column" survives the column's arrival.
   quotedText?: string;
   // "Notify authors" (PLAN.md §13d) — RAISED is LIVE plus the doc's byline
   // authors emailed and raisedAt stamped; nothing else about visibility or
@@ -141,10 +160,17 @@ export async function postAnnotation(opts: {
     return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
 
+  const anchorMode = opts.anchorMode ?? "columns";
+
   // The client's own position when it knew one precisely; otherwise the
   // doc's update-log tail as of right now. A malformed client value (should
   // never happen, but this is a server action) falls through to the same
   // tail lookup rather than failing the whole post over metadata.
+  //
+  // Computed before the anchor, not alongside it: in "columns" mode this is
+  // the coordinate system the stored offsets are expressed in (PLAN.md
+  // §13o), so the anchor has to be resolved against *this* state rather than
+  // whatever the document has become by the time the update lands.
   let ydocUpdateId: bigint | null = null;
   if (opts.ydocUpdateId !== undefined) {
     try {
@@ -157,28 +183,52 @@ export async function postAnnotation(opts: {
     ydocUpdateId = await ydocStore.maxUpdateId(ydocIdForDoc(annotation.docId));
   }
 
-  await prisma.annotation.update({
-    where: { id: annotation.id },
-    data: { ...(opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" }), ydocUpdateId },
-  });
-
-  // Only a root annotation ever carries a mark — a reply is just a comment
-  // in the thread, anchored nowhere of its own (PLAN.md §12i).
-  if (
+  // Only a root annotation ever carries an anchor onto the *doc* — a reply is
+  // a comment in the thread, anchored nowhere of its own (PLAN.md §12i).
+  const anchorRequested =
     annotation.parentAnnotationId === null &&
     typeof opts.anchorFrom === "number" &&
     typeof opts.anchorTo === "number" &&
-    opts.quotedText &&
-    opts.anchorTo > opts.anchorFrom
-  ) {
+    !!opts.quotedText &&
+    opts.anchorTo > opts.anchorFrom;
+
+  // Resolved *before* the status write, unlike the mark below, because it is
+  // part of the row rather than a separate document edit: one update, no
+  // window in which a LIVE annotation exists without the anchor it was
+  // posted with.
+  let capturedAnchor: { from: number; to: number; quotedText: string } | null = null;
+  if (anchorRequested && anchorMode === "columns" && ydocUpdateId !== null) {
+    capturedAnchor = await captureAnnotationAnchor({
+      ydocId: ydocIdForDoc(annotation.docId),
+      throughUpdateId: ydocUpdateId,
+      extensions: docContentExtensions,
+      schema: pmDocContentSchema,
+      from: opts.anchorFrom!,
+      to: opts.anchorTo!,
+      quotedText: opts.quotedText!,
+    });
+  }
+
+  await prisma.annotation.update({
+    where: { id: annotation.id },
+    data: {
+      ...(opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" }),
+      ydocUpdateId,
+      ...(capturedAnchor
+        ? { anchorFrom: capturedAnchor.from, anchorTo: capturedAnchor.to, quotedText: capturedAnchor.quotedText }
+        : {}),
+    },
+  });
+
+  if (anchorRequested && anchorMode === "mark") {
     await applyAnnotationMark({
       docId: annotation.docId,
       userId: session.user.id,
       role: session.user.role,
       annotationId: annotation.id,
-      from: opts.anchorFrom,
-      to: opts.anchorTo,
-      quotedText: opts.quotedText,
+      from: opts.anchorFrom!,
+      to: opts.anchorTo!,
+      quotedText: opts.quotedText!,
     });
     // No branch on the result — same reasoning as submitAnnotation above:
     // whether or not the mark landed, LIVE is already correct either way.

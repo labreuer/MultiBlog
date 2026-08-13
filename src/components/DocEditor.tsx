@@ -306,6 +306,12 @@ export default function DocEditor({
             from={widgetAnchor.from}
             to={widgetAnchor.to}
             quotedText={widget.pending.quotedText}
+            // PLAN.md §13o — the one surface that still writes a mark. It
+            // can: this editor already holds a writable connection to the
+            // document, so anchoring costs no privilege the author doesn't
+            // already have, and a mark cannot drift the way the reading
+            // views' stored offsets can.
+            anchorMode="mark"
             allowMoveToBottom={false}
             autoOpen
             resolveAnchor={() => (editorRef.current ? widget.resolveAnchor(editorRef.current) : null)}

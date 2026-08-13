@@ -18,6 +18,10 @@ type Props = {
   from: number;
   to: number;
   quotedText: string;
+  // PLAN.md §13o — passed straight through to LiveAnnotationComposer; "mark"
+  // only from the doc editor, which is also the only caller of the three
+  // props below.
+  anchorMode?: "mark" | "columns";
   // PLAN.md §12p/§13 — the reading view's own scrub position when known
   // precisely, threaded straight through to LiveAnnotationComposer.
   ydocUpdateId?: string | null;
@@ -60,6 +64,7 @@ export default function AnnotationPopover({
   from,
   to,
   quotedText,
+  anchorMode = "columns",
   ydocUpdateId = null,
   allowMoveToBottom = true,
   autoOpen = false,
@@ -123,6 +128,7 @@ export default function AnnotationPopover({
           anchorFrom={from}
           anchorTo={to}
           quotedText={quotedText}
+          anchorMode={anchorMode}
           ydocUpdateId={ydocUpdateId}
           resolveAnchor={resolveAnchor}
           onPosted={onPosted}
