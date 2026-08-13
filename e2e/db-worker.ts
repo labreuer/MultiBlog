@@ -641,15 +641,30 @@ export type AnnotationState = {
   id: string;
   parentAnnotationId: string | null;
   bodyText: string;
-  /** Only meaningful for a root (parentAnnotationId null) — see §12h/§12i. */
+  /**
+   * Anchored by *either* mechanism (PLAN.md §13o) — a mark in the doc's ydoc,
+   * or stored offsets. Only meaningful for a root (see §12h/§12i).
+   *
+   * Deliberately not "does it have a mark" any more. That was the same
+   * question until the doc editor and the reading views started answering it
+   * differently, and a test asserting on the surface-independent fact
+   * ("posting an annotation anchors it") should keep passing across that
+   * split. Use `marked` below for the surface-specific one.
+   */
   anchored: boolean;
+  /** Mark-anchored specifically: written from the doc editor, not a reading view. */
+  marked: boolean;
+  /** Column-anchored specifically, with what the *server* derived as the quote. */
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
   deletedAt: string | null;
 };
 
 /**
  * Every annotation on a doc, with each root's anchored/document-level state
- * resolved the same way annotation-data.ts's getDocAnnotationsAsThreads does —
- * a mark still present in Doc.proseJson vs. not (PLAN.md §12h).
+ * resolved the same two ways getDocAnnotationsAsThreads does (PLAN.md §13o):
+ * stored offsets on the row, or a mark still present in Doc.proseJson (§12h).
  */
 export async function getAnnotationStates(docId: string): Promise<AnnotationState[]> {
   const [doc, annotations] = await Promise.all([
@@ -663,7 +678,11 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
     id: a.id,
     parentAnnotationId: a.parentAnnotationId,
     bodyText: a.bodyText,
-    anchored: markedIds.has(a.id),
+    anchored: markedIds.has(a.id) || (a.anchorFrom !== null && a.quotedText !== ""),
+    marked: markedIds.has(a.id),
+    anchorFrom: a.anchorFrom,
+    anchorTo: a.anchorTo,
+    quotedText: a.quotedText,
     deletedAt: a.deletedAt?.toISOString() ?? null,
   }));
 }

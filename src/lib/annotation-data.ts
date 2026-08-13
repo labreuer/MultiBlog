@@ -34,15 +34,28 @@ export type AnnotationComment = {
 
 export type AnnotationThread = {
   id: string;
-  // Always null — a doc annotation has no stored absolute offset to sort by
-  // (§12i); kept only so AnnotationList's quote-position sort mode has a
-  // field to read (a no-op today, PLAN.md §12o's known gap).
+  // PLAN.md §13o — the root's stored offsets, for a thread anchored from a
+  // reading view; null for one anchored with a mark, which has no stored
+  // offset at all (§12i) and has to be found in the live document instead.
+  // A null pair is what tells every surface which mechanism to resolve
+  // through. It also, incidentally, makes AnnotationList's quote-position
+  // sort mode do something for the first time (§12o's known gap) — for
+  // column-anchored threads, which is as far as a stored field can take it.
   anchorFrom: number | null;
-  // "" once the root annotation's mark is no longer in the document —
-  // renders in the general-discussion bucket instead of under a quote
-  // header (§12h: degrades, not detached — there's no frozen revision to
-  // show a blockquote against). Every "" thread renders, not just the
-  // first, unlike a post's single general thread.
+  anchorTo: number | null;
+  // The quoted passage, from whichever mechanism anchored it: the stored
+  // column for a reading-view annotation, or the text under the mark for an
+  // editor one.
+  //
+  // The two degrade differently, on purpose. A lost *mark* leaves nothing
+  // behind — "" here, and the thread renders in the general-discussion
+  // bucket (§12h: degraded, not detached, since there's no frozen revision
+  // to show a blockquote against). A *stored* quote survives its own
+  // detachment, because it was derived server-side against a state that is
+  // still reconstructible (§13o), so the card keeps its blockquote and says
+  // what it was about even once that text is gone — which is what a
+  // DETACHED comment thread does on the post side. Every "" thread renders,
+  // not just the first, unlike a post's single general thread.
   quotedText: string;
   // The thread's own color: whoever opened it (root.user.color) — shared by
   // every reply, same as the post side's per-thread color.
@@ -103,10 +116,21 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
   for (const [rootId, members] of byRoot) {
     const root = byId.get(rootId);
     if (!root) continue;
-    const quotedText = proseJson && markedIds.has(rootId) ? extractMarkedText(proseJson, "annotation", "id", rootId) : "";
+    // PLAN.md §13o — stored columns first, since a row that has them was
+    // never marked and looking for its mark would always come up empty. The
+    // mark branch is unchanged, and is still read against Doc.proseJson: a
+    // store-debounce snapshot is fine for deciding *whether* to draw a quote
+    // header, and is never what decides where the card goes (§18b).
+    const columnAnchored = root.anchorFrom !== null && root.anchorTo !== null && root.quotedText !== "";
+    const quotedText = columnAnchored
+      ? root.quotedText
+      : proseJson && markedIds.has(rootId)
+        ? extractMarkedText(proseJson, "annotation", "id", rootId)
+        : "";
     threads.push({
       id: rootId,
-      anchorFrom: null,
+      anchorFrom: columnAnchored ? root.anchorFrom : null,
+      anchorTo: columnAnchored ? root.anchorTo : null,
       quotedText,
       color: root.user.color,
       comments: members.map((a) => ({

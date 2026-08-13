@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { JSONContent } from "@tiptap/react";
 import DocReadingBody from "./DocReadingBody";
 import DocScrubBar, { type ScrubbedState } from "./DocScrubBar";
+import type { AnnotationAnchorInput } from "@/lib/annotation-highlight-extension";
 
 type Props = {
   docId: string;
@@ -25,13 +26,27 @@ type Props = {
   // color is stable at editor-construction time instead of racing the
   // client-side session fetch.
   userColor: string;
+  // PLAN.md §13o — passed straight through to DocReadingBody, which is where
+  // the live tracking happens. Derived by page.tsx from the same thread
+  // fetch AnnotationSection renders, so the highlight and the card can never
+  // disagree about which annotations exist.
+  annotationAnchors: AnnotationAnchorInput[];
 };
 
 // Owns the one piece of state DocScrubBar, the title, and DocReadingBody need
 // to share: which historical title/body (if any) is currently overriding
 // the live ones. A server component (page.tsx) can't hold this itself,
 // hence the wrapper.
-export default function DocView({ docId, initialTitle, initialBodyJSON, staticBody, byline, canEdit, userColor }: Props) {
+export default function DocView({
+  docId,
+  initialTitle,
+  initialBodyJSON,
+  staticBody,
+  byline,
+  canEdit,
+  userColor,
+  annotationAnchors,
+}: Props) {
   const [scrubbed, setScrubbed] = useState<ScrubbedState | null>(null);
   // Bumped on "return to live" (PLAN.md §12) so DocScrubBar's slider seeks
   // back to the end instead of sitting at whatever historical position it
@@ -68,6 +83,7 @@ export default function DocView({ docId, initialTitle, initialBodyJSON, staticBo
         scrubFrozen={scrubFrozen}
         scrubUpdateId={scrubUpdateId}
         onReturnToLive={handleReturnToLive}
+        annotationAnchors={annotationAnchors}
       />
       {canEdit && <DocScrubBar docId={docId} onScrub={setScrubbed} resetSignal={resetSignal} />}
     </>

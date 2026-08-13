@@ -6,14 +6,19 @@ import type { Editor } from "@tiptap/react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "./AnnotationNode";
 import QuoteThreadHeader from "../QuoteThreadHeader";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
-import { collectAnnotationMarkRanges } from "@/lib/annotation-marks";
+import { resolveAnnotationRanges } from "@/lib/annotation-marks";
 import { activatePseudoBorderForHash } from "@/lib/pseudo-border";
 import marginStyles from "../margin-notes/MarginNotes.module.css";
 
 export type AnnotationEntry = {
   threadId: string;
   quotedText: string;
+  // PLAN.md §13o — non-null exactly for a thread anchored from a reading
+  // view; a mark-anchored one carries no stored offset and is found in the
+  // live document instead. Both pages turn the non-null ones into the
+  // editor's `AnnotationAnchorInput` list.
   anchorFrom: number | null;
+  anchorTo: number | null;
   color: string;
   root: AnnotationNodeData;
 };
@@ -63,19 +68,22 @@ export default function AnnotationList({ entries, docId }: Props) {
     [entries, sortMode],
   );
 
-  // Where CommentEntryList reads a stored offset, this has to *find* the
-  // anchor: a doc annotation's anchor is a mark inside the doc's own ydoc
-  // (PLAN.md §12i), which is why `entry.anchorFrom` is null for every one of
-  // these. Scanning the live editor rather than trusting the server's
-  // `quotedText` also means the card follows the text as an author edits
-  // above it, instead of pointing where the last store debounce saw it.
+  // Where CommentEntryList reads a stored offset straight off its props, this
+  // asks the live editor — through `resolveAnnotationRanges`, which answers
+  // for both mechanisms at once (PLAN.md §13o): a mark read off the document,
+  // or a stored offset the highlight plugin has been tracking per
+  // transaction. Even the stored ones are re-resolved rather than used as
+  // given, since a doc has no immutable snapshot to make them stable —
+  // §18b's point about not positioning against a store-debounce snapshot
+  // applies to a column just as much as it did to `quotedText`.
   //
-  // A thread whose mark is gone (§12h — degraded to document-level) simply
-  // isn't in the map, which drops it out of the rail and back into the list
-  // below, alongside the general-discussion threads.
+  // A thread whose anchor doesn't resolve (§12h's lost mark; a stored quote
+  // whose text is gone) simply isn't in the map, which drops it out of the
+  // rail and back into the list below — where, unlike a lost mark, a stored
+  // quote still has a blockquote to show.
   const resolveTops = useCallback(
     (editor: Editor) => {
-      const ranges = collectAnnotationMarkRanges(editor.state.doc);
+      const ranges = resolveAnnotationRanges(editor.state);
       const tops = new Map<string, number>();
       for (const entry of sorted) {
         const range = ranges.get(entry.threadId);

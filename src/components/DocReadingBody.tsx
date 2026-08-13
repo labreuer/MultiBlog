@@ -1,10 +1,15 @@
 "use client";
 
-import { useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
 import { useSelectionPopover } from "@/lib/use-selection-popover";
 import { AnnotationClick } from "@/lib/annotation-click-extension";
+import {
+  AnnotationHighlight,
+  setAnnotationAnchors,
+  type AnnotationAnchorInput,
+} from "@/lib/annotation-highlight-extension";
 import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
 import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
@@ -13,6 +18,10 @@ import { useDocPresence } from "./annotation/doc-presence-context";
 import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./DocReadingBody.module.css";
+
+// A stable default, so the push effect below doesn't fire on every render of
+// a surface that has no column-anchored annotations at all.
+const EMPTY_ANCHORS: AnnotationAnchorInput[] = [];
 
 type Props = {
   docId: string;
@@ -36,6 +45,11 @@ type Props = {
   // Clicking FROZEN — clears the scrub override and reports it back up so
   // DocView can also reset the scrub bar's own slider position.
   onReturnToLive?: () => void;
+  // PLAN.md §13o — every column-anchored annotation on this doc, so their
+  // ranges can be tracked against the live document and drawn. Mark-anchored
+  // ones aren't in here and don't need to be: their highlight is the mark's
+  // own renderHTML, which arrives with the content.
+  annotationAnchors?: AnnotationAnchorInput[];
 };
 
 // Clicking an annotation-highlighted span jumps to (and briefly tints) its
@@ -60,7 +74,6 @@ function jumpToAnnotationEntry(ids: string[]) {
   activatePseudoBordersForThread(id, color);
 }
 
-const annotationClickExtensions = [AnnotationClick.configure({ onHit: jumpToAnnotationEntry })];
 
 // The reading view at /doc/[slug] (PLAN.md §12g): live doc content, where
 // selecting text offers to annotate it.
@@ -80,6 +93,7 @@ export default function DocReadingBody({
   scrubFrozen = false,
   scrubUpdateId = null,
   onReturnToLive,
+  annotationAnchors = EMPTY_ANCHORS,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Declared here so both hooks below can take it as an input — see
@@ -87,6 +101,21 @@ export default function DocReadingBody({
   const editorRef = useRef<Editor | null>(null);
   const { setAwareness } = useDocPresence();
   const marginNotes = useMarginNotes();
+
+  // Configured once, from the server's first answer, so the first painted
+  // frame already has its highlights rather than acquiring them after an
+  // effect. Every later change goes through the meta transaction below —
+  // useLiveDocContent builds its editor exactly once (it owns a websocket),
+  // so re-configuring an extension could never reach it. `useState` rather
+  // than a ref because this is read during render.
+  const [initialAnchors] = useState(annotationAnchors);
+  const extensions = useMemo(
+    () => [
+      AnnotationClick.configure({ onHit: jumpToAnnotationEntry }),
+      AnnotationHighlight.configure({ anchors: initialAnchors }),
+    ],
+    [initialAnchors],
+  );
 
   const selection = useSelectionPopover({ editorRef, containerRef, userColor });
 
@@ -103,7 +132,7 @@ export default function DocReadingBody({
     frozen,
     editorRef,
     setAwareness,
-    extensions: annotationClickExtensions,
+    extensions,
     onSelectionUpdate: selection.capture,
     onContentPushed: (liveEditor) => {
       selection.reresolve(liveEditor);
@@ -126,6 +155,16 @@ export default function DocReadingBody({
   // (PLAN.md §18). Same ready-gating as AnnotatableArticle's: until then this
   // editor is display:none behind the SSR'd static body.
   useRegisterMarginNotesEditor(editor, ready);
+
+  // Posting, deleting or replying re-renders this tree with a new anchor list
+  // (router.refresh()); this is what gets it into the already-built editor.
+  // Also the only thing that gives a detached anchor another look — see
+  // annotation-highlight-extension.ts on why that isn't retried per
+  // keystroke.
+  useEffect(() => {
+    if (!editor) return;
+    setAnnotationAnchors(editor.view, annotationAnchors);
+  }, [editor, annotationAnchors]);
 
   function handleUnfreeze() {
     selection.clear();

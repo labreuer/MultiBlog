@@ -15,6 +15,9 @@ import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
 import CompareWithPicker from "@/components/CompareWithPicker";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
+import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
+import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
+import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { DocScrubProvider } from "@/components/DocScrubContext";
@@ -68,6 +71,14 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
 
   const canEdit = await canUserEditDoc(session.user.id, session.user.role, doc.id);
   const otherDocs = (await readableDocsFor(session.user.id, session.user.role)).filter((d) => d.id !== doc.id);
+
+  // PLAN.md §13o — fetched here rather than inside AnnotationSection because
+  // the body needs them too: a column-anchored annotation's highlight is a
+  // decoration this page has to supply, where a mark-anchored one's arrives
+  // with the content. One fetch, so the highlight and the card can't be
+  // derived from two different snapshots.
+  const threads = await getDocAnnotationsAsThreads(doc.id);
+  const annotationAnchors = annotationAnchorInputs(buildAnnotationEntries(threads));
 
   // bodyJSON seeds DocReadingBody's editor so its first paint is identical to
   // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
@@ -127,6 +138,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                     staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
                     canEdit={canEdit}
                     userColor={session.user.color}
+                    annotationAnchors={annotationAnchors}
                     byline={
                       // A <div>, not <p> — <form> isn't valid inside <p> (HTML
                       // rejects it; React hydrates it anyway and then warns), same
@@ -156,7 +168,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                       </div>
                     }
                   />
-                  <AnnotationSection docId={doc.id} />
+                  <AnnotationSection docId={doc.id} threads={threads} />
                 </div>
                 <MarginNotesRail className={styles.rail} />
               </div>

@@ -6,7 +6,7 @@ import AnnotationNode from "./AnnotationNode";
 import QuoteThreadHeader from "../QuoteThreadHeader";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
 import { EDITOR_SCROLL_ATTRIBUTE } from "../editor-scroll";
-import { collectAnnotationMarkRanges } from "@/lib/annotation-marks";
+import { resolveAnnotationRanges } from "@/lib/annotation-marks";
 import type { AnnotationEntry } from "./AnnotationList";
 import marginStyles from "../margin-notes/MarginNotes.module.css";
 import styles from "./EditorAnnotationRail.module.css";
@@ -33,13 +33,16 @@ type Props = {
 //   frame is hidden rather than piling up at an edge. That is what the layout
 //   hook's `bounds` option exists for, and this is its only caller.
 export default function EditorAnnotationRail({ entries, docId }: Props) {
-  // Same live-document scan the reading view uses — see AnnotationList's own
-  // note on why the server's `quotedText` isn't good enough to position
-  // against. It matters more here: this surface is where the typing that
-  // invalidates the snapshot is happening.
+  // Same live-document resolution the reading view uses, covering both
+  // anchoring mechanisms (PLAN.md §13o) — see AnnotationList's own note on
+  // why the server's `quotedText` isn't good enough to position against. It
+  // matters more here: this surface is where the typing that invalidates the
+  // snapshot is happening, and a reader's column-anchored annotation is
+  // precisely what the author needs to see while editing the passage it is
+  // about.
   const resolveTops = useCallback(
     (editor: Editor) => {
-      const ranges = collectAnnotationMarkRanges(editor.state.doc);
+      const ranges = resolveAnnotationRanges(editor.state);
       const tops = new Map<string, number>();
       for (const entry of entries) {
         const range = ranges.get(entry.threadId);

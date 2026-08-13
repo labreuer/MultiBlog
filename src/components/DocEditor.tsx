@@ -17,6 +17,7 @@ import EditorAnnotationRail from "./annotation/EditorAnnotationRail";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import type { AnnotationEntry } from "./annotation/AnnotationList";
+import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import type { DocVisibility } from "@/generated/prisma/enums";
@@ -211,6 +212,12 @@ export default function DocEditor({
   // the selection would be exactly the bug Phase 3 exists to avoid.
   const widgetAnchor = widget.pending && bodyEditor ? widget.resolveAnchor(bodyEditor) : null;
 
+  // PLAN.md §13o — derived from the entries this page already has rather than
+  // taken as a second prop: the rail and the highlight are two views of one
+  // list, and letting them arrive separately is how they would come to
+  // disagree.
+  const annotationAnchors = useMemo(() => annotationAnchorInputs(annotations), [annotations]);
+
   return (
     <div className={styles.container}>
       <div className={styles.mainColumn} ref={containerRef}>
@@ -261,6 +268,7 @@ export default function DocEditor({
             onAuthorStats={setAuthorStats}
             onSelectionUpdate={widget.capture}
             onContentUpdate={widget.reresolve}
+            annotationAnchors={annotationAnchors}
           />
         ) : (
           <p>Connecting to live editor…</p>

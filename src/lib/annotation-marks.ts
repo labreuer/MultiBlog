@@ -1,4 +1,6 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
+import type { EditorState } from "@tiptap/pm/state";
+import { getAnnotationAnchorRanges } from "./annotation-highlight-extension";
 
 export type AnnotationMarkRange = { from: number; to: number };
 
@@ -49,5 +51,26 @@ export function collectAnnotationMarkRanges(doc: PMNode): Map<string, Annotation
     }
   });
 
+  return ranges;
+}
+
+// PLAN.md §13o — where every annotation on this surface currently is,
+// whichever mechanism it was anchored with. The two are resolved in
+// completely different places (a mark is read straight off the document here;
+// a stored offset is tracked per transaction by
+// annotation-highlight-extension.ts's plugin state) and this is the one
+// function that has to know both exist, so no rail or jump target has to.
+//
+// A mark wins a collision, though there is no way to produce one:
+// postAnnotation writes one mechanism or the other and never both, and a
+// row's `anchorFrom` being null *is* "look for a mark instead". The ordering
+// is stated rather than left to Map insertion order in case that invariant is
+// ever loosened — the mark is the anchor that cannot drift, so it is the one
+// to believe.
+export function resolveAnnotationRanges(state: EditorState): Map<string, AnnotationMarkRange> {
+  const ranges = new Map(getAnnotationAnchorRanges(state));
+  for (const [id, range] of collectAnnotationMarkRanges(state.doc)) {
+    ranges.set(id, range);
+  }
   return ranges;
 }

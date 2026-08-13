@@ -2,10 +2,17 @@
 // consumer after /ydoc-debug. Three things worth covering that nothing else
 // in the suite touches: the doc-cache debounce actually reaches
 // Doc.title/proseJson, a reader's already-open tab updates with no reload
-// (the reading view's whole reason for existing, §12g), and the annotation
-// mark's full lifecycle — applied at the selected range, degrading to the
-// doc's general discussion the instant its text is gone, and never
-// reachable from the blog's own /comments.
+// (the reading view's whole reason for existing, §12g), and an annotation's
+// full anchoring lifecycle — anchored at the selected range, degrading the
+// instant its text is gone, and never reachable from the blog's own
+// /comments.
+//
+// The anchoring tests below cover *both* mechanisms (PLAN.md §13o), because
+// which one is used is a property of the surface: annotating from a reading
+// view stores offsets and leaves the document untouched, annotating from the
+// doc editor writes a mark. "The reading view writes no mark" is asserted
+// directly rather than left implied — it is the security property the split
+// exists for, and nothing else in the suite would notice if it regressed.
 import {
   test,
   expect,
@@ -120,7 +127,7 @@ test("a reader's already-open tab sees an author's edit with no reload", async (
 });
 
 test.describe("annotations", () => {
-  test("a selection submits an annotation whose mark lands exactly at the selected range", async ({
+  test("a reading-view selection anchors an annotation to it — as stored offsets, with no mark written to the doc", async ({
     page,
     sharedDoc,
     secondUser,
@@ -149,16 +156,35 @@ test.describe("annotations", () => {
     // "Annotate" already created the row as a DRAFT (PLAN.md §13j Phase 2) —
     // a row existing isn't "posted" any more, so this polls for the fully-
     // posted state directly rather than a length check that would pass the
-    // instant the draft appeared, well before Post's own flush/mark-apply
+    // instant the draft appeared, well before Post's own flush/anchor-capture
     // round trip (postAnnotation) has actually completed.
+    //
+    // PLAN.md §13o — the three things that make this the *reading view's*
+    // anchor and not the editor's: it is anchored, the quote the server
+    // derived at those offsets is exactly what was selected, and the doc's
+    // ydoc was never written to. The last one is the point of the whole
+    // split: a reader who may not edit this doc did not just edit it.
     await expect
       .poll(async () => (await getAnnotationStates(sharedDoc.id))[0], { timeout: 15_000 })
-      .toMatchObject({ anchored: true, bodyText: "Why this bit specifically?" });
+      .toMatchObject({
+        anchored: true,
+        marked: false,
+        quotedText: QUOTED_TEXT,
+        bodyText: "Why this bit specifically?",
+      });
 
-    // Renders through the mark, not a stored column — QuoteThreadHeader's
-    // blockquote shows the exact selected text (scoped to <blockquote>,
-    // since QUOTED_TEXT is also a plain substring of the body itself).
+    // The stored offsets are real positions, not a placeholder pair.
+    const [stored] = await getAnnotationStates(sharedDoc.id);
+    expect(stored.anchorTo).toBeGreaterThan(stored.anchorFrom!);
+
+    // QuoteThreadHeader's blockquote shows the exact selected text (scoped to
+    // <blockquote>, since QUOTED_TEXT is also a plain substring of the body).
     await expect(readerPage.locator("blockquote", { hasText: QUOTED_TEXT })).toBeVisible();
+
+    // And the passage itself is highlighted — by a decoration here rather
+    // than the mark's own span, which is why data-annotation-ids is plural
+    // (annotation-highlight-extension.ts).
+    await expect(readerPage.locator(`[data-annotation-ids~="${stored.id}"]`).first()).toBeVisible();
 
     // Never reachable from the blog's own moderation surface — a completely
     // separate table (§12i).
@@ -166,7 +192,7 @@ test.describe("annotations", () => {
     await expect(page.getByText("Why this bit specifically?")).toHaveCount(0);
   });
 
-  test("deleting the annotated text degrades the annotation to the doc's general discussion", async ({
+  test("deleting the annotated text unanchors the annotation but leaves it able to say what it quoted", async ({
     page,
     sharedDoc,
     secondUser,
@@ -194,17 +220,59 @@ test.describe("annotations", () => {
     await deleteTextInBody(page, QUOTED_TEXT);
     await expect(bodyEditor(page)).not.toContainText(QUOTED_TEXT);
 
-    // The mark went with the text it decorated — collectMarkAttrValues over
-    // the next prose_json store no longer finds this annotation's id.
-    await expect
-      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.anchored, { timeout: 15_000 })
-      .toBe(false);
-
-    // And the reading view reflects it: no quote header left to click,
-    // just the comment sitting in the general discussion.
+    // PLAN.md §13o — the two mechanisms degrade differently, and this is
+    // where that shows. A mark would have gone with the text it decorated;
+    // stored offsets survive the deletion as *columns* and stop resolving
+    // instead, which is a decision made against the live document at read
+    // time rather than a state written to the row. So the row still says
+    // "anchored" and the rendering is what has to change.
     await readerPage.goto(`/doc/${sharedDoc.slug}`);
     await expect(readerPage.getByText("This quote is about to disappear.")).toBeVisible();
-    await expect(readerPage.locator("blockquote")).toHaveCount(0);
+
+    // No highlight left in the article: the quoted text is gone, so neither
+    // the stored offsets nor a search for it resolves.
+    const [annotation] = await getAnnotationStates(sharedDoc.id);
+    await expect(readerPage.locator(`[data-annotation-ids~="${annotation.id}"]`)).toHaveCount(0);
+
+    // The blockquote *stays*, unlike a lost mark — the quote was derived
+    // server-side against a state that is still reconstructible, so the card
+    // can still say what it was about. That is the DETACHED affordance a
+    // post comment has always had and a doc annotation never could.
+    await expect(readerPage.locator("blockquote", { hasText: QUOTED_TEXT })).toBeVisible();
+  });
+
+  // The other side of PLAN.md §13o's split. e2e/text-selection.spec.ts already
+  // covers where the editor's marker sits; this covers what posting from it
+  // actually writes, which is the thing that must not follow the reading view.
+  test("the doc editor's own widget still anchors with a mark, and stores no offsets", async ({
+    page,
+    sharedDoc,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(`/doc/${sharedDoc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await selectTextInBody(page, QUOTED_TEXT);
+
+    // Stage one is a marker beside the document; clicking it opens the
+    // composer directly (PLAN.md §18f's `autoOpen`).
+    await page.locator("[data-testid='annotate-marker']").click();
+    const popup = page.getByTestId("annotation-popup");
+    await annotationEditor(page).click();
+    await page.keyboard.type("Annotated while editing.");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+
+    await expect
+      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0], { timeout: 15_000 })
+      .toMatchObject({
+        anchored: true,
+        marked: true,
+        // The columns stay empty: this annotation's anchor is content, and a
+        // second copy of it in a column would be a second source of truth to
+        // reconcile (§12i).
+        anchorFrom: null,
+        quotedText: "",
+        bodyText: "Annotated while editing.",
+      });
   });
 });
 
