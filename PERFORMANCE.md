@@ -316,3 +316,122 @@ Not yet measured end-to-end against the same editing-latency benchmark the
 2026-07-19/07-24 entries used (no keystroke reaches this path until a post
 editor is wired to it) — the comparison above is by inspection of the two
 code paths, not a timed run.
+
+## 2026-08-13 — One read-only TipTap editor per annotation: measured against annotation count
+
+**Prompt:** "Search the web for performance talk about having N readonly tiptap
+editors." → "Measure that situation."
+
+**Branch:** `annotation-rework`, HEAD `7a0f2e6`. The design under test is
+PLAN.md §13p's `AnnotationBodyReader`, which renders every posted annotation's
+body through an `editable: false` editor instead of the static React tree
+`annotation-entries.ts` produces. That was taken deliberately, over a lazier
+scheme, on the grounds that mounting an editor mid selection-gesture would be a
+worse bug than the cost it avoids — with the cost itself unmeasured. This is
+that number.
+
+**Why it was in doubt.** The canonical prior art
+([tiptap#1478](https://github.com/ueberdosis/tiptap/discussions/1478)) reports
+~30 *empty* editors taking **roughly 8+ seconds** of initial render, and
+ProseMirror's own answer to many instances is that there isn't one — Marijn:
+*"your only option is going to be to find a way to not render some of those
+editors."* If 8s were representative, §13p would be unshippable rather than
+merely costly.
+
+**Methodology**
+
+- A throwaway spec (`e2e/perf-annotations.spec.ts`) plus a temporary
+  `createPerfAnnotations` handler in `e2e/db-worker.ts`; both deleted after the
+  run, and the seeded rows cascade away with their fixture doc.
+- N document-level `LIVE` annotations on one doc, each with real `proseJson`
+  (~115 characters, one paragraph) rather than the empty bodies #1478 used.
+  Document-level on purpose: those render in the stacked list below the doc
+  regardless of viewport, so the card count is deterministic.
+- `about:blank` → `/doc/[slug]`, with Chrome DevTools Protocol
+  `Performance.getMetrics` read on both sides and diffed, so each figure covers
+  that one navigation and nothing before it. Wall clock is measured to the
+  point where every annotation body has mounted its editor (`[aria-label=
+  "Annotation"]` count ≥ N), which is the thing being paid for.
+- Median of 3 runs per cell. Throttled runs use
+  `Emulation.setCPUThrottlingRate`.
+- The **static arm** stubs `AnnotationBodyReader` to render `staticBody` alone,
+  no editor — i.e. the pre-§13p behaviour.
+
+**Results — `next dev`, unthrottled** (ms; the A/B, both arms)
+
+| n | editors: task / script / wall | static: task / script / wall |
+|---|---|---|
+| 0 | 185 / 64 / 396 | 178 / 55 / 358 |
+| 10 | 319 / 209 / 592 | 142 / 46 / 374 |
+| 30 | 511 / 364 / 878 | 135 / 39 / 458 |
+| 60 | 636 / 459 / 1205 | 167 / 37 / 617 |
+
+The load-bearing observation is the shape, not the magnitude: **the static arm
+is flat in annotation count** (script 55 → 37 across a 60× range, i.e. noise)
+and the editor arm is not. Everything else on the page costs the same either
+way, so the entire difference is editor construction — and `n=0` in the editor
+arm is therefore a valid baseline on its own, which is why the production runs
+below needed only one arm.
+
+**Results — `next start` (production build), editor arm**
+
+| n | unthrottled task / script / wall | 4× CPU task / script / wall |
+|---|---|---|
+| 0 | 88 / 18 / 149 | 489 / 85 / 599 |
+| 10 | 134 / 58 / 187 | 645 / 258 / 738 |
+| 30 | 165 / 84 / 231 | 1132 / 577 / 1269 |
+| 60 | 237 / 133 / 346 | 1512 / 887 / 1729 |
+
+Marginal wall-clock over the `n=0` baseline:
+
+| n | prod, unthrottled | prod, 4× CPU |
+|---|---|---|
+| 10 | +38ms | +139ms |
+| 30 | +82ms | +670ms |
+| 60 | +197ms | +1130ms |
+
+**The 8-second figure does not reproduce, by three orders of magnitude.** 30
+editors cost ~66ms of script in unthrottled production and ~325ms in dev,
+against ~8000ms claimed. The likely explanation is version: that report predates
+Tiptap v3 flipping `shouldRerenderOnTransaction` to **off** by default —
+verified in our installed `@tiptap/react@3.29.0`, where an unset value is
+handled identically to `false` (`dist/index.js:519`). That flag is the
+difference between paying construction once and paying a React re-render per
+transaction per editor, which is what turns a linear cost into a quadratic one.
+
+**Cost per editor falls as count rises** — 16 → 11 → 7ms in dev at n=10/30/60,
+as JIT warmup and shared extension setup amortise. Under 4× throttling the
+curve flattens (17 → 16 → 13ms), which is expected: throttling scales
+steady-state work harder than one-time warmup. So this degrades gracefully
+rather than hitting a cliff.
+
+**Not covered by this benchmark**
+
+- Long annotation bodies. Every seeded body was one short paragraph; per-editor
+  cost scales with content, so a doc full of essay-length annotations costs
+  more than these figures imply.
+- Real mobile hardware. 4× CPU throttling models the processor only, not slower
+  memory or GPU, so the throttled column is a **floor** for a mid-range phone
+  rather than an estimate of one.
+- Steady-state cost. This measures mount only. Nothing here says what N mounted
+  editors cost per remote keystroke afterwards — plausibly near zero, since
+  they have no live tap and `shouldRerenderOnTransaction` is off, but unmeasured.
+- `next dev` absolute values are inflated ~4× against production and are useful
+  only for the A/B, where both arms pay the same inflation.
+
+**Bottom line.** Not the catastrophe the prior art suggested, and the eager
+design is fine at small counts — but ~0.7s of added main-thread work at 30
+annotations and ~1.1s at 60, on a 4×-throttled build, on a page that is also
+opening a websocket and running the margin-notes layout pass. The break-even
+against a static render is somewhere around 10–15 annotations on a slow device.
+A doc that accumulates annotations over its life lands above that.
+
+The fix this points at costs almost nothing, because **only one editor is ever
+needed at a time**: pre-split reply highlights into the static render
+server-side (a posted annotation body is immutable in practice, so its
+highlights need no live tracking — unlike the doc, where tracking is the entire
+point), and mount an editor on `pointerenter`/`focusin`, which fires before a
+selection gesture can start. That collapses the editor column to the static
+column above, i.e. flat in N. What it depends on — annotation bodies staying
+immutable — is the subject of docs/COLLAB.md's 2026-08-13 log entry, which is
+where the design consequences live.

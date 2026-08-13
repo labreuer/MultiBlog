@@ -813,8 +813,9 @@ Same convention CACHING.md and PERFORMANCE.md use.
 Asked while weighing whether to keep one read-only editor per rendered annotation (PLAN.md §13p)
 or fall back to a static render plus one editor mounted on interaction. The measured cost of the
 eager design is ~0.7s of added main-thread work at 30 annotations on a 4×-throttled production
-build, so the static-plus-lazy option was the likely direction — and every argument for it rests
-on a posted annotation's body being immutable, which it is only in practice.
+build (PERFORMANCE.md's 2026-08-13 entry has the tables and the method), so the static-plus-lazy
+option was the likely direction — and every argument for it rests on a posted annotation's body
+being immutable, which it is only in practice.
 
 **The question.**
 
