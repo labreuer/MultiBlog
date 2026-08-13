@@ -20,7 +20,15 @@ import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
 import { resolveAnchorInDoc } from "../src/lib/annotation-anchors";
 import { annotationIdFromYdocId } from "../src/lib/ydoc-names";
-import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
+import {
+  ydocStore,
+  drainAppends,
+  UNAVAILABLE,
+  markDegraded,
+  clearDegraded,
+  isDegraded,
+  encodeYdocState,
+} from "./ydoc-store";
 import { materializeYdocAt } from "../src/lib/ydoc-snapshot";
 import { updateDocCache } from "./doc-cache";
 import { updateAnnotationCache } from "./annotation-cache";
@@ -117,8 +125,16 @@ export async function ydocOnStoreDocument({
     warnDegradedOnce(documentName, "onStoreDocument");
     return;
   }
+  // PLAN.md §13q — drained here and nowhere else. This is the debounce, which
+  // is already async and already writing to the database, so waiting for the
+  // in-flight appends costs nothing anybody is watching. Doing it on the
+  // per-update path instead would put a database round trip in front of
+  // collab latency, and doing it *not at all* would stamp the three writes
+  // below with an id older than the content they describe.
+  const lastUpdateId = await drainAppends(documentName);
+
   const { ydoc, stateVector } = encodeYdocState(document);
-  await ydocStore.storeState(documentName, ydoc, stateVector);
+  await ydocStore.storeState(documentName, ydoc, stateVector, lastUpdateId);
   // PLAN.md §12d / §13a — each no-ops unless documentName is its own kind of
   // ydoc (a doc's vs. an annotation's own namespace, mutually exclusive by
   // construction), so both are safe to call unconditionally for every
@@ -129,8 +145,8 @@ export async function ydocOnStoreDocument({
   // a client asserts. It is deliberately the *only* attribution available at
   // this point: the store hook is debounced, so several authors' edits can
   // coalesce into one flush and this names whichever was last.
-  await updateDocCache(documentName, document, lastContext?.userId);
-  await updateAnnotationCache(documentName, document);
+  await updateDocCache(documentName, document, lastContext?.userId, lastUpdateId);
+  await updateAnnotationCache(documentName, document, lastUpdateId);
 }
 
 // clientID -> user_id attribution (PLAN.md §11d). A connection's own Yjs

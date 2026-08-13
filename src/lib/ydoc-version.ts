@@ -151,12 +151,21 @@ export async function resolveUpdateIdForSnapshot(
     }
   }
 
-  // Start from the newest snapshot the client's version already covers.
-  // `ydoc_snapshot.state_vector` exists precisely so this is a vector
-  // comparison rather than a replay — §11b's invariant 2 stores both
-  // representations of the same point, and this is the first thing to use the
-  // pairing rather than one side of it.
-  const base = await ydocStore.findNewestSnapshotCoveredBy(ydocId, client);
+  // Where to start walking from. Cheapest usable base first — all three are
+  // vector comparisons rather than replays, because `ydoc.state_vector` and
+  // `ydoc_snapshot.state_vector` are stored beside the update ids they
+  // correspond to (§11b's invariant 2, and §13q for the `ydoc` row).
+  //
+  //  1. **The `ydoc` row itself** — a rolling checkpoint written by the store
+  //     debounce, so never more than one debounce behind head. This is the
+  //     usual answer, and it is what keeps the walk bounded by *seconds of
+  //     editing* rather than by the document's lifetime.
+  //  2. **A `ydoc_snapshot`** — for a client genuinely behind that checkpoint
+  //     (frozen for a long time, a slow link, a scrub).
+  //  3. **Nothing** — walk from row #1. Correct, just the expensive case.
+  const base =
+    (await ydocStore.findCheckpointCoveredBy(ydocId, client)) ??
+    (await ydocStore.findNewestSnapshotCoveredBy(ydocId, client));
   const cumulative = base ? Y.decodeStateVector(base.stateVector) : new Map<number, number>();
   let answer: bigint | null = base?.lastYdocUpdateId ?? null;
 

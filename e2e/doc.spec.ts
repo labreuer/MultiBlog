@@ -107,6 +107,28 @@ test("editing a doc updates its title/prose_json cache on the store debounce", a
   // last-writer-wins value under concurrent editing — see schema.prisma — so
   // this asserts it only where a single identity did all the typing.
   expect((await getDocState(draftDoc.id))?.updatedByEmail).toBe(ADMIN_EMAIL);
+
+  // PLAN.md §13q — the same flush stamps what it wrote. All three have to
+  // agree: Doc.prose_json_update_id (which update this cache is the content
+  // of), Ydoc.last_update_id (the rolling checkpoint the anchor resolver
+  // walks from), and the log's own tail.
+  //
+  // Asserting agreement rather than any single value is the point. The stamp
+  // is read from an in-memory map that the *append* fills asynchronously, so
+  // a version of this that didn't drain the append queue at the debounce
+  // would still write a plausible-looking id — just an older one than the
+  // content it describes, silently, and only under load.
+  const stamped = await getDocState(draftDoc.id);
+  expect(stamped?.proseJsonUpdateId).not.toBeNull();
+  expect({
+    prose: stamped?.proseJsonUpdateId,
+    ydoc: stamped?.ydocLastUpdateId,
+    tail: stamped?.ydocMaxUpdateId,
+  }).toEqual({
+    prose: stamped?.ydocMaxUpdateId,
+    ydoc: stamped?.ydocMaxUpdateId,
+    tail: stamped?.ydocMaxUpdateId,
+  });
 });
 
 test("a reader's already-open tab sees an author's edit with no reload", async ({ page, sharedDoc, secondUser }) => {

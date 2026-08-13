@@ -561,6 +561,22 @@ model Doc {
   // `doc.create()` needn't name it; the trigger overwrites it on INSERT
   // anyway.
   proseJsonLength Int           @default(0) @map("prose_json_length")
+  // PLAN.md §13q — which `ydoc_update` row `proseJson` above is the content
+  // of, written by the same `updateDocCache` pass.
+  //
+  // What it buys is that the cache stops having *unknown* staleness. The rule
+  // that `prose_json` is fine for deciding whether to draw something and
+  // wrong for deciding where (CLAUDE.md, COLLAB.md's cross-cutting hazard) is
+  // unchanged — a stamp does not make a stale cache fresh. But "how stale" is
+  // now a value rather than a thing to remember, which is what lets
+  // check-doc-integrity distinguish a legitimately-trailing cache from a
+  // broken one instead of treating the difference as unfalsifiable.
+  //
+  // Distinct from `Annotation.ydocUpdateId`, which is an *anchor's* coordinate
+  // system. This one describes a cached rendering; that one describes where a
+  // quotation was measured. They are stamped from different logs for a reply
+  // (§13p) and mean different things everywhere.
+  proseJsonUpdateId BigInt?     @map("prose_json_update_id")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
   // Updated when Prisma would update updatedAt. Sloppy with concurrent writes.
@@ -669,6 +685,17 @@ model Annotation {
   userId             String           @map("user_id")
   proseJson          Json?            @map("prose_json")
   bodyText           String           @default("") @map("body_text")
+  // PLAN.md §13q — the annotation-body counterpart of Doc.proseJsonUpdateId:
+  // which update of *this annotation's own* ydoc the two columns above are
+  // the content of, written by server/annotation-cache.ts's debounce.
+  //
+  // Inert while a posted annotation has no edit UI, since nothing moves after
+  // the composer closes. It is here for the case where that changes
+  // (docs/COLLAB.md's 2026-08-13 entry): a reply anchored into a body needs
+  // that body's own rolling checkpoint for the same reason a doc annotation
+  // needs the doc's, and building the seam now costs one column rather than a
+  // migration under live data later.
+  proseJsonUpdateId  BigInt?          @map("prose_json_update_id")
   status             AnnotationStatus @default(DRAFT)
   raisedAt           DateTime?        @map("raised_at")
   resolvedAt         DateTime?        @map("resolved_at")
@@ -813,6 +840,22 @@ model Ydoc {
   id          String   @id
   ydoc        Bytes
   stateVector Bytes    @map("state_vector")
+  // PLAN.md §13q — which `ydoc_update` row the two columns above correspond
+  // to, written in the same store-debounce pass that writes them.
+  //
+  // This makes the row a **rolling checkpoint**: a base that is never more
+  // than one debounce behind head, which is what
+  // `resolveUpdateIdForSnapshot` walks forward from. Without it that walk
+  // starts at the newest `ydoc_snapshot` covered by the client — and
+  // snapshots are created deliberately, never implicitly (§11b), so a doc
+  // that has never been published has none and the walk covers its whole
+  // lifetime. Measured before this existed: 1219 rows on a real document.
+  //
+  // Null until the first debounce after this column landed. Deliberately not
+  // backfilled: the honest value for an existing row is "unknown", and a
+  // guessed one would be indistinguishable from a real one while sending the
+  // walk to the wrong place.
+  lastUpdateId BigInt? @map("last_update_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

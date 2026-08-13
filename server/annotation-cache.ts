@@ -14,7 +14,15 @@ import type { Prisma } from "../src/generated/prisma/client";
 // a bare /ydoc-debug document), so this is safe to call unconditionally
 // alongside updateDocCache; the two never both match the same documentName
 // (§13a's namespace guard). No title fragment — an annotation has none.
-export async function updateAnnotationCache(ydocId: string, document: Y.Doc): Promise<void> {
+export async function updateAnnotationCache(
+  ydocId: string,
+  document: Y.Doc,
+  // PLAN.md §13q — which update of this annotation's own ydoc the content
+  // below is. Optional because the callers that flush without a collab server
+  // in the loop don't know one; omitted rather than nulled, so an unknown
+  // value never overwrites a known one.
+  lastUpdateId?: bigint | null,
+): Promise<void> {
   const annotationId = annotationIdFromYdocId(ydocId);
   if (!annotationId) return;
 
@@ -32,6 +40,7 @@ export async function updateAnnotationCache(ydocId: string, document: Y.Doc): Pr
       data: {
         proseJson: bodyJSON as Prisma.InputJsonValue,
         bodyText: extractText(bodyJSON),
+        ...(lastUpdateId === undefined || lastUpdateId === null ? {} : { proseJsonUpdateId: lastUpdateId }),
       },
     });
   } catch (err) {

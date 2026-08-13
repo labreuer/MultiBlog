@@ -460,6 +460,17 @@ export type DocState = {
   visibility: DocVisibility;
   /** Doc.updatedBy's email, or null when nothing has attributed an update yet. */
   updatedByEmail: string | null;
+  /**
+   * PLAN.md §13q — the version stamps the same store debounce writes, and
+   * whether they agree with the log. `stampsAgree` is the property that
+   * matters: `Doc.prose_json_update_id`, `Ydoc.last_update_id` and the log's
+   * own tail all describe one instant, so a mismatch means the cache and its
+   * stamp came from different moments.
+   */
+  proseJsonUpdateId: string | null;
+  ydocLastUpdateId: string | null;
+  ydocMaxUpdateId: string | null;
+  stampsAgree: boolean;
 };
 
 export async function getDocState(docId: string): Promise<DocState | null> {
@@ -468,11 +479,26 @@ export async function getDocState(docId: string): Promise<DocState | null> {
     include: { updatedBy: { select: { email: true } } },
   });
   if (!doc) return null;
+
+  const ydocId = ydocIdForDoc(docId);
+  const [ydoc, tail] = await Promise.all([
+    prisma.ydoc.findUnique({ where: { id: ydocId }, select: { lastUpdateId: true } }),
+    prisma.ydocUpdate.findFirst({ where: { ydocId }, orderBy: { id: "desc" }, select: { id: true } }),
+  ]);
+
   return {
     title: doc.title,
     proseText: doc.proseJson ? extractText(doc.proseJson) : null,
     visibility: doc.visibility,
     updatedByEmail: doc.updatedBy?.email ?? null,
+    proseJsonUpdateId: doc.proseJsonUpdateId?.toString() ?? null,
+    ydocLastUpdateId: ydoc?.lastUpdateId?.toString() ?? null,
+    ydocMaxUpdateId: tail?.id.toString() ?? null,
+    stampsAgree:
+      doc.proseJsonUpdateId !== null &&
+      ydoc?.lastUpdateId !== null &&
+      doc.proseJsonUpdateId === ydoc?.lastUpdateId &&
+      doc.proseJsonUpdateId === tail?.id,
   };
 }
 
