@@ -20,6 +20,8 @@ and the build order and points here.
 - Not built: [awareness-carried anchors](#6-anchors-carried-in-the-awareness-channel) ·
   [scrub-state anchoring](#7-anchoring-to-a-scrub-reachable-state) (partly built as §2b) ·
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
+  (including [showing an annotation at its own revision](#showing-an-annotation-at-its-own-revision--built-one-way-with-a-better-one-available),
+  the one part of §8 that is partly built)
 - [Comparison](#comparison) · [Choosing](#choosing) · [Log](#log)
 
 ---
@@ -162,7 +164,10 @@ from that ordering and placement:
   into a document they were explicitly denied write access to.
 - **The failure mode is the degraded state, not a corrupt one.** Row first, mark second: if the
   mark never lands, the annotation is document-level, which is a state the system already
-  renders. Mark-first would leave a mark naming a row that does not exist.
+  renders. Mark-first would leave a mark naming a row that does not exist. One consequence of
+  that ordering is easy to miss and was a real bug: the mark lands in an update *after* the state
+  its author was looking at, so that state can never show it — see
+  [showing an annotation at its own revision](#showing-an-annotation-at-its-own-revision--built-one-way-with-a-better-one-available).
 - **The client never mints the id it marks with**, so it cannot mark text with someone else's
   annotation id.
 
@@ -590,7 +595,9 @@ the endpoints through, exactly as `anchor-remap.ts` does today.
 
 ## 8. What the full `ydoc_update` history makes possible
 
-The strongest available option, and mostly unexploited. Two invariants make it real (PLAN.md
+The strongest available option, and still mostly unexploited — one corner of it is now built, and
+[has its own subsection below](#showing-an-annotation-at-its-own-revision--built-one-way-with-a-better-one-available).
+Two invariants make it real (PLAN.md
 §11b): **row #1 of `ydoc_update` for a document is a full state and every later row is a plain
 delta**, and **the log is never truncated**. So every state a document has ever been in is
 reconstructible, and the *operations* between any two states are on disk — not inferred.
@@ -650,6 +657,64 @@ original operation. Two consequences:
   is fine for repair and forensics, and wrong for per-keystroke resolution — which argues for
   keeping a cheap live anchor (a mark) *and* a version-stamped one for repair, rather than
   replacing one with the other.
+
+### Showing an annotation at its own revision — built one way, with a better one available
+
+**A mark-anchored annotation can never be attached at the state its author was looking at**, and
+this is structural rather than a race. The reader sees state *S*, posts, and the collab server
+applies the mark as its **own update** afterwards (§2's row-first-mark-second ordering, which is
+deliberate). So *S* is the one revision guaranteed *not* to contain the mark.
+
+That was a live bug, not a nicety: `AnnotationNode`'s "at this revision" control stamped *S*, so
+clicking it scrubbed the reading view to a document with no such mark in it, and the card fell
+out of the margin rail on arrival. Measured on a real doc — at update 64951 (an annotation's own
+stamp) the document carried four annotation marks and not that annotation's; its own first
+appears at 65049.
+
+**What is built: stamp the update that carries the mark.** `postAnnotation` re-stamps after a
+successful `applyAnnotationMark`, so `Annotation.ydoc_update_id` means the same thing for both
+mechanisms — *the earliest revision at which this annotation is locatable*. Column-anchored, that
+is the version its author saw, because the offsets are true there (§2b). Mark-anchored, it is the
+mark's own update. `scripts/backfill-mark-annotation-stamps.ts` fixed existing rows;
+`check-annotation-anchors.ts`'s `mark-at-stamp` is the standing guard.
+
+The cost is that "this revision" now means *the revision the annotation became attached at*,
+which can be far later than what its author saw. For one real annotation the gap was **74
+updates** of unrelated editing — so the control answers "where is this attached" rather than
+"what were they looking at", and those are different questions.
+
+**What is available: isolate the mark's update and replay only it.** Materialize at the stamp the
+author saw, then apply *only* the one `ydoc_update` row carrying the mark — nothing else from the
+intervening history. That shows the revision they saw **plus exactly the mark**, which is what
+the control was reaching for.
+
+It works, and the surprising part is how well. Applying a mark update onto a state 74 updates
+older integrated cleanly — mark present, nothing left in `pendingStructs`. Tested across every
+mark-anchored annotation on a real doc: 5/5, including that 74-row gap.
+
+The reason is [§8's opening fact](#8-what-the-full-ydoc_update-history-makes-possible): the mark
+update's structs are format markers whose **origins are items in the annotated text**, and that
+text necessarily existed at the stamp — the reader selected it there. Yjs does not need the
+intervening history; it needs the *referents*, which are older than the stamp.
+
+Two things it would need, neither large:
+
+- **Knowing which row carries the mark.** Going forward, `handleApplyAnnotationMark` already
+  reports it (that is what the re-stamp above consumes), so it is a column rather than a search.
+  Historically it is a one-off scan for first appearance — the backfill script already does
+  exactly that walk.
+- **Verify and fall back.** Applying can fail if the mark's origins *postdate* the stamp, which
+  the doc editor can produce: its stamp is the log tail at post time, and the tail can lag an
+  author's own just-typed characters. Then the structs park in `pendingStructs` rather than
+  throwing — silent, so the result has to be checked. Falling back to the plain revision is the
+  current behaviour, so the degraded path is already understood.
+
+**Not a GC hazard**, despite the reflex. The document being replayed into is a fresh
+materialization of updates ≤ the stamp, so the annotated text is *alive* there rather than a
+tombstone — the deletion, if any, lives in an update deliberately not applied. GC is an in-memory
+`Y.Doc` operation and never rewrites stored rows. §12h's GC reasoning is about
+`Y.RelativePosition`, a persisted pointer to an item id, and does not transfer to replaying a
+stored update.
 
 ### Attribution, and why `ydoc_update` has no `user_id`
 
