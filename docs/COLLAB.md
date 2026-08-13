@@ -2,19 +2,23 @@
 
 How a remark stays attached to the passage it is about, while the passage moves.
 
-This codebase answers that question **five different ways**, on five different surfaces, and
-the differences are deliberate rather than accidental. This file is where the mechanisms and
-their trade-offs live; PLAN.md keeps the chronology and the build order and points here.
+This codebase answers that question **six different ways**, and the differences are deliberate
+rather than accidental. Note that the count is of *mechanisms*, not surfaces: doc annotations
+alone use two, picked by which surface an annotation was written on rather than by who wrote
+it — §2 and §2b, and the reason for the split is a security argument rather than an anchoring
+one. This file is where the mechanisms and their trade-offs live; PLAN.md keeps the chronology
+and the build order and points here.
 
 - [The problem](#the-problem)
 - [The design space](#the-design-space)
 - Present strategies: [post comments](#1-post-comments--stored-offsets-remapped-on-publish) ·
-  [doc annotations](#2-doc-annotations--a-mark-inside-the-ydoc) ·
+  [doc annotations, from the editor](#2-doc-annotations--a-mark-inside-the-ydoc) ·
+  [doc annotations, from a reading view](#2b-doc-annotations-from-a-reading-view--offsets-against-a-stamped-update) ·
   [doc links](#3-doc-links--an-external-blob-repaired-by-search) ·
   [the in-progress selection, reading view](#4-the-in-progress-selection--offsets-plus-a-re-resolve) ·
   [the in-progress selection, doc editor](#5-yjs-relative-positions)
 - Not built: [awareness-carried anchors](#6-anchors-carried-in-the-awareness-channel) ·
-  [scrub-state anchoring](#7-anchoring-to-a-scrub-reachable-state) ·
+  [scrub-state anchoring](#7-anchoring-to-a-scrub-reachable-state) (partly built as §2b) ·
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
 - [Comparison](#comparison) · [Choosing](#choosing)
 
@@ -116,14 +120,22 @@ per event, not one per thread. Zero cost at read time.
 
 ## 2. Doc annotations — a mark inside the ydoc
 
-**Surface:** `/doc/[slug]` and the doc editor. **Code:** `src/lib/annotation-extension.ts`,
+**Surface:** the doc editor (`/doc/[slug]/edit`). **Code:** `src/lib/annotation-extension.ts`,
 `server/ydoc-hooks.ts`'s `handleApplyAnnotationMark`, `src/lib/annotation-data.ts`.
-**Design:** PLAN.md §12h, §12i.
+**Design:** PLAN.md §12h, §12i, §13o.
+
+> **This is now one of two mechanisms on the same model, and no longer the one a *reader*
+> gets.** Annotating from either reading view stores offsets instead —
+> [§2b](#2b-doc-annotations-from-a-reading-view--offsets-against-a-stamped-update), below,
+> which exists because applying a mark is an edit and a reader may not make one. Everything
+> in this section is still exactly true of an annotation written from the doc editor, and
+> that surface is not moving: it already holds a writable connection, so the mark costs it
+> no privilege it lacks, and a mark cannot drift. `Annotation.anchor_from` being null *is*
+> "this one is anchored by a mark."
 
 A doc has no revisions and no publish step, so there is no snapshot to hold offsets against and
 no moment at which to remap them. The anchor is therefore **content**: an `annotation` mark
-carrying the root annotation's id, living in the doc's own Yjs document. `Annotation` has no
-anchor columns at all.
+carrying the root annotation's id, living in the doc's own Yjs document.
 
 Because the anchor *is* part of the document, it moves with its text automatically, merges
 correctly under concurrent editing, and cannot drift. There is nothing to re-resolve, ever.
@@ -139,26 +151,32 @@ Two schema details it depends on:
 - **`clearable: false`** — otherwise the editor's "clear formatting" button strips anchors
   along with real formatting. The anchor is content, but it is not the user's formatting.
 
-**The mark is applied server-side.** `submitAnnotation` inserts the row first, then asks the
+**The mark is applied server-side.** `postAnnotation` inserts the row first, then asks the
 collab process to apply a mark carrying that id over the requested range. Three things follow
 from that ordering and placement:
 
-- **A reader can annotate without a writable connection.** Applying a mark is an edit, which a
-  `readOnly` connection cannot make. The alternative is handing every reader a writable socket
-  and trusting the UI not to let them type.
+- **A reader could annotate without a writable connection.** Applying a mark is an edit, which
+  a `readOnly` connection cannot make; routing it through the collab process meant a reader
+  never needed a writable socket. **This is the part that did not survive** — see §2b. It
+  worked; what it cost was that a reader's annotation was a real, unattributed, unbounded write
+  into a document they were explicitly denied write access to.
 - **The failure mode is the degraded state, not a corrupt one.** Row first, mark second: if the
   mark never lands, the annotation is document-level, which is a state the system already
   renders. Mark-first would leave a mark naming a row that does not exist.
 - **The client never mints the id it marks with**, so it cannot mark text with someone else's
   annotation id.
 
-**Capture, and the one place it can miss.** From the reading view the selection is captured
-against the cached render, which the live document may have moved past. The request therefore
-carries the selected text alongside the offsets, and the server verifies `textBetween(from, to)`
-against it before marking; on a mismatch it falls back to a unique occurrence of that text in
-the live document, and failing that the annotation is created document-level. The selected text
-is a **request field only, never a column** — once the mark is placed, the document is the
-record of what was annotated.
+**Capture, and the one place it can miss.** The selection is captured against the client's
+render, which the live document may have moved past. The request therefore carries the selected
+text alongside the offsets, and the server verifies `textBetween(from, to)` against it before
+marking; on a mismatch it falls back to a unique occurrence of that text in the live document,
+and failing that the annotation is created document-level. That rule is
+`resolveAnchorInDoc` (`src/lib/annotation-anchors.ts`), shared with §2b rather than restated,
+so the two mechanisms cannot come to disagree about what "this quote is still here" means. The
+selected text is a **request field only, never a column** — once the mark is placed, the
+document is the record of what was annotated. (§2b keeps that rule true of the trust boundary
+even though it does have a column: what it stores is the *server's* reading, never the
+client's.)
 
 **Document-level-ness is derived, not stored.** `collectMarkAttrValues(proseJson, "annotation",
 "id")` is one pass over JSON the reading view already holds; a root annotation whose id is not
@@ -193,6 +211,89 @@ growth is exactly the one that would pay most for turning GC off.
 **Never flip `gc` for a doc that has already loaded with it on.** One load with GC on collects
 tombstones permanently, so any future `gc: false` experiment is one-way per document and has to
 be a new-docs-only decision, not a config change.
+
+## 2b. Doc annotations from a reading view — offsets against a stamped update
+
+**Surface:** `/doc/[slug]`. **Code:** `Annotation.anchor_from`/`anchor_to`/`quoted_text`,
+`src/lib/annotation-anchor-capture.ts`, `src/lib/annotation-highlight-extension.ts`.
+**Design:** PLAN.md §13o. **This is [§7](#7-anchoring-to-a-scrub-reachable-state) built** —
+its columns and its version stamp, though not yet its materialize-and-diff resolver.
+
+Same model, same surface family, opposite side of §2's central trade. §2 buys "cannot drift" by
+making the anchor content; the price is that creating one is a **write**. For a reader that
+price turned out to be too high, for reasons that are about the write itself rather than about
+anchoring:
+
+- The write is **unattributed** — `attributeUpdate` reads identity off the Hocuspocus
+  connection, and a direct connection has none, so it lands in the never-truncated
+  `ydoc_update` log with no author.
+- The write is **unbounded** — `excludes: ""` (§2, deliberately) permits any number of
+  overlapping marks, each `addMark` splits text runs, and `removeMark` does not merge them
+  back. Annotation volume from people with read access is a permanent structural growth path
+  into a document they cannot otherwise write to.
+- It keeps a **mark-anything endpoint** on the hot path for every reader.
+
+So a reading-view annotation stores `{anchor_from, anchor_to, quoted_text}` and touches the
+document not at all. Which mechanism applies is decided by **surface, not permission**: an
+author reading `/doc/[slug]` gets the column anchor too. Keying on permission would put two
+anchor kinds behind one identical gesture.
+
+**The version stamp is what makes stored offsets defensible here.** `ydoc_update_id` was
+already on the row as metadata (§13n); it is now the coordinate system the offsets are
+expressed in, exactly as `anchored_event_id` is for a post comment — with the update log as the
+axis in place of discrete publication events, which is [§7](#7-anchoring-to-a-scrub-reachable-state)'s
+whole observation. `captureAnnotationAnchor` materializes the stamped state, resolves the
+client's offsets against **that**, and stores its own `textBetween` at the result. Two
+properties fall out:
+
+- **Nothing a client says is stored verbatim.** Its `quoted_text` is a verification hint only.
+  Name text that isn't in the stamped state and you get no anchor — not an anchor of your
+  choosing. (Name text that *is* there and you get an annotation on that passage, which is
+  indistinguishable from having selected it.)
+- **The triple is verifiable forever.** Replay to `ydoc_update_id` and `textBetween(from, to)`
+  *is* `quoted_text`, by construction. Resolving against "now" would have described a state
+  nothing records — and would have left §7's repair path with nothing trustworthy to diff from.
+
+This needs no collab round trip, which is worth stating because the obvious objection is
+staleness: `ydocOnChange` appends a `ydoc_update` row **per Yjs update**, not per store
+debounce, so the log's tail is within a websocket round trip of live. That is a different
+guarantee from `Doc.proseJson`, and the distinction is the cross-cutting hazard at the top of
+this file.
+
+**Resolution at read time is tiered**, because the naive version is unaffordable — this is the
+one place §2's "there is nothing to re-resolve, ever" is paid back in full. Ranges live in
+`AnnotationHighlight`'s plugin state and update per transaction:
+
+1. **Map through the transaction**, biased away from the range, then verify against
+   `quoted_text` (a mapping says where positions went, not whether the words survived). Free,
+   and correct for every local edit in the doc editor.
+2. **Search a window** sized by the document's own size delta. The reading views push remote
+   updates in with `setContent`, so there is no usable mapping ([§4](#4-the-in-progress-selection--offsets-plus-a-re-resolve)'s
+   trap) — but the text has barely moved, so a keystroke elsewhere costs a few dozen probes
+   rather than a scan. A window hit is *more* trustworthy than a globally unique match: it is
+   the occurrence nearest where the anchor already was.
+3. **A full scan, once.** Failing that the anchor is detached and is not rescanned on later
+   transactions — that would be O(document × quote) per keystroke forever, for the annotation
+   least likely to repay it. Detachment is re-evaluated on the next anchor push, the doc-side
+   equivalent of §1 re-testing a `DETACHED` thread at the next publish rather than continuously.
+
+Without tier 2 this would be the first per-keystroke full scan on a reading surface. Doc links
+([§3](#3-doc-links--an-external-blob-repaired-by-search)) pay that cost and memoize on document
+identity — worthless here, since every remote update *is* a new document.
+
+**No repair writes from a reading view**, per §3's closing rule. The doc editor could
+legitimately persist a correction and does not yet; that is where §7's repair half belongs.
+
+**Detachment keeps its quote, unlike §2.** A lost mark leaves nothing behind. A stored quote
+survives, because it was derived against a reconstructible state — so the card keeps its
+blockquote and can still say what it was about. That is §1's `DETACHED` affordance, on the doc
+side, which the mark could never offer.
+
+**One answer for both.** `resolveAnnotationRanges` (`src/lib/annotation-marks.ts`) merges the
+mark scan and this plugin's ranges; every consumer goes through it. The visible seam is in the
+DOM: a mark renders `data-annotation-id` (singular), a decoration renders
+`data-annotation-ids` (plural, because overlapping inline decorations drop each other's
+attributes — the same split §1's `data-thread-ids` already has).
 
 ## 3. Doc links — an external blob, repaired by search
 
@@ -411,6 +512,16 @@ position, alongside the presence flag that is already there. Four things fall ou
 
 ## 7. Anchoring to a scrub-reachable state
 
+> **Half of this is now built, as [§2b](#2b-doc-annotations-from-a-reading-view--offsets-against-a-stamped-update).**
+> The columns and the version stamp exist and are written on every reading-view annotation,
+> and `quoted_text` is derived against the stamped state precisely so that the resolver
+> described below stays buildable. What is **not** built is that resolver: nothing
+> materializes-and-diffs to place an anchor. §2b resolves against the *live* document with a
+> text search, which is cheaper and weaker. The rest of this section is therefore still the
+> design for the remaining half — and "a second source of truth", below, stopped being
+> hypothetical: the two mechanisms coexist, and `resolveAnnotationRanges` is the reconciliation
+> it warned would be needed.
+
 The doc-side analogue of §5's remap-on-publish, using the ydoc update log as the version axis in
 place of discrete publication events.
 
@@ -624,7 +735,8 @@ starts to hurt.
 | | Anchor lives | Survives edit *before* | Survives edit *inside* | Needs collab server | Durable | Per-resolution cost |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1. Post comments | Columns, vs. an immutable snapshot | Yes (remapped on publish) | Detaches | No | Yes | Zero at read; one diff per publish |
-| 2. Doc annotations | Mark in the ydoc | Yes (it *is* the content) | Yes | Yes, to apply | Yes | Zero |
+| 2. Doc annotations (editor) | Mark in the ydoc | Yes (it *is* the content) | Yes | Yes, to apply | Yes | Zero |
+| 2b. Doc annotations (reading) | Columns + a version stamp | Yes (mapped, or re-found nearby) | Detaches | **No** | Yes | O(1) typical; windowed search on a remote update |
 | 3. Doc links | JSON column | Only via text search | Unanchors | No | Yes | O(doc × text), memoized |
 | 4. Pending selection | Client memory | Only if text is globally unique | No | No | No (seconds) | O(doc × text) per update |
 | 5. Relative positions | CRDT item id | Yes | Yes | Yes (needs a binding) | Only with `gc: false` | O(1)-ish |
@@ -640,7 +752,12 @@ Rules of thumb, in the order they actually decide things:
    That is strategy 1, and it is why the post side never needed any of this.
 2. **Does the anchor describe exactly one document, and may the writer write to it?** Then a mark
    (strategy 2) beats everything: no drift, no resolution, no reconciliation. Reach for it first
-   and be suspicious of any argument to leave the document.
+   and be suspicious of any argument to leave the document. **Read "may the writer write to it"
+   strictly**, though — it is the clause §2b was carved out of. A server-applied mark makes the
+   answer technically yes for anyone, and that is exactly the trap: the write still happens, it
+   is just unattributed and outside the permission that was supposed to govern it. If the person
+   annotating could not have typed into that document themselves, the honest answer is no, and
+   you want a version-stamped anchor (§2b/§7) instead.
 3. **Is it ephemeral?** Then durability is not a requirement and awareness (strategy 6) is
    strictly better than anything stored — it also makes the state visible to collaborators, which
    nothing else here does.
@@ -652,5 +769,5 @@ Rules of thumb, in the order they actually decide things:
    search is a reconstruction of information the CRDT already has exactly.
 
 **Related:** PLAN.md §5 (post anchoring), §11 (the ydoc stack), §12h/§12i (annotations), §13f
-(pending selection), §14a/§14d (doc links) · [docs/PERMISSIONS.md](PERMISSIONS.md) for who may
-annotate what.
+(pending selection), §13o (the mark/column split and why a reader stopped writing marks),
+§14a/§14d (doc links) · [docs/PERMISSIONS.md](PERMISSIONS.md) for who may annotate what.

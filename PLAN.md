@@ -1658,6 +1658,11 @@ annotation         id, doc_id, parent_annotation_id NULL, user_id, body JSONB,
                    -- no status: document-level-ness is derived per render (§12h)
 ```
 
+> **The last three lines above are superseded by §13o.** `anchor_from`, `anchor_to` and
+> `quoted_text` now exist, for annotations written from a *reading* view — not because the
+> mark stopped being the better anchor, but because applying one is a write, and a reader
+> was making it. The doc editor still anchors exactly as sketched here.
+
 **A root annotation *is* the thread.** `resolved_at` is meaningful only where
 `parent_annotation_id` is null, the ydoc mark carries a root annotation's id, and replies hang
 off it through the same self-FK shape `Comment.parent_comment_id` already uses. There is no
@@ -1961,6 +1966,10 @@ Three things fall out of that ordering and that placement:
 - **A reader can annotate without a writable connection.** Annotating is otherwise a document
   edit, which a `readOnly` connection (§12g) cannot make — so the alternative is handing every
   `AUTHORIZED` reader a writable socket and relying on the UI not to let them type.
+  **Superseded by §13o**, which took a third option this bullet didn't consider: don't make
+  the edit at all. The mark still works and the doc editor still uses it; what §13o rejected
+  is a *reader* causing an unattributed, unbounded write into a document they were denied
+  write access to, which is what "without a writable connection" turns out to describe.
 - **The failure mode is the degraded state, not a corrupt one.** Row first, mark second: if the
   mark never lands, the annotation is document-level, which is a state the system already
   renders. Mark-first would leave a mark naming a row that doesn't exist.
@@ -2342,12 +2351,13 @@ above might read.
   reader with `canViewDocs` can open any `SHARED` doc they have a link to but has no route
   that lists them, and no nav entry. §12f's route table never specified one, so this isn't a
   regression against the plan — but it does mean docs are share-a-link-only in practice.
-- **The comment list's "Quoted text position" sort is inert on a doc.** `CommentEntryList`
-  sorts that mode by `anchorFrom`, which is null for every annotation-sourced thread (§12i:
-  a doc annotation has no stored offset), so all entries tie and fall through to the date
-  comparison. The dropdown still offers the option on `/doc/[slug]`, where it does nothing.
-  Deriving a real ordering is possible — the mark's position in `prose_json` is exactly the
-  needed number — just not built.
+- **The comment list's "Quoted text position" sort is *partly* inert on a doc.** That mode
+  sorts by `anchorFrom`, which was null for every annotation-sourced thread when this was
+  written (§12i: a doc annotation had no stored offset), so all entries tied and fell
+  through to the date comparison. §13o gave reading-view annotations real stored offsets, so
+  they now sort correctly; a *mark*-anchored one still has no stored offset and still ties.
+  Ordering those is possible — the mark's position in `prose_json` is exactly the needed
+  number — just not built, and it would now be the only remaining half of this gap.
 - **`/annotations`' deep-link filters have no UI and no Help section.** `?doc=`, `?author=`
   and `?user=` work and round-trip through the URL, but unlike `/comments` (which documents
   its equivalents in an on-page Help table) nothing on `/annotations` advertises them.
@@ -2848,13 +2858,16 @@ may swallow a failure's *effect on control flow*, never its *existence in the lo
 
 ### 13n. `ydoc_update_id`: which revision an annotation was written against
 
-**Metadata, not a second anchor.** `Annotation.ydocUpdateId BigInt?` records which
-`ydoc_update` row was current when the annotation was posted — deliberately *not* the
-`anchor_from`/`anchor_to`/`quoted_text` trio COLLAB.md §7 ("anchoring to a scrub-reachable
-state") speculates as a full second anchor-resolution path with its own materialize-diff-remap
-resolver. That stays unbuilt. The in-ydoc `annotation` mark (§12i) is still the only thing that
-answers "where is this now" — `ydoc_update_id` only ever answers "what did the reader see when
-they wrote this," and drives one thing: a scrubber jump.
+> **Superseded in part by §13o.** When this was written it was metadata and nothing else,
+> and said so emphatically: *"deliberately not the `anchor_from`/`anchor_to`/`quoted_text`
+> trio COLLAB.md §7 speculates … that stays unbuilt."* Those three columns now exist, and
+> this one is the version stamp they are measured against. Everything below about *how the
+> value is chosen* and *what reads it back* is unchanged and still current; only the
+> "metadata, not a second anchor" framing is not.
+
+`Annotation.ydocUpdateId BigInt?` records which `ydoc_update` row was current when the
+annotation was posted. It answers "what did the reader see when they wrote this," and drove
+exactly one thing at the time: a scrubber jump.
 
 **Written in `postAnnotation`** (`src/app/actions/annotations.ts`), for every posted
 annotation, root or reply — not gated to roots the way the mark itself is, since "what was I
@@ -2877,6 +2890,144 @@ cross-sibling-subtree shape `AnnotationMoveProvider`/`DocPresenceProvider` alrea
 touched the scrub bar once. Before that, or on `/doc/[slug]/edit` (no `DocScrubProvider` at
 all), the control simply doesn't render — the same null-is-supported convention
 `useMarginNotes()` established, not a broken state to guard against.
+
+### 13o. Two anchoring mechanisms, picked by surface — and why the reading views stopped writing marks
+
+**Decided:** an annotation written from a *reading* view (`/doc/[slug]`) anchors with stored
+`anchor_from`/`anchor_to`/`quoted_text` and never writes to the document. One written from the
+doc *editor* keeps §12i's in-ydoc `annotation` mark and stores no offsets. A row has one or the
+other, never both.
+
+This is COLLAB.md §7 ("anchoring to a scrub-reachable state"), which §13n above declined and
+this section builds — the resolver half of it, not yet the repair half. It reverses part of
+§12i, so the reason has to be worth the reversal.
+
+**What the mark cost a reader.** Applying a mark is an edit. §12i knew that and answered it by
+having the *collab process* apply the mark on the reader's behalf, so a reader with a
+`readOnly` connection could still annotate. That works, and the consequences of it working are
+the problem:
+
+- **A reader mutates a document they cannot edit.** Not a metaphor — a real Yjs update, applied
+  by a privileged path, to a doc whose `readOnly` token exists precisely to say this person may
+  not do that.
+- **The update is unattributed.** `attributeUpdate` reads the identity off the Hocuspocus
+  *connection*; a direct connection has none, so the change lands in the never-truncated
+  `ydoc_update` log with no author. The one table designed to answer "who changed this" can't.
+- **It is unbounded.** `excludes: ""` (§12i, deliberately) allows any number of overlapping
+  annotation marks over the same text. Each `addMark` splits text runs, and `removeMark` does
+  not merge them back. So annotation volume from people with read access is a permanent
+  structural growth path into a document they cannot otherwise write to, with no rate limit
+  anywhere in front of it.
+- **It keeps `/admin/annotation-mark` on the hot path for every reader.** That endpoint marks
+  any range of any document, gated only by a token the Next server mints. After this change it
+  is reachable only from the editor surface — where the caller could write to the document
+  directly anyway, so it grants nothing new.
+
+**The rule is the surface, not the permission.** An author reading `/doc/[slug]` also gets the
+column anchor, even though they could have written a mark. Keying on permission would mean the
+same gesture on the same page produced two different anchor kinds depending on who made it,
+and two code paths whose difference is invisible in the UI. Keying on surface means each page
+has exactly one answer, and `postAnnotation` takes an explicit `anchorMode` rather than
+inferring it from which optional props happen to be present.
+
+**What the columns cost, and the two things that keep it small.** Stored offsets into a *living*
+document are the weak anchor in COLLAB.md's table: unlike a post's, they have no immutable
+snapshot to be stable against and no publish step to be remapped at. Two decisions do most of
+the work of paying for that.
+
+*`quoted_text` is derived server-side, against the state `ydoc_update_id` names.* The client
+sends its own reading of the selection; `captureAnnotationAnchor`
+(`src/lib/annotation-anchor-capture.ts`) materializes the stamped state, uses that string only
+to verify — and if the document moved under the selection, to re-find — the range, and stores
+*its own* `textBetween` at whatever range that resolves to. So:
+
+- §12i's "the selected text is a request field only, never a column" survives the arrival of a
+  column, at the level that matters: nothing a client says is stored verbatim. A client naming
+  text that isn't in the stamped state gets **no anchor**, not an anchor of its choosing. (A
+  client naming text that *is* there gets an annotation on that passage — indistinguishable
+  from having selected it, so that residual isn't worth closing.)
+- The triple is self-consistent forever. Replay to `ydoc_update_id` and
+  `textBetween(anchor_from, anchor_to)` *is* `quoted_text`, by construction. Resolving against
+  "now" instead would have stored a triple describing a state nothing records — which is
+  exactly what would make COLLAB.md §7's materialize-and-diff repair unbuildable after the
+  fact, since it would have nothing trustworthy to diff *from*.
+
+Note what this does **not** need: a collab round trip. `ydocOnChange` appends a `ydoc_update`
+row per Yjs update rather than per store debounce, so the log's tail is within a websocket
+round trip of live — a different guarantee from `Doc.proseJson`, which lags by seconds and must
+never decide where anything is. The reading view's annotation path now touches the collab
+server for exactly one thing, the annotation's *own* body flush.
+
+*Resolution at read time is tiered, because the naive version is unaffordable.*
+`AnnotationHighlight` (`src/lib/annotation-highlight-extension.ts`) holds the resolved ranges in
+plugin state and updates them per transaction:
+
+1. **Map through the transaction**, biased away from the range (`map(from, 1)`/`map(to, -1)`,
+   the convention `anchor-remap.ts` already uses), then verify against `quoted_text` — a
+   mapping says where positions went, not whether the words survived. Free, and correct for
+   every local edit in the doc editor.
+2. **Search a window** sized by the document's own size delta plus a pad. The reading views push
+   remote updates in with `setContent`, which replaces the document wholesale and makes the
+   mapping meaningless (COLLAB.md §4's trap) — but the text has usually barely moved, so a
+   keystroke elsewhere costs a few dozen position probes rather than a scan. A hit in the window
+   is *more* trustworthy than a globally unique match, being the occurrence nearest where this
+   anchor already was.
+3. **A full `findQuoteOccurrences` scan, once.** If that fails the anchor is left detached and
+   is **not** retried on later transactions — retrying would mean an O(document × quote) scan
+   per keystroke forever, for the annotation least likely to repay it. Detachment is
+   re-evaluated on the next anchor push (any `router.refresh()`), which is the doc-side
+   equivalent of the post side re-testing a `DETACHED` thread at the next publish rather than
+   continuously (COLLAB.md §1).
+
+Without tier 2 this would be the first per-keystroke O(document × quote) cost on a reading
+surface — doc links pay it (COLLAB.md §3) but memoize on document identity, which is worthless
+here because every remote update *is* a new document.
+
+**No repair writes from a reading view**, following COLLAB.md §3's closing rule: a reading view
+is a tap at least one update behind, so any correction it computed was already stale, and N
+concurrent readers would be last-writer-wins on the one field whose entire job is precision.
+The doc editor *could* legitimately persist a correction — it is `Collaboration`-bound and its
+positions come from real transactions — and doesn't yet. That is the honest place to build
+COLLAB.md §7's repair half.
+
+**The two mechanisms degrade differently, on purpose.** A lost mark leaves nothing behind, so
+the thread falls into general discussion with no blockquote (§12h — degraded, not detached,
+since there was never a frozen revision to show one against). A stored quote *survives* its own
+detachment: it was derived against a reconstructible state, so the card keeps its blockquote and
+can still say what it was about even once that text is gone. That is the `DETACHED` affordance a
+post comment has always had and a doc annotation could not.
+
+**One answer, two mechanisms.** `resolveAnnotationRanges` (`src/lib/annotation-marks.ts`) merges
+the mark scan and the plugin's tracked ranges into one map, and every consumer — both margin-note
+rails, `AnnotationClick`, `QuoteThreadHeader`'s jump — goes through it rather than knowing there
+are two. `annotation-marks.ts`'s header had already anticipated being that single definition;
+this is what made it necessary. The one visible seam is in the DOM: a mark renders
+`data-annotation-id` (singular — a mark never merges ids onto one span), a decoration renders
+`data-annotation-ids` (plural — overlapping inline decorations silently drop each other's
+attributes, so `decoration-segments.ts` pre-splits them, the same split
+`quote-highlight-extension.ts` already has against the mark).
+
+**The doc editor gets the decoration too**, not just the reading view. An author rewriting a
+passage a reader annotated would otherwise see no sign it had been annotated, since that anchor
+is a row rather than content — which would make the reading views' anchor invisible on exactly
+the surface whose edits break it.
+
+**As built.** Migration `add_annotation_anchor_columns`; `postAnnotation`'s `anchorMode` branch;
+`captureAnnotationAnchor`; `resolveAnchorInDoc` (`src/lib/annotation-anchors.ts`), shared with
+`handleApplyAnnotationMark` so the two mechanisms can't come to disagree about what "this quote
+is still here" means; `AnnotationHighlight`; `resolveAnnotationRanges`. `/doc/[slug]` fetches
+threads once and passes them to both the body and `AnnotationSection` — the shape
+`[slug]/page.tsx` already used for a post's comments, and the reason is stronger here: two
+fetches would be two snapshots that could disagree about which annotations exist, leaving a
+highlight and the card it belongs to derived from different answers.
+
+**Known gaps.** The materialize-and-diff repair pass (COLLAB.md §7's other half) isn't built —
+the stamp that makes it possible is stored, nothing consumes it as one. A column anchor spanning
+a paragraph break can't be re-found once its offsets go stale, inheriting
+`findQuoteOccurrences`' block-boundary limitation (COLLAB.md §3, and §4's rejected fix for why
+that isn't quietly patched). And annotations still aren't correct *on the scrub view*: a reader
+scrubbed to a past state sees anchors resolved against the live document. The stamp is what
+would fix that, and it's now stored on every row.
 
 ## 14. Side-by-side docs, joined by doc links
 
@@ -5356,10 +5507,13 @@ asymmetry is old (§5 vs. §12i) rather than anything this section introduced.
 - **A post comment** has stored integer offsets (`anchorFrom`/`anchorTo`) into an
   immutable published snapshot. Resolving a card is a direct `coordsAtPos(anchorFrom)`.
   `from`, not `to` — the card lines up with where the quote *starts*.
-- **A doc annotation** has no stored offset at all. Its anchor is an `annotation` mark
-  inside the doc's own ydoc, so it has to be *found*: `collectAnnotationMarkRanges`
-  (`src/lib/annotation-marks.ts`) walks the live ProseMirror document once per pass and
-  returns every id's current range.
+- **A doc annotation** has to be resolved against the live document either way, and since
+  §13o there are two ways. A mark-anchored one has no stored offset at all and must be
+  *found* — `collectAnnotationMarkRanges` walks the live ProseMirror document once per pass.
+  A column-anchored one has stored offsets, but into a document that has kept moving since,
+  so they are tracked per transaction rather than trusted. `resolveAnnotationRanges`
+  (`src/lib/annotation-marks.ts`) merges both into one id → range map, and that is what
+  every consumer here calls; nothing in the layout knows there are two mechanisms.
 
 Scanning the live document rather than trusting the server matters more than it looks.
 `getDocAnnotationsAsThreads` decides quoted-vs-general against `Doc.proseJson`, which is

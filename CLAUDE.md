@@ -31,16 +31,28 @@ so is a page whose JS never runs: the `.anchored` class is toggled from JS, neve
 `@media` block. **CSS owns the two-column grid, JS owns only the vertical alignment** — so
 don't move the column layout into JS to "simplify", that split is what keeps the rail
 server-rendered in the right place. The two sides resolve an anchor differently and can't
-share that step: a post comment reads its stored `anchorFrom`, a doc annotation has no
-stored offset at all and must be *found* in the live document
-(`src/lib/annotation-marks.ts`, §12i) — `Annotation.ydocUpdateId` (§12p/§13n) doesn't change
-this: it's which revision the annotation was written against, read only to drive a scrubber
-jump, never resolved as a position. Never position a doc annotation off `Doc.proseJson`
-— it's a store-debounce snapshot, stale by seconds while anyone is typing; it's fine as the
-*seed* for which cards start in the rail, and nothing more.
-How a remark stays attached to a passage while the passage moves — all five strategies this
+share that step: a post comment reads its stored `anchorFrom` against an immutable
+snapshot, while **a doc annotation has to be resolved against the live document, whichever
+of its two mechanisms anchored it** — `resolveAnnotationRanges`
+(`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail
+and jump target goes through it rather than knowing there are two.
+**Which mechanism follows the surface, never the permission** (PLAN.md §13o): the doc
+*editor* writes an `annotation` mark into the doc's ydoc (§12i) and leaves
+`anchorFrom`/`anchorTo`/`quotedText` null; either *reading* view writes those three columns
+and never touches the document, so a reader annotating a doc no longer causes a write to
+one they may not edit. Don't "unify" them by giving the reading views the mark back —
+that write is the thing being removed, not an implementation detail. A row has one or the
+other and never both; a null `anchorFrom` *is* "look for a mark instead".
+`Annotation.ydocUpdateId` is no longer metadata-only: it's the version stamp those offsets
+were measured against (the doc's update log for a root, an anchored reply's parent
+annotation's for a reply, §13p), and `quotedText` is derived server-side against exactly
+that state — so replaying to it reproduces the quote by construction. It still drives the
+scrubber jump it always did. Never position a doc annotation off `Doc.proseJson` — it's a
+store-debounce snapshot, stale by seconds while anyone is typing; it's fine as the *seed*
+for which cards start in the rail, and nothing more.
+How a remark stays attached to a passage while the passage moves — every strategy this
 codebase uses, the ones it doesn't, and how to pick: [docs/COLLAB.md](docs/COLLAB.md). Read it
-before adding a sixth or "fixing" an anchor that looks fragile; several of the fragile-looking
+before adding another or "fixing" an anchor that looks fragile; several of the fragile-looking
 ones are deliberate, and one plausible fix has already been tried and reverted as too brittle.
 Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
 [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
