@@ -109,6 +109,14 @@ export interface YdocStore {
   maxUpdateId(id: string): Promise<bigint | null>;
   findSnapshotAtMark(id: string, mark: bigint): Promise<{ id: string } | null>;
   loadReplaySlice(id: string, throughUpdateId: bigint): Promise<ReplaySlice | typeof UNAVAILABLE>;
+  // PLAN.md §13q — the two reads `resolveUpdateIdForStateVector` needs. Kept on
+  // the store rather than reaching for prisma directly at the call site, per
+  // this file's own rule that it is the only code touching the three tables.
+  findNewestSnapshotCoveredBy(
+    id: string,
+    clientStateVector: Map<number, number>,
+  ): Promise<{ id: string; lastYdocUpdateId: bigint; stateVector: Uint8Array } | null>;
+  updatesAfter(id: string, afterUpdateId: bigint | null): Promise<{ id: bigint; update: Uint8Array }[]>;
 }
 
 class PrismaYdocStore implements YdocStore {
@@ -223,6 +231,50 @@ class PrismaYdocStore implements YdocStore {
     return prisma.ydocSnapshot.findFirst({ where: { ydocId: id, lastYdocUpdateId: mark }, select: { id: true } });
   }
 
+  // Newest-first, testing coverage in JS rather than SQL: a state vector is an
+  // opaque blob to Postgres, so "is this snapshot's version covered by that
+  // client's" cannot be a WHERE clause. There are only ever a handful of
+  // snapshots per document (§11b — they are created deliberately, not per
+  // update), so this reads a few rows at worst, and the common case is the
+  // first one.
+  async findNewestSnapshotCoveredBy(
+    id: string,
+    clientStateVector: Map<number, number>,
+  ): Promise<{ id: string; lastYdocUpdateId: bigint; stateVector: Uint8Array } | null> {
+    const snapshots = await prisma.ydocSnapshot.findMany({
+      where: { ydocId: id },
+      orderBy: { lastYdocUpdateId: "desc" },
+      select: { id: true, lastYdocUpdateId: true, stateVector: true },
+    });
+    for (const snapshot of snapshots) {
+      const vector = Y.decodeStateVector(new Uint8Array(snapshot.stateVector));
+      let covered = true;
+      for (const [client, clock] of vector) {
+        if ((clientStateVector.get(client) ?? 0) < clock) {
+          covered = false;
+          break;
+        }
+      }
+      if (covered) {
+        return {
+          id: snapshot.id,
+          lastYdocUpdateId: snapshot.lastYdocUpdateId,
+          stateVector: new Uint8Array(snapshot.stateVector),
+        };
+      }
+    }
+    return null;
+  }
+
+  async updatesAfter(id: string, afterUpdateId: bigint | null): Promise<{ id: bigint; update: Uint8Array }[]> {
+    const rows = await prisma.ydocUpdate.findMany({
+      where: { ydocId: id, ...(afterUpdateId === null ? {} : { id: { gt: afterUpdateId } }) },
+      orderBy: { id: "asc" },
+      select: { id: true, update: true },
+    });
+    return rows.map((r) => ({ id: r.id, update: new Uint8Array(r.update) }));
+  }
+
   // PLAN.md §15b — the replay-base primitive resolveReplayBase never actually
   // was: newest snapshot at or before throughUpdateId, then updates strictly
   // after its mark up to and including throughUpdateId. With no qualifying
@@ -305,6 +357,18 @@ class NullYdocStore implements YdocStore {
   async findSnapshotAtMark(id: string): Promise<{ id: string } | null> {
     this.warn(id, "findSnapshotAtMark");
     return null;
+  }
+
+  async findNewestSnapshotCoveredBy(
+    id: string,
+  ): Promise<{ id: string; lastYdocUpdateId: bigint; stateVector: Uint8Array } | null> {
+    this.warn(id, "findNewestSnapshotCoveredBy");
+    return null;
+  }
+
+  async updatesAfter(id: string): Promise<{ id: bigint; update: Uint8Array }[]> {
+    this.warn(id, "updatesAfter");
+    return [];
   }
 
   async loadReplaySlice(id: string): Promise<ReplaySlice | typeof UNAVAILABLE> {
