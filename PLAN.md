@@ -3029,6 +3029,95 @@ that isn't quietly patched). And annotations still aren't correct *on the scrub 
 scrubbed to a past state sees anchors resolved against the live document. The stamp is what
 would fix that, and it's now stored on every row.
 
+### 13p. A reply anchors to a passage of the annotation it answers
+
+**Decided:** selecting text inside a posted annotation opens a reply anchored to that passage.
+The anchor targets the **parent annotation's body**, never the doc — so a reply cannot quote
+the document, and a root annotation cannot quote another annotation. Same three columns §13o
+added; no schema change at all.
+
+**Why the target is a property of the row and not of the request.** A reply exists because of
+something its parent said. A quotation of the *doc* belongs to whichever annotation is about
+the doc, which is the root. So `postAnnotation` decides the target from
+`parent_annotation_id` rather than taking it as an argument: non-null picks
+`ydoc:annotation:<parentId>` and the annotation schema, null picks `ydoc:<docId>` and the doc
+schema. A client cannot ask for the other one, and there is no combination of arguments that
+produces a reply pointing into the doc.
+
+Decoding with the right schema is not cosmetic: decoding a doc body with the annotation schema
+silently drops every `annotation` mark in it, and decoding an annotation body with the doc
+schema registers a mark that body can never contain.
+
+**Only the column mechanism, and not as a temporary limitation.** A reply's anchor could not be
+a mark even if this wanted one: `annotationContentExtensions` (§13a) deliberately has no
+`annotation` mark, so an annotation body cannot carry an anchor onto another annotation.
+`anchorMode` is forced to `"columns"` for any reply, which is also what makes §13o's mark
+branch safe to leave keyed on `docId` with no root check of its own.
+
+**The stamp follows the target**, because §13o made the stamp the coordinate system the offsets
+are expressed in — the two cannot be chosen independently without the stored triple ceasing to
+mean anything. So an anchored reply stamps its *parent annotation's* update log, and
+`ydoc_update_id` becomes "the log of whichever document this annotation's anchor is measured
+against." An **anchorless** annotation — including the anchorless reply the plain Reply button
+still produces — stamps the doc's log exactly as every row did before, since with no offsets to
+be a coordinate system for, the column means only §13n's "what was I looking at," and that is
+the doc.
+
+The cost of that overload is §13n's "at this revision" control, which seeks the doc's scrub bar:
+for an anchored reply it now names a position in a different log. Weighed and accepted rather
+than adding a second column that would hold the same value as the first on every root
+annotation ever written. The control is unchanged for roots and for anchorless replies, which is
+every row that existed before this section.
+
+**A posted annotation's body had to become a real editing surface first.** That is
+`AnnotationBodyReader`, and the reason is not aesthetic: a browser `Selection` over the static
+React tree `annotation-entries.ts` produces gives DOM nodes and offsets, and converting those
+back into document positions means reimplementing what ProseMirror already does exactly — the
+same "don't reconstruct what the library has" rule COLLAB.md §4's rejected rewrite is about. A
+static tree also cannot carry decorations, which is how an existing reply's quote gets
+highlighted inside the parent. So the body renders through an `editable: false` editor behind
+the SSR copy, the shape `AnnotatableArticle` and `DocReadingBody` already use, which keeps the
+surface working with no JS and the first paint free of a flash. The static tree stays as the
+pre-ready and no-JS copy; both it and the JSON ship together.
+
+The cost is **one editor per rendered annotation**, real on a heavily-annotated doc, taken
+deliberately over a lazier scheme whose failure mode (mounting an editor mid selection-gesture,
+which cancels the gesture) would be worse than what it saves. If it ever measures badly, mount
+on first pointer/focus contact and keep eager mounting for any annotation that has anchored
+replies to decorate.
+
+**Two interaction rules, and the second is what makes it usable.**
+
+- **A selection with no reply open opens one; a selection with a reply already open re-points
+  it.** Not a second composer — the reader is refining what they are replying *about*, and one
+  composer per selection adjustment would leave a trail of abandoned `DRAFT` rows behind a
+  single change of mind.
+- **An empty selection is ignored, not treated as "deselected".** This is the one place the
+  gesture deliberately differs from `useSelectionPopover`, which clears on empty. Here the
+  composer consuming the selection is a *sibling editor on the same page*: clicking into it
+  collapses the body's selection, and clearing the anchor at the moment someone starts typing
+  about it would be exactly backwards. An anchor is replaced by another selection or not at all.
+
+**The anchor is immediate; the row is not.** The range reaches React state on every selection,
+so the pending decoration (§13f's, in the composing reader's own color) appears with no wait.
+The `DRAFT` row waits ~300ms for the selection to stop changing — a drag emits an update per
+pixel, and each would otherwise be a row, a ydoc and a websocket. A timer rather than
+`pointerup`, so a keyboard selection (shift+arrows, which never emits one) settles the same way.
+
+**Rendering.** Posted reply anchors are highlights inside the parent's body, each in its
+replying author's color, clickable to scroll to and flash that reply's card. It is §13o's
+decoration layer pointed at a different document — `AnnotationHighlight` and `AnnotationClick`
+neither knew nor needed to know which. Only *direct* replies are drawn in a given body: an
+anchor points at the annotation it answers, so a reply-of-a-reply is drawn inside its own
+parent, by that node.
+
+**Known gaps.** There is no way to *edit* someone else's posted annotation, so the body a reply
+anchors into is immutable in practice — but only in practice: `canUserAccessAnnotationYdoc`
+grants a writable connection to any doc reader for a non-`DRAFT` annotation, so nothing
+structural stops a body from changing under an anchor. The stamp is what would resolve that when
+it happens, and it is stored. `/annotations`' Quote column shows a reply's quote now, but the
+table still has no way to say *what* a quote is a quote of.
+
 ## 14. Side-by-side docs, joined by doc links
 
 **Decided:** a third doc surface — two docs rendered in parallel columns at

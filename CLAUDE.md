@@ -44,12 +44,21 @@ one they may not edit. Don't "unify" them by giving the reading views the mark b
 that write is the thing being removed, not an implementation detail. A row has one or the
 other and never both; a null `anchorFrom` *is* "look for a mark instead".
 `Annotation.ydocUpdateId` is no longer metadata-only: it's the version stamp those offsets
-were measured against (the doc's update log for a root, an anchored reply's parent
-annotation's for a reply, §13p), and `quotedText` is derived server-side against exactly
-that state — so replaying to it reproduces the quote by construction. It still drives the
-scrubber jump it always did. Never position a doc annotation off `Doc.proseJson` — it's a
-store-debounce snapshot, stale by seconds while anyone is typing; it's fine as the *seed*
-for which cards start in the rail, and nothing more.
+were measured against, and `quotedText` is derived server-side against exactly that state —
+so replaying to it reproduces the quote by construction. It still drives the scrubber jump
+it always did. Never position a doc annotation off `Doc.proseJson` — it's a store-debounce
+snapshot, stale by seconds while anyone is typing; it's fine as the *seed* for which cards
+start in the rail, and nothing more.
+**A reply's anchor points into its parent annotation's body, not the doc** (§13p) — same
+three columns, different target ydoc, and therefore a different update log stamping them
+(`ydoc:annotation:<parentId>`). `postAnnotation` picks the target from
+`parentAnnotationId` rather than taking it as an argument, so there's no request that
+anchors a reply into the doc or a root into an annotation; an *anchorless* annotation still
+stamps the doc's log. Selecting text in a posted annotation is the gesture that opens (or
+re-points) that reply, which is why `AnnotationNode` renders bodies through
+`AnnotationBodyReader` — a read-only TipTap editor behind the SSR copy — rather than the
+static React tree alone: a browser `Selection` over static markup can't give ProseMirror
+positions, and static markup can't carry the highlight decorations either.
 How a remark stays attached to a passage while the passage moves — every strategy this
 codebase uses, the ones it doesn't, and how to pick: [docs/COLLAB.md](docs/COLLAB.md). Read it
 before adding another or "fixing" an anchor that looks fragile; several of the fragile-looking

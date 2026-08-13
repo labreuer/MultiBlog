@@ -214,10 +214,11 @@ be a new-docs-only decision, not a config change.
 
 ## 2b. Doc annotations from a reading view — offsets against a stamped update
 
-**Surface:** `/doc/[slug]`. **Code:** `Annotation.anchor_from`/`anchor_to`/`quoted_text`,
+**Surface:** `/doc/[slug]` — both the doc itself and, since PLAN.md §13p, the body of any
+posted annotation on it. **Code:** `Annotation.anchor_from`/`anchor_to`/`quoted_text`,
 `src/lib/annotation-anchor-capture.ts`, `src/lib/annotation-highlight-extension.ts`.
-**Design:** PLAN.md §13o. **This is [§7](#7-anchoring-to-a-scrub-reachable-state) built** —
-its columns and its version stamp, though not yet its materialize-and-diff resolver.
+**Design:** PLAN.md §13o, §13p. **This is [§7](#7-anchoring-to-a-scrub-reachable-state) built**
+— its columns and its version stamp, though not yet its materialize-and-diff resolver.
 
 Same model, same surface family, opposite side of §2's central trade. §2 buys "cannot drift" by
 making the anchor content; the price is that creating one is a **write**. For a reader that
@@ -294,6 +295,30 @@ mark scan and this plugin's ranges; every consumer goes through it. The visible 
 DOM: a mark renders `data-annotation-id` (singular), a decoration renders
 `data-annotation-ids` (plural, because overlapping inline decorations drop each other's
 attributes — the same split §1's `data-thread-ids` already has).
+
+### The same mechanism, pointed at an annotation
+
+**Design:** PLAN.md §13p. A reply anchors to a passage of the annotation it answers, using
+these columns unchanged — the only thing that differs is which ydoc they are offsets into
+(`ydoc:annotation:<parentId>` rather than `ydoc:<docId>`), and therefore which update log
+stamps them. Worth reading as a property of this mechanism rather than as a fourth strategy:
+nothing in the resolver, the decoration layer or the click handler knew or needed to know which
+document it was pointed at.
+
+Three things about it are specific rather than incidental:
+
+- **The target is decided by the row, not the request.** `parent_annotation_id` non-null picks
+  the parent's ydoc; null picks the doc's. There is no combination of arguments a client can
+  send that produces a reply anchored into the doc, or a root anchored into an annotation.
+- **A mark was never an option here**, whatever the write permissions —
+  `annotationContentExtensions` has no `annotation` mark in it (PLAN.md §13a), on purpose, so
+  an annotation body cannot carry an anchor onto another annotation.
+- **The anchored body is immutable in practice and not by construction.** There is no UI for
+  editing a posted annotation, which is why offsets into one behave like §1's offsets into a
+  snapshot rather than like §2b's into a living doc. But `canUserAccessAnnotationYdoc` grants a
+  writable connection to any doc reader, so that is a missing feature rather than a guarantee —
+  don't build anything that assumes those offsets can never move. The version stamp is what
+  would resolve it when they do.
 
 ## 3. Doc links — an external blob, repaired by search
 
@@ -769,5 +794,6 @@ Rules of thumb, in the order they actually decide things:
    search is a reconstruction of information the CRDT already has exactly.
 
 **Related:** PLAN.md §5 (post anchoring), §11 (the ydoc stack), §12h/§12i (annotations), §13f
-(pending selection), §13o (the mark/column split and why a reader stopped writing marks),
-§14a/§14d (doc links) · [docs/PERMISSIONS.md](PERMISSIONS.md) for who may annotate what.
+(pending selection), §13o (the mark/column split and why a reader stopped writing marks), §13p
+(a reply anchored into the annotation it answers), §14a/§14d (doc links) ·
+[docs/PERMISSIONS.md](PERMISSIONS.md) for who may annotate what.
