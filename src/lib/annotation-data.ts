@@ -24,6 +24,17 @@ export type AnnotationComment = {
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
+  // PLAN.md §13p — a reply's own anchor, into the body of the annotation it
+  // answers rather than into the doc. Null/"" for an anchorless reply (the
+  // plain Reply button) and for every root, whose anchor lives on the thread
+  // instead. Its author's color, because the highlight drawn inside the
+  // parent's body is per-reply — several replies can quote different parts of
+  // one annotation, and they should be told apart the way overlapping
+  // annotations on the doc are.
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  color: string;
   // PLAN.md §12p/§13 — which ydoc_update this was posted against, stringified
   // for the client boundary (BigInt isn't serializable). Metadata only — see
   // the column's own comment in schema.prisma — not present until
@@ -142,6 +153,16 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
         createdAt: a.createdAt.toISOString(),
         deletedByUserId: a.deletedByUserId,
         commenterUserId: a.userId,
+        // PLAN.md §13p — only a *reply* anchors into a body, so a root's
+        // columns are deliberately dropped here rather than passed on: they
+        // are the thread's anchor into the doc, already carried by
+        // `anchorFrom`/`anchorTo`/`quotedText` on the thread above, and
+        // repeating them per-comment would invite something to draw a root's
+        // doc quote as a highlight inside its own body.
+        anchorFrom: a.parentAnnotationId !== null ? a.anchorFrom : null,
+        anchorTo: a.parentAnnotationId !== null ? a.anchorTo : null,
+        quotedText: a.parentAnnotationId !== null ? a.quotedText : "",
+        color: a.user.color,
         ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
       })),
     });

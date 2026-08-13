@@ -277,26 +277,43 @@ export async function deleteTextInBody(page: Page, needle: string): Promise<void
  * approach insufficient there.
  */
 export async function selectTextInBody(page: Page, needle: string): Promise<void> {
-  await page.evaluate((text) => {
-    const root = document.querySelector('[aria-label="Post body"]');
-    if (!root) throw new Error("Body editor not found.");
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      const index = node.textContent?.indexOf(text) ?? -1;
-      if (index === -1) continue;
-      const range = document.createRange();
-      range.setStart(node, index);
-      range.setEnd(node, index + text.length);
-      const selection = window.getSelection();
-      if (!selection) throw new Error("No selection available.");
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new Event("selectionchange"));
-      return;
-    }
-    throw new Error(`"${text}" not found in the body editor.`);
-  }, needle);
+  await selectTextIn(page, '[aria-label="Post body"]', needle);
+}
+
+/**
+ * PLAN.md §13p — the same gesture inside a posted *annotation's* body, which
+ * is a read-only ProseMirror surface of its own (AnnotationBodyReader) and
+ * therefore selectable in exactly the same way. `nth` picks which annotation
+ * on the page, in DOM order.
+ */
+export async function selectTextInAnnotation(page: Page, needle: string, nth = 0): Promise<void> {
+  await selectTextIn(page, '[aria-label="Annotation"]', needle, nth);
+}
+
+async function selectTextIn(page: Page, rootSelector: string, needle: string, nth = 0): Promise<void> {
+  await page.evaluate(
+    ({ text, selector, index: rootIndex }) => {
+      const root = document.querySelectorAll(selector)[rootIndex];
+      if (!root) throw new Error(`No element matching ${selector} at index ${rootIndex}.`);
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const index = node.textContent?.indexOf(text) ?? -1;
+        if (index === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + text.length);
+        const selection = window.getSelection();
+        if (!selection) throw new Error("No selection available.");
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+        return;
+      }
+      throw new Error(`"${text}" not found in ${selector}[${rootIndex}].`);
+    },
+    { text: needle, selector: rootSelector, index: nth },
+  );
 }
 
 /**

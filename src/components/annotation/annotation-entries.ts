@@ -38,6 +38,13 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
       // one: the tree is what a reader with no JS gets and what covers the
       // pre-ready frame; the JSON is what makes the body selectable.
       proseJson: a.proseJson,
+      // PLAN.md §13p — a reply's anchor into this annotation's parent, carried
+      // down so AnnotationNode can hand its *parent's* body the set of
+      // highlights to draw. Zero for a root.
+      anchorFrom: a.anchorFrom,
+      anchorTo: a.anchorTo,
+      quotedText: a.quotedText,
+      color: a.color,
       createdAt: a.createdAt,
       deletedByUserId: a.deletedByUserId,
       commenterUserId: a.commenterUserId,

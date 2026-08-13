@@ -11,7 +11,12 @@ import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
-import { docContentExtensions, pmDocContentSchema } from "@/lib/tiptap-schema";
+import {
+  annotationContentExtensions,
+  docContentExtensions,
+  pmAnnotationContentSchema,
+  pmDocContentSchema,
+} from "@/lib/tiptap-schema";
 import { ydocIdForAnnotation, ydocIdForDoc } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
@@ -160,17 +165,44 @@ export async function postAnnotation(opts: {
     return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
 
-  const anchorMode = opts.anchorMode ?? "columns";
+  const parentId = annotation.parentAnnotationId;
 
-  // The client's own position when it knew one precisely; otherwise the
-  // doc's update-log tail as of right now. A malformed client value (should
-  // never happen, but this is a server action) falls through to the same
-  // tail lookup rather than failing the whole post over metadata.
+  // PLAN.md §13p — **what an anchor points at is decided by whether this is a
+  // reply, not by what the client asked for.** A root annotation anchors into
+  // the doc; a reply anchors into the annotation it answers, and cannot
+  // anchor into the doc at all. That falls out of what a reply *is*: it is
+  // about something its parent said, and a quotation of the doc belongs to
+  // whichever annotation is about the doc.
+  const anchorRequested =
+    typeof opts.anchorFrom === "number" &&
+    typeof opts.anchorTo === "number" &&
+    !!opts.quotedText &&
+    opts.anchorTo > opts.anchorFrom;
+
+  // A reply is always columns, never a mark, and not as a policy choice: an
+  // annotation's own body schema has no `annotation` mark in it
+  // (annotationContentExtensions, §13a) precisely so a body can't carry an
+  // anchor onto another annotation, and §13p doesn't change that.
+  const anchorMode = parentId !== null ? "columns" : (opts.anchorMode ?? "columns");
+
+  // Which ydoc the anchor is measured into — and therefore which update log
+  // stamps it (§13o: the stamp is the coordinate system, so the two cannot be
+  // chosen independently).
+  const anchorYdocId = parentId !== null ? ydocIdForAnnotation(parentId) : ydocIdForDoc(annotation.docId);
+
+  // The client's own position when it knew one precisely; otherwise the tail
+  // of whichever log is about to matter. A malformed client value (should
+  // never happen, but this is a server action) falls through to the same tail
+  // lookup rather than failing the whole post over metadata.
   //
-  // Computed before the anchor, not alongside it: in "columns" mode this is
-  // the coordinate system the stored offsets are expressed in (PLAN.md
-  // §13o), so the anchor has to be resolved against *this* state rather than
-  // whatever the document has become by the time the update lands.
+  // An *anchorless* annotation — including an anchorless reply, which is what
+  // the plain Reply button still produces — stamps the doc's log, as every row
+  // did before §13p: with no offsets to be a coordinate system for, the column
+  // means only §13n's "what was I looking at", and that is the doc.
+  //
+  // Computed before the anchor, not alongside it: the anchor has to be
+  // resolved against *this* state rather than whatever the document has
+  // become by the time the update lands.
   let ydocUpdateId: bigint | null = null;
   if (opts.ydocUpdateId !== undefined) {
     try {
@@ -180,17 +212,10 @@ export async function postAnnotation(opts: {
     }
   }
   if (ydocUpdateId === null) {
-    ydocUpdateId = await ydocStore.maxUpdateId(ydocIdForDoc(annotation.docId));
+    ydocUpdateId = await ydocStore.maxUpdateId(
+      anchorRequested ? anchorYdocId : ydocIdForDoc(annotation.docId),
+    );
   }
-
-  // Only a root annotation ever carries an anchor onto the *doc* — a reply is
-  // a comment in the thread, anchored nowhere of its own (PLAN.md §12i).
-  const anchorRequested =
-    annotation.parentAnnotationId === null &&
-    typeof opts.anchorFrom === "number" &&
-    typeof opts.anchorTo === "number" &&
-    !!opts.quotedText &&
-    opts.anchorTo > opts.anchorFrom;
 
   // Resolved *before* the status write, unlike the mark below, because it is
   // part of the row rather than a separate document edit: one update, no
@@ -199,10 +224,14 @@ export async function postAnnotation(opts: {
   let capturedAnchor: { from: number; to: number; quotedText: string } | null = null;
   if (anchorRequested && anchorMode === "columns" && ydocUpdateId !== null) {
     capturedAnchor = await captureAnnotationAnchor({
-      ydocId: ydocIdForDoc(annotation.docId),
+      ydocId: anchorYdocId,
       throughUpdateId: ydocUpdateId,
-      extensions: docContentExtensions,
-      schema: pmDocContentSchema,
+      // The two targets are different documents with different schemas —
+      // decoding a doc body with the annotation schema would silently drop
+      // every annotation mark in it, and decoding an annotation body with the
+      // doc schema would register a mark that body can never contain.
+      extensions: parentId !== null ? annotationContentExtensions : docContentExtensions,
+      schema: parentId !== null ? pmAnnotationContentSchema : pmDocContentSchema,
       from: opts.anchorFrom!,
       to: opts.anchorTo!,
       quotedText: opts.quotedText!,
@@ -220,6 +249,9 @@ export async function postAnnotation(opts: {
     },
   });
 
+  // Unreachable for a reply — `anchorMode` was forced to "columns" above —
+  // which is what makes this branch's use of `docId` safe without a second
+  // root check of its own.
   if (anchorRequested && anchorMode === "mark") {
     await applyAnnotationMark({
       docId: annotation.docId,

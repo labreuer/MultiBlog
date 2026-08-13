@@ -21,6 +21,7 @@ import {
   annotationEditor,
   deleteTextInBody,
   selectTextInBody,
+  selectTextInAnnotation,
   waitForDocCollabReady,
   statusLine,
   visibleText,
@@ -227,7 +228,11 @@ test.describe("annotations", () => {
     // time rather than a state written to the row. So the row still says
     // "anchored" and the rendering is what has to change.
     await readerPage.goto(`/doc/${sharedDoc.slug}`);
-    await expect(readerPage.getByText("This quote is about to disappear.")).toBeVisible();
+    // `.first()` because an annotation's body is in the DOM twice since
+    // PLAN.md §13p — the SSR static copy (hidden once the editor mounts) and
+    // the editor's own. Same shape AnnotatableArticle has always had for the
+    // article itself.
+    await expect(readerPage.getByText("This quote is about to disappear.").first()).toBeVisible();
 
     // No highlight left in the article: the quoted text is gone, so neither
     // the stored offsets nor a search for it resolves.
@@ -239,6 +244,69 @@ test.describe("annotations", () => {
     // can still say what it was about. That is the DETACHED affordance a
     // post comment has always had and a doc annotation never could.
     await expect(readerPage.locator("blockquote", { hasText: QUOTED_TEXT })).toBeVisible();
+  });
+
+  // PLAN.md §13p — an annotation's own body is a surface you can annotate,
+  // and the same gesture means the same thing there: selecting text is the
+  // request to reply about *that* passage. The anchor targets the parent
+  // annotation, never the doc, which is what the assertions below pin down.
+  test("selecting inside an annotation opens a reply anchored to that passage, and re-selecting re-points it", async ({
+    sharedDoc,
+    secondUser,
+  }) => {
+    const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
+
+    // A root annotation to reply to, made the ordinary way.
+    await readerPage.goto(`/doc/${sharedDoc.slug}`);
+    await expect(bodyEditor(readerPage)).toBeVisible();
+    await expect(readerPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await selectTextInBody(readerPage, QUOTED_TEXT);
+    const popup = readerPage.getByTestId("annotation-popup");
+    await popup.getByRole("button", { name: "Annotate" }).click();
+    await annotationEditor(readerPage).click();
+    await readerPage.keyboard.type("The middle clause here is doing a lot of work.");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+    // Polls the *posted* state, not the row count: "Annotate" already created
+    // the row as a DRAFT, so a length check would pass before Post's own
+    // round trip had done anything.
+    await expect
+      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.quotedText, { timeout: 15_000 })
+      .toBe(QUOTED_TEXT);
+
+    // Reload so the posted annotation renders through AnnotationBodyReader
+    // rather than through whatever the composer left on screen.
+    await readerPage.goto(`/doc/${sharedDoc.slug}`);
+    await expect(readerPage.getByRole("textbox", { name: "Annotation" }).first()).toBeVisible();
+
+    // The gesture: no Reply click anywhere in this test.
+    await selectTextInAnnotation(readerPage, "middle clause");
+    await expect(annotationEditor(readerPage)).toBeVisible({ timeout: 15_000 });
+
+    // Re-pointing: a second selection while the composer sits open must move
+    // the anchor rather than open a second reply.
+    await selectTextInAnnotation(readerPage, "doing a lot of work");
+    await expect(annotationEditor(readerPage)).toHaveCount(1);
+
+    await annotationEditor(readerPage).click();
+    await readerPage.keyboard.type("Agreed, that's the crux.");
+    await readerPage.getByRole("button", { name: "Post annotation" }).click();
+
+    await expect
+      .poll(async () => (await getAnnotationStates(sharedDoc.id)).find((a) => a.parentAnnotationId !== null), {
+        timeout: 15_000,
+      })
+      .toMatchObject({
+        // The *second* selection is what it quotes — the first was replaced.
+        quotedText: "doing a lot of work",
+        bodyText: "Agreed, that's the crux.",
+      });
+
+    // And the anchor points into the parent annotation, not the doc: those
+    // offsets are small (an annotation body is short) and the quoted text
+    // appears nowhere in the doc at all.
+    const reply = (await getAnnotationStates(sharedDoc.id)).find((a) => a.parentAnnotationId !== null)!;
+    expect(reply.anchorTo).toBeGreaterThan(reply.anchorFrom!);
+    await expect(bodyEditor(readerPage)).not.toContainText("doing a lot of work");
   });
 
   // The other side of PLAN.md §13o's split. e2e/text-selection.spec.ts already

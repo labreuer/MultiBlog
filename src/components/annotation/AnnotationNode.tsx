@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { JSONContent } from "@tiptap/react";
+import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
+import { flashHighlight } from "@/lib/flash-highlight";
+import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 // Aliased because the local `isAdmin` below is the resolved boolean for this
 // viewer; role-checks.ts is safe in a client bundle by design (its own header
 // says so — authz.ts is not, since it imports prisma).
 import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "../LocalTime";
-import AnnotationBodyReader from "./AnnotationBodyReader";
+import AnnotationBodyReader, { type BodySelection } from "./AnnotationBodyReader";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
 import { useDocScrub } from "../DocScrubContext";
@@ -28,6 +31,14 @@ export type AnnotationNodeData = {
   body: ReactNode;
   // The JSON that tree was rendered from — see §13p and annotation-entries.ts.
   proseJson: JSONContent | null;
+  // PLAN.md §13p — this annotation's own anchor into its *parent's* body, if
+  // it is a reply that was made from a selection. Read by the parent, not by
+  // the node itself: it is what tells the parent's body which range to
+  // highlight in this reply's color.
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  color: string;
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
@@ -43,6 +54,25 @@ type Props = {
   docId: string;
   depth?: number;
 };
+
+// How long a selection has to stop changing before it is worth a DRAFT row
+// (PLAN.md §13p). Long enough that dragging across a sentence is one row and
+// not thirty; short enough that it still reads as "selecting opened a reply".
+const SELECTION_SETTLE_MS = 300;
+
+// Clicking a highlighted range inside an annotation's body scrolls to the
+// reply that quoted it and flashes the card — the in-body counterpart of
+// DocReadingBody's jumpToAnnotationEntry, keyed on `data-comment-id` (which
+// every rendered annotation already carries) rather than on a thread id,
+// since a reply is not a thread of its own.
+function jumpToReply(replyIds: string[]) {
+  const id = replyIds[0];
+  if (!id) return;
+  const target = document.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  flashHighlight(target, NEUTRAL_THREAD_COLOR);
+}
 
 // A permalink id for the annotation — down to the second is enough that a
 // collision would mean the same person annotated twice in the same second,
@@ -70,6 +100,12 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
   const router = useRouter();
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
+  // The composing reader's own color, for the pending decoration (PLAN.md
+  // §13f's convention: a not-yet-posted range is colored by whoever is making
+  // it, since there is no annotation to take a color from yet). Null before
+  // the client-side session resolves, which just means no decoration for that
+  // moment rather than a wrongly-colored one.
+  const viewerColor = session?.user?.color ?? null;
   const isAdmin = !!session?.user && isAdminRole(session.user.role);
   // A reply's own DRAFT id, once "Reply" has created one (PLAN.md §13j
   // Phase 2) — null means the reply composer isn't open. Unlike the old
@@ -79,6 +115,11 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
   const [replyDraftId, setReplyDraftId] = useState<string | null>(null);
   const [replyPending, startReplyTransition] = useTransition();
   const [replyError, setReplyError] = useState<string | null>(null);
+  // PLAN.md §13p — the range in *this* annotation's body that the open (or
+  // about-to-open) reply quotes. Set the instant a selection is made, so the
+  // decoration appears with no wait; the draft row it eventually belongs to
+  // is created on the debounce below.
+  const [replyAnchor, setReplyAnchor] = useState<BodySelection | null>(null);
   const [posted, setPosted] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -92,6 +133,38 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
   // before the reading view's scrub bar has been touched at all — both
   // supported states, see useDocScrub's own note.
   const seekToUpdateId = useDocScrub();
+  // PLAN.md §13p — the DRAFT row a selection eventually opens waits for the
+  // selection to settle, so the timer that decides "settled" needs somewhere
+  // to live. Declared up here with the other hooks, above the early return
+  // below, since hook order has to be identical on every render — including
+  // the renders where this node collapses to nothing.
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    },
+    [],
+  );
+
+  // Each direct reply that quotes part of this body, in its own author's
+  // color. Only direct replies: an anchor points at the annotation it answers,
+  // so a reply-of-a-reply is drawn inside *its* parent's body, by that node.
+  const replyAnchors = useMemo(
+    () =>
+      annotationAnchorInputs(
+        annotation.replies
+          .filter((reply) => reply.deletedByUserId === null)
+          .map((reply) => ({
+            threadId: reply.id,
+            quotedText: reply.quotedText,
+            anchorFrom: reply.anchorFrom,
+            anchorTo: reply.anchorTo,
+            color: reply.color,
+          })),
+      ),
+    [annotation.replies],
+  );
+
   const anchorId = anchorName(annotation.displayName, annotation.createdAt);
   const isDeleted = annotation.deletedByUserId !== null || justDeleted;
 
@@ -131,6 +204,35 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
     });
   };
 
+  // PLAN.md §13p — selecting text in this annotation's body *is* the request
+  // to reply to it, the same way selecting text in the doc is the request to
+  // annotate the doc. Two states, and the difference between them is the
+  // whole feature:
+  //
+  //  - **No reply open** → open one, anchored here.
+  //  - **A reply already open** → re-point it. Not a second composer: the
+  //    reader is refining what they are replying *about*, not starting a
+  //    second reply, and opening one per selection adjustment would leave a
+  //    trail of abandoned DRAFT rows behind a single change of mind.
+  //
+  // The anchor lands in state immediately (the decoration is free), but the
+  // DRAFT row waits for the selection to settle — a drag emits a selection
+  // update per pixel, and each one would otherwise be a row, a ydoc, and a
+  // websocket. A timer rather than pointerup, so a keyboard selection
+  // (shift+arrows, which never emits one) settles the same way.
+  const handleBodySelect = (selection: BodySelection) => {
+    setReplyAnchor(selection);
+    if (replyDraftId || posted) return;
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    openTimerRef.current = setTimeout(openReply, SELECTION_SETTLE_MS);
+  };
+
+  const closeReply = () => {
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    setReplyDraftId(null);
+    setReplyAnchor(null);
+  };
+
   return (
     <div className={`${styles.node} ${depth > 0 ? styles.nested : ""}`}>
       {isDeleted ? (
@@ -155,7 +257,18 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
               </button>
             )}
           </p>
-          <AnnotationBodyReader proseJson={annotation.proseJson} staticBody={annotation.body} />
+          <AnnotationBodyReader
+            proseJson={annotation.proseJson}
+            staticBody={annotation.body}
+            replyAnchors={replyAnchors}
+            pending={
+              replyAnchor && viewerColor
+                ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
+                : null
+            }
+            onSelect={handleBodySelect}
+            onAnchorClick={jumpToReply}
+          />
           {!posted && !replyDraftId && (
             <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
               {replyPending ? "Opening…" : "Reply"}
@@ -194,11 +307,18 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
       {replyDraftId && !posted && (
         <LiveAnnotationComposer
           annotationId={replyDraftId}
+          // Read at submit time, so re-selecting while this sits open changes
+          // what the reply ends up quoting (PLAN.md §13p). Undefined when the
+          // reply was opened from the Reply button and no selection followed —
+          // an anchorless reply, exactly as before.
+          anchorFrom={replyAnchor?.from}
+          anchorTo={replyAnchor?.to}
+          quotedText={replyAnchor?.quotedText}
           onPosted={() => {
             setPosted(true);
-            setReplyDraftId(null);
+            closeReply();
           }}
-          onCancel={() => setReplyDraftId(null)}
+          onCancel={closeReply}
         />
       )}
       {annotation.replies.map((reply) => (
