@@ -49,6 +49,14 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
     content: doc,
     editable: false,
     immediatelyRender: false,
+    // The same aria-label/role pair the doc reading view's editor carries
+    // (use-live-doc-content.ts) and for the same stated reason: it is what
+    // the e2e suite keys off instead of DOM order (CLAUDE.md's `.tiptap`
+    // ordering note). This surface is the *original* selection-to-comment
+    // one and had gone without, which is why nothing could address it —
+    // `role: "textbox"` on an `editable: false` editor is the existing
+    // convention here rather than a fresh judgement call.
+    editorProps: { attributes: { "aria-label": "Post body", role: "textbox" } },
     onCreate: () => setReady(true),
     onSelectionUpdate: ({ editor: liveEditor }) => {
       const { from, to, empty } = liveEditor.state.selection;
@@ -104,6 +112,12 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
       </div>
       {pending && (
         <div
+          // Mirrors AnnotationPopover's own `annotation-popup` — both
+          // reading surfaces' selection popovers need addressing by a test
+          // without matching the *other* CommentForm this page also renders
+          // (the general one below the article, whose buttons are named
+          // identically).
+          data-testid="comment-popup"
           style={{
             position: "absolute",
             top: pending.top + 6,

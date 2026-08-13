@@ -3,9 +3,11 @@
 Playwright, driving the real app against the real local Postgres. Covers the
 flows that otherwise get re-verified by hand every session: publish/unpublish,
 comment moderation, two-author live collaboration, quote anchoring across
-publishes, republishing from an earlier point in a doc's history, and
-/dashboard's session refresh (`src/app/sign-in/NOTES.md`) — the one flow whose
-whole point is that a change is *not* visible until the right page is visited.
+publishes, republishing from an earlier point in a doc's history,
+selecting text on each of the three surfaces that respond to it
+(`text-selection.spec.ts`), and /dashboard's session refresh
+(`src/app/sign-in/NOTES.md`) — the one flow whose whole point is that a change
+is *not* visible until the right page is visited.
 
 ```bash
 npm run e2e
@@ -96,7 +98,23 @@ the admin account.
 - **Public post bodies exist twice in the DOM.** `AnnotatableArticle` keeps a
   static server-rendered copy and an interactive one, toggling `display` between
   them — so a bare `getByText` trips strict mode and `.first()` can land on the
-  hidden copy. Use `visibleText()`.
+  hidden copy. Use `visibleText()`. `selectTextInBody()` is unaffected: it
+  resolves through the `aria-label`, which only the interactive copy carries.
+- **Selecting text is covered per-surface in `text-selection.spec.ts`**, and
+  new selection behaviour belongs there rather than spread across the three
+  specs that own each page. All three surfaces reach the same gesture through
+  genuinely different machinery (COLLAB.md §1/§4/§5) while failing
+  identically from the outside — "no widget appeared" — so keeping them
+  adjacent is what makes the odd one out visible. That file's header records
+  the shipped bug it exists for: `/doc/[slug]/edit`'s widget could not open at
+  all, and nothing caught it because the existing coverage of that page
+  *types* into the editor and never selects in it.
+- **Selection popovers are addressed by test id**, not by their buttons:
+  `comment-popup` (post reading view) and `annotation-popup` (both doc
+  surfaces). Every page carrying one also renders a second composer below the
+  article whose buttons are named identically, so an unscoped
+  `getByRole("button", { name: "Post comment" })` trips strict mode. Scope to
+  the popup and assert with `toContainText` from there.
 - **Deleting the quoted text does not collapse a quote's anchor range.**
   `recreateTransform` diffs at character level, so removing exactly the quoted
   words still leaves the mapped end one character past the start, paired against
