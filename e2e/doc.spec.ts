@@ -282,10 +282,26 @@ test.describe("annotations", () => {
     await selectTextInAnnotation(readerPage, "middle clause");
     await expect(annotationEditor(readerPage)).toBeVisible({ timeout: 15_000 });
 
+    // The selected passage is *visibly* marked, not merely decorated in the
+    // abstract. Asserted as a computed style rather than as the span's
+    // existence, because the decoration being dispatched and the decoration
+    // being painted are two different things: `.pending-annotation` is styled
+    // by a rule scoped under `.prose` (prose.module.css), so a surface that
+    // renders the span without that class produces exactly this feature
+    // silently doing nothing. That is the bug this assertion exists for.
+    const pendingMark = readerPage.locator('[aria-label="Annotation"] .pending-annotation').first();
+    await expect(pendingMark).toBeVisible();
+    expect(
+      await pendingMark.evaluate((el) => getComputedStyle(el).borderBottomStyle),
+    ).toBe("dashed");
+
     // Re-pointing: a second selection while the composer sits open must move
     // the anchor rather than open a second reply.
     await selectTextInAnnotation(readerPage, "doing a lot of work");
     await expect(annotationEditor(readerPage)).toHaveCount(1);
+    await expect(readerPage.locator('[aria-label="Annotation"] .pending-annotation').first()).toContainText(
+      "doing a lot of work",
+    );
 
     await annotationEditor(readerPage).click();
     await readerPage.keyboard.type("Agreed, that's the crux.");
@@ -307,6 +323,15 @@ test.describe("annotations", () => {
     const reply = (await getAnnotationStates(sharedDoc.id)).find((a) => a.parentAnnotationId !== null)!;
     expect(reply.anchorTo).toBeGreaterThan(reply.anchorFrom!);
     await expect(bodyEditor(readerPage)).not.toContainText("doing a lot of work");
+
+    // Once posted, the quote is highlighted inside the parent's body — the
+    // same paint check as above, for the durable decoration rather than the
+    // in-progress one.
+    await readerPage.reload();
+    const replyMark = readerPage.locator(`[data-annotation-ids~="${reply.id}"]`).first();
+    await expect(replyMark).toBeVisible();
+    await expect(replyMark).toContainText("doing a lot of work");
+    expect(await replyMark.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
   });
 
   // The other side of PLAN.md §13o's split. e2e/text-selection.spec.ts already

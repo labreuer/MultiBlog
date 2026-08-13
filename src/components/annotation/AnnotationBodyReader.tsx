@@ -10,6 +10,7 @@ import {
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
+import proseStyles from "@/styles/prose.module.css";
 import styles from "./AnnotationBodyReader.module.css";
 
 export type BodySelection = { from: number; to: number; quotedText: string };
@@ -145,10 +146,28 @@ export default function AnnotationBodyReader({
     setPendingAnnotation(editor.view, pending);
   }, [editor, pending]);
 
+  // `.prose` on both copies, not just the editor's. Every decoration this
+  // surface draws is styled by a rule *scoped under `.prose`* in
+  // prose.module.css — `.pending-annotation` and `.annotation-highlight`
+  // both — so without it the decorations are dispatched, the spans are in
+  // the DOM, and nothing paints: a selection inside an annotation looked
+  // like it did nothing at all. This is CLAUDE.md's "any new surface
+  // rendering post content needs its `.prose` class" with a second
+  // consequence that note doesn't mention, since every earlier surface
+  // happened to want the class for its list/blockquote styling anyway and
+  // got the decorations for free.
+  //
+  // It also fixes something older by the same mechanism: an annotation's
+  // *static* body never had `.prose` either, so a list or blockquote written
+  // in an annotation has been rendering stripped by globals.css's reset the
+  // whole time — while the same content in the composer, which does carry
+  // the class (AnnotationBody.tsx), looked right.
   return (
     <div className={styles.body}>
-      <div style={{ display: ready ? "none" : "block" }}>{staticBody}</div>
-      <div style={{ display: ready ? "block" : "none" }}>
+      <div className={proseStyles.prose} style={{ display: ready ? "none" : "block" }}>
+        {staticBody}
+      </div>
+      <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
       </div>
     </div>
