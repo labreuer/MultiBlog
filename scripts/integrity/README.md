@@ -1,11 +1,15 @@
 # Integrity checks
 
-Two scripts, each verifying one link in the chain that turns an append-only log
-into the columns the app reads:
+Three scripts. Two verify one link each in the chain that turns an append-only
+log into the columns the app reads; the third verifies a claim made *about* a
+point in that log:
 
 ```
 ydoc_update  →  ydoc.ydoc  →  doc.title / doc.prose_json / doc.prose_json_length
 └─ check-ydoc-integrity ─┘    └────────── check-doc-integrity ──────────┘
+     ↑
+     └── annotation.{anchor_from, anchor_to, quoted_text} @ ydoc_update_id
+         └────────────── check-annotation-anchors ──────────────┘
 ```
 
 Neither derives anything on read. `ydoc.ydoc` is what a live editing session
@@ -20,11 +24,14 @@ indefinitely, with nothing failing. That is what these exist to make loud.
 |---|---|---|
 | `check-ydoc-integrity.ts` | does the stored blob match a replay of its own update log? | ERROR — a divergence here means the document and its history disagree |
 | `check-doc-integrity.ts` | do the Doc columns match the stored blob? | mostly WARN, since a cache legitimately trails the ydoc by one debounce; `length-cache` is an ERROR because nothing explains or fixes it |
+| `check-annotation-anchors.ts` | replay to an annotation's stamp — is its quote actually there? | ERROR, except a missing stamp (WARN: rows predating the column are legitimately in that state) |
 
-Run both:
+Run all three:
 
 ```bash
-npx tsx scripts/integrity/check-ydoc-integrity.ts && npx tsx scripts/integrity/check-doc-integrity.ts
+npx tsx scripts/integrity/check-ydoc-integrity.ts \
+  && npx tsx scripts/integrity/check-doc-integrity.ts \
+  && npx tsx scripts/integrity/check-annotation-anchors.ts
 ```
 
 Each exits non-zero on an ERROR-level finding and zero on WARNs, so the pair can
@@ -45,6 +52,19 @@ single corruption look like two unrelated ones.
 The practical consequence: **when both report problems, fix the ydoc one first.**
 A bad blob will produce doc-cache findings that evaporate once the blob is
 repaired from its log.
+
+`check-annotation-anchors` sits at the same point in that ordering and for the
+same reason — it replays the log, so a corrupt log makes it report anchor faults
+that are really one ydoc fault wearing several hats. Run it third.
+
+It is the odd one out in what it verifies. The other two ask whether a *derived*
+value still matches what it was derived from. This one asks whether a claim
+written down once — "at update N, characters [a, b) of this document read
+exactly this" — is still true of the history. Nothing recomputes that claim, and
+PLAN.md §13o's design depends on it: the reading views search for the stored
+quote as ground truth, and COLLAB.md §7's eventual repair would diff *from* the
+stamped state. If the claim is wrong, both silently anchor to the wrong passage
+rather than failing.
 
 ## When to run them
 
