@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
@@ -18,15 +18,29 @@ import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import type { AnnotationEntry } from "./annotation/AnnotationList";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
+import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import styles from "./DocEditor.module.css";
 
-// PLAN.md §18/COLLAB.md §5 — below this width there's nowhere sensible to
-// float the selection widget (no gutter, no room beside the text). Reuses
-// STYLE.md's existing 480px breakpoint rather than the literal "iPhone 12
-// Pro Max portrait" (428px) the feature was specced against, which would be
-// a fifth undocumented width for a difference nothing depends on.
-const ANNOTATION_WIDGET_MEDIA_QUERY = "(min-width: 480px)";
+// PLAN.md §18f — the marker sits *beside* the document, so this floor is
+// about one thing only: whether a gutter to put it in actually exists.
+// Below it there is none, and the marker would clamp back over the text it
+// is meant to stay out of the way of — which is the whole point of the
+// marker, so the honest answer at those widths is no marker at all.
+//
+// Derived, not picked. `.container` is `max-width: 800px` with 1rem padding,
+// centred, so the text box's right edge sits at `(W + 800) / 2 - 16`; the
+// marker needs `MARKER_GAP + ANNOTATE_MARKER_SIZE + MARKER_GAP` (44px) of
+// clear space to its right. Solving gives W ≥ 856. 900px is the nearest
+// width STYLE.md already documents, and clears it comfortably.
+//
+// This is deliberately *not* the "iPhone 12 Pro Max portrait" (428px) the
+// feature was specced against: that number was chosen as the width above
+// which there'd be room beside the document, and measurement says there
+// isn't any until 856. Between the two, everything still works — a doc's
+// annotations are composed from its reading view (/doc/[slug]), which has
+// its own selection popover and no width floor.
+const ANNOTATION_WIDGET_MEDIA_QUERY = "(min-width: 900px)";
 
 type Props = {
   docId: string;
@@ -95,7 +109,13 @@ export default function DocEditor({
   // DocEditor.module.css's flex-height chain (STYLE.md's flex-grow trap).
   const containerRef = useRef<HTMLDivElement>(null);
   const { setAwareness } = useDocPresence();
-  const widget = useEditorAnnotationWidget({ editorRef, containerRef, userColor });
+  // Scoped to this column rather than a bare document.querySelector — see
+  // the hook's own note on why it takes this as a callback.
+  const getFrame = useCallback(
+    () => containerRef.current?.querySelector<HTMLElement>(`[${EDITOR_SCROLL_ATTRIBUTE}]`) ?? null,
+    [],
+  );
+  const widget = useEditorAnnotationWidget({ editorRef, containerRef, getFrame, userColor });
   const wideEnoughForWidget = useMediaQuery(ANNOTATION_WIDGET_MEDIA_QUERY);
 
   // No separate `ready` flag to gate on, unlike the reading views: this
@@ -245,16 +265,49 @@ export default function DocEditor({
         ) : (
           <p>Connecting to live editor…</p>
         )}
-        {wideEnoughForWidget && widget.pending && widget.placement && widgetAnchor && (
+        {/* Stage one (PLAN.md §18f): a marker beside the document, not a
+            panel over it. Selecting text in an editor is mostly not a
+            request to annotate — it's how you bold a word or move a
+            sentence — so this says only that annotating is possible, and
+            costs nothing until clicked. */}
+        {wideEnoughForWidget && widget.pending && !widget.expanded && widget.marker && (
+          <button
+            type="button"
+            className={styles.annotateMarker}
+            style={{ top: widget.marker.top, left: widget.marker.left }}
+            onClick={widget.expand}
+            title="Annotate this selection"
+            aria-label="Annotate this selection"
+            data-testid="annotate-marker"
+          >
+            {/* Inline, currentColor, no fill — the marker inherits the
+                hover/focus colours above, and a monochrome outline stays
+                quiet where an emoji glyph would not. */}
+            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path
+                d="M2.5 3.5h11v7.5h-6l-3 2.5v-2.5h-2z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
+        {/* Stage two: the composer, opened where the marker was. `autoOpen`
+            because the marker already asked the question its "Annotate"
+            button would ask again. */}
+        {wideEnoughForWidget && widget.pending && widget.expanded && widget.popoverPlacement && widgetAnchor && (
           <AnnotationPopover
             elementRef={widget.popoverRef}
             docId={docId}
-            top={widget.placement.top}
-            left={widget.placement.left}
+            top={widget.popoverPlacement.top}
+            left={widget.popoverPlacement.left}
             from={widgetAnchor.from}
             to={widgetAnchor.to}
             quotedText={widget.pending.quotedText}
             allowMoveToBottom={false}
+            autoOpen
             resolveAnchor={() => (editorRef.current ? widget.resolveAnchor(editorRef.current) : null)}
             onPosted={() => widget.clear()}
             onCancel={() => widget.clear()}

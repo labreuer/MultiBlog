@@ -5499,11 +5499,53 @@ positions, and precisely why they went unbuilt until now — the reading view ha
   awareness cursor). Never serialized, on purpose — see COLLAB.md §5 and the file's own
   header for the `gc: true` reasoning that rules a persisted one out.
 - `src/lib/use-editor-annotation-widget.ts` — the editor's counterpart to
-  `useSelectionPopover`, same shape (capture/reresolve/clear/placement/popoverRef) but no
+  `useSelectionPopover`, same shape (capture/reresolve/clear/popoverRef) but no
   text-search fallback: `reresolve` either still resolves the captured range or the
   content is gone, full stop. Adds `resolveAnchor`, called once at submit time rather than
   composing time — the actual payoff, since it means the final anchor reflects whatever
   concurrent typing happened while the composer was open, with no re-verification pass.
+  Also owns the two-stage geometry below, which is where it stops resembling
+  `useSelectionPopover` at all.
+
+**Two stages, because selecting text while editing is not a request to annotate.** This is
+the substantive difference from both reading views, and the reason this surface could not
+just reuse their popover. On a reading view a selection is a strong signal — there is
+little else to do with text you cannot edit — so `useSelectionPopover` opens its composer
+immediately, over the text. In an editor, selecting is how you bold a word, move a
+sentence, or read with the mouse; a panel appearing over the text on every one of those is
+noise in the middle of someone's work. So:
+
+- **Stage one is a marker beside the document, never over it** — `.annotateMarker`
+  (`DocEditor.module.css`), a 28px outline bubble in the gutter, level with the *start* of
+  the selection. It costs nothing: no DRAFT row, no live connection, no layout change. It
+  says only that annotating is possible. Its resting opacity is the dial for how much
+  presence that claim gets — it started at 55% and is currently full, with the hover rule
+  and the opacity transition left in place as the other half of that dial rather than
+  because they do anything at 1.
+- **Stage two is the composer, opened where the marker was**, on click. It passes
+  `AnnotationPopover`'s new `autoOpen`, which skips that component's own "Annotate" button
+  — the marker already asked that question, and the reason the button exists (not spinning
+  up a row and a connection on every micro-adjustment of a selection still being dragged)
+  is already paid for by the marker being free. Without `autoOpen` this surface would ask
+  twice to reach one composer.
+
+**The width floor is derived from that geometry, not chosen.** `.container` is a centred
+`max-width: 800px` column, so the text box's right edge sits at `(W + 800) / 2 - 16` and
+the marker needs 44px clear to its right — no gutter exists below **W ≥ 856**. The floor is
+`900px` (STYLE.md's nearest documented width). Below it the marker is *not offered at all*
+rather than repositioned: clamping it back over the text would defeat the one thing it
+exists to do. This supersedes the "iPhone 12 Pro Max portrait" (428px) figure the feature
+was specced against — that number was picked as the width above which there would be room
+beside the document, and measurement says there isn't any until 856. Nothing is lost
+between the two: a doc's annotations are still composed from its reading view, which has
+its own popover and no width floor. `e2e/text-selection.spec.ts` asserts the clearance at
+1280/960/900 and the absence at 700, so the arithmetic can't go stale if the column's
+width or padding changes.
+
+The *expanded* panel is best-effort about staying out of the way — `placePopover` still
+slides it left to fit, so above ~1200px it lands clear of the text and below that it
+overlaps. Accepted: by then it is a panel the author deliberately opened, not one that
+appeared over their work.
 - `provisionalPlacement` moved out of `use-selection-popover.ts` into
   `popover-placement.ts` as a shared export — both hooks need the identical two-phase
   bootstrap (a same-batch provisional placement so the popover exists in the DOM before
@@ -5513,17 +5555,18 @@ positions, and precisely why they went unbuilt until now — the reading view ha
   neither — only the reading view's `useLiveDocContent` did) and registers
   `PendingAnnotation`, the same view-only decoration the reading view uses, unconditionally
   — harmless on every other embedder.
-- `AnnotationPopover`/`LiveAnnotationComposer` gained two optional props rather than a
-  parallel composer: `allowMoveToBottom` (false here — no bottom composer on this page)
-  and `resolveAnchor`. `LiveAnnotationComposer.handleSubmit` treats `resolveAnchor` as
-  authoritative over the literal `anchorFrom`/`anchorTo` props when present, including
-  posting document-level (not falling back to the stale literals) when it resolves to
-  null.
+- `AnnotationPopover`/`LiveAnnotationComposer` gained three optional props rather than a
+  parallel composer: `allowMoveToBottom` (false here — no bottom composer on this page),
+  `autoOpen` (see the two-stage note above), and `resolveAnchor`.
+  `LiveAnnotationComposer.handleSubmit` treats `resolveAnchor` as authoritative over the
+  literal `anchorFrom`/`anchorTo` props when present, including posting document-level (not
+  falling back to the stale literals) when it resolves to null.
 - `DocEditor` wires the widget to `.mainColumn` as both the click-outside and
   popover-bounds region (no wrapping div, so `DocEditor.module.css`'s flex-height chain
-  is untouched), gates it on `useMediaQuery("(min-width: 480px)")` — STYLE.md's existing
-  narrow breakpoint, chosen over the literal "iPhone 12 Pro Max portrait" (428px) spec so
-  this isn't a fifth undocumented width — and feeds `provider.awareness` into
+  is untouched), supplies `getFrame` scoped to that column (the hook lives in `src/lib`,
+  which doesn't import from `src/components`, so `EDITOR_SCROLL_ATTRIBUTE` isn't reachable
+  from inside it — and a caller-scoped lookup can't match some other editor's frame the
+  way a global `querySelector` could), and feeds `provider.awareness` into
   `DocPresenceProvider`, which `edit/page.tsx` now wraps the page in (alongside
   `AnnotationMoveProvider`, required because `AnnotationPopover` calls `useAnnotationMove()`
   unconditionally regardless of `allowMoveToBottom`).

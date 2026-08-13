@@ -104,6 +104,40 @@
   flex: 0 0 auto;
 }
 
+/* PLAN.md §18f — stage one of annotating from the editor: a marker beside
+   the document, never over it, saying only that an annotation is possible.
+   `position: fixed` because it is placed against viewport coordinates
+   (coordsAtPos and getBoundingClientRect both speak that) and must escape
+   .editorContent's own scroll clipping — the same reasoning
+   src/lib/popover-placement.ts states for every popover in this codebase.
+   Width/height are mirrored by ANNOTATE_MARKER_SIZE in
+   use-editor-annotation-widget.ts, which needs the number to clamp the
+   marker into the viewport and to anchor the expanded panel to it. */
+.annotateMarker {
+  position: fixed;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 20;
+  opacity: 1;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.annotateMarker:hover,
+.annotateMarker:focus-visible {
+  opacity: 1;
+  color: var(--link);
+  border-color: var(--link);
+}
+
 .errorMessage {
   color: var(--error);
 }

@@ -19,7 +19,15 @@
 // into it, never by selecting. Each test below therefore asserts the widget
 // actually appears and names the exact selected text, which is the assertion
 // that would have failed.
-import { test, expect, bodyEditor, selectTextInBody, waitForDocCollabReady, QUOTED_TEXT } from "./fixtures";
+import {
+  test,
+  expect,
+  annotationEditor,
+  bodyEditor,
+  selectTextInBody,
+  waitForDocCollabReady,
+  QUOTED_TEXT,
+} from "./fixtures";
 
 test.describe("text selection offers somewhere to respond", () => {
   // A published post's public page — AnnotatableArticle, the original
@@ -74,31 +82,101 @@ test.describe("text selection offers somewhere to respond", () => {
     await expect(popup.getByRole("button", { name: "Move to bottom" })).toBeVisible();
   });
 
-  // The doc editor — the surface the bug in this file's header actually hit.
-  // Unlike both reading views this editor is Collaboration-bound, so its
-  // selection is captured as a pair of Y.RelativePositions rather than
-  // offsets (COLLAB.md §5), through a completely separate hook
+  // The doc editor — the surface the bug in this file's header actually hit,
+  // and the one that answers a selection differently on purpose (PLAN.md
+  // §18f). Unlike both reading views this editor is Collaboration-bound, so
+  // its selection is captured as a pair of Y.RelativePositions rather than
+  // offsets (COLLAB.md §5), through a separate hook
   // (useEditorAnnotationWidget, not useSelectionPopover).
-  test("a doc editor offers to annotate the selection", async ({ page, sharedDoc }) => {
+  test("a doc editor offers a marker beside the document, not a panel over it", async ({ page, sharedDoc }) => {
     await page.goto(`/doc/${sharedDoc.id}/edit`);
     await waitForDocCollabReady(page);
 
     await selectTextInBody(page, QUOTED_TEXT);
 
+    // Stage one, and the whole point of this surface differing: selecting
+    // text while editing is mostly *not* a request to annotate, so nothing
+    // opens over the text.
+    const marker = page.getByTestId("annotate-marker");
+    await expect(marker).toBeVisible();
+    await expect(page.getByTestId("annotation-popup")).toHaveCount(0);
+
+    // "Beside the document" is the requirement, so it's asserted as
+    // geometry rather than taken on trust from a class name: the marker
+    // starts at or past the right edge of the editor's own text box.
+    // Measured at the default 1280px here; the width sweep below is what
+    // holds that true across the supported range rather than at one size.
+    const frameBox = await page.locator("[data-editor-scroll]").boundingBox();
+    const markerBox = await marker.boundingBox();
+    expect(frameBox).not.toBeNull();
+    expect(markerBox).not.toBeNull();
+    expect(markerBox!.x).toBeGreaterThanOrEqual(frameBox!.x + frameBox!.width);
+    // ...and level with the selection rather than parked at a corner.
+    const highlight = await page.locator(".pending-annotation").first().boundingBox();
+    expect(highlight).not.toBeNull();
+    expect(Math.abs(markerBox!.y - highlight!.y)).toBeLessThan(40);
+
+    // Stage two: clicking expands it into the composer. No second
+    // "Annotate" button — the marker already was that question, so this
+    // goes straight to a live annotation editor (AnnotationPopover's
+    // `autoOpen`).
+    await marker.click();
     const popup = page.getByTestId("annotation-popup");
     await expect(popup).toBeVisible();
     await expect(popup).toContainText("Annotating:");
     await expect(popup).toContainText(QUOTED_TEXT);
-    await expect(popup.getByRole("button", { name: "Annotate" })).toBeVisible();
+    await expect(annotationEditor(page)).toBeVisible({ timeout: 15_000 });
+    await expect(popup.getByRole("button", { name: "Annotate", exact: true })).toHaveCount(0);
     // The other half of the read-view assertion above: no bottom composer
     // exists on this page for a draft to be moved to, so the control that
     // would move it there must not be offered.
     await expect(popup.getByRole("button", { name: "Move to bottom" })).toHaveCount(0);
 
-    // The selected range is also decorated, not merely popped over —
-    // PendingAnnotation is registered on this editor (PLAN.md §18f) so the
-    // source text stays visibly marked once focus moves into the composer
-    // and the browser's own selection highlight goes away.
+    // The marker gives way to the panel rather than both being on screen.
+    await expect(marker).toHaveCount(0);
+  });
+
+  // The marker's whole justification is that it stays out of the text's way,
+  // so "is it actually beside the document" has to hold across the range it
+  // is offered in — not just at Playwright's default 1280. The floor
+  // (DocEditor's ANNOTATION_WIDGET_MEDIA_QUERY) is derived from this exact
+  // geometry: `.container` is a centred 800px column, so a gutter wide
+  // enough for the marker doesn't exist until ~856px. These cases are what
+  // stop that arithmetic from silently going stale if the column's width or
+  // padding is ever changed.
+  for (const width of [1280, 960, 900]) {
+    test(`the editor's marker clears the text column at ${width}px`, async ({ page, sharedDoc }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(`/doc/${sharedDoc.id}/edit`);
+      await waitForDocCollabReady(page);
+      await selectTextInBody(page, QUOTED_TEXT);
+
+      const marker = page.getByTestId("annotate-marker");
+      await expect(marker).toBeVisible();
+      const frameBox = await page.locator("[data-editor-scroll]").boundingBox();
+      const markerBox = await marker.boundingBox();
+      expect(markerBox!.x).toBeGreaterThanOrEqual(frameBox!.x + frameBox!.width);
+      // And fully on screen — clamping it back inside the viewport is what
+      // would put it over the text, so overflowing is not the better failure.
+      expect(markerBox!.x + markerBox!.width).toBeLessThanOrEqual(width);
+    });
+  }
+
+  test("the editor offers no marker where there is no room beside the document", async ({ page, sharedDoc }) => {
+    // Below the floor the marker is not merely repositioned, it is not
+    // offered — a marker clamped back over the text would defeat its own
+    // purpose. Annotating is still reachable here, from the doc's reading
+    // view, which has no width floor of its own.
+    await page.setViewportSize({ width: 700, height: 800 });
+    await page.goto(`/doc/${sharedDoc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await selectTextInBody(page, QUOTED_TEXT);
+
+    // The selection is still decorated — the anchor was captured, only the
+    // marker is withheld — so this asserts the absence of a widget rather
+    // than the absence of a working selection.
     await expect(page.locator(".pending-annotation")).toHaveCount(1);
+    await expect(page.getByTestId("annotate-marker")).toHaveCount(0);
+    await expect(page.getByTestId("annotation-popup")).toHaveCount(0);
   });
 });
