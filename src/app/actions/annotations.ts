@@ -10,7 +10,16 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
-import { ydocIdForAnnotation } from "@/lib/ydoc-names";
+import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
+import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
+import { materializeYdocAt } from "@/lib/ydoc-snapshot";
+import {
+  annotationContentExtensions,
+  docContentExtensions,
+  pmAnnotationContentSchema,
+  pmDocContentSchema,
+} from "@/lib/tiptap-schema";
+import { ydocIdForAnnotation, ydocIdForDoc } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
@@ -70,21 +79,51 @@ export async function createDraftAnnotation(
 // Flips a DRAFT to LIVE (or RAISED — PLAN.md §13d) — the live ydoc editor
 // (AnnotationBody) has already been writing the real content in via the
 // collab server the whole time (server/annotation-cache.ts's store debounce
-// keeps proseJson/bodyText current), so this only changes visibility and,
-// for a root annotation with a captured selection, applies the mark
-// (row-first-mark-second, same ordering §12i's original submitAnnotation
-// established — a mark naming a still-DRAFT row would be
-// visible-but-unreadable to anyone who resolved it before this update
-// commits).
+// keeps proseJson/bodyText current), so this only changes visibility and
+// records the anchor, if the composer captured one.
+//
+// PLAN.md §13o — *how* it records that anchor is the one thing this action
+// branches on, and it branches on `anchorMode`, which names the surface the
+// annotation was composed on rather than anything about the author:
+//
+//   - "mark" — the doc editor. Applies the in-ydoc mark exactly as before
+//     (row-first-mark-second, the ordering §12i's original submitAnnotation
+//     established: a mark naming a still-DRAFT row would be
+//     visible-but-unreadable to anyone who resolved it before this commits),
+//     and writes no columns.
+//   - "columns" — either reading view, and the default. Writes
+//     anchorFrom/anchorTo/quotedText and touches the document not at all.
+//     A reader annotating a doc no longer causes a write to it.
 export async function postAnnotation(opts: {
   annotationId: string;
+  // PLAN.md §13o. Defaults to "columns": every caller but the doc editor's
+  // own popover is a reading surface, and a caller that forgets to say
+  // should get the mechanism that can't mutate the document.
+  anchorMode?: "mark" | "columns";
   anchorFrom?: number;
   anchorTo?: number;
+  // The client's own reading of its selection. In "mark" mode the collab
+  // server verifies the offsets against it; in "columns" mode
+  // captureAnnotationAnchor does. Never stored as sent either way — §12i's
+  // "a request field only, never a column" survives the column's arrival.
   quotedText?: string;
   // "Notify authors" (PLAN.md §13d) — RAISED is LIVE plus the doc's byline
   // authors emailed and raisedAt stamped; nothing else about visibility or
   // the mark differs from a plain LIVE post.
   raise?: boolean;
+  // PLAN.md §12p/§13 — the ydoc_update the author's own view showed, string
+  // because BigInt doesn't survive a server-action boundary. Supplied by the
+  // inline popover only when it knows precisely (annotating while
+  // scrub-frozen, DocView threads DocScrubBar's own position down); every
+  // other caller (the bottom composer, a reply) omits it and falls back to
+  // the doc's own update-log tail below.
+  ydocUpdateId?: string;
+  // PLAN.md §13q — the document version the offsets were measured against, as
+  // a base64 Yjs snapshot captured at selection time. Preferred over the tail
+  // below: it names what the annotator was actually looking at, where the
+  // tail names what the server happens to hold now. Absent from any surface
+  // with no live Y.Doc to capture from.
+  atVersion?: string;
 }): Promise<{ error?: string }> {
   const session = await auth();
   if (!session?.user) {
@@ -134,31 +173,167 @@ export async function postAnnotation(opts: {
     return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
 
-  await prisma.annotation.update({
-    where: { id: annotation.id },
-    data: opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" },
-  });
+  const parentId = annotation.parentAnnotationId;
 
-  // Only a root annotation ever carries a mark — a reply is just a comment
-  // in the thread, anchored nowhere of its own (PLAN.md §12i).
-  if (
-    annotation.parentAnnotationId === null &&
+  // PLAN.md §13p — **what an anchor points at is decided by whether this is a
+  // reply, not by what the client asked for.** A root annotation anchors into
+  // the doc; a reply anchors into the annotation it answers, and cannot
+  // anchor into the doc at all. That falls out of what a reply *is*: it is
+  // about something its parent said, and a quotation of the doc belongs to
+  // whichever annotation is about the doc.
+  const anchorRequested =
     typeof opts.anchorFrom === "number" &&
     typeof opts.anchorTo === "number" &&
-    opts.quotedText &&
-    opts.anchorTo > opts.anchorFrom
-  ) {
-    await applyAnnotationMark({
+    !!opts.quotedText &&
+    opts.anchorTo > opts.anchorFrom;
+
+  // A reply is always columns, never a mark, and not as a policy choice: an
+  // annotation's own body schema has no `annotation` mark in it
+  // (annotationContentExtensions, §13a) precisely so a body can't carry an
+  // anchor onto another annotation, and §13p doesn't change that.
+  const anchorMode = parentId !== null ? "columns" : (opts.anchorMode ?? "columns");
+
+  // Which ydoc the anchor is measured into — and therefore which update log
+  // stamps it (§13o: the stamp is the coordinate system, so the two cannot be
+  // chosen independently).
+  const anchorYdocId = parentId !== null ? ydocIdForAnnotation(parentId) : ydocIdForDoc(annotation.docId);
+
+  // The client's own position when it knew one precisely; otherwise the tail
+  // of whichever log is about to matter. A malformed client value (should
+  // never happen, but this is a server action) falls through to the same tail
+  // lookup rather than failing the whole post over metadata.
+  //
+  // An *anchorless* annotation — including an anchorless reply, which is what
+  // the plain Reply button still produces — stamps the doc's log, as every row
+  // did before §13p: with no offsets to be a coordinate system for, the column
+  // means only §13n's "what was I looking at", and that is the doc.
+  //
+  // Computed before the anchor, not alongside it: the anchor has to be
+  // resolved against *this* state rather than whatever the document has
+  // become by the time the update lands.
+  let ydocUpdateId: bigint | null = null;
+  if (opts.ydocUpdateId !== undefined) {
+    try {
+      ydocUpdateId = BigInt(opts.ydocUpdateId);
+    } catch {
+      ydocUpdateId = null;
+    }
+  }
+  // PLAN.md §13q — the client's own version, converted. Tried before the tail
+  // because the two answer different questions: this one is "what was the
+  // annotator looking at", the tail is "what does the server hold now", and
+  // they diverge exactly when somebody else is editing — which is the case
+  // the stamp exists for.
+  //
+  // Only for an anchor into the doc. A reply's anchor targets its parent
+  // annotation's ydoc, which the client has no live connection to (an
+  // annotation body renders from its proseJson cache, not a tap), so there is
+  // no version to capture and the tail is used. That is not a gap: nothing
+  // edits a posted annotation body today, so the tail *is* what the reader
+  // saw. It stops being true the day bodies become mutable (COLLAB.md's
+  // 2026-08-13 entry), which is when this branch needs a client-side capture
+  // of its own rather than a different server-side rule.
+  if (ydocUpdateId === null && opts.atVersion && anchorRequested && parentId === null) {
+    try {
+      const headDoc = await materializeYdocAt(anchorYdocId, (await ydocStore.maxUpdateId(anchorYdocId))!);
+      const resolved = await resolveUpdateIdForSnapshot(
+        anchorYdocId,
+        Buffer.from(opts.atVersion, "base64"),
+        headDoc,
+      );
+      headDoc.destroy();
+      ydocUpdateId = resolved.updateId;
+      if (resolved.walked > 200) {
+        console.info(
+          `[annotations] resolved a version ${resolved.walked} rows back in ${anchorYdocId} — ` +
+            `checkpointing is one debounce behind head, so this means the annotator was frozen for a while`,
+        );
+      }
+    } catch (err) {
+      // A malformed or undecodable snapshot, or a store failure. Falls to the
+      // tail below, which is exactly the behaviour before this existed — the
+      // anchor stays self-consistent with whatever gets stamped either way
+      // (captureAnnotationAnchor re-derives against it), so this degrades
+      // rather than fails.
+      console.error(`[annotations] couldn't resolve the client's version for ${anchorYdocId}:`, err);
+    }
+  }
+  if (ydocUpdateId === null) {
+    ydocUpdateId = await ydocStore.maxUpdateId(
+      anchorRequested ? anchorYdocId : ydocIdForDoc(annotation.docId),
+    );
+  }
+
+  // Resolved *before* the status write, unlike the mark below, because it is
+  // part of the row rather than a separate document edit: one update, no
+  // window in which a LIVE annotation exists without the anchor it was
+  // posted with.
+  let capturedAnchor: { from: number; to: number; quotedText: string } | null = null;
+  if (anchorRequested && anchorMode === "columns" && ydocUpdateId !== null) {
+    capturedAnchor = await captureAnnotationAnchor({
+      ydocId: anchorYdocId,
+      throughUpdateId: ydocUpdateId,
+      // The two targets are different documents with different schemas —
+      // decoding a doc body with the annotation schema would silently drop
+      // every annotation mark in it, and decoding an annotation body with the
+      // doc schema would register a mark that body can never contain.
+      extensions: parentId !== null ? annotationContentExtensions : docContentExtensions,
+      schema: parentId !== null ? pmAnnotationContentSchema : pmDocContentSchema,
+      from: opts.anchorFrom!,
+      to: opts.anchorTo!,
+      quotedText: opts.quotedText!,
+    });
+  }
+
+  await prisma.annotation.update({
+    where: { id: annotation.id },
+    data: {
+      ...(opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" }),
+      ydocUpdateId,
+      ...(capturedAnchor
+        ? { anchorFrom: capturedAnchor.from, anchorTo: capturedAnchor.to, quotedText: capturedAnchor.quotedText }
+        : {}),
+    },
+  });
+
+  // Unreachable for a reply — `anchorMode` was forced to "columns" above —
+  // which is what makes this branch's use of `docId` safe without a second
+  // root check of its own.
+  if (anchorRequested && anchorMode === "mark") {
+    const { applied, markUpdateId } = await applyAnnotationMark({
       docId: annotation.docId,
       userId: session.user.id,
       role: session.user.role,
       annotationId: annotation.id,
-      from: opts.anchorFrom,
-      to: opts.anchorTo,
-      quotedText: opts.quotedText,
+      from: opts.anchorFrom!,
+      to: opts.anchorTo!,
+      quotedText: opts.quotedText!,
     });
-    // No branch on the result — same reasoning as submitAnnotation above:
-    // whether or not the mark landed, LIVE is already correct either way.
+    // LIVE is already correct whether or not the mark landed — that part is
+    // unchanged. What the result *is* now read for is the stamp.
+    //
+    // PLAN.md §13n — a mark is applied as an update strictly after the state
+    // its author was looking at, so stamping that earlier state named a
+    // revision where the annotation provably isn't attached yet: "at this
+    // revision" scrubbed to a document with no such mark in it, and the card
+    // fell out of the margin rail on arrival. Re-stamping to the update that
+    // carries the mark makes the stamp mean, for both mechanisms, *the
+    // earliest revision at which this annotation is locatable* — which is
+    // what the control was always trying to show.
+    //
+    // Only on success. A mark that never landed leaves the annotation
+    // document-level, and its original stamp ("what the author was looking
+    // at") stays the most honest thing available.
+    if (applied && markUpdateId) {
+      try {
+        await prisma.annotation.update({
+          where: { id: annotation.id },
+          data: { ydocUpdateId: BigInt(markUpdateId) },
+        });
+      } catch (err) {
+        console.error(`[annotations] couldn't re-stamp ${annotation.id} to its mark's update:`, err);
+      }
+    }
   }
 
   if (opts.raise) {

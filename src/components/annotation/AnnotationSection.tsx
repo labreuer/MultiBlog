@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { getDocAnnotationsAsThreads, getOwnDraftAnnotations } from "@/lib/annotation-data";
+import { getOwnDraftAnnotations, type AnnotationThread } from "@/lib/annotation-data";
 import NewAnnotationComposer from "./NewAnnotationComposer";
 import OwnDraftsList from "./OwnDraftsList";
 import AnnotationPresenceIndicator from "./AnnotationPresenceIndicator";
@@ -16,15 +16,19 @@ import styles from "./AnnotationSection.module.css";
 //
 // The thread → entry transform lives in annotation-entries.ts now that the
 // doc *editor* renders its own annotation rail from the same data (§18c).
-export default async function AnnotationSection({ docId }: { docId: string }) {
+// `threads` is a prop rather than this component's own fetch (PLAN.md §13o):
+// the reading page also needs them, to hand DocReadingBody the anchors it
+// tracks and draws. Fetching in both places would be a second identical
+// query, and — worse — two answers that could disagree about which
+// annotations exist, so the highlight and the card it belongs to would be
+// derived from different snapshots. Same shape [slug]/page.tsx already uses
+// for a post's comment threads.
+export default async function AnnotationSection({ docId, threads }: { docId: string; threads: AnnotationThread[] }) {
   const session = await auth();
-  const [threads, ownDrafts] = await Promise.all([
-    getDocAnnotationsAsThreads(docId),
-    // Every doc route this renders from already requires a session
-    // (canUserReadDoc) — the `?? []` is just to keep this typed without a
-    // throw, never an expected runtime path.
-    session?.user ? getOwnDraftAnnotations(docId, session.user.id) : Promise.resolve([]),
-  ]);
+  // Every doc route this renders from already requires a session
+  // (canUserReadDoc) — the `?? []` is just to keep this typed without a
+  // throw, never an expected runtime path.
+  const ownDrafts = session?.user ? await getOwnDraftAnnotations(docId, session.user.id) : [];
 
   const entries = buildAnnotationEntries(threads);
 

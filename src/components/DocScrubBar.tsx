@@ -1,17 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { extractText } from "@/lib/diff";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { useReplayScrub, type ReplayPayload } from "./YdocDebug";
+import { useRegisterDocScrubSeek } from "./DocScrubContext";
 import styles from "./DocScrubBar.module.css";
 
-export type ScrubbedState = { bodyJSON: JSONContent; title: string };
+// `live` is true exactly when the slider sits at the newest update — PLAN.md
+// §12's frozen reading view uses it (and only it) to decide whether scrubbing
+// is the reason the view is frozen, rather than re-deriving "at the end" from
+// the slider's own index. `updateId` is that same position's ydoc_update id
+// (§12p/§13) — the precise value an annotation posted while scrub-frozen
+// records, rather than falling back to the doc's tail at post time.
+export type ScrubbedState = { bodyJSON: JSONContent; title: string; live: boolean; updateId: string | null };
 
 type Props = {
   docId: string;
   onScrub: (scrubbed: ScrubbedState) => void;
+  // Bumped by the reader clicking the FROZEN flag (PLAN.md §12) — seeks the
+  // slider back to the live end so it doesn't sit at a historical position
+  // once the body it controls has already snapped back to live. Any change
+  // in value triggers the reset; the number itself carries no meaning.
+  resetSignal?: number;
 };
 
 type LoadState = "idle" | "loading" | "error";
@@ -23,7 +35,7 @@ type LoadState = "idle" | "loading" | "error";
 // actually reaches for the slider. Until then this renders one grayed-out
 // <input> and nothing else, so a reader who never touches it costs the
 // server nothing beyond the page it already loaded.
-export default function DocScrubBar({ docId, onScrub }: Props) {
+export default function DocScrubBar({ docId, onScrub, resetSignal }: Props) {
   const [state, setState] = useState<LoadState>("idle");
   const [replay, setReplay] = useState<ReplayPayload | null>(null);
 
@@ -55,7 +67,7 @@ export default function DocScrubBar({ docId, onScrub }: Props) {
   }
 
   if (replay) {
-    return <LoadedScrubBar replay={replay} onScrub={onScrub} />;
+    return <LoadedScrubBar replay={replay} onScrub={onScrub} resetSignal={resetSignal} />;
   }
 
   return (
@@ -77,7 +89,15 @@ export default function DocScrubBar({ docId, onScrub }: Props) {
   );
 }
 
-function LoadedScrubBar({ replay, onScrub }: { replay: ReplayPayload; onScrub: (scrubbed: ScrubbedState) => void }) {
+function LoadedScrubBar({
+  replay,
+  onScrub,
+  resetSignal,
+}: {
+  replay: ReplayPayload;
+  onScrub: (scrubbed: ScrubbedState) => void;
+  resetSignal?: number;
+}) {
   const { total, index, current, renderResult, seek } = useReplayScrub(replay);
   const [hasScrubbed, setHasScrubbed] = useState(false);
 
@@ -91,8 +111,42 @@ function LoadedScrubBar({ replay, onScrub }: { replay: ReplayPayload; onScrub: (
     // The title fragment has no fallback of its own (PLAN.md §12n) — same
     // "Untitled" render-time rule as everywhere else that shows a doc's title.
     const title = docTitleOrFallback(renderResult.titleJSON ? extractText(renderResult.titleJSON) : "");
-    onScrub({ bodyJSON: renderResult.bodyJSON, title });
-  }, [renderResult, onScrub]);
+    onScrub({ bodyJSON: renderResult.bodyJSON, title, live: index === total - 1, updateId: current?.id.toString() ?? null });
+  }, [renderResult, onScrub, index, total, current]);
+
+  // PLAN.md §12p/§13 — registers "jump the slider to this ydoc_update id"
+  // for AnnotationNode's "at this revision" control, reached through
+  // DocScrubContext since the two are sibling subtrees in page.tsx.
+  // useCallback keeps this stable across the re-render every scrub tick
+  // causes — see useRegisterDocScrubSeek's own note on why an unstable
+  // function there would re-render the whole page on every drag.
+  const seekToUpdateId = useCallback(
+    (updateId: string) => {
+      const targetIndex = replay.updates.findIndex((u) => u.id === updateId);
+      if (targetIndex !== -1) seek(targetIndex);
+    },
+    [replay, seek],
+  );
+  useRegisterDocScrubSeek(seekToUpdateId);
+
+  // Skips on mount — useReplayScrub already starts at the live end
+  // (PLAN.md §12), so there's nothing to reset yet. Only an actual change in
+  // resetSignal (the FROZEN flag being clicked) should seek.
+  const resetDidMountRef = useRef(false);
+  useEffect(() => {
+    if (!resetDidMountRef.current) {
+      resetDidMountRef.current = true;
+      return;
+    }
+    if (resetSignal === undefined) return;
+    seek(total - 1);
+    // queueMicrotask only to keep this out of the "no setState synchronously
+    // in an effect body" lint rule's sights — same indirection
+    // use-live-doc-content.ts's hoisted-mode effect uses; it still runs
+    // before the next paint.
+    queueMicrotask(() => setHasScrubbed(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seek/total intentionally excluded: resetSignal changing is the only trigger, not their own identity
+  }, [resetSignal]);
 
   if (total === 0) {
     // No update history yet (a doc created but never edited) — nothing to

@@ -135,9 +135,10 @@ export default async function AnnotationsPage({
     prisma.annotation.count({ where }),
   ]);
 
-  // Quote text is derived, not stored (§12i) — resolve it once per distinct
-  // doc among this page's rows, not once per row, since several rows
-  // typically share a doc.
+  // Quote text is derived for a *mark*-anchored annotation (§12i) — resolve
+  // it once per distinct doc among this page's rows, not once per row, since
+  // several rows typically share a doc. A column-anchored one (§13o) and an
+  // anchored reply (§13p) carry theirs on the row and skip all of this.
   const markedIdsByDoc = new Map<string, Set<string>>();
   const proseJsonByDoc = new Map<string, JSONContent>();
   for (const a of annotations) {
@@ -158,7 +159,12 @@ export default async function AnnotationsPage({
       docTitle: docTitleOrFallback(a.doc.title),
       authorName: a.user.name ?? a.user.email,
       bodyText: a.bodyText,
-      quote: isRoot && marked && proseJson ? extractMarkedText(proseJson, "annotation", "id", a.id) : "",
+      // Stored first, since a row that has one was never marked and looking
+      // for its mark would always come up empty. A reply can have one now
+      // too (PLAN.md §13p) — quoting a passage of the annotation it answers
+      // rather than of the doc — which is why the `isRoot` gate applies only
+      // to the mark branch, where it is still exactly right.
+      quote: a.quotedText || (isRoot && marked && proseJson ? extractMarkedText(proseJson, "annotation", "id", a.id) : ""),
       isRoot,
       createdAt: a.createdAt,
       editedAt: a.editedAt,

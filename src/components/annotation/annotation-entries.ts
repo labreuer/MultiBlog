@@ -32,9 +32,23 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
       id: a.id,
       displayName: a.displayName,
       body: renderBody(a),
+      // PLAN.md §13p — the same content the static tree above was built
+      // from, shipped alongside it because AnnotationBodyReader needs the
+      // JSON (not the rendered elements) to seed its own editor. Both, not
+      // one: the tree is what a reader with no JS gets and what covers the
+      // pre-ready frame; the JSON is what makes the body selectable.
+      proseJson: a.proseJson,
+      // PLAN.md §13p — a reply's anchor into this annotation's parent, carried
+      // down so AnnotationNode can hand its *parent's* body the set of
+      // highlights to draw. Zero for a root.
+      anchorFrom: a.anchorFrom,
+      anchorTo: a.anchorTo,
+      quotedText: a.quotedText,
+      color: a.color,
       createdAt: a.createdAt,
       deletedByUserId: a.deletedByUserId,
       commenterUserId: a.commenterUserId,
+      ydocUpdateId: a.ydocUpdateId,
       replies: [],
     });
   }
@@ -65,6 +79,7 @@ export function buildAnnotationEntries(threads: AnnotationThread[]): AnnotationE
         threadId: thread.id,
         quotedText: thread.quotedText,
         anchorFrom: thread.anchorFrom,
+        anchorTo: thread.anchorTo,
         color: thread.color,
         root,
       })),
@@ -74,6 +89,7 @@ export function buildAnnotationEntries(threads: AnnotationThread[]): AnnotationE
         threadId: thread.id,
         quotedText: "",
         anchorFrom: null,
+        anchorTo: null,
         color: thread.color,
         root,
       })),

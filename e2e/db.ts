@@ -190,6 +190,9 @@ export const countDocYdocUpdates = (...args: Parameters<DbHandlers["countDocYdoc
 export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotationStates"]>): Promise<AnnotationState[]> =>
   call("getAnnotationStates", ...args);
 
+export const markPresentAtStamp = (...args: Parameters<DbHandlers["markPresentAtStamp"]>): Promise<boolean> =>
+  call("markPresentAtStamp", ...args);
+
 export const createTestAnnotation = (
   ...args: Parameters<DbHandlers["createTestAnnotation"]>
 ): Promise<{ id: string }> => call("createTestAnnotation", ...args);

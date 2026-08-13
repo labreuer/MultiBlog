@@ -24,19 +24,49 @@ export type AnnotationComment = {
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
+  // PLAN.md §13p — a reply's own anchor, into the body of the annotation it
+  // answers rather than into the doc. Null/"" for an anchorless reply (the
+  // plain Reply button) and for every root, whose anchor lives on the thread
+  // instead. Its author's color, because the highlight drawn inside the
+  // parent's body is per-reply — several replies can quote different parts of
+  // one annotation, and they should be told apart the way overlapping
+  // annotations on the doc are.
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  color: string;
+  // PLAN.md §12p/§13 — which ydoc_update this was posted against, stringified
+  // for the client boundary (BigInt isn't serializable). Metadata only — see
+  // the column's own comment in schema.prisma — not present until
+  // postAnnotation writes it, so null for a DRAFT and for anything posted
+  // before this column existed.
+  ydocUpdateId: string | null;
 };
 
 export type AnnotationThread = {
   id: string;
-  // Always null — a doc annotation has no stored absolute offset to sort by
-  // (§12i); kept only so AnnotationList's quote-position sort mode has a
-  // field to read (a no-op today, PLAN.md §12o's known gap).
+  // PLAN.md §13o — the root's stored offsets, for a thread anchored from a
+  // reading view; null for one anchored with a mark, which has no stored
+  // offset at all (§12i) and has to be found in the live document instead.
+  // A null pair is what tells every surface which mechanism to resolve
+  // through. It also, incidentally, makes AnnotationList's quote-position
+  // sort mode do something for the first time (§12o's known gap) — for
+  // column-anchored threads, which is as far as a stored field can take it.
   anchorFrom: number | null;
-  // "" once the root annotation's mark is no longer in the document —
-  // renders in the general-discussion bucket instead of under a quote
-  // header (§12h: degrades, not detached — there's no frozen revision to
-  // show a blockquote against). Every "" thread renders, not just the
-  // first, unlike a post's single general thread.
+  anchorTo: number | null;
+  // The quoted passage, from whichever mechanism anchored it: the stored
+  // column for a reading-view annotation, or the text under the mark for an
+  // editor one.
+  //
+  // The two degrade differently, on purpose. A lost *mark* leaves nothing
+  // behind — "" here, and the thread renders in the general-discussion
+  // bucket (§12h: degraded, not detached, since there's no frozen revision
+  // to show a blockquote against). A *stored* quote survives its own
+  // detachment, because it was derived server-side against a state that is
+  // still reconstructible (§13o), so the card keeps its blockquote and says
+  // what it was about even once that text is gone — which is what a
+  // DETACHED comment thread does on the post side. Every "" thread renders,
+  // not just the first, unlike a post's single general thread.
   quotedText: string;
   // The thread's own color: whoever opened it (root.user.color) — shared by
   // every reply, same as the post side's per-thread color.
@@ -97,10 +127,21 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
   for (const [rootId, members] of byRoot) {
     const root = byId.get(rootId);
     if (!root) continue;
-    const quotedText = proseJson && markedIds.has(rootId) ? extractMarkedText(proseJson, "annotation", "id", rootId) : "";
+    // PLAN.md §13o — stored columns first, since a row that has them was
+    // never marked and looking for its mark would always come up empty. The
+    // mark branch is unchanged, and is still read against Doc.proseJson: a
+    // store-debounce snapshot is fine for deciding *whether* to draw a quote
+    // header, and is never what decides where the card goes (§18b).
+    const columnAnchored = root.anchorFrom !== null && root.anchorTo !== null && root.quotedText !== "";
+    const quotedText = columnAnchored
+      ? root.quotedText
+      : proseJson && markedIds.has(rootId)
+        ? extractMarkedText(proseJson, "annotation", "id", rootId)
+        : "";
     threads.push({
       id: rootId,
-      anchorFrom: null,
+      anchorFrom: columnAnchored ? root.anchorFrom : null,
+      anchorTo: columnAnchored ? root.anchorTo : null,
       quotedText,
       color: root.user.color,
       comments: members.map((a) => ({
@@ -112,6 +153,17 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
         createdAt: a.createdAt.toISOString(),
         deletedByUserId: a.deletedByUserId,
         commenterUserId: a.userId,
+        // PLAN.md §13p — only a *reply* anchors into a body, so a root's
+        // columns are deliberately dropped here rather than passed on: they
+        // are the thread's anchor into the doc, already carried by
+        // `anchorFrom`/`anchorTo`/`quotedText` on the thread above, and
+        // repeating them per-comment would invite something to draw a root's
+        // doc quote as a highlight inside its own body.
+        anchorFrom: a.parentAnnotationId !== null ? a.anchorFrom : null,
+        anchorTo: a.parentAnnotationId !== null ? a.anchorTo : null,
+        quotedText: a.parentAnnotationId !== null ? a.quotedText : "",
+        color: a.user.color,
+        ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
       })),
     });
   }

@@ -4,25 +4,20 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "re
 import type { Editor } from "@tiptap/react";
 import { setPendingAnnotation } from "./pending-annotation-extension";
 import { findQuoteOccurrences } from "./quote-occurrences";
-import { placePopover, popoverBoundsFor, POPOVER_GAP, type PopoverPlacement } from "./popover-placement";
+import { placePopover, popoverBoundsFor, provisionalPlacement, type PopoverPlacement } from "./popover-placement";
 
 export type PendingSelection = {
   from: number;
   to: number;
   quotedText: string;
+  /**
+   * PLAN.md §13q — the document version these offsets were read against, as
+   * a base64 Yjs snapshot. Captured in the same tick as `from`/`to` so the
+   * two describe one instant, and null on a surface with no live Y.Doc to
+   * capture from.
+   */
+  atVersion: string | null;
 };
-
-/**
- * The preferred (unclamped) spot for a popover about to open at `pos` — good
- * enough to render at for one layout pass, which is what makes the measured
- * placement possible: the popover has to exist in the DOM before its size can
- * be read. Deliberately skips clamping rather than guessing a size, so the
- * only thing ever painted is either this or the fully-measured result.
- */
-function provisionalPlacement(liveEditor: Editor, pos: number): PopoverPlacement {
-  const coords = liveEditor.view.coordsAtPos(pos);
-  return { top: coords.bottom + POPOVER_GAP, left: coords.left + POPOVER_GAP };
-}
 
 export type SelectionPopover = {
   // No top/left on the selection itself — where its popover sits is derived
@@ -66,6 +61,7 @@ export function useSelectionPopover({
   userColor,
   externalAnchorPos = null,
   reflowKey,
+  versionRef,
 }: {
   editorRef: RefObject<Editor | null>;
   // Doubles as the region a click counts as "inside", and as the starting
@@ -81,6 +77,12 @@ export function useSelectionPopover({
   // An extra value whose change can reflow the page under the anchor, beyond
   // the scroll/resize this already listens for.
   reflowKey?: unknown;
+  // PLAN.md §13q — reads the live document's current version. A ref rather
+  // than a value for the same reason `editorRef` is one: the surface that
+  // owns the Y.Doc (useLiveDocContent) is constructed *after* this hook,
+  // because it takes this hook's `capture` as an input. A ref declared by the
+  // caller lets both take it and neither depend on the other.
+  versionRef?: RefObject<(() => string) | null>;
 }): SelectionPopover {
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
@@ -94,7 +96,7 @@ export function useSelectionPopover({
   }, [pending]);
 
   function openAt(liveEditor: Editor, pos: number) {
-    setPlacement(provisionalPlacement(liveEditor, pos));
+    setPlacement(provisionalPlacement(liveEditor.view.coordsAtPos(pos)));
   }
 
   function clear(liveEditor?: Editor | null) {
@@ -114,7 +116,11 @@ export function useSelectionPopover({
       clear(liveEditor);
       return;
     }
-    setPending({ from, to, quotedText });
+    // PLAN.md §13q — same synchronous tick as reading the selection above.
+    // From here on the surface freezes (a pending selection *is* the freeze
+    // condition), so the Y.Doc keeps advancing while the render is withheld
+    // and any later capture would name a state the reader never saw.
+    setPending({ from, to, quotedText, atVersion: versionRef?.current?.() ?? null });
     openAt(liveEditor, to);
     setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
   }
@@ -138,7 +144,12 @@ export function useSelectionPopover({
     const occurrences = container ? findQuoteOccurrences(doc, current.quotedText) : [];
     if (occurrences.length === 1 && container) {
       const { from, to } = occurrences[0];
-      setPending({ from, to, quotedText: current.quotedText });
+      // Re-versioned as well as re-positioned (PLAN.md §13q). This runs only
+      // after a `setContent` moved the text out from under the selection, so
+      // the offsets now describe the *new* document — pairing them with the
+      // version captured against the old one would be the one combination
+      // guaranteed to be wrong.
+      setPending({ from, to, quotedText: current.quotedText, atVersion: versionRef?.current?.() ?? null });
       openAt(liveEditor, to);
       setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
     } else {

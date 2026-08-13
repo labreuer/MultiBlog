@@ -105,6 +105,7 @@ value that two systems depend on invites drift.
 | `--border-strong` | `#999999` | `#6a6a6a` | Heavier border where more presence is needed | `AdminTable`'s `.actionButton`, `SiteHeader`'s nav separator glyphs, dashed drop-target outlines |
 | `--link` | `#3366cc` | `#7aa7ff` | Default link color | `globals.css`, sitewide. `#3366cc` fails AA (~3.4:1) on the dark background; `#7aa7ff` is ~9:1 |
 | `--accent-wash` / `--accent-outline` | `#eaf1ff` / `#8888aa` | `#16233d` / `#6b7fb0` | Drag-over / selected-state highlight | `AdminTable`/`PostSettingsPanel`/`DocSettingsPanel` `.dragOver`, `YdocDebug`'s snapshot dot |
+| `--frozen` / `--frozen-text` | `#1c5bd6` / `#ffffff` | `#4d86e0` / `#ffffff` | The frozen reading view's border and FROZEN flag fill/text | `DocReadingBody.module.css`. A solid fill, not text on the page, so it's darker-on-light/lighter-on-dark by request rather than this table's usual brighter-on-dark-for-legibility rule; white on `#4d86e0` is ~3.3:1, below AA — accepted for a 0.7rem all-caps badge, not extended to body text |
 | `--success` | `#00aa55` | `#3ddc84` | Success text/status | `CommentsTable`'s Approved status, diff insertions, publish-history "(current)" |
 | `--warning` / `--warning-text` | `#d4a017` / `#8a6d00` | `#e0b13a` / `#e5c351` | Warning border / warning text | row-status "saving" border / `CommentsTable`'s Pending status text — separate tokens because `#d4a017` alone fails AA as text |
 | `--danger` | `#cc0000` | `#ff6b6b` | Danger/delete action | soft-delete controls, `CommentsTable`'s Spam status, diff deletions |

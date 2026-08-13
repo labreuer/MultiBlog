@@ -18,9 +18,17 @@ import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
-import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
+import { resolveAnchorInDoc } from "../src/lib/annotation-anchors";
 import { annotationIdFromYdocId } from "../src/lib/ydoc-names";
-import { ydocStore, UNAVAILABLE, markDegraded, clearDegraded, isDegraded, encodeYdocState } from "./ydoc-store";
+import {
+  ydocStore,
+  drainAppends,
+  UNAVAILABLE,
+  markDegraded,
+  clearDegraded,
+  isDegraded,
+  encodeYdocState,
+} from "./ydoc-store";
 import { materializeYdocAt } from "../src/lib/ydoc-snapshot";
 import { updateDocCache } from "./doc-cache";
 import { updateAnnotationCache } from "./annotation-cache";
@@ -117,8 +125,16 @@ export async function ydocOnStoreDocument({
     warnDegradedOnce(documentName, "onStoreDocument");
     return;
   }
+  // PLAN.md §13q — drained here and nowhere else. This is the debounce, which
+  // is already async and already writing to the database, so waiting for the
+  // in-flight appends costs nothing anybody is watching. Doing it on the
+  // per-update path instead would put a database round trip in front of
+  // collab latency, and doing it *not at all* would stamp the three writes
+  // below with an id older than the content they describe.
+  const lastUpdateId = await drainAppends(documentName);
+
   const { ydoc, stateVector } = encodeYdocState(document);
-  await ydocStore.storeState(documentName, ydoc, stateVector);
+  await ydocStore.storeState(documentName, ydoc, stateVector, lastUpdateId);
   // PLAN.md §12d / §13a — each no-ops unless documentName is its own kind of
   // ydoc (a doc's vs. an annotation's own namespace, mutually exclusive by
   // construction), so both are safe to call unconditionally for every
@@ -129,8 +145,8 @@ export async function ydocOnStoreDocument({
   // a client asserts. It is deliberately the *only* attribution available at
   // this point: the store hook is debounced, so several authors' edits can
   // coalesce into one flush and this names whichever was last.
-  await updateDocCache(documentName, document, lastContext?.userId);
-  await updateAnnotationCache(documentName, document);
+  await updateDocCache(documentName, document, lastContext?.userId, lastUpdateId);
+  await updateAnnotationCache(documentName, document, lastUpdateId);
 }
 
 // clientID -> user_id attribution (PLAN.md §11d). A connection's own Yjs
@@ -370,15 +386,11 @@ export async function handleApplyAnnotationMark(
       const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(document, "default");
       const node = pmDocContentSchema.nodeFromJSON(json);
 
-      let range: { from: number; to: number } | null = null;
-      if (from >= 0 && to <= node.content.size && to > from && node.textBetween(from, to, " ") === quotedText) {
-        range = { from, to };
-      } else {
-        const occurrences = findQuoteOccurrences(node, quotedText);
-        if (occurrences.length === 1) {
-          range = occurrences[0];
-        }
-      }
+      // The same verify-then-unique-search rule the reading views' own
+      // capture uses (src/lib/annotation-anchors.ts) — shared rather than
+      // restated so the two mechanisms can't come to disagree about what
+      // "this quote is still here" means (PLAN.md §13o).
+      const range = resolveAnchorInDoc(node, from, to, quotedText);
       if (!range) {
         return;
       }
@@ -393,7 +405,23 @@ export async function handleApplyAnnotationMark(
     await connection.disconnect();
   }
 
-  send(response, 200, JSON.stringify({ applied }));
+  // PLAN.md §13n — which `ydoc_update` row now carries the mark, so the
+  // caller can stamp the annotation with a revision it is actually
+  // *locatable* at. A mark is applied as an update strictly after the state
+  // the author was looking at, so stamping that earlier state gave "at this
+  // revision" a document where the annotation provably isn't attached yet.
+  //
+  // Read after the transact, through the same append-queue barrier the store
+  // debounce uses, so the row is guaranteed to exist rather than merely to
+  // have been queued.
+  //
+  // Slightly generous under concurrency: another client's edit landing
+  // between the transact and this read makes it *their* row id. Harmless in
+  // the direction that matters — any id at or after the mark's own row
+  // contains the mark, which is the whole property being bought.
+  const markUpdateId = applied ? await drainAppends(documentName) : null;
+
+  send(response, 200, JSON.stringify({ applied, markUpdateId: markUpdateId?.toString() ?? null }));
 }
 
 // Every contiguous run of text carrying markName/attrName === attrValue —

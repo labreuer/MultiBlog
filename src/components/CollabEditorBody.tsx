@@ -9,6 +9,12 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { Annotation } from "@/lib/annotation-extension";
+import { PendingAnnotation } from "@/lib/pending-annotation-extension";
+import {
+  AnnotationHighlight,
+  setAnnotationAnchors,
+  type AnnotationAnchorInput,
+} from "@/lib/annotation-highlight-extension";
 import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
@@ -46,7 +52,26 @@ type Props = {
   // anchors the moment anyone typed) but paints over its highlight the same
   // way the read column does.
   suppressAnnotations?: boolean;
+  // PLAN.md §18/COLLAB.md §5 — the doc editor's own selection-to-annotation
+  // widget (useEditorAnnotationWidget), wired straight to useEditor's own
+  // selection hook. No default: every other embedder (post editors,
+  // /side-by-side, /ydoc-debug) simply never had one.
+  onSelectionUpdate?: (editor: Editor) => void;
+  // Fired synchronously on every local or remote transaction that changes
+  // the doc — separate from the debounced author-stats walk below, since a
+  // widget repositioning off a stale pixel offset for 400ms would visibly
+  // lag the text it's supposed to track.
+  onContentUpdate?: (editor: Editor) => void;
+  // PLAN.md §13o — column-anchored annotations (written from a reading view)
+  // have no mark in this document to render themselves, so an author editing
+  // here would otherwise have no idea a reader had annotated the sentence
+  // they're rewriting. Empty on every embedder that doesn't supply them,
+  // which costs one plugin with nothing to draw.
+  annotationAnchors?: AnnotationAnchorInput[];
 };
+
+// Stable default — see DocReadingBody's identical constant.
+const EMPTY_ANCHORS: AnnotationAnchorInput[] = [];
 
 // A thin colored bar rather than the library default's always-visible name
 // label — the name still shows, but only in a tooltip on hover (see
@@ -78,10 +103,19 @@ export default function CollabEditorBody({
   onAuthorStats,
   ariaLabel = "Post body",
   suppressAnnotations = false,
+  onSelectionUpdate,
+  onContentUpdate,
+  annotationAnchors = EMPTY_ANCHORS,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Read once at construction; later changes go through the meta transaction
+  // below, since useEditor builds this editor exactly once (it is bound to a
+  // Y.Doc and a websocket). Same two-step DocReadingBody uses. `useState`
+  // rather than a ref because this *is* read during render, which is exactly
+  // what react-hooks/refs forbids a ref for.
+  const [initialAnchors] = useState(annotationAnchors);
 
   const editor = useEditor({
     extensions: [
@@ -97,6 +131,16 @@ export default function CollabEditorBody({
       // correctly here too (PLAN.md §12i) — posts never get one applied,
       // and an unused mark type in the schema costs nothing.
       Annotation,
+      // View-only decoration (PLAN.md §13f) — never touches the ydoc, so
+      // registering it unconditionally doesn't drift this schema from the
+      // reading view's. Harmless on embedders with no selection widget.
+      PendingAnnotation,
+      // Also view-only, and for the same reason (PLAN.md §13o) — the
+      // reading-view anchor's counterpart to the `Annotation` mark above.
+      // Unlike the reading views, this editor has a real transaction mapping
+      // to track those offsets through, so the ranges follow local typing
+      // exactly rather than being re-found by text.
+      AnnotationHighlight.configure({ anchors: initialAnchors }),
     ],
     // Matches the title field's own aria-label/role. Two contenteditables
     // share this page, and without distinct accessible names the only thing
@@ -105,6 +149,21 @@ export default function CollabEditorBody({
     editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {
+      // setTimeout(0), not queueMicrotask: onUpdate fires from inside
+      // tiptap's own dispatchTransaction, mid-unwind of the transaction
+      // that triggered it. onContentUpdate (useEditorAnnotationWidget's
+      // reresolve) can itself update React state and, when a range no
+      // longer resolves, dispatch a transaction on this same view — doing
+      // either synchronously here reenters dispatchTransaction, which
+      // ProseMirror documents as unsafe. A microtask still runs before the
+      // browser has finished dispatching the *next* queued input event
+      // under rapid typing; a macrotask waits for that to fully settle
+      // first, at negligible cost since nothing reads the widget's
+      // position before the next paint anyway. Observed as a real, if
+      // intermittent, cursor/content desync during active typing without
+      // this — e2e/quote-anchoring.spec.ts's "an edit outside the quote
+      // moves the anchor" case, 2026-08-12.
+      if (onContentUpdate) setTimeout(() => onContentUpdate(e), 0);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         const { authorIds: ids, charsByAuthor } = perfMeasure("author-highlight walk", () =>
@@ -113,6 +172,10 @@ export default function CollabEditorBody({
         setAuthorIds(ids);
         setAuthorCharCounts(charsByAuthor);
       }, AUTHOR_STATS_DEBOUNCE_MS);
+    },
+    // Same reentrancy hazard and same fix as onUpdate above.
+    onSelectionUpdate: ({ editor: e }) => {
+      if (onSelectionUpdate) setTimeout(() => onSelectionUpdate(e), 0);
     },
   });
 
@@ -127,6 +190,14 @@ export default function CollabEditorBody({
   useEffect(() => {
     editor?.setEditable(editable);
   }, [editor, editable]);
+
+  // Same reason as `editable` above: the anchor set changes after
+  // construction (a reader posts an annotation, this page refreshes) and the
+  // extension's options were read once. PLAN.md §13o.
+  useEffect(() => {
+    if (!editor) return;
+    setAnnotationAnchors(editor.view, annotationAnchors);
+  }, [editor, annotationAnchors]);
 
   useEffect(() => {
     return () => {

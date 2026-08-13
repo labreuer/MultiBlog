@@ -13,7 +13,16 @@ import type { Prisma } from "../src/generated/prisma/client";
 // nothing here throws into the Hocuspocus hook that calls it (§11c's rule):
 // a document that isn't TipTap-shaped, or any other failure, is logged and
 // dropped, leaving prose_json exactly as stale as it already was.
-export async function updateDocCache(ydocId: string, document: Y.Doc, updatedByUserId?: string): Promise<void> {
+export async function updateDocCache(
+  ydocId: string,
+  document: Y.Doc,
+  updatedByUserId?: string,
+  // PLAN.md §13q — which ydoc_update the prose_json written below is the
+  // content of. Optional for the same reason updatedByUserId is: the seeding
+  // paths named above write this cache without a collab server, and so
+  // without an id. Omitted rather than nulled when unknown.
+  lastUpdateId?: bigint | null,
+): Promise<void> {
   const docId = docIdFromYdocId(ydocId);
   if (!docId) return;
 
@@ -53,6 +62,7 @@ export async function updateDocCache(ydocId: string, document: Y.Doc, updatedByU
         // user to name — a store flush with no context behind it (a shutdown
         // drain) shouldn't erase the last real editor.
         ...(updatedByUserId ? { updatedByUserId } : {}),
+        ...(lastUpdateId === undefined || lastUpdateId === null ? {} : { proseJsonUpdateId: lastUpdateId }),
       },
     });
   } catch (err) {

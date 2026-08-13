@@ -1,0 +1,7 @@
+/* A read-only body has none of AnnotationBody.module.css's composer chrome —
+   no frame, no resize handle, no min-height. The only rule it needs is the
+   one an `editable: false` ProseMirror node still gets from the UA: a focus
+   ring on a box nobody can type into. */
+.body :global(.tiptap) {
+  outline: none;
+}

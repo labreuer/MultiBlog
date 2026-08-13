@@ -35,6 +35,14 @@
   --accent-wash: light-dark(#eaf1ff, #16233d);
   --accent-outline: light-dark(#8888aa, #6b7fb0);
 
+  /* frozen reading view (PLAN.md §12) — darker in light theme, lighter in
+     dark, per the FROZEN flag's own spec rather than the usual "brighter on
+     dark to stay visible against a dark page" reasoning the rest of this
+     file follows; it's a solid fill, not text on the page background, so
+     that reasoning doesn't apply here. */
+  --frozen: light-dark(#1c5bd6, #4d86e0);
+  --frozen-text: light-dark(#ffffff, #ffffff);
+
   /* status */
   --success: light-dark(#00aa55, #3ddc84);
   --warning: light-dark(#d4a017, #e0b13a);
@@ -94,6 +102,8 @@
     --link: #3366cc;
     --accent-wash: #eaf1ff;
     --accent-outline: #8888aa;
+    --frozen: #1c5bd6;
+    --frozen-text: #ffffff;
     --success: #00aa55;
     --warning: #d4a017;
     --warning-text: #8a6d00;

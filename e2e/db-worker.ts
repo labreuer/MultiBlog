@@ -26,12 +26,20 @@ import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
-import { contentExtensions, titleExtensions, collectMarkAttrValues, pmDocContentSchema } from "@/lib/tiptap-schema";
+import {
+  contentExtensions,
+  titleExtensions,
+  collectMarkAttrValues,
+  pmDocContentSchema,
+  annotationContentExtensions,
+  docContentExtensions,
+  pmAnnotationContentSchema,
+} from "@/lib/tiptap-schema";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { captureAnchor } from "@/lib/doc-link-anchor";
 import { postContentFromYdoc } from "@/lib/post-content";
 import { docContentFromYdoc } from "@/lib/doc-content";
-import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
+import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
@@ -460,6 +468,17 @@ export type DocState = {
   visibility: DocVisibility;
   /** Doc.updatedBy's email, or null when nothing has attributed an update yet. */
   updatedByEmail: string | null;
+  /**
+   * PLAN.md §13q — the version stamps the same store debounce writes, and
+   * whether they agree with the log. `stampsAgree` is the property that
+   * matters: `Doc.prose_json_update_id`, `Ydoc.last_update_id` and the log's
+   * own tail all describe one instant, so a mismatch means the cache and its
+   * stamp came from different moments.
+   */
+  proseJsonUpdateId: string | null;
+  ydocLastUpdateId: string | null;
+  ydocMaxUpdateId: string | null;
+  stampsAgree: boolean;
 };
 
 export async function getDocState(docId: string): Promise<DocState | null> {
@@ -468,11 +487,26 @@ export async function getDocState(docId: string): Promise<DocState | null> {
     include: { updatedBy: { select: { email: true } } },
   });
   if (!doc) return null;
+
+  const ydocId = ydocIdForDoc(docId);
+  const [ydoc, tail] = await Promise.all([
+    prisma.ydoc.findUnique({ where: { id: ydocId }, select: { lastUpdateId: true } }),
+    prisma.ydocUpdate.findFirst({ where: { ydocId }, orderBy: { id: "desc" }, select: { id: true } }),
+  ]);
+
   return {
     title: doc.title,
     proseText: doc.proseJson ? extractText(doc.proseJson) : null,
     visibility: doc.visibility,
     updatedByEmail: doc.updatedBy?.email ?? null,
+    proseJsonUpdateId: doc.proseJsonUpdateId?.toString() ?? null,
+    ydocLastUpdateId: ydoc?.lastUpdateId?.toString() ?? null,
+    ydocMaxUpdateId: tail?.id.toString() ?? null,
+    stampsAgree:
+      doc.proseJsonUpdateId !== null &&
+      ydoc?.lastUpdateId !== null &&
+      doc.proseJsonUpdateId === ydoc?.lastUpdateId &&
+      doc.proseJsonUpdateId === tail?.id,
   };
 }
 
@@ -641,15 +675,40 @@ export type AnnotationState = {
   id: string;
   parentAnnotationId: string | null;
   bodyText: string;
-  /** Only meaningful for a root (parentAnnotationId null) — see §12h/§12i. */
+  /**
+   * Anchored by *either* mechanism (PLAN.md §13o) — a mark in the doc's ydoc,
+   * or stored offsets. Only meaningful for a root (see §12h/§12i).
+   *
+   * Deliberately not "does it have a mark" any more. That was the same
+   * question until the doc editor and the reading views started answering it
+   * differently, and a test asserting on the surface-independent fact
+   * ("posting an annotation anchors it") should keep passing across that
+   * split. Use `marked` below for the surface-specific one.
+   */
   anchored: boolean;
+  /** Mark-anchored specifically: written from the doc editor, not a reading view. */
+  marked: boolean;
+  /** Column-anchored specifically, with what the *server* derived as the quote. */
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  /** PLAN.md §13q — the version stamp, stringified (BigInt doesn't cross the RPC). */
+  ydocUpdateId: string | null;
+  /**
+   * Whether replaying the anchor's target ydoc to that stamp and reading the
+   * stored offsets gives back the stored quote — the invariant
+   * captureAnnotationAnchor establishes and
+   * scripts/integrity/check-annotation-anchors.ts checks in bulk. Null when
+   * there is no anchor or no stamp to check it against.
+   */
+  quoteMatchesAtStamp: boolean | null;
   deletedAt: string | null;
 };
 
 /**
  * Every annotation on a doc, with each root's anchored/document-level state
- * resolved the same way annotation-data.ts's getDocAnnotationsAsThreads does —
- * a mark still present in Doc.proseJson vs. not (PLAN.md §12h).
+ * resolved the same two ways getDocAnnotationsAsThreads does (PLAN.md §13o):
+ * stored offsets on the row, or a mark still present in Doc.proseJson (§12h).
  */
 export async function getAnnotationStates(docId: string): Promise<AnnotationState[]> {
   const [doc, annotations] = await Promise.all([
@@ -659,13 +718,75 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
   const proseJson = doc?.proseJson as JSONContent | null;
   const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
 
-  return annotations.map((a) => ({
-    id: a.id,
-    parentAnnotationId: a.parentAnnotationId,
-    bodyText: a.bodyText,
-    anchored: markedIds.has(a.id),
-    deletedAt: a.deletedAt?.toISOString() ?? null,
-  }));
+  return Promise.all(
+    annotations.map(async (a) => ({
+      id: a.id,
+      parentAnnotationId: a.parentAnnotationId,
+      bodyText: a.bodyText,
+      anchored: markedIds.has(a.id) || (a.anchorFrom !== null && a.quotedText !== ""),
+      marked: markedIds.has(a.id),
+      anchorFrom: a.anchorFrom,
+      anchorTo: a.anchorTo,
+      quotedText: a.quotedText,
+      ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
+      quoteMatchesAtStamp: await quoteMatchesAtStamp(a),
+      deletedAt: a.deletedAt?.toISOString() ?? null,
+    })),
+  );
+}
+
+/**
+ * PLAN.md §13n — replays a doc to an annotation's own stamp and reports
+ * whether its mark is there. The mark-anchored counterpart of
+ * `quoteMatchesAtStamp` below, and the property `postAnnotation`'s re-stamp
+ * exists to establish: "at this revision" has to land on a revision where the
+ * annotation is attached.
+ */
+export async function markPresentAtStamp(docId: string, annotationId: string): Promise<boolean> {
+  const a = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { ydocUpdateId: true },
+  });
+  if (!a?.ydocUpdateId) return false;
+  let ydoc: Y.Doc | null = null;
+  try {
+    ydoc = await materializeYdocAt(ydocIdForDoc(docId), a.ydocUpdateId);
+    const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(ydoc, "default") as JSONContent;
+    return collectMarkAttrValues(json, "annotation", "id").includes(annotationId);
+  } catch {
+    return false;
+  } finally {
+    ydoc?.destroy();
+  }
+}
+
+// The same replay-and-compare check-annotation-anchors.ts does, for one row,
+// so a spec can assert the invariant at the exact moment it posted rather
+// than trusting a bulk script run later.
+async function quoteMatchesAtStamp(a: {
+  docId: string;
+  parentAnnotationId: string | null;
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  ydocUpdateId: bigint | null;
+}): Promise<boolean | null> {
+  if (a.anchorFrom === null || a.anchorTo === null || a.quotedText === "" || a.ydocUpdateId === null) return null;
+  const isReply = a.parentAnnotationId !== null;
+  const ydocId = isReply ? ydocIdForAnnotation(a.parentAnnotationId!) : ydocIdForDoc(a.docId);
+  let ydoc: Y.Doc | null = null;
+  try {
+    ydoc = await materializeYdocAt(ydocId, a.ydocUpdateId);
+    const extensions = isReply ? annotationContentExtensions : docContentExtensions;
+    const schema = isReply ? pmAnnotationContentSchema : pmDocContentSchema;
+    const node = schema.nodeFromJSON(TiptapTransformer.extensions(extensions).fromYdoc(ydoc, "default"));
+    if (a.anchorTo > node.content.size) return false;
+    return node.textBetween(a.anchorFrom, a.anchorTo, " ") === a.quotedText;
+  } catch {
+    return false;
+  } finally {
+    ydoc?.destroy();
+  }
 }
 
 /**
@@ -995,6 +1116,7 @@ const handlers = {
   getDocLinkGroupIds,
   getDocLinkFields,
   getAnnotationStates,
+  markPresentAtStamp,
   createTestAnnotation,
   createComment,
   createQuoteThread,

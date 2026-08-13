@@ -561,6 +561,22 @@ model Doc {
   // `doc.create()` needn't name it; the trigger overwrites it on INSERT
   // anyway.
   proseJsonLength Int           @default(0) @map("prose_json_length")
+  // PLAN.md §13q — which `ydoc_update` row `proseJson` above is the content
+  // of, written by the same `updateDocCache` pass.
+  //
+  // What it buys is that the cache stops having *unknown* staleness. The rule
+  // that `prose_json` is fine for deciding whether to draw something and
+  // wrong for deciding where (CLAUDE.md, COLLAB.md's cross-cutting hazard) is
+  // unchanged — a stamp does not make a stale cache fresh. But "how stale" is
+  // now a value rather than a thing to remember, which is what lets
+  // check-doc-integrity distinguish a legitimately-trailing cache from a
+  // broken one instead of treating the difference as unfalsifiable.
+  //
+  // Distinct from `Annotation.ydocUpdateId`, which is an *anchor's* coordinate
+  // system. This one describes a cached rendering; that one describes where a
+  // quotation was measured. They are stamped from different logs for a reply
+  // (§13p) and mean different things everywhere.
+  proseJsonUpdateId BigInt?     @map("prose_json_update_id")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
   // Updated when Prisma would update updatedAt. Sloppy with concurrent writes.
@@ -634,12 +650,25 @@ model DocSlugHistory {
 
 // PLAN.md §12c/§12i — a root annotation (parentAnnotationId null) *is* the
 // thread; replies hang off it through the same self-FK shape
-// Comment.parentCommentId already uses. No anchor columns — the anchor is a
-// mark embedded in the doc's own ydoc (src/lib/annotation-extension.ts); no
-// quotedText — the annotated text is read from Doc.proseJson through the
-// mark, so there is nothing here that could fall out of sync with the
-// document. No moderation columns: annotations are never moderated (status
-// below is about visibility/notification, §13d, not approval).
+// Comment.parentCommentId already uses. No moderation columns: annotations
+// are never moderated (status below is about visibility/notification, §13d,
+// not approval).
+//
+// PLAN.md §13o / COLLAB.md §7 — **two anchoring mechanisms, picked by the
+// surface the annotation was written on, never by permission.** This used to
+// say "no anchor columns" and mean it; the trio below is what changed.
+//
+//   - The doc *editor* anchors with a mark inside the doc's own ydoc
+//     (src/lib/annotation-extension.ts, §12i) and leaves anchorFrom/anchorTo/
+//     quotedText null. It can: it already holds a writable connection.
+//   - Either *reading* view anchors with the trio and never writes a mark —
+//     so annotating no longer mutates a document the annotator may not be
+//     allowed to edit. See §13o for the security argument, which is the
+//     reason the two differ.
+//
+// A row has one or the other, never both, and nothing reads "which" from a
+// column: a null anchorFrom is exactly "look for a mark instead"
+// (src/lib/annotation-anchors.ts resolves both into one map).
 //
 // PLAN.md §13 — the body itself is a live ydoc (ydocIdForAnnotation(id),
 // src/lib/ydoc-names.ts), the same substrate a doc itself uses (§11).
@@ -656,6 +685,17 @@ model Annotation {
   userId             String           @map("user_id")
   proseJson          Json?            @map("prose_json")
   bodyText           String           @default("") @map("body_text")
+  // PLAN.md §13q — the annotation-body counterpart of Doc.proseJsonUpdateId:
+  // which update of *this annotation's own* ydoc the two columns above are
+  // the content of, written by server/annotation-cache.ts's debounce.
+  //
+  // Inert while a posted annotation has no edit UI, since nothing moves after
+  // the composer closes. It is here for the case where that changes
+  // (docs/COLLAB.md's 2026-08-13 entry): a reply anchored into a body needs
+  // that body's own rolling checkpoint for the same reason a doc annotation
+  // needs the doc's, and building the seam now costs one column rather than a
+  // migration under live data later.
+  proseJsonUpdateId  BigInt?          @map("prose_json_update_id")
   status             AnnotationStatus @default(DRAFT)
   raisedAt           DateTime?        @map("raised_at")
   resolvedAt         DateTime?        @map("resolved_at")
@@ -663,6 +703,54 @@ model Annotation {
   editedAt           DateTime?        @map("edited_at")
   deletedByUserId    String?          @map("deleted_by_user_id")
   deletedAt          DateTime?        @map("deleted_at")
+  // PLAN.md §13o / COLLAB.md §7 — the reading-view anchor: offsets into the
+  // document this annotation is *about*, plus the text that was there.
+  //
+  // **quotedText is derived server-side, never client-supplied**, and
+  // derived against the document *at ydocUpdateId below*, not at whatever
+  // the live state happens to be by the time the action runs. The client
+  // sends its own reading of the selection; postAnnotation materializes the
+  // stamped state, uses that string only to verify (and if need be correct)
+  // the offsets against it, and stores its own textBetween at the resolved
+  // range. Two things follow. §12i's "the selected text is a request field
+  // only, never a column" stays true of the *trust* boundary even though
+  // there is now a column — nothing a client says is stored verbatim. And
+  // the triple is self-consistent forever: replay to ydocUpdateId and
+  // textBetween(anchorFrom, anchorTo) *is* quotedText, by construction,
+  // which is what makes COLLAB.md §7's materialize-and-diff repair
+  // buildable later without trusting anything written today.
+  //
+  // Null/"" together means document-level, the same state a lost mark
+  // degrades to. Resolution against the *live* doc at read time is a
+  // separate, cheaper thing — a text-verify plus a unique-occurrence
+  // fallback (src/lib/annotation-anchors.ts), doc-link shaped (COLLAB.md
+  // §3) rather than post-comment shaped, because a doc has no immutable
+  // snapshot for offsets to stay stable against.
+  anchorFrom         Int?             @map("anchor_from")
+  anchorTo           Int?             @map("anchor_to")
+  quotedText         String           @default("") @map("quoted_text")
+  // PLAN.md §12p/§13n/§13o — which ydoc_update the author's view showed when
+  // they posted (postAnnotation, src/app/actions/annotations.ts): the
+  // client's own scrub position when known precisely (annotating while
+  // scrub-frozen), else the log's tail at post time. It drives "jump the
+  // scrubber to roughly here," and it is the version stamp the offsets above
+  // were measured against — comment_thread.anchored_event_id's analogue,
+  // with the update log as the axis in place of discrete publication events.
+  // Nothing resolves an anchor *through* it yet (§13o defers the
+  // materialize-and-diff repair path); it is what makes that buildable.
+  //
+  // It names the log of whichever document the anchor is measured against —
+  // the doc's for a root annotation, the *parent annotation's* own ydoc for
+  // an anchored reply (§13p). An anchorless annotation stamps the doc's, as
+  // every row did before anchored replies existed.
+  //
+  // No relation column on purpose: same plain-BigInt precedent as
+  // YdocSnapshot.lastYdocUpdateId, and a FK into ydoc_update would need
+  // ON DELETE SET NULL forever (the log is never truncated, but there's
+  // nothing here worth a join for). Null for every row from before this
+  // column existed, and for one whose fallback lookup came back empty (a
+  // doc with no update log yet).
+  ydocUpdateId       BigInt?          @map("ydoc_update_id")
 
   doc       Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
   parent    Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
@@ -752,6 +840,22 @@ model Ydoc {
   id          String   @id
   ydoc        Bytes
   stateVector Bytes    @map("state_vector")
+  // PLAN.md §13q — which `ydoc_update` row the two columns above correspond
+  // to, written in the same store-debounce pass that writes them.
+  //
+  // This makes the row a **rolling checkpoint**: a base that is never more
+  // than one debounce behind head, which is what
+  // `resolveUpdateIdForSnapshot` walks forward from. Without it that walk
+  // starts at the newest `ydoc_snapshot` covered by the client — and
+  // snapshots are created deliberately, never implicitly (§11b), so a doc
+  // that has never been published has none and the walk covers its whole
+  // lifetime. Measured before this existed: 1219 rows on a real document.
+  //
+  // Null until the first debounce after this column landed. Deliberately not
+  // backfilled: the honest value for an existing row is "unknown", and a
+  // guessed one would be indistinguishable from a real one while sending the
+  // walk to the wrong place.
+  lastUpdateId BigInt? @map("last_update_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

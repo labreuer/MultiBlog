@@ -16,6 +16,26 @@ type Props = {
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
+  // PLAN.md §13o — which anchoring mechanism this composer's surface uses.
+  // Defaults to "columns" (either reading view); only the doc editor's own
+  // popover passes "mark", because only it already holds a writable
+  // connection to the document the mark would be written into.
+  anchorMode?: "mark" | "columns";
+  // PLAN.md §13q — passed to postAnnotation, which converts it to a
+  // ydoc_update.id. Absent from any surface with no live Y.Doc to capture
+  // from, in which case the action falls back to the log tail.
+  atVersion?: string | null;
+  // PLAN.md §12p/§13 — passed straight to postAnnotation; absent from every
+  // caller but the inline popover on a scrub-frozen reading view, which is
+  // the only one that ever knows a position more precise than "just now".
+  ydocUpdateId?: string | null;
+  // PLAN.md §18/COLLAB.md §5 — present only from the doc editor's own
+  // selection widget. When set, this is authoritative over anchorFrom/
+  // anchorTo at submit time: those two are what the selection was when
+  // composing *started*, exactly the stale value Phase 3 exists to stop
+  // trusting. A null result (the anchored text is gone) posts document-level
+  // rather than falling back to the stale offsets.
+  resolveAnchor?: () => { from: number; to: number } | null;
   onPosted: () => void;
   onCancel: () => void;
   // PLAN.md §13g — present only from the inline popover, absent from the
@@ -45,6 +65,10 @@ export default function LiveAnnotationComposer({
   anchorFrom,
   anchorTo,
   quotedText,
+  anchorMode = "columns",
+  atVersion = null,
+  ydocUpdateId,
+  resolveAnchor,
   onPosted,
   onCancel,
   onMoveToBottom,
@@ -131,10 +155,26 @@ export default function LiveAnnotationComposer({
   async function handleSubmit() {
     setPending(true);
     setError(null);
+    // resolveAnchor, when present, is authoritative — see its own prop
+    // comment. `resolved` undefined (no resolveAnchor at all) falls back to
+    // the literal props; `resolved` null (resolveAnchor ran and found
+    // nothing) posts document-level rather than reusing the stale literals.
+    const resolved = resolveAnchor?.();
+    const finalAnchorFrom = resolveAnchor ? resolved?.from : anchorFrom;
+    const finalAnchorTo = resolveAnchor ? resolved?.to : anchorTo;
     const result =
       visibility === "private"
         ? await saveDraftAnnotation(annotationId)
-        : await postAnnotation({ annotationId, anchorFrom, anchorTo, quotedText, raise: visibility === "raise" });
+        : await postAnnotation({
+            annotationId,
+            anchorMode,
+            atVersion: atVersion ?? undefined,
+            anchorFrom: finalAnchorFrom,
+            anchorTo: finalAnchorTo,
+            quotedText,
+            raise: visibility === "raise",
+            ydocUpdateId: ydocUpdateId ?? undefined,
+          });
     setPending(false);
     if (result.error) {
       setError(result.error);

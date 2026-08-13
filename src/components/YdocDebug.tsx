@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { TiptapTransformer } from "@hocuspocus/transformer";
+import type { JSONContent } from "@tiptap/core";
 import { renderYdocDoc, type YdocRenderResult } from "@/lib/ydoc-render";
 import { titleAuthorHighlightExtensions } from "@/lib/tiptap-schema";
+import { collect as collectMarkInventory } from "@/lib/mark-inventory";
 import { extractText } from "@/lib/diff";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
@@ -735,7 +737,95 @@ function ReplayContent({ renderResult }: { renderResult: YdocRenderResult | null
           </tbody>
         </table>
       )}
+      <MarkInventory bodyJSON={renderResult.bodyJSON} titleJSON={renderResult.titleJSON} />
     </div>
+  );
+}
+
+/** How much of a run's text a cell shows before it stops being scannable. */
+const MARK_TEXT_PREVIEW = 60;
+
+function formatAttrValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+// One table per mark type actually present, after Clients. Both fragments
+// are scanned, not just the body: `authorHighlight` lands on the title too
+// (PLAN.md §3d gives the title its own fragment), and "what marks are in
+// this ydoc" that quietly meant "in its body" would be a misleading answer
+// on exactly the surface whose job is to not be misleading. Hence the Where
+// column — the two fragments share mark types, so merging them without
+// saying which is which would be worse than not merging at all.
+//
+// Recomputed per scrub step by design, like everything else in this view
+// (PLAN.md §11h): the inventory describes the position being *shown*, so a
+// cached one would be a lie the moment the slider moved. useMemo here only
+// skips the walk when ReplayView re-renders for some other reason.
+function MarkInventory({ bodyJSON, titleJSON }: { bodyJSON: JSONContent; titleJSON: JSONContent | null }) {
+  const inventory = useMemo(
+    () =>
+      collectMarkInventory([
+        { label: "body", doc: bodyJSON },
+        { label: "title", doc: titleJSON },
+      ]),
+    [bodyJSON, titleJSON],
+  );
+
+  return (
+    <>
+      <h3>Marks</h3>
+      {inventory.length === 0 ? (
+        <p className={styles.muted}>No marks in this document.</p>
+      ) : (
+        inventory.map((entry) => (
+          <div key={entry.type} data-testid={`mark-table-${entry.type}`}>
+            <h4>
+              {entry.type}{" "}
+              <span className={styles.muted}>
+                {entry.total > entry.instances.length
+                  ? `(first ${entry.instances.length} of ${entry.total})`
+                  : `(${entry.total})`}
+              </span>
+            </h4>
+            <table className={adminStyles.table}>
+              <thead>
+                <tr>
+                  <th className={adminStyles.headerCell}>Where</th>
+                  <th className={adminStyles.headerCell}>Text</th>
+                  {entry.attrNames.map((name) => (
+                    <th key={name} className={adminStyles.headerCell}>
+                      {name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {entry.instances.map((instance, index) => (
+                  // Index as key: these are positional rows rebuilt wholesale
+                  // on every scrub step, with no identity of their own to key
+                  // off — two runs of the same mark with identical attrs over
+                  // identical text are genuinely indistinguishable.
+                  <tr key={index} className={adminStyles.row}>
+                    <td className={adminStyles.cell}>{instance.where}</td>
+                    <td className={adminStyles.cell}>
+                      {instance.text.length > MARK_TEXT_PREVIEW
+                        ? `${instance.text.slice(0, MARK_TEXT_PREVIEW)}…`
+                        : instance.text || <span className={styles.muted}>—</span>}
+                    </td>
+                    {entry.attrNames.map((name) => (
+                      <td key={name} className={adminStyles.cell}>
+                        {formatAttrValue(instance.attrs[name])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
+      )}
+    </>
   );
 }
 

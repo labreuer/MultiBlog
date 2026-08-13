@@ -31,14 +31,46 @@ so is a page whose JS never runs: the `.anchored` class is toggled from JS, neve
 `@media` block. **CSS owns the two-column grid, JS owns only the vertical alignment** — so
 don't move the column layout into JS to "simplify", that split is what keeps the rail
 server-rendered in the right place. The two sides resolve an anchor differently and can't
-share that step: a post comment reads its stored `anchorFrom`, a doc annotation has no
-stored offset at all and must be *found* in the live document
-(`src/lib/annotation-marks.ts`, §12i). Never position a doc annotation off `Doc.proseJson`
-— it's a store-debounce snapshot, stale by seconds while anyone is typing; it's fine as the
-*seed* for which cards start in the rail, and nothing more.
-How a remark stays attached to a passage while the passage moves — all four strategies this
+share that step: a post comment reads its stored `anchorFrom` against an immutable
+snapshot, while **a doc annotation has to be resolved against the live document, whichever
+of its two mechanisms anchored it** — `resolveAnnotationRanges`
+(`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail
+and jump target goes through it rather than knowing there are two.
+**Which mechanism follows the surface, never the permission** (PLAN.md §13o): the doc
+*editor* writes an `annotation` mark into the doc's ydoc (§12i) and leaves
+`anchorFrom`/`anchorTo`/`quotedText` null; either *reading* view writes those three columns
+and never touches the document, so a reader annotating a doc no longer causes a write to
+one they may not edit. Don't "unify" them by giving the reading views the mark back —
+that write is the thing being removed, not an implementation detail. A row has one or the
+other and never both; a null `anchorFrom` *is* "look for a mark instead".
+`Annotation.ydocUpdateId` is no longer metadata-only: it's the version stamp those offsets
+were measured against, and `quotedText` is derived server-side against exactly that state —
+so replaying to it reproduces the quote by construction. It still drives the scrubber jump
+it always did. Since §13q it names **the version the annotator was looking at**, not the
+log's tail at post time: the client captures a `Y.snapshot` in the same synchronous tick it
+reads the selection offsets (later is wrong — the freeze withholds the *render* while the
+Y.Doc keeps advancing), and `resolveUpdateIdForSnapshot` converts it. A bare state vector
+can't do this — deletions advance no clock, so ~10% of updates are invisible to one — and
+`Y.encodeStateVectorFromUpdate` is the wrong primitive for reading a *delta*'s clocks, which
+it answers with silence rather than an error. What keeps the conversion cheap is
+`Ydoc.lastUpdateId`, written by the store debounce beside the blob and state vector it
+already wrote: a rolling checkpoint the walk starts from. `scripts/integrity/check-annotation-anchors.ts`
+is what verifies the whole arrangement still holds. Never position a doc annotation off `Doc.proseJson` — it's a store-debounce
+snapshot, stale by seconds while anyone is typing; it's fine as the *seed* for which cards
+start in the rail, and nothing more.
+**A reply's anchor points into its parent annotation's body, not the doc** (§13p) — same
+three columns, different target ydoc, and therefore a different update log stamping them
+(`ydoc:annotation:<parentId>`). `postAnnotation` picks the target from
+`parentAnnotationId` rather than taking it as an argument, so there's no request that
+anchors a reply into the doc or a root into an annotation; an *anchorless* annotation still
+stamps the doc's log. Selecting text in a posted annotation is the gesture that opens (or
+re-points) that reply, which is why `AnnotationNode` renders bodies through
+`AnnotationBodyReader` — a read-only TipTap editor behind the SSR copy — rather than the
+static React tree alone: a browser `Selection` over static markup can't give ProseMirror
+positions, and static markup can't carry the highlight decorations either.
+How a remark stays attached to a passage while the passage moves — every strategy this
 codebase uses, the ones it doesn't, and how to pick: [docs/COLLAB.md](docs/COLLAB.md). Read it
-before adding a fifth or "fixing" an anchor that looks fragile; several of the fragile-looking
+before adding another or "fixing" an anchor that looks fragile; several of the fragile-looking
 ones are deliberate, and one plausible fix has already been tried and reverted as too brittle.
 Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
 [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
@@ -367,10 +399,13 @@ duplicated, slugs are claimed through the transaction (`claimSlug` — `uniqueDo
 `uniqueUserSlug` query the global client and can't see rows the same import just created),
 the `ydoc` blob is always recomputed as `Y.mergeUpdates` over the rows being written rather
 than copied from a source, and `@updatedAt` columns need raw SQL to backdate. Afterwards,
-`scripts/integrity/` is the acceptance test — run both of its checks, ydoc first (a bad
-blob makes the doc-side checks report faults that evaporate once it's repaired). See
-[scripts/integrity/README.md](scripts/integrity/README.md) for which link of the
-`ydoc_update → ydoc.ydoc → doc.*` chain each one covers.
+`scripts/integrity/` is the acceptance test — run all three of its checks, ydoc first (a bad
+blob makes the doc- and annotation-side checks report faults that evaporate once it's
+repaired). See [scripts/integrity/README.md](scripts/integrity/README.md) for which link of
+the `ydoc_update → ydoc.ydoc → doc.*` chain each one covers, and why
+`check-annotation-anchors` is the odd one out: it verifies a *claim written down once*
+("at update N, characters [a, b) read exactly this") rather than a derived value, which is
+why nothing recomputes it and why a break there is silent.
 
 ### Performance measurement
 
@@ -467,6 +502,23 @@ blob makes the doc-side checks report faults that evaporate once it's repaired).
   'SetContentOptions'`) but reads as obviously-correct against any pre-v3 example or answer,
   so it's worth recognizing rather than re-deriving. Used by `LiveDocBody.tsx` to push live
   Yjs updates into a non-`Collaboration` editor without re-emitting them.
+- **TipTap v3's `Collaboration` extension binds through `@tiptap/y-tiptap`, not
+  `y-prosemirror`** — a separate package (Tiptap's own fork,
+  `node_modules/@tiptap/extension-collaboration/dist/index.js` imports every one of
+  `ySyncPlugin`/`ySyncPluginKey`/`absolutePositionToRelativePosition`/
+  `relativePositionToAbsolutePosition` from it). Reading a Collaboration-bound editor's
+  sync-plugin state (`ySyncPluginKey.getState(editor.state)`, e.g. to reach the
+  y-prosemirror binding's `ProsemirrorMapping` for a relative-position conversion) needs
+  the key imported from `@tiptap/y-tiptap`, or `PluginKey.getState()`'s identity match
+  silently fails: it doesn't throw, it just returns `undefined`, indistinguishable from
+  "this editor has no Collaboration binding at all." `src/lib/yjs-relative-anchor.ts`
+  shipped with the wrong import for one review cycle (PLAN.md §18f) — every selection on
+  `/doc/[slug]/edit` silently failed to capture, caught only by manual testing, not by
+  `npx tsc`, `eslint`, or the e2e suite (nothing exercises that page's *selecting* text,
+  only typing into it). `y-prosemirror` itself stays a real dependency — `server/
+  ydoc-hooks.ts` uses it correctly for stateless Yjs↔ProseMirror conversion server-side,
+  which never touches a `PluginKey` — the trap is specifically about plugin-state lookups
+  against a live client-side `Editor`.
 - The TipTap schema is shared by the editor, Hocuspocus doc-seeding, and public rendering
   via `src/lib/tiptap-schema.ts` — change it only there so the three can't drift. It holds
   *two* schemas: `contentExtensions` (post body) and `titleExtensions` (the title, a separate

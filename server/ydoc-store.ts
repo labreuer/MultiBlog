@@ -85,6 +85,35 @@ function tripCircuit(id: string): void {
 // Hocuspocus's own per-document in-memory state.
 const appendQueues = new Map<string, Promise<unknown>>();
 
+// PLAN.md §13q — the newest `ydoc_update.id` this process has *observed land*
+// for a document. In-memory only and deliberately so: it is a cache of
+// something the database already knows, rebuilt from the first append after a
+// restart, and nothing reads it before then (a stamp is skipped, not guessed).
+const lastAppendedId = new Map<string, bigint>();
+
+/**
+ * Resolves once every append queued so far for `id` has actually landed, so
+ * `lastAppendedId` describes the same document state the caller is holding.
+ *
+ * Called from the store debounce, never from the per-update path — see
+ * `appendUpdate`. It is an empty task on the same chain, which is what makes
+ * it a barrier rather than a poll.
+ *
+ * **Not covered by a test, and that is a statement about the test rather than
+ * about the barrier.** e2e/doc.spec.ts asserts the three stamps agree, which
+ * is the property this protects — but locally an insert resolves in under a
+ * millisecond against a store debounce measured in seconds, so the window
+ * never opens: removing this line leaves that assertion passing. It matters
+ * where insert latency approaches the debounce (a remote database, contention,
+ * a slow disk), which is exactly where nobody is watching. Kept on reasoning,
+ * not on evidence; opening the window on purpose would need fault injection
+ * this codebase has no seam for.
+ */
+export async function drainAppends(id: string): Promise<bigint | null> {
+  await enqueue(id, async () => {});
+  return lastAppendedId.get(id) ?? null;
+}
+
 function enqueue<T>(id: string, task: () => Promise<T>): Promise<T> {
   const previous = appendQueues.get(id) ?? Promise.resolve();
   const next = previous.then(task, task);
@@ -98,7 +127,7 @@ export interface YdocStore {
   load(id: string): Promise<LoadResult>;
   createIfAbsent(id: string, ydoc: Uint8Array, stateVector: Uint8Array): Promise<CreateIfAbsentResult>;
   appendUpdate(id: string, update: Uint8Array): Promise<void>;
-  storeState(id: string, ydoc: Uint8Array, stateVector: Uint8Array): Promise<void>;
+  storeState(id: string, ydoc: Uint8Array, stateVector: Uint8Array, lastUpdateId?: bigint | null): Promise<void>;
   createSnapshot(
     id: string,
     ydoc: Uint8Array,
@@ -109,6 +138,18 @@ export interface YdocStore {
   maxUpdateId(id: string): Promise<bigint | null>;
   findSnapshotAtMark(id: string, mark: bigint): Promise<{ id: string } | null>;
   loadReplaySlice(id: string, throughUpdateId: bigint): Promise<ReplaySlice | typeof UNAVAILABLE>;
+  // PLAN.md §13q — the two reads `resolveUpdateIdForStateVector` needs. Kept on
+  // the store rather than reaching for prisma directly at the call site, per
+  // this file's own rule that it is the only code touching the three tables.
+  findCheckpointCoveredBy(
+    id: string,
+    clientStateVector: Map<number, number>,
+  ): Promise<{ lastYdocUpdateId: bigint; stateVector: Uint8Array } | null>;
+  findNewestSnapshotCoveredBy(
+    id: string,
+    clientStateVector: Map<number, number>,
+  ): Promise<{ id: string; lastYdocUpdateId: bigint; stateVector: Uint8Array } | null>;
+  updatesAfter(id: string, afterUpdateId: bigint | null): Promise<{ id: bigint; update: Uint8Array }[]>;
 }
 
 class PrismaYdocStore implements YdocStore {
@@ -159,7 +200,21 @@ class PrismaYdocStore implements YdocStore {
     if (isCircuitOpen(id)) return;
     await enqueue(id, async () => {
       try {
-        await prisma.ydocUpdate.create({ data: { ydocId: id, update: Buffer.from(update) } });
+        const row = await prisma.ydocUpdate.create({ data: { ydocId: id, update: Buffer.from(update) } });
+        // PLAN.md §13q — the id Postgres just assigned, which this used to
+        // discard. Recorded in memory as a *side effect* of the insert
+        // resolving, never awaited by anything on the per-update path: the
+        // broadcast to peers has already happened by the time onChange runs,
+        // and making collab latency depend on a database round trip to serve
+        // a stamp read a few times a day would be the wrong trade.
+        //
+        // Consequently this lags the in-memory document by however long the
+        // insert takes. `drainAppends` below is what closes that gap, and it
+        // is called from the store debounce — off the hot path — because a
+        // stamp written from a lagging value would name an id *older* than
+        // the content it describes, and a consumer replaying to it would see
+        // less than the cache shows.
+        lastAppendedId.set(id, row.id);
       } catch (err) {
         if (isMissingDocError(err)) {
           console.warn(`[ydoc-store] ${id} no longer exists; dropping its pending update.`);
@@ -174,12 +229,25 @@ class PrismaYdocStore implements YdocStore {
     });
   }
 
-  async storeState(id: string, ydoc: Uint8Array, stateVector: Uint8Array): Promise<void> {
+  async storeState(
+    id: string,
+    ydoc: Uint8Array,
+    stateVector: Uint8Array,
+    lastUpdateId?: bigint | null,
+  ): Promise<void> {
     if (isCircuitOpen(id)) return;
     try {
       await prisma.ydoc.update({
         where: { id },
-        data: { ydoc: Buffer.from(ydoc), stateVector: Buffer.from(stateVector) },
+        data: {
+          ydoc: Buffer.from(ydoc),
+          stateVector: Buffer.from(stateVector),
+          // Omitted rather than nulled when unknown (PLAN.md §13q): the
+          // callers that seed a ydoc without a collab server in the loop
+          // don't know an id, and overwriting a real stamp with null would
+          // send the resolver's walk back to the start of the log.
+          ...(lastUpdateId === undefined || lastUpdateId === null ? {} : { lastUpdateId }),
+        },
       });
     } catch (err) {
       if (isMissingDocError(err)) {
@@ -221,6 +289,71 @@ class PrismaYdocStore implements YdocStore {
 
   async findSnapshotAtMark(id: string, mark: bigint): Promise<{ id: string } | null> {
     return prisma.ydocSnapshot.findFirst({ where: { ydocId: id, lastYdocUpdateId: mark }, select: { id: true } });
+  }
+
+  // PLAN.md §13q — the `ydoc` row as a walk base: its state_vector and
+  // last_update_id describe the same instant, written together by the store
+  // debounce. Null when the row predates that column (nothing to trust) or
+  // when the client is *behind* the last debounce, which is the case the
+  // snapshot search below exists for.
+  async findCheckpointCoveredBy(
+    id: string,
+    clientStateVector: Map<number, number>,
+  ): Promise<{ lastYdocUpdateId: bigint; stateVector: Uint8Array } | null> {
+    const row = await prisma.ydoc.findUnique({
+      where: { id },
+      select: { stateVector: true, lastUpdateId: true },
+    });
+    if (!row || row.lastUpdateId === null) return null;
+    const vector = Y.decodeStateVector(new Uint8Array(row.stateVector));
+    for (const [client, clock] of vector) {
+      if ((clientStateVector.get(client) ?? 0) < clock) return null;
+    }
+    return { lastYdocUpdateId: row.lastUpdateId, stateVector: new Uint8Array(row.stateVector) };
+  }
+
+  // Newest-first, testing coverage in JS rather than SQL: a state vector is an
+  // opaque blob to Postgres, so "is this snapshot's version covered by that
+  // client's" cannot be a WHERE clause. There are only ever a handful of
+  // snapshots per document (§11b — they are created deliberately, not per
+  // update), so this reads a few rows at worst, and the common case is the
+  // first one.
+  async findNewestSnapshotCoveredBy(
+    id: string,
+    clientStateVector: Map<number, number>,
+  ): Promise<{ id: string; lastYdocUpdateId: bigint; stateVector: Uint8Array } | null> {
+    const snapshots = await prisma.ydocSnapshot.findMany({
+      where: { ydocId: id },
+      orderBy: { lastYdocUpdateId: "desc" },
+      select: { id: true, lastYdocUpdateId: true, stateVector: true },
+    });
+    for (const snapshot of snapshots) {
+      const vector = Y.decodeStateVector(new Uint8Array(snapshot.stateVector));
+      let covered = true;
+      for (const [client, clock] of vector) {
+        if ((clientStateVector.get(client) ?? 0) < clock) {
+          covered = false;
+          break;
+        }
+      }
+      if (covered) {
+        return {
+          id: snapshot.id,
+          lastYdocUpdateId: snapshot.lastYdocUpdateId,
+          stateVector: new Uint8Array(snapshot.stateVector),
+        };
+      }
+    }
+    return null;
+  }
+
+  async updatesAfter(id: string, afterUpdateId: bigint | null): Promise<{ id: bigint; update: Uint8Array }[]> {
+    const rows = await prisma.ydocUpdate.findMany({
+      where: { ydocId: id, ...(afterUpdateId === null ? {} : { id: { gt: afterUpdateId } }) },
+      orderBy: { id: "asc" },
+      select: { id: true, update: true },
+    });
+    return rows.map((r) => ({ id: r.id, update: new Uint8Array(r.update) }));
   }
 
   // PLAN.md §15b — the replay-base primitive resolveReplayBase never actually
@@ -305,6 +438,23 @@ class NullYdocStore implements YdocStore {
   async findSnapshotAtMark(id: string): Promise<{ id: string } | null> {
     this.warn(id, "findSnapshotAtMark");
     return null;
+  }
+
+  async findCheckpointCoveredBy(id: string): Promise<{ lastYdocUpdateId: bigint; stateVector: Uint8Array } | null> {
+    this.warn(id, "findCheckpointCoveredBy");
+    return null;
+  }
+
+  async findNewestSnapshotCoveredBy(
+    id: string,
+  ): Promise<{ id: string; lastYdocUpdateId: bigint; stateVector: Uint8Array } | null> {
+    this.warn(id, "findNewestSnapshotCoveredBy");
+    return null;
+  }
+
+  async updatesAfter(id: string): Promise<{ id: bigint; update: Uint8Array }[]> {
+    this.warn(id, "updatesAfter");
+    return [];
   }
 
   async loadReplaySlice(id: string): Promise<ReplaySlice | typeof UNAVAILABLE> {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useEditor, type Editor, type JSONContent } from "@tiptap/react";
@@ -9,6 +9,7 @@ import { docContentExtensions } from "./tiptap-schema";
 import { getCollabUrl } from "./collab-url";
 import { renderYdocDoc } from "./ydoc-render";
 import { PendingAnnotation } from "./pending-annotation-extension";
+import { captureYdocVersion } from "./ydoc-version-client";
 
 type Awareness = HocuspocusProvider["awareness"];
 
@@ -50,6 +51,12 @@ export type LiveDocContentOptions = {
   // state that doesn't exist yet. A ref the caller declares up front is what
   // lets both hooks take it as an input and neither depend on the other.
   editorRef: React.RefObject<Editor | null>;
+  // PLAN.md §13q — populated with a reader for this surface's live document
+  // version, for useSelectionPopover to call at selection time. Same
+  // caller-declares-the-ref shape as `editorRef` above and for the same
+  // reason: the selection hook is constructed first, since this one takes its
+  // `capture` as an input.
+  versionRef?: React.RefObject<(() => string) | null>;
   // View-only decoration layers the calling surface wants on top of the
   // shared schema — never node/mark types, which would drift this view's
   // schema from the editor's and the server's (CLAUDE.md). `PendingAnnotation`
@@ -65,6 +72,14 @@ export type LiveDocContentOptions = {
   // since that handler always sets the *current* live content — there's no
   // "return to live" control because none is needed.
   overrideBodyJSON?: JSONContent | null;
+  // PLAN.md §12 — true while the reader is scrubbing or holding a selection.
+  // Gates only the live "update" listener below; `overrideBodyJSON` (a scrub
+  // push) and hoisted mode's own catch-up effect are unaffected — freezing
+  // exists to stop the *live* feed from moving text out from under a reader,
+  // never to block the thing that made them want to look at history in the
+  // first place. The Y.Doc itself keeps applying every remote update either
+  // way — only the render is withheld — so nothing here can lose data.
+  frozen?: boolean;
   // PLAN.md §14g — hoisted mode. When a caller (DocColumn) already owns a
   // Y.Doc and a connected provider — because the same pair also needs to
   // support a write surface without tearing down the websocket on every
@@ -103,6 +118,14 @@ export type LiveDocContent = {
   // window has passed — e2e/doc.spec.ts's annotation tests wait on it.
   synced: boolean;
   error: string | null;
+  // How many live updates arrived while `frozen` was true, since the last
+  // time it went back to false — the FROZEN (+N) count (PLAN.md §12). A
+  // listener-set pair rather than state: a remote typing burst during a long
+  // freeze would otherwise re-render this whole surface (and everything a
+  // margin-notes-style provider sits above) once per keystroke, the same
+  // cost margin-notes-context.tsx's own subscribe/notify pair avoids.
+  // Callers read it with `useSyncExternalStore`.
+  frozenUpdates: { subscribe: (listener: () => void) => () => void; getSnapshot: () => number };
 };
 
 export function useLiveDocContent({
@@ -111,9 +134,11 @@ export function useLiveDocContent({
   ariaLabel,
   extensions = [],
   overrideBodyJSON,
+  frozen = false,
   ydoc: hoistedYdoc,
   provider: hoistedProvider,
   editorRef,
+  versionRef,
   setAwareness,
   onEditorCreated,
   onSelectionUpdate,
@@ -140,6 +165,46 @@ export function useLiveDocContent({
     onContentPushedRef.current = onContentPushed;
   });
 
+  // Read inside the ydoc "update" listener below, which is registered once
+  // per connection and would otherwise close over whatever `frozen` was at
+  // that time.
+  const frozenRef = useRef(frozen);
+  // The listener's own definition — populated by the connection effect below
+  // once it exists, so the unfreeze effect further down can force one
+  // catch-up render without duplicating renderYdocDoc/setContent here.
+  const applyUpdateRef = useRef<(() => void) | null>(null);
+  const frozenCountRef = useRef(0);
+  const frozenCountListenersRef = useRef(new Set<() => void>());
+  const notifyFrozenCount = () => {
+    for (const listener of frozenCountListenersRef.current) listener();
+  };
+  const subscribeFrozenCount = useCallback((listener: () => void) => {
+    frozenCountListenersRef.current.add(listener);
+    return () => frozenCountListenersRef.current.delete(listener);
+  }, []);
+  const getFrozenCount = useCallback(() => frozenCountRef.current, []);
+
+  // Skips the catch-up/reset below on mount — `frozen` starts false, and
+  // there is nothing to catch up on yet.
+  const frozenDidMountRef = useRef(false);
+  useEffect(() => {
+    frozenRef.current = frozen;
+    if (!frozenDidMountRef.current) {
+      frozenDidMountRef.current = true;
+      return;
+    }
+    if (!frozen) {
+      frozenCountRef.current = 0;
+      notifyFrozenCount();
+      // queueMicrotask only to keep the catch-up render's own setState calls
+      // (inside applyUpdate, several levels of indirection away) out of the
+      // "no setState synchronously in an effect body" lint rule's sights —
+      // same indirection the hoisted-mode catch-up effect above uses; it
+      // still runs before the next paint.
+      queueMicrotask(() => applyUpdateRef.current?.());
+    }
+  }, [frozen]);
+
   const editor = useEditor({
     // PendingAnnotation (PLAN.md §13f) and DocLink (§14e) are view-only —
     // decorations, not node/mark types — so appending them here doesn't
@@ -165,10 +230,23 @@ export function useLiveDocContent({
     editorRef.current = editor;
   }, [editor, editorRef]);
 
+
   // Only constructed when nothing was hoisted in — see the options comment.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ownYdoc = useMemo(() => (hoistedYdoc ? null : new Y.Doc()), [docId, hoistedYdoc]);
   const ydoc = hoistedYdoc ?? ownYdoc!;
+
+  // PLAN.md §13q. Assigned once against `ydoc` rather than recreated per
+  // render: the Y.Doc identity is stable for this surface's lifetime, and the
+  // whole point is that the *call* happens at selection time rather than the
+  // value being computed ahead of it and going stale.
+  useEffect(() => {
+    if (!versionRef) return;
+    versionRef.current = () => captureYdocVersion(ydoc);
+    return () => {
+      versionRef.current = null;
+    };
+  }, [ydoc, versionRef]);
 
   // PLAN.md §14g — hoisted mode's "sync once on mount" counterpart to the
   // "update" listener registered below: the shared Y.Doc already holds every
@@ -214,6 +292,14 @@ export function useLiveDocContent({
 
   useEffect(() => {
     function applyUpdate() {
+      // Frozen: the Y.Doc above this listener already has the update (Yjs
+      // applies it regardless of whether anything is listening) — only the
+      // render is withheld, and counted so FROZEN can say "(+N)" for it.
+      if (frozenRef.current) {
+        frozenCountRef.current += 1;
+        notifyFrozenCount();
+        return;
+      }
       const result = renderYdocDoc(ydoc);
       const liveEditor = editorRef.current;
       if (result.ok) {
@@ -223,6 +309,7 @@ export function useLiveDocContent({
         setError(result.error);
       }
     }
+    applyUpdateRef.current = applyUpdate;
 
     // Hoisted mode (PLAN.md §14g) — the caller (DocColumn) owns the Y.Doc
     // and provider's connection lifecycle across read/write toggles, so this
@@ -298,5 +385,11 @@ export function useLiveDocContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setAwareness is a context setter (stable); re-running this on its identity would tear down and re-establish the websocket
   }, [docId, ydoc, hoistedProvider]);
 
-  return { editor, ready, synced, error };
+  return {
+    editor,
+    ready,
+    synced,
+    error,
+    frozenUpdates: { subscribe: subscribeFrozenCount, getSnapshot: getFrozenCount },
+  };
 }

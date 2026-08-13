@@ -24,6 +24,16 @@
   font-size: 0.8rem;
 }
 
+.revisionButton {
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .deleted {
   color: var(--text-secondary);
 }
