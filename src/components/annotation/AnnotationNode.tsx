@@ -3,11 +3,13 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import type { JSONContent } from "@tiptap/react";
 // Aliased because the local `isAdmin` below is the resolved boolean for this
 // viewer; role-checks.ts is safe in a client bundle by design (its own header
 // says so — authz.ts is not, since it imports prisma).
 import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "../LocalTime";
+import AnnotationBodyReader from "./AnnotationBodyReader";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
 import { useDocScrub } from "../DocScrubContext";
@@ -20,7 +22,12 @@ export type AnnotationNodeData = {
   // rendering, same @tiptap/static-renderer call the doc reading view
   // already uses, not a live editor. Only an actively-open composer
   // (LiveAnnotationComposer) is ever connected to an annotation's ydoc.
+  // Since §13p this is the pre-ready and no-JS copy rather than the whole
+  // rendering; AnnotationBodyReader swaps in an equivalent read-only editor
+  // once it mounts, which is what makes a body selectable.
   body: ReactNode;
+  // The JSON that tree was rendered from — see §13p and annotation-entries.ts.
+  proseJson: JSONContent | null;
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
@@ -148,7 +155,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
               </button>
             )}
           </p>
-          <div>{annotation.body}</div>
+          <AnnotationBodyReader proseJson={annotation.proseJson} staticBody={annotation.body} />
           {!posted && !replyDraftId && (
             <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
               {replyPending ? "Opening…" : "Reply"}

@@ -32,6 +32,12 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
       id: a.id,
       displayName: a.displayName,
       body: renderBody(a),
+      // PLAN.md §13p — the same content the static tree above was built
+      // from, shipped alongside it because AnnotationBodyReader needs the
+      // JSON (not the rendered elements) to seed its own editor. Both, not
+      // one: the tree is what a reader with no JS gets and what covers the
+      // pre-ready frame; the JSON is what makes the body selectable.
+      proseJson: a.proseJson,
       createdAt: a.createdAt,
       deletedByUserId: a.deletedByUserId,
       commenterUserId: a.commenterUserId,
