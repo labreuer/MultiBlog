@@ -1,9 +1,29 @@
 import * as Y from "yjs";
-import { ySyncPluginKey, absolutePositionToRelativePosition, relativePositionToAbsolutePosition } from "y-prosemirror";
+import { ySyncPluginKey, absolutePositionToRelativePosition, relativePositionToAbsolutePosition } from "@tiptap/y-tiptap";
 import type { Editor } from "@tiptap/react";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-// y-prosemirror's own `ProsemirrorMapping` type (dist/src/lib.d.ts) isn't
+// Deliberately @tiptap/y-tiptap, not the raw y-prosemirror package (also a
+// dependency here, used server-side in server/ydoc-hooks.ts for stateless
+// Yjs<->ProseMirror conversion — a different job with no plugin-state
+// lookup involved). Tiptap v3's `@tiptap/extension-collaboration` binds
+// through @tiptap/y-tiptap's own ySyncPlugin internally
+// (node_modules/@tiptap/extension-collaboration/dist/index.js), a fork
+// with its own PluginKey instance — not the one y-prosemirror exports.
+// PluginKey.getState() matches by object identity, so importing the wrong
+// package's key here doesn't error, it just always resolves to `undefined`
+// as if no Collaboration binding existed at all: captureRelativeRange
+// silently returned null on every real selection, so the doc editor's
+// selection widget could never appear. Caught by manual testing, not
+// caught by the diagnostic session `queueMicrotask`/`setTimeout` fixed —
+// the reentrancy bug above shared a test case but is a different bug.
+//
+// @tiptap/y-tiptap isn't in package.json directly; it's
+// @tiptap/extension-collaboration's own `^3.0.7` dependency. Add it as an
+// explicit direct dependency rather than relying on transitive hoisting —
+// see package.json.
+
+// @tiptap/y-tiptap's own `ProsemirrorMapping` type (dist/src/lib.d.ts) isn't
 // re-exported from the package's public entry point, only from an internal
 // path this codebase otherwise never reaches into — this is that type's
 // actual shape, restated rather than imported from an unsupported deep path.
@@ -11,7 +31,7 @@ type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>;
 
 // COLLAB.md §5 — this codebase's first app-level Y.RelativePosition code.
 // Everywhere else a relative position is used, it's entirely inside
-// y-prosemirror's own internals (CollaborationCaret's awareness cursor).
+// y-tiptap's own internals (CollaborationCaret's awareness cursor).
 //
 // The constraint that makes this safe, stated once here rather than at
 // every call site: a RelativeRange is never serialized and never stored.
@@ -26,7 +46,7 @@ type ProsemirrorMapping = Map<Y.AbstractType<unknown>, PMNode | PMNode[]>;
 // a database column, or React state that outlives the composing session.
 export type RelativeRange = { from: Y.RelativePosition; to: Y.RelativePosition };
 
-// The one thing that makes either conversion possible: a real y-prosemirror
+// The one thing that makes either conversion possible: a real y-tiptap
 // binding, which only exists when the editor is bound through the
 // `Collaboration` extension (ySyncPlugin). Both reading views in this
 // codebase push content with `setContent` instead (§12g) and have no

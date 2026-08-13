@@ -469,6 +469,23 @@ blob makes the doc-side checks report faults that evaporate once it's repaired).
   'SetContentOptions'`) but reads as obviously-correct against any pre-v3 example or answer,
   so it's worth recognizing rather than re-deriving. Used by `LiveDocBody.tsx` to push live
   Yjs updates into a non-`Collaboration` editor without re-emitting them.
+- **TipTap v3's `Collaboration` extension binds through `@tiptap/y-tiptap`, not
+  `y-prosemirror`** — a separate package (Tiptap's own fork,
+  `node_modules/@tiptap/extension-collaboration/dist/index.js` imports every one of
+  `ySyncPlugin`/`ySyncPluginKey`/`absolutePositionToRelativePosition`/
+  `relativePositionToAbsolutePosition` from it). Reading a Collaboration-bound editor's
+  sync-plugin state (`ySyncPluginKey.getState(editor.state)`, e.g. to reach the
+  y-prosemirror binding's `ProsemirrorMapping` for a relative-position conversion) needs
+  the key imported from `@tiptap/y-tiptap`, or `PluginKey.getState()`'s identity match
+  silently fails: it doesn't throw, it just returns `undefined`, indistinguishable from
+  "this editor has no Collaboration binding at all." `src/lib/yjs-relative-anchor.ts`
+  shipped with the wrong import for one review cycle (PLAN.md §18f) — every selection on
+  `/doc/[slug]/edit` silently failed to capture, caught only by manual testing, not by
+  `npx tsc`, `eslint`, or the e2e suite (nothing exercises that page's *selecting* text,
+  only typing into it). `y-prosemirror` itself stays a real dependency — `server/
+  ydoc-hooks.ts` uses it correctly for stateless Yjs↔ProseMirror conversion server-side,
+  which never touches a `PluginKey` — the trap is specifically about plugin-state lookups
+  against a live client-side `Editor`.
 - The TipTap schema is shared by the editor, Hocuspocus doc-seeding, and public rendering
   via `src/lib/tiptap-schema.ts` — change it only there so the three can't drift. It holds
   *two* schemas: `contentExtensions` (post body) and `titleExtensions` (the title, a separate

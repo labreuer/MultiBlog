@@ -5563,3 +5563,19 @@ receiving keystrokes faster than a human ever types. Accepted rather than chased
 `page.keyboard.type`'s per-character dispatch has no real-user equivalent, and the two fixes
 above are correct regardless of whether they touch the residual's actual mechanism. Revisit
 if it ever surfaces outside this one stress pattern.
+
+**A second, separate bug: the widget never appeared at all**, caught by manual testing after
+the above — the e2e trail above exercises typing, not selecting, so it never would have
+caught this. `yjs-relative-anchor.ts` imported `ySyncPluginKey` from `y-prosemirror`, but
+Tiptap v3's `@tiptap/extension-collaboration` binds through **`@tiptap/y-tiptap`**
+internally (`node_modules/@tiptap/extension-collaboration/dist/index.js`) — Tiptap's own
+fork, a separate package with its own `PluginKey` instance. `PluginKey.getState()` matches
+by object identity, so the wrong package's key doesn't error, it just always resolves to
+`undefined`, exactly as if the editor had no Collaboration binding — `captureRelativeRange`
+silently returned `null` on every real selection. Fixed by importing from `@tiptap/y-tiptap`
+instead, now an explicit direct dependency (`package.json`, pinned `^3.0.7` — it was already
+present transitively via `@tiptap/extension-collaboration`'s own dependency, at the same
+resolved version, so this changes nothing about what's installed, only makes the import
+supportable). `server/ydoc-hooks.ts`'s own `y-prosemirror` import is unaffected and correct
+as-is — a stateless Yjs↔ProseMirror conversion with no plugin-state lookup involved, not the
+same category of usage.
