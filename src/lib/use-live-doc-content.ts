@@ -9,6 +9,7 @@ import { docContentExtensions } from "./tiptap-schema";
 import { getCollabUrl } from "./collab-url";
 import { renderYdocDoc } from "./ydoc-render";
 import { PendingAnnotation } from "./pending-annotation-extension";
+import { captureYdocVersion } from "./ydoc-version-client";
 
 type Awareness = HocuspocusProvider["awareness"];
 
@@ -50,6 +51,12 @@ export type LiveDocContentOptions = {
   // state that doesn't exist yet. A ref the caller declares up front is what
   // lets both hooks take it as an input and neither depend on the other.
   editorRef: React.RefObject<Editor | null>;
+  // PLAN.md §13q — populated with a reader for this surface's live document
+  // version, for useSelectionPopover to call at selection time. Same
+  // caller-declares-the-ref shape as `editorRef` above and for the same
+  // reason: the selection hook is constructed first, since this one takes its
+  // `capture` as an input.
+  versionRef?: React.RefObject<(() => string) | null>;
   // View-only decoration layers the calling surface wants on top of the
   // shared schema — never node/mark types, which would drift this view's
   // schema from the editor's and the server's (CLAUDE.md). `PendingAnnotation`
@@ -131,6 +138,7 @@ export function useLiveDocContent({
   ydoc: hoistedYdoc,
   provider: hoistedProvider,
   editorRef,
+  versionRef,
   setAwareness,
   onEditorCreated,
   onSelectionUpdate,
@@ -222,10 +230,23 @@ export function useLiveDocContent({
     editorRef.current = editor;
   }, [editor, editorRef]);
 
+
   // Only constructed when nothing was hoisted in — see the options comment.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ownYdoc = useMemo(() => (hoistedYdoc ? null : new Y.Doc()), [docId, hoistedYdoc]);
   const ydoc = hoistedYdoc ?? ownYdoc!;
+
+  // PLAN.md §13q. Assigned once against `ydoc` rather than recreated per
+  // render: the Y.Doc identity is stable for this surface's lifetime, and the
+  // whole point is that the *call* happens at selection time rather than the
+  // value being computed ahead of it and going stale.
+  useEffect(() => {
+    if (!versionRef) return;
+    versionRef.current = () => captureYdocVersion(ydoc);
+    return () => {
+      versionRef.current = null;
+    };
+  }, [ydoc, versionRef]);
 
   // PLAN.md §14g — hoisted mode's "sync once on mount" counterpart to the
   // "update" listener registered below: the shared Y.Doc already holds every

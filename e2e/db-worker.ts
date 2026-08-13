@@ -26,12 +26,20 @@ import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
-import { contentExtensions, titleExtensions, collectMarkAttrValues, pmDocContentSchema } from "@/lib/tiptap-schema";
+import {
+  contentExtensions,
+  titleExtensions,
+  collectMarkAttrValues,
+  pmDocContentSchema,
+  annotationContentExtensions,
+  docContentExtensions,
+  pmAnnotationContentSchema,
+} from "@/lib/tiptap-schema";
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { captureAnchor } from "@/lib/doc-link-anchor";
 import { postContentFromYdoc } from "@/lib/post-content";
 import { docContentFromYdoc } from "@/lib/doc-content";
-import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
+import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
@@ -684,6 +692,16 @@ export type AnnotationState = {
   anchorFrom: number | null;
   anchorTo: number | null;
   quotedText: string;
+  /** PLAN.md §13q — the version stamp, stringified (BigInt doesn't cross the RPC). */
+  ydocUpdateId: string | null;
+  /**
+   * Whether replaying the anchor's target ydoc to that stamp and reading the
+   * stored offsets gives back the stored quote — the invariant
+   * captureAnnotationAnchor establishes and
+   * scripts/integrity/check-annotation-anchors.ts checks in bulk. Null when
+   * there is no anchor or no stamp to check it against.
+   */
+  quoteMatchesAtStamp: boolean | null;
   deletedAt: string | null;
 };
 
@@ -700,17 +718,50 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
   const proseJson = doc?.proseJson as JSONContent | null;
   const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
 
-  return annotations.map((a) => ({
-    id: a.id,
-    parentAnnotationId: a.parentAnnotationId,
-    bodyText: a.bodyText,
-    anchored: markedIds.has(a.id) || (a.anchorFrom !== null && a.quotedText !== ""),
-    marked: markedIds.has(a.id),
-    anchorFrom: a.anchorFrom,
-    anchorTo: a.anchorTo,
-    quotedText: a.quotedText,
-    deletedAt: a.deletedAt?.toISOString() ?? null,
-  }));
+  return Promise.all(
+    annotations.map(async (a) => ({
+      id: a.id,
+      parentAnnotationId: a.parentAnnotationId,
+      bodyText: a.bodyText,
+      anchored: markedIds.has(a.id) || (a.anchorFrom !== null && a.quotedText !== ""),
+      marked: markedIds.has(a.id),
+      anchorFrom: a.anchorFrom,
+      anchorTo: a.anchorTo,
+      quotedText: a.quotedText,
+      ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
+      quoteMatchesAtStamp: await quoteMatchesAtStamp(a),
+      deletedAt: a.deletedAt?.toISOString() ?? null,
+    })),
+  );
+}
+
+// The same replay-and-compare check-annotation-anchors.ts does, for one row,
+// so a spec can assert the invariant at the exact moment it posted rather
+// than trusting a bulk script run later.
+async function quoteMatchesAtStamp(a: {
+  docId: string;
+  parentAnnotationId: string | null;
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  ydocUpdateId: bigint | null;
+}): Promise<boolean | null> {
+  if (a.anchorFrom === null || a.anchorTo === null || a.quotedText === "" || a.ydocUpdateId === null) return null;
+  const isReply = a.parentAnnotationId !== null;
+  const ydocId = isReply ? ydocIdForAnnotation(a.parentAnnotationId!) : ydocIdForDoc(a.docId);
+  let ydoc: Y.Doc | null = null;
+  try {
+    ydoc = await materializeYdocAt(ydocId, a.ydocUpdateId);
+    const extensions = isReply ? annotationContentExtensions : docContentExtensions;
+    const schema = isReply ? pmAnnotationContentSchema : pmDocContentSchema;
+    const node = schema.nodeFromJSON(TiptapTransformer.extensions(extensions).fromYdoc(ydoc, "default"));
+    if (a.anchorTo > node.content.size) return false;
+    return node.textBetween(a.anchorFrom, a.anchorTo, " ") === a.quotedText;
+  } catch {
+    return false;
+  } finally {
+    ydoc?.destroy();
+  }
 }
 
 /**

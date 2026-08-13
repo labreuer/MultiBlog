@@ -11,6 +11,8 @@ import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
+import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
+import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import {
   annotationContentExtensions,
   docContentExtensions,
@@ -116,6 +118,12 @@ export async function postAnnotation(opts: {
   // other caller (the bottom composer, a reply) omits it and falls back to
   // the doc's own update-log tail below.
   ydocUpdateId?: string;
+  // PLAN.md §13q — the document version the offsets were measured against, as
+  // a base64 Yjs snapshot captured at selection time. Preferred over the tail
+  // below: it names what the annotator was actually looking at, where the
+  // tail names what the server happens to hold now. Absent from any surface
+  // with no live Y.Doc to capture from.
+  atVersion?: string;
 }): Promise<{ error?: string }> {
   const session = await auth();
   if (!session?.user) {
@@ -209,6 +217,45 @@ export async function postAnnotation(opts: {
       ydocUpdateId = BigInt(opts.ydocUpdateId);
     } catch {
       ydocUpdateId = null;
+    }
+  }
+  // PLAN.md §13q — the client's own version, converted. Tried before the tail
+  // because the two answer different questions: this one is "what was the
+  // annotator looking at", the tail is "what does the server hold now", and
+  // they diverge exactly when somebody else is editing — which is the case
+  // the stamp exists for.
+  //
+  // Only for an anchor into the doc. A reply's anchor targets its parent
+  // annotation's ydoc, which the client has no live connection to (an
+  // annotation body renders from its proseJson cache, not a tap), so there is
+  // no version to capture and the tail is used. That is not a gap: nothing
+  // edits a posted annotation body today, so the tail *is* what the reader
+  // saw. It stops being true the day bodies become mutable (COLLAB.md's
+  // 2026-08-13 entry), which is when this branch needs a client-side capture
+  // of its own rather than a different server-side rule.
+  if (ydocUpdateId === null && opts.atVersion && anchorRequested && parentId === null) {
+    try {
+      const headDoc = await materializeYdocAt(anchorYdocId, (await ydocStore.maxUpdateId(anchorYdocId))!);
+      const resolved = await resolveUpdateIdForSnapshot(
+        anchorYdocId,
+        Buffer.from(opts.atVersion, "base64"),
+        headDoc,
+      );
+      headDoc.destroy();
+      ydocUpdateId = resolved.updateId;
+      if (resolved.walked > 200) {
+        console.info(
+          `[annotations] resolved a version ${resolved.walked} rows back in ${anchorYdocId} — ` +
+            `checkpointing is one debounce behind head, so this means the annotator was frozen for a while`,
+        );
+      }
+    } catch (err) {
+      // A malformed or undecodable snapshot, or a store failure. Falls to the
+      // tail below, which is exactly the behaviour before this existed — the
+      // anchor stays self-consistent with whatever gets stamped either way
+      // (captureAnnotationAnchor re-derives against it), so this degrades
+      // rather than fails.
+      console.error(`[annotations] couldn't resolve the client's version for ${anchorYdocId}:`, err);
     }
   }
   if (ydocUpdateId === null) {

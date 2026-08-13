@@ -22,6 +22,10 @@ type Props = {
   // only from the doc editor, which is also the only caller of the three
   // props below.
   anchorMode?: "mark" | "columns";
+  // PLAN.md §13q — the document version the selection was read against,
+  // captured at selection time by useSelectionPopover. Threaded straight
+  // through; only postAnnotation knows what to do with it.
+  atVersion?: string | null;
   // PLAN.md §12p/§13 — the reading view's own scrub position when known
   // precisely, threaded straight through to LiveAnnotationComposer.
   ydocUpdateId?: string | null;
@@ -65,6 +69,7 @@ export default function AnnotationPopover({
   to,
   quotedText,
   anchorMode = "columns",
+  atVersion = null,
   ydocUpdateId = null,
   allowMoveToBottom = true,
   autoOpen = false,
@@ -129,6 +134,7 @@ export default function AnnotationPopover({
           anchorTo={to}
           quotedText={quotedText}
           anchorMode={anchorMode}
+          atVersion={atVersion}
           ydocUpdateId={ydocUpdateId}
           resolveAnchor={resolveAnchor}
           onPosted={onPosted}

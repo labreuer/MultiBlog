@@ -268,6 +268,64 @@ test.describe("annotations", () => {
     await expect(readerPage.locator("blockquote", { hasText: QUOTED_TEXT })).toBeVisible();
   });
 
+  // PLAN.md §13q — the stamp is *the version the annotator was looking at*,
+  // not the log's tail at the moment they clicked Post. Those are the same
+  // number unless somebody edits in between, so the test makes somebody edit
+  // in between: a second author types into the doc while the reader holds a
+  // selection, which advances the tail past what the reader can see (the
+  // reading view freezes its render on a selection, §12).
+  //
+  // Before this, the annotation would have been stamped with the tail —
+  // pointing at a state containing text the annotator never saw.
+  test("an annotation is stamped with the version its author was looking at, not the tail", async ({
+    page,
+    sharedDoc,
+    secondUser,
+  }) => {
+    const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
+
+    await readerPage.goto(`/doc/${sharedDoc.slug}`);
+    await expect(bodyEditor(readerPage)).toBeVisible();
+    await expect(readerPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+
+    // Hold a selection: from here the reader's render is frozen.
+    await selectTextInBody(readerPage, QUOTED_TEXT);
+    const popup = readerPage.getByTestId("annotation-popup");
+    await popup.getByRole("button", { name: "Annotate" }).click();
+
+    // Meanwhile the author types, advancing the log well past the reader's view.
+    await page.goto(`/doc/${sharedDoc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await bodyEditor(page).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Appended while the reader was mid-annotation.");
+    await expect
+      .poll(async () => (await getDocState(sharedDoc.id))?.proseText ?? "", { timeout: 15_000 })
+      .toContain("mid-annotation");
+
+    await annotationEditor(readerPage).click();
+    await readerPage.keyboard.type("Stamped against what I could see.");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+
+    await expect
+      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.quotedText, { timeout: 15_000 })
+      .toBe(QUOTED_TEXT);
+
+    // The stamp names a state *older* than the tail — i.e. the reader's, not
+    // the server's. Asserted as a strict inequality rather than an exact id
+    // because how many update rows the author's typing produced is a Yjs
+    // batching detail, but that it produced some is not.
+    const [annotation] = await getAnnotationStates(sharedDoc.id);
+    const doc = await getDocState(sharedDoc.id);
+    expect(annotation.ydocUpdateId).not.toBeNull();
+    expect(BigInt(annotation.ydocUpdateId!)).toBeLessThan(BigInt(doc!.ydocMaxUpdateId!));
+
+    // And the invariant still holds at that older stamp: replaying to it and
+    // reading the stored offsets gives back the stored quote. That is what
+    // scripts/integrity/check-annotation-anchors.ts checks in bulk.
+    expect(annotation.quoteMatchesAtStamp).toBe(true);
+  });
+
   // PLAN.md §13p — an annotation's own body is a surface you can annotate,
   // and the same gesture means the same thing there: selecting text is the
   // request to reply about *that* passage. The anchor targets the parent

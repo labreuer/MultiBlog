@@ -117,7 +117,14 @@ export default function DocReadingBody({
     [initialAnchors],
   );
 
-  const selection = useSelectionPopover({ editorRef, containerRef, userColor });
+  // PLAN.md §13q — declared here so both hooks can take it: useLiveDocContent
+  // owns the Y.Doc and fills this in, useSelectionPopover calls it at
+  // selection time. Same shape as `editorRef` above, and for the same reason
+  // (the selection hook is constructed first, since the content hook takes
+  // its `capture`).
+  const versionRef = useRef<(() => string) | null>(null);
+
+  const selection = useSelectionPopover({ editorRef, containerRef, userColor, versionRef });
 
   // The view's other freeze reason (PLAN.md §12) — any non-empty selection,
   // not merely one whose popover happens to be open, since the two are set
@@ -131,6 +138,7 @@ export default function DocReadingBody({
     overrideBodyJSON,
     frozen,
     editorRef,
+    versionRef,
     setAwareness,
     extensions,
     onSelectionUpdate: selection.capture,
@@ -208,6 +216,7 @@ export default function DocReadingBody({
           from={selection.pending.from}
           to={selection.pending.to}
           quotedText={selection.pending.quotedText}
+          atVersion={selection.pending.atVersion}
           ydocUpdateId={scrubUpdateId}
           onPosted={() => selection.clear()}
           onCancel={() => selection.clear()}
