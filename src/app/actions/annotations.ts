@@ -10,6 +10,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { annotationRevalidationPaths, requireDocAnnotationId } from "@/lib/annotation-container";
 import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
@@ -132,7 +133,7 @@ export async function postAnnotation(opts: {
 
   const annotation = await prisma.annotation.findUnique({
     where: { id: opts.annotationId },
-    select: { id: true, docId: true, userId: true, parentAnnotationId: true, status: true },
+    select: { id: true, docId: true, fileId: true, userId: true, parentAnnotationId: true, status: true },
   });
   if (!annotation) {
     return { error: "Annotation not found." };
@@ -174,6 +175,12 @@ export async function postAnnotation(opts: {
   }
 
   const parentId = annotation.parentAnnotationId;
+  // PLAN.md §19 — everything below this line assumes the annotation is about a
+  // *doc*: it stamps the doc's update log, may write a mark into the doc's
+  // ydoc, and emails the doc's byline. A file has no update log and no ydoc to
+  // mark, so the PDF branch is genuinely different work rather than a different
+  // id, and it arrives in Phase 3 along with the surface that can create one.
+  const docId = requireDocAnnotationId(annotation, "postAnnotation");
 
   // PLAN.md §13p — **what an anchor points at is decided by whether this is a
   // reply, not by what the client asked for.** A root annotation anchors into
@@ -196,7 +203,7 @@ export async function postAnnotation(opts: {
   // Which ydoc the anchor is measured into — and therefore which update log
   // stamps it (§13o: the stamp is the coordinate system, so the two cannot be
   // chosen independently).
-  const anchorYdocId = parentId !== null ? ydocIdForAnnotation(parentId) : ydocIdForDoc(annotation.docId);
+  const anchorYdocId = parentId !== null ? ydocIdForAnnotation(parentId) : ydocIdForDoc(docId);
 
   // The client's own position when it knew one precisely; otherwise the tail
   // of whichever log is about to matter. A malformed client value (should
@@ -260,7 +267,7 @@ export async function postAnnotation(opts: {
   }
   if (ydocUpdateId === null) {
     ydocUpdateId = await ydocStore.maxUpdateId(
-      anchorRequested ? anchorYdocId : ydocIdForDoc(annotation.docId),
+      anchorRequested ? anchorYdocId : ydocIdForDoc(docId),
     );
   }
 
@@ -301,7 +308,7 @@ export async function postAnnotation(opts: {
   // root check of its own.
   if (anchorRequested && anchorMode === "mark") {
     const { applied, markUpdateId } = await applyAnnotationMark({
-      docId: annotation.docId,
+      docId,
       userId: session.user.id,
       role: session.user.role,
       annotationId: annotation.id,
@@ -338,7 +345,7 @@ export async function postAnnotation(opts: {
 
   if (opts.raise) {
     const doc = await prisma.doc.findUnique({
-      where: { id: annotation.docId },
+      where: { id: docId },
       select: { title: true, slug: true, authors: { select: { user: { select: { email: true } } } } },
     });
     if (doc) {
@@ -354,7 +361,7 @@ export async function postAnnotation(opts: {
     }
   }
 
-  revalidatePath(`/doc/${annotation.docId}`);
+  revalidatePath(`/doc/${docId}`);
   return {};
 }
 
@@ -369,7 +376,7 @@ export async function saveDraftAnnotation(annotationId: string): Promise<{ error
   }
   const annotation = await prisma.annotation.findUnique({
     where: { id: annotationId },
-    select: { userId: true, status: true, docId: true },
+    select: { userId: true, status: true, docId: true, fileId: true },
   });
   if (!annotation) {
     return { error: "Annotation not found." };
@@ -382,7 +389,7 @@ export async function saveDraftAnnotation(annotationId: string): Promise<{ error
   }
 
   await flushAnnotationCache({ userId: session.user.id, role: session.user.role, annotationId });
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
   return {};
 }
 
@@ -397,7 +404,7 @@ export async function discardDraftAnnotation(annotationId: string): Promise<void
   }
   const annotation = await prisma.annotation.findUnique({
     where: { id: annotationId },
-    select: { userId: true, status: true, docId: true },
+    select: { userId: true, status: true, docId: true, fileId: true },
   });
   if (!annotation) {
     return;
@@ -410,7 +417,7 @@ export async function discardDraftAnnotation(annotationId: string): Promise<void
   }
   await prisma.annotation.delete({ where: { id: annotationId } });
   await prisma.ydoc.deleteMany({ where: { id: ydocIdForAnnotation(annotationId) } });
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
 }
 
 async function requireOwnOrAdmin(annotationId: string) {
@@ -420,7 +427,7 @@ async function requireOwnOrAdmin(annotationId: string) {
   }
   const annotation = await prisma.annotation.findUnique({
     where: { id: annotationId },
-    select: { userId: true, docId: true, status: true },
+    select: { userId: true, docId: true, fileId: true, status: true },
   });
   if (!annotation) {
     throw new Error("Annotation not found.");
@@ -440,7 +447,10 @@ export async function deleteAnnotation(annotationId: string): Promise<void> {
   });
   // A DRAFT never had a mark applied (§13d), so there's nothing to remove —
   // skip the round trip for the common "deleting my own private note" case.
-  if (annotation.status !== "DRAFT") {
+  // A *file* annotation never has one either, and for a stronger reason: a
+  // file has no ydoc at all, so there is no document to take a mark out of
+  // (PLAN.md §19). Both are the same early exit for different causes.
+  if (annotation.status !== "DRAFT" && annotation.docId !== null) {
     await removeAnnotationMark({
       docId: annotation.docId,
       userId: session.user.id,
@@ -448,7 +458,7 @@ export async function deleteAnnotation(annotationId: string): Promise<void> {
       annotationId,
     });
   }
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
   revalidatePath("/annotations");
 }
 
@@ -458,7 +468,7 @@ export async function restoreAnnotation(annotationId: string): Promise<void> {
     where: { id: annotationId },
     data: { deletedByUserId: null, deletedAt: null },
   });
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
   revalidatePath("/annotations");
 }
 

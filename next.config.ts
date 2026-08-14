@@ -9,7 +9,15 @@ const nextConfig: NextConfig = {
   // one yjs version is installed. Marking it external makes every server-side
   // layer resolve it through Node's own require cache instead.
   // https://github.com/yjs/yjs/issues/438
-  serverExternalPackages: ["yjs"],
+  //
+  // pdfjs-dist is external for a different reason (PLAN.md §19): the
+  // server-side text extraction resolves pdfjs's *own* worker and standard-font
+  // files by path (`createRequire(...).resolve`, src/lib/pdf-extract.ts), which
+  // only answers correctly if the package is being loaded from node_modules
+  // rather than inlined into a bundle. Bundling it would also drag several MB
+  // of parser into every server chunk that transitively touches the upload
+  // route.
+  serverExternalPackages: ["yjs", "pdfjs-dist"],
   // Next 15+ blocks cross-origin dev requests by default (HMR, RSC) as a CSRF
   // guard against a malicious site on the LAN reaching your dev server. Your
   // own devices on the same network need an explicit allowlist entry — this

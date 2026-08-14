@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
-import { canManagePosts, canManageDocs, isAdmin } from "@/lib/role-checks";
+import { canManagePosts, canManageDocs, canManageFiles, isAdmin } from "@/lib/role-checks";
 import { SITE_TITLE } from "@/lib/site-config";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import styles from "./SiteHeader.module.css";
@@ -102,6 +102,16 @@ export default function SiteHeader() {
   }
   if (session?.user && isAdmin(session.user.role)) {
     leftNav.push({ key: "users", node: <Link href="/users">Users</Link> });
+  }
+  // PLAN.md §19 — asked for as "to the right of Users", and placed here so it
+  // is, *for an ADMIN*. Users is ADMIN-only while Files is AUTHOR-and-up, so
+  // for an EDITOR or AUTHOR there is no Users entry for it to sit right of and
+  // it simply follows Docs. The literal position can't hold for every role;
+  // the order can.
+  if (session?.user && canManageFiles(session.user.role)) {
+    leftNav.push({ key: "files", node: <Link href="/files">Files</Link> });
+  }
+  if (session?.user && isAdmin(session.user.role)) {
     leftNav.push({ key: "site-settings", node: <Link href="/site-settings">Site Settings</Link> });
   }
 

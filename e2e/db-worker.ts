@@ -20,12 +20,17 @@ import bcrypt from "bcryptjs";
 import * as Y from "yjs";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
-import { prisma } from "@/lib/prisma";
+import { readFile } from "node:fs/promises";
+import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
+import { uniqueFileSlug } from "@/lib/file-slug";
+import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
+import { extractPdf } from "@/lib/pdf-extract";
+import { buildTestPdf } from "../scripts/make-test-pdf";
 import {
   contentExtensions,
   titleExtensions,
@@ -387,6 +392,114 @@ export async function addTestPostAuthor(postId: string, email: string): Promise<
   });
 }
 
+export type TestFile = {
+  id: string;
+  slug: string;
+  title: string;
+  sha256: string;
+  pageCount: number;
+  byteSize: number;
+  /** Normalised text of each page, index 0 = page 1 — what a spec asserts a selection against. */
+  pages: string[];
+};
+
+/**
+ * A throwaway uploaded file (PLAN.md §19).
+ *
+ * Goes through the **real** storage and extraction path — storeUploadStream and
+ * extractPdf, not a hand-written row — so a fixture file is byte-for-byte what
+ * the upload route would have produced. A shortcut here (a fake sha256, an
+ * empty file_page_text) would leave every viewer and anchoring spec testing a
+ * shape production never creates.
+ *
+ * Text comes from scripts/make-test-pdf.ts, and the returned `pages` are the
+ * extractor's own output rather than the input strings — normalisation joins
+ * lines and collapses whitespace, so what a spec must search for on screen is
+ * this, not what was written into the PDF.
+ */
+export async function createTestFile(opts: {
+  authorEmail: string;
+  title?: string;
+  visibility?: DocVisibility;
+  pages?: string[][];
+}): Promise<TestFile> {
+  const { authorEmail, title = uniqueTitle("file"), visibility = "PRIVATE" } = opts;
+  assertSafe(authorEmail);
+
+  const author = await prisma.user.findUnique({ where: { email: authorEmail } });
+  if (!author) throw new Error(`No such test author: ${authorEmail}`);
+
+  const pageLines = opts.pages ?? [
+    ["The quick brown fox jumps over the lazy dog.", "Page one of a throwaway test document."],
+    ["Page two begins here, well past the first screenful.", "Distinctive phrase: xylophone marmalade."],
+  ];
+
+  const bytes = buildTestPdf(pageLines);
+  const stored = await storeUploadStream(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
+  );
+  const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
+
+  const file = await prisma.storedFile.create({
+    data: {
+      slug: await uniqueFileSlug(title),
+      title,
+      filename: `${title.replace(/[^\w.-]+/g, "-")}.pdf`,
+      contentType: "application/pdf",
+      byteSize: stored.byteSize,
+      sha256: stored.sha256,
+      pageCount: parsed.pageCount,
+      visibility,
+      updatedByUserId: author.id,
+      authors: { create: { userId: author.id, bylineOrder: 0 } },
+    },
+    select: { id: true, slug: true },
+  });
+  await prisma.filePageText.createMany({
+    data: parsed.pages.map((text, pageIndex) => ({
+      fileId: file.id,
+      pageIndex,
+      textVersion: parsed.textVersion,
+      text,
+    })),
+  });
+
+  return {
+    id: file.id,
+    slug: file.slug,
+    title,
+    sha256: stored.sha256,
+    pageCount: parsed.pageCount,
+    byteSize: stored.byteSize,
+    pages: parsed.pages,
+  };
+}
+
+/** Same @example.com containment as deleteTestDoc, plus the shared-bytes rule. */
+export async function deleteTestFile(idOrSlug: string): Promise<void> {
+  const file = await prismaIncludingDeleted.storedFile.findFirst({
+    where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    select: { id: true, title: true, sha256: true, authors: { select: { user: { select: { email: true } } } } },
+  });
+  if (!file) return;
+
+  const unsafe = file.authors.filter((a) => !SAFE_EMAIL.test(a.user.email));
+  if (file.authors.length === 0 || unsafe.length > 0) {
+    throw new Error(`Refusing to delete file "${file.title}" — it has a non-throwaway (or missing) author.`);
+  }
+
+  await prismaIncludingDeleted.storedFile.delete({ where: { id: file.id } });
+  // Content-addressed storage means another file may share these bytes; only
+  // sweep them once nothing points at them.
+  const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
+  await deleteBytesIfUnreferenced(file.sha256, remaining);
+}
+
 export async function deleteTestDoc(idOrSlug: string): Promise<void> {
   const doc = await prisma.doc.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
@@ -729,7 +842,11 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
       anchorTo: a.anchorTo,
       quotedText: a.quotedText,
       ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
-      quoteMatchesAtStamp: await quoteMatchesAtStamp(a),
+      // `docId` is re-supplied rather than read off the row: the query above
+      // filters on it, so it is non-null here, but Annotation.docId is a
+      // nullable column since files became a second container (PLAN.md §19)
+      // and the type can't see the where clause.
+      quoteMatchesAtStamp: await quoteMatchesAtStamp({ ...a, docId }),
       deletedAt: a.deletedAt?.toISOString() ?? null,
     })),
   );
@@ -1103,6 +1220,8 @@ const handlers = {
   addTestDocAuthor,
   addTestPostAuthor,
   deleteTestDoc,
+  createTestFile,
+  deleteTestFile,
   getDocState,
   getContributorFields,
   getAvatarFacts,

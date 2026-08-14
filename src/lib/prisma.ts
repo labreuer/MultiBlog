@@ -74,6 +74,14 @@ export const prisma = client.$extends({
     doc: {
       $allOperations: (params) => excludeSoftDeleted(params.operation, params.args, params.query),
     },
+    // PLAN.md §19 — joins for exactly the reasons doc does: the same
+    // deletedByUserId/deletedAt pair, an admin table (/files) that reaches for
+    // prismaIncludingDeleted precisely so it can offer a restore, and slug
+    // uniqueness that has to see soft-deleted rows. Annotation is still
+    // excluded here and filters by hand, unchanged.
+    storedFile: {
+      $allOperations: (params) => excludeSoftDeleted(params.operation, params.args, params.query),
+    },
   },
 });
 

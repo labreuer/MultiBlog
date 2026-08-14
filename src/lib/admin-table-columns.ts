@@ -9,7 +9,7 @@ import type { AdminTableName } from "@/lib/column-order";
 // to read from.
 //
 // This is a real, unavoidable duplication — the alternative is a deeper
-// refactor separating "column identity" from "cell renderer" across all five
+// refactor separating "column identity" from "cell renderer" across all six
 // tables, out of scope here — so it is centralized in this one file rather
 // than scattered, and each table's block below is ordered and worded to make
 // a side-by-side diff against that table's own ColumnSpec easy. **Adding,
@@ -40,6 +40,20 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "length", label: "Length" },
     { key: "slug", label: "Slug", defaultHidden: true },
     { key: "created", label: "Created", defaultHidden: true },
+    { key: "deletedAt", label: "Deleted at", defaultHidden: true },
+  ],
+  files: [
+    { key: "title", label: "Title" },
+    { key: "filename", label: "Filename" },
+    { key: "authors", label: "Author(s)" },
+    { key: "visibility", label: "Visibility" },
+    { key: "pages", label: "Pages" },
+    { key: "size", label: "Size" },
+    { key: "annotations", label: "Annotations" },
+    { key: "created", label: "Added" },
+    { key: "slug", label: "Slug", defaultHidden: true },
+    { key: "updatedAt", label: "Updated", defaultHidden: true },
+    { key: "updatedBy", label: "Updated by", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   users: [

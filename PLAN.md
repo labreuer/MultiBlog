@@ -6051,3 +6051,497 @@ resolved version, so this changes nothing about what's installed, only makes the
 supportable). `server/ydoc-hooks.ts`'s own `y-prosemirror` import is unaffected and correct
 as-is — a stateless Yjs↔ProseMirror conversion with no plugin-state lookup involved, not the
 same category of usage.
+
+---
+
+## 19. PDF files and a collaborative PDF viewer
+
+### Context
+
+MultiBlog can host *docs* (TipTap over Yjs) but not *files*. The need is to upload PDFs,
+list and permission them the way docs already are, and read them in-browser with the same
+quote-anchored annotation conversation `/doc/[slug]` has — plus something docs never needed:
+multiple people reading one long document at different places, able to see and join each
+other's position.
+
+[docs/PDF.md](docs/PDF.md) settles the renderer (PDF.js) and the hard constraint
+(**annotations live outside the PDF; the file is read-only**), and recommends an anchor
+model, coordinate rules, layer structure and sync wire format. This plan adopts that
+document, with the deviations listed under *Deviations from docs/PDF.md* below.
+
+Intended outcome: `/files` (an admin table with upload) and `/pdf/[slug]` (a viewer with
+annotations, presence, and opt-in follow), reusing the existing annotation stack rather
+than growing a second one.
+
+---
+
+### Decisions taken
+
+#### Annotation storage — copy `/doc/[slug]`'s split, not a single ydoc
+
+The comparison, since it drives everything downstream:
+
+A single `ydoc:pdf:<fileId>` holding `Y.Map<id, Annotation>` (docs/PDF.md §9's literal
+recommendation) wins on three things: awareness needs a per-file ydoc *anyway*, so
+annotations would ride a connection that must exist regardless; the annotation list would
+update live where `/doc/[slug]` needs a `router.refresh()`; and offline creation would merge
+on reconnect.
+
+It loses on five, all specific to this codebase:
+
+1. **Hocuspocus authorizes the connection, not the keys.** Every connected client receives
+   every `Y.Map` entry. Two rules currently enforced in Postgres would break: a `DRAFT` is
+   invisible to everyone but its author (`getDocAnnotationsAsThreads`), and delete/restore is
+   `requireOwnOrAdmin` with a `deletedByUserId` audit. In a `Y.Map` anyone with a writable
+   connection can read another's draft and delete or resurrect any key, unattributed.
+2. **`/annotations` would go blind.** CLAUDE.md requires every admin table to filter, sort
+   and paginate in Postgres. A `Y.Map` is unqueryable from there, so PDF annotations would be
+   absent from that listing or need a second, JS-side one.
+3. **`RAISED` (notify authors) has no server trigger** — a `Y.Map` write is a client
+   mutation the Next server never sees, where `postAnnotation` is a server action that
+   flushes, validates, stamps and emails.
+4. **One never-truncated update log per PDF** carrying every keystroke of every annotation
+   body, downloaded in full on open. Today a body's history loads only when that body opens.
+5. **CRDT merge has nothing to merge.** A PDF annotation's *target* is written once and
+   never moves — the bytes are immutable and `docId` is a content hash (docs/PDF.md §4). The
+   only concurrently-edited thing is the body, which already has its own ydoc.
+
+So: **records → Postgres, ephemeral viewport → awareness**, which is the split
+`/doc/[slug]` already makes and docs/PDF.md invariant 5 states. The per-file ydoc still gets
+built — it just carries awareness and nothing else.
+
+#### The other two forks
+
+- **Bytes → content-addressed filesystem**, not a Postgres `bytea`. Prisma cannot stream a
+  `Bytes` column, so a 50MB file would land whole in Node's heap on upload *and* on every one
+  of PDF.js's range requests.
+- **`/pdf/[slug]` → full-viewport app shell**, not the page-scrolled `/doc/[slug]` layout.
+  This removes the need for PLAN.md §18's `createPortal`: the rail and the annotation list
+  are the same scroller, so cards are positioned within the panel that already owns them.
+
+---
+
+### Phase 0 — Dependency and version pin
+
+- `npm i pdfjs-dist@6.2.108` — **exact, no caret** (docs/PDF.md invariant 6, §10). ESM-only
+  (`.mjs`); `serverExternalPackages` in [next.config.ts](next.config.ts) may need it if the
+  Node-side text extraction (Phase 1) trips the same double-load issue `yjs` has.
+- `e2e/pdfjs-internals.spec.ts` — the smoke test §10 asks for. Asserts the specific internals
+  we touch still exist: `EventBus`, `PDFViewer.prototype.scrollPageIntoView`,
+  `pageView.div`, `viewport.convertToPdfPoint`, `viewport.convertToViewportRectangle`, and
+  the `textlayerrendered` / `updateviewarea` / `pagesinit` event names. An upgrade then fails
+  loudly here rather than silently at runtime.
+- Worker: set `GlobalWorkerOptions.workerPort = new Worker(new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url), { type: "module" })`.
+  Verify under Turbopack at implementation time; fall back to copying the worker into
+  `public/pdfjs/` from a `postinstall` script if the `new URL` form doesn't survive bundling.
+
+---
+
+### Phase 1 — The file table, storage, and upload
+
+#### Schema (`prisma/schema.prisma`)
+
+**Model named `StoredFile`, `@@map("file")`.** The table is `file`; the generated TS type
+must not be `File`, which would shadow the DOM/Node global that the upload code uses.
+
+```
+model StoredFile {
+  id, slug @unique, title, filename, contentType, byteSize Int, sha256 String,
+  pageCount Int?, visibility DocVisibility @default(PRIVATE),
+  createdAt, updatedAt, updatedByUserId, deletedByUserId, deletedAt
+  authors FileAuthor[]  slugHistory FileSlugHistory[]
+  annotations Annotation[]  metrics FileMetrics?
+  @@map("file")
+}
+model FileAuthor      { fileId, userId, bylineOrder, @@id([fileId, userId]) }
+model FileSlugHistory { id, fileId, slug @unique, createdAt }
+model FilePageText    { fileId, pageIndex, textVersion, text, @@id([fileId, pageIndex, textVersion]) }
+view  FileMetrics     { fileId @unique, byline String?, annotationCount Int }
+```
+
+- `DocVisibility` is reused as-is rather than cloned — it is already the site's
+  PRIVATE/SHARED vocabulary, and the user-facing rule is explicitly "same as docs".
+- `FileMetrics` is built by **grouping `file_author`**, never selecting `FROM file` — the
+  lesson `add_doc_metrics_view` records (Postgres 18's self-join elimination only fires for
+  INNER joins, and Prisma emits a LEFT JOIN for a to-one ordering). `annotationCount` is a
+  filtered count (excludes soft-deleted), which is exactly the case CLAUDE.md says belongs
+  in a view. `byteSize`/`pageCount` are plain stored columns — no view, no trigger.
+- `FilePageText` holds the **normalised** page text (docs/PDF.md §3), extracted server-side
+  at upload. This resolves §12's first open question in favour of storing it, and it is what
+  lets `quotedText` stay server-derived (see Phase 3) without re-parsing the PDF per post.
+
+**`Annotation` gains a second container.** `docId` becomes nullable; `fileId String?` is
+added with `onDelete: Cascade`; a hand-written `CHECK ((doc_id IS NOT NULL) <> (file_id IS
+NOT NULL))` goes in the migration — same technique `DocLink`'s `mark_id`/`mark` CHECK uses,
+since Prisma has no CHECK DSL. Required→nullable is a plain `DROP NOT NULL` with no
+interactive backfill prompt, so this is one migration.
+
+**`pdfTarget Json?`** carries docs/PDF.md §2's `Target` verbatim — `{ pageIndex, quads,
+quote, position, textVersion }` — as one column rather than seven. That is invariant 3
+(renderer-neutral, a renderer swap is a rendering change not a data migration), and it
+follows `DocLink.mark`'s precedent of an anchor as a JSON blob. `quotedText` reuses the
+existing column for `quote.exact`, so `/annotations`' Quote column needs no PDF branch.
+
+A **reply** to a PDF annotation needs nothing new: §13p already anchors a reply into its
+parent annotation's own ydoc via `anchorFrom`/`anchorTo`, and a PDF annotation's body is an
+ordinary `ydoc:annotation:<id>`. Only *roots* use `pdfTarget`.
+
+#### Byte storage
+
+`FILE_STORAGE_DIR` (bare env var, gitignored path, default `.file-storage/`), laid out
+content-addressed: `<dir>/<sha256[0:2]>/<sha256>`. Dedupe is free, and the hash *is*
+docs/PDF.md's `DocId`. New `src/lib/file-storage.ts` (server-only) owns pathing, the
+streaming write, and the read stream.
+
+**This is a new backup surface** — `pg_dump` no longer captures everything. DEPLOY.md needs
+a line saying so.
+
+#### Upload route — `src/app/api/files/upload/route.ts`
+
+`POST /api/files/upload?filename=<encoded>` with the **raw bytes as the body**, not
+`multipart/form-data`. Two reasons: `await request.formData()` buffers the whole file into
+memory, and raw-body avoids pulling in a multipart parser. A Route Handler is not subject to
+Server Actions' `bodySizeLimit` at all — that is the limit the user asked to bypass, and
+this is how (`uploadContributorAvatar` in [src/app/actions/contributor.ts](src/app/actions/contributor.ts)
+documents the constraint from the other side).
+
+Flow: `request.body` → `createWriteStream(tmp)` while hashing incrementally and counting
+bytes; abort past `MAX_UPLOAD_BYTES` (`FILE_MAX_UPLOAD_BYTES` env, default 50 × 1024 × 1024);
+verify the `%PDF-` magic on the first chunk; `rename` into the content-addressed path;
+extract `pageCount` and per-page normalised text with `pdfjs-dist/legacy/build/pdf.mjs`;
+create the `StoredFile` + `FileAuthor` + `FilePageText` rows in one transaction, claiming the
+slug through it (the `claimSlug` convention the importers use — `uniqueFileSlug` queries the
+global client and can't see rows the same transaction created).
+
+Slug from the upload filename, via the existing `slugify` + `RESERVED_SLUGS` machinery in
+[src/lib/slug.ts](src/lib/slug.ts); `src/lib/file-slug.ts` mirrors
+[src/lib/doc-slug.ts](src/lib/doc-slug.ts) exactly (`uniqueFileSlug`, `changeFileSlug`,
+`revertFileSlug`, its own namespace, no catch-all against post/doc slugs).
+
+#### Download route — `src/app/api/files/[id]/[hash]/route.ts`
+
+Session-gated by `canUserReadFile` (unlike the avatar route, which is deliberately public).
+Streams from disk with **`Range` support** — PDF.js range-requests a large PDF instead of
+pulling it whole. `ETag: "<sha256>"`, `Cache-Control: private, max-age=31536000, immutable`,
+and the same stale-hash graceful path the avatar route uses.
+
+#### nginx
+
+Add to the `location / { … }` block in
+[deploy/nginx-app.conf.sample](deploy/nginx-app.conf.sample):
+
+```nginx
+    # PDF uploads (PLAN.md §19). nginx's default client_max_body_size is 1m,
+    # which rejects every upload before it reaches Next. Keep this >= the app's
+    # FILE_MAX_UPLOAD_BYTES; the app reports a mismatch rather than hanging.
+    client_max_body_size 64m;
+    client_body_timeout  300s;
+    # Stream the body straight through instead of spooling 64m to disk first.
+    # Also makes an over-limit upload fail fast with a clean 413 up front.
+    proxy_request_buffering off;
+```
+
+#### Catching a misconfigured proxy
+
+Three layers, because an under-configured nginx fails in two different ways:
+
+1. **`GET /api/files/limits`** → `{ maxUploadBytes }`. The client refuses an over-sized file
+   locally, before any bytes leave the browser.
+2. **`413` on upload** → "The reverse proxy rejected this upload before it reached the app.
+   nginx's `client_max_body_size` is probably below the app's limit (N MB) — see
+   `deploy/nginx-app.conf.sample`." Uploads go through `XMLHttpRequest` rather than `fetch`,
+   for progress *and* because a proxy that resets the connection mid-body surfaces as an
+   opaque `TypeError: Failed to fetch`; a rejected `xhr` with `status === 0` on a body over
+   ~1MB gets the same message.
+3. **Admin-only "Check upload limit"** button on `/files`, which POSTs a
+   `MAX_UPLOAD_BYTES`-sized throwaway body to `/api/files/upload?probe=1` (discarded, no row
+   written). An honest end-to-end proxy check to run once after a deploy, rather than
+   discovering the limit with someone's real 40MB PDF.
+
+#### Permissions — `src/lib/file-authz.ts`
+
+Mirrors [src/lib/doc-authz.ts](src/lib/doc-authz.ts) function for function:
+`canUserReadFile` (SHARED → `canViewFiles`; PRIVATE → listed `FileAuthor`s alone, no
+ADMIN/EDITOR bypass), `canUserManageFile`, `canEditAnySharedFile`, `readableFilesFor`.
+
+`canViewFiles` / `canManageFiles` go in [src/lib/role-checks.ts](src/lib/role-checks.ts)
+with the same role sets as their doc counterparts and **deliberately not delegating to
+them** — the precedent and its rationale are already written above `canManageDocs` and
+`canEditAnySharedDoc`. `role-checks.ts` is the right home because `SiteHeader` (a client
+component) needs `canManageFiles` for the nav link.
+
+#### `/files` page and nav
+
+- `src/lib/files-query.ts` over [src/lib/table-query.ts](src/lib/table-query.ts), + a
+  `FilesTable.tsx` built from `src/components/table/` — the kit, not a fresh `<table>`.
+  Columns, all sortable: Title, Filename, Authors (`file_metrics.byline`), Visibility, Pages,
+  Size, Annotations (`file_metrics.annotationCount`), Created, Updated, Updated by, Slug,
+  Deleted at, Deleted. Slug/Created/Deleted default hidden, matching `/docs`.
+- Row scoping copies `docs/page.tsx`'s `authorScope` verbatim: own byline OR
+  (`canEditAnySharedFile` && SHARED), with an **ADMIN-only `?showAllFiles=1` checkbox**. That
+  is exactly the rule asked for — ADMIN-only PRIVATE visibility, EDITOR sees all SHARED,
+  AUTHOR sees only their own.
+- Upload control above the table, where `/docs` has `+ New doc`.
+- [src/components/SiteHeader.tsx](src/components/SiteHeader.tsx): a `Files` link gated on
+  `canManageFiles` (ADMIN/EDITOR/AUTHOR). The user asked for it "to the right of Users";
+  `Users` is ADMIN-only and `Files` is AUTHOR-and-up, so it is pushed into `leftNav` after
+  the `users`/`site-settings` entries and will simply appear left of nothing for a
+  non-ADMIN. Flagging rather than deciding silently.
+- `scripts/test-file.ts` following the `test-doc.ts` containment convention.
+
+---
+
+### Phase 2 — `/pdf/[slug]` viewer shell (no annotations yet)
+
+`src/app/pdf/[slug]/page.tsx` — server component: resolve slug (with `FileSlugHistory`
+redirect, as `resolveDocParam` does), gate on `canUserReadFile`, render the shell.
+
+`src/components/pdf/PdfViewer.tsx` — `"use client"`, loaded through `next/dynamic` with
+`ssr: false` (pdfjs touches `DOMMatrix`/`Path2D` at import time).
+
+- Built on **`PDFViewer` + `EventBus` + `PDFLinkService` from `pdfjs-dist/web/pdf_viewer.mjs`**,
+  with `pdfjs-dist/web/pdf_viewer.css` imported.
+- A cumulative page-offset table is built once on `pagesinit` from
+  `pdfPage.getViewport({ scale: 1 }).height` — the **public** API — rather than reading
+  `PDFViewer._pages`. This is what every "document fraction" in Phase 4 is computed against.
+- Layout is the full-viewport app shell: `SiteHeader` + a flex row of
+  `[presence rail | viewer | indicator strip | annotation panel]`, the viewer scrolling
+  inside its own box. `globals.css`'s `height: 100vh/100dvh` on `body` is what gives that
+  box a definite main size — the same budget `DocEditor.module.css`'s `.container` relies on.
+  Below `MARGIN_NOTES_MEDIA_QUERY` (1200px) the panel becomes a toggled overlay.
+- Toolbar: page number/count, prev/next, zoom (`page-fit`, `page-width`, numeric), rotate.
+
+---
+
+### Phase 3 — Anchoring and annotations
+
+#### Text normalisation — `src/lib/pdf-text.ts`
+
+docs/PDF.md §3's pipeline, as a **pure function of `getTextContent()` output**, shared by
+the browser and the Node-side upload extraction so the two cannot drift:
+gap-based space insertion + `hasEOL` newlines → NFKC → ligature decomposition → strip soft
+hyphens/zero-width → normalise dashes and quotes → collapse whitespace. Exports
+`TEXT_VERSION = \`${pdfjsVersion}/${NORMALISER_VERSION}\`` and builds the offset map
+(normalised index → `{ itemIndex, charOffset }`) client-side. Cached per
+`(fileId, pageIndex, textVersion)`.
+
+#### Capture — `src/lib/pdf-anchor-capture.ts`
+
+docs/PDF.md §5 exactly: `getSelection().getRangeAt(0)` → split by page → per page
+`getClientRects()` → subtract `pageView.div.getBoundingClientRect()` → `convertToPdfPoint`
+each corner → quads; plus `quote`/`position` from the normalised page text (never from the
+DOM — §11's Hypothesis trap). Rectangle selection is a drag on the `.annoLayer` producing a
+single quad with an empty `quote` and null `position`.
+
+CSS pixels from `getBoundingClientRect()`, never canvas backing-store pixels; the page's
+**current** rotation passed into every `getViewport`.
+
+#### Resolution — `src/lib/pdf-anchor-resolve.ts`
+
+docs/PDF.md §4 order: exact quote match searching outward from `position.start` → **[step 2
+deferred, see below]** → quads fallback → orphaned if the text under the resolved quads
+fails the quote check. Since the bytes are immutable, steps 1–2 exist only to survive *our
+own* normaliser changes; the quads path is always available and always correct.
+
+#### Layer — `src/components/pdf/anno-layer.ts`
+
+docs/PDF.md §6: a `.annoLayer` sibling built on `textlayerrendered`, `position:absolute;
+inset:0; pointer-events:none`, z-index below `.textLayer`, torn down when PDF.js evicts the
+page. **Never touch `.textLayer`/`.annotationLayer`** (invariant 4). Rects re-derived from
+quads on every `pagerendered`/`scalechanging`/`rotationchanging` — never cached across a
+scale change. Imperative, not React-per-page: PDF.js virtualises and rebuilds these nodes.
+
+Click handling per §7: one delegated listener on the viewer container,
+`elementsFromPoint` filtered on `data-anno-id`, suppressed when pointer travel between
+`pointerdown` and `click` exceeds ~4px.
+
+#### Server side
+
+- `postAnnotation` ([src/app/actions/annotations.ts](src/app/actions/annotations.ts)) gains a
+  `"pdf"` anchor mode beside `"mark"`/`"columns"`. It derives `quotedText` **server-side**
+  by slicing `FilePageText.text` at `position` and comparing it to the client's claim —
+  keeping §12i's "the selected text is a request field only, never a column" intact, and
+  cheaply, because the text was extracted once at upload. A rect-only annotation stores
+  `quotedText: ""`. `ydocUpdateId` is null for a PDF root (there is no update log for an
+  immutable file); a reply still stamps its parent body's log, unchanged.
+- `createDraftAnnotation` takes a container discriminant instead of a bare `docId`.
+- `canUserAccessAnnotationYdoc` ([src/lib/annotation-authz.ts](src/lib/annotation-authz.ts))
+  takes `{ doc } | { file }` and routes to `canUserReadDoc` / `canUserReadFile`. Its `DRAFT`
+  owner-only rule is unchanged.
+- `/annotations` ([src/app/annotations/page.tsx](src/app/annotations/page.tsx)): a Container
+  column that links to either `/doc/…` or `/pdf/…`. Its `doc.proseJson` content-boundary
+  work is skipped for PDF rows — `quotedText` is already stored, so there is nothing to
+  excerpt from a document body.
+
+#### Panel — `src/components/pdf/PdfAnnotationPanel.tsx`
+
+Reuses `AnnotationNode`, `QuoteThreadHeader`, `AnnotationColorStyles`,
+`NewAnnotationComposer`, `LiveAnnotationComposer`, `OwnDraftsList`, `pseudo-border.ts` and
+`MarginNotes.module.css` unchanged.
+
+**One small refactor** makes the layout machinery shared rather than duplicated:
+[use-margin-notes-layout.ts](src/components/margin-notes/use-margin-notes-layout.ts) is
+already source-agnostic in design ("Surfaces differ in how they answer this — which is the
+whole reason this is a callback rather than a prop shape") but typed against a TipTap
+`Editor` in four places: the `anchored` gate, `resolveTops(editor)`, `observer.observe(editor.view.dom)`,
+and `editor.on("update")`. Replace those with a `{ element, onChange }` source supplied by
+`MarginNotesProvider`, so `resolveTops` becomes `() => Map<string, number>` and callers close
+over their own source. Mechanical, touching `margin-notes-context.tsx`,
+`use-margin-notes-layout.ts`, `AnnotationList.tsx`, `CommentEntryList.tsx`,
+`EditorAnnotationRail.tsx` — three working surfaces, so `npm run e2e`'s coverage of
+`/doc/[slug]` matters here.
+
+The hook's existing **`bounds`** option is exactly right for this shell: it is documented for
+"a surface whose article scrolls inside its own box", hides cards whose anchor has scrolled
+out of the band, and attaches the scroll listener. That is the PDF viewer precisely.
+
+`PdfAnnotationList` is a thin sibling of
+[AnnotationList.tsx](src/components/annotation/AnnotationList.tsx) — same shape, three
+differences: `resolveTops` converts quads → page element → CSS `y` instead of reading
+`coordsAtPos`; the `quoteIndex` sort mode orders by `(pageIndex, y)`; and there is **no
+`createPortal`**, because in the app shell the rail and the list are the same scroller.
+Un-sharing rather than parameterising follows §13c's own precedent (`AnnotationList` was
+deliberately un-shared from `CommentEntryList` once the rendering problems diverged).
+
+Cards for annotations on non-rendered pages resolve to `targetTop: null`, which
+`packMarginNotes` already sends to the end of the rail in input order — so sorting the input
+by `(pageIndex, y)` gives "everything on screen, aligned, then everything else in document
+order" with no change to
+[margin-notes-layout.ts](src/lib/margin-notes-layout.ts). Those get a greyed class.
+
+---
+
+### Phase 4 — Presence, viewport sync, and follow
+
+#### Transport
+
+A per-file ydoc `ydoc:pdf:<fileId>` that stays **empty** and carries awareness only —
+docs/PDF.md invariant 5 taken literally. Additions:
+
+- `src/lib/ydoc-names.ts`: `YDOC_PDF_PREFIX = "ydoc:pdf:"`, `ydocIdForFile`,
+  `fileIdFromYdocId`, and `docIdFromYdocId` excludes the new prefix the same way it already
+  excludes `ydoc:annotation:`.
+- `src/app/api/file/[id]/token/route.ts` mirroring
+  [api/doc/[id]/token/route.ts](src/app/api/doc/[id]/token/route.ts). Every token is
+  `readOnly: true` — nobody ever writes content to this document, and awareness is unaffected
+  by `connectionConfig.readOnly`.
+- `server/ydoc-hooks.ts` needs no branch: `ydocOnLoadDocument`'s `createIfAbsent` handles a
+  name nobody made, and `updateDocCache`/`updateAnnotationCache` already no-op on a prefix
+  that is neither. The row accrues one empty state and never changes.
+- `PdfPresenceProvider` mirrors
+  [doc-presence-context.tsx](src/components/annotation/doc-presence-context.tsx), exposing
+  the awareness object to sibling subtrees.
+
+#### Wire format (`src/lib/pdf-presence.ts`)
+
+```ts
+type PdfPresence = {
+  user: { id, name, color },                          // author palette
+  viewport: { pageIndex, pdfPoint: [left, top], zoomMode, t } | null,
+  selection: { pageIndex, quads: Quad[] } | null,
+  leading: boolean,          // "I'm presenting — come join me"
+  following: string | null,  // clientId being followed
+};
+```
+
+Never `scrollTop`/`scrollLeft`/raw scale (§9). `updateviewarea` is rAF-coalesced before
+anything reads it and throttled to ~10 Hz outbound; awareness coalesces, so nothing queues.
+
+Echo suppression uses all three §9 guards: an `applyingRemote` flag cleared on the rAF after
+the resulting `updateviewarea`; a ~2%-of-viewport-height tolerance compare; and a timestamp
+guard dropping inbound states older than the last applied.
+
+#### The three affordances
+
+1. **Broadcast + follow.** A reader sets `leading: true`; others see "N is presenting —
+   Follow". Following applies their viewport via
+   `scrollPageIntoView({ pageNumber, destArray: [pageIndex, {name:"XYZ"}, left, top, null] })`
+   — `null` zoom, so a follower sees the same *content* at their own zoom. Any genuine local
+   scroll gesture (distinguished from a programmatic one by `applyingRemote`) drops the
+   follow immediately, plus an explicit "Stop following". One-directional only; §9 is
+   explicit that symmetric mutual following is unusable.
+2. **Left pseudo-scrollbar.** A 1px line the full height of the viewer, with a circle per
+   remote reader at their document fraction, in their author color. Click → jump to that
+   position.
+3. **Right indicator strip.** Same 1px line, carrying (a) a viewport thumb showing the
+   visible fraction, drawn only when it would be ≥20px tall, and (b) one tick per annotation
+   at its document fraction in its author's color, clickable to jump.
+
+Both rails are pure functions of document fraction — that math goes in
+`src/lib/pdf-rail-layout.ts`, DOM-free, the same split
+[margin-notes-layout.ts](src/lib/margin-notes-layout.ts) makes and for the same reason.
+
+**Remote selections** are drawn into the same `.annoLayer` as annotation highlights, in the
+author's color, for whichever pages are rendered — "always show selection if it would be
+visible on other users' views" falls out of the layer only existing for rendered pages.
+
+---
+
+### Phase 5 — Documentation
+
+- **PLAN.md §19** — the whole design (per the §10 convention: a dedicated section, so no §10
+  entry). Must record: why annotations are Postgres rows and not a `Y.Map`; why the per-file
+  ydoc exists and is empty; why `Annotation.docId` went nullable; why bytes are on disk.
+- **CLAUDE.md** — `FILE_STORAGE_DIR` / `FILE_MAX_UPLOAD_BYTES` in the env list; the
+  `StoredFile`-not-`File` naming reason; "never position a PDF annotation off anything but
+  the live quads"; the pinned-pdfjs rule.
+- **docs/PERMISSIONS.md** — files as a fifth pair of tables, or a note that they follow the
+  doc tables exactly with `canViewFiles`/`canManageFiles` substituted.
+- **docs/PDF.md** — flip §12's "server-side normalised text?" open question to *settled:
+  stored*, and record the §10 deviation below.
+- **DEPLOY.md** — the nginx block, and that `FILE_STORAGE_DIR` is a second backup surface
+  `pg_dump` does not cover.
+- **docs/COLLAB.md** — a PDF quad anchor as a third strategy in its comparison, with the
+  point that it cannot drift because the bytes cannot change.
+- **scripts/integrity/check-pdf-anchors.ts** — the sibling of
+  `check-annotation-anchors.ts`: for every PDF annotation, slice `FilePageText` at
+  `position` and confirm it still equals `quotedText`. Like its sibling, this verifies a
+  claim written down once rather than a derived value, so nothing else would catch a break.
+
+---
+
+### Deviations from docs/PDF.md, and deferrals
+
+- **§10 names `PDFViewerApplication`; this uses `PDFViewer`.** `PDFViewerApplication` is the
+  bundled `web/viewer.html` application, not an importable library entry. `PDFViewer` +
+  `EventBus` + `PDFLinkService` is the library-level equivalent and exposes every internal
+  §5/§8 relies on. Same version-pinning discipline applies.
+- **§9 says annotations → ydoc.** Not taken, for the five reasons under *Decisions* above.
+  §9's viewport half is taken exactly as written.
+- **§4 step 2 (fuzzy quote match) is deferred.** It only matters after a `textVersion` bump,
+  and §4 warns explicitly against running it synchronously (Hypothesis's ten-second stall).
+  Shipping it properly means a worker; steps 1, 3 and 4 make the viewer correct without it,
+  since quads always resolve.
+- **§3's lazy re-anchor on `textVersion` change is deferred** with it — nothing bumps the
+  version until the normaliser changes.
+- **The `Files` nav link is placed after `Users`/`Site Settings` in the same left group**,
+  which for a non-ADMIN means it is the only entry there. The literal reading ("to the right
+  of Users") can't hold for AUTHOR/EDITOR, who never see `Users`.
+
+---
+
+### Verification
+
+Per-phase, and each phase is independently shippable:
+
+- **Types/lint** — `npx tsc --noEmit`, `npx eslint .` after each phase.
+- **Phase 1** — `npm run e2e` with a new `e2e/files.spec.ts`: upload a small fixture PDF as
+  AUTHOR; assert it appears in `/files`, that an EDITOR sees it only when SHARED, that
+  another AUTHOR never does, and that ADMIN's `?showAllFiles=1` reveals a PRIVATE one.
+  Assert an over-limit upload is refused client-side, and that the download route honours a
+  `Range` request. A round-trip check that the stored `sha256` matches the bytes on disk.
+- **Phase 2/3** — `e2e/pdf-viewer.spec.ts`: open `/pdf/[slug]`, wait for `pagesinit`, select
+  a known phrase via `page.evaluate` over the text layer, post an annotation, reload, and
+  assert the highlight lands on the same quads and the card carries the same `quotedText`.
+  Then change zoom and rotation and assert the rects moved but the stored target didn't.
+- **Phase 4** — `e2e/pdf-sync.spec.ts` using the `secondUser()` fixture and two
+  `browser.newContext()`s (the browser pane's shared cookie jar makes this untestable by
+  hand): user A scrolls to page 12 and broadcasts, user B follows and lands on page 12, B
+  scrolls manually and the follow drops. Assert B's presence circle exists on A's left rail
+  at a plausible fraction before and after.
+- **Regression** — the full `npm run e2e` suite after the `use-margin-notes-layout` refactor,
+  which is the one change touching working surfaces.
+- **Integrity** — `npx tsx scripts/integrity/check-pdf-anchors.ts` on seeded content.
+- **By hand in the browser pane** — only for what the suite can't assert: that the two 1px
+  rails read well, that the viewport thumb's 20px threshold behaves at both extremes, and
+  that a rectangle selection over a figure produces a sensible highlight.

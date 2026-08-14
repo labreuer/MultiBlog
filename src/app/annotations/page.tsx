@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
 import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
 import { docTitleOrFallback } from "@/lib/doc-title";
+import { requireDocAnnotationId } from "@/lib/annotation-container";
 import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { parseAnnotationsFilters, type AnnotationsSortKey } from "@/lib/annotations-query";
@@ -115,6 +116,17 @@ export default async function AnnotationsPage({
       // (src/lib/annotation-authz.ts) delegates to canUserReadDoc for the
       // same reason.
       { OR: [{ doc: { authors: { some: { userId: session.user.id } } } }, { doc: { visibility: "SHARED" } }] },
+      // PLAN.md §19 — **doc annotations only, for now.** The two relation
+      // filters above already exclude a file annotation in Postgres (a
+      // relation filter never matches a null foreign key), so this term adds
+      // no rows and removes none; it is here to say so in a way the type
+      // checker can use, and to be the thing Phase 3 deletes when this listing
+      // grows its Container column and starts showing PDF annotations too.
+      //
+      // Leaving it silently doc-only would undo one of the reasons annotations
+      // are Postgres rows at all rather than entries in a per-file ydoc — that
+      // /annotations can see every one of them.
+      { docId: { not: null } },
       parseDeepLinkWhere(urlSearchParams),
     ],
   };
@@ -141,14 +153,28 @@ export default async function AnnotationsPage({
   // anchored reply (§13p) carry theirs on the row and skip all of this.
   const markedIdsByDoc = new Map<string, Set<string>>();
   const proseJsonByDoc = new Map<string, JSONContent>();
-  for (const a of annotations) {
+
+  // `docId`/`doc` are nullable columns since files became a second annotation
+  // container (PLAN.md §19), and the `where` above guarantees neither is null
+  // here. Narrowed once, loudly, rather than asserted at each of the eight
+  // uses below — if the where clause and this ever disagree, the failure
+  // should name itself rather than surface as `undefined` in a table cell.
+  const docAnnotations = annotations.map((a) => {
+    const docId = requireDocAnnotationId(a, "/annotations");
+    if (!a.doc) {
+      throw new Error(`/annotations selected annotation ${a.id} with no doc — its where clause should prevent this.`);
+    }
+    return { ...a, docId, doc: a.doc };
+  });
+
+  for (const a of docAnnotations) {
     if (proseJsonByDoc.has(a.docId) || !a.doc.proseJson) continue;
     const proseJson = a.doc.proseJson as JSONContent;
     proseJsonByDoc.set(a.docId, proseJson);
     markedIdsByDoc.set(a.docId, new Set(collectMarkAttrValues(proseJson, "annotation", "id")));
   }
 
-  const rows: AnnotationRow[] = annotations.map((a) => {
+  const rows: AnnotationRow[] = docAnnotations.map((a) => {
     const isRoot = a.parentAnnotationId === null;
     const proseJson = proseJsonByDoc.get(a.docId);
     const marked = markedIdsByDoc.get(a.docId)?.has(a.id) ?? false;

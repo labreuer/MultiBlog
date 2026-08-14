@@ -36,6 +36,29 @@ export function canManageDocs(role: Role): boolean {
   return DOC_MANAGER_ROLES.includes(role);
 }
 
+// PLAN.md §19 — the file counterparts, governing /pdf/[slug] reading and
+// /files management. Same role sets as the doc pair above, stated
+// independently and **deliberately not delegating to them**, which is the same
+// decision (and the same reasoning) as canManageDocs vs. canManagePosts: a
+// delegation preserves exactly the coupling the separation exists to break, so
+// that changing who may read a doc would silently change who may read a PDF.
+// If the two should ever differ, these are the functions to change.
+//
+// Both are here rather than in file-authz.ts by this file's own rule — a
+// client consumer is what earns the place, and SiteHeader needs canManageFiles
+// for the Files link.
+export const FILE_VIEWER_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR", "AUTHORIZED"];
+
+export function canViewFiles(role: Role): boolean {
+  return FILE_VIEWER_ROLES.includes(role);
+}
+
+export const FILE_MANAGER_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
+
+export function canManageFiles(role: Role): boolean {
+  return FILE_MANAGER_ROLES.includes(role);
+}
+
 // Who may carry a byline on a doc or post — the option list for the /docs and
 // /posts Authors filter (src/lib/author-filter.ts), and what the two edit
 // pages already hardcode inline when deciding who's eligible to be added as a

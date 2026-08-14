@@ -40,11 +40,13 @@ export async function listAuthorFilterOptions(viewerId: string): Promise<AuthorO
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
 }
 
-// A generic relation-filter shape loose enough to satisfy both
-// Prisma.DocWhereInput's and Prisma.PostWhereInput's `authors` field — both
-// are a to-many DocAuthor/PostAuthor relation with a nested `user.slug`, so
-// one structural type serves both call sites without importing either
-// generated type here.
+// A generic relation-filter shape loose enough to satisfy
+// Prisma.DocWhereInput's, Prisma.PostWhereInput's and
+// Prisma.StoredFileWhereInput's `authors` field — all three are a to-many
+// DocAuthor/PostAuthor/FileAuthor relation with a nested `user.slug`, so one
+// structural type serves every call site without importing any generated type
+// here. /files (PLAN.md §19) reuses this untouched, which is the payoff for
+// having written it structurally in the first place.
 type AuthorRelationWhere = {
   authors?: {
     some?: { user: { slug: { in: string[] } | string } };

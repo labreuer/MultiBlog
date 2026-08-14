@@ -29,6 +29,26 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost
+
+        # PDF uploads (PLAN.md §19). nginx's default client_max_body_size is
+        # 1m, which rejects every upload before it ever reaches Next — and
+        # rejects it with nginx's own HTML error page, so the app cannot say
+        # anything useful about it. Keep this at or above the app's
+        # FILE_MAX_UPLOAD_BYTES (default 50MB); /files has an ADMIN-only
+        # "Check upload limit" button that sends a full-size body through this
+        # path so a mismatch is found deliberately rather than by someone
+        # losing a real 40MB upload.
+        client_max_body_size 64m;
+        # A slow uplink can take minutes to send 64m. This is the gap *between*
+        # reads rather than the total, so it is generous without being a
+        # denial-of-service surface.
+        client_body_timeout  300s;
+        # Stream the body straight through to Next instead of spooling all of
+        # it to nginx's own disk first. Two payoffs: the app sees bytes as they
+        # arrive (which is what makes its mid-stream size check meaningful),
+        # and an over-limit upload is refused up front from the Content-Length
+        # with a clean 413 rather than after the whole transfer.
+        proxy_request_buffering off;
     }
 
     # Hocuspocus collab websocket. The document id travels in-band (not in the
