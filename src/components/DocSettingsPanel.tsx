@@ -133,6 +133,12 @@ export default function DocSettingsPanel({
   return (
     <details
       ref={detailsRef}
+      // Not decoration: EditorChrome.module.css keys the editor's height floor
+      // off `[data-doc-settings][open]`, so the body can't overflow on top of
+      // this panel and swallow the click that would close it again. A class
+      // won't do — CSS Modules hashes those per file, and the rule lives in a
+      // different module. See e2e/doc-settings-collapse.spec.ts.
+      data-doc-settings=""
       className={styles.details}
       onToggle={(e) => {
         if (e.currentTarget.open) e.currentTarget.scrollIntoView({ block: "start", behavior: "smooth" });
