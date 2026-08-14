@@ -17,7 +17,10 @@
    usable height — body { overflow-x: hidden } in globals.css implicitly
    computes body's overflow-y to auto per the CSS overflow spec (an
    element can't have one axis hidden and the other stay visible), which
-   is what makes that page-level scroll actually happen. */
+   is what makes that page-level scroll actually happen. That spill is only
+   harmless while nothing interactive sits below the frame to be painted over;
+   see the floor-yielding rule further down, which is what holds up the "only"
+   when the doc editor's Settings panel is open. */
 .editorFrame {
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -96,6 +99,37 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+}
+
+/* ...except while the doc editor's Settings panel is expanded, when the floor
+   yields entirely. The floor is what makes .editorFrame's deliberate lack of
+   `overflow: hidden` (see this file's header) benign: normally the overflow
+   spills into a page scroll with nothing below it to land on. Expanding
+   <details> puts something below it — a panel whose own <summary> is the
+   control that closes it again — and the overflowing body text is painted over
+   that summary, contenteditable and hungry for the click. The summary stays
+   visible and in the viewport the whole time, so this is a hit-testing failure
+   rather than a visual one: `elementFromPoint` at the summary's centre returns
+   a <p> from the editor, a caret blinks where the panel's header is drawn, and
+   the panel cannot be collapsed by clicking it. Guarded by
+   e2e/doc-settings-collapse.spec.ts, which fails in chromium and firefox alike
+   without this rule.
+
+   0 rather than a smaller floor: any nonzero value still overflows on a short
+   enough viewport, which is the same bug at a different window size. While the
+   panel is open the panel is what's being interacted with, so the editor
+   yielding its floor to it is the right trade — the frame keeps `flex-grow`,
+   so it still takes whatever height the panel doesn't need, and closing the
+   panel restores the floor.
+
+   `:has()` predates nothing this codebase already requires: it is more widely
+   supported than the `light-dark()` STYLE.md's dark theme is built on. The
+   scope attribute is what keeps this off the site header's own <details>
+   dropdowns, and off the other EditorChrome consumers (DocColumn, YdocDebug's
+   EditView), which have no settings panel. Attribute selectors survive CSS
+   Modules unhashed, which is why the hook is an attribute and not a class. */
+[data-doc-editor-column]:has(> [data-doc-settings][open]) .editorContent {
+  min-height: 0;
 }
 
 /* .tiptap is the actual contenteditable ProseMirror node, rendered by the

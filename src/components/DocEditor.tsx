@@ -220,7 +220,9 @@ export default function DocEditor({
 
   return (
     <div className={styles.container}>
-      <div className={styles.mainColumn} ref={containerRef}>
+      {/* data-doc-editor-column is the `:has()` scope for the height-floor
+          rule in EditorChrome.module.css — see DocSettingsPanel's <details>. */}
+      <div className={styles.mainColumn} data-doc-editor-column="" ref={containerRef}>
         {provider ? (
           <CollabTitleField
             ydoc={ydoc}
