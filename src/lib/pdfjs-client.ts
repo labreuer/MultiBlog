@@ -1,5 +1,12 @@
 "use client";
 
+// Must be the first import: it patches Map.prototype with the "upsert"
+// methods pdfjs-dist calls pervasively but some WebKit releases don't have
+// yet, and pdfjs-dist itself has to see the patched prototype from its very
+// first module evaluation onward. The named import (rather than a bare
+// side-effect one) is so ensurePdfWorker below can reuse the same source
+// string for the worker's own realm. See the polyfill file for the full story.
+import { MAP_UPSERT_POLYFILL_SOURCE } from "./pdfjs-map-upsert-polyfill";
 import * as pdfjs from "pdfjs-dist";
 import * as pdfjsViewer from "pdfjs-dist/web/pdf_viewer.mjs";
 
@@ -43,21 +50,58 @@ let workerReady = false;
  * `new Worker(src, { type: "module" })` per PDFWorker and owns the lifetime
  * itself, which is what makes mount/unmount/remount safe.
  *
- * The URL still comes from `new URL(…, import.meta.url)`, which is the form a
- * bundler rewrites to the emitted asset — so this survives Turbopack with no
- * copy step into `public/` and no guessable path. (Contrast
+ * The vendor script's own URL still comes from `new URL(…, import.meta.url)`,
+ * which is the form a bundler rewrites to the emitted asset — so this survives
+ * Turbopack with no copy step into `public/` and no guessable path. (Contrast
  * src/lib/pdf-extract.ts, where the *server* must defeat that same static
  * analysis, because there the file is read from node_modules at runtime rather
  * than bundled.)
  *
  * Without a worker at all, pdfjs falls back to parsing on the main thread —
  * a visibly frozen tab on a large PDF rather than an error, hence the warning.
+ *
+ * **`workerSrc` is a Blob URL we build, not the vendor file's URL directly.**
+ * The worker is its own JS realm and doesn't inherit the main thread's
+ * Map.prototype patch, and there's no hook to run code before the vendor
+ * script's own top-level body does — so the polyfill has to already be
+ * installed by the time that body runs. A local wrapper module (its only job
+ * importing the polyfill, then the vendor script) doesn't survive Turbopack
+ * the way the vendor URL above does: `new URL(literal, import.meta.url)` only
+ * gets bundler treatment for a package's own pre-built, dependency-free
+ * asset, which is what let the original one-liner here work at all. Point it
+ * at a local `.ts` file with an `import` of its own and Turbopack just copies
+ * it verbatim, unparsed — pdfjs then fails with `Failed to fetch dynamically
+ * imported module`, not with anything naming the real cause. Building the
+ * script as a Blob sidesteps bundling entirely: a module worker can `import`
+ * a full URL with no resolution step, so the polyfill source plus one import
+ * of the vendor script's URL is a complete, self-contained module with
+ * nothing left for a bundler to get wrong — **provided that URL is genuinely
+ * absolute.** Turbopack's dev-mode rewrite of `new URL(literal,
+ * import.meta.url).href` yields a root-relative path
+ * (`/_next/static/media/…mjs`), not a scheme-and-host URL, and a relative
+ * specifier inside a Blob module's `import` fails with `Failed to resolve
+ * module specifier … Invalid relative url or base scheme isn't hierarchical`
+ * — a `blob:` URL doesn't count as a hierarchical base for module resolution.
+ * Re-resolving against `window.location.href` (itself always absolute) is
+ * what forces a real one, whether Turbopack's own rewrite happened to be
+ * relative (dev) or already absolute (prod) — resolving an already-absolute
+ * URL against another base is a no-op, so this is safe either way.
  */
 export function ensurePdfWorker(): void {
   if (workerReady) return;
   workerReady = true;
   try {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).href;
+    const vendorWorkerUrl = new URL(
+      new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).href,
+      window.location.href,
+    ).href;
+    const workerSource = `${MAP_UPSERT_POLYFILL_SOURCE}\nimport ${JSON.stringify(vendorWorkerUrl)};\n`;
+    const blob = new Blob([workerSource], { type: "text/javascript" });
+    // Never revoked: ensurePdfWorker only ever runs once (the `workerReady`
+    // guard above), and every PDFWorker for the rest of the page's life —
+    // one per open document — is created against this same workerSrc.
+    // Revoking it after first use would break the second PDF opened.
+    pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
   } catch (err) {
     console.warn("[pdfjs-client] couldn't locate the PDF worker; parsing will block the main thread:", err);
   }
