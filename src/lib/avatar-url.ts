@@ -26,6 +26,20 @@ export function avatarUrl(userId: string, hash: string): string {
 export const AVATAR_SIZE = 160;
 
 /**
+ * Edge length the client-side cropper exports at (PLAN.md §17n) — 2× the
+ * stored size, deliberately. The canvas does the *crop*; sharp does the final
+ * reduction to AVATAR_SIZE with a proper resampling kernel, which is better
+ * than asking `drawImage` to do the whole downscale from a phone photo.
+ */
+export const AVATAR_EXPORT_SIZE = AVATAR_SIZE * 2;
+
+// There is deliberately no upload-size constant, here or anywhere. The cropper
+// uploads a fixed AVATAR_EXPORT_SIZE square of tens of KB whatever the source
+// was, so there is nothing for the browser to check; Next's 1MB Server Action
+// bodySizeLimit backstops a hand-crafted POST; and what actually bounds
+// ingestion cost is the pixel ceiling in avatar.ts, not a byte count.
+
+/**
  * Resolves what a contributor's avatar `src` should be, in precedence order:
  * the self-hosted upload, then the Auth.js adapter's remote `User.image`
  * (populated by an OAuth provider's profile, PLAN.md §17n), then null — at

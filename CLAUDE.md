@@ -220,7 +220,12 @@ than the reasoning itself.
     `"use client"` `ContributorPanel`, so it compiles into the client bundle too.
   Uploads are always re-encoded (160px square WebP) rather than stored as sent — that's what
   strips EXIF/GPS from a phone photo, and `.rotate()` bakes the orientation flag into the
-  pixels first so the strip doesn't leave it sideways. There is deliberately **no
+  pixels first so the strip doesn't leave it sideways. **The user picks the crop, in the
+  browser** (`AvatarCropper.tsx`, PLAN.md §17o), so what's POSTed is a fixed ~320px square of
+  tens of KB whatever the source was — which is why there is no byte cap anywhere and why
+  Next's 1MB `bodySizeLimit` and nginx's 1MB `client_max_body_size` can stay at their
+  defaults. Don't add one back: the guard that actually bounds ingestion cost is
+  `MAX_INPUT_PIXELS` (50MP), since bytes predict decode cost badly. There is deliberately **no
   "avatar from URL" path**: a server-side fetch of a user-supplied URL is SSRF. `sharp` is a
   direct dependency pinned at the range its pre-existing `overrides` entry uses — npm rejects
   a direct dep whose spec doesn't match its own override.

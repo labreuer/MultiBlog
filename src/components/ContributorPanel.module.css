@@ -20,7 +20,13 @@
   color: var(--text-secondary);
 }
 
-.field input {
+/* `>`, not a descendant selector: this is the text-input box, and every input
+   it's meant for is a direct child. As a descendant it also hit the avatar
+   cropper's zoom range input nested one level deeper, where the padding
+   silently ate 7.4px of track at each end — the thumb stopped short of both
+   extremes and the dead margin still looked like part of the control, since
+   the border was drawn around it. */
+.field > input {
   padding: 0.4rem;
   border: 1px solid var(--border);
   border-radius: 4px;
