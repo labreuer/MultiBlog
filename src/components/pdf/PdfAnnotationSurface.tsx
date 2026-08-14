@@ -197,6 +197,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
 
   // Redraw when the annotation set changes (a post, a delete, a refresh).
   // Runs after the ref sync above, so the layer reads the new set.
+  //
   useEffect(() => {
     layerRedrawRef.current?.();
     notify();
@@ -390,6 +391,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
         onJumpTo={jumpTo}
         pendingTarget={pending?.target ?? null}
         pendingKey={pending?.key ?? 0}
+        onClearPending={() => setPending(null)}
       />
     ),
     [fileId, entries, resolveTops, subscribe, positioned, jumpTo, pending],

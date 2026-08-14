@@ -75,7 +75,10 @@ async function selectPhrase(page: import("@playwright/test").Page, pageNumber: n
  */
 async function composeAnnotation(page: import("@playwright/test").Page, body: string) {
   await page.getByRole("button", { name: "Annotate" }).click();
-  await page.getByRole("button", { name: "Write an annotation..." }).click();
+  // No placeholder to click: capturing a selection auto-opens the editor, since
+  // the gesture that started it happened over the document rather than in the
+  // panel. The sibling test "Annotate visibly opens a composer…" is what pins
+  // that behaviour; here it is just why this step is missing.
   const editor = annotationEditor(page);
   await editor.click();
   await editor.pressSequentially(body);
@@ -371,6 +374,41 @@ test.describe("pdf annotations", () => {
       await waitForViewer(page);
       await expect(page.locator(".pdfViewer .page .annoRect")).toHaveCount(0, { timeout: 20_000 });
       await expect(page.getByText("No annotations yet.", { exact: false })).toBeVisible();
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+
+  test("Annotate visibly opens a composer showing what was selected", async ({ page }) => {
+    const file = await makeFile();
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      // Before: the panel is idle.
+      await expect(page.getByRole("button", { name: "Write an annotation..." })).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Annotation body" })).toHaveCount(0);
+
+      await selectPhrase(page, 1, PHRASE);
+      await page.getByRole("button", { name: "Annotate" }).click();
+
+      // After: the editor is open and the captured passage is quoted back.
+      //
+      // This is the bug the assertion exists for: the capture always worked,
+      // but its only visible result was a *collapsed* placeholder in a side
+      // panel, so pressing Annotate looked like it did nothing — and writing an
+      // annotation without pressing it produced an unanchored one, with nothing
+      // on screen distinguishing the two states.
+      await expect(page.getByRole("textbox", { name: "Annotation body" })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(`Annotating page 1`)).toBeVisible();
+      await expect(page.getByRole("blockquote").filter({ hasText: PHRASE })).toBeVisible();
+
+      // Cancelling drops the capture, so the next annotation starts unanchored
+      // rather than silently inheriting this selection's anchor.
+      await page.getByRole("button", { name: "Cancel" }).click();
+      await expect(page.getByText("Annotating page 1")).toHaveCount(0, { timeout: 15_000 });
+      await expect(page.getByRole("button", { name: "Write an annotation..." })).toBeVisible();
     } finally {
       await deleteTestFile(file.id);
     }

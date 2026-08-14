@@ -178,7 +178,8 @@ test.describe("pdf presence", () => {
       });
       await page.dispatchEvent("body", "pointerup");
       await page.getByRole("button", { name: "Annotate" }).click();
-      await page.getByRole("button", { name: "Write an annotation..." }).click();
+      // Capturing a selection auto-opens the editor — there is no placeholder
+      // to click. See e2e/pdf-annotations.spec.ts for the test that pins it.
       const editor = page.getByRole("textbox", { name: "Annotation body" });
       await editor.click();
       await editor.pressSequentially("Near the end.");

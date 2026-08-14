@@ -67,6 +67,8 @@ type Props = {
   pendingTarget: PdfTarget | null;
   /** Changes on every capture, so the composer remounts even for an identical re-selection. */
   pendingKey: number;
+  /** Drop the captured selection — the composer was cancelled, or the reader changed their mind. */
+  onClearPending: () => void;
 };
 
 export default function PdfAnnotationPanel({
@@ -78,6 +80,7 @@ export default function PdfAnnotationPanel({
   onJumpTo,
   pendingTarget,
   pendingKey,
+  onClearPending,
 }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("position");
 
@@ -159,13 +162,36 @@ export default function PdfAnnotationPanel({
     <div className={styles.panelInner}>
       <h2 className={styles.heading}>Annotations</h2>
 
+      {/* What the reader just selected, shown *before* the editor so that
+          clicking "Annotate" over the document has a visible result here —
+          otherwise the capture succeeds silently and the panel looks unchanged.
+          It is also the only place the anchor is legible before posting: the
+          server derives the stored quote itself, so this is the client's own
+          reading, shown for confirmation rather than as the record. */}
+      {pendingTarget && (
+        <div className={styles.pendingQuote}>
+          <span className={styles.pendingLabel}>
+            Annotating page {pendingTarget.pageIndex + 1}
+            {pendingTarget.quote.exact ? "" : " (region)"}
+          </span>
+          {pendingTarget.quote.exact && <blockquote>{pendingTarget.quote.exact}</blockquote>}
+          <button type="button" className={styles.pendingClear} onClick={onClearPending}>
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {/* Remounted whenever a new selection arrives, so the composer opens a
           fresh draft against the new target rather than reusing an open one
-          pointing at the previous selection. */}
+          pointing at the previous selection. `autoOpen` follows from the same
+          fact: the gesture that starts this composer happened over the
+          document, not here. */}
       <NewAnnotationComposer
         key={pendingTarget ? `pending-${pendingKey}` : "idle"}
         target={{ kind: "file", id: fileId }}
         pdfTarget={pendingTarget ?? undefined}
+        autoOpen={pendingTarget !== null}
+        onSettled={onClearPending}
       />
 
       {sorted.length === 0 ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createDraftAnnotation, postAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { useAnnotationMove } from "./annotation-move-context";
@@ -10,7 +10,31 @@ import styles from "./AnnotationComposer.module.css";
 // PLAN.md §19 — a container rather than a doc id, so the same composer serves
 // /doc/[slug] and /pdf/[slug]. `pdfTarget` is set only by the PDF surface,
 // which opens this composer with a selection already captured.
-type Props = { target: AnnotationTarget; pdfTarget?: unknown };
+type Props = {
+  target: AnnotationTarget;
+  pdfTarget?: unknown;
+  /**
+   * Open the editor immediately on mount instead of showing the collapsed
+   * placeholder (PLAN.md §19).
+   *
+   * Set by the PDF panel, whose composer is opened *by a gesture somewhere
+   * else* — the "Annotate" control floating over the selection. Without this
+   * the reader clicks Annotate, the capture succeeds silently, and the only
+   * visible result is a placeholder in a side panel they then have to find and
+   * click again. The doc side needs none of it: its composer opens where the
+   * selection is, so the click and the editor are in the same place.
+   */
+  autoOpen?: boolean;
+  /**
+   * The composer finished with the selection it was opened for — posted,
+   * saved privately, or cancelled.
+   *
+   * The PDF panel uses it to drop the captured anchor, so a later "Write an
+   * annotation…" starts unanchored instead of silently inheriting the previous
+   * selection's target.
+   */
+  onSettled?: () => void;
+};
 
 type OpenDraft = { id: string; anchorFrom?: number; anchorTo?: number; quotedText?: string };
 
@@ -21,7 +45,7 @@ type OpenDraft = { id: string; anchorFrom?: number; anchorTo?: number; quotedTex
 // open on every page load): opening it creates a DRAFT eagerly, same
 // reasoning §13d gives for why a composer needs a row before a single
 // keystroke lands.
-export default function NewAnnotationComposer({ target, pdfTarget }: Props) {
+export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = false, onSettled }: Props) {
   const [open, setOpen] = useState<OpenDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -60,7 +84,7 @@ export default function NewAnnotationComposer({ target, pdfTarget }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `open`/startTransition are read at fire time, not tracked as retrigger deps for this cross-tree signal
   }, [movedDraft, setMovedDraft]);
 
-  function openNew() {
+  const openNew = useCallback(() => {
     setError(null);
     startTransition(async () => {
       const result = await createDraftAnnotation(target);
@@ -70,7 +94,18 @@ export default function NewAnnotationComposer({ target, pdfTarget }: Props) {
       }
       setOpen({ id: result.id });
     });
-  }
+  }, [target]);
+
+  // Fires once per mount. The PDF panel remounts this component (a fresh
+  // `key`) on every capture, so "once per mount" is exactly once per selection
+  // — including a second selection of the same text, which an effect keyed on
+  // the target's value could not distinguish from a re-render.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoOpened.current) return;
+    autoOpened.current = true;
+    openNew();
+  }, [autoOpen, openNew]);
 
   if (open) {
     return (
@@ -80,8 +115,14 @@ export default function NewAnnotationComposer({ target, pdfTarget }: Props) {
         anchorTo={open.anchorTo}
         quotedText={open.quotedText}
         pdfTarget={pdfTarget}
-        onPosted={() => setOpen(null)}
-        onCancel={() => setOpen(null)}
+        onPosted={() => {
+          setOpen(null);
+          onSettled?.();
+        }}
+        onCancel={() => {
+          setOpen(null);
+          onSettled?.();
+        }}
       />
     );
   }
