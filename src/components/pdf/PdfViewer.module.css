@@ -134,7 +134,24 @@
 }
 
 /* pdfjs draws a border and shadow around each page via its own stylesheet;
-   these two just give the stack some breathing room inside our container. */
+   this just gives the stack some breathing room inside our container. */
 .viewerContainer :global(.pdfViewer) {
   padding: 0.5rem 0;
+}
+
+/* **Undo globals.css's `* { box-sizing: border-box }` for pdfjs's own subtree.**
+   pdfjs's stylesheet is written for content-box: it sets `.page`'s width and
+   height to the scaled page size and then adds a 9px border *outside* that. Under
+   border-box the border eats into the declared size instead, so the rendered
+   content ends up ~18px narrower than the viewport transform believes the page
+   is — a scale error of about 2%, which put every annotation highlight a few
+   pixels off its text and grew with the length of the quote.
+   Measured before the fix: a 178.3px-wide phrase was highlighted 182.8px wide.
+
+   Scoped to `.pdfViewer` and its descendants, which are exactly the elements
+   pdfjs's own CSS sizes. Our `.annoLayer` children live in here too and want the
+   same box model, since their positions come from the same viewport transform. */
+.viewerContainer :global(.pdfViewer),
+.viewerContainer :global(.pdfViewer *) {
+  box-sizing: content-box;
 }

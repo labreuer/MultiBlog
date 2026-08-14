@@ -11,8 +11,13 @@ import { normalisePageText, textVersionFor, type NormalisedPage, type PdfTextIte
 // mode that is silent rather than loud if broken:
 //
 //  - every x/y handed to `convertToPdfPoint` is **relative to the page
-//    element's top-left**, so client rects have the page div's own rect
-//    subtracted first;
+//    element's content box** — docs/PDF.md §5 says "the page element's
+//    top-left", which is not quite the same thing and is worth stating
+//    precisely: `getBoundingClientRect()` returns the *border* box, and
+//    pdfjs draws a 9px border around every page (`--page-border`). The
+//    layers we draw into are `inset: 0`, which positions from the *padding*
+//    box. Capture from the border box and render from the padding box and
+//    every highlight sits 9px off its text (see pageContentOrigin below);
 //  - CSS pixels from `getBoundingClientRect()`, never canvas backing-store
 //    pixels — the canvas is scaled by devicePixelRatio and the viewport
 //    transform is not, so a HiDPI screen would store anchors at twice the
@@ -48,7 +53,7 @@ export function captureTextTarget(
   range: Range,
   pdfjsVersion: string,
 ): PdfTarget | null {
-  const pageRect = page.div.getBoundingClientRect();
+  const pageRect = pageContentOrigin(page.div);
 
   // One quad per rendered line fragment, not one per selection. Zero-area
   // rects are dropped: a selection that ends exactly at a line break produces
@@ -91,7 +96,7 @@ export function captureRectTarget(
   clientRect: { left: number; top: number; right: number; bottom: number },
   pdfjsVersion: string,
 ): PdfTarget | null {
-  const pageRect = page.div.getBoundingClientRect();
+  const pageRect = pageContentOrigin(page.div);
   if (clientRect.right - clientRect.left < 2 || clientRect.bottom - clientRect.top < 2) return null;
 
   return {
@@ -103,10 +108,38 @@ export function captureRectTarget(
   };
 }
 
-/** A client-space rect → a PDF-user-space quad, via the page element's own origin. */
+/**
+ * The page's **content** origin in client coordinates — the point
+ * `convertToPdfPoint` measures from, and the point our `inset: 0` layers
+ * position from.
+ *
+ * `getBoundingClientRect()` alone is the border box, and pdfjs puts a 9px
+ * border on every page. Adding the border widths is the whole correction, and
+ * it has to happen here rather than at each call site because the resolve side
+ * gets it for free: `.annoLayer` is `inset: 0`, so its own origin already *is*
+ * the padding box.
+ *
+ * Read from computed style rather than hardcoded: `--page-border` is 9px
+ * normally and 1px under forced colours, so a constant would be wrong for the
+ * readers most likely to notice.
+ */
+type ContentBox = { left: number; top: number; right: number; bottom: number };
+
+function pageContentOrigin(div: HTMLElement): ContentBox {
+  const rect = div.getBoundingClientRect();
+  const style = getComputedStyle(div);
+  return {
+    left: rect.left + parseFloat(style.borderLeftWidth || "0"),
+    top: rect.top + parseFloat(style.borderTopWidth || "0"),
+    right: rect.right - parseFloat(style.borderRightWidth || "0"),
+    bottom: rect.bottom - parseFloat(style.borderBottomWidth || "0"),
+  };
+}
+
+/** A client-space rect → a PDF-user-space quad, via the page element's content origin. */
 function clientRectToQuad(
   rect: { left: number; top: number; right: number; bottom: number },
-  pageRect: DOMRect,
+  pageRect: ContentBox,
   viewport: PageViewport,
 ): Quad {
   const [x0, y0] = viewport.convertToPdfPoint(rect.left - pageRect.left, rect.top - pageRect.top);

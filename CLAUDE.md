@@ -277,6 +277,21 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
     **The e2e fixtures cannot catch this**: `scripts/make-test-pdf.ts` generates text-only
     PDFs, which exercise no image decoder at all. `e2e/pdf-assets.spec.ts` asserts each
     directory is served instead — that is the only guard, so don't delete it as trivial.
+- **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs, and the symptom is a
+  *scale* error rather than a layout one.** pdfjs's stylesheet is written for content-box: it
+  sets `.page`'s width/height to the scaled page size and adds a 9px `--page-border` outside
+  it. Under border-box the border eats into that size instead, so the rendered content is
+  ~18px narrower than the viewport transform believes — about 2%, growing with the length of
+  whatever is being measured. `PdfViewer.module.css` restores `content-box` for `.pdfViewer`
+  and its descendants; don't "tidy" that away. Related and separate: a page's
+  `getBoundingClientRect()` is the **border** box, while every layer we draw into is
+  `inset: 0` and therefore positions from the **padding** box, so capture has to add the
+  border widths back (`pageContentOrigin`, `pdf-anchor-capture.ts`). docs/PDF.md §5's "the
+  page element's top-left" is imprecise on exactly this point.
+  Both bugs shipped together and **every test passed**: the overlap assertion tolerated a
+  4.5px error. `e2e/pdf-annotations.spec.ts` now asserts *alignment* to within 2px at three
+  zooms, because the two failed differently — the border offset was constant in CSS pixels,
+  the box-sizing error scaled.
 - **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
   file's `sha256` is its identity, so the bytes an anchor was measured against are by
   construction the bytes every later reader sees. There is no tracking plugin, no

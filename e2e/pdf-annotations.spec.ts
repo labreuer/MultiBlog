@@ -153,6 +153,73 @@ test.describe("pdf annotations", () => {
     }
   });
 
+  test("the highlight lines up with its text, at every zoom", async ({ page }) => {
+    const file = await makeFile();
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      await selectPhrase(page, 1, PHRASE);
+      await composeAnnotation(page, "Alignment check.");
+
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      await page.waitForFunction(() => document.querySelector(".pdfViewer .page .annoRect") !== null, undefined, {
+        timeout: 30_000,
+      });
+
+      // **Alignment, not overlap.** The sibling test above asserts the highlight
+      // overlaps its phrase, and that is genuinely the property that matters
+      // most — but it is satisfied by a rect several pixels out of place, which
+      // is exactly what shipped: two compounding coordinate bugs (globals.css's
+      // `box-sizing: border-box` squeezing pdfjs's page content ~2%, and
+      // capturing from the border box while rendering from the padding box) put
+      // every highlight a few pixels off, and every test passed.
+      //
+      // Checked at three zooms because the two bugs failed differently: the
+      // border offset was constant in CSS pixels, the box-sizing error scaled
+      // with the quote's length. One zoom could have hidden either.
+      for (const zoom of ["page-width", "1.5", "0.75"]) {
+        await page.getByLabel("Zoom").selectOption(zoom);
+        await page.waitForTimeout(600);
+
+        const delta = await page.evaluate((needle) => {
+          const layer = document.querySelector('.pdfViewer .page[data-page-number="1"] .textLayer');
+          if (!layer) return null;
+          const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+          let node: Node | null;
+          let text: DOMRect | null = null;
+          while ((node = walker.nextNode())) {
+            const index = (node.textContent ?? "").indexOf(needle);
+            if (index < 0) continue;
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + needle.length);
+            text = range.getBoundingClientRect();
+            break;
+          }
+          const rect = document.querySelector<HTMLElement>(".pdfViewer .page .annoRect")?.getBoundingClientRect();
+          if (!text || !rect) return null;
+          return {
+            left: Math.abs(rect.left - text.left),
+            top: Math.abs(rect.top - text.top),
+            width: Math.abs(rect.width - text.width),
+          };
+        }, PHRASE);
+
+        expect(delta, `no highlight or text found at zoom ${zoom}`).not.toBeNull();
+        // 2px, which is sub-pixel rounding plus the highlight's own 1px radius —
+        // tight enough that either original bug (4.5px wide, 9px offset) fails.
+        expect(delta!.left, `left offset at zoom ${zoom}`).toBeLessThan(2);
+        expect(delta!.top, `top offset at zoom ${zoom}`).toBeLessThan(2);
+        expect(delta!.width, `width error at zoom ${zoom}`).toBeLessThan(2);
+      }
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+
   test("the stored quote is cut from the server's own page text", async ({ page }) => {
     const file = await makeFile();
     try {
