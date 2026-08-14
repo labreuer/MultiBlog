@@ -45,6 +45,8 @@ type Props = {
   presenceRail?: ReactNode;
   /** Rendered in the right indicator strip slot. Absent until Phase 4. */
   indicatorStrip?: ReactNode;
+  /** The presence/follow control, rendered in the toolbar. Absent until Phase 4. */
+  followBar?: ReactNode;
 };
 
 const ZOOM_PRESETS = ["page-fit", "page-width", "0.5", "0.75", "1", "1.25", "1.5", "2", "3"] as const;
@@ -58,6 +60,7 @@ export default function PdfViewer({
   onTogglePanel,
   presenceRail,
   indicatorStrip,
+  followBar,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerElementRef = useRef<HTMLDivElement>(null);
@@ -265,6 +268,8 @@ export default function PdfViewer({
         <button type="button" onClick={rotate} aria-label="Rotate">
           ⟳
         </button>
+
+        {followBar}
 
         {panel && onTogglePanel && (
           <button type="button" onClick={onTogglePanel} aria-label="Toggle annotations" aria-pressed={panelOpen}>

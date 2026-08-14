@@ -6,9 +6,13 @@ import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-
 import PdfViewer, { type PdfViewerHandle } from "./PdfViewer";
 import PdfAnnotationPanel, { type PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
+import { usePdfPresence } from "./use-pdf-presence";
+import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
+import { documentFraction, visibleFractionRange } from "@/lib/pdf-geometry";
 import { captureTextTarget, type CapturePage } from "@/lib/pdf-anchor-capture";
 import { resolveTargetRects } from "@/lib/pdf-anchor-resolve";
 import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
+import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
 import styles from "./PdfAnnotations.module.css";
@@ -87,10 +91,38 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
   // the highlights follow a post or a delete without waiting for a scroll.
   const layerRedrawRef = useRef<(() => void) | null>(null);
 
-  const onReady = useCallback((handle: PdfViewerHandle) => {
-    handleRef.current = handle;
+  // Held in state as well as in the ref: the rails are React and need the
+  // offsets table to re-render against, where the imperative callbacks need the
+  // stable ref.
+  const [handle, setHandle] = useState<PdfViewerHandle | null>(null);
+  const onReady = useCallback((next: PdfViewerHandle) => {
+    handleRef.current = next;
+    setHandle(next);
     setReady(true);
   }, []);
+
+  const presence = usePdfPresence(fileId, handle);
+
+  // Same mirroring, for the same reason: the layer's callbacks are invoked by
+  // pdfjs long after render and must see the current readers without the layer
+  // being re-attached every time somebody scrolls.
+  // Read by the selection effect, which must not re-attach its document-level
+  // listener every time somebody else scrolls.
+  const presenceRef = useRef(presence);
+  useEffect(() => {
+    presenceRef.current = presence;
+  }, [presence]);
+
+  const readersRef = useRef(presence.readers);
+  useEffect(() => {
+    readersRef.current = presence.readers;
+    layerRedrawRef.current?.();
+  }, [presence.readers]);
+
+  // The visible slab, as a 0..1 range, recomputed on the same "rendering moved"
+  // signal everything else here uses.
+  const [visibleRange, setVisibleRange] = useState<{ start: number; end: number } | null>(null);
+  const [railHeight, setRailHeight] = useState(0);
 
   // ---- the highlight layer ------------------------------------------------
   useEffect(() => {
@@ -102,6 +134,25 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
         entriesRef.current
           .filter((entry) => entry.target?.pageIndex === pageIndex)
           .map((entry): AnnoLayerEntry => ({ id: entry.root.id, target: entry.target!, color: entry.color })),
+      // PLAN.md §19 — other readers' live selections, drawn in the same layer
+      // but outlined rather than filled, so they read as somebody's cursor
+      // rather than as an annotation that exists. They appear for whichever
+      // pages are rendered, which is exactly "show it if it would be visible
+      // on this reader's view" without needing to compute that separately.
+      remoteForPage: (pageIndex) =>
+        readersRef.current
+          .filter((reader) => reader.presence.selection?.pageIndex === pageIndex)
+          .map((reader): AnnoLayerEntry => ({
+            id: `remote-${reader.clientId}`,
+            color: reader.presence.user.color,
+            target: {
+              pageIndex,
+              quads: reader.presence.selection!.quads,
+              quote: { exact: "", prefix: "", suffix: "" },
+              position: null,
+              textVersion: "",
+            },
+          })),
     });
 
     layerRedrawRef.current = layers.redraw;
@@ -114,13 +165,21 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     });
 
-    // The panel repositions on the same events the layer redraws on.
-    const onMoved = () => notify();
+    // The panel repositions — and the right-hand strip's thumb moves — on the
+    // same events the layer redraws on.
+    const onMoved = () => {
+      notify();
+      const containerRect = handle.container.getBoundingClientRect();
+      const top = fractionAtViewportY(handle, containerRect.top);
+      const bottom = fractionAtViewportY(handle, containerRect.bottom);
+      setVisibleRange(top && bottom ? visibleFractionRange(handle.offsets, top, bottom) : null);
+    };
     handle.eventBus.on("updateviewarea", onMoved);
     handle.eventBus.on("pagerendered", onMoved);
     handle.eventBus.on("scalechanging", onMoved);
     handle.eventBus.on("rotationchanging", onMoved);
     handle.container.addEventListener("scroll", onMoved, { passive: true });
+    onMoved();
 
     return () => {
       layerRedrawRef.current = null;
@@ -176,6 +235,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
         setPopover(null);
+        presenceRef.current?.publishSelection(null);
         return;
       }
       const range = selection.getRangeAt(0);
@@ -193,6 +253,11 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
         setPopover(null);
         return;
       }
+
+      // Broadcast it, so other readers see what this one is looking at even if
+      // it never becomes an annotation. Ephemeral by construction — it lives in
+      // awareness and disappears when the selection or the connection does.
+      presenceRef.current?.publishSelection({ pageIndex: target.pageIndex, quads: target.quads });
 
       // Anchored to the end of the selection, in viewport coordinates, so the
       // control appears where the reader's pointer finished rather than over
@@ -240,6 +305,23 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
     return tops;
   }, []);
 
+  // The thumb's 20px minimum is a pixel threshold, so the rail's real height
+  // has to be measured. Measured off the **viewer container**, not the rail
+  // element: the two are siblings in a stretched flex row and therefore the
+  // same height, and the container is the one that reliably has a box. (The
+  // rail is wrapped for layout reasons at the call site, and a wrapper is
+  // exactly the kind of thing that can end up with no height of its own.)
+  useEffect(() => {
+    const container = handle?.container;
+    if (!container) return;
+    // No explicit initial measurement: ResizeObserver fires once on `observe`
+    // with the element's current size, so a synchronous setState here would
+    // only add a cascading render before the observer's own first callback.
+    const observer = new ResizeObserver(() => setRailHeight(container.clientHeight));
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [handle]);
+
   const jumpTo = useCallback((entry: PdfAnnotationEntry) => {
     const handle = handleRef.current;
     if (!handle || !entry.target) return;
@@ -252,6 +334,47 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       destArray: [entry.target.pageIndex, { name: "XYZ" }, 0, top ?? 0, null],
     });
   }, []);
+
+  // One tick per anchored annotation, at its own document fraction.
+  const ticks = useMemo((): AnnotationTick[] => {
+    if (!handle) return [];
+    return entries.flatMap((entry) => {
+      const target = entry.target;
+      if (!target) return [];
+      const top = quadsTopY(target.quads);
+      if (top === null) return [];
+      const pageHeight = pageHeightAt(handle.offsets, target.pageIndex);
+      // PDF user space measures y upward from the page's bottom; a document
+      // fraction measures downward from its top. This subtraction is the whole
+      // conversion, and it is the one place the sign flip happens for ticks.
+      return [
+        {
+          id: entry.root.id,
+          fraction: documentFraction(handle.offsets, target.pageIndex, Math.max(0, pageHeight - top)),
+          color: entry.color,
+          label: entry.quotedText || `Annotation on page ${target.pageIndex + 1}`,
+        },
+      ];
+    });
+  }, [entries, handle]);
+
+  const jumpToReader = useCallback((reader: RemoteReader) => {
+    const current = handleRef.current;
+    const viewport = reader.presence.viewport;
+    if (!current || !viewport) return;
+    current.viewer.scrollPageIntoView({
+      pageNumber: viewport.pageIndex + 1,
+      destArray: [viewport.pageIndex, { name: "XYZ" }, viewport.pdfPoint[0], viewport.pdfPoint[1], null],
+    });
+  }, []);
+
+  const jumpToAnnotation = useCallback(
+    (id: string) => {
+      const entry = entriesRef.current.find((candidate) => candidate.root.id === id);
+      if (entry) jumpTo(entry);
+    },
+    [jumpTo],
+  );
 
   const panel = useMemo(
     () => (
@@ -284,6 +407,26 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
           panel={panel}
           panelOpen={panelOpen}
           onTogglePanel={() => setPanelOpen((open) => !open)}
+          presenceRail={
+            <PdfPresenceRail readers={presence.readers} offsets={handle?.offsets ?? null} onJumpTo={jumpToReader} />
+          }
+          indicatorStrip={
+            <PdfIndicatorStrip
+              ticks={ticks}
+              visibleRange={visibleRange}
+              railHeightPx={railHeight}
+              onJumpTo={jumpToAnnotation}
+            />
+          }
+          followBar={
+            <PdfFollowBar
+              readers={presence.readers}
+              leading={presence.leading}
+              onSetLeading={presence.setLeading}
+              following={presence.following}
+              onFollow={presence.follow}
+            />
+          }
         />
 
         {popover && (
@@ -307,4 +450,42 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       </AnnotationMoveProvider>
     </DocPresenceProvider>
   );
+}
+
+/** A page's height at scale 1, recovered from the cumulative offset table. */
+function pageHeightAt(offsets: PdfViewerHandle["offsets"], pageIndex: number): number {
+  const top = offsets.tops[pageIndex];
+  if (top === undefined) return 0;
+  return (offsets.tops[pageIndex + 1] ?? offsets.total) - top;
+}
+
+/**
+ * Which page, and how far down it, sits at a given viewport y — the input to
+ * the visible-range calculation.
+ *
+ * Walks the *rendered* pages rather than computing from scroll offset, because
+ * only rendered pages have a box to measure and pdfjs virtualises. At the top
+ * and bottom edges of a long document the answer can be null (the edge falls in
+ * a gap, or on a page not yet built), which the caller treats as "no thumb"
+ * rather than guessing.
+ */
+function fractionAtViewportY(
+  handle: PdfViewerHandle,
+  clientY: number,
+): { pageIndex: number; yFromTop: number } | null {
+  const pages = handle.container.querySelectorAll<HTMLElement>(".page");
+  for (const page of pages) {
+    const rect = page.getBoundingClientRect();
+    if (clientY < rect.top || clientY > rect.bottom) continue;
+    const pageNumber = Number(page.dataset.pageNumber);
+    if (!Number.isInteger(pageNumber)) continue;
+    const pageIndex = pageNumber - 1;
+    const height = pageHeightAt(handle.offsets, pageIndex);
+    // Scaled back to the unrotated, scale-1 space every fraction is measured
+    // in — a fraction that depended on the reader's zoom would mean something
+    // different to each of them, which is the whole thing this avoids.
+    const fractionDownPage = rect.height > 0 ? (clientY - rect.top) / rect.height : 0;
+    return { pageIndex, yFromTop: fractionDownPage * height };
+  }
+  return null;
 }

@@ -172,9 +172,22 @@ test("opening Settings shrinks the editor without stealing clicks from it or the
   secondUser,
 }) => {
   // Guarantees a second eligible-but-not-yet-author row exists regardless of
-  // whatever else is in this database — the row's identity doesn't matter,
-  // only that clicking it is possible and registers.
-  await secondUser({ role: "AUTHOR" });
+  // whatever else is in this database. Identified by name below rather than
+  // assumed to land at checkbox index 1 — eligibleUsers (the edit page's own
+  // query) is every ADMIN/EDITOR/AUTHOR in the whole database sorted by
+  // name, so on a shared dev DB a real account could easily sort ahead of
+  // this one. Clicking whatever's actually at index 1 would risk making a
+  // real person a co-author of a doc this test then deletes.
+  const { user: coAuthorCandidate } = await secondUser({ role: "AUTHOR" });
+
+  // Tall enough that .editorContent's own 300px floor (EditorChrome.module.css)
+  // is never the constraint — that floor is a *documented*, cross-browser
+  // "the page scrolls instead of shrinking further" overflow, not the bug
+  // under test, and at a short viewport it looks identical from the outside.
+  // This test is about whether the shrink that *should* fit actually reaches
+  // the editor's own hit-testing, not about what happens once there's
+  // genuinely no room.
+  await page.setViewportSize({ width: 1280, height: 1400 });
 
   await page.goto(`/doc/${sharedDoc.id}/edit`);
   await waitForDocCollabReady(page);
@@ -208,11 +221,13 @@ test("opening Settings shrinks the editor without stealing clicks from it or the
   await page.keyboard.type(addition);
   await expect(bodyEditor(page)).toContainText(addition);
 
-  // The first and second author checkboxes are reachable and functional —
-  // exactly the region the stale hit-testing intercepted.
+  // The first author checkbox (admin, the doc's sole author so far — always
+  // the first row, since DocSettingsPanel puts current authors ahead of the
+  // rest) and a second one, reachable and functional — exactly the region
+  // the stale hit-testing intercepted.
   const checkboxes = authors.getByRole("checkbox");
   const first = checkboxes.nth(0);
-  const second = checkboxes.nth(1);
+  const second = authors.locator("label", { hasText: coAuthorCandidate.name! }).getByRole("checkbox");
   await expect(first).toBeChecked(); // the doc's sole author, admin, so far
   await expect(second).not.toBeChecked();
 
