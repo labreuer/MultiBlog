@@ -327,4 +327,52 @@ test.describe("pdf annotations", () => {
       await deleteTestFile(file.id);
     }
   });
+
+  test("deleting an annotation takes its highlight and tick with it", async ({ page }) => {
+    const file = await makeFile();
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      await selectPhrase(page, 1, PHRASE);
+      await composeAnnotation(page, "Doomed annotation.");
+
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      // Four surfaces show an annotation, and all four have to let go of it.
+      const highlight = page.locator(".pdfViewer .page .annoRect");
+      const tick = page.locator('[aria-label="Document map"]').getByRole("button");
+      const card = page.locator("[data-margin-note-id]");
+      const badge = page.getByRole("button", { name: /Jump to this passage/ });
+
+      await expect(highlight).not.toHaveCount(0, { timeout: 20_000 });
+      await expect(tick).toHaveCount(1);
+      await expect(card).toHaveCount(1);
+      await expect(badge).toHaveCount(1);
+
+      await page.getByRole("button", { name: "Delete", exact: true }).click();
+      await page.getByRole("button", { name: "Yes", exact: true }).click();
+
+      // **Deletion is a soft delete**, so the row survives — which is exactly
+      // why this needs asserting on every surface rather than trusting the
+      // query to stop returning it. The first cut hid only the card, leaving
+      // the highlight painted on the page, its tick on the strip, and an
+      // orphaned page badge: "I deleted it but it's still there".
+      await expect(highlight).toHaveCount(0, { timeout: 20_000 });
+      await expect(tick).toHaveCount(0);
+      await expect(badge).toHaveCount(0);
+      await expect(visibleText(page, "Doomed annotation.")).toHaveCount(0);
+
+      // And it stays gone across a reload, i.e. the server-side view-model
+      // agrees with what the client just did.
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      await expect(page.locator(".pdfViewer .page .annoRect")).toHaveCount(0, { timeout: 20_000 });
+      await expect(page.getByText("No annotations yet.", { exact: false })).toBeVisible();
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
 });

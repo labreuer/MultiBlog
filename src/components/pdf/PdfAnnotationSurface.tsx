@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import PdfViewer, { type PdfViewerHandle } from "./PdfViewer";
-import PdfAnnotationPanel, { type PdfAnnotationEntry } from "./PdfAnnotationPanel";
+import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
@@ -132,7 +132,9 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
     const layers = attachAnnoLayers(handle.viewer, handle.eventBus, {
       entriesForPage: (pageIndex) =>
         entriesRef.current
-          .filter((entry) => entry.target?.pageIndex === pageIndex)
+          // entryHasVisibleContent, not just a page match: a soft-deleted
+          // thread must take its highlight with it.
+          .filter((entry) => entry.target?.pageIndex === pageIndex && entryHasVisibleContent(entry))
           .map((entry): AnnoLayerEntry => ({ id: entry.root.id, target: entry.target!, color: entry.color })),
       // PLAN.md §19 — other readers' live selections, drawn in the same layer
       // but outlined rather than filled, so they read as somebody's cursor
@@ -340,7 +342,8 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
     if (!handle) return [];
     return entries.flatMap((entry) => {
       const target = entry.target;
-      if (!target) return [];
+      // Same rule as the highlight above — a deleted thread leaves no tick.
+      if (!target || !entryHasVisibleContent(entry)) return [];
       const top = quadsTopY(target.quads);
       if (top === null) return [];
       const pageHeight = pageHeightAt(handle.offsets, target.pageIndex);

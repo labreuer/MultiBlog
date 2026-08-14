@@ -31,6 +31,25 @@ export type PdfAnnotationEntry = {
   root: AnnotationNodeData;
 };
 
+/**
+ * Whether a thread still has anything to show.
+ *
+ * Deletion is a *soft* delete, and a deleted root whose replies survive is
+ * still a live conversation — so this is `hasNonDeletedDescendant`, not a plain
+ * `deletedByUserId === null`. Exported because **four** surfaces have to agree
+ * on it: the card, its page badge, the highlight drawn on the page, and the
+ * tick on the right-hand strip. They did not, and the result was that deleting
+ * an annotation removed its card while leaving its highlight, its tick and a
+ * stray page badge behind — "I deleted it but it's still there".
+ *
+ * The doc side gets this for free: it has no highlight of its own to clean up
+ * (a mark is content, so it goes when the mark does) and no rail ticks, so
+ * AnnotationNode rendering nothing is the whole story there.
+ */
+export function entryHasVisibleContent(entry: PdfAnnotationEntry): boolean {
+  return entry.root.deletedByUserId === null || hasNonDeletedDescendant(entry.root);
+}
+
 type SortMode = "datetime" | "position";
 
 type Props = {
@@ -67,7 +86,10 @@ export default function PdfAnnotationPanel({
   // therefore earlier — hence the reversed comparison. Getting this backwards
   // is the kind of thing that looks fine on a one-page document.
   const sorted = useMemo(() => {
-    const withOrder = entries.map((entry) => ({
+    // Fully-deleted threads drop out here rather than rendering an empty
+    // shell — see entryHasVisibleContent. Doing it at the top means the
+    // layout hook never measures them either.
+    const withOrder = entries.filter(entryHasVisibleContent).map((entry) => ({
       entry,
       page: entry.target?.pageIndex ?? Number.POSITIVE_INFINITY,
       y: entry.target ? -(quadsTopY(entry.target.quads) ?? 0) : Number.POSITIVE_INFINITY,
@@ -93,10 +115,6 @@ export default function PdfAnnotationPanel({
 
   const renderEntry = useCallback(
     (entry: PdfAnnotationEntry) => {
-      // A deleted root with no live descendants renders nothing (see
-      // AnnotationNode) — its quote header would otherwise dangle above empty
-      // space, the same rule AnnotationList applies.
-      const rootRendersNothing = entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
       const offscreen = positioned && !isAnchored(entry.root.id);
 
       return (
@@ -112,11 +130,16 @@ export default function PdfAnnotationPanel({
               className={styles.pageBadge}
               onClick={() => onJumpTo(entry)}
               title="Jump to this passage"
+              // The visible text is just "p. 4", which tells a screen reader
+              // nothing about what the control does; `title` is only used as an
+              // accessible name when an element has no content, so it doesn't
+              // fill the gap here.
+              aria-label={`Jump to this passage on page ${entry.target.pageIndex + 1}`}
             >
               p. {entry.target.pageIndex + 1}
             </button>
           )}
-          {entry.quotedText && !rootRendersNothing && (
+          {entry.quotedText && (
             <QuoteThreadHeader
               threadId={entry.threadId}
               quotedText={entry.quotedText}
@@ -145,7 +168,7 @@ export default function PdfAnnotationPanel({
         pdfTarget={pendingTarget ?? undefined}
       />
 
-      {entries.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>
       ) : (
         <>
