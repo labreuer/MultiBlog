@@ -190,6 +190,10 @@ test("avatar upload: re-encodes and resizes, serves immutably, and removal falls
 
     const png = await makeTestPng(contributorPage);
     await contributorPage.getByLabel("Photo").setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: png });
+    // Picking a file opens the cropper rather than uploading (PLAN.md §17n);
+    // confirming it is what posts. The positioning itself is exercised by
+    // avatar-crop.spec.ts — here the default crop is all this needs.
+    await contributorPage.getByRole("button", { name: "Use this photo" }).click();
     await expect(contributorPage.getByRole("button", { name: "Remove photo" })).toBeVisible();
 
     // Stored re-encoded and squared, never as the bytes that were uploaded

@@ -10,13 +10,16 @@ import { AVATAR_SIZE } from "./avatar-url";
 // equivalent, so nothing here may be imported from a "use client" component.
 // ContributorPanel gets the finished URL as a prop instead.
 
-/** Rejected before `sharp` ever sees the bytes — a cheap guard that doesn't require decoding anything. */
-export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-
 /**
  * Decompression-bomb ceiling, in pixels. sharp's own default is ~268MP,
  * which is far more than an avatar could justify: a 50MP source is already
  * a 8000×6000 photo.
+ *
+ * This is the *only* ingestion limit, deliberately. A byte cap used to sit
+ * alongside it and was removed: bytes are a poor proxy for what decoding
+ * actually costs — a 2MB PNG can be 100MP — so the pixel ceiling is both the
+ * stricter and the more honest guard, and a byte cap large enough not to
+ * reject legitimate photos never bound anything the pixel cap didn't.
  */
 const MAX_INPUT_PIXELS = 50 * 1024 * 1024;
 
@@ -56,10 +59,6 @@ export type ProcessedAvatar = {
  *   so it has to be baked into the pixels first.
  */
 export async function processAvatar(input: Uint8Array): Promise<ProcessedAvatar> {
-  if (input.byteLength > MAX_UPLOAD_BYTES) {
-    throw new Error(`Image is too large (max ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB).`);
-  }
-
   let encoded: Buffer;
   try {
     encoded = await sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })

@@ -5568,8 +5568,15 @@ security and privacy step:
   upload is attacker-controlled; `sharp` decodes the actual bytes and anything
   it can't parse is rejected. (The declared type is still checked first, only
   to produce a clearer message than a decode failure.)
-- A 5MB cap is enforced *before* decoding, and `limitInputPixels` caps the
-  decompression bomb at 50MP against `sharp`'s ~268MP default.
+- `limitInputPixels` caps the decompression bomb at 50MP against `sharp`'s
+  ~268MP default. This is the **only** ingestion limit, deliberately. A 5MB
+  byte cap sat beside it originally and was removed once the cropper landed
+  (§17o): bytes predict decode cost badly — a 2MB PNG can be 100MP — so the
+  pixel ceiling is both the stricter and the more honest guard, and a byte cap
+  loose enough not to reject real photographs never bound anything the pixel
+  ceiling didn't. The app-level byte check was also unreachable from the
+  dashboard, since Next's 1MB Server Action `bodySizeLimit` answers a larger
+  body with a 413 before the action is entered.
 
 160px is 4× the 40px card slot, so one stored size covers the dashboard preview
 and 2× displays without a second variant — which is what lets the render path
@@ -5615,6 +5622,76 @@ read before uploading a photo of themselves.
 - **Avatars are never garbage collected beyond the `ON DELETE CASCADE`.**
   Replacing an avatar overwrites the row, so there is no orphan accumulation —
   but there is also no history, and no way to undo a replacement.
+
+### 17o. Choosing the crop, in the browser
+
+`processAvatar` resizes with `fit: "cover", position: "attention"` — sharp's
+saliency heuristic picks which square of a non-square photo survives. That is a
+reasonable default and the wrong decision-maker: which square represents
+someone is a judgement only they can make. Picking a file now opens a cropper
+(`src/components/AvatarCropper.tsx`) that drags and zooms the photo behind a
+circular mask, and what gets uploaded is the crop.
+
+**The crop happens client-side, and that is the load-bearing choice.** The
+alternative — POST the original plus crop parameters and `.extract()`
+server-side — needs this same UI anyway, *plus* a wider `FormData` contract and
+parameter validation, so it is strictly more code for the same result. It also
+changes what crosses the wire: a fixed ~320px square of tens of KB whatever the
+source was, rather than the user's multi-megabyte original. That is what lets
+Next's 1MB Server Action `bodySizeLimit` and nginx's 1MB `client_max_body_size`
+both stay at their defaults, and it is why the byte caps above could go.
+
+320px is 2× the stored `AVATAR_SIZE`: the canvas does the *crop* and `sharp`
+does the final reduction with a proper resampling kernel, which is better than
+asking `drawImage` to do the whole downscale from a phone photo.
+
+None of this weakens ingestion, which is unchanged and still runs on every
+upload. A hand-crafted POST that skips the cropper entirely is exactly as
+constrained as it was before — re-encoded, EXIF-stripped, format-sniffed,
+pixel-capped. What did change is *coverage*: the canvas strips EXIF before the
+server ever sees the bytes, so no browser-driven upload can exercise the
+server-side strip any more. That guarantee now needs a direct test of
+`processAvatar`, not an e2e one.
+
+**Crop parameters are deliberately not persisted.** Storing them so a user
+could re-adjust later requires keeping the original in the database — and the
+original is the copy that still has the GPS EXIF in it, which would quietly
+undo the claim the panel makes to the user's face. Re-adjusting means
+re-uploading.
+
+**Minimum zoom is "covers the circle", not "contains the photo".** Letting the
+slider go below cover was built and then reverted: it fits the whole photo in,
+letterboxed against transparency (WebP carries alpha and `processAvatar`
+preserves it), but a circular avatar that doesn't fill its circle reads as
+broken rather than deliberate — and choosing which part of a photo shows is the
+job this control exists to do. The rejection is recorded in the component so it
+isn't re-derived as an improvement.
+
+Two defects worth keeping, both invisible to `tsc`, `eslint`, and any
+value-level test:
+
+- **The object URL must be created *and* revoked inside one effect.** Created
+  in a `useState` initializer and revoked in an effect cleanup — the shape that
+  most obviously satisfies `react-hooks/set-state-in-effect` — it dies on
+  StrictMode's first cleanup with nothing to recreate it (App Router sets
+  `__NEXT_STRICT_MODE_APP` by default), and *every* pick fails with "That file
+  couldn't be read as an image." Handing the URL to the DOM node inside the
+  effect satisfies the same lint rule properly, by synchronising an external
+  system rather than copying a derived value into state.
+- **`.field input` in `ContributorPanel.module.css` was a descendant
+  selector**, so a text input's padding and border landed on the cropper's
+  range input nested one level deeper — leaving the zoom slider's track 145.2px
+  inside a 160px box. The 7.4px of dead margin at each end still looked
+  draggable, because the border was drawn around it. The *values* stayed
+  reachable programmatically, which is exactly why a `fill()`/keyboard test saw
+  nothing wrong; only measuring the track caught it. Narrowed to
+  `.field > input`.
+
+`e2e/avatar-crop.spec.ts` covers both, and draws its own source image rather
+than reading a committed one — every geometry assertion is derived from the
+source's dimensions, so a checked-in file could be swapped for one of a
+different shape and break the spec without a line of code changing. That is not
+hypothetical; it is how the spec came to be written this way.
 
 ## 18. Margin notes: comments and annotations beside the text they belong to
 

@@ -12,6 +12,7 @@ import {
 } from "@/app/actions/contributor";
 import EditorToolbar from "./EditorToolbar";
 import ContributorCard from "./ContributorCard";
+import AvatarCropper from "./AvatarCropper";
 import { AVATAR_SIZE } from "@/lib/avatar-url";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./ContributorPanel.module.css";
@@ -56,6 +57,9 @@ export default function ContributorPanel({
   const [uploaded, setUploaded] = useState(hasUploadedAvatar);
   const [avatarPending, startAvatarTransition] = useTransition();
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  // The picked file, held while the cropper is open. Nothing is uploaded until
+  // the crop is confirmed, so this is also "is the cropper showing".
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [orderInput, setOrderInput] = useState(contributorOrder !== null ? String(contributorOrder) : "");
   const [orcidInput, setOrcidInput] = useState(orcid ?? "");
   const [websiteInput, setWebsiteInput] = useState(website ?? "");
@@ -98,24 +102,36 @@ export default function ContributorPanel({
     });
   }
 
-  function handleAvatarChange(file: File | undefined) {
+  // Picking a file no longer uploads it — it opens the cropper, and what gets
+  // uploaded is that component's export (PLAN.md §17n).
+  function handleAvatarPick(file: File | undefined) {
+    // Cleared immediately, not after the upload: the input's value is only
+    // needed to *notice* the pick, and leaving it set means re-picking the
+    // same file after a Cancel fires no onChange and appears to do nothing.
+    if (fileInputRef.current) fileInputRef.current.value = "";
     if (!file) return;
+    setAvatarError(null);
+    // No size check: the cropper uploads a fixed-size square whatever the
+    // source was, so a large pick costs the server nothing, and a file the
+    // browser can't decode reports itself through the cropper's onError.
+    setPendingFile(file);
+  }
+
+  function handleCroppedUpload(cropped: File) {
     setAvatarError(null);
     startAvatarTransition(async () => {
       try {
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append("file", cropped);
         const { src } = await uploadContributorAvatar(formData);
         setCurrentAvatarSrc(src);
         setUploaded(true);
+        setPendingFile(null);
         router.refresh();
       } catch (e) {
+        // The cropper stays open on failure, with the crop intact — a retry
+        // shouldn't cost the user their positioning.
         setAvatarError(e instanceof Error ? e.message : "Failed to upload that image.");
-      } finally {
-        // Cleared so re-picking the *same* file still fires onChange — the
-        // obvious retry after a failed upload, which would otherwise appear
-        // to do nothing.
-        if (fileInputRef.current) fileInputRef.current.value = "";
       }
     });
   }
@@ -158,11 +174,11 @@ export default function ContributorPanel({
           type="file"
           accept="image/*"
           disabled={avatarPending}
-          onChange={(e) => handleAvatarChange(e.target.files?.[0])}
+          onChange={(e) => handleAvatarPick(e.target.files?.[0])}
         />
         <p className={styles.hint}>
           Stored on this site, resized to {AVATAR_SIZE}px square. Location data and other metadata are removed.
-          {uploaded && (
+          {uploaded && !pendingFile && (
             <>
               {" "}
               <button type="button" onClick={handleAvatarRemove} disabled={avatarPending} className={styles.linkButton}>
@@ -171,7 +187,22 @@ export default function ContributorPanel({
             </>
           )}
         </p>
-        {avatarPending && <p className={styles.hint}>Working…</p>}
+        {pendingFile && (
+          <AvatarCropper
+            // Keyed by the file so picking a second photo remounts rather than
+            // reusing the first one's zoom and offset, which would otherwise
+            // be applied to a completely different image.
+            key={`${pendingFile.name}:${pendingFile.size}:${pendingFile.lastModified}`}
+            file={pendingFile}
+            busy={avatarPending}
+            onCancel={() => {
+              setPendingFile(null);
+              setAvatarError(null);
+            }}
+            onConfirm={handleCroppedUpload}
+          />
+        )}
+        {avatarPending && !pendingFile && <p className={styles.hint}>Working…</p>}
         {avatarError && <p className={styles.error}>{avatarError}</p>}
       </div>
 

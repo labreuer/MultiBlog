@@ -1,0 +1,81 @@
+.cropper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+}
+
+/* The circular mask. `touch-action: none` is what makes a touch drag position
+   the photo instead of scrolling the dashboard out from under it. */
+.frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.frame:active {
+  cursor: grabbing;
+}
+
+/* The frame is focusable only so the arrow keys have somewhere to land, so the
+   ring has to be visible — it's the only cue that the keys will do anything. */
+.frame:focus-visible {
+  outline: 2px solid var(--accent-outline);
+  outline-offset: 2px;
+}
+
+/* Positioned from its own centre so the component's offset is a pure
+   translation of centre-from-centre — the same quantity the canvas export
+   scales by. width/height/transform are all set inline from the geometry. */
+.image {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: none;
+  pointer-events: none;
+}
+
+.zoomRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.zoomRow input {
+  width: 160px;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  max-width: 320px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cancel {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.error {
+  color: var(--error);
+  font-size: 0.85rem;
+}

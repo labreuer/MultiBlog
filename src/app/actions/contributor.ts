@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { pmBlurbSchema } from "@/lib/tiptap-schema";
 import { extractText } from "@/lib/diff";
 import { normalizeOrcid, normalizeWebsite } from "@/lib/contributor-links";
-import { storeAvatar, MAX_UPLOAD_BYTES } from "@/lib/avatar";
+import { storeAvatar } from "@/lib/avatar";
 import { avatarUrl } from "@/lib/avatar-url";
 import type { Prisma } from "@/generated/prisma/client";
 
@@ -112,9 +112,12 @@ export async function uploadContributorAvatar(formData: FormData): Promise<{ src
   if (!(file instanceof File) || file.size === 0) {
     throw new Error("No file was selected.");
   }
-  if (file.size > MAX_UPLOAD_BYTES) {
-    throw new Error(`Image is too large (max ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB).`);
-  }
+  // No size check here, and none downstream either. It would be unreachable:
+  // Next's Server Action bodySizeLimit (1MB by default, unset in
+  // next.config.ts) rejects a larger body with a 413 before this function is
+  // entered, so any app-level ceiling above 1MB can never fire and its message
+  // would misstate the real limit. What bounds ingestion cost is
+  // processAvatar's pixel ceiling, which a byte count only ever approximated.
 
   // The declared type is never trusted — processAvatar sniffs the real
   // format by decoding — but rejecting an obviously-wrong one first gives a
