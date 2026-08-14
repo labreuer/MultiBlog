@@ -4,8 +4,10 @@ Reference for work on the in-browser PDF viewer: annotations stored **outside** 
 plus multi-client viewport synchronisation.
 
 **Status of this document.** The anchor model, coordinate rules, layer structure, and sync
-wire format below are *recommendations* worked out in design discussion, not yet
-battle-tested in this codebase. The renderer choice (PDF.js) and the "annotations live
+wire format below were *recommendations* worked out in design discussion. **They are now
+built** — PLAN.md §19, `src/lib/pdf-anchor*.ts`, `src/components/pdf/`. Where the
+implementation departs from what is written here, §13 at the end says so and why; treat any
+un-annotated statement below as still current. The renderer choice (PDF.js) and the "annotations live
 outside the file" constraint are settled. Treat everything else as a strong default —
 if you find a concrete reason it's wrong, say so rather than silently working around it.
 
@@ -335,7 +337,53 @@ available without rendering.
 
 ## 12. Open
 
-- Whether to keep a server-side copy of normalised page text for search, or recompute client-side.
-- Annotation permissions / visibility scoping.
+- ~~Whether to keep a server-side copy of normalised page text for search, or recompute
+  client-side.~~ **Settled: stored.** `file_page_text` holds the normalised text of every
+  page, extracted once at upload (PLAN.md §19). It was not the search argument that decided
+  it — it is that `quotedText` has to be derived server-side to keep §12i's "the selected
+  text is a request field only, never a column" true, and doing that per annotation would
+  otherwise mean re-parsing the PDF on every post. Storing it makes the derivation a string
+  slice. Search is a free consequence, not the reason.
+- ~~Annotation permissions / visibility scoping.~~ **Settled: a file carries docs'
+  PRIVATE/SHARED model** (`src/lib/file-authz.ts`, docs/PERMISSIONS.md), and an annotation on
+  one is an ordinary `Annotation` row, so it inherits DRAFT privacy, soft delete, and
+  `requireOwnOrAdmin` unchanged.
 - Behaviour when the same logical document arrives with different bytes (different `docId`)
-  — re-anchor across editions, or treat as unrelated.
+  — re-anchor across editions, or treat as unrelated. **Still open**, and note that
+  content-addressed storage makes the two *share* bytes when they are identical and stay
+  wholly separate when they are not; nothing bridges editions.
+
+---
+
+## 13. Where the implementation departs from this document
+
+Recorded here rather than silently, because each of these reads as a bug in our code until
+you know it isn't.
+
+**§10 names `PDFViewerApplication`; the viewer is built on `PDFViewer`.** The former is the
+bundled `web/viewer.html` *application*, not an importable library entry. `PDFViewer` +
+`EventBus` + `PDFLinkService` from `pdfjs-dist/web/pdf_viewer.mjs` is the library-level
+equivalent and exposes every internal §5 and §8 rely on. The version-pinning discipline §10
+asks for is unchanged, and `e2e/pdf-viewer.spec.ts` is the smoke test it asks for.
+
+**§5 names `convertToViewportRectangle`; it does not exist in pdfjs 6.** Neither the types
+nor the shipped `pdf.mjs` have it — only `convertToViewportPoint` and `convertToPdfPoint`.
+Converting the two opposite corners as points is exactly equivalent for an axis-aligned box,
+which is all a quad's bounding box ever is here. Every *rule* in §5 still holds.
+
+**§9's "annotations → ydoc" is not taken.** Annotations are Postgres rows, for five reasons
+set out in PLAN.md §19 — chiefly that Hocuspocus authorizes the connection rather than the
+keys, so a `Y.Map` would expose every DRAFT and let anyone delete any entry unattributed, and
+that `/annotations` could not see them at all. §9's *viewport* half is taken exactly as
+written, including all three echo guards.
+
+**§4 step 2 (fuzzy quote match) is deferred.** It matters only after a `textVersion` bump,
+and §4 itself warns against running it synchronously (Hypothesis's ten-second stall). Doing
+it properly needs a worker; steps 1, 3 and 4 make the viewer correct without it, because the
+quads always resolve. §3's lazy re-anchor on a version change is deferred with it.
+
+**§3's NFKC is applied per character, not to the joined string.** Whole-string NFKC can merge
+or reorder across characters, which is incompatible with the exact offset map §3 also
+requires. Per-character keeps the map exact and the function deterministic — which is what §3
+actually rests on — and both sides that matter (upload extraction and selection capture) call
+the same function, so they agree by construction. See `src/lib/pdf-text.ts`.

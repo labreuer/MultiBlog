@@ -183,6 +183,11 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   §13m has the full account; the generalizable half is that a `NEXT_PUBLIC_` var answers "how
   does the *browser* reach this", which is the wrong question for a server-to-server call and
   happens to give the same answer as the right one only until a reverse proxy exists.
+  Optional: `FILE_STORAGE_DIR` (default `.file-storage/`) and `FILE_MAX_UPLOAD_BYTES`
+  (default 50MB) — both bare, so a deployment changes its upload limit with a **restart, not
+  a rebuild**. That is why the browser learns the limit from `/api/files/limits` rather than
+  from a baked-in constant: the client-side pre-check and the server's enforcement are then
+  provably the same number.
   Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
   `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
   deployment's title survives `git pull` instead of living in a tracked file. Also optional:
@@ -224,6 +229,55 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   "avatar from URL" path**: a server-side fetch of a user-supplied URL is SSRF. `sharp` is a
   direct dependency pinned at the range its pre-existing `overrides` entry uses — npm rejects
   a direct dep whose spec doesn't match its own override.
+- **An uploaded PDF is bytes on disk, not a `bytea`** (PLAN.md §19) — content-addressed at
+  `FILE_STORAGE_DIR/<sha256[0:2]>/<sha256>`, served from `/api/files/<id>/<hash>` with `Range`
+  support so PDF.js can render page 1 of a large scan without transferring all of it. Prisma
+  cannot stream a `Bytes` column, which is the whole argument: a 50MB file would land in
+  Node's heap on upload *and* on every one of pdfjs's range requests. `UserAvatar`'s
+  in-Postgres bytes are not a counter-precedent — those are ~10KB and served whole.
+  Consequences worth remembering:
+  - **`FILE_STORAGE_DIR` is a second backup surface `pg_dump` does not cover** (DEPLOY.md).
+  - **Never delete a file's bytes without counting references first.** Content addressing
+    means two `StoredFile` rows can legitimately share one blob; `deleteBytesIfUnreferenced`
+    takes the surviving count as an argument for exactly that reason.
+  - The Prisma model is **`StoredFile`**, `@@map("file")`. The table is `file`; the generated
+    TS type must not be `File`, which is a DOM/Node global the upload path uses.
+  - Upload is a **Route Handler taking a raw body**, not a Server Action and not multipart:
+    actions carry a 1MB `bodySizeLimit` that raising would raise site-wide, and
+    `request.formData()` buffers the whole upload before user code sees it. nginx needs
+    `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader
+    names the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
+- **pdfjs traps, all four verified against 6.2.108** (PLAN.md §19, docs/PDF.md §10). Each
+  fails in a way that does not look like its cause:
+  - **Turbopack rewrites `require.resolve("pdfjs-dist/…")` to a virtual module id**, even
+    under `serverExternalPackages`. pdfjs then reports `Invalid factory url: … must include
+    trailing slash`, which reads like a malformed URL of ours. `src/lib/pdf-extract.ts`
+    anchors `createRequire` at the project root *and* builds the specifier from a variable so
+    it isn't statically analysable. This failed **only through Next** — the same code under
+    `npx tsx` was fine.
+  - **`workerSrc`, never `workerPort`.** A supplied port is shared, so destroying one loading
+    task marks that PDFWorker destroyed and the *second* mount dies with `PDFWorker.create -
+    the worker is being destroyed` — which reads like a missing `await` in our teardown.
+    React StrictMode trips it on every dev page load.
+  - **`workerSrc` wants a `file://` URL; `standardFontDataUrl` wants a bare path.** Same
+    library, opposite spellings, because one goes through Node's ESM loader and the other
+    through pdfjs's own filesystem read.
+  - **`PDFDocumentProxy.destroy()` is gone in 6.x** (it has `cleanup()`, which leaves the
+    worker alive) — destroy the *loading task*. And **`convertToViewportRectangle` no longer
+    exists** despite docs/PDF.md §5 naming it; convert both corners as points instead.
+  pdfjs's fonts and cmaps are fetched at runtime by URLs it builds by concatenation, so no
+  bundler can see them: `scripts/copy-pdfjs-assets.ts` copies them into `public/` and is wired
+  as `prebuild`/`predev`, making it unskippable.
+- **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
+  file's `sha256` is its identity, so the bytes an anchor was measured against are by
+  construction the bytes every later reader sees. There is no tracking plugin, no
+  per-transaction re-resolution and no version stamp — `Annotation.ydocUpdateId` is
+  meaningless for a file. `docs/PDF.md` §4's quote/position steps exist only to survive
+  changes to **our own** normaliser (`src/lib/pdf-text.ts`, whose `NORMALISER_VERSION` must be
+  bumped on *any* behavioural change, however small). `quotedText` is still derived
+  server-side from `FilePageText` — the page text extracted once at upload — so §12i's "the
+  selected text is a request field only, never a column" survives; `scripts/integrity/check-pdf-anchors.ts`
+  is what verifies that claim, and it is the only thing that would ever notice it breaking.
 - Site icons (favicon/manifest): [docs/FAVICON.md](docs/FAVICON.md).
 - The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
   exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
@@ -343,14 +397,17 @@ anything repeatable.
   optionally seeded with body text), `scripts/test-post.ts` (create/delete posts against a
   `--doc <id>`, draft or published, with a moderation policy — PLAN.md §15: a post is
   always a snapshot of some doc, never independently authored), `scripts/test-comment.ts`
-  (list a post's comments and their statuses), `scripts/test-ydoc.ts` (create/list/delete
+  (list a post's comments and their statuses), `scripts/test-file.ts` (create/list/delete
+  uploaded PDFs — it *generates* its own document via `scripts/make-test-pdf.ts` and pushes it
+  through the real storage and extraction path, so a fixture file is indistinguishable from an
+  uploaded one), `scripts/test-ydoc.ts` (create/list/delete
   standalone documents in the ydoc stack, PLAN.md §11 — `--garbage` writes bytes that
   aren't a valid Yjs update at all, to exercise `/ydoc-debug`'s "not TipTap-compatible"
   error path on purpose). Each script's header comment documents its own flags — read that
   rather than a copy here, which is what will go stale. Defaults worth knowing without
   opening anything:
   `test-admin@example.com`, role `ADMIN`, password always `testpass123`.
-- `test-user.ts`/`test-doc.ts`/`test-post.ts`/`test-comment.ts` all refuse to touch
+- `test-user.ts`/`test-doc.ts`/`test-post.ts`/`test-comment.ts`/`test-file.ts` all refuse to touch
   anything but `@example.com` accounts and docs/posts authored solely by them, so they
   can't reach real data by mistake. Delete a post or doc *before* its author: once its
   only author is gone, "no authors" is indistinguishable from a real one that lost its

@@ -1053,3 +1053,43 @@ Then the client stays permanently ahead of the log, the walk consumes every row 
 tail, and the anchor resolves against a state missing those characters — degrading to the same
 text search everything else here degrades to. Worth recognising as the persistence layer already
 reporting itself degraded, rather than as anything about anchoring.
+
+---
+
+## A third strategy: quads into an immutable file (PLAN.md §19)
+
+Everything above is about keeping a remark attached to a passage **while the passage moves**.
+A PDF annotation is the case where it cannot.
+
+A file's identity is the sha256 of its bytes, so the document an anchor was measured against
+is, by construction, the document every later reader sees. Nothing drifts. The anchor is a
+set of quadrilaterals in PDF user space (docs/PDF.md §2), and resolving it is arithmetic: a
+viewport transform at the reader's current scale and rotation, and no re-resolution ever.
+
+That makes it the cheapest strategy in this document, and it is worth being precise about
+*why*, because the cheapness is not a property of quads:
+
+- The post-comment strategy (§1) pays for an immutable snapshot with detachment across
+  publishes.
+- The doc-annotation strategies (§7) pay for a live document with per-transaction tracking
+  and a repair story.
+- The doc-link strategy (§3) pays for spanning two documents with drift on every edit.
+- **This one pays nothing, because immutability was given rather than bought.**
+
+So do not read it as evidence that quads are a better anchor than offsets or marks. Applied
+to a doc, quads would be worse than either — geometry moves the instant a line rewraps. What
+this strategy demonstrates is only that *when the substrate cannot change, anchoring stops
+being a problem*, which is exactly the assumption none of the other three get to make.
+
+Two consequences that do generalise:
+
+**The quote is a check, not the anchor.** `quote.exact` and `position` exist to detect that
+our own extractor or normaliser changed, not that the document did (docs/PDF.md §4's closing
+note). That separation — a primary anchor plus an independent verification — is worth
+copying anywhere the two can be made independent, and it is what lets a PDF annotation be
+reported as `orphaned` rather than silently drawn in the wrong place.
+
+**A version stamp measures the substrate, not the remark.** `Annotation.ydocUpdateId` is
+null for every file annotation, and correctly so: it names the coordinate system an anchor
+was measured in, and a file has only one. Reaching for a stamp out of habit, on a substrate
+that cannot version, would be a field to keep correct for no reason.
