@@ -1,0 +1,140 @@
+/* PLAN.md §19 — the full-viewport app shell for /pdf/[slug].
+   Deliberately unlike /doc/[slug]'s page-scrolled layout: the viewer scrolls
+   inside its own box and nothing lives below the fold, so the annotation
+   panel is a column beside it rather than a section under it. */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  /* `flex: 1 1 auto` + `min-height: 0` against body's definite 100dvh — the
+     same height budget DocEditor.module.css's .container relies on. A
+     min-height here instead would let the box fall back to content size and
+     put a second scrollbar on the page (STYLE.md's Global baseline). */
+  flex: 1 1 auto;
+  min-height: 0;
+  font-family: sans-serif;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+
+.title {
+  font-weight: 600;
+  margin-right: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40ch;
+}
+
+.toolbar button,
+.toolbar select {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pageInput {
+  width: 4ch;
+  text-align: right;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.pageCount {
+  color: var(--text-secondary);
+}
+
+/* The row under the toolbar: presence rail | viewer | indicator | panel.
+   CSS owns this grid and JS owns only vertical alignment inside the panel —
+   the same split CLAUDE.md insists on for the doc-side margin notes. */
+.body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Wrapper exists solely to be the containing block for .viewerContainer:
+   pdfjs positions its pages absolutely and requires an absolutely-positioned,
+   scrollable container. */
+.viewerWrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.viewerContainer {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--surface-muted);
+}
+
+/* The annotation panel. A column beside the viewer above the breakpoint; a
+   full-width overlay below it, since there is no room for both and no page
+   to scroll to instead. */
+.panel {
+  display: none;
+  flex: 0 0 360px;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface);
+  overflow-y: auto;
+  /* `relative`, so the anchored cards inside can be absolutely positioned
+     against this scroller rather than against the viewport. */
+  position: relative;
+}
+
+.panelOpen {
+  display: block;
+}
+
+@media (max-width: 1199px) {
+  .panelOpen {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    flex: none;
+    border-left: none;
+  }
+}
+
+.status {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.error {
+  padding: 2rem;
+  text-align: center;
+  color: var(--error);
+}
+
+/* pdfjs draws a border and shadow around each page via its own stylesheet;
+   these two just give the stack some breathing room inside our container. */
+.viewerContainer :global(.pdfViewer) {
+  padding: 0.5rem 0;
+}

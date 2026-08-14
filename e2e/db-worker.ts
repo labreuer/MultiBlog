@@ -1154,7 +1154,13 @@ export async function countAllYdocs(): Promise<number> {
  * an authorless one, which is what one becomes the moment its only author
  * is deleted.
  */
-export async function sweepTestData(): Promise<{ posts: number; docs: number; users: number; ydocs: number }> {
+export async function sweepTestData(): Promise<{
+  posts: number;
+  docs: number;
+  files: number;
+  users: number;
+  ydocs: number;
+}> {
   const stalePosts = await prisma.post.findMany({
     where: {
       title: { startsWith: E2E_TITLE_PREFIX },
@@ -1188,6 +1194,21 @@ export async function sweepTestData(): Promise<{ posts: number; docs: number; us
     }
   }
 
+  // PLAN.md §19 — files, before users, for exactly the reason posts and docs
+  // go first: deleteTestFile refuses an authorless file, and deleting the only
+  // author is what makes one. Also unlike a doc, a file owns *bytes* on disk,
+  // so a missed sweep leaks storage rather than just a row.
+  const staleFiles = await prismaIncludingDeleted.storedFile.findMany({
+    where: {
+      title: { startsWith: E2E_TITLE_PREFIX },
+      authors: { every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
+    },
+    select: { id: true, authors: { select: { userId: true } } },
+  });
+  for (const file of staleFiles) {
+    if (file.authors.length > 0) await deleteTestFile(file.id);
+  }
+
   const staleUsers = await prisma.user.findMany({
     where: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
     select: { email: true },
@@ -1195,13 +1216,32 @@ export async function sweepTestData(): Promise<{ posts: number; docs: number; us
   for (const user of staleUsers) await deleteTestUser(user.email);
 
   // Anonymous commenters the moderation specs invent have no User row.
-  await prisma.commenter.deleteMany({
+  //
+  // Their *comments* go first. `comment.commenter_id` is RESTRICT, so a
+  // commenter whose comment outlived its own spec (a crashed run, a Ctrl+C
+  // mid-test) makes this deleteMany fail outright with a foreign-key
+  // violation — which then fails the teardown for the whole suite, long after
+  // and far away from whatever actually crashed. Deleting the comments first
+  // makes the sweep idempotent under exactly the conditions it exists for.
+  const staleCommenters = await prisma.commenter.findMany({
     where: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
+    select: { id: true },
   });
+  const staleCommenterIds = staleCommenters.map((c) => c.id);
+  if (staleCommenterIds.length > 0) {
+    await prisma.comment.deleteMany({ where: { commenterId: { in: staleCommenterIds } } });
+    await prisma.commenter.deleteMany({ where: { id: { in: staleCommenterIds } } });
+  }
 
   const staleYdocs = await prisma.ydoc.deleteMany({ where: { id: { startsWith: "ydoc:test-" } } });
 
-  return { posts: stalePosts.length, docs: staleDocs.length, users: staleUsers.length, ydocs: staleYdocs.count };
+  return {
+    posts: stalePosts.length,
+    docs: staleDocs.length,
+    files: staleFiles.length,
+    users: staleUsers.length,
+    ydocs: staleYdocs.count,
+  };
 }
 
 // ---------------------------------------------------------------------------
