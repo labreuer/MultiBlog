@@ -30,6 +30,7 @@ import { uniqueDocSlug } from "@/lib/doc-slug";
 import { uniqueFileSlug } from "@/lib/file-slug";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
+import { parsePdfTarget } from "@/lib/pdf-anchor";
 import { buildTestPdf } from "../scripts/make-test-pdf";
 import {
   contentExtensions,
@@ -481,6 +482,66 @@ export async function createTestFile(opts: {
 }
 
 /** Same @example.com containment as deleteTestDoc, plus the shared-bytes rule. */
+export type FileAnnotationFacts = {
+  id: string;
+  bodyText: string;
+  /** The stored quote — derived server-side at post time, never client-supplied. */
+  quotedText: string;
+  pageIndex: number | null;
+  quadCount: number;
+  position: { start: number; end: number } | null;
+  textVersion: string | null;
+  /** The page text this server extracted at upload, at the target's own textVersion. */
+  pageTextAtTarget: string | null;
+};
+
+/**
+ * The stored anchor of every annotation on a file, alongside the page text the
+ * *server* holds for it.
+ *
+ * Returning both is the point: it lets a spec assert that `quotedText` is
+ * exactly `pageText.slice(position.start, position.end)` — that is, that the
+ * quote was cut from the server's own extraction rather than accepted from the
+ * client (PLAN.md §19, §12i's "a request field only, never a column"). Nothing
+ * observable in the browser can distinguish those two.
+ */
+export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnotationFacts[]> {
+  const annotations = await prisma.annotation.findMany({
+    where: { fileId, status: { not: "DRAFT" } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, bodyText: true, quotedText: true, pdfTarget: true },
+  });
+
+  return Promise.all(
+    annotations.map(async (a) => {
+      const target = parsePdfTarget(a.pdfTarget);
+      const pageText = target
+        ? await prisma.filePageText.findUnique({
+            where: {
+              fileId_pageIndex_textVersion: {
+                fileId,
+                pageIndex: target.pageIndex,
+                textVersion: target.textVersion,
+              },
+            },
+            select: { text: true },
+          })
+        : null;
+
+      return {
+        id: a.id,
+        bodyText: a.bodyText,
+        quotedText: a.quotedText,
+        pageIndex: target?.pageIndex ?? null,
+        quadCount: target?.quads.length ?? 0,
+        position: target?.position ?? null,
+        textVersion: target?.textVersion ?? null,
+        pageTextAtTarget: pageText?.text ?? null,
+      };
+    }),
+  );
+}
+
 export async function deleteTestFile(idOrSlug: string): Promise<void> {
   const file = await prismaIncludingDeleted.storedFile.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
@@ -1262,6 +1323,7 @@ const handlers = {
   deleteTestDoc,
   createTestFile,
   deleteTestFile,
+  getFileAnnotationFacts,
   getDocState,
   getContributorFields,
   getAvatarFacts,

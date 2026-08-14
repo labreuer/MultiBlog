@@ -4,9 +4,13 @@ import { useEffect, useState, useTransition } from "react";
 import { createDraftAnnotation, postAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { useAnnotationMove } from "./annotation-move-context";
+import type { AnnotationTarget } from "@/lib/annotation-container";
 import styles from "./AnnotationComposer.module.css";
 
-type Props = { docId: string };
+// PLAN.md §19 — a container rather than a doc id, so the same composer serves
+// /doc/[slug] and /pdf/[slug]. `pdfTarget` is set only by the PDF surface,
+// which opens this composer with a selection already captured.
+type Props = { target: AnnotationTarget; pdfTarget?: unknown };
 
 type OpenDraft = { id: string; anchorFrom?: number; anchorTo?: number; quotedText?: string };
 
@@ -17,7 +21,7 @@ type OpenDraft = { id: string; anchorFrom?: number; anchorTo?: number; quotedTex
 // open on every page load): opening it creates a DRAFT eagerly, same
 // reasoning §13d gives for why a composer needs a row before a single
 // keystroke lands.
-export default function NewAnnotationComposer({ docId }: Props) {
+export default function NewAnnotationComposer({ target, pdfTarget }: Props) {
   const [open, setOpen] = useState<OpenDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -59,7 +63,7 @@ export default function NewAnnotationComposer({ docId }: Props) {
   function openNew() {
     setError(null);
     startTransition(async () => {
-      const result = await createDraftAnnotation(docId);
+      const result = await createDraftAnnotation(target);
       if ("error" in result) {
         setError(result.error);
         return;
@@ -75,6 +79,7 @@ export default function NewAnnotationComposer({ docId }: Props) {
         anchorFrom={open.anchorFrom}
         anchorTo={open.anchorTo}
         quotedText={open.quotedText}
+        pdfTarget={pdfTarget}
         onPosted={() => setOpen(null)}
         onCancel={() => setOpen(null)}
       />

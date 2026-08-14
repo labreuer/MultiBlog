@@ -36,6 +36,11 @@ type Props = {
   // trusting. A null result (the anchored text is gone) posts document-level
   // rather than falling back to the stale offsets.
   resolveAnchor?: () => { from: number; to: number } | null;
+  // PLAN.md §19 — a PDF anchor (docs/PDF.md §2's Target), present only from the
+  // /pdf/[slug] composer. Passed straight through to postAnnotation, which
+  // validates it and derives `quotedText` from its own stored page text rather
+  // than believing anything in here.
+  pdfTarget?: unknown;
   onPosted: () => void;
   onCancel: () => void;
   // PLAN.md §13g — present only from the inline popover, absent from the
@@ -69,6 +74,7 @@ export default function LiveAnnotationComposer({
   atVersion = null,
   ydocUpdateId,
   resolveAnchor,
+  pdfTarget,
   onPosted,
   onCancel,
   onMoveToBottom,
@@ -174,6 +180,7 @@ export default function LiveAnnotationComposer({
             quotedText,
             raise: visibility === "raise",
             ydocUpdateId: ydocUpdateId ?? undefined,
+            pdfTarget,
           });
     setPending(false);
     if (result.error) {

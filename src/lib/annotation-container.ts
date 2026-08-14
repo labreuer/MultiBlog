@@ -9,6 +9,20 @@
 
 export type AnnotationContainer = { kind: "doc"; docId: string } | { kind: "file"; fileId: string };
 
+/**
+ * Which container a *new* annotation should belong to — the argument form,
+ * where `AnnotationContainer` above is the row form.
+ *
+ * A discriminated union rather than two optional ids, so "neither" and "both"
+ * are unspellable: the same guarantee `annotation_one_container_check` gives in
+ * the database, expressed where the caller is.
+ *
+ * Lives here rather than beside createDraftAnnotation because that file is
+ * `"use server"`, and a Server Actions module is expected to export async
+ * functions and nothing else.
+ */
+export type AnnotationTarget = { kind: "doc"; id: string } | { kind: "file"; id: string };
+
 export type AnnotationContainerColumns = { docId: string | null; fileId: string | null };
 
 /**

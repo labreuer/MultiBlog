@@ -2,7 +2,10 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
-import PdfViewerClient from "@/components/pdf/PdfViewerClient";
+import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
+import { getFileAnnotationsAsThreads } from "@/lib/annotation-data";
+import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
+import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
 import styles from "./page.module.css";
 
 // PLAN.md §19 — the PDF reading view.
@@ -60,5 +63,25 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
   // the download route answer `immutable` — see the route's own header.
   const fileUrl = `/api/files/${file.id}/${file.sha256}`;
 
-  return <PdfViewerClient fileUrl={fileUrl} title={file.title} />;
+  // Fetched here rather than inside the panel for the same reason
+  // /doc/[slug] fetches its threads at the page level (PLAN.md §13o): the
+  // *highlights* and the *cards* have to come from one snapshot, or the two
+  // could disagree about which annotations exist.
+  //
+  // buildAnnotationEntries is reused verbatim — it is a server module (it runs
+  // @tiptap/static-renderer, whose output ships in the RSC payload), and the
+  // thread → entry transform is identical for both containers. Only the PDF
+  // target is extra, joined back on by thread id rather than by position so it
+  // cannot depend on that function's ordering.
+  const threads = await getFileAnnotationsAsThreads(file.id);
+  const targets = new Map(threads.map((thread) => [thread.id, thread.pdfTarget]));
+  const entries: PdfAnnotationEntry[] = buildAnnotationEntries(threads).map((entry) => ({
+    threadId: entry.threadId,
+    quotedText: entry.quotedText,
+    color: entry.color,
+    target: targets.get(entry.threadId) ?? null,
+    root: entry.root,
+  }));
+
+  return <PdfSurfaceClient fileId={file.id} fileUrl={fileUrl} title={file.title} entries={entries} />;
 }

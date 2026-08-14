@@ -104,6 +104,36 @@ export default function PdfViewer({
     eventBus.on("updateviewarea", onViewArea);
     eventBus.on("pagechanging", onViewArea);
 
+    // **Registered before `setDocument`, not after the awaits below.**
+    // `pagesinit` fires almost immediately once the document is handed over,
+    // and the page-dimension fetch afterwards is a few worker round trips — so
+    // attaching this listener inside that `.then()` reliably misses the event.
+    // The viewer then renders perfectly while never reporting ready, which
+    // silently disables everything downstream of `onReady` (selection capture,
+    // the annotation layer) with no error anywhere.
+    //
+    // Readiness needs *both* signals, so each records itself and the last one
+    // to arrive completes: `pagesinit` for the layout, the dimension table for
+    // the geometry every rail is computed against.
+    let pagesReady = false;
+    let pending: PdfViewerHandle | null = null;
+
+    const completeReady = () => {
+      if (!pagesReady || !pending || cancelled) return;
+      // Settable only once the first page has been laid out; assigning earlier
+      // is silently dropped and the viewer opens at some default.
+      viewer.currentScaleValue = "page-width";
+      handleRef.current = pending;
+      setStatus("ready");
+      onReadyRef.current?.(pending);
+    };
+
+    const onPagesInit = () => {
+      pagesReady = true;
+      completeReady();
+    };
+    eventBus.on("pagesinit", onPagesInit);
+
     const task = pdfjs.getDocument(documentOptions(fileUrl));
 
     task.promise
@@ -134,19 +164,8 @@ export default function PdfViewer({
         );
         if (cancelled) return;
 
-        const offsets = buildPageOffsets(heights);
-        const handle: PdfViewerHandle = { viewer, eventBus, pdf, offsets, container };
-        handleRef.current = handle;
-
-        // `pagesinit` fires once the first page has been laid out, which is
-        // when `currentScaleValue` becomes settable — assigning it earlier is
-        // silently dropped, and the viewer opens at whatever default it likes.
-        const onPagesInit = () => {
-          viewer.currentScaleValue = "page-width";
-          setStatus("ready");
-          onReadyRef.current?.(handle);
-        };
-        eventBus.on("pagesinit", onPagesInit);
+        pending = { viewer, eventBus, pdf, offsets: buildPageOffsets(heights), container };
+        completeReady();
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -160,6 +179,7 @@ export default function PdfViewer({
       if (frame) cancelAnimationFrame(frame);
       eventBus.off("updateviewarea", onViewArea);
       eventBus.off("pagechanging", onViewArea);
+      eventBus.off("pagesinit", onPagesInit);
       handleRef.current = null;
       // Order matters: drop the viewer's reference to the document before
       // destroying the loading task, or pdfjs renders into a document it no

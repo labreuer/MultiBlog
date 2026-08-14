@@ -4,7 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
 import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
 import { docTitleOrFallback } from "@/lib/doc-title";
-import { requireDocAnnotationId } from "@/lib/annotation-container";
 import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { parseAnnotationsFilters, type AnnotationsSortKey } from "@/lib/annotations-query";
@@ -37,6 +36,9 @@ function buildFilterWhere(filters: ReturnType<typeof parseAnnotationsFilters>): 
     where.OR = [
       { bodyText: { contains: filters.q, mode: "insensitive" } },
       { doc: { title: { contains: filters.q, mode: "insensitive" } } },
+      // The file counterpart, so searching a PDF's title finds its annotations
+      // exactly as searching a doc's does.
+      { file: { title: { contains: filters.q, mode: "insensitive" } } },
       { user: { name: { contains: filters.q, mode: "insensitive" } } },
       { user: { email: { contains: filters.q, mode: "insensitive" } } },
     ];
@@ -45,30 +47,48 @@ function buildFilterWhere(filters: ReturnType<typeof parseAnnotationsFilters>): 
 }
 
 function buildOrderBy(sort: SortColumn<AnnotationsSortKey>[]): Prisma.AnnotationOrderByWithRelationInput[] {
-  return sort.map(({ key, dir }): Prisma.AnnotationOrderByWithRelationInput => {
-    switch (key) {
-      case "doc":
-        return { doc: { title: dir } };
-      case "author":
-        return { user: { name: dir } };
-      case "created":
-        return { createdAt: dir };
-      case "edited":
-        return { editedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
-      case "status":
-        // DRAFT is excluded from this whole page (baseWhere, §13d), so the
-        // only values ever sorted here are LIVE and RAISED.
-        return { status: dir };
-      case "raisedAt":
-        return { raisedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
-      case "resolvedAt":
-        return { resolvedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
-      case "deletedAt":
-        return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
-      case "deleted":
-        return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+  return sort.flatMap(({ key, dir }): Prisma.AnnotationOrderByWithRelationInput[] => {
+    // PLAN.md §19 — `doc` is the one key that expands to two terms. The column
+    // shows a doc *or* a file title, and Prisma can't order by "whichever of
+    // two relations is present". Ordering by each in turn groups rows by
+    // container kind and sorts alphabetically within each group: stable and
+    // honest, if not a true merge. A merged ordering would need a view over
+    // both titles, which is more machinery than one sort key deserves.
+    if (key === "doc") {
+      // Plain `dir`, not the {sort, nulls} form: `title` is NOT NULL on both
+      // models, so Prisma rejects nulls handling for it. The *relation* is what
+      // is nullable, and Prisma orders a missing to-one relation last on its
+      // own — which is exactly the grouping this wants.
+      return [{ doc: { title: dir } }, { file: { title: dir } }];
     }
+    return [orderTermFor(key, dir)];
   });
+}
+
+function orderTermFor(
+  key: Exclude<AnnotationsSortKey, "doc">,
+  dir: "asc" | "desc",
+): Prisma.AnnotationOrderByWithRelationInput {
+  switch (key) {
+    case "author":
+      return { user: { name: dir } };
+    case "created":
+      return { createdAt: dir };
+    case "edited":
+      return { editedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+    case "status":
+      // DRAFT is excluded from this whole page (baseWhere, §13d), so the only
+      // values ever sorted here are LIVE and RAISED.
+      return { status: dir };
+    case "raisedAt":
+      return { raisedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+    case "resolvedAt":
+      return { resolvedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+    case "deletedAt":
+      return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+    case "deleted":
+      return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+  }
 }
 
 export default async function AnnotationsPage({
@@ -101,32 +121,35 @@ export default async function AnnotationsPage({
       // exclude it outright rather than relying on canManageDocs to gate
       // the whole page and stop there.
       { status: { not: "DRAFT" } },
-      // Scoped to the docs this viewer may *read* — canUserReadDoc's rule
-      // (src/lib/doc-authz.ts) restated as a `where`, since Prisma has no way
+      // Scoped to what this viewer may *read* — canUserReadDoc's and
+      // canUserReadFile's rules restated as a `where`, since Prisma has no way
       // to share a predicate between a per-row check and a query filter:
-      // SHARED docs for anyone with canViewDocs, which the canManageDocs page
-      // gate above already implies, plus this viewer's own byline-authored
-      // PRIVATE ones.
+      // SHARED containers for anyone who passes the page gate above, plus this
+      // viewer's own byline-authored PRIVATE ones.
       //
       // Readability rather than manage-ability is the bound that matters here
       // because of what the query below selects: doc.proseJson, rendered as
       // the Quote column, so a wider scope would put an excerpt of a PRIVATE
       // doc's body in front of someone /doc/[slug] refuses outright
       // (docs/PERMISSIONS.md). canUserAccessAnnotationYdoc
-      // (src/lib/annotation-authz.ts) delegates to canUserReadDoc for the
-      // same reason.
-      { OR: [{ doc: { authors: { some: { userId: session.user.id } } } }, { doc: { visibility: "SHARED" } }] },
-      // PLAN.md §19 — **doc annotations only, for now.** The two relation
-      // filters above already exclude a file annotation in Postgres (a
-      // relation filter never matches a null foreign key), so this term adds
-      // no rows and removes none; it is here to say so in a way the type
-      // checker can use, and to be the thing Phase 3 deletes when this listing
-      // grows its Container column and starts showing PDF annotations too.
+      // (src/lib/annotation-authz.ts) asks the same pair of questions.
       //
-      // Leaving it silently doc-only would undo one of the reasons annotations
-      // are Postgres rows at all rather than entries in a per-file ydoc — that
-      // /annotations can see every one of them.
-      { docId: { not: null } },
+      // PLAN.md §19 — **both containers**, each scoped by its own read rule.
+      // A relation filter never matches a null foreign key, so the doc terms
+      // exclude every file annotation and vice versa; the four together are
+      // exactly "annotations on something this viewer may read".
+      //
+      // That /annotations sees PDF annotations at all is one of the reasons
+      // they are Postgres rows rather than entries in a per-file ydoc — a
+      // listing that silently covered half of them would give that reason away.
+      {
+        OR: [
+          { doc: { authors: { some: { userId: session.user.id } } } },
+          { doc: { visibility: "SHARED" } },
+          { file: { authors: { some: { userId: session.user.id } } } },
+          { file: { visibility: "SHARED" } },
+        ],
+      },
       parseDeepLinkWhere(urlSearchParams),
     ],
   };
@@ -142,6 +165,10 @@ export default async function AnnotationsPage({
       include: {
         user: { select: { name: true, email: true } },
         doc: { select: { id: true, slug: true, title: true, proseJson: true } },
+        // A file has no proseJson to excerpt: a PDF annotation's quote is
+        // always the stored column (derived server-side at post time), so
+        // there is no mark to hunt for and no document body to read.
+        file: { select: { id: true, slug: true, title: true } },
       },
     }),
     prisma.annotation.count({ where }),
@@ -154,35 +181,48 @@ export default async function AnnotationsPage({
   const markedIdsByDoc = new Map<string, Set<string>>();
   const proseJsonByDoc = new Map<string, JSONContent>();
 
-  // `docId`/`doc` are nullable columns since files became a second annotation
-  // container (PLAN.md §19), and the `where` above guarantees neither is null
-  // here. Narrowed once, loudly, rather than asserted at each of the eight
-  // uses below — if the where clause and this ever disagree, the failure
-  // should name itself rather than surface as `undefined` in a table cell.
-  const docAnnotations = annotations.map((a) => {
-    const docId = requireDocAnnotationId(a, "/annotations");
-    if (!a.doc) {
-      throw new Error(`/annotations selected annotation ${a.id} with no doc — its where clause should prevent this.`);
+  // Both containers, flattened to one shape. `containerKind` is what the table
+  // links through; everything else about a row reads the same either way, which
+  // is the payoff for annotations being one table rather than two.
+  //
+  // The `where` above guarantees exactly one relation is present. Asserted
+  // loudly rather than defaulted, so a disagreement between that clause and
+  // this names itself instead of surfacing as an empty cell.
+  const rowsWithContainer = annotations.map((a) => {
+    const container = a.doc
+      ? ({ kind: "doc", id: a.doc.id, slug: a.doc.slug, title: docTitleOrFallback(a.doc.title) } as const)
+      : a.file
+        ? ({ kind: "file", id: a.file.id, slug: a.file.slug, title: a.file.title } as const)
+        : null;
+    if (!container) {
+      throw new Error(`/annotations selected annotation ${a.id} with no container — its where clause should prevent this.`);
     }
-    return { ...a, docId, doc: a.doc };
+    return { ...a, container };
   });
 
+  // The mark-derived quote is a doc-only concern (§12i): a file has no ydoc to
+  // hold a mark, so its rows skip this entirely.
+  const docAnnotations = rowsWithContainer.filter(
+    (a): a is (typeof rowsWithContainer)[number] & { doc: NonNullable<(typeof a)["doc"]> } => a.doc !== null,
+  );
+
   for (const a of docAnnotations) {
-    if (proseJsonByDoc.has(a.docId) || !a.doc.proseJson) continue;
+    if (proseJsonByDoc.has(a.doc.id) || !a.doc.proseJson) continue;
     const proseJson = a.doc.proseJson as JSONContent;
-    proseJsonByDoc.set(a.docId, proseJson);
-    markedIdsByDoc.set(a.docId, new Set(collectMarkAttrValues(proseJson, "annotation", "id")));
+    proseJsonByDoc.set(a.doc.id, proseJson);
+    markedIdsByDoc.set(a.doc.id, new Set(collectMarkAttrValues(proseJson, "annotation", "id")));
   }
 
-  const rows: AnnotationRow[] = docAnnotations.map((a) => {
+  const rows: AnnotationRow[] = rowsWithContainer.map((a) => {
     const isRoot = a.parentAnnotationId === null;
-    const proseJson = proseJsonByDoc.get(a.docId);
-    const marked = markedIdsByDoc.get(a.docId)?.has(a.id) ?? false;
+    const proseJson = a.doc ? proseJsonByDoc.get(a.doc.id) : undefined;
+    const marked = a.doc ? (markedIdsByDoc.get(a.doc.id)?.has(a.id) ?? false) : false;
     return {
       id: a.id,
-      docId: a.docId,
-      docSlug: a.doc.slug,
-      docTitle: docTitleOrFallback(a.doc.title),
+      containerKind: a.container.kind,
+      docId: a.container.id,
+      docSlug: a.container.slug,
+      docTitle: a.container.title,
       authorName: a.user.name ?? a.user.email,
       bodyText: a.bodyText,
       // Stored first, since a row that has one was never marked and looking

@@ -1,0 +1,131 @@
+/* PLAN.md §19 — the annotation panel beside the PDF, and the highlight layer
+   drawn over it. */
+
+.panelInner {
+  padding: 0.75rem;
+}
+
+.heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.empty {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.sortRow {
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* The positioned region. `position: relative` makes it the containing block
+   for the absolutely-placed cards the layout hook writes `top` onto; its own
+   height is set by that hook, since absolutely positioned children contribute
+   none. */
+.cards {
+  position: relative;
+}
+
+.card {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+/* An annotation on a page pdfjs hasn't rendered — most of them, most of the
+   time, since only a few pages exist at once. Greyed rather than hidden: the
+   conversation is still readable, it just has nothing on screen to sit level
+   with. */
+.offscreen {
+  opacity: 0.55;
+}
+
+.pageBadge {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 0 0.3em;
+  margin-right: 0.4em;
+  cursor: pointer;
+}
+
+.pageBadge:hover {
+  color: var(--foreground);
+  border-color: var(--link);
+}
+
+/* The floating "Annotate this" control that appears over a live selection. */
+.selectionPopover {
+  position: fixed;
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow-color);
+  padding: 0.25rem;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.selectionPopover button {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.selectionPopover button:hover {
+  background: var(--surface-hover);
+}
+
+/* Highlight rectangles inside our .annoLayer (components/pdf/anno-layer.ts).
+   Global, because that layer's DOM is built imperatively rather than by React,
+   so it carries no CSS-module hashes. */
+:global(.annoLayer) {
+  position: absolute;
+  inset: 0;
+  /* Below the text layer, so native selection keeps working over a highlight
+     (docs/PDF.md §6). */
+  z-index: 1;
+  /* Inert as a whole; hit-testing is a delegated listener plus
+     elementsFromPoint, which sees through pointer-events: none. */
+  pointer-events: none;
+}
+
+:global(.annoRect) {
+  position: absolute;
+  /* The author's color arrives as --anno-color, validated against SAFE_COLOR
+     before it is ever written (STYLE.md: no color literals outside the palette
+     modules). The fallback is the neutral thread color. */
+  background: color-mix(in srgb, var(--anno-color, #999999) var(--anno-tint), transparent);
+  border-radius: 2px;
+}
+
+/* Tint strength tracks the scheme the same way the doc-side anchor highlights
+   do — a percentage can't go through light-dark(), so it rides the --dark flag
+   and calc() (globals.css). */
+:global(.annoLayer) {
+  --anno-tint: calc(26% + var(--dark) * 18%);
+}
+
+:global(.annoRect[data-anno-active="true"]) {
+  --anno-tint: calc(45% + var(--dark) * 17%);
+}
+
+/* A remote reader's live selection (PLAN.md §19 Phase 4) — outlined rather
+   than filled, so it reads as somebody's cursor rather than as an annotation
+   that exists. */
+:global(.annoRectRemote) {
+  background: transparent;
+  outline: 2px solid var(--anno-color, #999999);
+  outline-offset: -1px;
+}
