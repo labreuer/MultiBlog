@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, open, rename, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { formatBytes } from "./file-format";
 
@@ -103,7 +102,11 @@ const PDF_MAGIC = "%PDF-";
 // has arrived and validated. A rename within a filesystem is atomic, so a
 // reader can never observe a half-written file at a content-addressed path —
 // which would be the one genuinely corrupting failure here, since that path
-// claims to be those exact bytes forever after.
+// claims to be those exact bytes forever after. The temp file lives inside
+// storageDir() itself (a `.tmp-` prefixed sibling of the hash buckets), not
+// os.tmpdir() — FILE_STORAGE_DIR is routinely a separate mount from /tmp in
+// deployment, and rename() across filesystems fails with EXDEV rather than
+// falling back to a copy.
 export async function storeUploadStream(
   body: ReadableStream<Uint8Array>,
   options: { maxBytes?: number; requirePdf?: boolean } = {},
@@ -112,7 +115,7 @@ export async function storeUploadStream(
   const requirePdf = options.requirePdf ?? true;
 
   await mkdir(storageDir(), { recursive: true });
-  const tempPath = join(tmpdir(), `multiblog-upload-${randomUUID()}`);
+  const tempPath = join(storageDir(), `.tmp-upload-${randomUUID()}`);
   const handle = await open(tempPath, "wx");
 
   const hash = createHash("sha256");
