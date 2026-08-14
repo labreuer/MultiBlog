@@ -66,23 +66,32 @@ export function ensurePdfWorker(): void {
 // Where scripts/copy-pdfjs-assets.ts puts pdfjs's runtime data files. Absolute
 // site paths with trailing slashes — pdfjs concatenates a filename directly
 // onto each, so a missing slash silently produces `…standard_fontsFoxitSans`.
+// An *unset* one concatenates onto `null`, which is how a missing `wasmUrl`
+// surfaces: `Failed to resolve module specifier 'nullopenjpeg_nowasm_fallback.js'`.
 //
 // Not `new URL(…, import.meta.url)` like the worker above: these are fetched by
 // URLs pdfjs *builds*, so there is no import for a bundler to see and nothing
 // to emit. That is the whole reason the copy step exists.
 const STANDARD_FONT_DATA_URL = "/pdfjs/standard_fonts/";
 const CMAP_URL = "/pdfjs/cmaps/";
+const WASM_URL = "/pdfjs/wasm/";
+const ICC_URL = "/pdfjs/iccs/";
 
 /** Options every `getDocument` in the browser shares. */
 export function documentOptions(url: string): Parameters<typeof pdfjs.getDocument>[0] {
   return {
     url,
-    // Without these, a PDF that doesn't embed its fonts renders with
-    // substituted glyphs (and warns once per document), and a CJK document
-    // renders as blank boxes. See scripts/copy-pdfjs-assets.ts.
+    // All four of pdfjs's runtime asset directories. See
+    // scripts/copy-pdfjs-assets.ts for what each one is for; the one that
+    // matters most is `wasmUrl`, which carries the JBIG2 and JPEG 2000
+    // decoders. **A scanned PDF is images**, so without it every page renders
+    // blank — with a working text layer floating over the blankness, which
+    // reads as "the PDF isn't loading" rather than as a decoder problem.
     standardFontDataUrl: STANDARD_FONT_DATA_URL,
     cMapUrl: CMAP_URL,
     cMapPacked: true,
+    wasmUrl: WASM_URL,
+    iccUrl: ICC_URL,
     // Range requests are why the download route implements them (PLAN.md §19):
     // a large PDF renders its first page without transferring the whole file.
     // `disableAutoFetch` stops pdfjs then quietly fetching the rest in the

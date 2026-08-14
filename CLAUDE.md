@@ -265,9 +265,18 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   - **`PDFDocumentProxy.destroy()` is gone in 6.x** (it has `cleanup()`, which leaves the
     worker alive) — destroy the *loading task*. And **`convertToViewportRectangle` no longer
     exists** despite docs/PDF.md §5 naming it; convert both corners as points instead.
-  pdfjs's fonts and cmaps are fetched at runtime by URLs it builds by concatenation, so no
-  bundler can see them: `scripts/copy-pdfjs-assets.ts` copies them into `public/` and is wired
-  as `prebuild`/`predev`, making it unskippable.
+  - **pdfjs has FOUR runtime asset directories, not two**, all fetched by URLs it builds by
+    concatenation, so no bundler can see them: `standard_fonts/`, `cmaps/`, **`wasm/`** (the
+    JBIG2 and JPEG 2000 decoders) and `iccs/`. `scripts/copy-pdfjs-assets.ts` copies all four
+    into `public/` and is wired as `prebuild`/`predev`, making it unskippable; the copies are
+    gitignored, and `public/pdfjs/**` is eslint-ignored because the wasm fallbacks are
+    minified JS. Miss `wasm/` and a **scanned** PDF renders as blank pages with a working text
+    layer floating over them — which reads as "the viewer is broken", not as a decoder
+    problem. An unset URL concatenates onto `null`, so the tell is
+    `Failed to resolve module specifier 'nullopenjpeg_nowasm_fallback.js'`.
+    **The e2e fixtures cannot catch this**: `scripts/make-test-pdf.ts` generates text-only
+    PDFs, which exercise no image decoder at all. `e2e/pdf-assets.spec.ts` asserts each
+    directory is served instead — that is the only guard, so don't delete it as trivial.
 - **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
   file's `sha256` is its identity, so the bytes an anchor was measured against are by
   construction the bytes every later reader sees. There is no tracking plugin, no
