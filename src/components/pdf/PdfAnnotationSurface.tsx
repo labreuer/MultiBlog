@@ -25,8 +25,13 @@ import styles from "./PdfAnnotations.module.css";
 // waiting to become an annotation" state that the popover raises and the panel
 // consumes.
 
-/** Matches the doc side's rail breakpoint, so one number governs both surfaces. */
-const POSITIONED_MEDIA_QUERY = "(min-width: 1200px)";
+// Deliberately *not* the doc side's 1200px rail breakpoint (that's an 800px
+// reading column + a 340px rail's own math, src/lib/margin-notes-layout.ts).
+// This panel is a fixed-width card list beside a viewer that has nothing to
+// reflow, not a rail that needs room for live prose — so it can go narrower.
+// 768px is the narrowest common iPad width (Mini, portrait); every iPad in
+// landscape is wider than its own portrait width, so this covers both.
+const POSITIONED_MEDIA_QUERY = "(min-width: 768px)";
 
 type Props = {
   fileId: string;
