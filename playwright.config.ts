@@ -57,6 +57,33 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], storageState: ADMIN_STORAGE_STATE, colorScheme: "dark" },
       dependencies: ["setup"],
     },
+    // Gecko, for the engine differences chromium can't surface — chiefly
+    // contenteditable selection and beforeinput behavior, which is where
+    // ProseMirror diverges most. Playwright drives its own Firefox build
+    // (v1538 / Firefox 153.0), not /Applications/Firefox.app: there is no
+    // stable-channel option for Firefox the way there is for Chrome.
+    //
+    // Gated behind E2E_FIREFOX rather than added to the projects list
+    // unconditionally, because a project in that list runs on every bare
+    // `playwright test` — which would roughly double the wall clock of the
+    // everyday `npm run e2e` for a suite whose day-to-day job is catching
+    // regressions in our own logic, not Gecko's. Same reasoning as
+    // chromium-dark's testMatch above. Run it with:
+    //
+    //   E2E_FIREFOX=1 npx playwright test --project=firefox
+    //
+    // The flag alone is not enough — without the env var the project does
+    // not exist and Playwright errors with "Project(s) 'firefox' not found".
+    ...(process.env.E2E_FIREFOX
+      ? [
+          {
+            name: "firefox",
+            use: { ...devices["Desktop Firefox"], storageState: ADMIN_STORAGE_STATE },
+            dependencies: ["setup"],
+            testIgnore: /dark-mode\.spec\.ts/,
+          },
+        ]
+      : []),
   ],
   // `reuseExistingServer` is unconditional rather than `!process.env.CI`: the
   // user frequently has `npm run dev:all` up already, and CLAUDE.md is explicit
