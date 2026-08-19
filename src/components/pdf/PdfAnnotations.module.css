@@ -143,33 +143,43 @@
   /* Inert as a whole; hit-testing is a delegated listener plus
      elementsFromPoint, which sees through pointer-events: none. */
   pointer-events: none;
+
+  /* **The alpha lives here, on the group, not on each rect — that is what
+     stops overlapping highlights from blending.** Every .annoRect below is an
+     *opaque* fill; `opacity` on this layer renders it as a group into its own
+     buffer first, so within that buffer the last rect painted simply covers
+     whatever is under it, and the flattened result is composited over the page
+     exactly once. Give each rect its own translucent fill instead (as this did
+     before) and two authors' highlights over the same words compound into a
+     third, darker colour belonging to neither of them.
+
+     Which rect is "last" is DOM order: paint order for positioned siblings at
+     the same z-index is tree order, and anno-layer.ts appends in the order the
+     entries arrive — oldest annotation first, so the newest wins an overlap,
+     and remote selections after all of them so a live one is always visible.
+
+     A unitless number rather than the `--anchor-tint` percentage the doc-side
+     highlights use (globals.css) even though the values are the same 26% ->
+     44%: an unsupported percentage would make this declaration invalid and
+     leave opacity at 1, i.e. opaque bars covering the page text. A plain
+     number has no such failure mode. */
+  --anno-alpha: calc(0.26 + var(--dark) * 0.18);
+  opacity: var(--anno-alpha);
 }
 
 :global(.annoRect) {
   position: absolute;
-  /* The author's color arrives as --anno-color, validated against SAFE_COLOR
-     before it is ever written (STYLE.md: no color literals outside the palette
-     modules). The fallback is the neutral thread color. */
-  background: color-mix(in srgb, var(--anno-color, #999999) var(--anno-tint), transparent);
+  /* Opaque, per the group-opacity note above. The author's color arrives as
+     --anno-color, validated against SAFE_COLOR before it is ever written
+     (STYLE.md: no color literals outside the palette modules). The fallback is
+     the neutral thread color. */
+  background: var(--anno-color, #999999);
   border-radius: 2px;
 }
 
-/* Tint strength tracks the scheme the same way the doc-side anchor highlights
-   do — a percentage can't go through light-dark(), so it rides the --dark flag
-   and calc() (globals.css). */
-:global(.annoLayer) {
-  --anno-tint: calc(26% + var(--dark) * 18%);
-}
-
+/* The annotation whose card is focused. It can't simply be *more opaque* any
+   more — the group owns the alpha — so it reads stronger by being shaded
+   toward the scheme's extreme instead: darker on light, lighter on dark. */
 :global(.annoRect[data-anno-active="true"]) {
-  --anno-tint: calc(45% + var(--dark) * 17%);
-}
-
-/* A remote reader's live selection (PLAN.md §19 Phase 4) — outlined rather
-   than filled, so it reads as somebody's cursor rather than as an annotation
-   that exists. */
-:global(.annoRectRemote) {
-  background: transparent;
-  outline: 2px solid var(--anno-color, #999999);
-  outline-offset: -1px;
+  background: color-mix(in srgb, var(--anno-color, #999999) 70%, var(--shade-target));
 }

@@ -39,9 +39,21 @@ export type AnnoLayerEntry = {
 };
 
 export type AnnoLayerSource = {
-  /** Every entry that belongs on `pageIndex`. Called on each (re)render of that page. */
+  /**
+   * Every entry that belongs on `pageIndex`. Called on each (re)render of that
+   * page. **Order is meaningful**: highlights are opaque fills flattened by one
+   * group opacity (PdfAnnotations.module.css), so where two overlap the one
+   * appended later wins outright rather than the two blending. Callers pass
+   * annotations oldest-first, which puts the newest on top.
+   */
   entriesForPage: (pageIndex: number) => AnnoLayerEntry[];
-  /** Live remote selections (PLAN.md §19 Phase 4). Same drawing path, different styling. */
+  /**
+   * Live remote selections (PLAN.md §19 Phase 4). Same drawing path *and* the
+   * same filled styling as an annotation — they used to be drawn as an outline
+   * so they'd read as somebody's cursor, but a highlight in the reader's own
+   * colour is what this surface shows now. Appended after every annotation
+   * rect, so a live selection is never hidden under a saved highlight.
+   */
   remoteForPage?: (pageIndex: number) => AnnoLayerEntry[];
 };
 
@@ -90,6 +102,8 @@ export function attachAnnoLayers(
     // preserving between passes, and a page holds tens of rects, not thousands.
     layer.replaceChildren();
 
+    // Append order *is* stacking order — see AnnoLayerSource. Annotations
+    // first (oldest to newest), then live remote selections over the lot.
     const entries = source.entriesForPage(pageIndex);
     for (const entry of entries) {
       appendRects(layer, entry, viewport, false);
@@ -157,6 +171,11 @@ function appendRects(
   const color = SAFE_COLOR.test(entry.color) ? entry.color : null;
   for (const rect of resolveTargetRects(entry.target, viewport)) {
     const element = document.createElement("div");
+    // `annoRectRemote` no longer restyles anything — a remote selection is
+    // drawn as the same filled highlight an annotation gets. It stays as a
+    // marker for what this rect *is*: e2e/pdf-presence.spec.ts asserts on it,
+    // and it is the only thing distinguishing an ephemeral selection from a
+    // saved annotation in the DOM.
     element.className = remote ? "annoRect annoRectRemote" : "annoRect";
     // Singular, unlike the doc side's `data-annotation-ids`: overlapping
     // *decorations* have to be pre-split because ProseMirror drops attributes

@@ -128,10 +128,10 @@ test.describe("pdf presence", () => {
       });
       await page.dispatchEvent("body", "pointerup");
 
-      // Drawn into the same .annoLayer as annotation highlights but outlined
-      // rather than filled, so it reads as somebody's cursor rather than as an
-      // annotation that exists. It appears only for rendered pages, which is
-      // "show it if it would be visible here" for free.
+      // Drawn into the same .annoLayer as annotation highlights, and with the
+      // same filled styling — `annoRectRemote` marks what it is rather than
+      // restyling it. It appears only for rendered pages, which is "show it if
+      // it would be visible here" for free.
       await expect(other.locator(".annoRectRemote")).toHaveCount(1, { timeout: 20_000 });
 
       // And it is ephemeral: clearing the selection clears it everywhere. This

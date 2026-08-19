@@ -142,10 +142,10 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
           .filter((entry) => entry.target?.pageIndex === pageIndex && entryHasVisibleContent(entry))
           .map((entry): AnnoLayerEntry => ({ id: entry.root.id, target: entry.target!, color: entry.color })),
       // PLAN.md §19 — other readers' live selections, drawn in the same layer
-      // but outlined rather than filled, so they read as somebody's cursor
-      // rather than as an annotation that exists. They appear for whichever
-      // pages are rendered, which is exactly "show it if it would be visible
-      // on this reader's view" without needing to compute that separately.
+      // and with the same filled highlight an annotation gets, in that
+      // reader's own colour. They appear for whichever pages are rendered,
+      // which is exactly "show it if it would be visible on this reader's
+      // view" without needing to compute that separately.
       remoteForPage: (pageIndex) =>
         readersRef.current
           .filter((reader) => reader.presence.selection?.pageIndex === pageIndex)
