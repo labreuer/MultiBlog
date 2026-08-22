@@ -88,6 +88,47 @@ time NODE_OPTIONS="--max-old-space-size=3072" npm run build
 echo "==> Restarting services"
 sudo systemctl restart "$WEB_UNIT" "$COLLAB_UNIT"
 
+# Wait for the app to actually answer before declaring the deploy done.
+#
+# Both units are Type=simple, so systemd marks them active the instant it
+# FORKS the process — not when `next start` has bound its port. `systemctl
+# status` showing "active" immediately after a restart is therefore not
+# evidence the site is up, and the `status` call below would happily print a
+# green unit over a dead upstream.
+#
+# The window is short but real: measured on a 2-vCPU box, nginx logged
+# `connect() failed (111: Connection refused) ... upstream: 127.0.0.1:3000`
+# for a request that arrived in the ~1s between the restart and `✓ Ready`.
+# A deploy that returns while the site still 502s is the kind of failure you
+# only notice from someone else's bug report.
+#
+# The port comes from the unit's own Environment= (DEPLOY.md §6), not from
+# .env — `next start` reads PORT, which the unit sets and .env does not. That
+# also keeps this correct for a second instance on another port (§11).
+WEB_PORT="$(systemctl show "$WEB_UNIT" -p Environment --value \
+            | tr ' ' '\n' | sed -n 's/^PORT=//p' | head -1)"
+WEB_PORT="${WEB_PORT:-3000}"
+
+echo "==> Waiting for $WEB_UNIT to answer on :$WEB_PORT"
+READY_TIMEOUT="${READY_TIMEOUT:-60}"
+for i in $(seq 1 "$READY_TIMEOUT"); do
+    # `|| true`: curl exits non-zero on a refused connection, which is the
+    # expected state early in this loop and must not trip `set -e`.
+    code="$(curl -s -o /dev/null -m 2 -w '%{http_code}' \
+            "http://127.0.0.1:$WEB_PORT/" || true)"
+    if [ "$code" = 200 ]; then
+        echo "    ready after ${i}s"
+        break
+    fi
+    if [ "$i" -eq "$READY_TIMEOUT" ]; then
+        echo "    NOT READY after ${READY_TIMEOUT}s — last response: HTTP $code" >&2
+        systemctl --no-pager status "$WEB_UNIT" | sed -n '1,12p' >&2
+        journalctl -u "$WEB_UNIT" -n 20 --no-pager >&2
+        exit 1
+    fi
+    sleep 1
+done
+
 echo "==> Done."
 systemctl --no-pager status "$WEB_UNIT" "$COLLAB_UNIT" | sed -n '1,12p'
 echo "==> Total deploy time: ${SECONDS}s"
