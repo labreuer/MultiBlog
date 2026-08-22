@@ -1,12 +1,20 @@
 import { test, expect, signIn, gotoOk } from "./fixtures";
 import { ADMIN_EMAIL, createTestFile, deleteTestFile, type TestFile } from "./db";
 
-// The built-ins pdfjs-dist needs that WebKit ships late or not at all
-// (src/lib/pdfjs-webkit-polyfills.ts). Both of these were found on a real
-// iPad, and both are invisible to the rest of this suite: chromium has them,
-// so every other spec exercises the one engine where the bug can't happen.
+// The built-in pdfjs-dist needs that WebKit does not have
+// (src/lib/pdfjs-webkit-polyfills.ts). It is invisible to the rest of this
+// suite: chromium has it, so every other spec exercises the one engine where
+// the bug can't happen.
 //
-// Simulated by *deleting* each built-in before any page script runs, rather
+// This covered three gaps once. Two of them — the `Iterator` global and the
+// TC39 Map upsert methods — were version lag, and left with their polyfills
+// when the baseline moved to Safari 26 / iPadOS 18.4+ (PLAN.md §19a).
+// `ReadableStream`'s async iteration is the one WebKit has never implemented
+// at all, so it is the one that stays. `scripts/probe-engine.ts` is how that
+// distinction is drawn on evidence; run it before adding or removing a case
+// here.
+//
+// Simulated by *deleting* the built-in before any page script runs, rather
 // than by adding a webkit project. Three reasons, in order of weight:
 //
 //  1. It runs in the everyday chromium suite instead of behind an opt-in flag,
@@ -20,10 +28,11 @@ import { ADMIN_EMAIL, createTestFile, deleteTestFile, type TestFile } from "./db
 //     `webkit` project behind E2E_WEBKIT in playwright.config.ts for machines
 //     where it does work; this spec is what covers the gap where it doesn't.
 //
-// The limit worth knowing: this verifies the *engine gap*, not iPadOS Safari.
-// The native long-press and selection-handle gestures are reproducible on a
-// real device and nowhere else. It also asserts today's WebKit behaviour — if
-// WebKit ever ships these, the spec keeps passing while testing a hypothetical.
+// Two limits worth knowing. This verifies the *engine gap*, not iPadOS Safari:
+// the native long-press and selection-handle gestures are reproducible on a
+// real device and nowhere else. And `addInitScript` reaches pages and frames
+// but not workers, so this covers the main-thread half of the patch only —
+// pdfjs needs the same one inside its worker, where nothing here can look.
 
 const PAGE_ONE = "The quick brown fox jumps over the lazy dog on page one.";
 const PHRASE = "brown fox jumps";
@@ -34,14 +43,6 @@ const DROP_STREAM_ASYNC_ITERATION = () => {
   delete ReadableStream.prototype[Symbol.asyncIterator];
   // @ts-expect-error the .values alias goes with it
   delete ReadableStream.prototype.values;
-};
-
-/** Deletes the TC39 Map upsert methods, as older WebKit releases lack them. */
-const DROP_MAP_UPSERT = () => {
-  // @ts-expect-error removing a proposal method on purpose
-  delete Map.prototype.getOrInsert;
-  // @ts-expect-error same
-  delete Map.prototype.getOrInsertComputed;
 };
 
 async function makeFile(): Promise<TestFile> {
@@ -87,7 +88,6 @@ async function selectViaSelectionChange(page: import("@playwright/test").Page, n
 test.describe("pdf viewer without WebKit's missing built-ins", () => {
   for (const [name, drop] of [
     ["ReadableStream async iteration", DROP_STREAM_ASYNC_ITERATION],
-    ["Map upsert", DROP_MAP_UPSERT],
   ] as const) {
     test(`a selection still anchors without ${name}`, async ({ page }) => {
       await page.addInitScript(drop);

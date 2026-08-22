@@ -294,9 +294,12 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
     directory is served instead — that is the only guard, so don't delete it as trivial.
   - **Pinning pdfjs protects its API, not the runtime it assumes.** It uses built-ins WebKit
     ships late or not at all; `src/lib/pdfjs-webkit-polyfills.ts` patches them, and is a
-    source *string* because the patch must reach the worker realm too. So **bumping
-    `pdfjs-dist` needs a real iPad**, not just the `pdfjs-internals` smoke test — a
-    chromium-only suite cannot see this class at all. PLAN.md §19a, docs/PDF.md §10.
+    source *string* because the patch must reach the worker realm too. Baseline is **Safari 26
+    / iPadOS 18.4+**, so **bumping `pdfjs-dist` needs `npx tsx scripts/probe-engine.ts` and a
+    real Safari**, not just the `pdfjs-internals` smoke test — a chromium-only suite cannot see
+    this class at all, and `e2e/pdf-webkit-gaps.spec.ts` guards against regression without ever
+    detecting that a patch has stopped being needed. Which patches stand, the measured engine
+    table, and the worker-realm import-order trap: docs/PDF.md §10, PLAN.md §19a.
 - **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs, and the symptom is a
   *scale* error rather than a layout one.** pdfjs's stylesheet is written for content-box: it
   sets `.page`'s width/height to the scaled page size and adds a 9px `--page-border` outside

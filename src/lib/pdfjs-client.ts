@@ -1,11 +1,11 @@
 "use client";
 
-// Must be the first import: it patches the built-ins pdfjs-dist needs but
-// WebKit ships late or not at all (Map upsert, ReadableStream async
-// iteration), and pdfjs-dist itself has to see them patched from its very
-// first module evaluation onward. The named import (rather than a bare
-// side-effect one) is so ensurePdfWorker below can reuse the same source
-// string for the worker's own realm. See the polyfill file for the full story.
+// Must be the first import: it patches `ReadableStream`'s async iteration,
+// which WebKit has never implemented and pdfjs needs in both realms. The named
+// import (rather than a bare side-effect one) is so ensurePdfWorker below can
+// reuse the same source string for the worker's own realm. See the polyfill
+// file for the full story, including the two patches that used to live beside
+// it and left when the baseline moved to Safari 26 / iPadOS 18.4+.
 import { WEBKIT_POLYFILL_SOURCE } from "./pdfjs-webkit-polyfills";
 import * as pdfjs from "pdfjs-dist";
 import * as pdfjsViewer from "pdfjs-dist/web/pdf_viewer.mjs";
@@ -73,11 +73,11 @@ let workerReady = false;
  * it verbatim, unparsed — pdfjs then fails with `Failed to fetch dynamically
  * imported module`, not with anything naming the real cause. Building the
  * script as a Blob sidesteps bundling entirely: a module worker can `import`
- * a full URL with no resolution step, so the polyfill source plus one import
- * of the vendor script's URL is a complete, self-contained module with
- * nothing left for a bundler to get wrong — **provided that URL is genuinely
- * absolute.** Turbopack's dev-mode rewrite of `new URL(literal,
- * import.meta.url).href` yields a root-relative path
+ * a full URL with no resolution step, so one import of the polyfill (itself a
+ * Blob) followed by one of the vendor script's URL is a complete,
+ * self-contained module with nothing left for a bundler to get wrong —
+ * **provided that URL is genuinely absolute.** Turbopack's dev-mode rewrite of
+ * `new URL(literal, import.meta.url).href` yields a root-relative path
  * (`/_next/static/media/…mjs`), not a scheme-and-host URL, and a relative
  * specifier inside a Blob module's `import` fails with `Failed to resolve
  * module specifier … Invalid relative url or base scheme isn't hierarchical`
@@ -95,7 +95,21 @@ export function ensurePdfWorker(): void {
       new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).href,
       window.location.href,
     ).href;
-    const workerSource = `${WEBKIT_POLYFILL_SOURCE}\nimport ${JSON.stringify(vendorWorkerUrl)};\n`;
+    // **The polyfill is its own module, imported first — not inlined above the
+    // vendor import.** A module's static imports are hoisted and evaluated
+    // before its own body, so the obvious spelling
+    // (`<polyfill source>` then `import "<vendor>"`) runs the vendor worker
+    // script *first* and the patches second — the reverse of what it reads as.
+    //
+    // Nothing currently depends on getting this right: the one surviving patch
+    // is needed before pdfjs's first *call*, not during its module evaluation,
+    // so it lands in time either way. It is spelled correctly anyway because
+    // the inlined form was wrong-by-luck rather than by design, and a patch
+    // that does need evaluation-time ordering is exactly the kind that fails
+    // with a ReferenceError out of vendor code naming none of ours. Two static
+    // imports in source order cost one extra Blob and remove the trap.
+    const polyfillUrl = URL.createObjectURL(new Blob([WEBKIT_POLYFILL_SOURCE], { type: "text/javascript" }));
+    const workerSource = `import ${JSON.stringify(polyfillUrl)};\nimport ${JSON.stringify(vendorWorkerUrl)};\n`;
     const blob = new Blob([workerSource], { type: "text/javascript" });
     // Never revoked: ensurePdfWorker only ever runs once (the `workerReady`
     // guard above), and every PDFWorker for the rest of the page's life —

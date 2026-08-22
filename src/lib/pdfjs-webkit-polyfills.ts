@@ -1,8 +1,18 @@
-// Patches for built-ins pdfjs-dist uses that WebKit ships late or not at all.
-// Both of the ones here were found on a real iPad and are invisible to every
-// local check, because a chromium-only e2e suite runs the one engine that has
-// them. e2e/pdf-webkit-gaps.spec.ts is what covers them now: it deletes each
-// built-in in chromium and asserts the viewer still works.
+// The one built-in pdfjs-dist needs that WebKit does not have.
+//
+// **Baseline: Safari 26 / iPadOS 18.4+.** Two more patches used to live here —
+// the `Iterator` global and `Map.prototype.getOrInsert`/`.getOrInsertComputed`
+// — and both were deleted when that baseline was set, because Safari has
+// shipped both since 18.4. `scripts/probe-engine.ts` is what established that,
+// by feature-probing a real Safari in both realms rather than reading release
+// notes; docs/PDF.md §10 records the measurement. Re-run it on a `pdfjs-dist`
+// bump instead of adding a patch on suspicion — and delete a patch the same
+// way, on a measurement rather than an assumption that everyone has updated.
+//
+// What is left is not a version lag and will not age out the way those two
+// did: WebKit has *never* implemented
+// `ReadableStream.prototype[Symbol.asyncIterator]`, and Safari 26.6.1 still
+// lacks it on the main thread and in workers alike.
 //
 // Exported as a source *string*, not just executed here, because the worker
 // realm can't be patched by importing this module the normal way: pdfjs is
@@ -13,32 +23,15 @@
 // unparsed. That's harmless for the vendor file (already-built, dependency-
 // free JS), but a wrapper `.ts` module with its own `import` doesn't survive
 // being copied verbatim. ensurePdfWorker (pdfjs-client.ts) works around that
-// by building the worker's script as a Blob at runtime instead: this source,
-// followed by an `import` of the vendor worker's own resolved absolute URL —
-// which a module worker can load with no bundler involved at all.
+// by building the worker's script as a Blob at runtime instead: a module that
+// imports this source (itself a Blob) and then the vendor worker's own
+// resolved absolute URL — both of which a module worker can load with no
+// bundler involved at all. Those two imports are static and in that order
+// because static imports are hoisted; see the note in ensurePdfWorker for why
+// that ordering is kept even though nothing here now depends on it.
 //
 // Being a source string, this is plain JS and cannot use TypeScript syntax.
 export const WEBKIT_POLYFILL_SOURCE = `
-// --- Map upsert (TC39) ---------------------------------------------------
-// pdfjs-dist 6.x calls Map.prototype.getOrInsert and .getOrInsertComputed
-// pervasively, on the main thread and inside its own worker script alike.
-// Those methods shipped in V8/Node before they did in every WebKit release,
-// so an iPad on an older iPadOS throws
-// \`this.something.getOrInsertComputed is not a function\` the moment pdfjs
-// touches either realm's Map.prototype for the first time.
-if (typeof Map.prototype.getOrInsert !== "function") {
-  Map.prototype.getOrInsert = function (key, value) {
-    if (!this.has(key)) this.set(key, value);
-    return this.get(key);
-  };
-}
-if (typeof Map.prototype.getOrInsertComputed !== "function") {
-  Map.prototype.getOrInsertComputed = function (key, callback) {
-    if (!this.has(key)) this.set(key, callback(key));
-    return this.get(key);
-  };
-}
-
 // --- ReadableStream async iteration (WHATWG Streams) ----------------------
 // WebKit has never implemented ReadableStream.prototype[Symbol.asyncIterator]
 // (nor its .values alias). pdfjs needs it in *both* realms:

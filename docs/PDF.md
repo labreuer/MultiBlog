@@ -318,37 +318,91 @@ float the version.
 
 Pinning `pdfjs-dist` fixes the API you call. It does nothing about the second coupling, which
 is to the *JavaScript runtime* pdfjs assumes underneath it — and pdfjs tracks new built-ins
-closely, while WebKit ships them late or not at all. Two have already broken the viewer on an
-iPad, both patched in `src/lib/pdfjs-webkit-polyfills.ts`:
+closely, while WebKit ships them late or not at all. **Baseline: Safari 26 / iPadOS 18.4+.**
 
-- **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** (TC39 upsert). Called pervasively,
-  and thrown the moment pdfjs first touches `Map.prototype`.
-- **`ReadableStream.prototype[Symbol.asyncIterator]`**, which WebKit has never implemented.
-  `getTextContent` iterates its stream with `for await (const value of readableStream)`, so
-  **every text extraction throws** — which on this surface means a selection is captured and
-  then dies before it can be published or become an annotation.
+Three gaps have broken the viewer in Safari over time. Only one is still patched, and the
+split between them is the useful part:
 
-Three things generalise beyond these two specific patches:
+- **`ReadableStream.prototype[Symbol.asyncIterator]`** — the standing one, patched in
+  `src/lib/pdfjs-webkit-polyfills.ts`. WebKit has *never* implemented it, in either realm, and
+  Safari 26.6.1 still does not. `getTextContent` iterates its stream with
+  `for await (const value of readableStream)`, so **every text extraction throws** — which on
+  this surface means a selection is captured and then dies before it can be published or
+  become an annotation.
+- **The `Iterator` global** and **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** —
+  both were *version lag*, both shipped in Safari 18.4, and both patches were **deleted** when
+  the baseline was set. The `Iterator` one is worth remembering anyway for its shape: pdfjs
+  polyfills `Iterator.prototype.join` itself, guarded by
+  `typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
+  So on an engine without it, the failure was a `ReferenceError` thrown out of pdfjs's
+  top-level module body before a line of its own logic ran: the viewer never mounted, and the
+  stack pointed at our `import * as pdfjs`. A `typeof` guard protects the property, not the
+  object it hangs off.
 
-1. **The patch has to reach both realms.** pdfjs runs a worker, which is its own realm and
-   inherits nothing from the main thread's prototypes — and both of these are used on both
+**Measured baseline — Safari 26.6.1 (2026-08-22), both realms.** `npx tsx scripts/probe-engine.ts`
+serves one page that runs the checks on the main thread *and* inside a module worker, opens it
+in a browser, and prints both columns. Re-run it on a `pdfjs-dist` bump rather than re-deriving
+this from memory — and **delete** a patch the same way, on a measurement rather than an
+assumption that everyone has updated.
+
+Only the **Safari 26.6.1** column is measured. The *shipped in* column is from release notes
+and is orientation, not evidence.
+
+| built-in | Safari 26.6.1 | shipped in |
+| --- | --- | --- |
+| `ReadableStream.prototype[Symbol.asyncIterator]` (and `.values`) | **absent** | never |
+| `Iterator` global | present | 18.4 |
+| `Map.prototype.getOrInsert` / `.getOrInsertComputed` | present | 18.4 |
+| `URL.parse` / `URL.canParse` | present | 18.0 / 17.0 |
+| `Response.prototype.bytes`, `Uint8Array.fromBase64` / `.toBase64` / `.toHex` | present | 18.0 / 26 |
+| `Float16Array`, `Promise.withResolvers`, `AbortSignal.any`, `Set.prototype.intersection` | present | 26 / 17.4 |
+
+`Iterator.prototype.join` is *itself* still absent on 26.6.1 — pdfjs's own polyfill for it
+fires and works, now that the global its guard dereferences exists. The guard was the bug,
+never the method. `Float16Array` and `Uint8Array.fromBase64` are worth a glance in that table
+too: pdfjs feature-detects the first (`FeatureTest.isFloat16ArraySupported`, falling back to
+`Float32Array`) and does **not** guard the second, which it uses for XFA images and signature
+decompression — a narrow path, but the one to suspect if the baseline ever moves backwards.
+
+Four things generalise beyond the specific patches:
+
+1. **A patch has to reach both realms, and may need to land before pdfjs's module body rather
+   than merely before its first call.** pdfjs runs a worker, which is its own realm and
+   inherits nothing from the main thread's prototypes — and the surviving gap is used on both
    sides (the worker iterates a `DecompressionStream`'s readable side the same way). There is
    no hook to run code before the vendor worker's own top-level body, so `ensurePdfWorker`
-   builds the worker script as a Blob: the polyfill source, then an `import` of the vendor
-   worker's absolute URL. That is why the polyfills are exported as a *source string* and not
-   merely executed.
+   builds the worker script as a Blob, which is why the polyfill is exported as a *source
+   string* and not merely executed. **The obvious spelling of that Blob is wrong.**
+   `<polyfill source>` followed by `import "<vendor>"` puts the patches in the module's *own
+   body*, and static imports are hoisted, so the vendor worker script runs before them. The
+   surviving patch tolerates that (it is needed before pdfjs's first call, and lands in the
+   gap); the deleted `Iterator` one did not, because it was dereferenced during evaluation.
+   The polyfill is therefore its own Blob module imported ahead of the vendor's — kept that
+   way after `Iterator` left, because the inlined form was right by luck rather than design.
 2. **The failure never names the missing built-in.** WebKit reports the async-iterator gap as
    `undefined is not a function (near '...value of readableStream...')` — it names the loop
    variable. It reads as a pdfjs bug, and every stack frame in it belongs to pdfjs.
 3. **A chromium-only test suite is structurally blind to this class.** Chromium has all of it;
    the bug can only exist where the tests do not run. `e2e/pdf-webkit-gaps.spec.ts` closes that
-   by *deleting* each built-in in chromium and asserting the viewer still works — which also
+   by *deleting* the built-in in chromium and asserting the viewer still works — which also
    sidesteps the fact that Playwright's WebKit will not launch on every developer machine
-   (`playwright.config.ts` records the macOS 14 pin that stops it).
+   (`playwright.config.ts` records the macOS 14 pin that stops it). Its reach stops at the
+   page: `addInitScript` does not touch workers, so the worker half of the patch is asserted
+   by nothing, and `scripts/probe-engine.ts` is what covers that realm instead.
+4. **A polyfill is a claim about an engine, and claims expire.** Nothing in this repo notices
+   when one goes stale, and that is structural rather than an oversight:
+   `pdf-webkit-gaps.spec.ts` verifies by *deleting* the built-in, so it keeps passing whether
+   or not any real engine still lacks it — the right design for a regression guard, and
+   useless as an expiry check. `scripts/probe-engine.ts` is the counterpart, asking what the
+   engine actually has. So **add a patch on a failure and remove one on a measurement**, never
+   on an assumption about who has updated.
 
-**So: when bumping `pdfjs-dist`, re-check on a real iPad**, not only on the smoke test in §10
-above. The smoke test asserts pdfjs's API surface, which is the coupling that pinning already
-protects; this is the one it doesn't.
+**So: when bumping `pdfjs-dist`, re-run `scripts/probe-engine.ts` and open a PDF in a real
+Safari** — not only the smoke test in §10 above. The smoke test asserts pdfjs's API surface,
+which is the coupling that pinning already protects; this is the one it doesn't. The probe
+answers "what does the engine have", the real Safari answers "does the viewer work", and
+neither substitutes for the other: a bump can start using a built-in the probe has never
+heard of.
 
 The same asymmetry applies to input. Text selection on iPadOS emits no `pointerup` — a
 long-press hands the touch to WebKit's selection gesture recognizer, which fires
