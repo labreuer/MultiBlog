@@ -288,10 +288,23 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
   }, [ready, capturePageFor]);
 
   // ---- where each card wants to sit ---------------------------------------
+  // Viewport-space top per annotation whose passage is **on screen right now**,
+  // which is what bounds the rail: a card is only ever placed level with text
+  // the reader can see, so the packed column can't grow past the panel's own
+  // height however far away the next annotation is. Anything absent from this
+  // map is not in the rail at all (PdfAnnotationPanel hides it), rather than
+  // cascading to the end of a column that then has to be scrolled.
+  //
+  // "On screen" is intersection with the viewer container's own rect, not "on a
+  // page pdfjs has built" — pdfjs keeps a buffer of pages above and below the
+  // visible region, and those were exactly the cards that used to be placed
+  // hundreds of pixels below the fold.
   const resolveTops = useCallback(() => {
     const handle = handleRef.current;
     const tops = new Map<string, number>();
     if (!handle) return tops;
+
+    const viewRect = handle.container.getBoundingClientRect();
 
     for (const entry of entriesRef.current) {
       const target = entry.target;
@@ -308,7 +321,13 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       const pageRect = pageView.div.getBoundingClientRect();
       // Viewport space, matching what the layout hook subtracts its container's
       // own rect from.
-      tops.set(entry.root.id, pageRect.top + Math.min(...rects.map((r) => r.top)));
+      const top = pageRect.top + Math.min(...rects.map((r) => r.top));
+      const bottom = pageRect.top + Math.max(...rects.map((r) => r.top + r.height));
+      // Partially visible counts: a passage half off the bottom edge still has
+      // a card to sit beside, and requiring full visibility would make cards
+      // flicker in and out at the edges as the reader scrolls.
+      if (bottom <= viewRect.top || top >= viewRect.bottom) continue;
+      tops.set(entry.root.id, top);
     }
     return tops;
   }, []);

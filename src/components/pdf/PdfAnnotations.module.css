@@ -73,12 +73,37 @@
   margin-bottom: 12px;
 }
 
-/* An annotation on a page pdfjs hasn't rendered — most of them, most of the
-   time, since only a few pages exist at once. Greyed rather than hidden: the
-   conversation is still readable, it just has nothing on screen to sit level
-   with. */
-.offscreen {
-  opacity: 0.55;
+/* An annotation whose passage isn't on screen — most of them, most of the time.
+   Out of the rail entirely, so the column stays the height of the panel; "All"
+   is where these are read. Hidden rather than unmounted: a card can be holding
+   an open reply composer, and scrolling past its passage must not discard it. */
+.notInRail {
+  display: none;
+}
+
+/* The Rail/All switch. Deliberately plain text rather than a button-looking
+   control: it sits directly above the cards and competes with them for
+   attention otherwise. */
+.modeRow {
+  margin: 0.5rem 0 0.25rem;
+  text-align: right;
+}
+
+.modeToggle,
+.emptyLink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.modeToggle:hover,
+.emptyLink:hover {
+  color: var(--foreground);
 }
 
 .pageBadge {

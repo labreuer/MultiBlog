@@ -6411,11 +6411,33 @@ differences: `resolveTops` converts quads → page element → CSS `y` instead o
 Un-sharing rather than parameterising follows §13c's own precedent (`AnnotationList` was
 deliberately un-shared from `CommentEntryList` once the rendering problems diverged).
 
-Cards for annotations on non-rendered pages resolve to `targetTop: null`, which
-`packMarginNotes` already sends to the end of the rail in input order — so sorting the input
-by `(pageIndex, y)` gives "everything on screen, aligned, then everything else in document
-order" with no change to
-[margin-notes-layout.ts](src/lib/margin-notes-layout.ts). Those get a greyed class.
+**The rail holds what is on screen, and is therefore never taller than the panel.**
+`resolveTops` ([PdfAnnotationSurface.tsx](src/components/pdf/PdfAnnotationSurface.tsx))
+answers only for annotations whose resolved rects intersect the viewer container's own rect —
+not for every annotation on a page pdfjs has built, which is a buffer extending well above and
+below the visible region. An id absent from that map is out of the rail; the panel's two modes
+are what the reader chooses between:
+
+- **Rail** — cards for passages on screen, each level with its own passage. It scrolls only
+  when more annotations are anchored on screen than fit beside them.
+- **All** — every annotation as a plain list in document order, positioned by nothing. This
+  is where an annotation the reader hasn't scrolled to lives, and the only place a
+  document-level one (no target at all) appears. Below the 768px breakpoint the panel is a
+  full-width overlay with no document beside it, so this is the only mode and the toggle is
+  not rendered.
+
+Out of the rail means `display: none`, **not unmounted**, and that is load-bearing twice
+over: a card can be holding an open reply composer — a live Hocuspocus connection and a
+`DRAFT` row — or a delete confirmation, and scrolling its passage off screen must not discard
+either; and the id list `usePdfMarginNotes` keys its effect on stays stable, so membership
+changing on every scroll doesn't tear down and rebuild its `ResizeObserver` and pdfjs
+subscription. The hook skips any card with a null `offsetParent` so a hidden one doesn't take
+a slot in the cascade at zero height.
+
+[margin-notes-layout.ts](src/lib/margin-notes-layout.ts) is unchanged and stays shared with
+the doc rail. Its clamp is one-sided by design — `cursor` starts at 0, so nothing is ever
+placed above the container's top — and with membership bounded to the visible band there is
+nothing left for a bottom clamp to catch.
 
 ---
 

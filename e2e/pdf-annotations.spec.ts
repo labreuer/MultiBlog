@@ -267,7 +267,7 @@ test.describe("pdf annotations", () => {
     }
   });
 
-  test("an annotation stays listed while its page is scrolled away from", async ({ page }) => {
+  test("an annotation leaves the rail when its passage scrolls off, and is still readable under \"all\"", async ({ page }) => {
     const file = await createTestFile({
       ownerEmail: ADMIN_EMAIL,
       visibility: "SHARED",
@@ -285,9 +285,8 @@ test.describe("pdf annotations", () => {
       await waitForViewer(page);
 
       const card = page.locator("[data-margin-note-id]").first();
+      // Its passage is on screen, so it is in the rail.
       await expect(card).toBeVisible();
-      // Its page is on screen, so it is positioned rather than greyed.
-      await expect(card).not.toHaveClass(/offscreen/);
 
       await page.getByLabel("Page number").fill("12");
       await page.getByLabel("Page number").press("Enter");
@@ -297,17 +296,32 @@ test.describe("pdf annotations", () => {
         { timeout: 30_000 },
       );
 
-      // Still listed and still readable. That is the guarantee: an annotation
-      // whose page isn't on screen is off-screen, not detached.
+      // Out of the rail, because the rail holds what is on screen and nothing
+      // else — that is what keeps it from growing past the panel. The panel
+      // says so rather than going silently blank.
       //
-      // Deliberately *not* asserting that it becomes greyed here. Greying
-      // follows pdfjs evicting the page, and its buffer size is an internal
-      // with no contract — a 12-page document may well keep page 1 alive. A
-      // test that pinned it would be asserting pdfjs's memory policy rather
-      // than our behaviour, and would break on an upgrade that changed it for
-      // unrelated reasons.
+      // Keyed on the passage being off screen, not on pdfjs having evicted the
+      // page: its buffer size is an internal with no contract, and a 12-page
+      // document may well keep page 1 built. Asserting eviction would pin
+      // pdfjs's memory policy rather than our behaviour.
+      await expect(card).toBeHidden();
+      await expect(page.getByText("Nothing annotated on screen", { exact: false })).toBeVisible();
+
+      // The rail never outgrows the panel it sits in. Before this bound, an
+      // annotation a page or two below the fold was placed a page or two below
+      // the fold, in a container grown to fit it.
+      const railHeight = await page.evaluate(
+        () => document.querySelector<HTMLElement>("[data-pseudo-border-root]")?.offsetHeight ?? -1,
+      );
+      expect(railHeight).toBeGreaterThanOrEqual(0);
+      expect(railHeight).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
+
+      // Still readable, and still attributed to page 1 — "not in the rail" is a
+      // statement about position, not about the annotation existing.
+      await page.getByRole("button", { name: `Show all 1`, exact: true }).click();
       await expect(card).toBeVisible();
       await expect(visibleText(page, "An annotation near the top.")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Jump to this passage on page 1" })).toBeVisible();
     } finally {
       await deleteTestFile(file.id);
     }

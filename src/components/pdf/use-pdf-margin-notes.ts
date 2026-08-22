@@ -23,20 +23,21 @@ import { packMarginNotes, type MarginNoteMeasurement } from "@/lib/margin-notes-
 // rendering problem, so they stopped sharing a component. Same here.
 
 export type PdfMarginNotesOptions = {
-  /**
-   * Viewport-space top edge for each card that currently has a visible anchor,
-   * keyed by annotation id. Ids absent from the map are treated as anchorless
-   * and cascade to the end of the panel — which for a PDF is the normal state
-   * of most cards, since pdfjs only renders a few pages at a time.
+/**
+   * Viewport-space top edge for each annotation whose passage is on screen right
+   * now, keyed by id. An id absent from the map is not in the rail at all — the
+   * panel hides it, which is what keeps the packed column within the panel's own
+   * height — and for a PDF that is the normal state of most cards, since only a
+   * few pages of a long document are ever on screen.
    */
   resolveTops: () => Map<string, number>;
   /** Card ids in render order — the effect's identity, so adding or reordering re-observes. */
   ids: string[];
-  /** Fired when the set of *positionable* ids changes, so the panel can grey the rest. */
+  /** Fired when the set of *positionable* ids changes, so the panel can hide the rest. */
   onAnchoredIdsChange?: (ids: Set<string>) => void;
   /** Subscribe to "the rendering moved" — pdfjs scroll/render/scale events. Returns an unsubscribe. */
   subscribe: (listener: () => void) => () => void;
-  /** Whether to position at all. False below the breakpoint, where the panel is a plain list. */
+  /** Whether to position at all. False below the breakpoint, and in the panel's "All" list mode. */
   enabled: boolean;
 };
 
@@ -108,6 +109,11 @@ export function usePdfMarginNotes({ resolveTops, ids, onAnchoredIdsChange, subsc
       for (const element of cards()) {
         const id = element.dataset.marginNoteId;
         if (!id) continue;
+        // `display: none` — a card whose passage is off screen, which the panel
+        // keeps mounted (its reply composer may be live) but out of the rail.
+        // Skipped rather than measured: at zero height it would otherwise take
+        // a slot in the cascade and pad the column with a gap apiece.
+        if (element.offsetParent === null) continue;
         byId.set(id, element);
         const top = tops.get(id);
         measurements.push({

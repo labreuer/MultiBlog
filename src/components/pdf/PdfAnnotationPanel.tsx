@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
 import QuoteThreadHeader from "@/components/QuoteThreadHeader";
 import NewAnnotationComposer from "@/components/annotation/NewAnnotationComposer";
@@ -19,9 +19,28 @@ import styles from "./PdfAnnotations.module.css";
 //
 // The other difference is which cards can be positioned at all. On a doc, every
 // anchored card has a live position because the whole document is in the DOM.
-// pdfjs renders a handful of pages, so most annotations have *no* on-screen
-// anchor at any moment — they aren't detached, just off-screen. They cascade to
-// the end of the panel greyed, and the set changes as the reader scrolls.
+// pdfjs shows a few pages of a long PDF, so most annotations have *no* on-screen
+// anchor at any moment — they aren't detached, just out of view.
+//
+// **The rail holds only those, and is therefore never taller than the panel.**
+// Two modes, and the toggle between them is the whole design:
+//
+//   Rail  cards for passages currently on screen, each level with its own
+//         passage. Everything else is hidden — not greyed and cascaded to the
+//         end, which is what used to make this column arbitrarily tall: an
+//         annotation four pages down was placed four pages down, in a container
+//         grown to fit it, so it sat far below the fold with nothing to align
+//         with anyway. It scrolls only when more annotations are anchored on
+//         screen than fit beside them.
+//   All   every annotation as a plain list, in document order, positioned by
+//         nothing. This is where an annotation you haven't scrolled to lives,
+//         and the only place a document-level one (no target at all) appears.
+//
+// Hidden means `display: none`, not unmounted, and that is load-bearing: a card
+// can be holding an open reply composer — a live Hocuspocus connection and a
+// DRAFT row — or a delete confirmation, and scrolling the passage off screen
+// must not throw that away. It also keeps the ids the layout hook is keyed on
+// stable, so membership changes don't tear down its observers on every scroll.
 
 export type PdfAnnotationEntry = {
   threadId: string;
@@ -108,24 +127,35 @@ export default function PdfAnnotationPanel({
     return withOrder.map((w) => w.entry);
   }, [entries]);
 
+  // Rail unless the reader asks for the list — and never below the breakpoint,
+  // where nothing is positioned and the panel is a full-width overlay with no
+  // document beside it to align to.
+  const [showAll, setShowAll] = useState(false);
+  const railMode = positioned && !showAll;
+
   const ids = useMemo(() => sorted.map((entry) => entry.root.id), [sorted]);
   const { containerRef, isAnchored } = usePdfMarginNotes({
     resolveTops,
     ids,
     subscribe,
-    enabled: positioned,
+    enabled: railMode,
   });
+
+  const railCount = useMemo(
+    () => (railMode ? sorted.filter((entry) => isAnchored(entry.root.id)).length : sorted.length),
+    [railMode, sorted, isAnchored],
+  );
 
   const renderEntry = useCallback(
     (entry: PdfAnnotationEntry) => {
-      const offscreen = positioned && !isAnchored(entry.root.id);
+      const hidden = railMode && !isAnchored(entry.root.id);
 
       return (
         <div
           key={entry.root.id}
           data-margin-note-id={entry.root.id}
           data-thread-id={entry.threadId}
-          className={`${styles.card} ${offscreen ? styles.offscreen : ""}`}
+          className={`${styles.card} ${hidden ? styles.notInRail : ""}`}
         >
           {entry.target && (
             <button
@@ -155,7 +185,7 @@ export default function PdfAnnotationPanel({
         </div>
       );
     },
-    [fileId, isAnchored, onJumpTo, positioned],
+    [fileId, isAnchored, onJumpTo, railMode],
   );
 
   return (
@@ -197,9 +227,46 @@ export default function PdfAnnotationPanel({
       {sorted.length === 0 ? (
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>
       ) : (
-        <div ref={containerRef} className={styles.cards} data-pseudo-border-root>
-          {sorted.map(renderEntry)}
-        </div>
+        <>
+          {/* Only above the breakpoint: below it nothing is positioned, so the
+              list is all there is and a toggle would offer the state it's
+              already in. */}
+          {positioned && (
+            <div className={styles.modeRow}>
+              <button
+                type="button"
+                className={styles.modeToggle}
+                onClick={() => setShowAll((previous) => !previous)}
+                aria-pressed={showAll}
+              >
+                {showAll ? "Show beside the text" : `Show all ${sorted.length}`}
+              </button>
+            </div>
+          )}
+
+          {/* Empty in rail mode is a normal state, not an error — it means the
+              reader is looking at part of the document nobody has annotated —
+              so it says which part is missing rather than "no annotations". The
+              container still renders beneath it: the cards are in it, hidden,
+              and the hook needs them measurable the moment one comes into view. */}
+          {railMode && railCount === 0 && (
+            <p className={styles.empty}>
+              Nothing annotated on screen.{" "}
+              {/* Worded differently from the toggle above deliberately: two
+                  controls with the same accessible name in one panel is a
+                  locator ambiguity for anything driving it, screen readers
+                  included. */}
+              <button type="button" className={styles.emptyLink} onClick={() => setShowAll(true)}>
+                Show them all
+              </button>
+              .
+            </p>
+          )}
+
+          <div ref={containerRef} className={styles.cards} data-pseudo-border-root>
+            {sorted.map(renderEntry)}
+          </div>
+        </>
       )}
     </div>
   );
