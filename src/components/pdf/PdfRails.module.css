@@ -2,6 +2,11 @@
    Left: where other readers are. Right: where you are, and where the
    annotations are. */
 
+/* Width is CSS's; **height is pinned inline from JS** to the viewer container's
+   clientHeight (PdfRails.tsx's `railStyle`), because that is where the vertical
+   scrollbar's track ends and these markers have to agree with it. That is the
+   same "CSS owns the columns, JS owns only the vertical" split the doc-side
+   margin notes use — don't move the flex sizing here into JS to match. */
 .rail {
   position: relative;
   flex: 0 0 18px;
@@ -49,7 +54,10 @@
 /* The portion of the document currently visible, on the right-hand strip.
    Drawn only when it would be at least MIN_VIEWPORT_THUMB_PX tall — below that
    it is indistinguishable from an annotation tick, which would make the strip
-   harder to read rather than easier (PLAN.md §19). */
+   harder to read rather than easier (PLAN.md §19).
+
+   **Currently unused at runtime, and not dead.** PdfRails.tsx's
+   `SHOW_VIEWPORT_THUMB` is off; the class is what that switch turns back on. */
 .viewportThumb {
   position: absolute;
   left: 50%;

@@ -93,6 +93,53 @@
   background: var(--surface-muted);
 }
 
+/* **A custom scrollbar, purely so the two rails can line up with it.**
+
+   The rails either side of this container paint a marker at `top: fraction%` of
+   their own box (PdfRails.tsx), which is the same place as the native thumb only
+   if the native track also spans that box. By default it doesn't — a platform
+   scrollbar insets its track by an arrow button at each end, which pinched these
+   markers by 18px at fraction 0 and 1 and ~9px at 0.25 and 0.75. Declaring these
+   pseudos is what removes the buttons; measured afterwards, the thumb's top lands
+   within 0.0px of where the rail's own fraction arithmetic puts it.
+
+   **STYLE.md's "Custom scrollbars, and anything positioned beside one" carries the
+   engine facts** — why the button height can't simply be measured instead, what
+   this costs Firefox and Safari, and why `scrollbar-width` must not be added here.
+   Read it before changing any declaration below.
+
+   The rail no longer *draws* that agreement: `.viewportThumb` is gated off behind
+   PdfRails.tsx's `SHOW_VIEWPORT_THUMB`, because two grey bars a few pixels apart
+   read as a fault. The alignment is still what makes the annotation ticks land
+   where the scrollbar says they should.
+
+   Scoped to this one container on purpose — nothing else on the page has a rail to
+   agree with, and `.panel` below keeps the platform scrollbar. */
+.viewerContainer::-webkit-scrollbar {
+  /* Narrow, with the thumb filling it edge to edge rather than inset by a
+     transparent border — an inset thumb sits below its own box, and the rails
+     position against the box (STYLE.md, "Insetting a thumb moves it"). */
+  width: 10px;
+  height: 10px;
+}
+
+.viewerContainer::-webkit-scrollbar-track,
+.viewerContainer::-webkit-scrollbar-corner {
+  background: var(--surface-muted);
+}
+
+/* `--border-strong`, the same token the rail's markers are drawn against, so this
+   reads as part of the same instrument rather than as chrome borrowed from
+   somewhere else. */
+.viewerContainer::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 5px;
+}
+
+.viewerContainer::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
 /* The annotation panel. A column beside the viewer above the breakpoint; a
    full-width overlay below it, since there is no room for both and no page
    to scroll to instead. 768px (not the doc rail's 1200px, PdfAnnotationSurface's

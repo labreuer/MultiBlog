@@ -6538,6 +6538,26 @@ visible on other users' views" falls out of the layer only existing for rendered
   §5/§8 relies on. Same version-pinning discipline applies.
 - **§9 says annotations → ydoc.** Not taken, for the five reasons under *Decisions* above.
   §9's viewport half is taken exactly as written.
+- **The right strip's viewport thumb ships disabled** (Phase 4 item 3a above), behind
+  `SHOW_VIEWPORT_THUMB` in `PdfRails.tsx` rather than deleted. The scrollbar sits about ten
+  pixels from the strip and says the same thing; two grey bars that close read as a
+  rendering fault rather than as one position shown twice. Keeping the code costs nothing
+  and buys the only on-screen check of the fraction arithmetic — the thumb is drawn from
+  `visibleFractionRange` over `buildPageOffsets`, the scrollbar beside it from the engine's
+  own `scrollTop / scrollHeight`, so the two disagreeing is exactly what a bug in that
+  arithmetic looks like. The 20px `MIN_VIEWPORT_THUMB_PX` rule and its e2e coverage stay as
+  specified, since the switch is the only thing between them and a visible thumb.
+- **Neither rail is "a 1px line the full height of the viewer"** (items 2 and 3 above), and
+  the viewer's scrollbar is restyled rather than native. Both follow from the same
+  requirement, which the phase description doesn't state: a marker at a document fraction
+  has to land where the scrollbar between the two rails says that fraction is. It didn't —
+  by up to 18px, from an arrow-button inset no API reports, and by a further 9px at any zoom
+  past fit-width, from a rail covering the container's border box while the track stops at
+  its client box. The rails are now pinned to `container.clientHeight` and the scrollbar is
+  drawn from `::-webkit-scrollbar` pseudos, after which the two agree to within 0.0px in
+  Chromium. The engine facts, the measurements, what this costs Firefox and Safari, and why
+  no e2e spec can see any of it: **STYLE.md, "Custom scrollbars, and anything positioned
+  beside one"**. Why it is done *here*: `PdfViewer.module.css` and `PdfRails.tsx`.
 - **§4 step 2 (fuzzy quote match) is deferred.** It only matters after a `textVersion` bump,
   and §4 warns explicitly against running it synchronously (Hypothesis's ten-second stall).
   Shipping it properly means a worker; steps 1, 3 and 4 make the viewer correct without it,

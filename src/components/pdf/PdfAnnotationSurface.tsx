@@ -344,6 +344,11 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
     // No explicit initial measurement: ResizeObserver fires once on `observe`
     // with the element's current size, so a synchronous setState here would
     // only add a cascading render before the observer's own first callback.
+    //
+    // **clientHeight, not offsetHeight** — this is now both rails' actual
+    // height, not just the input to the thumb-visibility threshold, and the
+    // difference is exactly the horizontal scrollbar the vertical track also
+    // loses. PdfRails.tsx's header has the measurement.
     const observer = new ResizeObserver(() => setRailHeight(container.clientHeight));
     observer.observe(container);
     return () => observer.disconnect();
@@ -437,7 +442,12 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
           panelOpen={panelOpen}
           onTogglePanel={() => setPanelOpen((open) => !open)}
           presenceRail={
-            <PdfPresenceRail readers={presence.readers} offsets={handle?.offsets ?? null} onJumpTo={jumpToReader} />
+            <PdfPresenceRail
+              readers={presence.readers}
+              offsets={handle?.offsets ?? null}
+              railHeightPx={railHeight}
+              onJumpTo={jumpToReader}
+            />
           }
           indicatorStrip={
             <PdfIndicatorStrip
