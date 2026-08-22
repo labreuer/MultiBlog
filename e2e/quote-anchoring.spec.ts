@@ -87,7 +87,14 @@ test.describe("quote anchoring across publishes", () => {
     // should slide forward by exactly the inserted length and stay valid.
     const prefix = "Yesterday, ";
     await bodyEditor(page).click();
-    await page.keyboard.press("Control+Home");
+    // Select-all then collapse left, rather than a document-start chord: there
+    // isn't a portable one. `Control+Home` is Windows-only (macOS leaves the
+    // caret where it was, so the prefix lands at the *end* and the assertion
+    // below fails on the text it just typed), and `ControlOrMeta+Home` is no
+    // better — macOS's document-start binding is `Meta+ArrowUp`, not Cmd+Home.
+    // `ControlOrMeta+A` is the idiom the rest of the suite already uses.
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.press("ArrowLeft");
     await page.keyboard.type(prefix);
     await expect(bodyEditor(page)).toContainText(`${prefix}${QUOTED_BODY}`);
 

@@ -22,7 +22,23 @@ export default defineConfig({
   // an app defect. Failure rate was roughly 1 full run in 3.5 at three
   // workers, 0 in 8 at two — for the same ~50s wall clock, because the dev
   // server is the bottleneck rather than the parallelism.
-  workers: process.env.CI ? 1 : 2,
+  //
+  // That measurement is machine-specific, and the default is the machine it
+  // was taken on. A weaker one wants *fewer*: on a 2-physical-core fanless
+  // laptop, two workers reproduce at two exactly what three did there — a
+  // full run showed 6 failures spread across pdf, quote-anchoring,
+  // session-refresh, side-by-side and ydoc-debug, every one of which passed
+  // single-worker. The tell is that the failures are scattered across
+  // unrelated specs and vanish in isolation; a real regression doesn't move.
+  // Override per machine with E2E_WORKERS in .env (already loaded above, and
+  // never committed, so one checkout can differ from another).
+  //
+  // `|| 2` rather than `?? 2`: a commented-out or blank `E2E_WORKERS=` in .env
+  // is an empty string, which `??` passes through and `Number("")` turns into
+  // 0 — and Playwright rejects that outright with "config.workers must be a
+  // positive number", before running anything. `||` folds empty, absent and
+  // unparseable all back to the default.
+  workers: process.env.CI ? 1 : Number(process.env.E2E_WORKERS) || 2,
   forbidOnly: !!process.env.CI,
   // No local retries on purpose: a retry that turns a red run green hides
   // exactly the collab/WS timing regressions this suite exists to catch.
