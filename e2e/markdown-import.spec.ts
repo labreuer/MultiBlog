@@ -113,6 +113,36 @@ test("a leading H2 stays in the body when the file also uses H1", async ({ page 
   await expect(body.locator("h1")).toHaveText("The Real Title");
 });
 
+test("HTML entities are decoded, except inside code", async ({ page }) => {
+  // marked leaves entities encoded (it emits HTML, so that is correct for it)
+  // and @tiptap/markdown decodes only four of them, so without our own pass
+  // these reach a text node verbatim and render as their own source.
+  // docs/DOC_IMPORT.md §3.
+  const title = `${E2E_TITLE_PREFIX}Entities ${Date.now()}`;
+  await importMarkdown(
+    page,
+    "entities.md",
+    `# ${title}\n\nCurly &#x2019; and a dash &mdash; and u/&#8203;bob.\n\n` +
+      `A [link](https://x.test/?a=1&amp;b=2) and \`code &lt; here\`.\n\n` +
+      "```\nfenced &amp; untouched\n```\n",
+  );
+
+  const body = bodyEditor(page);
+  // Decoded: a named entity, a hex numeric one.
+  await expect(body).toContainText("Curly ’ and a dash —");
+  // An invisible character decodes like any other: the zero-width space in
+  // `u/&#8203;bob` becomes a real U+200B rather than being removed. Written as
+  // an escape, not the character, so the assertion stays legible to review and
+  // cannot be silently voided by an editor that trims invisible characters.
+  expect(await body.innerText()).toMatch(/u\/\u200Bbob/);
+  // Link destinations decode too (docs/DOC_IMPORT.md §5).
+  await expect(body.locator("a")).toHaveAttribute("href", "https://x.test/?a=1&b=2");
+  // Code is exempt in both forms — CommonMark does not decode entity
+  // references inside a code span or a fence, so these are the real characters.
+  await expect(body.locator("code").first()).toHaveText("code &lt; here");
+  await expect(body.locator("pre")).toContainText("fenced &amp; untouched");
+});
+
 test("rejects a non-markdown file without creating a doc", async ({ page }) => {
   await page.goto("/docs");
   await page.setInputFiles('input[type="file"][name="file"]', {

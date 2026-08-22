@@ -44,7 +44,11 @@ Not `docContentExtensions`: its two extra marks (`authorHighlight`, `annotation`
 a doc acquires by being *edited*, and no Markdown source can produce either. The reading and
 editing sides register that superset, so nothing written here is dropped when it's read back.
 
-## 3. Raw HTML in the source becomes literal text, not nodes
+## 3. HTML in the source: tags stay text, entities get decoded
+
+These two look adjacent and pull in opposite directions, so both halves are stated here.
+
+### Tags become literal text, not nodes
 
 `@tiptap/markdown` converts an embedded HTML token by handing it to `generateJSON`, but only
 where `window.DOMParser` exists. With no DOM it falls back to `htmlAsLiteralText`
@@ -55,6 +59,40 @@ That is a promise of this import, not an accident of where it happens to run —
 reason the parse stays on the server rather than moving to the browser to "get proper HTML
 support". An uploaded file's HTML turned into real nodes is an injection surface; literal
 text is the safe reading of a document someone else wrote.
+
+### Entity references *are* decoded, and that does not weaken the above
+
+Nothing in the parse chain decodes more than four entities. `marked` decodes none — it is an
+HTML *emitter*, so leaving `&nbsp;` encoded is correct for its purpose, since the browser
+would decode it downstream. `@tiptap/markdown` then calls `@tiptap/core`'s
+`decodeHtmlEntities`, which is:
+
+```js
+text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&")
+```
+
+Four references out of the ~2200 named ones in the HTML spec, and no numeric ones at all. So
+`&nbsp;`, `&mdash;`, `&#8203;`, `&#x2019;` and the rest reach a ProseMirror text node
+verbatim and render as their own source. `markdownToDocContent` therefore walks the parse
+output and decodes with the `entities` package, which is what `parse5` and `cheerio` use.
+
+**This does not touch the security property above.** Decoding turns `&lt;div&gt;` into the
+*text* `<div>` — still a text node, still never an element. The four-entity decode already
+did exactly that before any of this was added; the change is only how many references it
+covers.
+
+**Decoding is all that happens.** A reference names a character and becomes that character,
+including the invisible ones — a `&#8203;` in the source arrives as a real zero-width space,
+not as nothing. Deleting characters an author wrote is a separate decision from decoding
+them, and the importer does not make it. Anything that should be removed rather than decoded
+is a content question, to be settled deliberately and not as a side effect of parsing.
+
+One exemption, and it is load-bearing:
+
+- **Code is untouched, in both forms.** CommonMark does not decode entity references inside a
+  code span or a fenced block, so `&lt;` there is genuinely those four characters and
+  rewriting it would corrupt the sample. A `codeBlock` node is returned unwalked; a text node
+  carrying the `code` mark keeps its text.
 
 ## 4. Which heading becomes the title
 
@@ -159,9 +197,8 @@ which defaults to **1 MB** (`next/dist/server/app-render/action-handler.js`,
 That limit is enforced *while the request body is still being read*, so a payload above it
 never reaches the action at all — it fails with an unstyled `413 Body exceeded 1 MB limit`
 instead of any message the action writes. **A cap at or above 1 MB is not a cap; it is a
-message that never prints.** The first version of this import shipped with a 2 MB cap and had
-exactly that bug. The headroom between 768 KB and 1 MB is for multipart framing, which makes
-the request a little larger than the file itself.
+message that never prints.** The headroom between 768 KB and 1 MB is for multipart framing,
+which makes the request a little larger than the file itself.
 
 If `serverActions.bodySizeLimit` is ever raised, raise `MAX_MARKDOWN_BYTES` with it — and not
 past it. Raising the Next limit alone widens the body *every* server action in the app will

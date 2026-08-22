@@ -44,6 +44,7 @@
     "@tiptap/static-renderer": "^3.29.0",
     "@tiptap/y-tiptap": "^3.0.7",
     "bcryptjs": "^3.0.3",
+    "entities": "^8.0.0",
     "jose": "^6.2.4",
     "next": "16.2.11",
     "next-auth": "^5.0.0-beta.32",
