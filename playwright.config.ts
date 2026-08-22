@@ -84,6 +84,44 @@ export default defineConfig({
           },
         ]
       : []),
+    // WebKit, for the one class of bug no amount of chromium coverage can
+    // reach: the PDF surface runs pdfjs, and pdfjs uses modern built-ins that
+    // WebKit ships late or not at all. Two have already bitten an iPad —
+    // Map.prototype.getOrInsertComputed and ReadableStream's async iterator,
+    // both now patched in src/lib/pdfjs-webkit-polyfills.ts. Each was invisible
+    // locally, because a chromium-only suite runs the one engine that has them.
+    //
+    // This is *not* iPadOS Safari — Playwright drives its own WebKit build, so
+    // the native selection gestures an iPad uses (long-press, the drag handles)
+    // are still unreproducible here. What it does share is the JS engine, which
+    // is where those two bugs live.
+    //
+    // **It does not run on macOS 14 at all**, and the failure is not yours to
+    // fix: playwright 1.62 targets webkit 2336, but browsers.json pins mac14
+    // (and mac14-arm64) to a frozen 2251 build via revisionOverrides, whose
+    // protocol has no `PushAPIEnabled` setting — so every test dies in
+    // `browserContext.newPage` with `Protocol error (Page.overrideSetting)`
+    // before its body runs. `playwright install --force webkit` re-downloads
+    // the same pinned build and changes nothing. It unblocks on macOS 15+, or
+    // on Linux CI. That is why the polyfills' own coverage lives in
+    // e2e/pdf-webkit-gaps.spec.ts, which simulates each gap in chromium and so
+    // runs everywhere — this project is a bonus, not the guard.
+    //
+    // Gated behind E2E_WEBKIT for the same reason as firefox above: a project
+    // in this list runs on every bare `playwright test`. Run it with:
+    //
+    //   E2E_WEBKIT=1 npx playwright test --project=webkit
+    //
+    ...(process.env.E2E_WEBKIT
+      ? [
+          {
+            name: "webkit",
+            use: { ...devices["Desktop Safari"], storageState: ADMIN_STORAGE_STATE },
+            dependencies: ["setup"],
+            testIgnore: /dark-mode\.spec\.ts/,
+          },
+        ]
+      : []),
   ],
   // `reuseExistingServer` is unconditional rather than `!process.env.CI`: the
   // user frequently has `npm run dev:all` up already, and CLAUDE.md is explicit

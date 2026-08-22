@@ -1,12 +1,12 @@
 "use client";
 
-// Must be the first import: it patches Map.prototype with the "upsert"
-// methods pdfjs-dist calls pervasively but some WebKit releases don't have
-// yet, and pdfjs-dist itself has to see the patched prototype from its very
+// Must be the first import: it patches the built-ins pdfjs-dist needs but
+// WebKit ships late or not at all (Map upsert, ReadableStream async
+// iteration), and pdfjs-dist itself has to see them patched from its very
 // first module evaluation onward. The named import (rather than a bare
 // side-effect one) is so ensurePdfWorker below can reuse the same source
 // string for the worker's own realm. See the polyfill file for the full story.
-import { MAP_UPSERT_POLYFILL_SOURCE } from "./pdfjs-map-upsert-polyfill";
+import { WEBKIT_POLYFILL_SOURCE } from "./pdfjs-webkit-polyfills";
 import * as pdfjs from "pdfjs-dist";
 import * as pdfjsViewer from "pdfjs-dist/web/pdf_viewer.mjs";
 
@@ -62,7 +62,7 @@ let workerReady = false;
  *
  * **`workerSrc` is a Blob URL we build, not the vendor file's URL directly.**
  * The worker is its own JS realm and doesn't inherit the main thread's
- * Map.prototype patch, and there's no hook to run code before the vendor
+ * prototype patches, and there's no hook to run code before the vendor
  * script's own top-level body does — so the polyfill has to already be
  * installed by the time that body runs. A local wrapper module (its only job
  * importing the polyfill, then the vendor script) doesn't survive Turbopack
@@ -95,7 +95,7 @@ export function ensurePdfWorker(): void {
       new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).href,
       window.location.href,
     ).href;
-    const workerSource = `${MAP_UPSERT_POLYFILL_SOURCE}\nimport ${JSON.stringify(vendorWorkerUrl)};\n`;
+    const workerSource = `${WEBKIT_POLYFILL_SOURCE}\nimport ${JSON.stringify(vendorWorkerUrl)};\n`;
     const blob = new Blob([workerSource], { type: "text/javascript" });
     // Never revoked: ensurePdfWorker only ever runs once (the `workerReady`
     // guard above), and every PDFWorker for the rest of the page's life —
