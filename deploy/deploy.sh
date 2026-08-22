@@ -8,6 +8,11 @@
 # .env automatically (next build loads .env; prisma loads it via
 # prisma.config.ts), so no manual export is needed here.
 #
+# `npm ci` runs only when the pull actually changed package.json or
+# package-lock.json — see the block below for why that is skipped outright
+# rather than softened to `npm i`. FORCE_INSTALL=1 overrides:
+#   FORCE_INSTALL=1 ./deploy/deploy.sh
+#
 # Safe to reuse unmodified for a second instance on the same box (e.g. a
 # second subdomain/DB, see DEPLOY.md §11) — it cd's to wherever this script
 # itself lives, not a hardcoded path, and the systemd unit names default to
@@ -31,10 +36,42 @@ WEB_UNIT="${WEB_UNIT:-${INSTANCE}-web}"
 COLLAB_UNIT="${COLLAB_UNIT:-${INSTANCE}-collab}"
 
 echo "==> Pulling latest"
+BEFORE_PULL="$(git rev-parse HEAD)"
 git pull
 
-echo "==> Installing dependencies (incl. dev deps: prisma/tsx/typescript are runtime here)"
-npm ci
+# Skip the install when the pull did not touch the dependency manifests. On a
+# 970 MB node_modules this is the single biggest win available to a redeploy:
+# `npm ci` deletes and refills the tree every time, measured at ~18s whether or
+# not anything changed, against a ~55s deploy.
+#
+# Deliberately NOT `npm i` as the fast path. `npm i` reconciles in ~3.5s, but:
+#   - it can rewrite package-lock.json when anything drifts (npm version,
+#     platform-specific optional deps). This script starts with `git pull`, so
+#     a lock modified on the server becomes a merge conflict on the NEXT
+#     deploy — the same failure DEPLOY.md §5 warns about for editing
+#     package.json on the box, reached by a different route.
+#   - it reconciles rather than replaces, so packages orphaned by an earlier
+#     dependency set survive and node_modules slowly diverges from what a
+#     clean install produces.
+# Skipping entirely is both faster than `npm i` and exactly as deterministic
+# as `npm ci`, because it only happens when the inputs to `npm ci` are
+# byte-identical to the ones that produced the current tree.
+#
+# FORCE_INSTALL=1 re-installs unconditionally — for the one case the git
+# comparison cannot see: a previous run whose `npm ci` died partway, leaving a
+# node_modules that exists but is incomplete.
+if [ "${FORCE_INSTALL:-0}" = 1 ]; then
+    echo "==> Installing dependencies (FORCE_INSTALL=1)"
+    npm ci
+elif [ ! -d node_modules ]; then
+    echo "==> Installing dependencies (no node_modules yet)"
+    npm ci
+elif git diff --quiet "$BEFORE_PULL" HEAD -- package.json package-lock.json; then
+    echo "==> Dependencies unchanged since $(git rev-parse --short "$BEFORE_PULL") — skipping npm ci"
+else
+    echo "==> Dependencies changed — npm ci (incl. dev deps: prisma/tsx/typescript are runtime here)"
+    npm ci
+fi
 
 echo "==> Generating Prisma client"
 npx prisma generate
