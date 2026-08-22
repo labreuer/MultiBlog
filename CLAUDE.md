@@ -80,6 +80,11 @@ invites): [docs/EMAIL.md](docs/EMAIL.md).
 Who may do what, as tables over roles × doc visibility × byline membership, plus where each
 rule lives so it can be re-derived: [docs/PERMISSIONS.md](docs/PERMISSIONS.md). A `PRIVATE`
 doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e).
+Creating a doc from Markdown — `/docs`' file import and paste box, which heading becomes the
+title, why the parse is headless and server-side, why the size cap is 768 KB rather than a
+round number, and why the paste box is a textarea and not a clipboard read:
+[docs/DOC_IMPORT.md](docs/DOC_IMPORT.md). The four source files carry pointers into it rather
+than the reasoning itself.
 
 ## Running
 
