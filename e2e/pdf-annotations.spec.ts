@@ -15,7 +15,7 @@ const PHRASE = "brown fox jumps";
 
 async function makeFile(): Promise<TestFile> {
   return createTestFile({
-    authorEmail: ADMIN_EMAIL,
+    ownerEmail: ADMIN_EMAIL,
     visibility: "SHARED",
     pages: [[PAGE_ONE], [PAGE_TWO]],
   });
@@ -69,9 +69,11 @@ async function selectPhrase(page: import("@playwright/test").Page, pageNumber: n
 
 /**
  * Opens the panel composer against the pending selection, types `body`, and
- * posts. Uses the same locators the doc-side specs do ("Annotation body",
- * "Post annotation") because it is the same composer component — the surface
- * around it differs, the composer does not.
+ * saves. Same component the doc-side specs drive, so "Annotation body" is the
+ * shared locator — but the submit button is "Save" here, not "Post annotation":
+ * on a file the composer speaks the file surface's vocabulary (PRIVATE/SHARED
+ * in the select beside it), so the button is one verb rather than a restatement
+ * of the choice.
  */
 async function composeAnnotation(page: import("@playwright/test").Page, body: string) {
   await page.getByRole("button", { name: "Annotate" }).click();
@@ -82,7 +84,7 @@ async function composeAnnotation(page: import("@playwright/test").Page, body: st
   const editor = annotationEditor(page);
   await editor.click();
   await editor.pressSequentially(body);
-  await page.getByRole("button", { name: "Post annotation" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
 
   // Wait for the post to actually land before returning. Clicking is only the
   // *start* of it — postAnnotation flushes the annotation's ydoc, derives the
@@ -267,7 +269,7 @@ test.describe("pdf annotations", () => {
 
   test("an annotation stays listed while its page is scrolled away from", async ({ page }) => {
     const file = await createTestFile({
-      authorEmail: ADMIN_EMAIL,
+      ownerEmail: ADMIN_EMAIL,
       visibility: "SHARED",
       pages: Array.from({ length: 12 }, (_, i) => [`Page ${i + 1} body text, distinct marker-${i + 1}-zebra.`]),
     });

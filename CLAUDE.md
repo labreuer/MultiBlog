@@ -242,6 +242,15 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
     takes the surviving count as an argument for exactly that reason.
   - The Prisma model is **`StoredFile`**, `@@map("file")`. The table is `file`; the generated
     TS type must not be `File`, which is a DOM/Node global the upload path uses.
+  - **A file's listed users are `FileOwner`s, not authors** (PLAN.md §19): nobody on that
+    list wrote the PDF. The list is seeded with the uploader, editable afterwards, and grants
+    `/files`' Owner(s) line, the right to rename/re-slug/re-own/delete, and read access to a
+    `PRIVATE` file. `DocAuthor`/`PostAuthor` are "author" because a doc's or post's listed
+    users really did write it, and the shared filter kit (`AuthorFilterPanel`,
+    `authorFilterWhere`, `AuthorMode`) is named for those two surfaces; `/files` reaches it
+    through the `ownerFilterWhere`/`listOwnerFilterOptions` wrappers and an aliased import,
+    and every option it added defaults to what `/docs` and `/posts` pass, which is what keeps
+    those two tables out of it. Don't "unify" the two vocabularies in either direction.
   - Upload is a **Route Handler taking a raw body**, not a Server Action and not multipart:
     actions carry a 1MB `bodySizeLimit` that raising would raise site-wide, and
     `request.formData()` buffers the whole upload before user code sees it. nginx needs

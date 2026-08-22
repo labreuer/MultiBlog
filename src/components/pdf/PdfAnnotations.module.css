@@ -59,12 +59,6 @@
   color: var(--foreground);
 }
 
-.sortRow {
-  margin: 0.75rem 0;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
-
 /* The positioned region. `position: relative` makes it the containing block
    for the absolutely-placed cards the layout hook writes `top` onto; its own
    height is set by that hook, since absolutely positioned children contribute

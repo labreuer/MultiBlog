@@ -632,14 +632,14 @@ async function postFileAnnotation(opts: {
   if (raise) {
     const file = await prisma.storedFile.findUnique({
       where: { id: fileId },
-      select: { title: true, slug: true, authors: { select: { user: { select: { email: true } } } } },
+      select: { title: true, slug: true, owners: { select: { user: { select: { email: true } } } } },
     });
     if (file) {
       const subject = `${raisedBy} raised an annotation on "${file.title}"`;
       const text = `${bodyText}\n\n${appUrl(`/pdf/${file.slug}`)}`;
-      // One message per byline author, not one multi-recipient message — same
+      // One message per owner, not one multi-recipient message — same
       // reasoning as the doc side's raise.
-      await Promise.all(file.authors.map((a) => sendMail({ to: a.user.email, subject, text })));
+      await Promise.all(file.owners.map((o) => sendMail({ to: o.user.email, subject, text })));
     }
   }
 

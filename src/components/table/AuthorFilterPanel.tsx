@@ -10,7 +10,12 @@ export type AuthorOption = { slug: string; label: string };
 // The Authors filter panel on /docs and /posts — a checkbox list of eligible
 // authors plus a combining mode, both mirrored into the querystring
 // (src/lib/author-filter.ts owns the `where` semantics; this only renders and
-// reports selection). Deliberately not an extension of MultiSelectDropdown
+// reports selection). /files renders the same panel over its Owner(s) column,
+// which is why the wording is a prop — but only the wording: the callback still
+// reports `{ authors, authorMode }`, the shape /docs and /posts already spread
+// straight into `updateFilters`, so adding /files changed nothing for them.
+// /files' own keys are `owners`/`ownerMode`, and FilesTable does that one-line
+// translation at its call site. Deliberately not an extension of MultiSelectDropdown
 // (TableControls.tsx): that component's option value *is* its own label, so
 // it can't carry a slug with a separate display name, and its `Set<T> |
 // "ALL"` selection snaps an empty selection back to "ALL" — wrong here, where
@@ -20,18 +25,31 @@ export function AuthorFilterPanel({
   selected,
   mode,
   onChange,
+  label = "Authors",
+  noun = "author",
 }: {
   /** Every ADMIN/EDITOR/AUTHOR, alphabetical by display label, "(me)" already applied. */
   options: readonly AuthorOption[];
-  /** Checked slugs. Empty means no author filter, whatever `mode` is. */
+  /** Checked slugs. Empty means no filter, whatever `mode` is. */
   selected: readonly string[];
   mode: AuthorMode;
-  /** One callback for both halves — a checkbox and the mode select are each one navigation. */
+  /**
+   * One callback for both halves — a checkbox and the mode select are each one
+   * navigation. Keyed for /docs and /posts, who spread it into `updateFilters`
+   * unchanged; a caller filtering on some other relation translates.
+   */
   onChange: (next: { authors: string[]; authorMode: AuthorMode }) => void;
+  /** Plural heading on the summary — "Owners" on /files. */
+  label?: string;
+  /** Singular, lowercase, for the accessible names beneath it. */
+  noun?: string;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   useCloseOnOutsideClick(detailsRef);
 
+  // Capitalized for the <select>'s accessible name, which reads as a sentence
+  // start; the button's stays lowercase mid-sentence, as it always was.
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
   const checked = new Set(selected);
   const chosen = options.filter((o) => checked.has(o.slug));
 
@@ -62,11 +80,11 @@ export function AuthorFilterPanel({
   return (
     <details ref={detailsRef} className={styles.dropdownWrapper}>
       <summary className={styles.dropdownSummary} title={chosen.map((o) => o.label).join(", ")}>
-        Authors: {summary}
+        {label}: {summary}
       </summary>
       <div className={styles.dropdownPanel}>
         <div className={styles.columnPickerList}>
-          {options.length === 0 && <span className={styles.columnRowFixed}>No authors to filter by.</span>}
+          {options.length === 0 && <span className={styles.columnRowFixed}>No {noun}s to filter by.</span>}
           {options.map((option) => (
             <label key={option.slug} className={styles.columnRow}>
               <input
@@ -84,7 +102,7 @@ export function AuthorFilterPanel({
             Match:{" "}
             <select
               value={mode}
-              aria-label="Author match mode"
+              aria-label={`${Noun} match mode`}
               onChange={(e) => commit([...selected], e.target.value as AuthorMode)}
             >
               {AUTHOR_MODES.map((m) => (
@@ -96,7 +114,7 @@ export function AuthorFilterPanel({
           </label>
           <button
             type="button"
-            aria-label="Clear author filter"
+            aria-label={`Clear ${noun} filter`}
             disabled={selected.length === 0}
             onClick={() => commit([], mode)}
           >

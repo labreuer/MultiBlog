@@ -25,7 +25,7 @@ async function waitForViewer(page: import("@playwright/test").Page) {
 
 test.describe("pdf viewer", () => {
   test("the pdfjs internals we depend on still exist", async ({ page }) => {
-    const file = await createTestFile({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
     try {
       await signIn(page, ADMIN_EMAIL);
       await gotoOk(page, `/pdf/${file.slug}`);
@@ -72,7 +72,7 @@ test.describe("pdf viewer", () => {
 
   test("renders the document's real text and navigates between pages", async ({ page }) => {
     const file = await createTestFile({
-      authorEmail: ADMIN_EMAIL,
+      ownerEmail: ADMIN_EMAIL,
       visibility: "SHARED",
       pages: [
         ["Page one carries a distinctive phrase: heliotrope cartwheel."],
@@ -113,7 +113,7 @@ test.describe("pdf viewer", () => {
   });
 
   test("zoom and rotation move the rendering without touching the document", async ({ page }) => {
-    const file = await createTestFile({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
     try {
       await signIn(page, ADMIN_EMAIL);
       await gotoOk(page, `/pdf/${file.slug}`);
@@ -141,7 +141,7 @@ test.describe("pdf viewer", () => {
     }
   });
 
-  test("refuses a PRIVATE file to a non-author and 404s an unknown slug", async ({ page }) => {
+  test("refuses a PRIVATE file to a non-owner and 404s an unknown slug", async ({ page }) => {
     await signIn(page, ADMIN_EMAIL);
     const res = await page.goto("/pdf/definitely-not-a-real-file-slug");
     expect(res?.status()).toBe(404);

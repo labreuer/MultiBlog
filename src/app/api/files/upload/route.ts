@@ -139,10 +139,12 @@ export async function POST(request: Request) {
           sha256: stored.sha256,
           pageCount: parsed.pageCount,
           updatedByUserId: session.user.id,
-          // The uploader is the byline, same as createDoc makes its creator the
-          // sole DocAuthor. It is also what makes the file visible to them at
-          // all under PRIVATE, which is the default.
-          authors: { create: { userId: session.user.id, bylineOrder: 0 } },
+          // The uploader becomes the sole owner, the way createDoc makes its
+          // creator the sole DocAuthor — "owner" rather than "author" because
+          // nobody here wrote the PDF (schema.prisma's FileOwner). It is also
+          // what makes the file visible to them at all under PRIVATE, which is
+          // the default.
+          owners: { create: { userId: session.user.id, ownerOrder: 0 } },
         },
         select: { id: true, slug: true, title: true },
       });

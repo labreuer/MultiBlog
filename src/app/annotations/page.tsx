@@ -146,7 +146,7 @@ export default async function AnnotationsPage({
         OR: [
           { doc: { authors: { some: { userId: session.user.id } } } },
           { doc: { visibility: "SHARED" } },
-          { file: { authors: { some: { userId: session.user.id } } } },
+          { file: { owners: { some: { userId: session.user.id } } } },
           { file: { visibility: "SHARED" } },
         ],
       },

@@ -115,6 +115,7 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
         anchorTo={open.anchorTo}
         quotedText={open.quotedText}
         pdfTarget={pdfTarget}
+        container={target.kind}
         onPosted={() => {
           setOpen(null);
           onSettled?.();

@@ -50,7 +50,7 @@ test.describe("files", () => {
     try {
       // The title comes from the filename with the extension stripped, and the
       // row is immediately listed — which also exercises the file_metrics view
-      // (the Author(s) cell) and the uploader's revalidation path.
+      // (the Owner(s) cell) and the uploader's revalidation path.
       await gotoOk(page, "/files");
       await expect(page.getByRole("link", { name: title })).toBeVisible();
     } finally {
@@ -72,7 +72,7 @@ test.describe("files", () => {
   });
 
   test("serves bytes with an ETag and honours a Range request", async ({ page }) => {
-    const file = await createTestFile({ authorEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
     try {
       await signIn(page, ADMIN_EMAIL);
       await gotoOk(page, "/files");
@@ -130,8 +130,8 @@ test.describe("files", () => {
     await createTestUser({ email: ownerEmail, name: `File Owner ${ownerEmail.split("@")[0]}`, role: "AUTHOR" });
     await createTestUser({ email: otherEmail, name: `File Other ${otherEmail.split("@")[0]}`, role: "AUTHOR" });
 
-    const privateFile = await createTestFile({ authorEmail: ownerEmail, visibility: "PRIVATE" });
-    const sharedFile = await createTestFile({ authorEmail: ownerEmail, visibility: "SHARED" });
+    const privateFile = await createTestFile({ ownerEmail: ownerEmail, visibility: "PRIVATE" });
+    const sharedFile = await createTestFile({ ownerEmail: ownerEmail, visibility: "SHARED" });
 
     try {
       // The owner sees both.
@@ -167,12 +167,12 @@ test.describe("files", () => {
     }
   });
 
-  test("refuses to serve a PRIVATE file's bytes to a non-author", async ({ page }) => {
+  test("refuses to serve a PRIVATE file's bytes to a non-owner", async ({ page }) => {
     const ownerEmail = uniqueEmail("file-owner");
     const otherEmail = uniqueEmail("file-other");
     await createTestUser({ email: ownerEmail, name: `File Owner ${ownerEmail.split("@")[0]}`, role: "AUTHOR" });
     await createTestUser({ email: otherEmail, name: `File Other ${otherEmail.split("@")[0]}`, role: "AUTHOR" });
-    const file = await createTestFile({ authorEmail: ownerEmail, visibility: "PRIVATE" });
+    const file = await createTestFile({ ownerEmail: ownerEmail, visibility: "PRIVATE" });
 
     try {
       await signIn(page, otherEmail);
@@ -182,7 +182,7 @@ test.describe("files", () => {
         `/api/files/${file.id}/${file.sha256}`,
       );
       // 404, not 403: whether a PRIVATE file exists is itself something its
-      // non-authors shouldn't learn from a guessable id.
+      // non-owners shouldn't learn from a guessable id.
       expect(status).toBe(404);
     } finally {
       await deleteTestFile(file.id);

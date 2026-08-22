@@ -131,7 +131,7 @@ model User {
   docAuthors           DocAuthor[]
   docUpdates           Doc[]                  @relation("DocUpdatedBy")
   docDeletions         Doc[]                  @relation("DocDeletedBy")
-  fileAuthors          FileAuthor[]
+  fileOwners           FileOwner[]
   fileUpdates          StoredFile[]           @relation("FileUpdatedBy")
   fileDeletions        StoredFile[]           @relation("FileDeletedBy")
   annotations          Annotation[]           @relation("AnnotationAuthor")
@@ -920,7 +920,7 @@ model StoredFile {
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")
 
-  authors     FileAuthor[]
+  owners      FileOwner[]
   slugHistory FileSlugHistory[]
   pageTexts   FilePageText[]
   annotations Annotation[]
@@ -932,9 +932,9 @@ model StoredFile {
   @@map("file")
 }
 
-// /files' Author(s) and Annotations columns, as a view — the same role
+// /files' Owner(s) and Annotations columns, as a view — the same role
 // DocMetrics plays for /docs, and built the same way for the same reason:
-// by grouping file_author, never by selecting FROM file. A view that reads
+// by grouping file_owner, never by selecting FROM file. A view that reads
 // its own base table gets scanned twice on every sort through it, because
 // Prisma emits a LEFT JOIN for a to-one relation ordering and Postgres 18's
 // self-join elimination only collapses INNER joins (add_doc_metrics_view,
@@ -947,7 +947,7 @@ model StoredFile {
 // Length they are known at upload time and never recomputed.
 view FileMetrics {
   fileId          String  @unique @map("file_id")
-  byline          String? @map("byline")
+  owners          String? @map("owners")
   annotationCount Int     @map("annotation_count")
 
   file StoredFile @relation(fields: [fileId], references: [id])
@@ -955,16 +955,23 @@ view FileMetrics {
   @@map("file_metrics")
 }
 
-model FileAuthor {
-  fileId      String @map("file_id")
-  userId      String @map("user_id")
-  bylineOrder Int    @map("byline_order")
+// Who a file belongs to (PLAN.md §19). Deliberately *not* called an author:
+// the people listed here didn't write the PDF, they hold it — the list is
+// seeded with whoever uploaded it and edited freely afterwards, and what it
+// confers is the byline-shaped display in /files' Owner(s) column, the right
+// to rename/re-slug/re-own/delete, and, for a PRIVATE file, the right to read
+// it at all (src/lib/file-authz.ts). DocAuthor/PostAuthor keep their name
+// because a doc's or post's listed users really did write it.
+model FileOwner {
+  fileId     String @map("file_id")
+  userId     String @map("user_id")
+  ownerOrder Int    @map("owner_order")
 
   file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
   user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([fileId, userId])
-  @@map("file_author")
+  @@map("file_owner")
 }
 
 // Redirect sources for a file's past slugs — same shape and rationale as

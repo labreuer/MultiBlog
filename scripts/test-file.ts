@@ -1,14 +1,16 @@
 // Create or delete throwaway uploaded files for manual testing (PLAN.md §19).
-// Same containment convention as test-doc.ts: only ever touches files authored
+// Same containment convention as test-doc.ts: only ever touches files owned
 // solely by @example.com throwaway accounts, and `delete` refuses a file with
-// any other author, so it can't reach real content by mistake.
+// any other owner, so it can't reach real content by mistake. (A file has
+// owners, not authors — nobody listed on it wrote the PDF; prisma/schema.prisma's
+// FileOwner.)
 //
 // Usage:
-//   npx tsx scripts/test-file.ts create <authorEmail> [--visibility=PRIVATE|SHARED] [--pages=N] [title]
+//   npx tsx scripts/test-file.ts create <ownerEmail> [--visibility=PRIVATE|SHARED] [--pages=N] [title]
 //   npx tsx scripts/test-file.ts delete <slugOrId>
 //   npx tsx scripts/test-file.ts list
 //
-// authorEmail must be an existing @example.com user — create one first with
+// ownerEmail must be an existing @example.com user — create one first with
 // scripts/test-user.ts create. title defaults to "Test file <timestamp>".
 // --visibility defaults to PRIVATE. --pages defaults to 3.
 //
@@ -22,7 +24,7 @@
 // the point; a fixture that skipped either step would test a path production
 // never takes.
 //
-// `delete` removes the row (and cascades its authors, slug history, page text
+// `delete` removes the row (and cascades its owners, slug history, page text
 // and annotations) and then removes the stored bytes **only if no other file
 // still references them** — content addressing means two files can legitimately
 // share one blob, and sweeping it would break the other one's downloads.
@@ -87,13 +89,13 @@ function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
   });
 }
 
-async function create(authorEmail: string, rest: string[]): Promise<void> {
-  if (!SAFE_EMAIL.test(authorEmail)) {
-    throw new Error(`Refusing to create a file for "${authorEmail}" — only @example.com accounts.`);
+async function create(ownerEmail: string, rest: string[]): Promise<void> {
+  if (!SAFE_EMAIL.test(ownerEmail)) {
+    throw new Error(`Refusing to create a file for "${ownerEmail}" — only @example.com accounts.`);
   }
-  const author = await prisma.user.findUnique({ where: { email: authorEmail }, select: { id: true } });
-  if (!author) {
-    throw new Error(`No user with email "${authorEmail}" — create one with scripts/test-user.ts create.`);
+  const owner = await prisma.user.findUnique({ where: { email: ownerEmail }, select: { id: true } });
+  if (!owner) {
+    throw new Error(`No user with email "${ownerEmail}" — create one with scripts/test-user.ts create.`);
   }
 
   const { title: titleArg, visibility, pages } = parseCreateArgs(rest);
@@ -115,8 +117,8 @@ async function create(authorEmail: string, rest: string[]): Promise<void> {
       sha256: stored.sha256,
       pageCount: parsed.pageCount,
       visibility,
-      updatedByUserId: author.id,
-      authors: { create: { userId: author.id, bylineOrder: 0 } },
+      updatedByUserId: owner.id,
+      owners: { create: { userId: owner.id, ownerOrder: 0 } },
     },
     select: { id: true, slug: true },
   });
@@ -145,22 +147,22 @@ async function remove(slugOrId: string): Promise<void> {
       id: true,
       slug: true,
       sha256: true,
-      authors: { select: { user: { select: { email: true } } } },
+      owners: { select: { user: { select: { email: true } } } },
     },
   });
   if (!file) {
     throw new Error(`No file with slug or id "${slugOrId}".`);
   }
-  if (file.authors.length === 0) {
+  if (file.owners.length === 0) {
     throw new Error(
-      `File "${file.slug}" has no authors — refusing to delete, since that's indistinguishable from a real file ` +
-        `whose author was removed. (Delete files before deleting their author.)`,
+      `File "${file.slug}" has no owners — refusing to delete, since that's indistinguishable from a real file ` +
+        `whose owner was removed. (Delete files before deleting their owner.)`,
     );
   }
-  const unsafe = file.authors.filter((a) => !SAFE_EMAIL.test(a.user.email));
+  const unsafe = file.owners.filter((o) => !SAFE_EMAIL.test(o.user.email));
   if (unsafe.length > 0) {
     throw new Error(
-      `File "${file.slug}" has non-throwaway author(s): ${unsafe.map((a) => a.user.email).join(", ")}. Refusing.`,
+      `File "${file.slug}" has non-throwaway owner(s): ${unsafe.map((o) => o.user.email).join(", ")}. Refusing.`,
     );
   }
 
@@ -186,7 +188,7 @@ async function list(): Promise<void> {
       pageCount: true,
       byteSize: true,
       deletedAt: true,
-      authors: { select: { user: { select: { email: true } } } },
+      owners: { select: { user: { select: { email: true } } } },
       _count: { select: { annotations: true } },
     },
   });
@@ -195,13 +197,13 @@ async function list(): Promise<void> {
     return;
   }
   for (const file of files) {
-    const authors = file.authors.map((a) => a.user.email).join(", ") || "(none)";
+    const owners = file.owners.map((o) => o.user.email).join(", ") || "(none)";
     const flags = [file.visibility, file.deletedAt ? "DELETED" : null].filter(Boolean).join(" ");
     console.log(
       `${file.id}  ${file.slug}\n` +
         `    "${file.title}"  ${flags}  ${file.pageCount ?? "?"}pp  ${file.byteSize}B  ` +
         `${file._count.annotations} annotation(s)\n` +
-        `    authors: ${authors}`,
+        `    owners: ${owners}`,
     );
   }
 }
@@ -210,9 +212,9 @@ async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   switch (command) {
     case "create": {
-      const [authorEmail, ...rest] = args;
-      if (!authorEmail) throw new Error("Usage: npx tsx scripts/test-file.ts create <authorEmail> [...]");
-      await create(authorEmail, rest);
+      const [ownerEmail, ...rest] = args;
+      if (!ownerEmail) throw new Error("Usage: npx tsx scripts/test-file.ts create <ownerEmail> [...]");
+      await create(ownerEmail, rest);
       return;
     }
     case "delete": {
@@ -226,7 +228,7 @@ async function main(): Promise<void> {
       return;
     default:
       console.log("Usage:");
-      console.log("  npx tsx scripts/test-file.ts create <authorEmail> [--visibility=PRIVATE|SHARED] [--pages=N] [title]");
+      console.log("  npx tsx scripts/test-file.ts create <ownerEmail> [--visibility=PRIVATE|SHARED] [--pages=N] [title]");
       console.log("  npx tsx scripts/test-file.ts delete <slugOrId>");
       console.log("  npx tsx scripts/test-file.ts list");
       process.exitCode = 1;

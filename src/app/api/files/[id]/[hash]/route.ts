@@ -43,7 +43,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
   if (!(await canUserReadFile(session.user.id, session.user.role, file))) {
     // 404 rather than 403: whether a PRIVATE file exists is itself something
-    // its non-authors shouldn't learn, and this route is reachable by guessing
+    // its non-owners shouldn't learn, and this route is reachable by guessing
     // an id in a way /pdf/[slug] (which answers a visible Forbidden, matching
     // /doc/[slug]) is not.
     return new Response("Not found", { status: 404 });

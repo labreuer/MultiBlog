@@ -187,6 +187,13 @@ are stated independently of their doc counterparts rather than delegating to the
 sets today; the separation exists so the two can diverge without one silently dragging the
 other, which is the reasoning `canManageDocs` vs. `canManagePosts` already records.
 
+**A file's listed users are its owners, not its authors.** The join table is `file_owner`
+(`FileOwner`), not `file_author`, and `/files`' column is Owner(s) — nobody listed on an
+uploaded PDF wrote it. The list is seeded with whoever uploaded the file and is editable
+afterwards, and what it grants is control plus read access to a PRIVATE file. Everywhere
+below, read "in `file_owner`" for the doc tables' "in `doc_author`"; `doc_author` and
+`post_author` keep their name because a doc's or post's listed users really did write it.
+
 The four tables above therefore apply to files as written, with these substitutions and one
 structural difference:
 
@@ -194,7 +201,7 @@ structural difference:
 |---|---|
 | Read `/doc/[slug]` | Read `/pdf/[slug]`, and fetch its bytes from `/api/files/…` |
 | Edit `/doc/[slug]/edit` | **No equivalent** — a file has no editable content |
-| Visibility / byline / slug / delete | `canUserManageFile` (`src/app/actions/files.ts`) |
+| Visibility / owners / slug / delete | `canUserManageFile` (`src/app/actions/files.ts`) |
 | Listed in `/docs` (+ ADMIN "Show all docs") | Listed in `/files` (+ ADMIN "Show all files") |
 | Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same `requireOwnOrAdmin` |
 | Collab connection | Presence only, and **always read-only** (`/api/file/[id]/token`) |
@@ -204,7 +211,7 @@ Two consequences worth stating plainly, because they are what the user-facing ru
 - **An AUTHOR sees only their own files**, PRIVATE *and* SHARED, because
   `canManageAnySharedFile` is ADMIN/EDITOR — exactly as `/docs` behaves.
 - **The bytes route answers 404, not 403**, to someone who may not read a PRIVATE file.
-  Whether such a file exists is itself something its non-authors shouldn't learn, and unlike
+  Whether such a file exists is itself something its non-owners shouldn't learn, and unlike
   `/pdf/[slug]` (which shows a visible Forbidden, matching `/doc/[slug]`) that route is
   reachable by guessing an id.
 
@@ -223,6 +230,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Read / manage a file; its `where`-clause equivalent | `src/lib/file-authz.ts` |
 | `/files` row scoping + the "Show all files" override | `src/app/files/page.tsx` |
 | File mutations (visibility, title, slug, delete) | `src/app/actions/files.ts` |
+| Who owns a file (`file_owner`, the doc tables' `doc_author`) | `prisma/schema.prisma`'s `FileOwner` |
 | File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
 | File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |
 | Annotation ydoc access (DRAFT is owner-only, even from ADMIN; asks whichever container the annotation has) | `src/lib/annotation-authz.ts` |

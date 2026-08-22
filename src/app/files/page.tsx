@@ -7,7 +7,7 @@ import { isAdmin } from "@/lib/authz";
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import { parseFilesFilters, type FilesFilters, type FilesSortKey } from "@/lib/files-query";
-import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
+import { ownerFilterWhere, listOwnerFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import FilesTable from "@/components/FilesTable";
 import FileUploader from "@/components/FileUploader";
@@ -28,7 +28,7 @@ function buildFilterWhere(filters: FilesFilters): Prisma.StoredFileWhereInput {
       { filename: { contains: filters.q, mode: "insensitive" } },
     ];
   }
-  Object.assign(where, authorFilterWhere(filters.authors, filters.authorMode) as Prisma.StoredFileWhereInput);
+  Object.assign(where, ownerFilterWhere(filters.owners, filters.ownerMode) as Prisma.StoredFileWhereInput);
   return where;
 }
 
@@ -39,12 +39,12 @@ function buildOrderBy(sort: SortColumn<FilesSortKey>[]): Prisma.StoredFileOrderB
         return { title: dir };
       case "filename":
         return { filename: dir };
-      case "authors":
+      case "owners":
         // Through the file_metrics view — the same string_agg the cell shows.
-        return { metrics: { byline: { sort: dir, nulls: "last" } } };
+        return { metrics: { owners: { sort: dir, nulls: "last" } } };
       case "annotations":
         // Also the view: a filtered count, which Prisma's `_count` can't
-        // express. No `nulls` handling, unlike byline beside it — the view
+        // express. No `nulls` handling, unlike owners beside it — the view
         // COALESCEs the count to 0, so the column is declared non-null and
         // Prisma rejects the {sort, nulls} form for it. A file with no view row
         // at all still sorts as a NULL *relation*, which Prisma puts last.
@@ -92,36 +92,36 @@ export default async function FilesPage({
   }
 
   const urlSearchParams = toURLSearchParams(await searchParams);
-  const [prefs, authorOptions] = await Promise.all([
+  const [prefs, ownerOptions] = await Promise.all([
     getTablePrefs(session.user.id, "files"),
-    listAuthorFilterOptions(session.user.id),
+    listOwnerFilterOptions(session.user.id),
   ]);
   const filters = parseFilesFilters(
     urlSearchParams,
     prefs,
-    authorOptions.map((o) => o.slug),
+    ownerOptions.map((o) => o.slug),
   );
 
   // Which rows this table selects (docs/PERMISSIONS.md), restating
   // file-authz.ts's rule as a `where` the same way /docs restates doc-authz's:
-  //   - a SHARED file is listed for any ADMIN/EDITOR, byline or not;
-  //   - a PRIVATE file is listed for its byline authors — so an AUTHOR sees
+  //   - a SHARED file is listed for any ADMIN/EDITOR, owner or not;
+  //   - a PRIVATE file is listed for its owners — so an AUTHOR sees
   //     only their own, which is exactly the specified rule;
   //   - ADMIN alone can drop that scoping with "Show all files"
   //     (?showAllFiles=1), an explicit per-visit opt-in stored nowhere. It
   //     widens this query and only this query: opening a PRIVATE file the admin
-  //     doesn't author still goes through canUserReadFile, which refuses it.
+  //     doesn't own still goes through canUserReadFile, which refuses it.
   const viewerIsAdmin = isAdmin(session.user.role);
   const viewerCanManageAnyShared = canManageAnySharedFile(session.user.role);
-  const bypassAuthorScoping = viewerIsAdmin && filters.showAllFiles;
-  const authorScope: Prisma.StoredFileWhereInput = {
+  const bypassOwnerScoping = viewerIsAdmin && filters.showAllFiles;
+  const ownerScope: Prisma.StoredFileWhereInput = {
     OR: [
-      { authors: { some: { userId: session.user.id } } },
+      { owners: { some: { userId: session.user.id } } },
       ...(viewerCanManageAnyShared ? [{ visibility: "SHARED" as const }] : []),
     ],
   };
   const where: Prisma.StoredFileWhereInput = {
-    AND: [bypassAuthorScoping ? {} : authorScope, buildFilterWhere(filters)],
+    AND: [bypassOwnerScoping ? {} : ownerScope, buildFilterWhere(filters)],
   };
 
   const [files, totalCount] = await Promise.all([
@@ -144,9 +144,9 @@ export default async function FilesPage({
         deletedAt: true,
         // Read from the same view that sorts them, so the displayed and sorted
         // expressions can't drift (§16e).
-        metrics: { select: { byline: true, annotationCount: true } },
+        metrics: { select: { owners: true, annotationCount: true } },
         // Ids only: canManage below is a membership test, not a display value.
-        authors: { select: { userId: true } },
+        owners: { select: { userId: true } },
         updatedBy: { select: { name: true, email: true } },
       },
     }),
@@ -158,12 +158,12 @@ export default async function FilesPage({
     slug: file.slug,
     title: file.title,
     filename: file.filename,
-    // NULL only when the file has no authors — same empty cell either way.
-    authors: file.metrics?.byline ?? "",
+    // NULL only when the file has no owners — same empty cell either way.
+    owners: file.metrics?.owners ?? "",
     visibility: file.visibility,
     pageCount: file.pageCount,
     byteSize: file.byteSize,
-    // No view row at all means no authors and no annotations, so zero.
+    // No view row at all means no owners and no annotations, so zero.
     annotationCount: file.metrics?.annotationCount ?? 0,
     createdAt: file.createdAt,
     updatedAt: file.updatedAt,
@@ -175,7 +175,7 @@ export default async function FilesPage({
     // override has no say: it widens which rows are listed, not who may act on
     // them, so a PRIVATE file it brings into view is read-only in this table.
     canManage:
-      file.authors.some((a) => a.userId === session.user.id) ||
+      file.owners.some((o) => o.userId === session.user.id) ||
       (viewerCanManageAnyShared && file.visibility === "SHARED"),
   }));
 
@@ -189,7 +189,7 @@ export default async function FilesPage({
         filters={filters}
         prefs={prefs}
         isAdmin={viewerIsAdmin}
-        authorOptions={authorOptions}
+        ownerOptions={ownerOptions}
       />
     </main>
   );

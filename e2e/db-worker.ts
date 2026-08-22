@@ -419,16 +419,17 @@ export type TestFile = {
  * this, not what was written into the PDF.
  */
 export async function createTestFile(opts: {
-  authorEmail: string;
+  /** The file's sole owner — a file has owners, not authors (schema.prisma's FileOwner). */
+  ownerEmail: string;
   title?: string;
   visibility?: DocVisibility;
   pages?: string[][];
 }): Promise<TestFile> {
-  const { authorEmail, title = uniqueTitle("file"), visibility = "PRIVATE" } = opts;
-  assertSafe(authorEmail);
+  const { ownerEmail, title = uniqueTitle("file"), visibility = "PRIVATE" } = opts;
+  assertSafe(ownerEmail);
 
-  const author = await prisma.user.findUnique({ where: { email: authorEmail } });
-  if (!author) throw new Error(`No such test author: ${authorEmail}`);
+  const owner = await prisma.user.findUnique({ where: { email: ownerEmail } });
+  if (!owner) throw new Error(`No such test user: ${ownerEmail}`);
 
   const pageLines = opts.pages ?? [
     ["The quick brown fox jumps over the lazy dog.", "Page one of a throwaway test document."],
@@ -456,8 +457,8 @@ export async function createTestFile(opts: {
       sha256: stored.sha256,
       pageCount: parsed.pageCount,
       visibility,
-      updatedByUserId: author.id,
-      authors: { create: { userId: author.id, bylineOrder: 0 } },
+      updatedByUserId: owner.id,
+      owners: { create: { userId: owner.id, ownerOrder: 0 } },
     },
     select: { id: true, slug: true },
   });
@@ -545,13 +546,13 @@ export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnota
 export async function deleteTestFile(idOrSlug: string): Promise<void> {
   const file = await prismaIncludingDeleted.storedFile.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
-    select: { id: true, title: true, sha256: true, authors: { select: { user: { select: { email: true } } } } },
+    select: { id: true, title: true, sha256: true, owners: { select: { user: { select: { email: true } } } } },
   });
   if (!file) return;
 
-  const unsafe = file.authors.filter((a) => !SAFE_EMAIL.test(a.user.email));
-  if (file.authors.length === 0 || unsafe.length > 0) {
-    throw new Error(`Refusing to delete file "${file.title}" — it has a non-throwaway (or missing) author.`);
+  const unsafe = file.owners.filter((o) => !SAFE_EMAIL.test(o.user.email));
+  if (file.owners.length === 0 || unsafe.length > 0) {
+    throw new Error(`Refusing to delete file "${file.title}" — it has a non-throwaway (or missing) owner.`);
   }
 
   await prismaIncludingDeleted.storedFile.delete({ where: { id: file.id } });
@@ -1256,18 +1257,18 @@ export async function sweepTestData(): Promise<{
   }
 
   // PLAN.md §19 — files, before users, for exactly the reason posts and docs
-  // go first: deleteTestFile refuses an authorless file, and deleting the only
-  // author is what makes one. Also unlike a doc, a file owns *bytes* on disk,
+  // go first: deleteTestFile refuses an ownerless file, and deleting the only
+  // owner is what makes one. Also unlike a doc, a file owns *bytes* on disk,
   // so a missed sweep leaks storage rather than just a row.
   const staleFiles = await prismaIncludingDeleted.storedFile.findMany({
     where: {
       title: { startsWith: E2E_TITLE_PREFIX },
-      authors: { every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
+      owners: { every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
     },
-    select: { id: true, authors: { select: { userId: true } } },
+    select: { id: true, owners: { select: { userId: true } } },
   });
   for (const file of staleFiles) {
-    if (file.authors.length > 0) await deleteTestFile(file.id);
+    if (file.owners.length > 0) await deleteTestFile(file.id);
   }
 
   const staleUsers = await prisma.user.findMany({

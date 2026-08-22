@@ -46,7 +46,7 @@ function currentPage(page: import("@playwright/test").Page) {
 
 test.describe("pdf presence", () => {
   test("each reader sees where the other is, and can follow them", async ({ page, secondUser }) => {
-    const file = await createTestFile({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", pages: PAGES });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: PAGES });
     const { user, page: other } = await secondUser({ role: "AUTHOR" });
 
     try {
@@ -99,7 +99,7 @@ test.describe("pdf presence", () => {
   });
 
   test("a reader's live selection shows on the other's view", async ({ page, secondUser }) => {
-    const file = await createTestFile({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", pages: PAGES });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: PAGES });
     const { page: other } = await secondUser({ role: "AUTHOR" });
 
     try {
@@ -146,7 +146,7 @@ test.describe("pdf presence", () => {
   });
 
   test("the right-hand strip carries a clickable tick per annotation", async ({ page }) => {
-    const file = await createTestFile({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", pages: PAGES });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: PAGES });
     try {
       await signIn(page, ADMIN_EMAIL);
       await gotoOk(page, `/pdf/${file.slug}`);
@@ -183,7 +183,9 @@ test.describe("pdf presence", () => {
       const editor = page.getByRole("textbox", { name: "Annotation body" });
       await editor.click();
       await editor.pressSequentially("Near the end.");
-      await page.getByRole("button", { name: "Post annotation" }).click();
+      // "Save", not "Post annotation" — the file surface's wording; see
+      // composeAnnotation in e2e/pdf-annotations.spec.ts.
+      await page.getByRole("button", { name: "Save" }).click();
       await expect(page.getByRole("button", { name: "Write an annotation..." })).toBeVisible({ timeout: 15_000 });
 
       // One tick, in the lower part of the strip because the annotation is on

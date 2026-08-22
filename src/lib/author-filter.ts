@@ -7,6 +7,12 @@ import type { AuthorMode } from "@/lib/table-query";
 // like every other criterion on those tables. This module owns the two
 // server-only pieces both pages need identically: the option list, and the
 // four modes' Prisma `where` semantics.
+//
+// /files (PLAN.md §19) has the same filter over a differently-named relation:
+// its listed users are *owners*, not authors, because nobody in that list wrote
+// the PDF. The mode semantics are identical, so rather than a second copy this
+// module takes the relation field as an argument and exposes `ownerFilterWhere`
+// /`listOwnerFilterOptions` as the file-side spellings.
 
 export type AuthorOption = { slug: string; label: string };
 
@@ -40,21 +46,38 @@ export async function listAuthorFilterOptions(viewerId: string): Promise<AuthorO
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
 }
 
+// Every ADMIN/EDITOR/AUTHOR who could be listed on a file, for /files' Owner(s)
+// filter. The same list under the other vocabulary: eligibility is the same
+// BYLINE_ELIGIBLE_ROLES question whether the row credits the user or belongs to
+// them, so this is an alias rather than a near-copy that could drift.
+export const listOwnerFilterOptions = listAuthorFilterOptions;
+
+/** Which to-many user relation a filter reads — /docs and /posts have one, /files the other. */
+export type PersonRelationField = "authors" | "owners";
+
 // A generic relation-filter shape loose enough to satisfy
-// Prisma.DocWhereInput's, Prisma.PostWhereInput's and
-// Prisma.StoredFileWhereInput's `authors` field — all three are a to-many
-// DocAuthor/PostAuthor/FileAuthor relation with a nested `user.slug`, so one
+// Prisma.DocWhereInput's and Prisma.PostWhereInput's `authors` field and
+// Prisma.StoredFileWhereInput's `owners` — all three are a to-many
+// DocAuthor/PostAuthor/FileOwner relation with a nested `user.slug`, so one
 // structural type serves every call site without importing any generated type
-// here. /files (PLAN.md §19) reuses this untouched, which is the payoff for
-// having written it structurally in the first place.
-type AuthorRelationWhere = {
-  authors?: {
-    some?: { user: { slug: { in: string[] } | string } };
-    every?: { user: { slug: { in: string[] } } };
-    none?: { user: { slug: { in: string[] } } };
-  };
-  AND?: AuthorRelationWhere[];
+// here. Both keys are optional and only ever one is set, which is what lets a
+// computed key stand in for either without the two whereinputs having to agree
+// on a name.
+type PersonRelationClause = {
+  some?: { user: { slug: { in: string[] } | string } };
+  every?: { user: { slug: { in: string[] } } };
+  none?: { user: { slug: { in: string[] } } };
 };
+type PersonRelationWhere = {
+  authors?: PersonRelationClause;
+  owners?: PersonRelationClause;
+  AND?: PersonRelationWhere[];
+};
+
+/** `{ [field]: clause }`, typed — a bare computed key widens to a plain index signature. */
+function on(field: PersonRelationField, clause: PersonRelationClause): PersonRelationWhere {
+  return { [field]: clause };
+}
 
 // The four modes, given the sanitized (known-slug, possibly empty) selection
 // a page's parser already produced. An empty selection is no filter at all,
@@ -72,20 +95,24 @@ type AuthorRelationWhere = {
 // string_aggs every join row regardless of the user's soft-delete state, so
 // "fixing" `every` to ignore deleted users would make EXACTLY disagree with
 // what the column next to it prints.
-export function authorFilterWhere(slugs: string[], mode: AuthorMode): AuthorRelationWhere {
+export function authorFilterWhere(
+  slugs: string[],
+  mode: AuthorMode,
+  field: PersonRelationField = "authors",
+): PersonRelationWhere {
   if (slugs.length === 0) return {};
 
   switch (mode) {
     case "ANY":
       // At least one of them — one EXISTS regardless of how many are checked.
-      return { authors: { some: { user: { slug: { in: slugs } } } } };
+      return on(field, { some: { user: { slug: { in: slugs } } } });
 
     case "ALL":
       // Every one of them, extras allowed. NOT `some: { in: slugs } }` (that's
       // ANY, an OR) and NOT `every` (that's "nobody outside the set", a
       // different question, vacuously true of an authorless row) — an AND of
       // one `some` per slug is the only spelling that means this.
-      return { AND: slugs.map((slug) => ({ authors: { some: { user: { slug } } } })) };
+      return { AND: slugs.map((slug) => on(field, { some: { user: { slug } } })) };
 
     case "EXACTLY":
       // That byline and nobody else. The per-slug `some`s establish "all of
@@ -96,14 +123,23 @@ export function authorFilterWhere(slugs: string[], mode: AuthorMode): AuthorRela
       // so the somes above already require at least slugs.length authors.
       return {
         AND: [
-          ...slugs.map((slug) => ({ authors: { some: { user: { slug } } } })),
-          { authors: { every: { user: { slug: { in: slugs } } } } },
+          ...slugs.map((slug) => on(field, { some: { user: { slug } } })),
+          on(field, { every: { user: { slug: { in: slugs } } } }),
         ],
       };
 
     case "NONE":
       // None of them wrote it. A row with no byline at all passes, correctly
       // — nobody checked wrote it either.
-      return { authors: { none: { user: { slug: { in: slugs } } } } };
+      return on(field, { none: { user: { slug: { in: slugs } } } });
   }
+}
+
+/**
+ * The /files spelling of authorFilterWhere — same four modes, over `owners`.
+ * A wrapper rather than a `field` argument at the call site so that page reads
+ * in its own vocabulary and can't pass the wrong relation name.
+ */
+export function ownerFilterWhere(slugs: string[], mode: AuthorMode): PersonRelationWhere {
+  return authorFilterWhere(slugs, mode, "owners");
 }

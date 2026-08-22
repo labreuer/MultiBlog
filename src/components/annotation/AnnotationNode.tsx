@@ -318,6 +318,7 @@ export default function AnnotationNode({ annotation, target, depth = 0 }: Props)
           anchorFrom={replyAnchor?.from}
           anchorTo={replyAnchor?.to}
           quotedText={replyAnchor?.quotedText}
+          container={target.kind}
           onPosted={() => {
             setPosted(true);
             closeReply();

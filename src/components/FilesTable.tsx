@@ -29,7 +29,11 @@ import {
 } from "@/components/table/BulkToolbar";
 import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
-import { AuthorFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
+// Aliased, like ownerFilterWhere in src/lib/author-filter.ts: the kit's panel
+// is shared with /docs and /posts, where the people listed really are authors,
+// and it takes its wording from props — so the only thing that needs to read in
+// this table's vocabulary is the name it is used under here.
+import { AuthorFilterPanel as OwnerFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
 import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
 import { saveTableColumns } from "@/app/actions/table-preferences";
@@ -49,15 +53,20 @@ import styles from "./FilesTable.module.css";
 // PLAN.md §19 — /files, built from the shared table kit exactly as /docs is.
 // A new admin table means a `*-query.ts` and the kit's hooks, never a fresh
 // `<table>` (CLAUDE.md), and every column here sorts in Postgres: the two that
-// no plain ORDER BY could reach (Author(s), Annotations) go through the
+// no plain ORDER BY could reach (Owner(s), Annotations) go through the
 // `file_metrics` view.
+//
+// Owner(s), not Author(s): the users listed on a file didn't write the PDF —
+// they hold it, and the list decides who may manage it and who may read a
+// PRIVATE one (prisma/schema.prisma's FileOwner, src/lib/file-authz.ts).
 
 export type FileRow = {
   id: string;
   slug: string;
   title: string;
   filename: string;
-  authors: string;
+  /** The Owner(s) cell — file_metrics' string_agg of admin initials, already joined. */
+  owners: string;
   visibility: DocVisibility;
   /** Null for a file whose upload-time parse never recorded one. */
   pageCount: number | null;
@@ -74,7 +83,7 @@ export type FileRow = {
 const SORTABLE_KEYS = [
   "title",
   "filename",
-  "authors",
+  "owners",
   "visibility",
   "pages",
   "size",
@@ -93,7 +102,7 @@ export default function FilesTable({
   filters,
   prefs,
   isAdmin,
-  authorOptions,
+  ownerOptions,
 }: {
   rows: FileRow[];
   totalCount: number;
@@ -101,7 +110,7 @@ export default function FilesTable({
   prefs: TablePrefs;
   /** Whether to render the ADMIN-only "Show all files" checkbox (docs/PERMISSIONS.md). */
   isAdmin: boolean;
-  authorOptions: AuthorOption[];
+  ownerOptions: AuthorOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -164,7 +173,7 @@ export default function FilesTable({
       cellProps: () => ({ className: styles.filenameCell }),
       cell: (row) => row.filename,
     },
-    { key: "authors", header: "Author(s)", sortKey: "authors", cell: (row) => row.authors },
+    { key: "owners", header: "Owner(s)", sortKey: "owners", cell: (row) => row.owners },
     {
       key: "visibility",
       header: "Visibility",
@@ -286,11 +295,15 @@ export default function FilesTable({
           placeholder="Search title or filename …"
           label="Search title or filename"
         />
-        <AuthorFilterPanel
-          options={authorOptions}
-          selected={filters.authors}
-          mode={filters.authorMode}
-          onChange={(next) => updateFilters(next)}
+        <OwnerFilterPanel
+          options={ownerOptions}
+          selected={filters.owners}
+          mode={filters.ownerMode}
+          // The panel reports /docs' and /posts' key names; this table's are
+          // `owners`/`ownerMode`, so the selection is renamed on the way in.
+          onChange={({ authors, authorMode }) => updateFilters({ owners: authors, ownerMode: authorMode })}
+          label="Owners"
+          noun="owner"
         />
         <ColumnPicker
           columns={columns}
@@ -358,7 +371,7 @@ export default function FilesTable({
               checked={filters.showAllFiles}
               onChange={(e) => updateFilters({ showAllFiles: e.target.checked })}
             />{" "}
-            Show all files (bypasses PRIVATE authorship for this listing only)
+            Show all files (bypasses PRIVATE ownership for this listing only)
           </label>
         </p>
       )}
@@ -369,40 +382,40 @@ export default function FilesTable({
         searchDescription="Free-text search over the file's title and its original filename."
         filters={[
           {
-            param: "authors",
+            param: "owners",
             meaning: (
               <>
-                Comma-separated user slugs, combined per <code>authorMode</code>. A slug that no longer names a live
+                Comma-separated user slugs, combined per <code>ownerMode</code>. A slug that no longer names a live
                 ADMIN/EDITOR/AUTHOR account is dropped rather than honoured.
               </>
             ),
-            control: "Authors dropdown",
+            control: "Owners dropdown",
           },
           {
-            param: "authorMode",
+            param: "ownerMode",
             meaning: (
               <>
-                How <code>authors</code> is applied. <code>ANY</code> (the default), <code>ALL</code>,{" "}
-                <code>EXACTLY</code>, <code>NONE</code> — identical semantics to /docs. Ignored while nothing is
-                checked.
+                How <code>owners</code> is applied. <code>ANY</code> (the default), <code>ALL</code>,{" "}
+                <code>EXACTLY</code>, <code>NONE</code> — identical semantics to /docs&apos; <code>authorMode</code>.
+                Ignored while nothing is checked.
               </>
             ),
-            control: "Match dropdown, at the foot of the Authors panel",
+            control: "Match dropdown, at the foot of the Owners panel",
           },
         ]}
         notes={
           <p style={{ marginTop: 8 }}>
-            Every column here sorts. <strong>Author(s)</strong> and <strong>Annotations</strong> go through the{" "}
-            <code>file_metrics</code> view — a byline joined in SQL across a file&apos;s authors, and a count that
+            Every column here sorts. <strong>Owner(s)</strong> and <strong>Annotations</strong> go through the{" "}
+            <code>file_metrics</code> view — the initials joined in SQL across a file&apos;s owners, and a count that
             excludes deleted and still-private draft annotations, neither of which a plain <code>ORDER BY</code> could
             name. <strong>Size</strong> sorts on the raw byte count even though it prints rounded, and{" "}
             <strong>Pages</strong> and Size are both stored columns recorded once at upload, so sorting by either costs
             no more than sorting by a date. <strong>Slug</strong>, <strong>Updated</strong>,{" "}
             <strong>Updated by</strong> and <strong>Deleted at</strong> are hidden by default (Columns picker, above).
             This listing shows every <strong>SHARED</strong> file to an ADMIN or EDITOR, plus the{" "}
-            <strong>PRIVATE</strong> files you carry a byline on — so an AUTHOR sees only their own. ADMIN accounts also
+            <strong>PRIVATE</strong> files you own — so an AUTHOR sees only their own. ADMIN accounts also
             get a &quot;Show all files&quot; checkbox above, which adds everyone else&apos;s PRIVATE files for the
-            current visit; opening one still needs a byline on it (docs/PERMISSIONS.md). Deleting is a soft delete: the
+            current visit; opening one still needs ownership of it (docs/PERMISSIONS.md). Deleting is a soft delete: the
             row is hidden and restorable, and the stored bytes are never swept, since another file may share them.
           </p>
         }

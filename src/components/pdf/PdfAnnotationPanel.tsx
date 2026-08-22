@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
 import QuoteThreadHeader from "@/components/QuoteThreadHeader";
 import NewAnnotationComposer from "@/components/annotation/NewAnnotationComposer";
@@ -50,8 +50,6 @@ export function entryHasVisibleContent(entry: PdfAnnotationEntry): boolean {
   return entry.root.deletedByUserId === null || hasNonDeletedDescendant(entry.root);
 }
 
-type SortMode = "datetime" | "position";
-
 type Props = {
   fileId: string;
   entries: PdfAnnotationEntry[];
@@ -82,12 +80,16 @@ export default function PdfAnnotationPanel({
   pendingKey,
   onClearPending,
 }: Props) {
-  const [sortMode, setSortMode] = useState<SortMode>("position");
-
-  // Position order is (page, then down the page). `quadsTopY` returns PDF user
-  // space, where y increases *upward*, so a larger y is higher on the page and
-  // therefore earlier — hence the reversed comparison. Getting this backwards
-  // is the kind of thing that looks fine on a one-page document.
+  // Position order is (page, then down the page), with creation time breaking
+  // ties — for the unanchored entries, which share one page/y sentinel, that is
+  // the whole order. `quadsTopY` returns PDF user space, where y increases
+  // *upward*, so a larger y is higher on the page and therefore earlier — hence
+  // the reversed comparison. Getting this backwards is the kind of thing that
+  // looks fine on a one-page document.
+  //
+  // Not a choice the reader makes: this panel is the margin-note rail above the
+  // breakpoint, where a card sits level with its own passage, so any order but
+  // position would fight the positioning hook rather than re-sort the list.
   const sorted = useMemo(() => {
     // Fully-deleted threads drop out here rather than rendering an empty
     // shell — see entryHasVisibleContent. Doing it at the top means the
@@ -99,14 +101,12 @@ export default function PdfAnnotationPanel({
       time: new Date(entry.root.createdAt).getTime(),
     }));
     withOrder.sort((a, b) => {
-      if (sortMode === "position") {
-        if (a.page !== b.page) return a.page - b.page;
-        if (a.y !== b.y) return a.y - b.y;
-      }
+      if (a.page !== b.page) return a.page - b.page;
+      if (a.y !== b.y) return a.y - b.y;
       return a.time - b.time;
     });
     return withOrder.map((w) => w.entry);
-  }, [entries, sortMode]);
+  }, [entries]);
 
   const ids = useMemo(() => sorted.map((entry) => entry.root.id), [sorted]);
   const { containerRef, isAnchored } = usePdfMarginNotes({
@@ -197,21 +197,9 @@ export default function PdfAnnotationPanel({
       {sorted.length === 0 ? (
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>
       ) : (
-        <>
-          <div className={styles.sortRow}>
-            <label>
-              Sort by:{" "}
-              <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
-                <option value="position">Position in document</option>
-                <option value="datetime">Annotation date</option>
-              </select>
-            </label>
-          </div>
-
-          <div ref={containerRef} className={styles.cards} data-pseudo-border-root>
-            {sorted.map(renderEntry)}
-          </div>
-        </>
+        <div ref={containerRef} className={styles.cards} data-pseudo-border-root>
+          {sorted.map(renderEntry)}
+        </div>
       )}
     </div>
   );

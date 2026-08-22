@@ -6149,19 +6149,26 @@ model StoredFile {
   id, slug @unique, title, filename, contentType, byteSize Int, sha256 String,
   pageCount Int?, visibility DocVisibility @default(PRIVATE),
   createdAt, updatedAt, updatedByUserId, deletedByUserId, deletedAt
-  authors FileAuthor[]  slugHistory FileSlugHistory[]
+  owners FileOwner[]  slugHistory FileSlugHistory[]
   annotations Annotation[]  metrics FileMetrics?
   @@map("file")
 }
-model FileAuthor      { fileId, userId, bylineOrder, @@id([fileId, userId]) }
+model FileOwner       { fileId, userId, ownerOrder, @@id([fileId, userId]) }
 model FileSlugHistory { id, fileId, slug @unique, createdAt }
 model FilePageText    { fileId, pageIndex, textVersion, text, @@id([fileId, pageIndex, textVersion]) }
-view  FileMetrics     { fileId @unique, byline String?, annotationCount Int }
+view  FileMetrics     { fileId @unique, owners String?, annotationCount Int }
 ```
 
 - `DocVisibility` is reused as-is rather than cloned — it is already the site's
   PRIVATE/SHARED vocabulary, and the user-facing rule is explicitly "same as docs".
-- `FileMetrics` is built by **grouping `file_author`**, never selecting `FROM file` — the
+- **`FileOwner`, not `FileAuthor`.** Nobody listed on an uploaded PDF wrote it: the list is
+  seeded with whoever uploaded the file, is editable afterwards, and grants the `/files`
+  display line, the right to rename/re-slug/re-own/delete, and — for a `PRIVATE` file — the
+  right to read it at all. That is ownership, not credit. The word stops here:
+  `DocAuthor`/`PostAuthor` are accurate, and so is the shared filter kit
+  (`AuthorFilterPanel`, `authorFilterWhere`, `AuthorMode`), which `/files` reaches through
+  `ownerFilterWhere`/`listOwnerFilterOptions` and an aliased import rather than renaming.
+- `FileMetrics` is built by **grouping `file_owner`**, never selecting `FROM file` — the
   lesson `add_doc_metrics_view` records (Postgres 18's self-join elimination only fires for
   INNER joins, and Prisma emits a LEFT JOIN for a to-one ordering). `annotationCount` is a
   filtered count (excludes soft-deleted), which is exactly the case CLAUDE.md says belongs
@@ -6209,7 +6216,7 @@ Flow: `request.body` → `createWriteStream(tmp)` while hashing incrementally an
 bytes; abort past `MAX_UPLOAD_BYTES` (`FILE_MAX_UPLOAD_BYTES` env, default 50 × 1024 × 1024);
 verify the `%PDF-` magic on the first chunk; `rename` into the content-addressed path;
 extract `pageCount` and per-page normalised text with `pdfjs-dist/legacy/build/pdf.mjs`;
-create the `StoredFile` + `FileAuthor` + `FilePageText` rows in one transaction, claiming the
+create the `StoredFile` + `FileOwner` + `FilePageText` rows in one transaction, claiming the
 slug through it (the `claimSlug` convention the importers use — `uniqueFileSlug` queries the
 global client and can't see rows the same transaction created).
 
@@ -6261,7 +6268,7 @@ Three layers, because an under-configured nginx fails in two different ways:
 #### Permissions — `src/lib/file-authz.ts`
 
 Mirrors [src/lib/doc-authz.ts](src/lib/doc-authz.ts) function for function:
-`canUserReadFile` (SHARED → `canViewFiles`; PRIVATE → listed `FileAuthor`s alone, no
+`canUserReadFile` (SHARED → `canViewFiles`; PRIVATE → listed `FileOwner`s alone, no
 ADMIN/EDITOR bypass), `canUserManageFile`, `canEditAnySharedFile`, `readableFilesFor`.
 
 `canViewFiles` / `canManageFiles` go in [src/lib/role-checks.ts](src/lib/role-checks.ts)
@@ -6274,10 +6281,11 @@ component) needs `canManageFiles` for the nav link.
 
 - `src/lib/files-query.ts` over [src/lib/table-query.ts](src/lib/table-query.ts), + a
   `FilesTable.tsx` built from `src/components/table/` — the kit, not a fresh `<table>`.
-  Columns, all sortable: Title, Filename, Authors (`file_metrics.byline`), Visibility, Pages,
+  Columns, all sortable: Title, Filename, Owner(s) (`file_metrics.owners`), Visibility, Pages,
   Size, Annotations (`file_metrics.annotationCount`), Created, Updated, Updated by, Slug,
   Deleted at, Deleted. Slug/Created/Deleted default hidden, matching `/docs`.
-- Row scoping copies `docs/page.tsx`'s `authorScope` verbatim: own byline OR
+- Row scoping copies `docs/page.tsx`'s `authorScope` verbatim as `ownerScope`: own row in
+  `file_owner` OR
   (`canEditAnySharedFile` && SHARED), with an **ADMIN-only `?showAllFiles=1` checkbox**. That
   is exactly the rule asked for — ADMIN-only PRIVATE visibility, EDITOR sees all SHARED,
   AUTHOR sees only their own.
@@ -6517,6 +6525,29 @@ visible on other users' views" falls out of the layer only existing for rendered
 - **The `Files` nav link is placed after `Users`/`Site Settings` in the same left group**,
   which for a non-ADMIN means it is the only entry there. The literal reading ("to the right
   of Users") can't hold for AUTHOR/EDITOR, who never see `Users`.
+- **The annotation panel speaks the file surface's vocabulary**, where `/doc/[slug]` speaks
+  the doc's. On `/pdf/[slug]`:
+  - The composer's visibility select offers exactly **PRIVATE** and **SHARED** — the words a
+    file's own visibility uses everywhere else (`DocVisibility`, `/files`' Visibility
+    column), so an annotation on a file doesn't introduce a second vocabulary for the same
+    distinction.
+  - The submit button reads **Save**. The select beside it already names the outcome; the
+    doc side spells the outcome out on the button instead, because there the button is the
+    only thing that does.
+  - There is therefore **no "Post & notify authors" on a file**, so `RAISED` is unreachable
+    from `/pdf/[slug]`. The path itself is live — `postAnnotation`'s `raise` branch mails a
+    file's owners, and a doc annotation offers it — so this is a gap in the PDF UI, not a
+    missing capability. Worth knowing before wondering why file owners get no mail.
+  - **The panel has no sort control**: order is (page, then down the page, creation time
+    breaking ties). Above the breakpoint this panel *is* the margin-note rail, where each
+    card sits level with its own passage, so any other order fights the positioning hook
+    rather than re-sorting the list. `AnnotationList` on `/doc/[slug]`, which is a plain
+    list below its own rail, keeps its sort dropdown.
+
+  The wording lives in `LiveAnnotationComposer`'s optional `container` prop (defaulting to
+  `"doc"`), threaded from the `AnnotationTarget` that `NewAnnotationComposer` and
+  `AnnotationNode` already carry — so the two surfaces share one composer and one submit
+  path, and only the labels and the option list differ.
 
 ---
 

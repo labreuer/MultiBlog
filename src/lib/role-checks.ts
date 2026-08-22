@@ -64,7 +64,9 @@ export function canManageFiles(role: Role): boolean {
 // pages already hardcode inline when deciding who's eligible to be added as a
 // co-author. Coincides with DOC_MANAGER_ROLES/POST_MANAGER_ROLES today, and is
 // named separately because it answers a different question: what a byline may
-// *name*, not who may *manage*.
+// *name*, not who may *manage*. /files' Owner(s) filter shares the list: being
+// eligible to be listed on a row is the same question whether the row credits
+// the user (a doc, a post) or belongs to them (a file, PLAN.md §19).
 export const BYLINE_ELIGIBLE_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
 
 // canEditAnySharedDoc is deliberately *not* here, though it is just as pure a
