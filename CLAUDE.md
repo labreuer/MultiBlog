@@ -262,7 +262,7 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
     `request.formData()` buffers the whole upload before user code sees it. nginx needs
     `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader
     names the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
-- **pdfjs traps, all four verified against 6.2.108** (PLAN.md §19, docs/PDF.md §10). Each
+- **pdfjs traps, all verified against 6.2.108** (PLAN.md §19, docs/PDF.md §10). Each
   fails in a way that does not look like its cause:
   - **Turbopack rewrites `require.resolve("pdfjs-dist/…")` to a virtual module id**, even
     under `serverExternalPackages`. pdfjs then reports `Invalid factory url: … must include
@@ -292,6 +292,11 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
     **The e2e fixtures cannot catch this**: `scripts/make-test-pdf.ts` generates text-only
     PDFs, which exercise no image decoder at all. `e2e/pdf-assets.spec.ts` asserts each
     directory is served instead — that is the only guard, so don't delete it as trivial.
+  - **Pinning pdfjs protects its API, not the runtime it assumes.** It uses built-ins WebKit
+    ships late or not at all; `src/lib/pdfjs-webkit-polyfills.ts` patches them, and is a
+    source *string* because the patch must reach the worker realm too. So **bumping
+    `pdfjs-dist` needs a real iPad**, not just the `pdfjs-internals` smoke test — a
+    chromium-only suite cannot see this class at all. PLAN.md §19a, docs/PDF.md §10.
 - **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs, and the symptom is a
   *scale* error rather than a layout one.** pdfjs's stylesheet is written for content-box: it
   sets `.page`'s width/height to the scaled page size and adds a 9px `--page-border` outside
@@ -691,6 +696,12 @@ why nothing recomputes it and why a break there is silent.
   worth keeping in mind for anything sized the same way later, even though that specific
   component is gone (PLAN.md §15: a published post no longer surfaces a live-staleness
   signal at all, by decision — see §15h).
+- **A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
+  `pointerup` for one — a long-press hands the touch to WebKit's gesture recognizer
+  (`pointercancel` instead), and the drag handles are native views that fire nothing — and
+  shift+arrows delivers none anywhere. Either alone works on every desktop and silently does
+  nothing on a tablet, so debounce `selectionchange` and let `pointerup` short-circuit it
+  (`PdfAnnotationSurface`; `AnnotationNode` uses a plain timer for the same reason).
 - When matching one element's width to another's via `ResizeObserver` (e.g. `PostsTable`'s
   search box tracking the Title column's width): use the observed element's own
   `getBoundingClientRect().width` inside the callback, not the callback's own

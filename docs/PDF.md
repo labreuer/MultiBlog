@@ -314,6 +314,49 @@ Hypothesis — who have done exactly this integration for over a decade — ship
 that new PDF.js releases may be incompatible with their client. Budget for upgrade work; do not
 float the version.
 
+### Engine coupling — the built-ins pdfjs assumes
+
+Pinning `pdfjs-dist` fixes the API you call. It does nothing about the second coupling, which
+is to the *JavaScript runtime* pdfjs assumes underneath it — and pdfjs tracks new built-ins
+closely, while WebKit ships them late or not at all. Two have already broken the viewer on an
+iPad, both patched in `src/lib/pdfjs-webkit-polyfills.ts`:
+
+- **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** (TC39 upsert). Called pervasively,
+  and thrown the moment pdfjs first touches `Map.prototype`.
+- **`ReadableStream.prototype[Symbol.asyncIterator]`**, which WebKit has never implemented.
+  `getTextContent` iterates its stream with `for await (const value of readableStream)`, so
+  **every text extraction throws** — which on this surface means a selection is captured and
+  then dies before it can be published or become an annotation.
+
+Three things generalise beyond these two specific patches:
+
+1. **The patch has to reach both realms.** pdfjs runs a worker, which is its own realm and
+   inherits nothing from the main thread's prototypes — and both of these are used on both
+   sides (the worker iterates a `DecompressionStream`'s readable side the same way). There is
+   no hook to run code before the vendor worker's own top-level body, so `ensurePdfWorker`
+   builds the worker script as a Blob: the polyfill source, then an `import` of the vendor
+   worker's absolute URL. That is why the polyfills are exported as a *source string* and not
+   merely executed.
+2. **The failure never names the missing built-in.** WebKit reports the async-iterator gap as
+   `undefined is not a function (near '...value of readableStream...')` — it names the loop
+   variable. It reads as a pdfjs bug, and every stack frame in it belongs to pdfjs.
+3. **A chromium-only test suite is structurally blind to this class.** Chromium has all of it;
+   the bug can only exist where the tests do not run. `e2e/pdf-webkit-gaps.spec.ts` closes that
+   by *deleting* each built-in in chromium and asserting the viewer still works — which also
+   sidesteps the fact that Playwright's WebKit will not launch on every developer machine
+   (`playwright.config.ts` records the macOS 14 pin that stops it).
+
+**So: when bumping `pdfjs-dist`, re-check on a real iPad**, not only on the smoke test in §10
+above. The smoke test asserts pdfjs's API surface, which is the coupling that pinning already
+protects; this is the one it doesn't.
+
+The same asymmetry applies to input. Text selection on iPadOS emits no `pointerup` — a
+long-press hands the touch to WebKit's selection gesture recognizer, which fires
+`pointercancel`, and the selection handles are native views above the page that emit no
+pointer events at all. Anything reading `window.getSelection()` must settle on
+`selectionchange` (debounced) as well, or it will work on every desktop and silently do
+nothing on a tablet. See `PdfAnnotationSurface`'s trigger comment.
+
 ---
 
 ## 11. Prior art worth reading before reimplementing

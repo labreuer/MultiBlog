@@ -6573,6 +6573,50 @@ visible on other users' views" falls out of the layer only existing for rendered
 
 ---
 
+### 19a. What an iPad broke, and why nothing here could have caught it
+
+Found after Phase 4, on the first real tablet to open `/pdf/[slug]`: selecting text did
+nothing at all — no live selection for the other readers, no Annotate popover for the reader
+themselves. **Three independent causes, stacked**, so fixing any one alone still looked
+broken. All three are WebKit-side, and all three were invisible to `npx tsc`, `npx eslint`,
+and the entire e2e suite, for the same structural reason: those run one engine, and it is the
+engine that has none of these problems.
+
+1. **The capture never triggered.** The whole path hung off a single `pointerup` on
+   `document`. iPadOS never delivers one for a text selection: a long-press hands the touch to
+   WebKit's selection gesture recognizer, which emits `pointercancel` instead, and the
+   selection handles are native views above the page emitting no pointer events at all.
+   Keyboard selection (shift+arrows) was silently broken for the same reason, on every
+   platform. `PdfAnnotationSurface` now settles on `selectionchange` as well, debounced,
+   sharing one timer with `pointerup` so a mouse drag still costs the single capture it always
+   did. This is the conclusion §13's `AnnotationNode.handleBodySelect` had already reached for
+   the doc side.
+2. **Then `getTextContent` threw**, because pdfjs iterates its stream with `for await` and
+   WebKit has never implemented `ReadableStream.prototype[Symbol.asyncIterator]`.
+3. **And `Map.prototype.getOrInsertComputed` was already patched** for the same class of
+   reason — older WebKit lacks the TC39 upsert methods.
+
+2 and 3 live in `src/lib/pdfjs-webkit-polyfills.ts` (renamed from the Map-only file, since
+the subject was always "built-ins pdfjs assumes that WebKit lags on"), injected into the main
+thread *and* the worker realm. docs/PDF.md §10's *Engine coupling* has the full account and
+the standing rule it produces: **pinning `pdfjs-dist` protects the API you call and says
+nothing about the runtime pdfjs assumes, so a version bump needs a real iPad, not just the
+§10 smoke test.**
+
+Two smaller consequences worth keeping:
+
+- **`capturePageFor` is awaited inside a try/catch.** Everything behind it is a worker round
+  trip and a parse of an untrusted PDF; a rejection there used to surface as an
+  `unhandledRejection` and take the capture with it — which is exactly how this presented, a
+  selection captured and then silently dropped, indistinguishable from the trigger never
+  firing.
+- **Two triggers plus a debounce make overlapping async runs reachable**, which one
+  `pointerup` never did — dragging an iOS selection handle emits a `selectionchange` per
+  pixel while a capture is still in flight. Hence a generation counter, and a `cloneRange()`
+  because `getRangeAt` returns the *live* range, which otherwise mutates under the await.
+
+---
+
 ### Verification
 
 Per-phase, and each phase is independently shippable:
@@ -6592,6 +6636,15 @@ Per-phase, and each phase is independently shippable:
   hand): user A scrolls to page 12 and broadcasts, user B follows and lands on page 12, B
   scrolls manually and the follow drops. Assert B's presence circle exists on A's left rail
   at a plausible fraction before and after.
+- **Browser engine gaps** — `e2e/pdf-webkit-gaps.spec.ts` (§19a): deletes each built-in
+  WebKit lacks and asserts a selection still anchors. Simulated in chromium rather than run
+  under a `webkit` project, because chromium is where the suite actually runs and because
+  Playwright's WebKit will not launch on every machine (`playwright.config.ts` records the
+  macOS 14 pin). Confirm it *fails* with the polyfills disabled before trusting it — a test
+  of a polyfill that only ever passes proves nothing. It also drives the `selectionchange`
+  path with no `pointerup`, so both triggers are covered between it and the specs above.
+  None of this substitutes for opening the page on a real iPad, which is the only place the
+  native selection gestures exist.
 - **Regression** — the full `npm run e2e` suite after the `use-margin-notes-layout` refactor,
   which is the one change touching working surfaces.
 - **Integrity** — `npx tsx scripts/integrity/check-pdf-anchors.ts` on seeded content.
