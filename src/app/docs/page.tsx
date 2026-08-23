@@ -12,6 +12,7 @@ import { parseDocsFilters, type DocsFilters, type DocsSortKey } from "@/lib/docs
 import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import DocsTable from "@/components/DocsTable";
+import DocImportButton from "@/components/DocImportButton";
 import styles from "./page.module.css";
 
 function buildFilterWhere(filters: DocsFilters): Prisma.DocWhereInput {
@@ -190,12 +191,27 @@ export default async function DocsPage({
           A GET <Link> would let Next's hover-prefetch create docs nobody
           asked for (§12n) — creation is a real mutation, so it's a form
           submit, not a link to a title-collecting page. */}
-      <div style={{ margin: "1em 0" }}>
+      {/* space-between rather than a margin on either child, and flex-start so
+          the import block's paste panel and errors grow downward instead of
+          re-centering "+ New doc" against it — docs/DOC_IMPORT.md §9. */}
+      <div
+        style={{
+          margin: "1em 0",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: "1.5em",
+        }}
+      >
         <form action={createDoc}>
           <button type="submit" className={styles.newDocButton}>
             + New doc
           </button>
         </form>
+        {/* Same permission as "+ New doc" — this block is already inside the
+            canManageDocs gate above (§12f); importMarkdownDocAction re-checks
+            it server-side regardless. */}
+        <DocImportButton className={styles.newDocButton} />
       </div>
       <DocsTable
         rows={rows}
