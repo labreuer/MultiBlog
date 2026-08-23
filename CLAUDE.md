@@ -257,61 +257,28 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
     `request.formData()` buffers the whole upload before user code sees it. nginx needs
     `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader
     names the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
-- **pdfjs traps, all four verified against 6.2.108** (PLAN.md §19, docs/PDF.md §10). Each
-  fails in a way that does not look like its cause:
-  - **Turbopack rewrites `require.resolve("pdfjs-dist/…")` to a virtual module id**, even
-    under `serverExternalPackages`. pdfjs then reports `Invalid factory url: … must include
-    trailing slash`, which reads like a malformed URL of ours. `src/lib/pdf-extract.ts`
-    anchors `createRequire` at the project root *and* builds the specifier from a variable so
-    it isn't statically analysable. This failed **only through Next** — the same code under
-    `npx tsx` was fine.
-  - **`workerSrc`, never `workerPort`.** A supplied port is shared, so destroying one loading
-    task marks that PDFWorker destroyed and the *second* mount dies with `PDFWorker.create -
-    the worker is being destroyed` — which reads like a missing `await` in our teardown.
-    React StrictMode trips it on every dev page load.
-  - **`workerSrc` wants a `file://` URL; `standardFontDataUrl` wants a bare path.** Same
-    library, opposite spellings, because one goes through Node's ESM loader and the other
-    through pdfjs's own filesystem read.
-  - **`PDFDocumentProxy.destroy()` is gone in 6.x** (it has `cleanup()`, which leaves the
-    worker alive) — destroy the *loading task*. And **`convertToViewportRectangle` no longer
-    exists** despite docs/PDF.md §5 naming it; convert both corners as points instead.
-  - **pdfjs has FOUR runtime asset directories, not two**, all fetched by URLs it builds by
-    concatenation, so no bundler can see them: `standard_fonts/`, `cmaps/`, **`wasm/`** (the
-    JBIG2 and JPEG 2000 decoders) and `iccs/`. `scripts/copy-pdfjs-assets.ts` copies all four
-    into `public/` and is wired as `prebuild`/`predev`, making it unskippable; the copies are
-    gitignored, and `public/pdfjs/**` is eslint-ignored because the wasm fallbacks are
-    minified JS. Miss `wasm/` and a **scanned** PDF renders as blank pages with a working text
-    layer floating over them — which reads as "the viewer is broken", not as a decoder
-    problem. An unset URL concatenates onto `null`, so the tell is
-    `Failed to resolve module specifier 'nullopenjpeg_nowasm_fallback.js'`.
-    **The e2e fixtures cannot catch this**: `scripts/make-test-pdf.ts` generates text-only
-    PDFs, which exercise no image decoder at all. `e2e/pdf-assets.spec.ts` asserts each
-    directory is served instead — that is the only guard, so don't delete it as trivial.
-- **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs, and the symptom is a
-  *scale* error rather than a layout one.** pdfjs's stylesheet is written for content-box: it
-  sets `.page`'s width/height to the scaled page size and adds a 9px `--page-border` outside
-  it. Under border-box the border eats into that size instead, so the rendered content is
-  ~18px narrower than the viewport transform believes — about 2%, growing with the length of
-  whatever is being measured. `PdfViewer.module.css` restores `content-box` for `.pdfViewer`
-  and its descendants; don't "tidy" that away. Related and separate: a page's
-  `getBoundingClientRect()` is the **border** box, while every layer we draw into is
-  `inset: 0` and therefore positions from the **padding** box, so capture has to add the
-  border widths back (`pageContentOrigin`, `pdf-anchor-capture.ts`). docs/PDF.md §5's "the
-  page element's top-left" is imprecise on exactly this point.
-  Both bugs shipped together and **every test passed**: the overlap assertion tolerated a
-  4.5px error. `e2e/pdf-annotations.spec.ts` now asserts *alignment* to within 2px at three
-  zooms, because the two failed differently — the border offset was constant in CSS pixels,
-  the box-sizing error scaled.
+- **pdfjs is full of traps that fail in ways not resembling their cause** — a build error
+  that reads as a malformed URL of ours, a teardown error that reads as a missing `await`,
+  a scanned PDF rendering as blank pages with a working text layer over them. All of them,
+  verified against 6.2.108, are in **[docs/PDF.md](docs/PDF.md) §10** — read it before a
+  `pdfjs-dist` bump or when the viewer misbehaves inexplicably. Two consequences reach
+  outside the viewer and so are repeated here:
+  - **Never delete `e2e/pdf-assets.spec.ts` as trivial.** It asserts that each of pdfjs's
+    four runtime asset directories is served, and it is the only guard on any of them —
+    `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image decoder,
+    so no fixture-based test can cover it.
+  - **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs**, and the symptom is a
+    ~2% *scale* error rather than a layout one. `PdfViewer.module.css` restores
+    `content-box` for `.pdfViewer` and its descendants; don't "tidy" that away. Mechanism,
+    and the related border-box/padding-box trap in coordinate capture: docs/PDF.md §5.
 - **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
   file's `sha256` is its identity, so the bytes an anchor was measured against are by
-  construction the bytes every later reader sees. There is no tracking plugin, no
-  per-transaction re-resolution and no version stamp — `Annotation.ydocUpdateId` is
-  meaningless for a file. `docs/PDF.md` §4's quote/position steps exist only to survive
-  changes to **our own** normaliser (`src/lib/pdf-text.ts`, whose `NORMALISER_VERSION` must be
-  bumped on *any* behavioural change, however small). `quotedText` is still derived
-  server-side from `FilePageText` — the page text extracted once at upload — so §12i's "the
-  selected text is a request field only, never a column" survives; `scripts/integrity/check-pdf-anchors.ts`
-  is what verifies that claim, and it is the only thing that would ever notice it breaking.
+  construction the bytes every later reader sees — no tracking plugin, no per-transaction
+  re-resolution, no version stamp (`Annotation.ydocUpdateId` is meaningless for a file).
+  Don't reach for the doc side's drift machinery here. The one thing that *can* invalidate a
+  stored anchor is our own normaliser, so bump `NORMALISER_VERSION` (`src/lib/pdf-text.ts`)
+  on **any** behavioural change, however small. Full reasoning and the two obligations it
+  leaves: docs/PDF.md §4.
 - Site icons (favicon/manifest): [docs/FAVICON.md](docs/FAVICON.md).
 - The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
   exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its

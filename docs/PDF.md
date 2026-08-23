@@ -138,6 +138,18 @@ immediately so the page is usable while stragglers resolve.
 Because `docId` is a content hash, the PDF cannot have changed underneath us. Steps 1–2 exist
 to survive *our own* extractor/normaliser changes, not document edits.
 
+**So a PDF anchor cannot drift, and its implementation is far smaller than a text
+document's.** No tracking plugin, no per-transaction re-resolution, no version stamp — a
+ydoc update id is meaningless for a file. Two obligations replace all of that:
+
+- **Bump the normaliser's version on *any* behavioural change, however small**
+  (`NORMALISER_VERSION`, `src/lib/pdf-text.ts`). It is the only thing that can invalidate a
+  stored `position`, and steps 1–2 above are the only recovery.
+- **Keep deriving `quotedText` server-side** from the page text extracted at upload, so §12i's
+  "the selected text is a request field only, never a column" holds here too. That is a claim
+  written down once rather than a value anything recomputes, so nothing would notice it
+  breaking — `scripts/integrity/check-pdf-anchors.ts` exists to be the thing that does.
+
 ---
 
 ## 5. Coordinates
@@ -152,8 +164,23 @@ viewport.convertToViewportRectangle(rect);     // PDF user space -> page-relativ
 
 Rules:
 
-- `x`/`y` passed to `convertToPdfPoint` must be **relative to the page element's top-left**.
-  Subtract `pageView.div.getBoundingClientRect()` from client coordinates first.
+- `x`/`y` passed to `convertToPdfPoint` must be relative to the page element's **content**
+  box — and `getBoundingClientRect()` returns its **border** box, which is not the same
+  origin. pdfjs draws a `--page-border` (9px a side as of 6.2.108) and every layer we add is
+  `inset: 0`, so it positions from the padding box while the rect starts a border-width
+  earlier. Add the border widths back when converting client coordinates
+  (`pageContentOrigin`, `src/lib/pdf-anchor-capture.ts`). The resulting error is constant in
+  CSS pixels and independent of zoom, which makes it read as a rounding artefact.
+- **The page element must be `content-box`.** pdfjs's stylesheet sets `.page`'s width and
+  height to the scaled page size and then adds that border *outside* it. A global
+  `* { box-sizing: border-box }` reset makes the border eat into the declared size instead,
+  so the rendered content ends up ~18px narrower than the viewport transform believes — a
+  ~2% **scale** error that grows with the length of whatever is being measured, not the
+  layout error a box-sizing bug sounds like. Restore `content-box` for the viewer subtree.
+- Test these two by asserting **alignment within a couple of pixels at several zooms**, not
+  by asserting overlap. Both shipped together here and every test passed, because an overlap
+  assertion tolerated 4.5px of error — and they failed differently: the border offset was
+  constant in CSS pixels, the box-sizing error scaled.
 - Use CSS pixels from `getBoundingClientRect()`, never canvas backing-store pixels. The
   canvas is scaled by `devicePixelRatio`; the viewport transform is not.
 - Always pass the page's **current** `rotation` into `getViewport`. Rotation changes invalidate
@@ -161,6 +188,13 @@ Rules:
 - `range.getClientRects()` returns one rect per rendered line fragment, not per selection.
   Store all of them as separate quads — that is what makes a multi-line highlight render
   correctly.
+- **`viewer.currentScale` is not the conversion scale.** A page viewport is built at
+  `currentScale * PixelsPerInch.PDF_TO_CSS_UNITS` — the 96/72 converting PDF's 72dpi points
+  to CSS pixels — and it is that *product* which maps a point to a screen position. Anything
+  deriving a length or an offset in PDF space from the bare zoom level is out by exactly 4/3.
+  Prefer `pageView.viewport`, which is already the product; reach for `currentScale` only
+  when the page you need has not been built, and multiply. 4/3 is small enough to read as a
+  chosen value rather than a unit error — see §13.
 
 Selection → stored anchor:
 
@@ -173,6 +207,28 @@ window.getSelection().getRangeAt(0)
   -> quads
   -> plus quote/position from the normalised page text
 ```
+
+### Navigating to a point
+
+```ts
+viewer.scrollPageIntoView({
+  pageNumber,                                     // 1-based, unlike destArray[0]
+  destArray: [pageIndex, { name: "XYZ" }, left, top, zoom],
+});                                               // zoom null preserves the reader's own
+```
+
+- `top` names the point pdfjs puts at the **top edge of the view**, not the centre.
+- **Landing a passage flush against that edge is usually wrong.** It leaves no context above
+  it, so a quote beginning mid-sentence arrives with its lead-in off screen; and on a layout
+  carrying a rail or an overlay along the top, it puts the passage's own card out of sight.
+  Offset by a fraction of the viewport height instead.
+- PDF user space has y increasing **upward**, so moving the view's top edge *higher up the
+  page* means a **larger** `top`: the offset is **added**. The wrong sign scrolls the same
+  distance the wrong way, which reads as a tuning problem rather than a reversal.
+- Convert the offset with the combined scale from the rules above —
+  `viewportHeightPx * fraction / (currentScale * PDF_TO_CSS_UNITS)`.
+- A `top` above the page's own top edge needs **no clamp**. pdfjs scrolls into the inter-page
+  gap and the page before it, which is the context the offset exists to show.
 
 ---
 
@@ -302,6 +358,12 @@ Default to **passive presence**: render remote viewports as scrollbar ticks or e
 Snapping is opt-in and one-directional ("follow Alice"), with any local scroll gesture
 immediately dropping the follow. Symmetric mutual following is unusable in practice.
 
+A tick strip beside the scroller has a coordinate problem the ticks themselves don't hint
+at: a platform scrollbar insets its track by an arrow button at each end, no API reports
+that inset, and a strip drawn over the full height therefore disagrees with the scrollbar
+worst at both ends and not at all in the middle. STYLE.md's "Custom scrollbars, and anything
+positioned beside one" has the measurements and the fix.
+
 ---
 
 ## 10. Version coupling
@@ -313,6 +375,37 @@ touch still exist, so an upgrade fails loudly in CI rather than silently at runt
 Hypothesis — who have done exactly this integration for over a decade — ship a standing warning
 that new PDF.js releases may be incompatible with their client. Budget for upgrade work; do not
 float the version.
+
+### Traps verified against 6.2.108
+
+Each of these fails in a way that does not look like its cause. Re-check them on any bump.
+
+- **Turbopack rewrites `require.resolve("pdfjs-dist/…")` to a virtual module id**, even under
+  `serverExternalPackages`. pdfjs then reports `Invalid factory url: … must include trailing
+  slash`, which reads like a malformed URL of ours. Anchor `createRequire` at the project
+  root *and* build the specifier from a variable so it is not statically analysable
+  (`src/lib/pdf-extract.ts`). This fails **only through Next** — the same code under `npx
+  tsx` is fine.
+- **`workerSrc`, never `workerPort`.** A supplied port is shared, so destroying one loading
+  task marks that PDFWorker destroyed and the *second* mount dies with `PDFWorker.create -
+  the worker is being destroyed` — which reads like a missing `await` in our own teardown.
+  React StrictMode trips it on every dev page load.
+- **`workerSrc` wants a `file://` URL; `standardFontDataUrl` wants a bare path.** Same
+  library, opposite spellings, because one goes through Node's ESM loader and the other
+  through pdfjs's own filesystem read.
+- **`PDFDocumentProxy.destroy()` is gone in 6.x.** It has `cleanup()`, which drops cached
+  fonts and leaves the worker alive. Destroy the *loading task* instead. §5's
+  `convertToViewportRectangle` is gone in 6.x too — §13 has the replacement.
+- **There are FOUR runtime asset directories, not two**, all fetched by URLs pdfjs builds by
+  concatenation, so no bundler can see them: `standard_fonts/`, `cmaps/`, **`wasm/`** (the
+  JBIG2 and JPEG 2000 decoders) and `iccs/`. Copy all four into `public/` from a `prebuild`/
+  `predev` step so it cannot be skipped (`scripts/copy-pdfjs-assets.ts`). Miss `wasm/` and a
+  **scanned** PDF renders as blank pages with a working text layer floating over them —
+  which reads as "the viewer is broken", not as a decoder problem. An unset URL concatenates
+  onto `null`, so the tell is `Failed to resolve module specifier
+  'nullopenjpeg_nowasm_fallback.js'`. **Generated fixtures cannot catch this**: a text-only
+  PDF exercises no image decoder at all, so the guard has to be a test that each directory is
+  actually served (`e2e/pdf-assets.spec.ts`).
 
 ---
 
@@ -381,6 +474,13 @@ written, including all three echo guards.
 and §4 itself warns against running it synchronously (Hypothesis's ten-second stall). Doing
 it properly needs a worker; steps 1, 3 and 4 make the viewer correct without it, because the
 quads always resolve. §3's lazy re-anchor on a version change is deferred with it.
+
+**§5 said nothing about `currentScale`, and the omission cost a release cycle.** The rule is
+now written into §5 itself. Recorded here because of how it failed rather than that it did:
+"scroll a jumped-to passage 25% down the viewport" computed its offset from `currentScale`
+and landed the passage at 0.333 instead. Nothing threw, no test could see it, and a third of
+the way down looks exactly like a value somebody chose. It was found by measuring the
+rendered position against the container, which is the only thing that would have found it.
 
 **§3's NFKC is applied per character, not to the joined string.** Whole-string NFKC can merge
 or reorder across characters, which is incompatible with the exact offset map §3 also
