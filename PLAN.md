@@ -6593,6 +6593,58 @@ visible on other users' views" falls out of the layer only existing for rendered
 
 ---
 
+### 19a. The engine assumptions under the PDF surface
+
+**Baseline: Safari 26 / iPadOS 18.4+.** Setting one is a judgement about *engines*, not
+hardware: Apple ships current Safari to macOS versions years past their last major release, so
+old hardware caps macOS and not Safari, and a stale WebKit is nearly always an un-updated one
+rather than an unsupportable one.
+
+Two independent WebKit-shaped problems sit under `/pdf/[slug]`, and neither is visible to
+`npx tsc`, `npx eslint` or the e2e suite — those run one engine, and it is the engine that has
+neither.
+
+**1. A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
+`pointerup` for one: a long-press hands the touch to WebKit's selection gesture recognizer,
+which emits `pointercancel` instead, and the selection handles are native views above the page
+emitting no pointer events at all. Keyboard selection (shift+arrows) delivers none on any
+platform. `PdfAnnotationSurface` therefore debounces `selectionchange` and lets `pointerup`
+short-circuit it, so a mouse drag still costs the single capture it always did — the
+conclusion §13's `AnnotationNode.handleBodySelect` reaches for the doc side. Having two
+triggers has two consequences:
+
+- **`capturePageFor` is awaited inside a try/catch.** Behind it is a worker round trip and a
+  parse of an untrusted PDF; an unhandled rejection there takes the capture with it and
+  presents as a selection captured and silently dropped — indistinguishable from the trigger
+  never firing.
+- **Overlapping async runs are reachable**, which a lone `pointerup` never made them: dragging
+  an iOS selection handle emits a `selectionchange` per pixel while a capture is still in
+  flight. Hence a generation counter, and a `cloneRange()` — `getRangeAt` returns the *live*
+  range, which otherwise mutates under the await.
+
+**2. pdfjs assumes built-ins WebKit does not have.** Exactly one needs patching at this
+baseline: `ReadableStream.prototype[Symbol.asyncIterator]`, which WebKit has never implemented
+and Safari 26.6.1 still lacks in both realms. `getTextContent` iterates its stream with
+`for await`, so without it **every text extraction throws** — on this surface, a selection that
+dies before it can be published or become an annotation.
+`src/lib/pdfjs-webkit-polyfills.ts` holds the patch as a source *string* so it can reach the
+worker realm as well as the main thread, and `ensurePdfWorker` builds the worker script as two
+static imports — the polyfill Blob module, then the vendor worker — because static imports are
+hoisted, so inlining the source above the import runs the vendor script first. docs/PDF.md
+§10's *Engine coupling* carries the measured table and the full account.
+
+**Keeping the claim honest.** A polyfill is a claim about an engine, and claims expire.
+`e2e/pdf-webkit-gaps.spec.ts` is the regression guard — it deletes the built-in in chromium and
+asserts a selection still anchors — and by construction it cannot notice expiry: it passes
+whether or not any real engine still lacks the built-in, and `page.addInitScript` does not
+reach workers, so it covers the main-thread half only. `scripts/probe-engine.ts` is the other
+half, feature-probing a real browser on the main thread *and* inside a module worker and
+printing both columns. **So bumping `pdfjs-dist` means running the probe and opening a PDF in a
+real Safari**, not only the §10 smoke test: pinning protects the API you call and says nothing
+about the runtime pdfjs assumes.
+
+---
+
 ### Verification
 
 Per-phase, and each phase is independently shippable:
@@ -6612,6 +6664,15 @@ Per-phase, and each phase is independently shippable:
   hand): user A scrolls to page 12 and broadcasts, user B follows and lands on page 12, B
   scrolls manually and the follow drops. Assert B's presence circle exists on A's left rail
   at a plausible fraction before and after.
+- **Browser engine gaps** — `e2e/pdf-webkit-gaps.spec.ts` (§19a): deletes the built-in WebKit
+  lacks and asserts a selection still anchors. Simulated in chromium rather than run under a
+  `webkit` project, because chromium is where the suite actually runs and because Playwright's
+  WebKit will not launch on every machine (`playwright.config.ts` records the macOS 14 pin).
+  Confirm it *fails* with the polyfill disabled before trusting it — a test of a polyfill that
+  only ever passes proves nothing. It also drives the `selectionchange` path with no
+  `pointerup`, so both triggers are covered between it and the specs above. Two things it does
+  not reach: `scripts/probe-engine.ts` is what says whether the polyfill is still *needed* and
+  what covers the worker realm, and only a real iPad has the native selection gestures.
 - **Regression** — the full `npm run e2e` suite after the `use-margin-notes-layout` refactor,
   which is the one change touching working surfaces.
 - **Integrity** — `npx tsx scripts/integrity/check-pdf-anchors.ts` on seeded content.

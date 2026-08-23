@@ -22,7 +22,23 @@ export default defineConfig({
   // an app defect. Failure rate was roughly 1 full run in 3.5 at three
   // workers, 0 in 8 at two — for the same ~50s wall clock, because the dev
   // server is the bottleneck rather than the parallelism.
-  workers: process.env.CI ? 1 : 2,
+  //
+  // That measurement is machine-specific, and the default is the machine it
+  // was taken on. A weaker one wants *fewer*: on a 2-physical-core fanless
+  // laptop, two workers reproduce at two exactly what three did there — a
+  // full run showed 6 failures spread across pdf, quote-anchoring,
+  // session-refresh, side-by-side and ydoc-debug, every one of which passed
+  // single-worker. The tell is that the failures are scattered across
+  // unrelated specs and vanish in isolation; a real regression doesn't move.
+  // Override per machine with E2E_WORKERS in .env (already loaded above, and
+  // never committed, so one checkout can differ from another).
+  //
+  // `|| 2` rather than `?? 2`: a commented-out or blank `E2E_WORKERS=` in .env
+  // is an empty string, which `??` passes through and `Number("")` turns into
+  // 0 — and Playwright rejects that outright with "config.workers must be a
+  // positive number", before running anything. `||` folds empty, absent and
+  // unparseable all back to the default.
+  workers: process.env.CI ? 1 : Number(process.env.E2E_WORKERS) || 2,
   forbidOnly: !!process.env.CI,
   // No local retries on purpose: a retry that turns a red run green hides
   // exactly the collab/WS timing regressions this suite exists to catch.
@@ -79,6 +95,44 @@ export default defineConfig({
           {
             name: "firefox",
             use: { ...devices["Desktop Firefox"], storageState: ADMIN_STORAGE_STATE },
+            dependencies: ["setup"],
+            testIgnore: /dark-mode\.spec\.ts/,
+          },
+        ]
+      : []),
+    // WebKit, for the one class of bug no amount of chromium coverage can
+    // reach: the PDF surface runs pdfjs, and pdfjs uses modern built-ins that
+    // WebKit ships late or not at all. Two have already bitten an iPad —
+    // Map.prototype.getOrInsertComputed and ReadableStream's async iterator,
+    // both now patched in src/lib/pdfjs-webkit-polyfills.ts. Each was invisible
+    // locally, because a chromium-only suite runs the one engine that has them.
+    //
+    // This is *not* iPadOS Safari — Playwright drives its own WebKit build, so
+    // the native selection gestures an iPad uses (long-press, the drag handles)
+    // are still unreproducible here. What it does share is the JS engine, which
+    // is where those two bugs live.
+    //
+    // **It does not run on macOS 14 at all**, and the failure is not yours to
+    // fix: playwright 1.62 targets webkit 2336, but browsers.json pins mac14
+    // (and mac14-arm64) to a frozen 2251 build via revisionOverrides, whose
+    // protocol has no `PushAPIEnabled` setting — so every test dies in
+    // `browserContext.newPage` with `Protocol error (Page.overrideSetting)`
+    // before its body runs. `playwright install --force webkit` re-downloads
+    // the same pinned build and changes nothing. It unblocks on macOS 15+, or
+    // on Linux CI. That is why the polyfills' own coverage lives in
+    // e2e/pdf-webkit-gaps.spec.ts, which simulates each gap in chromium and so
+    // runs everywhere — this project is a bonus, not the guard.
+    //
+    // Gated behind E2E_WEBKIT for the same reason as firefox above: a project
+    // in this list runs on every bare `playwright test`. Run it with:
+    //
+    //   E2E_WEBKIT=1 npx playwright test --project=webkit
+    //
+    ...(process.env.E2E_WEBKIT
+      ? [
+          {
+            name: "webkit",
+            use: { ...devices["Desktop Safari"], storageState: ADMIN_STORAGE_STATE },
             dependencies: ["setup"],
             testIgnore: /dark-mode\.spec\.ts/,
           },

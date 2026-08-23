@@ -38,6 +38,12 @@ import styles from "./PdfAnnotations.module.css";
 // landscape is wider than its own portrait width, so this covers both.
 const POSITIONED_MEDIA_QUERY = "(min-width: 768px)";
 
+// How long a selection has to stop changing before it's captured. Matches
+// AnnotationNode's constant of the same name, for the same reason: a drag emits
+// a selection update per pixel, and each capture behind this one is a pdfjs
+// worker round trip.
+const SELECTION_SETTLE_MS = 300;
+
 type Props = {
   fileId: string;
   fileUrl: string;
@@ -244,14 +250,25 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
   useEffect(() => {
     if (!ready) return;
 
+    // Two triggers plus a debounce means a run can still be awaiting
+    // `capturePageFor` when the next one starts — dragging an iOS selection
+    // handle emits a `selectionchange` per pixel of drag. Each run claims a
+    // generation and drops its own results if a newer one has started, so an
+    // older capture finishing late can't publish over a newer selection.
+    let generation = 0;
+
     const onSelectionSettled = async () => {
+      const run = ++generation;
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
         setPopover(null);
         presenceRef.current?.publishSelection(null);
         return;
       }
-      const range = selection.getRangeAt(0);
+      // Cloned, because `getRangeAt` hands back the *live* range: left as-is it
+      // would mutate under the await below, and the rects measured for the
+      // popover would then describe a different selection than the one captured.
+      const range = selection.getRangeAt(0).cloneRange();
       const pageElement = (range.startContainer.parentElement as HTMLElement | null)?.closest<HTMLElement>(".page");
       const pageNumber = Number(pageElement?.dataset.pageNumber);
       if (!pageElement || !Number.isInteger(pageNumber)) {
@@ -259,8 +276,24 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
         return;
       }
 
-      const page = await capturePageFor(pageNumber - 1);
-      if (!page) return;
+      // Guarded, because everything behind it is pdfjs: a worker round trip
+      // and a parse of somebody's arbitrary PDF. A rejection here used to
+      // surface as an unhandledRejection and take the capture with it — which
+      // is exactly how the WebKit ReadableStream gap presented on an iPad
+      // (src/lib/pdfjs-webkit-polyfills.ts): a selection captured, then
+      // silently dropped, indistinguishable from the trigger never firing.
+      // Failing closed keeps the surface usable — no popover, no stale
+      // broadcast — rather than leaving a dead listener behind.
+      let page: CapturePage | null;
+      try {
+        page = await capturePageFor(pageNumber - 1);
+      } catch (error) {
+        console.warn("[pdf] couldn't read the page's text to anchor this selection:", error);
+        setPopover(null);
+        presenceRef.current?.publishSelection(null);
+        return;
+      }
+      if (!page || run !== generation) return;
       const target = captureTextTarget(page, range, PDFJS_VERSION);
       if (!target) {
         setPopover(null);
@@ -281,15 +314,45 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       setPopover({ left: last.right, top: last.bottom + 6, target });
     };
 
-    // `selectionchange` fires per character as a drag proceeds; capturing on
-    // *pointerup* instead means one capture per selection rather than one per
-    // pixel of drag, and the text extraction behind it is a worker round trip.
-    const onPointerUp = () => {
-      // A tick, so the selection the browser reports is the finished one.
-      window.setTimeout(() => void onSelectionSettled(), 0);
+    // Two triggers into one handler, because neither covers every way a
+    // selection can be made:
+    //
+    //  - **`pointerup`** is "the drag is definitely over", so a mouse
+    //    selection gets its popover immediately rather than after the settle
+    //    delay. A tick, so the selection the browser reports is the finished one.
+    //  - **`selectionchange`, debounced** is the one that fires for everything
+    //    else. It is deliberately *not* the sole trigger on desktop — it emits
+    //    per character of drag, and the capture behind it is a worker round
+    //    trip — but pointerup alone cannot see:
+    //      * an iPadOS long-press, where WebKit's selection gesture recognizer
+    //        claims the touch and the DOM gets `pointercancel` instead;
+    //      * a drag of iOS's selection handles, which are native views above
+    //        the page and emit no pointer events on `document` at all;
+    //      * a keyboard selection (shift+arrows), which emits none either.
+    //    Before this, none of the three published anything, so an iPad reader's
+    //    selection was invisible to everyone else and raised no Annotate
+    //    popover for the reader themselves. AnnotationNode's handleBodySelect
+    //    settles on a timer for the same reason.
+    //
+    // They share one timer rather than running independently, so a mouse drag
+    // costs the same single capture it always did: the per-pixel
+    // `selectionchange`s keep rescheduling, and the pointerup that ends the
+    // drag supersedes the pending one instead of adding a second run.
+    let settleTimer: number | undefined;
+    const settle = (delay: number) => {
+      window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => void onSelectionSettled(), delay);
     };
+    const onPointerUp = () => settle(0);
+    const onSelectionChange = () => settle(SELECTION_SETTLE_MS);
+
     document.addEventListener("pointerup", onPointerUp);
-    return () => document.removeEventListener("pointerup", onPointerUp);
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      window.clearTimeout(settleTimer);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
   }, [ready, capturePageFor]);
 
   // ---- where each card wants to sit ---------------------------------------

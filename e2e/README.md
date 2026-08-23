@@ -137,7 +137,14 @@ the admin account.
   already-running dev server that server's console output isn't captured
   either — so a 500 tells you nothing. `gotoOk` puts the response body in the
   failure message, which is how the flake below was finally identified.
-- **Don't raise `workers` above 2.** Three overloads the dev server rather than
+- **Don't raise `workers` above 2 — and lower it on a weak machine.** The 2 is
+  a measurement, not a constant, and it was taken on the Windows desktop. Set
+  `E2E_WORKERS=1` in `.env` (never committed, so it stays per-machine) where
+  two is too many: a 2-physical-core fanless laptop shows the same class of
+  failure at two that the desktop showed at three. What identifies it as
+  contention rather than a regression is that the red tests are scattered
+  across unrelated specs, don't repeat between runs, and all pass under
+  `--workers=1`; a real regression fails the same test every time. Three overloads the dev server rather than
   the machine, and the failures look like app bugs but aren't: a public page
   500ing with next-auth's `useSession must be wrapped in a <SessionProvider />`
   during SSR (the root layout *does* wrap `{children}`, and next-auth guards

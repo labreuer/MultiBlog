@@ -159,6 +159,12 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   it with `npx tsx that-file.ts` from the project root; delete the file afterward.
 - Dev account `labreuer@gmail.com` has role ADMIN.
 - `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`. Optional:
+  `E2E_WORKERS` — the Playwright worker count, defaulting to 2. Lives here rather than in
+  `playwright.config.ts` precisely because it is a property of the machine and not of the
+  repo: the committed 2 is right for the Windows desktop it was measured on and too many
+  for a 2-core laptop. `playwright.config.ts` already imports `dotenv/config` (it needs
+  `DATABASE_URL` for the DB helpers), so a value here is in `process.env` before
+  `defineConfig` evaluates. Optional:
   `NEXT_PUBLIC_COLLAB_URL` — leave unset for local dev; `src/lib/collab-url.ts`'s `getCollabUrl()`
   (the one function every client-side `HocuspocusProvider` call goes through) derives
   `ws://<the page's own host>:1234` per request instead, so the same running dev server
@@ -261,7 +267,7 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   that reads as a malformed URL of ours, a teardown error that reads as a missing `await`,
   a scanned PDF rendering as blank pages with a working text layer over them. All of them,
   verified against 6.2.108, are in **[docs/PDF.md](docs/PDF.md) §10** — read it before a
-  `pdfjs-dist` bump or when the viewer misbehaves inexplicably. Two consequences reach
+  `pdfjs-dist` bump or when the viewer misbehaves inexplicably. Three consequences reach
   outside the viewer and so are repeated here:
   - **Never delete `e2e/pdf-assets.spec.ts` as trivial.** It asserts that each of pdfjs's
     four runtime asset directories is served, and it is the only guard on any of them —
@@ -271,6 +277,14 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
     ~2% *scale* error rather than a layout one. `PdfViewer.module.css` restores
     `content-box` for `.pdfViewer` and its descendants; don't "tidy" that away. Mechanism,
     and the related border-box/padding-box trap in coordinate capture: docs/PDF.md §5.
+  - **Bumping `pdfjs-dist` needs `npx tsx scripts/probe-engine.ts` and a real Safari**, not
+    just the internals smoke test. Pinning protects the *API* pdfjs offers, not the
+    JavaScript runtime it assumes underneath — and WebKit ships those built-ins late or not
+    at all (`src/lib/pdfjs-webkit-polyfills.ts`, baseline Safari 26 / iPadOS 18.4+). A
+    chromium-only suite cannot see this class at all, and `e2e/pdf-webkit-gaps.spec.ts`
+    guards against regression without ever detecting that a patch has stopped being needed.
+    Which patches stand, the measured engine table, and the worker-realm import-order trap:
+    docs/PDF.md §10, PLAN.md §19a.
 - **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
   file's `sha256` is its identity, so the bytes an anchor was measured against are by
   construction the bytes every later reader sees — no tracking plugin, no per-transaction
@@ -336,6 +350,15 @@ doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e)
   create and delete their own throwaway users/posts, and it reuses a `dev:all` you
   already have running rather than starting (or killing) its own. Full details,
   fixtures, and the gotchas that bite when writing new specs: [e2e/README.md](e2e/README.md).
+  - **On macOS, `npm run e2e` doesn't run at all**: its `check-ports` prestep shells
+    through `pwsh`, which isn't installed, so the script dies before Playwright starts.
+    Use `npx playwright test` directly there. `npm run stop:all` is unavailable for the
+    same reason — stop a `dev:all` with `pkill -f "next dev"` and `pkill -f
+    "server/collab.ts"` instead.
+  - **The default 2 workers is a measurement from one machine, not a constant.** A
+    weaker one needs `E2E_WORKERS=1` (see the `.env` list above), or it produces scattered
+    failures across unrelated specs that all pass single-worker and read exactly like
+    real regressions. `--workers=1` on the command line is the one-off equivalent.
 - **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.**
   Symptom: the server logs `✓ Ready`, serves `/` fine, then prints
   `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs
@@ -644,6 +667,12 @@ why nothing recomputes it and why a break there is silent.
   worth keeping in mind for anything sized the same way later, even though that specific
   component is gone (PLAN.md §15: a published post no longer surfaces a live-staleness
   signal at all, by decision — see §15h).
+- **A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
+  `pointerup` for one — a long-press hands the touch to WebKit's gesture recognizer
+  (`pointercancel` instead), and the drag handles are native views that fire nothing — and
+  shift+arrows delivers none anywhere. Either alone works on every desktop and silently does
+  nothing on a tablet, so debounce `selectionchange` and let `pointerup` short-circuit it
+  (`PdfAnnotationSurface`; `AnnotationNode` uses a plain timer for the same reason).
 - When matching one element's width to another's via `ResizeObserver` (e.g. `PostsTable`'s
   search box tracking the Title column's width): use the observed element's own
   `getBoundingClientRect().width` inside the callback, not the callback's own

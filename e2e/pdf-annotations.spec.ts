@@ -33,8 +33,10 @@ async function waitForViewer(page: import("@playwright/test").Page) {
  * Driving a real `Range` rather than a mouse drag: the capture path reads
  * `window.getSelection()`, so a programmatic selection exercises exactly the
  * same code, and a coordinate drag would be at the mercy of where pdfjs
- * happened to lay out the glyphs. `pointerup` is dispatched afterwards because
- * that — not `selectionchange` — is what the surface listens for.
+ * happened to lay out the glyphs. `pointerup` is dispatched afterwards to take
+ * the surface's *immediate* trigger — it also listens for `selectionchange` on
+ * a settle timer, which is the path an iPad reaches and which
+ * e2e/pdf-webkit-gaps.spec.ts drives instead.
  */
 async function selectPhrase(page: import("@playwright/test").Page, pageNumber: number, needle: string) {
   const found = await page.evaluate(
