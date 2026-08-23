@@ -7,6 +7,7 @@ import NewAnnotationComposer from "@/components/annotation/NewAnnotationComposer
 import { usePdfMarginNotes } from "./use-pdf-margin-notes";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import { quadsTopY } from "@/lib/pdf-anchor";
+import { JUMP_VIEWPORT_FRACTION } from "@/lib/pdf-geometry";
 import styles from "./PdfAnnotations.module.css";
 
 // PLAN.md §19 Phase 3 — the annotation column beside the PDF.
@@ -79,7 +80,13 @@ type Props = {
   /** Whether to position cards. False below the breakpoint, where this is a plain list. */
   positioned: boolean;
   /** Scroll the viewer to an annotation. */
-  onJumpTo: (entry: PdfAnnotationEntry) => void;
+  /**
+   * Scroll the document to this entry's passage. The second argument is how far
+   * down the viewport to land it (`JUMP_VIEWPORT_FRACTION` or 0) — the panel's
+   * call, because only the panel knows whether its own chrome is currently
+   * overlaying the card the reader is about to look for.
+   */
+  onJumpTo: (entry: PdfAnnotationEntry, viewportFraction: number) => void;
   /** A selection captured in the viewer, waiting to become an annotation. */
   pendingTarget: PdfTarget | null;
   /** Changes on every capture, so the composer remounts even for an identical re-selection. */
@@ -161,7 +168,12 @@ export default function PdfAnnotationPanel({
             <button
               type="button"
               className={styles.pageBadge}
-              onClick={() => onJumpTo(entry)}
+              // Rail mode puts the card level with its passage and the chrome
+              // over the top of the rail, so a passage landing flush against
+              // the top edge takes its own card under the heading with it. In
+              // "Show all" the card is a list item that does not move, so the
+              // document goes where it was asked to.
+              onClick={() => onJumpTo(entry, railMode ? JUMP_VIEWPORT_FRACTION : 0)}
               title="Jump to this passage"
               // The visible text is just "p. 4", which tells a screen reader
               // nothing about what the control does; `title` is only used as an
@@ -188,8 +200,11 @@ export default function PdfAnnotationPanel({
     [fileId, isAnchored, onJumpTo, railMode],
   );
 
-  return (
-    <div className={styles.panelInner}>
+  // The panel's own chrome, grouped so rail mode can lift it out of the flow
+  // and float it over the cards (see `.stack`). Everything here is fixed at the
+  // top of the panel; everything below scrolls past underneath it.
+  const chrome = (
+    <div className={styles.chrome}>
       <h2 className={styles.heading}>Annotations</h2>
 
       {/* What the reader just selected, shown *before* the editor so that
@@ -224,50 +239,66 @@ export default function PdfAnnotationPanel({
         onSettled={onClearPending}
       />
 
-      {sorted.length === 0 ? (
+      {sorted.length === 0 && (
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>
-      ) : (
-        <>
-          {/* Only above the breakpoint: below it nothing is positioned, so the
-              list is all there is and a toggle would offer the state it's
-              already in. */}
-          {positioned && (
-            <div className={styles.modeRow}>
-              <button
-                type="button"
-                className={styles.modeToggle}
-                onClick={() => setShowAll((previous) => !previous)}
-                aria-pressed={showAll}
-              >
-                {showAll ? "Show beside the text" : `Show all ${sorted.length}`}
-              </button>
-            </div>
-          )}
+      )}
 
-          {/* Empty in rail mode is a normal state, not an error — it means the
-              reader is looking at part of the document nobody has annotated —
-              so it says which part is missing rather than "no annotations". The
-              container still renders beneath it: the cards are in it, hidden,
-              and the hook needs them measurable the moment one comes into view. */}
-          {railMode && railCount === 0 && (
-            <p className={styles.empty}>
-              Nothing annotated on screen.{" "}
-              {/* Worded differently from the toggle above deliberately: two
-                  controls with the same accessible name in one panel is a
-                  locator ambiguity for anything driving it, screen readers
-                  included. */}
-              <button type="button" className={styles.emptyLink} onClick={() => setShowAll(true)}>
-                Show them all
-              </button>
-              .
-            </p>
-          )}
+      {/* Only above the breakpoint: below it nothing is positioned, so the
+          list is all there is and a toggle would offer the state it's
+          already in. */}
+      {sorted.length > 0 && positioned && (
+        <div className={styles.modeRow}>
+          <button
+            type="button"
+            className={styles.modeToggle}
+            onClick={() => setShowAll((previous) => !previous)}
+            aria-pressed={showAll}
+          >
+            {showAll ? "Show beside the text" : `Show all ${sorted.length}`}
+          </button>
+        </div>
+      )}
 
+      {/* Empty in rail mode is a normal state, not an error — it means the
+          reader is looking at part of the document nobody has annotated —
+          so it says which part is missing rather than "no annotations". The
+          container still renders beneath it: the cards are in it, hidden,
+          and the hook needs them measurable the moment one comes into view. */}
+      {sorted.length > 0 && railMode && railCount === 0 && (
+        <p className={styles.empty}>
+          Nothing annotated on screen.{" "}
+          {/* Worded differently from the toggle above deliberately: two
+              controls with the same accessible name in one panel is a
+              locator ambiguity for anything driving it, screen readers
+              included. */}
+          <button type="button" className={styles.emptyLink} onClick={() => setShowAll(true)}>
+            Show them all
+          </button>
+          .
+        </p>
+      )}
+    </div>
+  );
+
+  return (
+    <div className={styles.panelInner}>
+      {/* In rail mode the chrome and the cards share one grid cell, so a card's
+          coordinate origin is the top of the panel rather than the bottom of
+          the chrome. That is what lets a card be positioned level with a
+          passage near the top of the viewer at all — before, everything in the
+          panel's first ~150px was clamped to the chrome's underside — and it is
+          what makes a card entering from above slide out from under the chrome
+          instead of appearing at full height in one frame. The chrome is opaque
+          and paints over them on the way past, deliberately. */}
+      <div className={railMode ? styles.stack : undefined}>
+        {chrome}
+
+        {sorted.length > 0 && (
           <div ref={containerRef} className={styles.cards} data-pseudo-border-root>
             {sorted.map(renderEntry)}
           </div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

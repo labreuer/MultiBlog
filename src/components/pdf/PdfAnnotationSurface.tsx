@@ -8,12 +8,17 @@ import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } f
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
-import { documentFraction, visibleFractionRange } from "@/lib/pdf-geometry";
+import {
+  JUMP_VIEWPORT_FRACTION,
+  documentFraction,
+  jumpDestinationY,
+  visibleFractionRange,
+} from "@/lib/pdf-geometry";
 import { captureTextTarget, type CapturePage } from "@/lib/pdf-anchor-capture";
 import { resolveTargetRects } from "@/lib/pdf-anchor-resolve";
 import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
 import type { RemoteReader } from "./use-pdf-presence";
-import { PDFJS_VERSION } from "@/lib/pdfjs-client";
+import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
 import styles from "./PdfAnnotations.module.css";
 
@@ -326,7 +331,24 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       // Partially visible counts: a passage half off the bottom edge still has
       // a card to sit beside, and requiring full visibility would make cards
       // flicker in and out at the edges as the reader scrolls.
-      if (bottom <= viewRect.top || top >= viewRect.bottom) continue;
+      //
+      // **The band is deliberately asymmetric**, extending one viewport height
+      // *above* the top edge and not one pixel below the bottom. A card hangs
+      // downwards from its passage, so one arriving at the bottom is already
+      // gradual: it is placed below the fold and rises into view. One arriving
+      // at the top had nowhere to be until it was due, so it appeared at full
+      // height in the frame its passage crossed the edge. Given a lead-in it is
+      // placed above the panel (clipped) or under the panel's chrome, and
+      // slides out from under it instead.
+      //
+      // A whole viewport height rather than a card's height because this
+      // function has no idea how tall a card is, and the bound has to exceed the
+      // tallest one to hide it completely. It costs nothing downstream: the
+      // packer cascades *downwards*, so a lead-in card placed at a negative top
+      // cannot move a visible one, and the container height it reports is the
+      // bottom of the last card either way. A card taller than the panel itself
+      // can never be fully hidden, and still arrives partly formed.
+      if (bottom <= viewRect.top - viewRect.height || top >= viewRect.bottom) continue;
       tops.set(entry.root.id, top);
     }
     return tops;
@@ -354,16 +376,40 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
     return () => observer.disconnect();
   }, [handle]);
 
-  const jumpTo = useCallback((entry: PdfAnnotationEntry) => {
+  /**
+   * Scroll a passage into view, landing it `fraction` of the way down rather
+   * than flush against the top edge — see JUMP_VIEWPORT_FRACTION for why.
+   *
+   * The caller chooses, because only it knows whether the panel's chrome is
+   * over the rail: the indicator strip's ticks and a card's page badge in rail
+   * mode both want the offset, while "Show all" has no positioned card to keep
+   * clear of and passes 0.
+   */
+  const jumpTo = useCallback((entry: PdfAnnotationEntry, fraction: number = JUMP_VIEWPORT_FRACTION) => {
     const handle = handleRef.current;
     if (!handle || !entry.target) return;
-    const top = quadsTopY(entry.target.quads);
+    const top = quadsTopY(entry.target.quads) ?? 0;
     handle.viewer.scrollPageIntoView({
       pageNumber: entry.target.pageIndex + 1,
       // A PDF destination array — the same shape PDF.js consumes for a link,
       // and the same one presence uses to follow a reader (docs/PDF.md §9).
       // `null` for zoom preserves the local reader's own zoom.
-      destArray: [entry.target.pageIndex, { name: "XYZ" }, 0, top ?? 0, null],
+      //
+      // The scale is read at click time rather than closed over: the reader may
+      // have zoomed since. `currentScale * PDF_TO_CSS_UNITS`, never the bare
+      // zoom level — docs/PDF.md §5.
+      destArray: [
+        entry.target.pageIndex,
+        { name: "XYZ" },
+        0,
+        jumpDestinationY(
+          top,
+          handle.container.clientHeight,
+          handle.viewer.currentScale * pdfjs.PixelsPerInch.PDF_TO_CSS_UNITS,
+          fraction,
+        ),
+        null,
+      ],
     });
   }, []);
 

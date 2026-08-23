@@ -86,6 +86,11 @@ export function usePdfMarginNotes({ resolveTops, ids, onAnchoredIdsChange, subsc
       for (const card of cards()) {
         card.style.top = "";
         card.style.position = "";
+        // With the inline position dropped these are back in normal flow, so
+        // they are no longer where `data-placed` claims. Leaving it set would
+        // reveal them at a stale position for a frame on the way back into rail
+        // mode — the same defect the flag exists to prevent.
+        delete card.dataset.placed;
       }
       reportedRef.current = null;
       return;
@@ -104,6 +109,19 @@ export function usePdfMarginNotes({ resolveTops, ids, onAnchoredIdsChange, subsc
         onChangeRef.current?.(resolved);
       }
 
+      // **A card is hidden until this pass has positioned it** (`data-placed`,
+      // consumed by PdfAnnotations.module.css), because membership and
+      // placement cannot happen in the same frame. `setAnchoredIds` above is
+      // what drops a newly-arrived card's `display: none`, and React applies it
+      // *after* this function returns — so on this pass the card is still
+      // `display: none`, gets skipped by the `offsetParent` guard below, and
+      // receives no `top`. It therefore paints once in normal flow, at the top
+      // of the container, before the next pass moves it to its passage.
+      //
+      // That next pass is guaranteed: going from `display: none` to a real box
+      // is a resize, and every card is observed. So the flag costs one frame of
+      // invisibility and buys never painting a card in the wrong place — which
+      // reads as the card loading at the top of the panel and jumping.
       const measurements: MarginNoteMeasurement[] = [];
       const byId = new Map<string, HTMLElement>();
       for (const element of cards()) {
@@ -113,30 +131,61 @@ export function usePdfMarginNotes({ resolveTops, ids, onAnchoredIdsChange, subsc
         // keeps mounted (its reply composer may be live) but out of the rail.
         // Skipped rather than measured: at zero height it would otherwise take
         // a slot in the cascade and pad the column with a gap apiece.
-        if (element.offsetParent === null) continue;
-        byId.set(id, element);
+        if (element.offsetParent === null) {
+          delete element.dataset.placed;
+          continue;
+        }
         const top = tops.get(id);
+        // **Still on screen, but no longer in the rail** — the mirror of the
+        // arriving case above, and the same one-frame gap: `setAnchoredIds` has
+        // been called with a set this card is absent from, and React applies the
+        // `display: none` that follows *after* this function returns. Left to
+        // fall through, it would be measured with a null `targetTop`, which the
+        // packer reads as "anchorless" and places at the end of the cascade —
+        // so a card leaving at the bottom of the panel jumps up behind the last
+        // anchored one for a frame before vanishing.
+        //
+        // Skipped entirely instead, keeping the `top` it already has until it
+        // is hidden. Nothing is lost by that: membership ends only once the
+        // passage has left the band, by which point the card is off the panel's
+        // edge anyway. A PDF card's `targetTop` is never *legitimately* null —
+        // an annotation with no target never enters `tops` at all, so it is
+        // never in the rail — which is why this can be a plain `continue`
+        // rather than the doc rail's genuine anchorless case.
+        if (top === undefined) continue;
+        byId.set(id, element);
         measurements.push({
           id,
           // Relative to the panel's own scroller, not the viewport — the cards
           // are positioned inside it.
-          targetTop: top === undefined ? null : top - containerTop + container.scrollTop,
+          targetTop: top - containerTop + container.scrollTop,
           // offsetHeight, not the rect: a card mid-flash carries a background
           // transition, and offsetHeight is unaffected by it.
           height: element.offsetHeight,
         });
       }
 
-      const { placements, height } = packMarginNotes(measurements);
+      // `minTop: -Infinity`, unlike the doc rail's default 0: here the
+      // container's top edge is the viewport's, so a card above it is arriving
+      // rather than misplaced — clipped above the panel or under the panel's
+      // own chrome, sliding into view as its passage scrolls down. Clamping it
+      // to 0 is what made a card appear at full height in one frame.
+      const { placements, height } = packMarginNotes(measurements, { minTop: -Infinity });
       for (const placement of placements) {
         const element = byId.get(placement.id);
         if (!element) continue;
         element.style.position = "absolute";
         element.style.top = `${placement.top}px`;
+        // **Marks the card as safe to show** — see the note above the loop.
+        element.dataset.placed = "";
       }
       // Absolutely positioned children contribute nothing to the container's
       // height, so it has to be told — otherwise the panel never scrolls.
-      container.style.height = `${height}px`;
+      // Floored at 0: with every member still in the lead-in band above the
+      // viewport the cascade's bottom is negative, and a negative `height` is
+      // not a parse error but a silently ignored declaration, which would leave
+      // the container frozen at whatever it last measured.
+      container.style.height = `${Math.max(0, height)}px`;
     };
 
     const schedule = () => {

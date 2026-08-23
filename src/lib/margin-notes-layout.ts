@@ -49,9 +49,34 @@ export type MarginNoteLayout = {
 // Anchorless cards (targetTop null) sort after every anchored one and keep
 // their input order among themselves, so the rail reads as "everything
 // anchored, in document order, then everything that isn't".
+export type PackMarginNotesOptions = {
+  gap?: number;
+  /**
+   * Floor for the cascade, and therefore for the first card's placement.
+   *
+   * `0` — the default, and what the doc rail wants — keeps a card anchored
+   * above the container's own top edge (an early quote, with the rail's heading
+   * and form above it) from being placed at a negative offset.
+   *
+   * The PDF panel passes `-Infinity` instead, because there the container's top
+   * edge is the *viewport's* top edge and a card above it is not misplaced, it
+   * is arriving: it sits clipped above the panel, or under the panel's own
+   * chrome, and slides into view as its passage scrolls down. Clamping it to 0
+   * is exactly what made a card appear at full height in a single frame.
+   *
+   * **A negative `minTop` and an anchorless card do not mix.** A `targetTop` of
+   * null falls back to 0 rather than to the cursor, so the first such card in
+   * the cascade lands at 0 — the container's top — however far below that the
+   * anchored cards sit. That is harmless at the default `minTop`, where 0 is
+   * the floor anyway, and is why the PDF hook never passes a null `targetTop`:
+   * an annotation with no on-screen target is not in its rail at all.
+   */
+  minTop?: number;
+};
+
 export function packMarginNotes(
   notes: MarginNoteMeasurement[],
-  gap: number = MARGIN_NOTE_GAP,
+  { gap = MARGIN_NOTE_GAP, minTop = 0 }: PackMarginNotesOptions = {},
 ): MarginNoteLayout {
   const anchored = notes
     .filter((note) => note.targetTop !== null)
@@ -62,10 +87,8 @@ export function packMarginNotes(
   const floating = notes.filter((note) => note.targetTop === null);
 
   const placements: MarginNotePlacement[] = [];
-  // Doubles as the clamp that keeps a card anchored above the container's own
-  // top edge (an early quote, with the rail's heading and form above it) from
-  // being placed at a negative offset.
-  let cursor = 0;
+  // Doubles as the clamp described on `minTop`.
+  let cursor = minTop;
 
   for (const note of [...anchored, ...floating]) {
     const top = Math.max(note.targetTop ?? 0, cursor);

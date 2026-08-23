@@ -103,6 +103,42 @@ export function thumbIsWorthDrawing(range: { start: number; end: number }, railH
   return (range.end - range.start) * railHeightPx >= MIN_VIEWPORT_THUMB_PX;
 }
 
+/**
+ * How far down the viewport a jumped-to passage should land, as a fraction of
+ * the viewer's height.
+ *
+ * Not zero — flush against the top edge — for two reasons, both about what the
+ * reader can see once they arrive. A passage at the very top has no context
+ * above it, so a quote that begins mid-sentence arrives with its first half off
+ * screen. And the annotation panel's own chrome overlays the top of the rail
+ * (PdfAnnotations.module.css's `.stack`), so the card belonging to a passage up
+ * there is the one card the reader cannot read.
+ */
+export const JUMP_VIEWPORT_FRACTION = 0.25;
+
+/**
+ * The PDF-space y to hand an `XYZ` destination so a passage lands `fraction`
+ * down the viewport instead of against its top edge.
+ *
+ * **docs/PDF.md §5's "Navigating to a point" is the contract** — that the offset
+ * is *added* because PDF y increases upward, that an out-of-page result needs no
+ * clamp, and, most easily got wrong, that `cssPixelsPerPoint` is
+ * `viewer.currentScale * PixelsPerInch.PDF_TO_CSS_UNITS` and never
+ * `currentScale` alone. Read it before changing the arithmetic below; every
+ * line of it is one sign or factor away from a plausible wrong answer.
+ */
+export function jumpDestinationY(
+  quadTopY: number,
+  viewportHeightPx: number,
+  cssPixelsPerPoint: number,
+  fraction: number = JUMP_VIEWPORT_FRACTION,
+): number {
+  // A non-positive scale would divide the offset into nonsense. It only happens
+  // before the first layout, where the unshifted destination is right anyway.
+  if (!(cssPixelsPerPoint > 0)) return quadTopY;
+  return quadTopY + (viewportHeightPx * fraction) / cssPixelsPerPoint;
+}
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return value < 0 ? 0 : value > 1 ? 1 : value;

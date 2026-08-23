@@ -59,12 +59,77 @@
   color: var(--foreground);
 }
 
+/* **Rail mode only: the chrome floats over the cards.**
+
+   Both children are put in the same grid cell, which does two things one
+   `display: grid` cannot obviously be doing. First, it moves the cards'
+   coordinate origin from the bottom of the chrome to the top of the panel —
+   the layout hook measures `targetTop` against `.cards`' own rect, so with the
+   chrome above it in normal flow, every passage in the viewer's top ~150px
+   resolved to a negative offset and was clamped flat against the chrome's
+   underside. Those cards are now placed where their passage actually is.
+   Second, it gives a card somewhere to *be* while it is still arriving: one
+   entering from the top materialises under the chrome and slides out from
+   beneath it, rather than appearing at full height in a single frame the
+   moment its passage crosses the viewer's top edge.
+
+   The chrome is therefore opaque and paints over whatever is beneath it, which
+   is the intended behaviour and not an oversight — `z-index` because both
+   children are positioned and DOM order would otherwise put the cards on top,
+   `align-self: start` so it claims only its own height instead of stretching
+   over the whole column, and the negative margins so its background reaches
+   `.panelInner`'s padding gutters instead of leaving a card visible in them.
+
+   Not applied in list mode ("Show all"), where the chrome must take up space
+   like anything else or the first entries in the list would be permanently
+   underneath it. */
+.stack {
+  display: grid;
+  /* Cancels `.panelInner`'s *top* padding only, so the grid cell — and with it
+     a card's zero — starts at the panel's own top edge. The horizontal padding
+     is left in place: `.card` is `width: 100%` against its containing block, so
+     moving the side padding onto `.cards` would widen every card by it. */
+  margin-top: -0.75rem;
+}
+
+.stack > .chrome {
+  grid-area: 1 / 1;
+  /* `top: 0` against the panel's scrollport. The margin-top above puts the
+     chrome's resting position there already, so it does not jump on first
+     stick — worth keeping true if either number changes. */
+  position: sticky;
+  top: 0;
+  align-self: start;
+  z-index: 2;
+  /* Out to the panel's edges, with the padding put back inside, so a card
+     passing underneath isn't visible in the gutters either side. */
+  margin: 0 -0.75rem;
+  padding: 0.75rem 0.75rem 0.5rem;
+  background: var(--surface);
+}
+
 /* The positioned region. `position: relative` makes it the containing block
    for the absolutely-placed cards the layout hook writes `top` onto; its own
    height is set by that hook, since absolutely positioned children contribute
    none. */
 .cards {
   position: relative;
+}
+
+.stack > .cards {
+  grid-area: 1 / 1;
+}
+
+/* A card the layout hook has not positioned yet. It has just lost its
+   `display: none` and has no `top` of its own, so it is sitting in normal flow
+   at the top of the container — one frame later the hook moves it to its
+   passage. Hiding it for that frame is the difference between a card arriving
+   at the edge of the viewport and a card appearing to load at the top of the
+   panel and jump. `visibility`, not `display`: the hook has to be able to
+   measure its height on exactly that frame. Rail mode only — nothing is
+   positioned in the list, so nothing there is ever unplaced. */
+.stack > .cards [data-margin-note-id]:not([data-placed]) {
+  visibility: hidden;
 }
 
 .card {
