@@ -371,6 +371,27 @@ export async function addTestDocAuthor(docId: string, email: string): Promise<vo
 }
 
 /**
+ * The doc's current author emails, in byline order — server truth for
+ * settling DocSettingsPanel's author checkboxes, which flip optimistically
+ * before their server action lands (handleAuthorToggle's setAuthors-then-
+ * startTransition). A spec that toggles an author and only asserts
+ * toBeChecked can end while the action is still in flight — or after the
+ * "Author list changed — please retry" concurrency guard silently rejected
+ * it — and the doc.spec Settings test once died in *teardown* that way:
+ * with the admin's re-add unlanded and the co-author's row cascaded away by
+ * secondUser's earlier teardown, deleteTestDoc found zero authors and its
+ * safety guard refused (docs/playwright-flakiness.html, class 5).
+ */
+export async function getDocAuthorEmails(docId: string): Promise<string[]> {
+  const rows = await prisma.docAuthor.findMany({
+    where: { docId },
+    orderBy: { bylineOrder: "asc" },
+    include: { user: { select: { email: true } } },
+  });
+  return rows.map((r) => r.user.email);
+}
+
+/**
  * Adds a co-author to an existing test post — the /posts counterpart to
  * addTestDocAuthor above, needed to build a multi-author post at all (the
  * Authors filter's ALL/EXACTLY modes have nothing to distinguish from ANY
@@ -1101,6 +1122,7 @@ const handlers = {
   deleteTestPost,
   createTestDoc,
   addTestDocAuthor,
+  getDocAuthorEmails,
   addTestPostAuthor,
   deleteTestDoc,
   getDocState,

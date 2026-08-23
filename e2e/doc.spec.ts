@@ -256,11 +256,20 @@ test.describe("annotations", () => {
     // time rather than a state written to the row. So the row still says
     // "anchored" and the rendering is what has to change.
     await readerPage.goto(`/doc/${sharedDoc.slug}`);
-    // `.first()` because an annotation's body is in the DOM twice since
-    // PLAN.md §13p — the SSR static copy (hidden once the editor mounts) and
-    // the editor's own. Same shape AnnotatableArticle has always had for the
-    // article itself.
-    await expect(readerPage.getByText("This quote is about to disappear.").first()).toBeVisible();
+    // visibleText, not `.first()`: an annotation's body is in the DOM twice
+    // since PLAN.md §13p — the SSR static copy and the editor's own,
+    // display-toggled once AnnotationBodyReader mounts. `.first()` pins
+    // whichever copy is DOM-first regardless of visibility, and under load
+    // that was the hidden one — this exact line failed 4 of the flakiness
+    // matrix's 30 runs, always at 3 workers, because mount timing decided
+    // which copy it landed on (docs/playwright-flakiness.html, class 5). The
+    // 2026-08-23 audit of every other `.first()` in the suite found this the
+    // only dual-copy-hazardous one: the highlight locators are decoration
+    // attributes only the live copy carries (`data-thread-ids` /
+    // `data-annotation-ids` — the static render's mark uses the singular
+    // `data-annotation-id`), and the rest pick among same-visibility
+    // siblings (rows, columns, split highlight segments).
+    await expect(visibleText(readerPage, "This quote is about to disappear.")).toBeVisible();
 
     // No highlight left in the article: the quoted text is gone, so neither
     // the stored offsets nor a search for it resolves.
