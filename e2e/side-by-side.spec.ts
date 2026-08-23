@@ -760,8 +760,20 @@ test.describe("side-by-side group bar", () => {
       await select.selectOption({ label: "New Group" });
       const panel = page.getByTestId("doc-link-group-panel");
       await panel.getByRole("button", { name: "Save" }).click();
-      await expect(panel.getByText("Saved")).toBeVisible({ timeout: 5_000 });
-      createdGroupId = await select.locator("option", { hasText: "(untitled)" }).getAttribute("value");
+      // Settle on the durable outcome — the dropdown gaining the group's real
+      // option, whose value is the server-issued id and so can only appear
+      // once the create has round-tripped — and deliberately NOT on the
+      // status line. On the *create* path "Saved" is only a flash: the panel
+      // re-renders into its saved-group form as soon as the new id arrives,
+      // resetting the status span, so the old `getByText("Saved")` with a 5s
+      // budget was racing that flash — it lost once at 3 workers when the
+      // round trip outlived the budget, and re-checking *after* the option
+      // settles never sees it at all (docs/playwright-flakiness.html,
+      // class 5). The three autosave tests above keep their "Saved" asserts:
+      // an existing group's panel doesn't re-render away its status.
+      const savedOption = select.locator("option", { hasText: "(untitled)" });
+      await expect(savedOption).toHaveCount(1);
+      createdGroupId = await savedOption.getAttribute("value");
       expect(createdGroupId).not.toBeNull();
 
       // §14l's own dropdown swap already proves a group is active; the
