@@ -4,7 +4,26 @@
 import "dotenv/config";
 import { defineConfig, devices } from "@playwright/test";
 
-export const BASE_URL = "http://localhost:3000";
+// Two targets (docs/playwright-flakiness.html):
+//
+// - **prod** (`npm run e2e`, via E2E_TARGET=prod): the full suite runs against
+//   `next build` + `next start` on :3005 (scripts/e2e-web.ps1). Two of the
+//   suite's historical failure classes are dev-only and compiled out of a
+//   production build — the prerender-manifest RMW tear (vercel/next.js#96664,
+//   ~1 tear per suite run, occasionally a 500 on an unrelated route) and
+//   next-auth's dev-only SessionProvider invariant, which turns a transient
+//   Turbopack SSR module miss into a 500. Next's own Playwright guide
+//   recommends the prod target. Cookies don't scope by port, so the same
+//   e2e/.auth/admin.json works on either target.
+//
+// - **dev** (`npm run e2e:dev`, or a bare `npx playwright test …`): the old
+//   behavior, against `next dev` on :3000 — the fast loop for a spec or
+//   feature under active development, with no build step. The
+//   `devServer500Watch` fixture names the two dev-only 500 classes in a red
+//   test's annotations so they don't read as app regressions.
+const PROD = process.env.E2E_TARGET === "prod";
+
+export const BASE_URL = PROD ? "http://localhost:3005" : "http://localhost:3000";
 export const ADMIN_STORAGE_STATE = "e2e/.auth/admin.json";
 
 export default defineConfig({
@@ -14,31 +33,27 @@ export default defineConfig({
   // cross-file interference is limited to the per-IP comment rate limit — see
   // the note in e2e/README.md before writing a test that posts via the form.
   fullyParallel: false,
-  // Two, not three. Three workers overload the *dev server*, not the machine:
-  // measured symptoms were a public page 500ing with next-auth's
-  // "useSession must be wrapped in a <SessionProvider />" during SSR, and
-  // server actions arriving with truncated bodies ("Unexpected end of JSON
-  // input" on /posts/[id]/edit), neither reproducible in isolation and neither
-  // an app defect. Failure rate was roughly 1 full run in 3.5 at three
-  // workers, 0 in 8 at two — for the same ~50s wall clock, because the dev
-  // server is the bottleneck rather than the parallelism.
+  // Prod target: two. The 30-run matrix (docs/playwright-flakiness.html)
+  // measured the dev server's request p50/p99 roughly doubling per added
+  // worker (41/294 → 65/509 → 110/879 ms; requests ≥1s per run: ~1 → ~2 →
+  // ~11), for the same ~200s wall clock — fixed costs dominate a 148-test
+  // suite, so extra workers buy tail latency, not speed. `next start` is much
+  // lighter per request, so 2 may be conservative there; remeasure before
+  // raising it. Historical note: the "1 full run in 3.5 red at three workers"
+  // measurement attributed to truncated server-action bodies was actually the
+  // manifest tear above (same error string, Next parsing its own manifest).
   //
-  // That measurement is machine-specific, and the default is the machine it
-  // was taken on. A weaker one wants *fewer*: on a 2-physical-core fanless
-  // laptop, two workers reproduce at two exactly what three did there — a
-  // full run showed 6 failures spread across pdf, quote-anchoring,
-  // session-refresh, side-by-side and ydoc-debug, every one of which passed
-  // single-worker. The tell is that the failures are scattered across
-  // unrelated specs and vanish in isolation; a real regression doesn't move.
-  // Override per machine with E2E_WORKERS in .env (already loaded above, and
-  // never committed, so one checkout can differ from another).
+  // Dev target: one. The dev lane exists for iterating on a single spec or
+  // feature, where parallelism buys nothing and the dev server's queueing
+  // under 2+ workers is what used to make scattered, unreproducible failures
+  // (and on a 2-core laptop, two workers reproduce what three did here).
   //
-  // `|| 2` rather than `?? 2`: a commented-out or blank `E2E_WORKERS=` in .env
+  // Override per machine with E2E_WORKERS in .env (loaded above, never
+  // committed). `||` rather than `??`: a commented-out or blank `E2E_WORKERS=`
   // is an empty string, which `??` passes through and `Number("")` turns into
-  // 0 — and Playwright rejects that outright with "config.workers must be a
-  // positive number", before running anything. `||` folds empty, absent and
-  // unparseable all back to the default.
-  workers: process.env.CI ? 1 : Number(process.env.E2E_WORKERS) || 2,
+  // 0 — and Playwright rejects 0 outright. `||` folds empty, absent and
+  // unparseable back to the default.
+  workers: process.env.CI ? 1 : Number(process.env.E2E_WORKERS) || (PROD ? 2 : 1),
   forbidOnly: !!process.env.CI,
   // No local retries on purpose: a retry that turns a red run green hides
   // exactly the collab/WS timing regressions this suite exists to catch.
@@ -106,12 +121,23 @@ export default defineConfig({
   // that a dev server we didn't start is not ours to kill. If nothing is
   // listening, Playwright starts both halves itself and stops them at the end.
   webServer: [
-    {
-      command: "npm run dev",
-      url: BASE_URL,
-      reuseExistingServer: true,
-      timeout: 180_000,
-    },
+    PROD
+      ? {
+          // Build + serve the production bundle (scripts/e2e-web.ps1). The
+          // timeout covers a full `next build` on a cold :3005; a server left
+          // running from a previous run skips it entirely via
+          // reuseExistingServer.
+          command: "npm run e2e:web",
+          url: BASE_URL,
+          reuseExistingServer: true,
+          timeout: 300_000,
+        }
+      : {
+          command: "npm run dev",
+          url: BASE_URL,
+          reuseExistingServer: true,
+          timeout: 180_000,
+        },
     {
       // A raw WebSocket server, so wait on the TCP port — an HTTP probe of the
       // Hocuspocus endpoint proves nothing useful.

@@ -66,7 +66,12 @@ test.describe("email invites", () => {
       const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
       const invitePage = await context.newPage();
 
-      await invitePage.goto(url);
+      // Navigate the invite link's path against baseURL, not the absolute URL:
+      // db-worker builds it with its own appUrl(), whose APP_URL comes from
+      // .env and names the dev server — the prod target (:3005) is a different
+      // origin. The path+token is the part under test; the host is config.
+      const inviteLink = new URL(url);
+      await invitePage.goto(inviteLink.pathname + inviteLink.search);
       await expect(invitePage.getByText(email)).toBeVisible();
 
       await invitePage.getByLabel("Choose a password").fill(newPassword);
@@ -102,7 +107,9 @@ test.describe("email invites", () => {
 
       const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
       const invitePage = await context.newPage();
-      await invitePage.goto(secondUrl);
+      // Path-relative for the same reason as the acceptance test above.
+      const second = new URL(secondUrl);
+      await invitePage.goto(second.pathname + second.search);
       await invitePage.getByLabel("Choose a password").fill("another-new-password-123");
       await invitePage.getByRole("button", { name: "Set password" }).click();
       await expect(invitePage.getByText("Password set")).toBeVisible();

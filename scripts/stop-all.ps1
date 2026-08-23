@@ -1,24 +1,32 @@
-# Stops this repo's `npm run dev:all` tree (Next.js on :3000 + Hocuspocus on :1234)
-# in one shot, so a restart doesn't need a separate discover/trace/kill round trip.
+# Stops every server this repo runs locally, in one shot, so a restart doesn't
+# need a separate discover/trace/kill round trip: the `npm run dev:all` tree
+# (Next.js dev on :3000 + Hocuspocus on :1234) and the e2e prod web server
+# (`npm run e2e:web`, `next start` on :3005). Named for the `npm run stop:all`
+# script that invokes it — it used to be stop-dev.ps1, before :3005 existed.
 #
 # Verifies before killing anything:
 #   - the process actually listening on each port must have this repo's own path in
-#     its CommandLine (the real leaf processes -- next's start-server.js, tsx's
+#     its CommandLine (the real leaf processes -- next's server entry, tsx's
 #     collab.ts entry point -- always do, since they're invoked via absolute
 #     node_modules paths). If a port owner doesn't match, that port is left alone.
-#   - each ancestor added to the kill list must itself match a known dev:all-related
-#     pattern (concurrently, npm run dev/collab, next dev, tsx watch, or the repo
-#     path again). The walk stops climbing at the first ancestor that doesn't match,
-#     so it can never reach past this project's process tree into an unrelated
-#     parent shell.
+#   - each ancestor added to the kill list must itself match a known server-tree
+#     pattern (concurrently, npm run dev/collab/e2e:web, next dev/start, tsx watch,
+#     or the repo path again). The walk stops climbing at the first ancestor that
+#     doesn't match, so it can never reach past this project's process tree into an
+#     unrelated parent shell.
 
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path.TrimEnd('\')
-$ports = @(3000, 1234)
+# 3005 is the e2e prod web server (scripts/e2e-web.ps1) — same ownership check applies.
+$ports = @(3000, 3005, 1234)
 $ancestorMarkers = @(
     $repoRoot, 'concurrently', 'npm run dev:all', 'npm:dev', 'npm:collab',
-    'npm run dev', 'npm run collab', 'npm-cli.js', 'next dev', 'tsx watch'
+    'npm run dev', 'npm run collab', 'npm-cli.js', 'next dev', 'tsx watch',
+    # The e2e prod web tree (scripts/e2e-web.ps1). In practice every process in
+    # it carries the repo's absolute path and already matches $repoRoot; these
+    # make the intent explicit rather than relying on that alone.
+    'npm run e2e:web', 'e2e-web.ps1', 'next start'
 )
 
 function Get-ProcCommandLine($procId) {
@@ -108,4 +116,4 @@ if ($aborted) {
     Write-Host "`nDone, but one port was left alone -- see warnings above."
     exit 1
 }
-Write-Host "`nPorts 3000 and 1234 are clear."
+Write-Host "`nPorts 3000, 3005 and 1234 are clear."

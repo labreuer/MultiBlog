@@ -91,6 +91,14 @@ export default function DocEditor({
   const [deleted, setDeleted] = useState(initialDeleted);
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  // Distinct from `connectionStatus === "connected"`: the provider reports
+  // "connected" at websocket-open, before authentication and before the
+  // initial sync has delivered the document (syncStep2). "🟢 Live" waits for
+  // this flag so it means "the content in front of you is the document", not
+  // "a socket exists" — docs/playwright-flakiness.html, class 2. The provider
+  // only ever emits `synced` on the true transition, so the false direction
+  // is ours to handle in onStatus below.
+  const [synced, setSynced] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authorStats, setAuthorStats] = useState<AuthorStat[]>([]);
   // CollabEditorBody's onEditorReady, finally used for something: the
@@ -176,7 +184,11 @@ export default function DocEditor({
           name: documentName,
           document: ydoc,
           token: fetchToken,
-          onStatus: ({ status }) => setConnectionStatus(status),
+          onStatus: ({ status }) => {
+            setConnectionStatus(status);
+            if (status !== "connected") setSynced(false);
+          },
+          onSynced: () => setSynced(true),
           onAuthenticationFailed: ({ reason }) => setError(`Live editing unavailable: ${reason}`),
         });
         setProvider(instance);
@@ -245,7 +257,9 @@ export default function DocEditor({
         )}
         <p className={styles.statusLine}>
           {connectionStatus === "connected"
-            ? "🟢 Live"
+            ? synced
+              ? "🟢 Live"
+              : "🔵 Connected"
             : connectionStatus === "connecting"
               ? "🟡 Connecting…"
               : "🔴 Disconnected"}

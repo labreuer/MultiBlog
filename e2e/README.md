@@ -10,18 +10,37 @@ selecting text on each of the three surfaces that respond to it
 is *not* visible until the right page is visited.
 
 ```bash
-npm run e2e
+npm run e2e        # full suite, against a production build on :3005
+npm run e2e:dev    # the dev-server target (:3000), one worker by default
 ```
+
+The full suite targets `next build` + `next start` rather than `next dev`
+because two of the suite's historical failure classes were dev-server bugs that
+a production build compiles out — the prerender-manifest tear
+(vercel/next.js#96664) and next-auth's dev-only SessionProvider invariant 500.
+The whole investigation, with rates and mechanisms:
+[docs/playwright-flakiness.html](../docs/playwright-flakiness.html). The dev
+target remains the fast loop for a spec or feature under active development
+(no build step, HMR-warm server); its `devServer500Watch` fixture annotates a
+red test whose 500 matches a known dev-only class so it doesn't read as an app
+regression.
 
 Other entry points: `npm run e2e:ui` (watch mode with a time-travel debugger),
 `npm run e2e:report` (last run's HTML report), and the usual Playwright flags —
-`npx playwright test e2e/doc.spec.ts -g "title"`, `--headed`, `--debug`.
+`npx playwright test e2e/doc.spec.ts -g "title"`, `--headed`, `--debug` (all
+dev-target; set `E2E_TARGET=prod` yourself to point one at :3005).
 
 ## How a run is wired
 
-1. `playwright.config.ts`'s `webServer` brings up `npm run dev` (:3000) and
-   `npm run collab` (:1234) — **unless something is already listening**, in
-   which case it reuses them. A `dev:all` you started yourself is never killed.
+1. `playwright.config.ts`'s `webServer` brings up the web server — for the
+   prod target `npm run e2e:web` (a `next build`, then `next start` on :3005
+   with `AUTH_URL`/`APP_URL`/`E2E_REVALIDATE` set — see `scripts/e2e-web.ps1`),
+   for the dev target `npm run dev` (:3000) — plus `npm run collab` (:1234),
+   **unless something is already listening**, in which case it reuses them. A
+   `dev:all` you started yourself is never killed, and an `npm run e2e:web`
+   left running skips the rebuild on every later `npm run e2e`. (Playwright
+   kills servers *it* started at run end, so back-to-back cold runs each pay
+   the build.)
 2. The `setup` project (`auth.setup.ts`) creates `e2e-admin@example.com`, signs
    in through the real form once, and writes the cookie jar to
    `e2e/.auth/admin.json` (gitignored). It then opens one throwaway doc's
@@ -35,8 +54,10 @@ Other entry points: `npm run e2e:ui` (watch mode with a time-travel debugger),
 4. The `cleanup` teardown project sweeps any leftover `e2e-*@example.com` users,
    `E2E …` posts/docs and orphaned commenters.
 
-The whole suite runs in roughly 50 seconds on 2 workers — see the worker-count
-note below before raising that.
+The suite proper runs in just under 3 minutes on 2 workers (148 tests — the
+"~50 seconds" this file used to claim predates most of them); a cold
+`npm run e2e` adds the `next build` on top. See the worker-count note below
+before raising the parallelism.
 
 ## Fixtures
 
@@ -59,7 +80,10 @@ post's own edit page, which only publishes.
 
 Plus helpers: `bodyEditor(page)`, `titleEditor(page)`, `statusLine(page)`,
 `visibleText(page, text)`, `deleteTextInBody(page, needle)`,
-`selectTextInBody(page, needle)`, `waitForDocCollabReady(page)`,
+`selectTextInBody(page, needle)`, `collapseToBodyStart(page)` (never
+`Ctrl+A`+`ArrowLeft` — its comment explains the keystroke race that wiped
+whole documents), `waitForDocCollabReady(page)`, `freshGoto(page, path)` (for
+asserting on direct-DB writes on an ISR page against the prod target),
 `signIn(page, email)`.
 
 Each fixture deletes what it created. Nothing is shared between tests except
@@ -137,22 +161,24 @@ the admin account.
   already-running dev server that server's console output isn't captured
   either — so a 500 tells you nothing. `gotoOk` puts the response body in the
   failure message, which is how the flake below was finally identified.
-- **Don't raise `workers` above 2 — and lower it on a weak machine.** The 2 is
-  a measurement, not a constant, and it was taken on the Windows desktop. Set
-  `E2E_WORKERS=1` in `.env` (never committed, so it stays per-machine) where
-  two is too many: a 2-physical-core fanless laptop shows the same class of
-  failure at two that the desktop showed at three. What identifies it as
-  contention rather than a regression is that the red tests are scattered
-  across unrelated specs, don't repeat between runs, and all pass under
-  `--workers=1`; a real regression fails the same test every time. Three overloads the dev server rather than
-  the machine, and the failures look like app bugs but aren't: a public page
-  500ing with next-auth's `useSession must be wrapped in a <SessionProvider />`
-  during SSR (the root layout *does* wrap `{children}`, and next-auth guards
-  that throw so it can't fire in production), and server actions arriving with
-  truncated bodies — `Unexpected end of JSON input`, which leaves the clicked
-  action silently not applied. Neither reproduces in isolation. Measured: ~1
-  failed run in 3.5 at three workers, 0 in 8 at two, for the same ~50s wall
-  clock, because the dev server is the bottleneck.
+- **Don't raise `workers` above the defaults (2 prod / 1 dev) without
+  remeasuring — and lower them on a weak machine** via `E2E_WORKERS` in `.env`
+  (never committed, so it stays per-machine). The 30-run matrix
+  (docs/playwright-flakiness.html) measured the *dev* server's request p50/p99
+  roughly doubling per added worker, for the same ~200s wall clock — fixed
+  costs dominate, so extra workers buy tail latency, not speed, and it's the
+  tail that trips 10s expect budgets. The tell for contention is still that
+  red tests scatter across unrelated specs and don't repeat between runs; but
+  note it's no longer a *sufficient* tell in reverse — a genuine keystroke
+  race (class 1 in that doc) failed at every worker count including 1. Two
+  historical attributions from this bullet's earlier text were corrected by
+  the matrix: the `useSession must be wrapped in a <SessionProvider />` 500s
+  are next-auth's dev-only invariant amplified by rebuild windows (impossible
+  in the prod build the full suite now targets), and the "server actions
+  arriving with truncated bodies" were never truncated bodies at all — the
+  `Unexpected end of JSON input` was Next failing to parse its own
+  prerender-manifest (vercel/next.js#96664), 500ing the request before the
+  action ran.
 - **Two users means two browser contexts**, which `secondUser()` handles. Don't
   reach for two tabs: they share a cookie jar, and the second sign-in silently
   re-authenticates the first (the same trap CLAUDE.md documents for the browser

@@ -13,7 +13,7 @@
 // The banner is also untested here — it's an env var (SITE_BANNER) plus a
 // gitignored file, not app state this suite's fixtures control either way.
 import type { Browser, Page } from "@playwright/test";
-import { test, expect, signIn } from "./fixtures";
+import { test, expect, freshGoto, signIn } from "./fixtures";
 import { createTestUser, deleteTestUser, getAvatarFacts, getContributorFields, uniqueEmail } from "./db";
 
 // A fresh browser context, not the shared `page`'s — the browser pane's
@@ -63,7 +63,10 @@ test("contributor sidebar lists an opted-in contributor and omits everyone else"
   });
 
   try {
-    await page.goto("/");
+    // freshGoto, not goto: these contributors were written straight to the DB,
+    // so on the prod target `/`'s ISR cache from an earlier test's visit would
+    // still be serving a render without them (fixtures.ts's freshGoto comment).
+    await freshGoto(page, "/");
     const card = cardFor(page, listed.slug);
     await expect(card.getByRole("link", { name: listed.name })).toBeVisible();
     await expect(card.getByRole("link", { name: "ORCID iD" })).toHaveAttribute(
@@ -87,7 +90,9 @@ test("contributor sidebar moves below the post list under 900px", async ({ page 
 
   try {
     await page.setViewportSize({ width: 500, height: 900 });
-    await page.goto("/");
+    // freshGoto for the same reason as the sidebar test above: the
+    // contributor exists only as a direct DB write.
+    await freshGoto(page, "/");
     const main = page.locator("main");
     const aside = page.locator("aside");
     await expect(aside.getByRole("link", { name: user.name })).toBeVisible();

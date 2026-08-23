@@ -39,8 +39,22 @@ export default function SessionRefresh() {
     // `update` writes the new cookie and the provider's own cache (so the
     // header re-renders); `router.refresh()` is what re-renders the server
     // components that read `auth()`. If the user is gone the callback returns
-    // null, the cookie is cleared, and the refreshed page redirects to /sign-in.
-    void update({}).then(() => router.refresh());
+    // null and the cookie is cleared — navigate to /sign-in explicitly rather
+    // than refreshing into the page's own server-side redirect: under
+    // production timing the refresh could race the cookie clearing and
+    // re-render a still-authenticated page, leaving a dead session parked on
+    // /dashboard (caught by e2e/session-refresh.spec.ts against the prod
+    // target). `update` resolves with the refreshed session, so null is
+    // exactly "this session just died"; this effect only runs from
+    // status === "authenticated", so it can't misfire for a visitor who was
+    // never signed in.
+    void update({}).then((session) => {
+      if (session === null) {
+        router.push("/sign-in");
+        return;
+      }
+      router.refresh();
+    });
   }, [status, update, router]);
 
   return null;
