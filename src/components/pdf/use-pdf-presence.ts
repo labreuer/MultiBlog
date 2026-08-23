@@ -270,7 +270,31 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
   );
 
   const publishSelection = useCallback(
-    (selection: { pageIndex: number; quads: Quad[] } | null) => publish({ selection }),
+    (selection: { pageIndex: number; quads: Quad[] } | null) => {
+      // Clearing an already-cleared selection is not a broadcast anyone needs,
+      // and it is by far the common case: the caller's trigger is
+      // `selectionchange` on `document` (PdfAnnotationSurface's capture
+      // effect), which fires for every caret move on the page — including one
+      // per keystroke in an annotation composer, itself a contenteditable.
+      // `setAwarenessField` has no such guard of its own: y-protocols bumps the
+      // awareness clock and fans the state out to every other reader whether or
+      // not the value changed, so without this a reader typing a paragraph
+      // sends the collab process a stream of identical nulls.
+      //
+      // Read off `localRef` rather than a ref of its own, so the "what did we
+      // last publish" answer has exactly one home — `publish` above is what
+      // writes it, and a second copy could disagree with it. Null before the
+      // connection exists, which correctly suppresses too: `publish` no-ops in
+      // that state anyway.
+      //
+      // Only the null case is deduplicated. Two *different* selections must
+      // both go out, and two identical non-null ones are already bounded by the
+      // caller's debounce — the viewport broadcaster above needs
+      // `viewportChangedEnough` precisely because its trigger is a raw scroll
+      // stream with no such settle step.
+      if (selection === null && localRef.current?.selection == null) return;
+      publish({ selection });
+    },
     [publish],
   );
 

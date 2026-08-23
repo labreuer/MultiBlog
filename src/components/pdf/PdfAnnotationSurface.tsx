@@ -273,6 +273,17 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       const pageNumber = Number(pageElement?.dataset.pageNumber);
       if (!pageElement || !Number.isInteger(pageNumber)) {
         setPopover(null);
+        // Clearing, not just returning: awareness is *sticky*, so a selection
+        // that isn't in the PDF still has to retract the one that was. The
+        // collapsed branch above cannot cover this — there is a real selection
+        // here, just not on a page — and reaching it is routine rather than
+        // exceptional, because selecting text inside a posted annotation is the
+        // gesture that anchors a reply to it (AnnotationNode renders bodies
+        // through AnnotationBodyReader for exactly that). Without this, a
+        // reader who highlights a passage and then goes to reply in the panel
+        // leaves that highlight burning on everyone else's view until some
+        // later click happens to collapse the selection.
+        presenceRef.current?.publishSelection(null);
         return;
       }
 
@@ -297,6 +308,12 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
       const target = captureTextTarget(page, range, PDFJS_VERSION);
       if (!target) {
         setPopover(null);
+        // Same rule as the page lookup above, for the rarer shape of the same
+        // thing: the selection is real but has no quads on this page (every
+        // rect zero-area, or the selection falling in the gap between two
+        // pages), so what was broadcast before is now wrong and has to be
+        // retracted rather than left standing.
+        presenceRef.current?.publishSelection(null);
         return;
       }
 
