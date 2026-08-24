@@ -290,7 +290,7 @@ than the reasoning itself.
     chromium-only suite cannot see this class at all, and `e2e/pdf-webkit-gaps.spec.ts`
     guards against regression without ever detecting that a patch has stopped being needed.
     Which patches stand, the measured engine table, and the worker-realm import-order trap:
-    docs/PDF.md §10, PLAN.md §19a.
+    docs/PDF.md §10 (PLAN.md §19a records only the baseline, as a decision).
 - **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
   file's `sha256` is its identity, so the bytes an anchor was measured against are by
   construction the bytes every later reader sees — no tracking plugin, no per-transaction

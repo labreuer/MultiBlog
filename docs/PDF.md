@@ -502,7 +502,17 @@ long-press hands the touch to WebKit's selection gesture recognizer, which fires
 `pointercancel`, and the selection handles are native views above the page that emit no
 pointer events at all. Anything reading `window.getSelection()` must settle on
 `selectionchange` (debounced) as well, or it will work on every desktop and silently do
-nothing on a tablet. See `PdfAnnotationSurface`'s trigger comment.
+nothing on a tablet.
+
+Having two triggers instead of one has a consequence worth stating before you write the
+handler: **overlapping async runs become reachable**, which a lone `pointerup` never made
+them. Dragging an iOS selection handle emits a `selectionchange` per pixel while a capture
+is still in flight, so the handler needs a generation counter to drop superseded results,
+and must `cloneRange()` — `getRangeAt` returns the *live* range, which otherwise mutates
+under the await. Anything awaited in there also needs its own `catch`: behind the capture
+is a worker round trip and a parse of an untrusted PDF, and an unhandled rejection presents
+as a selection captured and silently dropped, indistinguishable from the trigger never
+firing. See `PdfAnnotationSurface`'s trigger comment for the implemented form.
 
 ---
 
@@ -584,3 +594,14 @@ or reorder across characters, which is incompatible with the exact offset map §
 requires. Per-character keeps the map exact and the function deterministic — which is what §3
 actually rests on — and both sides that matter (upload extraction and selection capture) call
 the same function, so they agree by construction. See `src/lib/pdf-text.ts`.
+
+**§9's wire format is a subset of what ships.** §9 describes a `ViewportState` carrying a
+viewport and nothing else. The implemented `PdfPresence` (`src/lib/pdf-presence.ts`) adds
+three fields §9 never anticipated, because presence here does more than follow a scroll
+position: `user` (id, name, and the author-palette colour, so a remote cursor is
+attributable), `selection` (page index plus quads, so an in-progress selection is visible to
+other readers before it becomes an annotation), and the `leading`/`following` pair that
+§9's *Follow semantics* describes in prose without giving them a place on the wire. Every
+§9 *rule* still holds and is still where the rules live: never broadcast `scrollTop`,
+`scrollLeft`, a pixel offset or a raw scale; all three echo guards; ~10 Hz outbound with no
+queue. Only the shape is wider.

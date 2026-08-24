@@ -8,7 +8,8 @@ import { ADMIN_EMAIL, createTestFile, deleteTestFile, type TestFile } from "./db
 //
 // This covered three gaps once. Two of them — the `Iterator` global and the
 // TC39 Map upsert methods — were version lag, and left with their polyfills
-// when the baseline moved to Safari 26 / iPadOS 18.4+ (PLAN.md §19a).
+// when the baseline moved to Safari 26 / iPadOS 18.4+ (PLAN.md §19a for the
+// baseline itself; docs/PDF.md §10 for which gaps were measured, and when).
 // `ReadableStream`'s async iteration is the one WebKit has never implemented
 // at all, so it is the one that stays. `scripts/probe-engine.ts` is how that
 // distinction is drawn on evidence; run it before adding or removing a case

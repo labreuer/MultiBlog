@@ -6353,15 +6353,15 @@ own* normaliser changes; the quads path is always available and always correct.
 
 #### Layer — `src/components/pdf/anno-layer.ts`
 
-docs/PDF.md §6: a `.annoLayer` sibling built on `textlayerrendered`, `position:absolute;
-inset:0; pointer-events:none`, z-index below `.textLayer`, torn down when PDF.js evicts the
-page. **Never touch `.textLayer`/`.annotationLayer`** (invariant 4). Rects re-derived from
-quads on every `pagerendered`/`scalechanging`/`rotationchanging` — never cached across a
-scale change. Imperative, not React-per-page: PDF.js virtualises and rebuilds these nodes.
+Carries out docs/PDF.md §6 (the `.annoLayer` sibling, its teardown on page eviction, and
+invariant 4's **never touch `.textLayer`/`.annotationLayer`**) and §7 (delegated click
+handling with the ~4px travel suppression). Those rules are stated there and not repeated
+here — this phase is where they get built, and §6's "re-derive rects from quads on every
+render, never cache across a scale change" is the one most easily lost in a refactor.
 
-Click handling per §7: one delegated listener on the viewer container,
-`elementsFromPoint` filtered on `data-anno-id`, suppressed when pointer travel between
-`pointerdown` and `click` exceeds ~4px.
+Imperative rather than React-per-page, which follows from §6's eviction rule rather than
+being a separate choice: PDF.js virtualises and rebuilds these nodes underneath any
+component that thinks it owns them.
 
 #### Server side
 
@@ -6464,6 +6464,8 @@ docs/PDF.md invariant 5 taken literally. Additions:
 
 #### Wire format (`src/lib/pdf-presence.ts`)
 
+Wider than docs/PDF.md §9's `ViewportState`, which carries a viewport and nothing else:
+
 ```ts
 type PdfPresence = {
   user: { id, name, color },                          // author palette
@@ -6474,12 +6476,11 @@ type PdfPresence = {
 };
 ```
 
-Never `scrollTop`/`scrollLeft`/raw scale (§9). `updateviewarea` is rAF-coalesced before
-anything reads it and throttled to ~10 Hz outbound; awareness coalesces, so nothing queues.
-
-Echo suppression uses all three §9 guards: an `applyingRemote` flag cleared on the rAF after
-the resulting `updateviewarea`; a ~2%-of-viewport-height tolerance compare; and a timestamp
-guard dropping inbound states older than the last applied.
+`user` makes a remote cursor attributable, `selection` puts an in-progress selection on the
+wire before it becomes an annotation, and `leading`/`following` give §9's follow semantics a
+place to live. **The §9 rules are unchanged and still stated there** — never `scrollTop`,
+`scrollLeft`, a pixel offset or a raw scale; all three echo guards; ~10 Hz outbound with no
+queue, since awareness coalesces. Recorded as a divergence in docs/PDF.md §13.
 
 #### The three affordances
 
@@ -6530,14 +6531,18 @@ visible on other users' views" falls out of the layer only existing for rendered
 
 ---
 
-### Deviations from docs/PDF.md, and deferrals
+### Deviations from this plan, and deferrals
 
-- **§10 names `PDFViewerApplication`; this uses `PDFViewer`.** `PDFViewerApplication` is the
-  bundled `web/viewer.html` application, not an importable library entry. `PDFViewer` +
-  `EventBus` + `PDFLinkService` is the library-level equivalent and exposes every internal
-  §5/§8 relies on. Same version-pinning discipline applies.
-- **§9 says annotations → ydoc.** Not taken, for the five reasons under *Decisions* above.
-  §9's viewport half is taken exactly as written.
+**Where the *implementation* departs from docs/PDF.md, look there, not here:
+[docs/PDF.md](docs/PDF.md) §13 is that list** — `PDFViewerApplication` vs `PDFViewer`,
+§9's annotations-as-ydoc not taken, and §4 step 2's fuzzy match and §3's lazy re-anchor both
+deferred. It carries two further records that never had an entry here, which is the point:
+the two copies had already drifted, and one of them is the file a reader of docs/PDF.md
+will actually reach for.
+
+What follows is the other kind — where the shipped feature departs from the phase
+descriptions *above*, which is this document's own business.
+
 - **The right strip's viewport thumb ships disabled** (Phase 4 item 3a above), behind
   `SHOW_VIEWPORT_THUMB` in `PdfRails.tsx` rather than deleted. The scrollbar sits about ten
   pixels from the strip and says the same thing; two grey bars that close read as a
@@ -6558,12 +6563,6 @@ visible on other users' views" falls out of the layer only existing for rendered
   Chromium. The engine facts, the measurements, what this costs Firefox and Safari, and why
   no e2e spec can see any of it: **STYLE.md, "Custom scrollbars, and anything positioned
   beside one"**. Why it is done *here*: `PdfViewer.module.css` and `PdfRails.tsx`.
-- **§4 step 2 (fuzzy quote match) is deferred.** It only matters after a `textVersion` bump,
-  and §4 warns explicitly against running it synchronously (Hypothesis's ten-second stall).
-  Shipping it properly means a worker; steps 1, 3 and 4 make the viewer correct without it,
-  since quads always resolve.
-- **§3's lazy re-anchor on `textVersion` change is deferred** with it — nothing bumps the
-  version until the normaliser changes.
 - **The `Files` nav link is placed after `Users`/`Site Settings` in the same left group**,
   which for a non-ADMIN means it is the only entry there. The literal reading ("to the right
   of Users") can't hold for AUTHOR/EDITOR, who never see `Users`.
@@ -6593,57 +6592,21 @@ visible on other users' views" falls out of the layer only existing for rendered
 
 ---
 
-### 19a. The engine assumptions under the PDF surface
+### 19a. The engine baseline under the PDF surface
 
-**Baseline: Safari 26 / iPadOS 18.4+.** Setting one is a judgement about *engines*, not
-hardware: Apple ships current Safari to macOS versions years past their last major release, so
-old hardware caps macOS and not Safari, and a stale WebKit is nearly always an un-updated one
-rather than an unsupportable one.
+**Baseline: Safari 26 / iPadOS 18.4+.** Recorded here because it is a decision rather than a
+measurement: it is a judgement about *engines*, not hardware. Apple ships current Safari to
+macOS versions years past their last major release, so old hardware caps macOS and not
+Safari, and a stale WebKit is nearly always an un-updated one rather than an unsupportable
+one. That is what makes a recent baseline defensible rather than exclusionary.
 
-Two independent WebKit-shaped problems sit under `/pdf/[slug]`, and neither is visible to
-`npx tsc`, `npx eslint` or the e2e suite — those run one engine, and it is the engine that has
-neither.
-
-**1. A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
-`pointerup` for one: a long-press hands the touch to WebKit's selection gesture recognizer,
-which emits `pointercancel` instead, and the selection handles are native views above the page
-emitting no pointer events at all. Keyboard selection (shift+arrows) delivers none on any
-platform. `PdfAnnotationSurface` therefore debounces `selectionchange` and lets `pointerup`
-short-circuit it, so a mouse drag still costs the single capture it always did — the
-conclusion §13's `AnnotationNode.handleBodySelect` reaches for the doc side. Having two
-triggers has two consequences:
-
-- **`capturePageFor` is awaited inside a try/catch.** Behind it is a worker round trip and a
-  parse of an untrusted PDF; an unhandled rejection there takes the capture with it and
-  presents as a selection captured and silently dropped — indistinguishable from the trigger
-  never firing.
-- **Overlapping async runs are reachable**, which a lone `pointerup` never made them: dragging
-  an iOS selection handle emits a `selectionchange` per pixel while a capture is still in
-  flight. Hence a generation counter, and a `cloneRange()` — `getRangeAt` returns the *live*
-  range, which otherwise mutates under the await.
-
-**2. pdfjs assumes built-ins WebKit does not have.** Exactly one needs patching at this
-baseline: `ReadableStream.prototype[Symbol.asyncIterator]`, which WebKit has never implemented
-and Safari 26.6.1 still lacks in both realms. `getTextContent` iterates its stream with
-`for await`, so without it **every text extraction throws** — on this surface, a selection that
-dies before it can be published or become an annotation.
-`src/lib/pdfjs-webkit-polyfills.ts` holds the patch as a source *string* so it can reach the
-worker realm as well as the main thread, and `ensurePdfWorker` builds the worker script as two
-static imports — the polyfill Blob module, then the vendor worker — because static imports are
-hoisted, so inlining the source above the import runs the vendor script first. docs/PDF.md
-§10's *Engine coupling* carries the measured table and the full account.
-
-**Keeping the claim honest.** A polyfill is a claim about an engine, and claims expire.
-`e2e/pdf-webkit-gaps.spec.ts` is the regression guard — it deletes the built-in in chromium and
-asserts a selection still anchors — and by construction it cannot notice expiry: it passes
-whether or not any real engine still lacks the built-in, and `page.addInitScript` does not
-reach workers, so it covers the main-thread half only. `scripts/probe-engine.ts` is the other
-half, feature-probing a real browser on the main thread *and* inside a module worker and
-printing both columns. **So bumping `pdfjs-dist` means running the probe and opening a PDF in a
-real Safari**, not only the §10 smoke test: pinning protects the API you call and says nothing
-about the runtime pdfjs assumes.
-
----
+Everything that follows *from* the baseline — which built-ins WebKit lacks, which patches
+stand and which were deleted when it moved, the measured table, the worker-realm
+import-order trap, why a selection must settle on `selectionchange` rather than
+`pointerup`, and why `e2e/pdf-webkit-gaps.spec.ts` cannot notice its own expiry — is in
+**[docs/PDF.md](docs/PDF.md) §10, *Engine coupling***, and only there. It is the file
+someone opens when the viewer misbehaves; this one is the file someone opens to ask why the
+feature is shaped this way.
 
 ### Verification
 
