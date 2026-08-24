@@ -9,6 +9,7 @@ import AnnotationBody from "./AnnotationBody";
 import { getCollabUrl } from "@/lib/collab-url";
 import { useDocPresence } from "./doc-presence-context";
 import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
+import type { AnnotationTarget } from "@/lib/annotation-container";
 import styles from "./AnnotationComposer.module.css";
 
 type Props = {
@@ -36,6 +37,16 @@ type Props = {
   // trusting. A null result (the anchored text is gone) posts document-level
   // rather than falling back to the stale offsets.
   resolveAnchor?: () => { from: number; to: number } | null;
+  // PLAN.md §19 — a PDF anchor (docs/PDF.md §2's Target), present only from the
+  // /pdf/[slug] composer. Passed straight through to postAnnotation, which
+  // validates it and derives `quotedText` from its own stored page text rather
+  // than believing anything in here.
+  pdfTarget?: unknown;
+  // PLAN.md §19 — which surface this composer sits on. Decides its wording and
+  // which outcomes it offers, and nothing else: the submit path is the same two
+  // server actions either way. Defaults to "doc" so every doc call site is
+  // untouched.
+  container?: AnnotationTarget["kind"];
   onPosted: () => void;
   onCancel: () => void;
   // PLAN.md §13g — present only from the inline popover, absent from the
@@ -53,6 +64,24 @@ type Props = {
 // instead of letting the UI express a combination that can't exist.
 type Visibility = "private" | "post" | "raise";
 
+// /pdf/[slug] offers two of the three, under the file surface's own words:
+// PRIVATE/SHARED is what a file's visibility is called everywhere else in the
+// app (DocVisibility, /files' Visibility column), so an annotation on one reads
+// in the same vocabulary rather than a second one meaning the same thing.
+// "Post & notify" is deliberately absent there — the `raise` path itself is
+// untouched and still reachable from a doc.
+const VISIBILITY_OPTIONS: Record<AnnotationTarget["kind"], { value: Visibility; label: string }[]> = {
+  doc: [
+    { value: "private", label: "Keep private" },
+    { value: "post", label: "Post" },
+    { value: "raise", label: "Post & notify authors" },
+  ],
+  file: [
+    { value: "private", label: "PRIVATE" },
+    { value: "post", label: "SHARED" },
+  ],
+};
+
 // PLAN.md §13j Phase 2/4 — the provider-connection lifecycle around
 // AnnotationBody, mirroring DocEditor.tsx's own connect-on-mount/
 // destroy-on-unmount effect but scoped to one annotation's ydoc rather than
@@ -69,6 +98,8 @@ export default function LiveAnnotationComposer({
   atVersion = null,
   ydocUpdateId,
   resolveAnchor,
+  pdfTarget,
+  container = "doc",
   onPosted,
   onCancel,
   onMoveToBottom,
@@ -174,6 +205,7 @@ export default function LiveAnnotationComposer({
             quotedText,
             raise: visibility === "raise",
             ydocUpdateId: ydocUpdateId ?? undefined,
+            pdfTarget,
           });
     setPending(false);
     if (result.error) {
@@ -196,15 +228,23 @@ export default function LiveAnnotationComposer({
     return <p className={styles.status}>{error ?? "Connecting…"}</p>;
   }
 
-  const submitLabel = pending
-    ? visibility === "private"
-      ? "Saving..."
-      : "Posting..."
-    : visibility === "private"
-      ? "Save privately"
-      : visibility === "raise"
-        ? "Post & notify authors"
-        : "Post annotation";
+  // One verb on /pdf/[slug], because the select beside it already says what
+  // the outcome is; the doc side keeps its three labels, which are the only
+  // place that surface names the outcome at all.
+  const submitLabel =
+    container === "file"
+      ? pending
+        ? "Saving..."
+        : "Save"
+      : pending
+        ? visibility === "private"
+          ? "Saving..."
+          : "Posting..."
+        : visibility === "private"
+          ? "Save privately"
+          : visibility === "raise"
+            ? "Post & notify authors"
+            : "Post annotation";
 
   return (
     <div>
@@ -225,9 +265,11 @@ export default function LiveAnnotationComposer({
           className={styles.visibilitySelect}
           aria-label="Annotation visibility"
         >
-          <option value="private">Keep private</option>
-          <option value="post">Post</option>
-          <option value="raise">Post &amp; notify authors</option>
+          {VISIBILITY_OPTIONS[container].map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
         <button
           type="button"

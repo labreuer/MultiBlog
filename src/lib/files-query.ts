@@ -22,6 +22,9 @@ import {
 //                only `_count`. Named for ownership rather than authorship
 //                because nobody listed on a file wrote it (schema.prisma's
 //                FileOwner); /docs' and /posts' equivalent stays `authors`.
+//   annotations  `file_metrics.annotation_count` — a *filtered* count
+//                (non-deleted, non-DRAFT), which `_count` has no way to
+//                express in an orderBy.
 //
 // Size and Pages are plain stored columns and need neither a view nor a
 // trigger, which is the difference from /docs' Length: a doc's length is a
@@ -35,6 +38,7 @@ export type FilesSortKey =
   | "visibility"
   | "pages"
   | "size"
+  | "annotations"
   | "created"
   | "slug"
   | "updatedAt"
@@ -49,6 +53,7 @@ const SORT_KEYS: readonly FilesSortKey[] = [
   "visibility",
   "pages",
   "size",
+  "annotations",
   "created",
   "slug",
   "updatedAt",

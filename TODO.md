@@ -303,6 +303,8 @@ own editor comes first.
 weighing against it — it fits this case better than durable anchoring does, and would make an
 in-progress selection visible to other people on the page, which no option here does today.
 
+---
+
 ## The e2e port configuration ignores this checkout's own `.env`
 
 **Status:** open, found 2026-08-23. Worked around by running on the default ports with the

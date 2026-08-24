@@ -681,9 +681,26 @@ model DocSlugHistory {
 // old plain-text `body` {text} column is gone: every row was backfilled onto
 // proseJson/bodyText (scripts/backfill-annotation-ydocs.ts, since deleted)
 // before this column was dropped.
+// PLAN.md §19 — **an annotation hangs off a doc or off an uploaded file, never
+// both and never neither.** Exactly one of docId/fileId is non-null, enforced
+// by a hand-written CHECK in add_file_model's migration (Prisma has no CHECK
+// DSL — same technique DocLink's mark_id/mark pair uses below). docId was NOT
+// NULL until PDF annotations arrived; loosening it is a plain DROP NOT NULL
+// with no backfill, since every pre-existing row keeps the doc it had.
+//
+// The two containers are genuinely different anchoring problems, not two
+// spellings of one. A doc moves under its annotations, which is what the whole
+// resolve-and-repair apparatus above exists for; a file's bytes cannot change
+// (its sha256 is its identity), so a PDF anchor is measured once and is correct
+// forever. That is why pdfTarget is a single opaque blob and needs none of
+// anchorFrom/anchorTo's tracking machinery.
 model Annotation {
   id                 String           @id @default(cuid())
-  docId              String           @map("doc_id")
+  docId              String?          @map("doc_id")
+  // PLAN.md §19 — the file counterpart of docId. Cascades for the same reason
+  // docId does: an annotation on a deleted container is unreachable, not
+  // merely orphaned.
+  fileId             String?          @map("file_id")
   parentAnnotationId String?          @map("parent_annotation_id")
   userId             String           @map("user_id")
   proseJson          Json?            @map("prose_json")
@@ -754,14 +771,33 @@ model Annotation {
   // column existed, and for one whose fallback lookup came back empty (a
   // doc with no update log yet).
   ydocUpdateId       BigInt?          @map("ydoc_update_id")
+  // PLAN.md §19 / docs/PDF.md §2 — the whole PDF anchor as one JSON blob:
+  // { pageIndex, quads, quote: {exact,prefix,suffix}, position: {start,end},
+  // textVersion }. Non-null exactly for a *root* annotation on a file; a reply
+  // to one anchors into its parent's body with anchorFrom/anchorTo like any
+  // other reply (§13p), so this stays null there.
+  //
+  // One opaque column rather than seven typed ones, for the reason docs/PDF.md
+  // invariant 3 gives: the stored record must be renderer-neutral, so swapping
+  // PDF.js for another engine is a rendering change and not a data migration.
+  // Nothing in Postgres ever sorts or filters on a field inside it — the same
+  // trade DocLink.mark already makes for the same kind of value.
+  //
+  // quote.exact is *also* written to quotedText above, which is what lets
+  // /annotations render its Quote column with no PDF branch at all. That is a
+  // deliberate duplication of one string, not a second source of truth: the
+  // column is the display copy, this blob is the anchor.
+  pdfTarget          Json?            @map("pdf_target")
 
-  doc       Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
+  doc       Doc?         @relation(fields: [docId], references: [id], onDelete: Cascade)
+  file      StoredFile?  @relation(fields: [fileId], references: [id], onDelete: Cascade)
   parent    Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
   replies   Annotation[] @relation("AnnotationReplies")
   user      User         @relation("AnnotationAuthor", fields: [userId], references: [id])
   deletedBy User?        @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
 
   @@index([docId])
+  @@index([fileId])
   @@map("annotation")
 }
 
@@ -887,6 +923,7 @@ model StoredFile {
   owners      FileOwner[]
   slugHistory FileSlugHistory[]
   pageTexts   FilePageText[]
+  annotations Annotation[]
   metrics     FileMetrics?
   updatedBy   User?             @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
   deletedBy   User?             @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
@@ -895,7 +932,7 @@ model StoredFile {
   @@map("file")
 }
 
-// /files' Owner(s) column, as a view — the same role
+// /files' Owner(s) and Annotations columns, as a view — the same role
 // DocMetrics plays for /docs, and built the same way for the same reason:
 // by grouping file_owner, never by selecting FROM file. A view that reads
 // its own base table gets scanned twice on every sort through it, because
@@ -903,12 +940,15 @@ model StoredFile {
 // self-join elimination only collapses INNER joins (add_doc_metrics_view,
 // PLAN.md §16l).
 //
-// Size and Pages are plain stored columns on file and need neither this view
-// nor a trigger: unlike Doc's Length they are known at upload time and never
-// recomputed.
+// annotationCount is here rather than as a Prisma `_count` because it is a
+// *filtered* count — soft-deleted annotations don't count — and `_count` has
+// no way to express that in an orderBy. Size and Pages are plain stored
+// columns on file and need neither this view nor a trigger: unlike Doc's
+// Length they are known at upload time and never recomputed.
 view FileMetrics {
   fileId          String  @unique @map("file_id")
   owners          String? @map("owners")
+  annotationCount Int     @map("annotation_count")
 
   file StoredFile @relation(fields: [fileId], references: [id])
 

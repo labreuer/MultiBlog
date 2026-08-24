@@ -24,8 +24,8 @@
 // the point; a fixture that skipped either step would test a path production
 // never takes.
 //
-// `delete` removes the row (and cascades its owners, slug history and page
-// text) and then removes the stored bytes **only if no other file
+// `delete` removes the row (and cascades its owners, slug history, page text
+// and annotations) and then removes the stored bytes **only if no other file
 // still references them** — content addressing means two files can legitimately
 // share one blob, and sweeping it would break the other one's downloads.
 
@@ -189,6 +189,7 @@ async function list(): Promise<void> {
       byteSize: true,
       deletedAt: true,
       owners: { select: { user: { select: { email: true } } } },
+      _count: { select: { annotations: true } },
     },
   });
   if (files.length === 0) {
@@ -200,7 +201,8 @@ async function list(): Promise<void> {
     const flags = [file.visibility, file.deletedAt ? "DELETED" : null].filter(Boolean).join(" ");
     console.log(
       `${file.id}  ${file.slug}\n` +
-        `    "${file.title}"  ${flags}  ${file.pageCount ?? "?"}pp  ${file.byteSize}B\n` +
+        `    "${file.title}"  ${flags}  ${file.pageCount ?? "?"}pp  ${file.byteSize}B  ` +
+        `${file._count.annotations} annotation(s)\n` +
         `    owners: ${owners}`,
     );
   }

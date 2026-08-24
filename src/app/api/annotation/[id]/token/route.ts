@@ -19,7 +19,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const annotation = await prisma.annotation.findUnique({
     where: { id },
-    select: { userId: true, status: true, doc: { select: { id: true, visibility: true } } },
+    // Both containers selected, exactly one of which is non-null (PLAN.md §19)
+    // — canUserAccessAnnotationYdoc asks whichever it has.
+    select: {
+      userId: true,
+      status: true,
+      doc: { select: { id: true, visibility: true } },
+      file: { select: { id: true, visibility: true } },
+    },
   });
   if (!annotation) {
     return NextResponse.json({ error: "Annotation not found" }, { status: 404 });

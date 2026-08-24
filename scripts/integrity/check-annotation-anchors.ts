@@ -63,6 +63,7 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
 import { materializeYdocAt } from "../../src/lib/ydoc-snapshot";
 import { ydocIdForDoc, ydocIdForAnnotation } from "../../src/lib/ydoc-names";
+import { requireDocAnnotationId } from "../../src/lib/annotation-container";
 import {
   annotationContentExtensions,
   docContentExtensions,
@@ -120,6 +121,14 @@ async function main() {
 
   const annotations = await prisma.annotation.findMany({
     where: {
+      // PLAN.md §19 — doc annotations only, and permanently so rather than
+      // pending a later widening. Every check below replays a ydoc: a file has
+      // none (its bytes are immutable, so there is nothing to replay *to*), and
+      // a PDF anchor is verified against stored page text instead. That is a
+      // different question with a different failure mode, so it gets its own
+      // sibling check (scripts/integrity/check-pdf-anchors.ts) rather than a
+      // branch in here.
+      docId: { not: null },
       ...(docId ? { docId } : {}),
       ...(annotationId ? { id: annotationId } : {}),
     },
@@ -127,6 +136,7 @@ async function main() {
     select: {
       id: true,
       docId: true,
+      fileId: true,
       parentAnnotationId: true,
       anchorFrom: true,
       anchorTo: true,
@@ -155,7 +165,8 @@ async function main() {
 
   for (const a of annotations) {
     const anchored = a.anchorFrom !== null && a.anchorTo !== null && a.quotedText !== "";
-    const marked = (await markedIn(a.docId)).has(a.id);
+    const annotationDocId = requireDocAnnotationId(a, "check-annotation-anchors");
+    const marked = (await markedIn(annotationDocId)).has(a.id);
 
     if (anchored && marked) {
       report("error", a.id, "mechanism-xor", "has both stored offsets and a mark in the doc's ydoc");
@@ -166,7 +177,7 @@ async function main() {
     // question.
     if (!anchored && marked && a.ydocUpdateId !== null) {
       checked++;
-      const node = await nodeAt(ydocIdForDoc(a.docId), a.ydocUpdateId, false);
+      const node = await nodeAt(ydocIdForDoc(annotationDocId), a.ydocUpdateId, false);
       if (!node) {
         report("error", a.id, "mark-at-stamp", `couldn't replay the doc to ${a.ydocUpdateId}`);
       } else {
@@ -202,7 +213,7 @@ async function main() {
     // into the doc. Which ydoc that is decides both the replay target and the
     // schema it has to be decoded with.
     const isReply = a.parentAnnotationId !== null;
-    const targetYdocId = isReply ? ydocIdForAnnotation(a.parentAnnotationId!) : ydocIdForDoc(a.docId);
+    const targetYdocId = isReply ? ydocIdForAnnotation(a.parentAnnotationId!) : ydocIdForDoc(annotationDocId);
 
     const stamp = await prisma.ydocUpdate.findUnique({
       where: { id: a.ydocUpdateId },

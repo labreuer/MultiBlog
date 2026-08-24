@@ -97,7 +97,7 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
             context={null}
             color={entry.color}
           />
-          <AnnotationNode annotation={entry.root} docId={docId} />
+          <AnnotationNode annotation={entry.root} target={{ kind: "doc", id: docId }} />
         </div>
       ))}
     </div>

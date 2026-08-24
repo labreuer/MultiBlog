@@ -45,7 +45,7 @@ export default async function AnnotationSection({ docId, threads }: { docId: str
       />
       <h2 className={styles.heading}>Annotations</h2>
       <AnnotationPresenceIndicator />
-      <NewAnnotationComposer docId={docId} />
+      <NewAnnotationComposer target={{ kind: "doc", id: docId }} />
       <OwnDraftsList drafts={ownDrafts} />
 
       {threads.length === 0 ? (

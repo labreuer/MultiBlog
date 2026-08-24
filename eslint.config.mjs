@@ -15,6 +15,11 @@ const eslintConfig = defineConfig([
     // Playwright's own output.
     "playwright-report/**",
     "test-results/**",
+    // Vendored pdfjs runtime assets (scripts/copy-pdfjs-assets.ts, PLAN.md
+    // §19). Gitignored build output copied verbatim from a pinned dependency,
+    // and its wasm fallbacks are minified JS — linting them reports ~160
+    // problems in code that is not ours and that we must not edit.
+    "public/pdfjs/**",
   ]),
   {
     // Playwright signals "this fixture depends on nothing" with an empty

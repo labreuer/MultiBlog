@@ -42,6 +42,13 @@ function buildOrderBy(sort: SortColumn<FilesSortKey>[]): Prisma.StoredFileOrderB
       case "owners":
         // Through the file_metrics view — the same string_agg the cell shows.
         return { metrics: { owners: { sort: dir, nulls: "last" } } };
+      case "annotations":
+        // Also the view: a filtered count, which Prisma's `_count` can't
+        // express. No `nulls` handling, unlike owners beside it — the view
+        // COALESCEs the count to 0, so the column is declared non-null and
+        // Prisma rejects the {sort, nulls} form for it. A file with no view row
+        // at all still sorts as a NULL *relation*, which Prisma puts last.
+        return { metrics: { annotationCount: dir } };
       case "visibility":
         return { visibility: dir };
       case "pages":
@@ -131,14 +138,13 @@ export default async function FilesPage({
         visibility: true,
         pageCount: true,
         byteSize: true,
-        sha256: true,
         createdAt: true,
         updatedAt: true,
         deletedByUserId: true,
         deletedAt: true,
         // Read from the same view that sorts them, so the displayed and sorted
         // expressions can't drift (§16e).
-        metrics: { select: { owners: true } },
+        metrics: { select: { owners: true, annotationCount: true } },
         // Ids only: canManage below is a membership test, not a display value.
         owners: { select: { userId: true } },
         updatedBy: { select: { name: true, email: true } },
@@ -157,7 +163,8 @@ export default async function FilesPage({
     visibility: file.visibility,
     pageCount: file.pageCount,
     byteSize: file.byteSize,
-    sha256: file.sha256,
+    // No view row at all means no owners and no annotations, so zero.
+    annotationCount: file.metrics?.annotationCount ?? 0,
     createdAt: file.createdAt,
     updatedAt: file.updatedAt,
     updatedByName: file.updatedBy ? (file.updatedBy.name ?? file.updatedBy.email) : "",

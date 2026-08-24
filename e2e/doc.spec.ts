@@ -31,6 +31,7 @@ import {
 import {
   countDocYdocUpdates,
   getDocState,
+  getDocAuthorEmails,
   getAnnotationStates,
   markPresentAtStamp,
   addTestDocAuthor,
@@ -153,6 +154,120 @@ test("a reader's already-open tab sees an author's edit with no reload", async (
   // No readerPage.reload() anywhere above or below — DocReadingBody's read-only
   // Hocuspocus tap is what has to deliver this.
   await expect(readerPage.getByText(addition.trim())).toBeVisible({ timeout: 15_000 });
+});
+
+// Regression coverage for a layout bug that shipped with no test at all:
+// opening DocSettingsPanel's <details> (a native, JS-untouched toggle) grows
+// content below the editor, and .editorFrame is supposed to shrink to make
+// room (DocEditor.module.css's flex-grow chain, STYLE.md's flex-grow trap).
+// On Safari specifically, the outer border resized but the scrollable
+// [data-editor-scroll] child didn't — the caret and click hit-testing stayed
+// at the old, taller size, spilling over the now-shorter border into the
+// Authors checkboxes below. sharedDoc rather than draftDoc: the admin
+// unchecking themself as author (below) must not cost them edit access
+// mid-test, and only a SHARED doc's "any ADMIN/EDITOR" bypass guarantees
+// that (docs/PERMISSIONS.md — a PRIVATE doc has no such bypass).
+test("opening Settings shrinks the editor without stealing clicks from it or the author checkboxes", async ({
+  page,
+  sharedDoc,
+  secondUser,
+}) => {
+  // Guarantees a second eligible-but-not-yet-author row exists regardless of
+  // whatever else is in this database. Identified by name below rather than
+  // assumed to land at checkbox index 1 — eligibleUsers (the edit page's own
+  // query) is every ADMIN/EDITOR/AUTHOR in the whole database sorted by
+  // name, so on a shared dev DB a real account could easily sort ahead of
+  // this one. Clicking whatever's actually at index 1 would risk making a
+  // real person a co-author of a doc this test then deletes.
+  const { user: coAuthorCandidate } = await secondUser({ role: "AUTHOR" });
+
+  // Tall enough that .editorContent's own 300px floor (EditorChrome.module.css)
+  // is never the constraint — that floor is a *documented*, cross-browser
+  // "the page scrolls instead of shrinking further" overflow, not the bug
+  // under test, and at a short viewport it looks identical from the outside.
+  // This test is about whether the shrink that *should* fit actually reaches
+  // the editor's own hit-testing, not about what happens once there's
+  // genuinely no room.
+  await page.setViewportSize({ width: 1280, height: 1400 });
+
+  await page.goto(`/doc/${sharedDoc.id}/edit`);
+  await waitForDocCollabReady(page);
+
+  const scrollFrame = page.locator("[data-editor-scroll]");
+  const beforeBox = await scrollFrame.boundingBox();
+  expect(beforeBox).not.toBeNull();
+
+  await page.getByText("Settings", { exact: true }).click();
+  const authors = page.getByRole("group", { name: "Authors" });
+  await expect(authors).toBeVisible();
+
+  const afterBox = await scrollFrame.boundingBox();
+  expect(afterBox).not.toBeNull();
+  // The bug's exact shape: the box report itself (not just the pixel value)
+  // has to have actually shrunk...
+  expect(afterBox!.height).toBeLessThan(beforeBox!.height);
+  // ...and not merely on paper — its bottom edge must not still reach past
+  // where the Authors panel now starts, which is what let the editor's
+  // caret/hit-testing intercept clicks meant for the checkboxes below it.
+  const authorsBox = await authors.boundingBox();
+  expect(authorsBox).not.toBeNull();
+  expect(afterBox!.y + afterBox!.height).toBeLessThanOrEqual(authorsBox!.y + 1);
+
+  // The editor itself is still genuinely interactive at its new bounds, not
+  // just correctly sized on paper — a click has to land where it visually
+  // is, and typing has to actually reach the document.
+  const addition = "Typed after Settings opened.";
+  await bodyEditor(page).click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(addition);
+  await expect(bodyEditor(page)).toContainText(addition);
+
+  // The first author checkbox (admin, the doc's sole author so far — always
+  // the first row, since DocSettingsPanel puts current authors ahead of the
+  // rest) and a second one, reachable and functional — exactly the region
+  // the stale hit-testing intercepted.
+  const checkboxes = authors.getByRole("checkbox");
+  const first = checkboxes.nth(0);
+  const second = authors.locator("label", { hasText: coAuthorCandidate.name! }).getByRole("checkbox");
+  await expect(first).toBeChecked(); // the doc's sole author, admin, so far
+  await expect(second).not.toBeChecked();
+
+  await second.click();
+  await expect(second).toBeChecked();
+
+  // Safe only because sharedDoc is SHARED — admin keeps edit access after
+  // unchecking themself, per the fixture comment above.
+  await first.click();
+  await expect(first).not.toBeChecked();
+  await first.click();
+  await expect(first).toBeChecked();
+  // Settle on server truth: toBeChecked passes on the checkbox's *optimistic*
+  // flip (handleAuthorToggle sets state before its action runs), so the
+  // admin's re-add can still be in flight — or silently rejected by the
+  // "Author list changed — please retry" concurrency guard — when this test
+  // ends. That once left teardown holding a doc with zero authors: the
+  // unlanded re-add plus secondUser's earlier teardown cascading the
+  // co-author's row away, which deleteTestDoc's safety guard rightly refused
+  // (docs/playwright-flakiness.html, class 5). Polling the DB proves both
+  // authors really landed — and turns a rejected re-add into a failure *here*,
+  // where the cause is legible, instead of a cryptic one in teardown.
+  await expect
+    .poll(() => getDocAuthorEmails(sharedDoc.id))
+    .toEqual(expect.arrayContaining([ADMIN_EMAIL, coAuthorCandidate.email]));
+
+  // Closing it back up (the same native toggle, the other direction) hands
+  // the space back to the editor, and the editor keeps working through that
+  // too — this is what "you can click it to close it" actually depends on.
+  await page.getByText("Settings", { exact: true }).click();
+  await expect(authors).not.toBeVisible();
+
+  const closedBox = await scrollFrame.boundingBox();
+  expect(closedBox).not.toBeNull();
+  expect(closedBox!.height).toBeGreaterThan(afterBox!.height);
+
+  await bodyEditor(page).click();
+  await page.keyboard.type(" And after closing it again.");
+  await expect(bodyEditor(page)).toContainText("And after closing it again.");
 });
 
 test.describe("annotations", () => {

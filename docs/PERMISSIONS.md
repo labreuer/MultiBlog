@@ -199,18 +199,25 @@ structural difference:
 
 | Doc rule | File equivalent |
 |---|---|
-| Read `/doc/[slug]` | Fetch its bytes from `/api/files/…` |
+| Read `/doc/[slug]` | Read `/pdf/[slug]`, and fetch its bytes from `/api/files/…` |
 | Edit `/doc/[slug]/edit` | **No equivalent** — a file has no editable content |
 | Visibility / owners / slug / delete | `canUserManageFile` (`src/app/actions/files.ts`) |
 | Listed in `/docs` (+ ADMIN "Show all docs") | Listed in `/files` (+ ADMIN "Show all files") |
+| Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same `requireOwnOrAdmin` |
+| Collab connection | Presence only, and **always read-only** (`/api/file/[id]/token`) |
 
 Two consequences worth stating plainly, because they are what the user-facing rule asked for:
 
 - **An AUTHOR sees only their own files**, PRIVATE *and* SHARED, because
   `canManageAnySharedFile` is ADMIN/EDITOR — exactly as `/docs` behaves.
 - **The bytes route answers 404, not 403**, to someone who may not read a PRIVATE file.
-  Whether such a file exists is itself something its non-owners shouldn't learn, and that
-  route is reachable by guessing an id.
+  Whether such a file exists is itself something its non-owners shouldn't learn, and unlike
+  `/pdf/[slug]` (which shows a visible Forbidden, matching `/doc/[slug]`) that route is
+  reachable by guessing an id.
+
+`/annotations` lists annotations on **both** containers, each scoped by its own read rule.
+That it can see PDF annotations at all is one of the reasons they are Postgres rows rather
+than entries in a per-file ydoc (PLAN.md §19).
 
 ## Where each rule lives
 
@@ -226,7 +233,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Who owns a file (`file_owner`, the doc tables' `doc_author`) | `prisma/schema.prisma`'s `FileOwner` |
 | File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
 | File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |
-| Annotation ydoc access (DRAFT is owner-only, even from ADMIN) | `src/lib/annotation-authz.ts` |
+| Annotation ydoc access (DRAFT is owner-only, even from ADMIN; asks whichever container the annotation has) | `src/lib/annotation-authz.ts` |
 | `/docs` row scoping + the "Show all docs" override | `src/app/docs/page.tsx` |
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |

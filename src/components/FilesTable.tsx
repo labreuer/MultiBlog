@@ -52,8 +52,8 @@ import styles from "./FilesTable.module.css";
 
 // PLAN.md §19 — /files, built from the shared table kit exactly as /docs is.
 // A new admin table means a `*-query.ts` and the kit's hooks, never a fresh
-// `<table>` (CLAUDE.md), and every column here sorts in Postgres: the one that
-// no plain ORDER BY could reach (Owner(s)) goes through the
+// `<table>` (CLAUDE.md), and every column here sorts in Postgres: the two that
+// no plain ORDER BY could reach (Owner(s), Annotations) go through the
 // `file_metrics` view.
 //
 // Owner(s), not Author(s): the users listed on a file didn't write the PDF —
@@ -71,7 +71,7 @@ export type FileRow = {
   /** Null for a file whose upload-time parse never recorded one. */
   pageCount: number | null;
   byteSize: number;
-  sha256: string;
+  annotationCount: number;
   createdAt: Date;
   updatedAt: Date;
   updatedByName: string;
@@ -87,6 +87,7 @@ const SORTABLE_KEYS = [
   "visibility",
   "pages",
   "size",
+  "annotations",
   "created",
   "slug",
   "updatedAt",
@@ -154,16 +155,16 @@ export default function FilesTable({
       key: "title",
       header: "Title",
       sortKey: "title",
-      // Links straight at the stored bytes: a PDF opens in the
-      // browser's own viewer (the serve route sends it inline), and
-      // anything else downloads. /pdf/[slug] does not exist yet.
+      // Links by slug, not id — unlike /docs, whose /doc/[slug] route resolves
+      // an id too (resolveDocParam). /pdf/[slug] takes a slug only, so the id
+      // would 404.
       cellProps: (row) => ({
         className: styles.titleCell,
         onClick: (e) => {
-          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/api/files/${row.id}/${row.sha256}`);
+          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/pdf/${row.slug}`);
         },
       }),
-      cell: (row) => <Link href={`/api/files/${row.id}/${row.sha256}`}>{row.title}</Link>,
+      cell: (row) => <Link href={`/pdf/${row.slug}`}>{row.title}</Link>,
     },
     {
       key: "filename",
@@ -205,6 +206,14 @@ export default function FilesTable({
       // Sorted on the raw byte count in Postgres, displayed rounded — so
       // "1.2 MB" and "1.3 MB" order by their real sizes rather than by string.
       cell: (row) => formatBytes(row.byteSize),
+    },
+    {
+      key: "annotations",
+      header: "Annotations",
+      sortKey: "annotations",
+      nowrap: true,
+      cellProps: () => ({ className: styles.numeric }),
+      cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
     },
     {
       key: "created",
@@ -396,9 +405,10 @@ export default function FilesTable({
         ]}
         notes={
           <p style={{ marginTop: 8 }}>
-            Every column here sorts. <strong>Owner(s)</strong> goes through the <code>file_metrics</code> view — the
-            initials joined in SQL across a file&apos;s owners, which a plain <code>ORDER BY</code> could not name.{" "}
-            <strong>Size</strong> sorts on the raw byte count even though it prints rounded, and{" "}
+            Every column here sorts. <strong>Owner(s)</strong> and <strong>Annotations</strong> go through the{" "}
+            <code>file_metrics</code> view — the initials joined in SQL across a file&apos;s owners, and a count that
+            excludes deleted and still-private draft annotations, neither of which a plain <code>ORDER BY</code> could
+            name. <strong>Size</strong> sorts on the raw byte count even though it prints rounded, and{" "}
             <strong>Pages</strong> and Size are both stored columns recorded once at upload, so sorting by either costs
             no more than sorting by a date. <strong>Slug</strong>, <strong>Updated</strong>,{" "}
             <strong>Updated by</strong> and <strong>Deleted at</strong> are hidden by default (Columns picker, above).

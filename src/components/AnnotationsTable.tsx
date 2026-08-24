@@ -41,6 +41,10 @@ import adminStyles from "@/components/table/AdminTable.module.css";
 
 export type AnnotationRow = {
   id: string;
+  // PLAN.md §19 — the container, which is a doc *or* a file. `containerKind`
+  // decides which route the cell links to; the id/slug/title trio means the
+  // same thing either way, so nothing downstream needs a second set of fields.
+  containerKind: "doc" | "file";
   docId: string;
   docSlug: string;
   docTitle: string;
@@ -152,7 +156,14 @@ export default function AnnotationsTable({
         />
       ),
     },
-    { key: "doc", header: "Doc", sortKey: "doc", cell: (row) => <Link href={`/doc/${row.docSlug}`}>{row.docTitle}</Link> },
+    {
+      key: "doc",
+      header: "Doc / File",
+      sortKey: "doc",
+      cell: (row) => (
+        <Link href={row.containerKind === "file" ? `/pdf/${row.docSlug}` : `/doc/${row.docSlug}`}>{row.docTitle}</Link>
+      ),
+    },
     { key: "author", header: "Author", sortKey: "author", cell: (row) => row.authorName },
     { key: "body", header: "Body", cell: (row) => row.bodyText },
     {

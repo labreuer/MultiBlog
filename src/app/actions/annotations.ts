@@ -4,12 +4,19 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
+import { canUserReadFile } from "@/lib/file-authz";
+import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { isAdmin } from "@/lib/authz";
 import { applyAnnotationMark, flushAnnotationCache, removeAnnotationMark } from "@/lib/annotation-admin";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import {
+  annotationRevalidationPaths,
+  requireDocAnnotationId,
+  type AnnotationTarget,
+} from "@/lib/annotation-container";
 import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
@@ -26,6 +33,7 @@ import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 const MAX_BODY_LENGTH = 5000;
 
+
 // PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
 // editor to before a single keystroke lands, so opening one (the bottom
 // composer, or Reply) creates a DRAFT eagerly: invisible to every other
@@ -35,26 +43,52 @@ const MAX_BODY_LENGTH = 5000;
 // from here). Seeded with an empty paragraph, same shape seedAnnotationYdoc
 // already produces for real content.
 export async function createDraftAnnotation(
-  docId: string,
+  container: string | AnnotationTarget,
   parentAnnotationId?: string,
 ): Promise<{ id: string } | { error: string }> {
   const session = await auth();
   if (!session?.user) {
-    return { error: "You must be signed in to annotate a doc." };
+    return { error: "You must be signed in to annotate." };
   }
 
-  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { id: true, visibility: true } });
-  if (!doc) {
-    return { error: "Doc not found." };
-  }
-  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
-    return { error: "You don't have permission to annotate this doc." };
+  // PLAN.md §19 — a bare string still means a doc id. Every existing caller
+  // (NewAnnotationComposer, AnnotationNode's Reply, the doc editor's popover)
+  // passes one, and they are all doc surfaces; widening the parameter rather
+  // than changing them keeps the file work from touching the doc tree at all.
+  const target: AnnotationTarget = typeof container === "string" ? { kind: "doc", id: container } : container;
+
+  if (target.kind === "doc") {
+    const doc = await prisma.doc.findUnique({ where: { id: target.id }, select: { id: true, visibility: true } });
+    if (!doc) {
+      return { error: "Doc not found." };
+    }
+    if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
+      return { error: "You don't have permission to annotate this doc." };
+    }
+  } else {
+    const file = await prisma.storedFile.findUnique({
+      where: { id: target.id },
+      select: { id: true, visibility: true },
+    });
+    if (!file) {
+      return { error: "File not found." };
+    }
+    if (!(await canUserReadFile(session.user.id, session.user.role, file))) {
+      return { error: "You don't have permission to annotate this file." };
+    }
   }
 
   let parentId: string | null = null;
   if (parentAnnotationId) {
-    const parent = await prisma.annotation.findUnique({ where: { id: parentAnnotationId }, select: { docId: true } });
-    if (!parent || parent.docId !== docId) {
+    const parent = await prisma.annotation.findUnique({
+      where: { id: parentAnnotationId },
+      select: { docId: true, fileId: true },
+    });
+    // A reply has to live in the same container as its parent — otherwise a
+    // thread could straddle a doc and a file, and every query that scopes by
+    // container would see half of it.
+    const parentContainerId = target.kind === "doc" ? parent?.docId : parent?.fileId;
+    if (!parent || parentContainerId !== target.id) {
       return { error: "Invalid reply target." };
     }
     parentId = parentAnnotationId;
@@ -63,7 +97,7 @@ export async function createDraftAnnotation(
   const seed = seedAnnotationYdoc("");
   const annotation = await prisma.annotation.create({
     data: {
-      docId,
+      ...(target.kind === "doc" ? { docId: target.id } : { fileId: target.id }),
       parentAnnotationId: parentId,
       userId: session.user.id,
       proseJson: seed.proseJson as Prisma.InputJsonValue,
@@ -124,6 +158,11 @@ export async function postAnnotation(opts: {
   // tail names what the server happens to hold now. Absent from any surface
   // with no live Y.Doc to capture from.
   atVersion?: string;
+  // PLAN.md §19 — a PDF anchor (docs/PDF.md §2's Target), for an annotation on
+  // a file. Mutually exclusive with the three doc fields above by construction:
+  // the branch below is chosen by which container the annotation is in, never
+  // by which fields the client filled in.
+  pdfTarget?: unknown;
 }): Promise<{ error?: string }> {
   const session = await auth();
   if (!session?.user) {
@@ -132,7 +171,7 @@ export async function postAnnotation(opts: {
 
   const annotation = await prisma.annotation.findUnique({
     where: { id: opts.annotationId },
-    select: { id: true, docId: true, userId: true, parentAnnotationId: true, status: true },
+    select: { id: true, docId: true, fileId: true, userId: true, parentAnnotationId: true, status: true },
   });
   if (!annotation) {
     return { error: "Annotation not found." };
@@ -175,6 +214,38 @@ export async function postAnnotation(opts: {
 
   const parentId = annotation.parentAnnotationId;
 
+  // PLAN.md §19 — **a file annotation takes a completely different path from
+  // here**, and short-circuits rather than threading a condition through the
+  // doc logic below. What follows this branch stamps the doc's update log,
+  // may write a mark into the doc's ydoc, and emails the doc's byline; a file
+  // has no update log, no ydoc and a different byline table, so almost none of
+  // it would survive being made conditional.
+  if (annotation.fileId !== null) {
+    return postFileAnnotation({
+      annotationId: annotation.id,
+      fileId: annotation.fileId,
+      parentId,
+      bodyText,
+      rawTarget: opts.pdfTarget,
+      raise: opts.raise === true,
+      raisedBy: session.user.name ?? session.user.email ?? "Someone",
+      // A reply anchors into its parent's *body*, exactly as on the doc side
+      // (§13p) — that mechanism is container-independent, because an
+      // annotation's body is a ydoc whatever it hangs off.
+      replyAnchor:
+        parentId !== null &&
+        typeof opts.anchorFrom === "number" &&
+        typeof opts.anchorTo === "number" &&
+        !!opts.quotedText &&
+        opts.anchorTo > opts.anchorFrom
+          ? { from: opts.anchorFrom, to: opts.anchorTo, quotedText: opts.quotedText }
+          : null,
+    });
+  }
+
+  // Everything below this line assumes the annotation is about a *doc*.
+  const docId = requireDocAnnotationId(annotation, "postAnnotation");
+
   // PLAN.md §13p — **what an anchor points at is decided by whether this is a
   // reply, not by what the client asked for.** A root annotation anchors into
   // the doc; a reply anchors into the annotation it answers, and cannot
@@ -196,7 +267,7 @@ export async function postAnnotation(opts: {
   // Which ydoc the anchor is measured into — and therefore which update log
   // stamps it (§13o: the stamp is the coordinate system, so the two cannot be
   // chosen independently).
-  const anchorYdocId = parentId !== null ? ydocIdForAnnotation(parentId) : ydocIdForDoc(annotation.docId);
+  const anchorYdocId = parentId !== null ? ydocIdForAnnotation(parentId) : ydocIdForDoc(docId);
 
   // The client's own position when it knew one precisely; otherwise the tail
   // of whichever log is about to matter. A malformed client value (should
@@ -260,7 +331,7 @@ export async function postAnnotation(opts: {
   }
   if (ydocUpdateId === null) {
     ydocUpdateId = await ydocStore.maxUpdateId(
-      anchorRequested ? anchorYdocId : ydocIdForDoc(annotation.docId),
+      anchorRequested ? anchorYdocId : ydocIdForDoc(docId),
     );
   }
 
@@ -301,7 +372,7 @@ export async function postAnnotation(opts: {
   // root check of its own.
   if (anchorRequested && anchorMode === "mark") {
     const { applied, markUpdateId } = await applyAnnotationMark({
-      docId: annotation.docId,
+      docId,
       userId: session.user.id,
       role: session.user.role,
       annotationId: annotation.id,
@@ -338,7 +409,7 @@ export async function postAnnotation(opts: {
 
   if (opts.raise) {
     const doc = await prisma.doc.findUnique({
-      where: { id: annotation.docId },
+      where: { id: docId },
       select: { title: true, slug: true, authors: { select: { user: { select: { email: true } } } } },
     });
     if (doc) {
@@ -354,7 +425,7 @@ export async function postAnnotation(opts: {
     }
   }
 
-  revalidatePath(`/doc/${annotation.docId}`);
+  revalidatePath(`/doc/${docId}`);
   return {};
 }
 
@@ -369,7 +440,7 @@ export async function saveDraftAnnotation(annotationId: string): Promise<{ error
   }
   const annotation = await prisma.annotation.findUnique({
     where: { id: annotationId },
-    select: { userId: true, status: true, docId: true },
+    select: { userId: true, status: true, docId: true, fileId: true },
   });
   if (!annotation) {
     return { error: "Annotation not found." };
@@ -382,7 +453,7 @@ export async function saveDraftAnnotation(annotationId: string): Promise<{ error
   }
 
   await flushAnnotationCache({ userId: session.user.id, role: session.user.role, annotationId });
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
   return {};
 }
 
@@ -397,7 +468,7 @@ export async function discardDraftAnnotation(annotationId: string): Promise<void
   }
   const annotation = await prisma.annotation.findUnique({
     where: { id: annotationId },
-    select: { userId: true, status: true, docId: true },
+    select: { userId: true, status: true, docId: true, fileId: true },
   });
   if (!annotation) {
     return;
@@ -410,7 +481,7 @@ export async function discardDraftAnnotation(annotationId: string): Promise<void
   }
   await prisma.annotation.delete({ where: { id: annotationId } });
   await prisma.ydoc.deleteMany({ where: { id: ydocIdForAnnotation(annotationId) } });
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
 }
 
 async function requireOwnOrAdmin(annotationId: string) {
@@ -420,7 +491,7 @@ async function requireOwnOrAdmin(annotationId: string) {
   }
   const annotation = await prisma.annotation.findUnique({
     where: { id: annotationId },
-    select: { userId: true, docId: true, status: true },
+    select: { userId: true, docId: true, fileId: true, status: true },
   });
   if (!annotation) {
     throw new Error("Annotation not found.");
@@ -440,7 +511,10 @@ export async function deleteAnnotation(annotationId: string): Promise<void> {
   });
   // A DRAFT never had a mark applied (§13d), so there's nothing to remove —
   // skip the round trip for the common "deleting my own private note" case.
-  if (annotation.status !== "DRAFT") {
+  // A *file* annotation never has one either, and for a stronger reason: a
+  // file has no ydoc at all, so there is no document to take a mark out of
+  // (PLAN.md §19). Both are the same early exit for different causes.
+  if (annotation.status !== "DRAFT" && annotation.docId !== null) {
     await removeAnnotationMark({
       docId: annotation.docId,
       userId: session.user.id,
@@ -448,7 +522,7 @@ export async function deleteAnnotation(annotationId: string): Promise<void> {
       annotationId,
     });
   }
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
   revalidatePath("/annotations");
 }
 
@@ -458,7 +532,7 @@ export async function restoreAnnotation(annotationId: string): Promise<void> {
     where: { id: annotationId },
     data: { deletedByUserId: null, deletedAt: null },
   });
-  revalidatePath(`/doc/${annotation.docId}`);
+  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
   revalidatePath("/annotations");
 }
 
@@ -470,4 +544,106 @@ export async function bulkDeleteAnnotations(annotationIds: string[]): Promise<Bu
 
 export async function bulkRestoreAnnotations(annotationIds: string[]): Promise<BulkResult> {
   return settleBulk(annotationIds, (id) => restoreAnnotation(id));
+}
+
+// PLAN.md §19 — posting an annotation on a file.
+//
+// The doc path's whole apparatus is absent here, and each absence is a
+// consequence of the file being immutable rather than a simplification:
+//
+//   - no `ydocUpdateId`. That column is the *coordinate system* a doc anchor
+//     was measured in, and it exists because a doc moves. A file's bytes are
+//     its identity (sha256), so a PDF anchor needs no version stamp: replaying
+//     is meaningless when there is nothing to replay.
+//   - no mark, because there is no ydoc to write one into.
+//   - no re-resolution. `pdfTarget`'s quads are correct forever.
+//
+// What it keeps is the thing that actually matters: **quotedText is derived
+// server-side, never taken from the client** (§12i's "a request field only,
+// never a column"). The client's `position` is a hint; the server slices the
+// page text *it* extracted at upload and stores its own slice. That makes the
+// stored row self-consistent by construction — which is exactly what
+// scripts/integrity/check-pdf-anchors.ts later verifies.
+async function postFileAnnotation(opts: {
+  annotationId: string;
+  fileId: string;
+  parentId: string | null;
+  bodyText: string;
+  rawTarget: unknown;
+  raise: boolean;
+  /** Display name for the notification email — resolved by the caller, which already has the session. */
+  raisedBy: string;
+  replyAnchor: { from: number; to: number; quotedText: string } | null;
+}): Promise<{ error?: string }> {
+  const { annotationId, fileId, parentId, bodyText, raise, raisedBy, replyAnchor } = opts;
+
+  // A root annotation may carry a PDF target; a reply never does — its anchor
+  // points into its parent's body, not into the document, for the same reason
+  // §13p gives on the doc side. Parsed rather than trusted: parsePdfTarget
+  // checks shape and finiteness, and the quote check below does the rest.
+  const target = parentId === null ? parsePdfTarget(opts.rawTarget) : null;
+
+  let quotedText = "";
+  let storedTarget: PdfTarget | null = null;
+
+  if (target) {
+    // The page text this server extracted at upload, at the *same*
+    // textVersion the client measured against. A mismatch means the client is
+    // running a different normaliser than the one that produced our stored
+    // text — after a deploy mid-session, say — and the honest response is to
+    // keep the quads (which are version-independent) and drop the quote,
+    // rather than slice text the offsets don't describe.
+    const pageText = await prisma.filePageText.findUnique({
+      where: {
+        fileId_pageIndex_textVersion: {
+          fileId,
+          pageIndex: target.pageIndex,
+          textVersion: target.textVersion,
+        },
+      },
+      select: { text: true },
+    });
+
+    if (pageText && target.position) {
+      const slice = pageText.text.slice(target.position.start, target.position.end);
+      // Verified against the client's own reading before being believed. If
+      // they disagree, the offsets are stale relative to our text and the
+      // quote is dropped — the annotation stays anchored by its quads and
+      // renders without a blockquote, rather than quoting the wrong sentence.
+      quotedText = slice === target.quote.exact ? slice : "";
+    }
+    // Whatever the quote came to, the stored target carries the server's
+    // answer rather than the client's, so the row cannot disagree with itself.
+    storedTarget = { ...target, quote: { ...target.quote, exact: quotedText } };
+  }
+
+  await prisma.annotation.update({
+    where: { id: annotationId },
+    data: {
+      ...(raise ? { status: "RAISED" as const, raisedAt: new Date() } : { status: "LIVE" as const }),
+      ...(storedTarget ? { pdfTarget: storedTarget as unknown as Prisma.InputJsonValue, quotedText } : {}),
+      // A reply's anchor into its parent's body, unchanged from the doc side.
+      ...(replyAnchor
+        ? { anchorFrom: replyAnchor.from, anchorTo: replyAnchor.to, quotedText: replyAnchor.quotedText }
+        : {}),
+    },
+  });
+
+  if (raise) {
+    const file = await prisma.storedFile.findUnique({
+      where: { id: fileId },
+      select: { title: true, slug: true, owners: { select: { user: { select: { email: true } } } } },
+    });
+    if (file) {
+      const subject = `${raisedBy} raised an annotation on "${file.title}"`;
+      const text = `${bodyText}\n\n${appUrl(`/pdf/${file.slug}`)}`;
+      // One message per owner, not one multi-recipient message — same
+      // reasoning as the doc side's raise.
+      await Promise.all(file.owners.map((o) => sendMail({ to: o.user.email, subject, text })));
+    }
+  }
+
+  revalidatePath("/files");
+  revalidatePath("/annotations");
+  return {};
 }
