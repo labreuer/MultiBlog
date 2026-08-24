@@ -62,6 +62,7 @@ import "dotenv/config";
 import * as Y from "yjs";
 import { prisma } from "../src/lib/prisma";
 import { ydocIdForDoc } from "../src/lib/ydoc-names";
+import { requireDocAnnotationId } from "../src/lib/annotation-container";
 import { docContentExtensions, collectMarkAttrValues } from "../src/lib/tiptap-schema";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
@@ -90,16 +91,21 @@ async function main() {
     where: {
       anchorFrom: null,
       quotedText: "",
+      // PLAN.md §19 — this backfill is about the doc-side *mark* mechanism,
+      // which files have no equivalent of; a file annotation matching the two
+      // null-ish conditions above is simply document-level, not un-stamped.
+      docId: { not: null },
       ...(docFilter ? { docId: docFilter } : {}),
     },
-    select: { id: true, docId: true, ydocUpdateId: true, bodyText: true },
+    select: { id: true, docId: true, fileId: true, ydocUpdateId: true, bodyText: true },
   });
 
   const byDoc = new Map<string, typeof candidates>();
   for (const a of candidates) {
-    const group = byDoc.get(a.docId) ?? [];
+    const annotationDocId = requireDocAnnotationId(a, "backfill-mark-annotation-stamps");
+    const group = byDoc.get(annotationDocId) ?? [];
     group.push(a);
-    byDoc.set(a.docId, group);
+    byDoc.set(annotationDocId, group);
   }
 
   console.log(

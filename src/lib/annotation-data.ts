@@ -1,6 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
 import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
+import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 
 // PLAN.md §13c — the doc-side view-model, un-shared from comment-data.ts's
 // ThreadWithComments (§12i's original decision) now that an annotation body
@@ -71,6 +72,13 @@ export type AnnotationThread = {
   // The thread's own color: whoever opened it (root.user.color) — shared by
   // every reply, same as the post side's per-thread color.
   color: string;
+  // PLAN.md §19 — the PDF anchor, for a thread on a file. Null for every doc
+  // thread, and for a file thread left document-level. It is deliberately a
+  // *third* field beside anchorFrom/anchorTo rather than a reuse of them: a
+  // doc offset and a page-plus-quads are different coordinate systems, and a
+  // surface that confused them would draw a highlight at character 340 of a
+  // PDF page.
+  pdfTarget: PdfTarget | null;
   comments: AnnotationComment[];
 };
 
@@ -144,6 +152,8 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
       anchorTo: columnAnchored ? root.anchorTo : null,
       quotedText,
       color: root.user.color,
+      // Always null here: a doc annotation has no PDF to point into.
+      pdfTarget: null,
       comments: members.map((a) => ({
         id: a.id,
         parentAnnotationId: a.parentAnnotationId,
@@ -192,4 +202,128 @@ export async function getOwnDraftAnnotations(docId: string, userId: string): Pro
     select: { id: true, bodyText: true, createdAt: true },
   });
   return drafts.map((d) => ({ id: d.id, bodyText: d.bodyText, createdAt: d.createdAt.toISOString() }));
+}
+
+// PLAN.md §19 — the file counterpart of getDocAnnotationsAsThreads.
+//
+// Simpler than the doc version in one specific way, and it is worth naming why:
+// there is no *mark* mechanism to fall back to. A doc annotation may be
+// anchored by a mark inside the doc's own ydoc (§12i), which is why that
+// function has to read Doc.proseJson and hunt for mark ids. A file has no ydoc
+// to hold a mark, so every anchored file annotation carries its anchor in
+// columns — `pdfTarget` plus `quotedText` — and an unanchored one is simply
+// document-level. One mechanism, no branch.
+//
+// Same DRAFT exclusion, for the same reason (§13a: a draft is owner-only with
+// no admin override); getOwnFileDraftAnnotations is the narrower query that
+// lets an author find their own again.
+export async function getFileAnnotationsAsThreads(fileId: string): Promise<AnnotationThread[]> {
+  const annotations = await prisma.annotation.findMany({
+    where: { fileId, status: { not: "DRAFT" } },
+    orderBy: { createdAt: "asc" },
+    include: { user: { select: { name: true, email: true, color: true } } },
+  });
+
+  const threads: AnnotationThread[] = [];
+  for (const [rootId, members] of groupByRoot(annotations)) {
+    const root = members.find((a) => a.id === rootId);
+    if (!root) continue;
+    // A stored target that fails to parse is treated as absent rather than as
+    // an error: the annotation still has a body worth reading, and rendering it
+    // document-level is the same graceful degradation a doc annotation gets
+    // when its mark is gone (§12h).
+    const pdfTarget = parsePdfTarget(root.pdfTarget);
+    threads.push({
+      id: rootId,
+      // Not applicable to a file thread — these are *doc* offsets. The PDF
+      // anchor is pdfTarget below.
+      anchorFrom: null,
+      anchorTo: null,
+      quotedText: root.quotedText,
+      color: root.user.color,
+      pdfTarget,
+      comments: members.map(toComment),
+    });
+  }
+
+  return threads;
+}
+
+export async function getOwnFileDraftAnnotations(fileId: string, userId: string): Promise<OwnDraft[]> {
+  const drafts = await prisma.annotation.findMany({
+    where: { fileId, userId, status: "DRAFT" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, bodyText: true, createdAt: true },
+  });
+  return drafts.map((d) => ({ id: d.id, bodyText: d.bodyText, createdAt: d.createdAt.toISOString() }));
+}
+
+type AnnotationRow = {
+  id: string;
+  parentAnnotationId: string | null;
+  bodyText: string;
+  proseJson: unknown;
+  createdAt: Date;
+  editedAt?: Date | null;
+  deletedByUserId: string | null;
+  userId: string;
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  ydocUpdateId: bigint | null;
+  user: { name: string | null; email: string; color: string };
+};
+
+/**
+ * Groups a flat annotation list into threads by walking each row up to its
+ * root, cycle-guarded.
+ *
+ * Shared by both container types because the *threading* rule is genuinely the
+ * same — a root annotation is the thread, replies hang off it through the
+ * self-FK — even though the anchoring rules are not. Factored out when files
+ * arrived rather than duplicated: the walk is the fiddly part, and two copies
+ * of a cycle guard is two chances to get it wrong.
+ */
+function groupByRoot<T extends AnnotationRow>(annotations: T[]): Map<string, T[]> {
+  const byId = new Map(annotations.map((a) => [a.id, a]));
+  const byRoot = new Map<string, T[]>();
+
+  for (const annotation of annotations) {
+    let current = annotation;
+    const seen = new Set<string>();
+    while (current.parentAnnotationId && !seen.has(current.id)) {
+      seen.add(current.id);
+      const parent = byId.get(current.parentAnnotationId);
+      if (!parent) break;
+      current = parent;
+    }
+    const members = byRoot.get(current.id) ?? [];
+    members.push(annotation);
+    byRoot.set(current.id, members);
+  }
+
+  return byRoot;
+}
+
+/** One annotation row as a comment in a thread. Identical for both containers. */
+function toComment(a: AnnotationRow): AnnotationComment {
+  return {
+    id: a.id,
+    parentAnnotationId: a.parentAnnotationId,
+    displayName: a.user.name ?? a.user.email,
+    bodyText: a.bodyText,
+    proseJson: a.proseJson as JSONContent | null,
+    createdAt: a.createdAt.toISOString(),
+    deletedByUserId: a.deletedByUserId,
+    commenterUserId: a.userId,
+    // PLAN.md §13p — only a *reply* anchors into a body. A root's columns are
+    // its anchor into the container and belong to the thread, not to the
+    // comment; passing them on would invite something to draw a root's quote
+    // as a highlight inside its own body.
+    anchorFrom: a.parentAnnotationId !== null ? a.anchorFrom : null,
+    anchorTo: a.parentAnnotationId !== null ? a.anchorTo : null,
+    quotedText: a.parentAnnotationId !== null ? a.quotedText : "",
+    color: a.user.color,
+    ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
+  };
 }

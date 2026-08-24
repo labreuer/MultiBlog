@@ -79,3 +79,32 @@ rather than failing.
   cache against a source that is legitimately ahead of it, so an active editor
   produces differences that are not faults. They are `--verbose`-only for that
   reason.
+
+## `check-pdf-anchors.ts` (PLAN.md §19)
+
+The file-side sibling of `check-annotation-anchors.ts`, and the odd one out in the same way:
+it verifies a **claim written down once** — "on page N, characters [a, b) of the normalised
+text read exactly this" — rather than a derived value. Nothing recomputes it, so nothing
+else would ever notice it breaking.
+
+It is a separate script rather than a branch inside `check-annotation-anchors.ts` because the
+two check different things against different substrates. A doc annotation's anchor is
+verified by replaying a ydoc to a stamped version; a file has no ydoc and no version to
+replay to — its bytes are immutable, which is precisely why its anchor is checked against
+the stored page text (`file_page_text`) instead.
+
+What it can and cannot see:
+
+- **Can**: a quote that disagrees with the page text at its own offsets; a target whose
+  `textVersion` has no matching extraction; a `pageIndex` past the end of the document; a
+  malformed target blob; a quote stored with no target at all.
+- **Cannot**: the quads. They are geometry, and checking them would mean rendering the PDF,
+  which needs a browser. They are also the part least likely to be wrong — they were
+  measured against bytes that cannot change.
+
+```
+npx tsx scripts/integrity/check-pdf-anchors.ts [--file <idOrSlug>] [--verbose]
+```
+
+Unlike the other three it does **not** need to run after the ydoc check: it touches no ydoc
+at all, so its findings are never downstream of a bad blob.

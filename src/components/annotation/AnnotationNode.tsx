@@ -1,5 +1,6 @@
 "use client";
 
+import type { AnnotationTarget } from "@/lib/annotation-container";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -51,7 +52,10 @@ export type AnnotationNodeData = {
 
 type Props = {
   annotation: AnnotationNodeData;
-  docId: string;
+  // PLAN.md §19 — the container this thread lives in, so Reply can create its
+  // draft in the right one. A discriminated union rather than a doc id, since
+  // the same node renders on /doc/[slug] and /pdf/[slug].
+  target: AnnotationTarget;
   depth?: number;
 };
 
@@ -96,7 +100,7 @@ export function hasNonDeletedDescendant(annotation: AnnotationNodeData): boolean
 
 // The doc-side sibling of CommentNode (PLAN.md §13c) — un-shared from it now
 // that an annotation and a post comment no longer share a rendering problem.
-export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) {
+export default function AnnotationNode({ annotation, target, depth = 0 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
@@ -195,7 +199,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
   const openReply = () => {
     setReplyError(null);
     startReplyTransition(async () => {
-      const result = await createDraftAnnotation(docId, annotation.id);
+      const result = await createDraftAnnotation(target, annotation.id);
       if ("error" in result) {
         setReplyError(result.error);
         return;
@@ -314,6 +318,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
           anchorFrom={replyAnchor?.from}
           anchorTo={replyAnchor?.to}
           quotedText={replyAnchor?.quotedText}
+          container={target.kind}
           onPosted={() => {
             setPosted(true);
             closeReply();
@@ -322,7 +327,7 @@ export default function AnnotationNode({ annotation, docId, depth = 0 }: Props) 
         />
       )}
       {annotation.replies.map((reply) => (
-        <AnnotationNode key={reply.id} annotation={reply} docId={docId} depth={depth + 1} />
+        <AnnotationNode key={reply.id} annotation={reply} target={target} depth={depth + 1} />
       ))}
     </div>
   );

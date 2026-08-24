@@ -382,6 +382,103 @@ own `overflow-x: auto` container. Don't reach for a `@media` breakpoint: `overfl
 is self-activating and needs no width threshold, which is why this section defines none.
 The existing breakpoints (900px, 480px, 1200px) are for *reflowing* layouts, not overflow.
 
+## Custom scrollbars, and anything positioned beside one
+
+Added 2026-08-22, after the two marker rails flanking the PDF viewer
+(`src/components/pdf/`, PLAN.md §19) turned out not to line up with the scrollbar between
+them. Two independent causes, and the engine facts below are the generalisable half —
+nothing here is pdfjs-specific, and the same rules govern any rail, minimap, or tick strip
+drawn beside a scrolling box.
+
+Numbers are measured, not quoted: a plain 400px scroller in a **headed** browser,
+screenshotted and read back pixel by pixel, using the fact that at `scrollTop: 0` the
+thumb's top edge *is* the track's top edge and at maximum scroll its bottom edge *is* the
+track's bottom. That recovers the track without ever identifying an arrow glyph.
+
+### The DOM reports thickness and nothing else
+
+`offsetWidth - clientWidth` (vertical) and `offsetHeight - clientHeight` (horizontal) are
+the only scrollbar dimensions available. Arrow-button height, thumb length and thumb
+position have **no** API: no CSS property, no readable pseudo-element
+(`getComputedStyle(el, "::-webkit-scrollbar-button")` returns the element's own style for
+an unstyled pseudo), and no hit-testing path, since scrollbar parts aren't in the hit-test
+tree.
+
+**The obvious heuristic is wrong.** A button is not square. Measured on Windows 10:
+
+| Engine | Thickness | Buttons (each end) | Track, of a 400px box |
+| --- | --- | --- | --- |
+| Chromium, default | 15px | **18px** | 364px |
+| Chromium, `scrollbar-width: thin` | 10px | 12px | 376px |
+| Firefox, default | 17px | 17px | 366px |
+| Firefox, `scrollbar-width: thin` | 8px | 8px | 384px |
+| WebKit | 0 (overlay) | none | 400px |
+
+An overlay drawn at `top: <fraction>%` of the full box therefore pinches against the track
+symmetrically — worst at the ends, exactly zero in the middle. At Chromium's default that
+is 18px of error at fraction 0 and 1, ~9px at 0.25 and 0.75. It reads as "the markers drift
+apart towards the ends", which is not obviously a scrollbar problem.
+
+### The fix is to remove the inset, not to measure it
+
+**Declaring any `::-webkit-scrollbar` rule makes Chromium and WebKit stop painting native
+parts** and draw a buttonless track instead. Measured with a rule in place: buttons 0/0,
+track == `clientHeight`, and the thumb's top within **0.0px** of
+`track x scrollTop / scrollHeight` at every scroll position — so an overlay positioned by
+plain fraction needs no inset at all.
+
+Three consequences to weigh before reaching for it:
+
+- **`scrollbar-width` and `scrollbar-color` override the pseudos in Chromium.** Setting
+  either one silently reinstates the native scrollbar, buttons included. This is the trap:
+  `scrollbar-width: thin` looks like a refinement to add later and undoes the whole thing.
+- **Firefox is not fixable this way.** Gecko ignores the pseudos and has no way to drop its
+  buttons. Its thumb is also shorter than proportional (32px where the proportional length
+  is 36.6px), so its top travels further and drifts a further ~5px at the extremes even
+  once the button inset is accounted for.
+- **Safari's overlay scrollbar becomes a permanent gutter.** Styling the pseudos is what
+  materialises it; there is no way to keep the overlay *and* drop the buttons elsewhere.
+
+If none of that is acceptable, the remaining option is to hide the native scrollbar
+outright (`scrollbar-width: none` plus `::-webkit-scrollbar { display: none }`, as
+`SiteHeader.module.css`'s `.scroller` already does for a different reason) and make the
+overlay itself the scroll control — exact on every engine, at the cost of implementing
+drag, click-to-scroll and keyboard by hand.
+
+### Insetting a thumb moves it
+
+A scrollbar part ignores `margin`, so the way to slim a thumb inside a wider bar is a
+transparent border plus `background-clip: content-box`. That shifts the **visible** thumb
+down from its box by exactly the border width — a constant offset, invisible on its own and
+obvious the moment something else is positioned against the box. A 12px bar with a 2px
+inset put the native thumb a constant 2px below a fraction-positioned overlay. Prefer a
+narrower bar whose thumb fills it edge to edge.
+
+### An overlay beside a scroller is sized by the client box, not the border box
+
+A flex sibling of a scrolling container stretches to that container's **border** box, but
+the vertical scrollbar's track ends at its **client** box. The difference is whatever the
+horizontal scrollbar takes — so as soon as content overflows sideways, fraction 1.0 sits
+below the track's end and every marker drifts proportionally (measured at up to 9px on a
+400px rail). Pin the overlay to `clientHeight`, which — unlike the button inset — is a
+number the DOM does report.
+
+Height is the only thing JS should supply here; the row/column layout stays CSS's, the same
+split the margin-note rails use (CLAUDE.md, PLAN.md §18). Setting an explicit cross-size
+needs **no `align-self` override**: `stretch` applies only while the cross size is `auto`,
+so a definite height simply wins. Leave the height unset until the first measurement
+arrives and the element stays full-height rather than collapsing for a frame.
+
+### Regression coverage
+
+**There is none, and there can't be locally.** Headless Playwright reports scrollbar
+thickness **0** on all three engines — they use overlay scrollbars with no buttons — so no
+spec in `npm run e2e` can observe any of this, including the 18px misalignment it was
+written to fix. Same blind spot as the SSR/locale class in CLAUDE.md's Gotchas: the
+environment the check runs in is the one environment where the bug doesn't exist. A
+standing guard would need a headed project in `playwright.config.ts`, which nothing else in
+the suite currently justifies. Verify by hand, headed, or with a throwaway pixel probe.
+
 ## Breakpoints and centred-column widths
 
 Three reflow breakpoints, each with one job:
