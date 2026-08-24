@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { formatBytes } from "./file-format";
+import { formatBytes, type UploadKind } from "./file-format";
 
 // PLAN.md §19 — where an uploaded file's bytes actually live, and the only
 // module that knows. Everything else addresses a file by its sha256.
@@ -87,7 +87,23 @@ export type StoredBytes = {
 };
 
 /** PDF magic number. A file that doesn't start with this is rejected before anything else touches it. */
-const PDF_MAGIC = "%PDF-";
+// The first bytes each accepted format must start with, checked as the body
+// streams past (PLAN.md §19 Phase 1). Kept here rather than in file-format.ts
+// because file-format.ts is imported by client components, and a magic number
+// is a server-side concern the browser has no use for.
+//
+// This is the *whole* format check for a .docx, and a first gate for a PDF —
+// which is parsed properly after storing, because its page text is what a
+// later annotation anchors into. A .docx has no such reader yet, so being a
+// real OPC package (a zip) is all there is to confirm; anything stricter would
+// reject documents Word, LibreOffice and Pages all write differently and we
+// can hold perfectly well.
+const MAGIC: Record<UploadKind, string> = {
+  // "%PDF-"
+  pdf: "%PDF-",
+  // "PK\u0003\u0004" — the local file header every zip entry starts with.
+  docx: "PK\u0003\u0004",
+};
 
 // Streams a request body to disk, hashing as it goes.
 //
@@ -107,12 +123,20 @@ const PDF_MAGIC = "%PDF-";
 // os.tmpdir() — FILE_STORAGE_DIR is routinely a separate mount from /tmp in
 // deployment, and rename() across filesystems fails with EXDEV rather than
 // falling back to a copy.
+/** One phrasing for both the mid-stream and too-short rejections. */
+function wrongFormatMessage(kind: UploadKind | null): string {
+  return kind === "docx" ? "That doesn't look like a .docx file." : "That doesn't look like a PDF file.";
+}
+
 export async function storeUploadStream(
   body: ReadableStream<Uint8Array>,
-  options: { maxBytes?: number; requirePdf?: boolean } = {},
+  options: { maxBytes?: number; kind?: UploadKind | null } = {},
 ): Promise<StoredBytes> {
   const maxBytes = options.maxBytes ?? maxUploadBytes();
-  const requirePdf = options.requirePdf ?? true;
+  // `kind: null` skips the check outright, for a caller that has already
+  // decided what the bytes are.
+  const kind = options.kind === undefined ? "pdf" : options.kind;
+  const magic = kind ? MAGIC[kind] : null;
 
   await mkdir(storageDir(), { recursive: true });
   const tempPath = join(storageDir(), `.tmp-upload-${randomUUID()}`);
@@ -121,7 +145,7 @@ export async function storeUploadStream(
   const hash = createHash("sha256");
   let byteSize = 0;
   let head = Buffer.alloc(0);
-  let headChecked = !requirePdf;
+  let headChecked = magic === null;
 
   try {
     const reader = body.getReader();
@@ -145,10 +169,10 @@ export async function storeUploadStream(
       const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
       if (!headChecked) {
         head = head.length === 0 ? Buffer.from(chunk) : Buffer.concat([head, chunk]);
-        if (head.length >= PDF_MAGIC.length) {
-          if (head.subarray(0, PDF_MAGIC.length).toString("latin1") !== PDF_MAGIC) {
+        if (magic && head.length >= magic.length) {
+          if (head.subarray(0, magic.length).toString("latin1") !== magic) {
             await reader.cancel().catch(() => {});
-            throw new UploadError("That doesn't look like a PDF file.", 415);
+            throw new UploadError(wrongFormatMessage(kind), 415);
           }
           headChecked = true;
         }
@@ -173,9 +197,9 @@ export async function storeUploadStream(
     throw new UploadError("That file is empty.", 400);
   }
   if (!headChecked) {
-    // Shorter than "%PDF-" and therefore never checked above.
+    // Shorter than the magic itself, and therefore never checked above.
     await rm(tempPath, { force: true }).catch(() => {});
-    throw new UploadError("That doesn't look like a PDF file.", 415);
+    throw new UploadError(wrongFormatMessage(kind), 415);
   }
 
   const sha256 = hash.digest("hex");

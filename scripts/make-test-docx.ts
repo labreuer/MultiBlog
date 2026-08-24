@@ -10,7 +10,7 @@
 // codebase reads the entries back, so the extra bytes buy simplicity.
 //
 // What it is *for* is narrow, and deliberately so. The upload path checks a
-// .docx only for being a zip (src/lib/docx-validate.ts), so what a spec needs
+// .docx only for being a zip (src/lib/file-storage.ts's MAGIC), so what a spec needs
 // is (a) something that really is a valid package, and (b) a way to produce
 // bytes that are not. It is not a Word-compatibility fixture: no Word document
 // is this bare, and if a .docx ever gains a reading surface, that surface wants

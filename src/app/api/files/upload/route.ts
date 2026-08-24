@@ -13,7 +13,6 @@ import {
   storeUploadStream,
 } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
-import { looksLikeDocx } from "@/lib/docx-validate";
 import {
   UPLOAD_ACCEPT_LABEL,
   contentTypeForKind,
@@ -106,7 +105,10 @@ export async function POST(request: Request) {
 
   let stored;
   try {
-    stored = await storeUploadStream(request.body);
+    // The kind decides which magic the stream is checked against, mid-flight,
+    // so a mislabelled upload is refused after a few bytes rather than after
+    // the whole transfer.
+    stored = await storeUploadStream(request.body, { kind });
   } catch (err) {
     if (err instanceof UploadError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
@@ -115,29 +117,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Couldn't save that file." }, { status: 500 });
   }
 
-  // Check after storing, not before: the bytes are already safe on disk, so a
-  // rejection is a clean rollback rather than a lost upload to retry.
+  // A PDF is parsed after storing; a .docx is not, and that asymmetry is the
+  // whole of the difference between them here.
   //
-  // What "check" means depends on the format, and the difference is the point
-  // (src/lib/docx-validate.ts). A PDF is fully parsed, because its page text is
-  // what a later annotation anchors into — so a PDF we cannot read must not be
-  // stored at all. A .docx is only confirmed to be a zip: nothing reads one
-  // yet, so there is no anchor target to protect, and a deeper parse would only
-  // reject documents we can hold perfectly well.
+  // The bytes are already safe on disk by this point, so a parse failure is a
+  // clean rollback rather than a lost upload to retry. A PDF earns the parse
+  // because its page text is what a later annotation anchors into — a PDF we
+  // cannot read must not be stored at all. A .docx has no reader yet, so
+  // storeUploadStream's package check above is the whole of its validation
+  // (src/lib/file-storage.ts says why going deeper would only reject documents
+  // we can hold perfectly well).
   //
-  // The PDF branch is the one place a whole file is held in memory, and it is
+  // The parse is the one place a whole file is held in memory, and it is
   // deliberate. pdfjs needs the bytes; it is bounded by MAX_UPLOAD_BYTES, brief
   // (freed as soon as extraction returns), and one-per-upload rather than
   // one-per-read — exactly the distinction that ruled out a `bytea` column,
   // which would pay this on *every download*, forever.
-  const discardStoredBytes = async () => {
-    // Only remove the bytes if this upload is what put them there. A dedupe hit
-    // means another file already references them and they must survive.
-    if (!stored.deduped) {
-      await deleteBytesIfUnreferenced(stored.sha256, 0);
-    }
-  };
-
   let pageCount: number | null = null;
   let pages: { textVersion: string; texts: readonly string[] } | null = null;
 
@@ -148,12 +143,13 @@ export async function POST(request: Request) {
       pages = { textVersion: parsed.textVersion, texts: parsed.pages };
     } catch (err) {
       console.error("[files/upload] couldn't parse the uploaded PDF:", err);
-      await discardStoredBytes();
+      // Only remove the bytes if this upload is what put them there. A dedupe
+      // hit means another file already references them and they must survive.
+      if (!stored.deduped) {
+        await deleteBytesIfUnreferenced(stored.sha256, 0);
+      }
       return NextResponse.json({ error: "That PDF couldn't be read — it may be damaged." }, { status: 415 });
     }
-  } else if (!(await looksLikeDocx(storagePathFor(stored.sha256)))) {
-    await discardStoredBytes();
-    return NextResponse.json({ error: "That doesn't look like a .docx file." }, { status: 415 });
   }
 
   try {
