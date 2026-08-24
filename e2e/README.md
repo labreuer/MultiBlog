@@ -10,8 +10,8 @@ selecting text on each of the three surfaces that respond to it
 is *not* visible until the right page is visited.
 
 ```bash
-npm run e2e        # full suite, against a production build on :3005
-npm run e2e:dev    # the dev-server target (:3000), one worker by default
+npm run e2e        # full suite, against a production build on :3002 (WEB_PORT + 2)
+npm run e2e:dev    # the dev-server target (:3000 = WEB_PORT), one worker by default
 ```
 
 The full suite targets `next build` + `next start` rather than `next dev`
@@ -28,12 +28,12 @@ regression.
 Other entry points: `npm run e2e:ui` (watch mode with a time-travel debugger),
 `npm run e2e:report` (last run's HTML report), and the usual Playwright flags —
 `npx playwright test e2e/doc.spec.ts -g "title"`, `--headed`, `--debug` (all
-dev-target; set `E2E_TARGET=prod` yourself to point one at :3005).
+dev-target; set `E2E_TARGET=prod` yourself to point one at :3002).
 
 ## How a run is wired
 
 1. `playwright.config.ts`'s `webServer` brings up the web server — for the
-   prod target `npm run e2e:web` (a `next build`, then `next start` on :3005
+   prod target `npm run e2e:web` (a `next build`, then `next start` on :3002
    with `AUTH_URL`/`APP_URL`/`E2E_REVALIDATE` set — see `scripts/e2e-web.ps1`),
    for the dev target `npm run dev` (:3000) — plus `npm run collab` (:1234),
    **unless something is already listening**, in which case it reuses them. A

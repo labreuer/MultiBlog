@@ -7,7 +7,7 @@
   },
   "scripts": {
     "predev": "tsx scripts/copy-pdfjs-assets.ts",
-    "dev": "next dev",
+    "dev": "tsx scripts/dev-web.ts",
     "prebuild": "tsx scripts/copy-pdfjs-assets.ts",
     "build": "next build",
     "start": "next start",

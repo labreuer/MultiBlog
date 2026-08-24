@@ -305,56 +305,59 @@ in-progress selection visible to other people on the page, which no option here 
 
 ---
 
-## The e2e port configuration ignores this checkout's own `.env`
+## No setup script for a new worktree (slots are hand-configured)
 
-**Status:** open, found 2026-08-23. Worked around by running on the default ports with the
-second working copy stopped, which is why nothing is broken today and why it will bite again
-the moment both are up at once.
+**Status:** open, 2026-08-24. Two slots exist and both work; nothing automates a *third*, and
+nothing at all covers a worktree created by `claude -w`.
 
-`.env` puts this checkout on `APP_URL="http://localhost:3002"` and `COLLAB_PORT=1236` - the
-`+2` offset from the repo default pair - with a comment saying why: *"so a dev:all on the
-default ports can coexist."* That is a real arrangement, not a leftover; there is a second
-working copy of this repo on the box (`C:\Users\labreuer\Claude\Projects\MultiBlog`, on its own
-branch) that owns 3000/1234.
+Supersedes "The e2e port configuration ignores this checkout's own `.env`", which this day's
+work closed: `npm run dev` is `scripts/dev-web.ts` and passes `-p` explicitly, `BASE_URL` and
+`check-ports.ps1`'s `$ports` both derive from `scripts/dev-ports.ts`, and the two slots hold
+separate databases and separate `.file-storage` directories — so Playwright adopting the other
+checkout's server, and the PDF-download 503s that followed from a shared `file` table, are both
+structurally impossible now rather than merely detected. The arrangement itself is a durable
+fact about the box and so lives in CLAUDE.md ("Two development slots"), not here.
 
-**Only the collab half of that is honoured.** `server/collab.ts` reads `COLLAB_PORT`, and
-`playwright.config.ts` reads it too (via its `dotenv/config` import), so collab is
-self-consistent on 1236 and so is the browser (`NEXT_PUBLIC_COLLAB_URL` pins it there). The web
-half is not honoured anywhere:
+**What is still manual.** A slot is three values in `.env` plus a database, and I typed both
+slots' worth. `.env` is gitignored, so a newly created worktree starts with *no* `.env` at all:
+it cannot reach a database, and copying slot A's in gives it slot A's ports, which is the
+collision the whole arrangement exists to prevent. `scripts/dev-ports.ts` made the values flow
+from one place; it did not make them *allocate*.
 
-- `package.json`'s `"dev"` is a bare `next dev` with no `-p`, so Next binds its own default
-  3000. `APP_URL` is what the app *advertises* (`appUrl()`, email links); nothing reads it to
-  pick a bind port.
-- `playwright.config.ts:7` hardcodes `BASE_URL = "http://localhost:3000"`.
-- `scripts/check-ports.ps1`'s `$ports` is the literal `@(3000, 1234)` - and the 1234 is stale
-  independently of any of this, since collab actually listens on `COLLAB_PORT`.
+**Why this becomes urgent rather than tidy.** `claude -w` / `--worktree` creates worktrees under
+`.claude/worktrees/` — that directory already exists in this repo, empty — and the desktop app
+gives every session its own worktree automatically. Those are precisely the trees the slot model
+does not know about. The first time either is used against this repo, the new tree either fails
+to start or quietly fights slot A for :3000.
 
-**What it costs when both copies are running.** `reuseExistingServer: true` is unconditional, so
-Playwright adopts whatever answers on 3000 - which is the *other* checkout, running a different
-branch. Two failures stack, and neither names its own cause:
+**What a new worktree needs beyond what git gives it:**
 
-1. The suite silently tests the other working copy's code. Edits under test are never served.
-2. `.file-storage` is gitignored and per-checkout while the `file` table is shared through one
-   Postgres, so the fixtures write an uploaded PDF's bytes into *this* checkout's storage dir
-   and the adopted server looks for them in *its own*. Every download 503s
-   (`src/app/api/files/[id]/[hash]/route.ts` - "File contents are missing"), the viewer never
-   loads, and all eight PDF specs die on `waitForViewer` timeouts. It reads as a pdfjs or viewer
-   regression and is neither. Deterministic, so `--workers=1` does not distinguish it.
+1. **A derived `.env`, not a copied one** — `DEV_HOST=<n>.localhost`, `WEB_PORT=3000 + 5n`,
+   `COLLAB_PORT=1234 + n`, `DATABASE_URL` naming `multiblog_<n>`, and its own `AUTH_SECRET`.
+   `NEXT_PUBLIC_COLLAB_URL` and `FILE_STORAGE_DIR` must be left **unset**: each one defeats a
+   slot when pinned, for reasons recorded in slot B's `.env` comments (the first pins the host
+   as well as the port, the second is what made two checkouts share one storage directory).
+2. **`npm ci` and `npx prisma generate`** — `node_modules` and `src/generated/prisma` are
+   gitignored and do not carry over. This is the bulk of the wall-clock cost, and the reason
+   slots here are worth keeping warm rather than creating per task.
+3. **Its own database** — `CREATE DATABASE multiblog_<n> OWNER multiblog` (the `multiblog` role
+   has CREATEDB, so no superuser and no elevated shell), then `npx prisma migrate deploy`, then
+   optionally `npx tsx scripts/seed-sample-data.ts`. The seed needs *that slot's* collab server
+   already running or its anchored annotations silently degrade to document-level (§12i).
+4. Nothing for `public/pdfjs/` — `predev` already copies it on first run.
 
-`check-ports.ps1` exists to catch precisely this and does the job well - it would have named the
-foreign PID and its command line in one line. But it only runs as part of `npm run e2e`, and
-running a *subset* of specs (`npx playwright test pdf-annotations`) goes straight to Playwright
-and skips the guard. That gap is worth closing too: there is no way today to run a few specs
-*through* the preflight short of `npm run check-ports && npx playwright test <specs>` by hand.
+**Allocation has to be real, not a counter.** Pick the lowest `n` whose three web ports are free
+*and* whose `multiblog_<n>` does not exist, then record it; a stored counter drifts the moment a
+worktree is removed by hand. Hashing the branch name instead (as barnacle.ai's Supabase script
+does) avoids a registry but makes the ports unpredictable, which is worse here specifically
+because `.claude/launch.json` is static JSON the preview tool reads literally and cannot follow a
+computed port.
 
-**The fix**, which restores what `.env` already intends rather than adding a new idea:
+**Teardown is half the job.** `git worktree remove` deletes the tree and leaves `multiblog_<n>`
+and its `.file-storage/` behind. Without a matching `dropdb` step those accumulate silently, and
+the accumulation is invisible until `\l` is long. A `--remove <n>` path belongs in the same
+script as the setup path, for the same reason `scripts/test-*.ts` each own their own `delete`.
 
-- Derive `BASE_URL` from `APP_URL` (or introduce a plain `PORT` and derive both from it).
-- Pass that port to `next dev` explicitly in the `webServer` command, since Next will not take
-  it from `APP_URL`.
-- Make `check-ports.ps1` read the same two values instead of literals, so it guards the ports
-  the suite will actually use.
-
-With that, the suite runs on 3002/1236 and never contends with the other working copy at all -
-no stopping anybody's dev server, and the adopt-a-stranger failure becomes impossible rather
-than merely detected.
+**Not urgent while there are two slots** — two is the number that fits in your head, and the
+manual path is now short. It stops being short at three, and stops working at all the first time
+a worktree is created by tooling rather than by hand.

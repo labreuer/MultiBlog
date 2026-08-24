@@ -89,23 +89,79 @@ than the reasoning itself.
 
 ## Running
 
-- `npm run dev:all` — web (Next.js, :3000) + collab (Hocuspocus, :1234) via concurrently;
-  one Ctrl+C stops both. Individually: `npm run dev`, `npm run collab`.
+**Two development slots.** This machine runs two working trees side by side, so a branch
+can be worked on without disturbing what the other tree is serving. A *slot* is a working
+tree plus its own `.env`, its own Postgres database and its own `.file-storage`; the three
+values that define one live in `.env` and are read through `scripts/dev-ports.ts` (and its
+hand-kept PowerShell mirror `scripts/dev-ports.ps1`):
+
+| | slot A | slot B |
+|---|---|---|
+| working tree | `~/Claude/Projects/MultiBlog` (main worktree) | `~/git/MultiBlog` (git worktree) |
+| `DEV_HOST` | `localhost` | `b.localhost` |
+| `WEB_PORT` (dev server) | 3000 | 3005 |
+| `WEB_PORT + 1` (preview tool's `web-prod`) | 3001 | 3006 |
+| `WEB_PORT + 2` (e2e prod target) | 3002 | 3007 |
+| `COLLAB_PORT` | 1234 | 1235 |
+| database | `multiblog` | `multiblog_b` |
+
+The other two web ports stay derived rather than configured: `WEB_PORT + 1` is the preview
+tool's `web-prod` and `WEB_PORT + 2` is the e2e prod target, so a slot owns three consecutive
+web ports and slots sit five apart — 3003/3004 are slack, and a third slot belongs at 3010.
+**Collab takes one port per slot and no block**, which is a fact about the app rather than a
+simplification: there is exactly one `new Server(...)` in the codebase (`server/collab.ts`),
+every `documentName` is `ydoc:`-prefixed and multiplexed over that one process (annotations
+included, via `ydoc:annotation:<id>`), and the e2e prod target reuses the running collab
+server rather than starting a second. Every port literal that used to be spread across
+`package.json`, `playwright.config.ts`, `check-ports.ps1`, `stop-all.ps1` and `e2e-web.ps1`
+now comes from that one module; `.claude/launch.json` is the deliberate exception, because
+the preview tool reads static JSON (see the bullet below).
+
+**`DEV_HOST` is not redundant with the ports, and that is the part worth remembering.**
+Cookies key on host and ignore port entirely — they predate the origin model — so two slots
+on one hostname share a single `authjs.session-token` however far apart their ports are:
+signing into one silently invalidates the other, and because the stale cookie is *present*
+rather than absent it fails as a JWT decrypt error, which reads like an auth regression.
+Every other browser store (IndexedDB, `localStorage`) is origin-scoped and so already
+separated by port alone. `*.localhost` is used rather than a hosts-file entry because it
+resolves to 127.0.0.1 through Node's own resolver with no entry and no elevation, is already
+in Next's built-in dev-origin allowlist (so it needs no `allowedDevOrigins` line), and is
+trusted by NextAuth under `next dev`. An invented TLD like `multiblog-b.test` fails the first
+two of those.
+
+Because the two trees share one repository, `git worktree list` from either shows both, and
+**the same branch cannot be checked out in both at once** — which is the guard that makes the
+arrangement safe rather than a second clone's honour system. Uncommitted work does *not*
+cross between them.
+
+- `npm run dev:all` — web (Next.js, `WEB_PORT`) + collab (Hocuspocus, `COLLAB_PORT`) via concurrently;
+  one Ctrl+C stops both. Individually: `npm run dev`, `npm run collab`. `npm run dev` is
+  `scripts/dev-web.ts`, not a bare `next dev`: Next resolves `--port` through commander's
+  `.default(3000).env('PORT')` while argv is parsed, and loads its own `.env` files later,
+  so **a `WEB_PORT` or `PORT` line in `.env` cannot reach it** — the port has to be on the
+  command line. This is not hypothetical: slot B carried an `APP_URL` naming its own port
+  for a while and went on binding :3000 every time, because nothing binds from `APP_URL`.
 - `npm run stop:all` — stops a `dev:all` you (Claude) started, in one command instead of a
   netstat/parent-trace/taskkill dance across several. Verifies the port owner's command line
   actually mentions this repo before touching anything (see `scripts/stop-all.ps1` —
-  which also stops an e2e prod web server on :3005 if one is running).
+  which also stops an e2e prod web server on `WEB_PORT + 2` if one is running). It reads
+  this slot's ports from `scripts/dev-ports.ps1`, so run it from the tree you mean to stop
+  — it will not touch the other slot's servers.
 - `.claude/launch.json` defines `web`, `collab`, and `web-prod` for the preview tool.
   `web-prod` runs `next start` on :3001 (so it can coexist with a `dev:all` on :3000) against
   whatever `npm run build` last produced — use it for anything caching-related, since
   `next dev` doesn't enforce the static/dynamic split or the Full Route Cache. It shells
   through `pwsh` to set `AUTH_TRUST_HOST`/`AUTH_URL`, without which NextAuth rejects
   `localhost:3001` as an `UntrustedHost` under `next start`. See CACHING.md's
-  2026-07-24 entry.
+  2026-07-24 entry. **This file is the one place a port is still literal**, because the
+  preview tool reads static JSON and cannot compute `WEB_PORT + 1`. Its numbers are slot A's;
+  in slot B the `web`/`web-prod` entries point at ports nothing is listening on, so drive
+  that slot from `npm run dev:all` and open the pane on `http://b.localhost:3005` directly.
 - The user often runs `dev:all` themselves. **You may stop it** when the work needs it —
   `npm run stop:all`, then restart via the preview tool. Standing permission, no need to
   ask each time. Prefer attaching to what's already running (open the browser pane on
-  http://localhost:3000) when that would answer the question, since a restart costs a cold
+  http://localhost:3000, or `http://b.localhost:3005` for slot B) when that would answer
+  the question, since a restart costs a cold
   recompile and can poison `.next` (see the Checks section); but a schema change or a new
   Prisma model *requires* the restart, and asking is worse than doing it. Say that you did.
 
@@ -113,7 +169,15 @@ than the reasoning itself.
 
 - Local **Postgres 18** (Windows service `postgresql-x64-18`), owning port 5432. The
   `multiblog` role/DB connect passwordless — the 18 instance trusts all local connections.
-  `psql -U multiblog -h 127.0.0.1 -d multiblog` just works. The old `postgresql-x64-14`
+  `psql -U multiblog -h 127.0.0.1 -d multiblog` just works. **Two databases in that one
+  cluster**, one per slot: `multiblog` (slot A) and `multiblog_b` (slot B, `~/git/MultiBlog`).
+  They are separate precisely so two branches can hold divergent migration state without
+  either one's `prisma migrate dev` detecting drift and offering the full reset described
+  further down this section — which is the failure this arrangement exists to prevent, and
+  the reason a second checkout must never be pointed at the first's `DATABASE_URL`. The
+  `multiblog` role has CREATEDB, so a further slot needs no superuser:
+  `psql -U multiblog -h 127.0.0.1 -d postgres -c "CREATE DATABASE multiblog_c OWNER multiblog"`,
+  then `npx prisma migrate deploy` and `npx tsx scripts/seed-sample-data.ts` from that tree. The old `postgresql-x64-14`
   service is stopped, not uninstalled: its data directory still holds the pre-rebuild
   database, recoverable with `pg_dump` by starting 14 on a spare port. That door closes if
   14 is ever uninstalled.
@@ -164,7 +228,11 @@ than the reasoning itself.
   file importing `prisma` from `./src/lib/prisma` (same as `server/collab.ts` does) and run
   it with `npx tsx that-file.ts` from the project root; delete the file afterward.
 - Dev account `labreuer@gmail.com` has role ADMIN.
-- `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`. Optional:
+- `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`, plus
+  `DEV_HOST` and `WEB_PORT` — the three values that make this tree a *slot* rather than
+  a copy (see Running above; `scripts/dev-ports.ts` is where they are read). `DEV_HOST` and
+  `WEB_PORT` both default sensibly when absent (`localhost`, 3000), so an unedited `.env`
+  behaves exactly as it did before slots existed. Optional:
   `E2E_WORKERS` — the Playwright worker count, defaulting to 2. Lives here rather than in
   `playwright.config.ts` precisely because it is a property of the machine and not of the
   repo: the committed 2 is right for the Windows desktop it was measured on and too many
@@ -173,7 +241,7 @@ than the reasoning itself.
   `defineConfig` evaluates. Optional:
   `NEXT_PUBLIC_COLLAB_URL` — leave unset for local dev; `src/lib/collab-url.ts`'s `getCollabUrl()`
   (the one function every client-side `HocuspocusProvider` call goes through) derives
-  `ws://<the page's own host>:1234` per request instead, so the same running dev server
+  `ws://<the page's own host>:<NEXT_PUBLIC_COLLAB_PORT>` per request instead, so the same running dev server
   works from `localhost` *and* a LAN IP (e.g. testing from a phone) with no restart. Set it
   explicitly only for a real deployment (a different host/subdomain, or `wss://`) — once set,
   it pins every client to that one value, same as before. `next.config.ts`'s
@@ -181,8 +249,13 @@ than the reasoning itself.
   reach the Next dev server itself (HMR, RSC) at all — needed for the same phone-on-LAN case,
   but for the web server rather than the collab one, and it does need a **restart** (not
   `getCollabUrl()`'s zero-restart) since it's read at `next dev` startup. `COLLAB_PORT` is bare,
-  not `NEXT_PUBLIC_`, so it isn't readable client-side at all — `getCollabUrl()`'s `:1234`
-  fallback is a literal, same as the `process.env.NEXT_PUBLIC_COLLAB_URL` reads it replaced.
+  not `NEXT_PUBLIC_`, so it isn't readable client-side at all — which is why there is a
+  separate `NEXT_PUBLIC_COLLAB_PORT` holding the same number for the browser (defaulting to
+  `1234`). That pair is what lets a second slot move its collab port *without* pinning
+  `NEXT_PUBLIC_COLLAB_URL`: pinning the URL also pins the host, which silently defeats the
+  per-request derivation above. Slot B did exactly that until `NEXT_PUBLIC_COLLAB_PORT`
+  existed. Being a `NEXT_PUBLIC_` var it is substituted by textual match at build time, so
+  `src/lib/collab-url.ts` must keep reading it as a full literal member expression.
   **`NEXT_PUBLIC_COLLAB_URL` is the browser's answer only.** The Next *server* also calls the
   collab process directly over plain HTTP (`/admin/ydoc-snapshot`, `/admin/annotation-mark`,
   `/admin/annotation-unmark`, `/admin/annotation-flush`); that origin comes from
@@ -348,13 +421,14 @@ than the reasoning itself.
   typescript 7 is blocked separately by `typescript-eslint`'s `<6.1.0` peer. Both
   unblock when Next ships a refreshed lint config — recheck then, not before.
   Taking eslint 10 *would* drop the `brace-expansion` audit count from 9 to 6.
-- `npm run e2e` — the full Playwright suite, against a **production build** on :3005
+- `npm run e2e` — the full Playwright suite, against a **production build** on `WEB_PORT + 2`
+  (:3002 in slot A)
   (builds first — a cold run pays `next build`; ~3min of suite proper on 2 workers).
   Prod rather than `next dev` because two historical flake classes were dev-server
   bugs a production build compiles out; the whole investigation is
   [docs/playwright-flakiness.html](docs/playwright-flakiness.html). `npm run e2e:dev`
   (or a bare `npx playwright test …`) is the dev-target loop for iterating on one
-  spec — :3000, one worker, reusing a `dev:all` you already have running rather than
+  spec — `WEB_PORT` (:3000 in slot A), one worker, reusing a `dev:all` you already have running rather than
   starting (or killing) its own. **Prefer the suite to driving the browser pane by
   hand** for anything it already covers, and for anything worth covering: one command
   replaces a dozen `read_page`/click round trips, and a spec can do the setup *and*

@@ -3,27 +3,35 @@
 // e2e/db.ts import src/lib/prisma, which needs DATABASE_URL at import time.
 import "dotenv/config";
 import { defineConfig, devices } from "@playwright/test";
+// The slot's hostname and port block. Ports are no longer literals here
+// because a second working tree runs beside this one on its own block —
+// see scripts/dev-ports.ts for what a slot is and why DEV_HOST matters as
+// much as the numbers do.
+import { COLLAB_PORT, E2E_WEB_PORT, WEB_PORT, webUrl } from "./scripts/dev-ports";
 
 // Two targets (docs/playwright-flakiness.html):
 //
 // - **prod** (`npm run e2e`, via E2E_TARGET=prod): the full suite runs against
-//   `next build` + `next start` on :3005 (scripts/e2e-web.ps1). Two of the
-//   suite's historical failure classes are dev-only and compiled out of a
-//   production build — the prerender-manifest RMW tear (vercel/next.js#96664,
-//   ~1 tear per suite run, occasionally a 500 on an unrelated route) and
-//   next-auth's dev-only SessionProvider invariant, which turns a transient
-//   Turbopack SSR module miss into a 500. Next's own Playwright guide
-//   recommends the prod target. Cookies don't scope by port, so the same
-//   e2e/.auth/admin.json works on either target.
+//   `next build` + `next start` on WEB_PORT + 2 — :3002 in slot A
+//   (scripts/e2e-web.ps1). Two of the suite's historical failure classes are
+//   dev-only and compiled out of a production build — the prerender-manifest
+//   RMW tear (vercel/next.js#96664, ~1 tear per suite run, occasionally a 500
+//   on an unrelated route) and next-auth's dev-only SessionProvider invariant,
+//   which turns a transient Turbopack SSR module miss into a 500. Next's own
+//   Playwright guide recommends the prod target. Cookies don't scope by port,
+//   so the same e2e/.auth/admin.json works on either target — which holds only
+//   because both targets share this slot's DEV_HOST. That same port-blindness
+//   is why two slots need different *hostnames* and not merely different
+//   ports (scripts/dev-ports.ts).
 //
 // - **dev** (`npm run e2e:dev`, or a bare `npx playwright test …`): the old
-//   behavior, against `next dev` on :3000 — the fast loop for a spec or
-//   feature under active development, with no build step. The
+//   behavior, against `next dev` on WEB_PORT — :3000 in slot A. The fast loop
+//   for a spec or feature under active development, with no build step. The
 //   `devServer500Watch` fixture names the two dev-only 500 classes in a red
 //   test's annotations so they don't read as app regressions.
 const PROD = process.env.E2E_TARGET === "prod";
 
-export const BASE_URL = PROD ? "http://localhost:3005" : "http://localhost:3000";
+export const BASE_URL = PROD ? webUrl(E2E_WEB_PORT) : webUrl(WEB_PORT);
 export const ADMIN_STORAGE_STATE = "e2e/.auth/admin.json";
 
 export default defineConfig({
@@ -180,7 +188,7 @@ export default defineConfig({
       // A raw WebSocket server, so wait on the TCP port — an HTTP probe of the
       // Hocuspocus endpoint proves nothing useful.
       command: "npm run collab",
-      port: Number(process.env.COLLAB_PORT ?? 1234),
+      port: COLLAB_PORT,
       reuseExistingServer: true,
       timeout: 60_000,
     },

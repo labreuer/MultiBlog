@@ -1,8 +1,9 @@
 # Stops every server this repo runs locally, in one shot, so a restart doesn't
 # need a separate discover/trace/kill round trip: the `npm run dev:all` tree
-# (Next.js dev on :3000 + Hocuspocus on :1234) and the e2e prod web server
-# (`npm run e2e:web`, `next start` on :3005). Named for the `npm run stop:all`
-# script that invokes it — it used to be stop-dev.ps1, before :3005 existed.
+# (Next.js dev on WEB_PORT + Hocuspocus on COLLAB_PORT) and the e2e prod web
+# server (`npm run e2e:web`, `next start` on WEB_PORT + 2). In slot A those are
+# :3000, :1234 and :3002. Named for the `npm run stop:all` script that invokes
+# it — it used to be stop-dev.ps1, before :3005 existed.
 #
 # Verifies before killing anything:
 #   - the process actually listening on each port must have this repo's own path in
@@ -17,12 +18,22 @@
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path.TrimEnd('\')
-# 3005 is the e2e prod web server (scripts/e2e-web.ps1) — same ownership check applies.
-$ports = @(3000, 3005, 1234)
+# This slot's block, not literals — see scripts/dev-ports.ts. E2eWeb
+# (WEB_PORT + 2) is the e2e prod web server (scripts/e2e-web.ps1); the same
+# ownership check applies to it. WebProd (WEB_PORT + 1) stays out of the list on
+# purpose: it belongs to the preview tool, which has to stop it itself (CACHING.md).
+$slot = & (Join-Path $PSScriptRoot 'dev-ports.ps1')
+$repoRoot = $slot.RepoRoot
+$ports = @($slot.Web, $slot.E2eWeb, $slot.Collab)
 $ancestorMarkers = @(
     $repoRoot, 'concurrently', 'npm run dev:all', 'npm:dev', 'npm:collab',
     'npm run dev', 'npm run collab', 'npm-cli.js', 'next dev', 'tsx watch',
+    # `npm run dev` is a tsx wrapper now (scripts/dev-web.ts) that spawns next's
+    # bin by absolute path, so the leaf's command line quotes that path and the
+    # 'next dev' marker above (which expects a space, not a quote) no longer
+    # matches it. It still matches $repoRoot; this entry makes that deliberate
+    # rather than lucky.
+    'dev-web.ts',
     # The e2e prod web tree (scripts/e2e-web.ps1). In practice every process in
     # it carries the repo's absolute path and already matches $repoRoot; these
     # make the intent explicit rather than relying on that alone.
@@ -116,4 +127,4 @@ if ($aborted) {
     Write-Host "`nDone, but one port was left alone -- see warnings above."
     exit 1
 }
-Write-Host "`nPorts 3000, 3005 and 1234 are clear."
+Write-Host "`nPorts $($ports -join ', ') are clear."
