@@ -233,10 +233,15 @@ cross between them.
   a copy (see Running above; `scripts/dev-ports.ts` is where they are read). `DEV_HOST` and
   `WEB_PORT` both default sensibly when absent (`localhost`, 3000), so an unedited `.env`
   behaves exactly as it did before slots existed. Optional:
-  `E2E_WORKERS` — the Playwright worker count, defaulting to 2. Lives here rather than in
-  `playwright.config.ts` precisely because it is a property of the machine and not of the
-  repo: the committed 2 is right for the Windows desktop it was measured on and too many
-  for a 2-core laptop. `playwright.config.ts` already imports `dotenv/config` (it needs
+  `E2E_WORKERS` — the Playwright worker count. It is an **override, not the setting**: the
+  default is derived in `playwright.config.ts` from `os.cpus().length`, clamped so it never
+  exceeds the count an actual measurement produced. That derivation is why no machine is
+  described here any more — this entry used to say the committed 2 was right for "the
+  desktop it was measured on" and too many for "a 2-core laptop", which left the reader to
+  translate their own hardware into a number with no way to check the translation. Set this
+  only to contradict the derivation, and the symptom that warrants it is specific: red tests
+  scattering across unrelated specs, not repeating between runs, all passing at
+  `E2E_WORKERS=1`. `playwright.config.ts` already imports `dotenv/config` (it needs
   `DATABASE_URL` for the DB helpers), so a value here is in `process.env` before
   `defineConfig` evaluates. Optional:
   `NEXT_PUBLIC_COLLAB_URL` — leave unset for local dev; `src/lib/collab-url.ts`'s `getCollabUrl()`
@@ -423,7 +428,8 @@ cross between them.
   Taking eslint 10 *would* drop the `brace-expansion` audit count from 9 to 6.
 - `npm run e2e` — the full Playwright suite, against a **production build** on `WEB_PORT + 2`
   (:3002 in slot A)
-  (builds first — a cold run pays `next build`; ~3min of suite proper on 2 workers).
+  (builds first — a cold run pays `next build`; ~2min of suite proper once warm on a
+  6c/12t desktop — e2e/README.md names the rig behind every timing it quotes).
   Prod rather than `next dev` because two historical flake classes were dev-server
   bugs a production build compiles out; the whole investigation is
   [docs/playwright-flakiness.html](docs/playwright-flakiness.html). `npm run e2e:dev`
@@ -440,10 +446,14 @@ cross between them.
     Use `npx playwright test` directly there. `npm run stop:all` is unavailable for the
     same reason — stop a `dev:all` with `pkill -f "next dev"` and `pkill -f
     "server/collab.ts"` instead.
-  - **The default 2 workers is a measurement from one machine, not a constant.** A
-    weaker one needs `E2E_WORKERS=1` (see the `.env` list above), or it produces scattered
-    failures across unrelated specs that all pass single-worker and read exactly like
-    real regressions. `--workers=1` on the command line is the one-off equivalent.
+  - **The worker count is derived from the machine, and `E2E_WORKERS` overrides it.**
+    `playwright.config.ts` scales the prod default with `os.cpus().length` up to a measured
+    ceiling, so a smaller box gets fewer workers with nothing to edit and nobody to ask. The
+    dev lane is always 1 and is *not* derived — its limit is the dev server serializing SSR,
+    not the CPU, so there is no core count at which raising it would help. What too many
+    workers looks like, if you override upward: scattered failures across unrelated specs
+    that all pass single-worker and read exactly like real regressions. `--workers=1` on the
+    command line is the one-off equivalent of the env var.
 - **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.**
   Symptom: the server logs `✓ Ready`, serves `/` fine, then prints
   `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs

@@ -4,6 +4,16 @@ Running log of known performance characteristics, trade-offs, and decisions in
 the collaborative editor. Add a new dated entry below for each notable
 finding, fix, or deliberately-deferred issue — most recent last.
 
+**Every measurement in this file was taken on one machine** — an Intel
+i7-8700K, 6 cores / 12 threads, Windows, with Postgres and the collab server on
+the same box. That holds for every entry below, including the earliest; an entry
+that ever measures somewhere else must say so. These figures are sub-millisecond
+and CPU-bound, so the rig matters more here than almost anywhere else in the
+repo — a number with none attached cannot be checked or scaled by whoever
+reads it next. Where a table carries a throttled column, that is
+`Emulation.setCPUThrottlingRate` applied to *this* processor: a floor for slower
+hardware, not a measurement of any.
+
 ## Console-based performance logging
 
 Some hot paths are instrumented with `perfMeasure` (`src/lib/perf-monitor.ts`).
