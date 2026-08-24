@@ -17,7 +17,7 @@ import { test, expect, freshGoto, signIn } from "./fixtures";
 import { createTestUser, deleteTestUser, getAvatarFacts, getContributorFields, uniqueEmail } from "./db";
 
 // A fresh browser context, not the shared `page`'s — the browser pane's
-// "tabs share one cookie jar" trap (CLAUDE.md) applies to Playwright pages
+// "tabs share one cookie jar" trap (docs/BROWSER_PANE.md) applies to Playwright pages
 // in the same context too; a separate context is what secondUser() uses for
 // exactly this reason.
 async function signedInAs(browser: Browser, email: string): Promise<Page> {

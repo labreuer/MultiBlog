@@ -10,8 +10,8 @@ selecting text on each of the three surfaces that respond to it
 is *not* visible until the right page is visited.
 
 ```bash
-npm run e2e        # full suite, against a production build on :3005
-npm run e2e:dev    # the dev-server target (:3000), one worker by default
+npm run e2e        # full suite, against a production build on :3002 (WEB_PORT + 2)
+npm run e2e:dev    # the dev-server target (:3000 = WEB_PORT), one worker by default
 ```
 
 The full suite targets `next build` + `next start` rather than `next dev`
@@ -28,12 +28,12 @@ regression.
 Other entry points: `npm run e2e:ui` (watch mode with a time-travel debugger),
 `npm run e2e:report` (last run's HTML report), and the usual Playwright flags —
 `npx playwright test e2e/doc.spec.ts -g "title"`, `--headed`, `--debug` (all
-dev-target; set `E2E_TARGET=prod` yourself to point one at :3005).
+dev-target; set `E2E_TARGET=prod` yourself to point one at :3002).
 
 ## How a run is wired
 
 1. `playwright.config.ts`'s `webServer` brings up the web server — for the
-   prod target `npm run e2e:web` (a `next build`, then `next start` on :3005
+   prod target `npm run e2e:web` (a `next build`, then `next start` on :3002
    with `AUTH_URL`/`APP_URL`/`E2E_REVALIDATE` set — see `scripts/e2e-web.ps1`),
    for the dev target `npm run dev` (:3000) — plus `npm run collab` (:1234),
    **unless something is already listening**, in which case it reuses them. A
@@ -54,10 +54,18 @@ dev-target; set `E2E_TARGET=prod` yourself to point one at :3005).
 4. The `cleanup` teardown project sweeps any leftover `e2e-*@example.com` users,
    `E2E …` posts/docs and orphaned commenters.
 
-The suite proper runs in just under 3 minutes on 2 workers (148 tests — the
-"~50 seconds" this file used to claim predates most of them); a cold
-`npm run e2e` adds the `next build` on top. See the worker-count note below
-before raising the parallelism.
+The suite proper runs in about 2 minutes against the prod target at 2 workers
+(160 tests, measured 2026-08-24 with the servers already warm). A cold
+`npm run e2e` adds the `next build` on top.
+
+**Every timing in this file was measured on one machine** — an Intel i7-8700K,
+6 cores / 12 threads, Windows, with Postgres and the collab server on the same
+box — and that is worth stating rather than assuming, because a wall-clock
+figure with no rig attached cannot be checked by the next person to read it.
+This one has already been wrong twice: "just under 3 minutes" was itself a
+correction of an older "~50 seconds". Treat every number here as dated, scale
+it by your own core count, and re-measure rather than infer. See the
+worker-count note below before raising the parallelism.
 
 ## Fixtures
 
@@ -161,13 +169,19 @@ the admin account.
   already-running dev server that server's console output isn't captured
   either — so a 500 tells you nothing. `gotoOk` puts the response body in the
   failure message, which is how the flake below was finally identified.
-- **Don't raise `workers` above the defaults (2 prod / 1 dev) without
-  remeasuring — and lower them on a weak machine** via `E2E_WORKERS` in `.env`
-  (never committed, so it stays per-machine). The 30-run matrix
-  (docs/playwright-flakiness.html) measured the *dev* server's request p50/p99
-  roughly doubling per added worker, for the same ~200s wall clock — fixed
-  costs dominate, so extra workers buy tail latency, not speed, and it's the
-  tail that trips 10s expect budgets. The tell for contention is still that
+- **The defaults are derived, not typed in, and raising the ceiling needs a
+  fresh matrix.** `playwright.config.ts` scales the prod default with
+  `os.cpus().length` up to `MEASURED_WORKERS`, so a smaller machine gets fewer
+  workers with nothing to edit; the dev lane is a hard 1 because its limit is
+  the dev server serializing SSR rather than the CPU. `E2E_WORKERS` in `.env`
+  overrides either (never committed, so it stays per-machine). Two matrices sit
+  behind that (docs/playwright-flakiness.html). On **dev**, request p50/p99
+  roughly doubled per added worker for the same ~200s wall clock — extra workers
+  bought tail latency, not speed. On **prod** the speed is real (3 workers ~13%
+  quicker, 4 ~18%) but so is the price: p50 climbed 30-55%, and above 2 workers
+  a run's slowest test began crossing the 10s expect budget, with one contention
+  red in each of the 3- and 4-worker rounds and none at 2. Faster runs are not
+  worth a red that reads like a regression. The tell for contention is still that
   red tests scatter across unrelated specs and don't repeat between runs; but
   note it's no longer a *sufficient* tell in reverse — a genuine keystroke
   race (class 1 in that doc) failed at every worker count including 1. Two
@@ -181,7 +195,7 @@ the admin account.
   action ran.
 - **Two users means two browser contexts**, which `secondUser()` handles. Don't
   reach for two tabs: they share a cookie jar, and the second sign-in silently
-  re-authenticates the first (the same trap CLAUDE.md documents for the browser
+  re-authenticates the first (the same trap docs/BROWSER_PANE.md documents for the browser
   pane).
 - **`sendMail` is never stubbed or spied on.** Every address the suite creates
   is `@example.com`, and `src/lib/mail.ts` refuses to deliver to that domain
@@ -229,7 +243,7 @@ test("measure", async ({ page, draftDoc }) => {
 });
 ```
 
-For editing-latency work, the `execCommand('insertText')` loop CLAUDE.md
+For editing-latency work, the `execCommand('insertText')` loop PERFORMANCE.md
 describes runs the same way inside `page.evaluate`, timed with
 `performance.now()` — one command instead of a keystroke-by-keystroke drive
 through the browser pane.

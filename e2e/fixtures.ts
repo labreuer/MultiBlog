@@ -25,7 +25,7 @@ export { expect } from "@playwright/test";
  * A second signed-in identity, in its own browser context.
  *
  * A separate context is the whole point: the browser pane's tabs share one
- * cookie jar (CLAUDE.md), which makes "two users at once" a manual balancing
+ * cookie jar (docs/BROWSER_PANE.md), which makes "two users at once" a manual balancing
  * act there. Here each context has its own jar and neither can clobber the
  * other.
  */
@@ -302,7 +302,7 @@ export function statusLine(page: Page) {
  * Deletes an exact substring from the body editor.
  *
  * Selects it with a DOM `Range` and issues a real `delete` command, per the
- * recipe in CLAUDE.md — that drives a genuine ProseMirror transaction through
+ * recipe in PERFORMANCE.md — that drives a genuine ProseMirror transaction through
  * the normal path (mark tagging, Yjs sync) rather than reaching past it. The
  * alternative, arrowing a cursor to the right offset and pressing Backspace N
  * times, is far more fragile and no more realistic.

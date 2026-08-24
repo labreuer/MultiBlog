@@ -1,7 +1,7 @@
 # Read-only guard for `npm run e2e`, run before Playwright starts.
 #
 # playwright.config.ts sets `reuseExistingServer: true` unconditionally against
-# a hardcoded localhost:3000/:1234 (CLAUDE.md is explicit that a dev server we
+# this slot's own web and collab ports (CLAUDE.md is explicit that a dev server we
 # didn't start isn't ours to kill), and webServer.url treats *any* HTTP
 # response as "ready" -- including a 404 from a completely different app. If
 # some other project is squatting on either port, Playwright silently adopts
@@ -16,10 +16,13 @@
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path.TrimEnd('\')
-# 3005 is the e2e prod target (scripts/e2e-web.ps1) — dev's 3000 + 5, chosen to
-# coexist with both `dev:all` (:3000) and the preview tool's web-prod (:3001).
-$ports = @(3000, 3005, 1234)
+# This slot's block, not literals: a second working tree runs beside this one
+# on its own WEB_PORT/COLLAB_PORT (scripts/dev-ports.ts). E2eWeb is WEB_PORT + 2,
+# the e2e prod target. WebProd (WEB_PORT + 1) is deliberately absent — the
+# preview tool owns that one, and Playwright never contends for it.
+$slot = & (Join-Path $PSScriptRoot 'dev-ports.ps1')
+$repoRoot = $slot.RepoRoot
+$ports = @($slot.Web, $slot.E2eWeb, $slot.Collab)
 
 # Tripwire for next dev's prerender-manifest corruption (vercel/next.js#96664,
 # docs/playwright-flakiness.html class 3): the RMW race's *sticky* variant
@@ -71,4 +74,4 @@ if ($foreign) {
     exit 1
 }
 
-Write-Host "`nPorts 3000 and 1234 are clear or already ours."
+Write-Host "`nPorts $($ports -join ', ') are clear or already ours."

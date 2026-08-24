@@ -9,6 +9,9 @@ it — §2 and §2b, and the reason for the split is a security argument rather 
 one. This file is where the mechanisms and their trade-offs live; PLAN.md keeps the chronology
 and the build order and points here.
 
+The *stack* these documents live in — one Hocuspocus process, the three `ydoc*` tables, what
+a restart does and does not do, and the IndexedDB rules — is [YDOC.md](YDOC.md).
+
 - [The problem](#the-problem)
 - [The design space](#the-design-space)
 - Present strategies: [post comments](#1-post-comments--stored-offsets-remapped-on-publish) ·

@@ -145,7 +145,7 @@ export default function CollabEditorBody({
     // Matches the title field's own aria-label/role. Two contenteditables
     // share this page, and without distinct accessible names the only thing
     // telling them apart is DOM order — which is what the e2e suite would
-    // otherwise have to key off (see CLAUDE.md's `.tiptap` ordering note).
+    // otherwise have to key off (see docs/TIPTAP.md's `.tiptap` ordering note).
     editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {

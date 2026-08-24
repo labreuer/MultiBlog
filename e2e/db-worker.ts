@@ -2,7 +2,7 @@
 // comments.
 //
 // This mirrors what scripts/test-user.ts, scripts/test-post.ts and
-// scripts/test-comment.ts do for manual testing (see CLAUDE.md), and keeps
+// scripts/test-comment.ts do for manual testing (see docs/TEST_DATA.md), and keeps
 // their safety rail: every write is gated on an @example.com address, so a
 // misfiring test can't touch a real account or a real post.
 //

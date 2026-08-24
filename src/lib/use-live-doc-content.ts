@@ -42,7 +42,7 @@ export type LiveDocContentOptions = {
   initialBodyJSON: JSONContent;
   // Same aria-label CollabEditorBody's editor carries, so the e2e suite's
   // bodyEditor() helper (e2e/fixtures.ts) and the .tiptap-ordering
-  // convention (CLAUDE.md) work for a doc's reading view for free.
+  // convention (docs/TIPTAP.md) work for a doc's reading view for free.
   ariaLabel: string;
   // Owned by the caller rather than created here, and populated by this hook
   // once useEditor is ready. That direction matters: the selection hook needs
@@ -59,7 +59,7 @@ export type LiveDocContentOptions = {
   versionRef?: React.RefObject<(() => string) | null>;
   // View-only decoration layers the calling surface wants on top of the
   // shared schema — never node/mark types, which would drift this view's
-  // schema from the editor's and the server's (CLAUDE.md). `PendingAnnotation`
+  // schema from the editor's and the server's (docs/TIPTAP.md). `PendingAnnotation`
   // is always included, since every surface built on this shows a
   // pending-selection decoration; `DocLink` is passed in by the side-by-side
   // column alone.

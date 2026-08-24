@@ -24,7 +24,7 @@
 // THE EDIT IS MADE IN THE YDOC, NOT IN prose_json
 //
 // A doc's ydoc row IS the doc; title/prose_json are only caches of it (PLAN.md
-// §3d/§12d, and CLAUDE.md's "A doc's `ydoc` row *is* the doc"). Rewriting
+// §3d/§12d, and docs/YDOC.md's "A doc's `ydoc` row *is* the doc"). Rewriting
 // prose_json alone would be a lie the next store debounce silently reverts, and
 // would leave every annotation's anchor mark pointing into content the ydoc
 // still has. So this script does what an editor does: loads the ydoc, deletes
@@ -38,7 +38,7 @@
 //      docContentFromYdoc() that server/doc-cache.ts uses.
 // prose_json_length needs no handling at all: the doc_sync_prose_json_length
 // trigger owns that column and fires on any UPDATE naming prose_json (never
-// assign to it — CLAUDE.md).
+// assign to it — docs/DATABASE.md).
 //
 // All three land in one Prisma transaction, so a doc is never left with a log
 // entry its ydoc blob doesn't reflect. scripts/integrity/ is the acceptance

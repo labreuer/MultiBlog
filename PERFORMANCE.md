@@ -4,6 +4,16 @@ Running log of known performance characteristics, trade-offs, and decisions in
 the collaborative editor. Add a new dated entry below for each notable
 finding, fix, or deliberately-deferred issue — most recent last.
 
+**Every measurement in this file was taken on one machine** — an Intel
+i7-8700K, 6 cores / 12 threads, Windows, with Postgres and the collab server on
+the same box. That holds for every entry below, including the earliest; an entry
+that ever measures somewhere else must say so. These figures are sub-millisecond
+and CPU-bound, so the rig matters more here than almost anywhere else in the
+repo — a number with none attached cannot be checked or scaled by whoever
+reads it next. Where a table carries a throttled column, that is
+`Emulation.setCPUThrottlingRate` applied to *this* processor: a floor for slower
+hardware, not a measurement of any.
+
 ## Console-based performance logging
 
 Some hot paths are instrumented with `perfMeasure` (`src/lib/perf-monitor.ts`).
@@ -18,6 +28,41 @@ multiblogPerf.isEnabled()
 ```
 
 Enabled logs look like `[multiblog perf] <label>: <ms>ms`.
+
+## Measuring by hand
+
+### Editing latency
+
+`document.execCommand('insertText', false, char)` in a loop inside the editor's `.tiptap`
+element, timed with `performance.now()` per call, drives a real ProseMirror transaction
+through the normal path — mark-tagging, Yjs sync, decorations — without OS input-pipeline
+noise. Reproducible enough for relative before/after comparisons.
+
+`execCommand('delete', false)` undoes it the same way, character-for-character, to restore
+test content afterward.
+
+The same loop runs inside `page.evaluate` in a spec, which is one command rather than a
+per-keystroke drive through the browser pane, and can print its numbers straight to stdout.
+
+> `document.querySelector('.tiptap')` matches the **title** editor first; the body editor is
+> `querySelectorAll('.tiptap')[1]`. See [docs/TIPTAP.md](docs/TIPTAP.md).
+
+### Stress-testing at a realistic content size
+
+Copy the target content into a throwaway post rather than editing the real one directly. That
+removes any risk from a botched restore step.
+
+### A/B-ing against actual history rather than guessing
+
+1. Confirm `git status` is clean.
+2. `git checkout <old-commit>`.
+3. Stop and restart `dev:all` — checkout doesn't hot-reload cleanly across many files, and the
+   collab server especially needs a real restart.
+4. Measure.
+5. `git checkout <branch-name>` and restart again.
+
+With uncommitted work, `git stash push -u` / `git stash pop` does the same job without needing
+a commit.
 
 ## 2026-07-19 — Status line: revision diff + author mark counts
 

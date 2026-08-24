@@ -110,7 +110,7 @@ test("visiting /dashboard as a deleted user clears the session", async ({ second
   await deleteTestUser(user.email);
 
   // The JWT is still valid and still says ADMIN — deleting the row doesn't
-  // revoke it (CLAUDE.md's browser-pane note).
+  // revoke it (docs/BROWSER_PANE.md).
   await page.goto("/");
   await expect(adminLink(page)).toBeVisible();
 

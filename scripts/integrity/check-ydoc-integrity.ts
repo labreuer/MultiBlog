@@ -31,7 +31,7 @@
 //
 // WHAT IT CHECKS
 //   1. log-not-empty  — a ydoc row with no ydoc_update rows has nothing to
-//      rebuild from. §11b's whole recovery story is the log (CLAUDE.md is
+//      rebuild from. §11b's whole recovery story is the log (docs/YDOC.md is
 //      explicit that a doc's ydoc row IS the doc, with the log as the only way
 //      back), so an empty one is a silent loss of that.
 //   2. invariant-1    — row #1 must be a full state, not a delta (§11b). Tested
@@ -136,7 +136,7 @@ async function main() {
   if (ydocs.length === 0) {
     if (targetId) {
       // Not a failure: a doc created but never opened has no ydoc row yet —
-      // ydocOnLoadDocument creates it on first connect (CLAUDE.md).
+      // ydocOnLoadDocument creates it on first connect (docs/YDOC.md).
       console.log(`\nNo ydoc row for ${targetId}. (Never opened, or the id is wrong.)\n`);
       return 0;
     }
