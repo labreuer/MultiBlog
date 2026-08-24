@@ -813,3 +813,7 @@ directory leaves every `file` row pointing at bytes that aren't there; the downl
 answers 503 and logs the sha256, but the file is gone. Back the directory up alongside the
 database dump, and restore the two together.
 
+`scripts/copy-pdfjs-assets.ts` runs from `prebuild`, so pdfjs's fonts and cmaps land in
+`public/` as part of any normal build. It needs no deploy step of its own — but if a build is
+ever run in a way that skips npm lifecycle scripts, run it by hand or PDFs render with
+substituted glyphs and CJK documents render as blank boxes.

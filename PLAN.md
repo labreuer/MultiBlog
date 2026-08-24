@@ -6052,6 +6052,8 @@ supportable). `server/ydoc-hooks.ts`'s own `y-prosemirror` import is unaffected 
 as-is — a stateless Yjs↔ProseMirror conversion with no plugin-state lookup involved, not the
 same category of usage.
 
+---
+
 ## 19. PDF files and a collaborative PDF viewer
 
 ### Context
@@ -6297,10 +6299,383 @@ component) needs `canManageFiles` for the nav link.
 
 ---
 
-### Phases 2–5 — the viewer, annotations and presence
+### Phase 2 — `/pdf/[slug]` viewer shell (no annotations yet)
 
-Everything from `/pdf/[slug]` onward — the viewer shell, PDF anchoring and
-annotations, presence and follow, and §19a's engine baseline — lands on the branch
-stacked on this one. Phase 1 above is self-contained without them: an uploaded file
-is stored, served with `Range` support, listed and managed at `/files`, and opened
-through the browser's own viewer at its download URL.
+`src/app/pdf/[slug]/page.tsx` — server component: resolve slug (with `FileSlugHistory`
+redirect, as `resolveDocParam` does), gate on `canUserReadFile`, render the shell.
+
+`src/components/pdf/PdfViewer.tsx` — `"use client"`, loaded through `next/dynamic` with
+`ssr: false` (pdfjs touches `DOMMatrix`/`Path2D` at import time).
+
+- Built on **`PDFViewer` + `EventBus` + `PDFLinkService` from `pdfjs-dist/web/pdf_viewer.mjs`**,
+  with `pdfjs-dist/web/pdf_viewer.css` imported.
+- A cumulative page-offset table is built once on `pagesinit` from
+  `pdfPage.getViewport({ scale: 1 }).height` — the **public** API — rather than reading
+  `PDFViewer._pages`. This is what every "document fraction" in Phase 4 is computed against.
+- Layout is the full-viewport app shell: `SiteHeader` + a flex row of
+  `[presence rail | viewer | indicator strip | annotation panel]`, the viewer scrolling
+  inside its own box. `globals.css`'s `height: 100vh/100dvh` on `body` is what gives that
+  box a definite main size — the same budget `DocEditor.module.css`'s `.container` relies on.
+  Below `MARGIN_NOTES_MEDIA_QUERY` (1200px) the panel becomes a toggled overlay.
+- Toolbar: page number/count, prev/next, zoom (`page-fit`, `page-width`, numeric), rotate.
+
+---
+
+### Phase 3 — Anchoring and annotations
+
+#### Text normalisation — `src/lib/pdf-text.ts`
+
+docs/PDF.md §3's pipeline, as a **pure function of `getTextContent()` output**, shared by
+the browser and the Node-side upload extraction so the two cannot drift:
+gap-based space insertion + `hasEOL` newlines → NFKC → ligature decomposition → strip soft
+hyphens/zero-width → normalise dashes and quotes → collapse whitespace. Exports
+`TEXT_VERSION = \`${pdfjsVersion}/${NORMALISER_VERSION}\`` and builds the offset map
+(normalised index → `{ itemIndex, charOffset }`) client-side. Cached per
+`(fileId, pageIndex, textVersion)`.
+
+#### Capture — `src/lib/pdf-anchor-capture.ts`
+
+docs/PDF.md §5 exactly: `getSelection().getRangeAt(0)` → split by page → per page
+`getClientRects()` → subtract `pageView.div.getBoundingClientRect()` → `convertToPdfPoint`
+each corner → quads; plus `quote`/`position` from the normalised page text (never from the
+DOM — §11's Hypothesis trap). Rectangle selection is a drag on the `.annoLayer` producing a
+single quad with an empty `quote` and null `position`.
+
+CSS pixels from `getBoundingClientRect()`, never canvas backing-store pixels; the page's
+**current** rotation passed into every `getViewport`.
+
+#### Resolution — `src/lib/pdf-anchor-resolve.ts`
+
+docs/PDF.md §4 order: exact quote match searching outward from `position.start` → **[step 2
+deferred, see below]** → quads fallback → orphaned if the text under the resolved quads
+fails the quote check. Since the bytes are immutable, steps 1–2 exist only to survive *our
+own* normaliser changes; the quads path is always available and always correct.
+
+#### Layer — `src/components/pdf/anno-layer.ts`
+
+docs/PDF.md §6: a `.annoLayer` sibling built on `textlayerrendered`, `position:absolute;
+inset:0; pointer-events:none`, z-index below `.textLayer`, torn down when PDF.js evicts the
+page. **Never touch `.textLayer`/`.annotationLayer`** (invariant 4). Rects re-derived from
+quads on every `pagerendered`/`scalechanging`/`rotationchanging` — never cached across a
+scale change. Imperative, not React-per-page: PDF.js virtualises and rebuilds these nodes.
+
+Click handling per §7: one delegated listener on the viewer container,
+`elementsFromPoint` filtered on `data-anno-id`, suppressed when pointer travel between
+`pointerdown` and `click` exceeds ~4px.
+
+#### Server side
+
+- `postAnnotation` ([src/app/actions/annotations.ts](src/app/actions/annotations.ts)) gains a
+  `"pdf"` anchor mode beside `"mark"`/`"columns"`. It derives `quotedText` **server-side**
+  by slicing `FilePageText.text` at `position` and comparing it to the client's claim —
+  keeping §12i's "the selected text is a request field only, never a column" intact, and
+  cheaply, because the text was extracted once at upload. A rect-only annotation stores
+  `quotedText: ""`. `ydocUpdateId` is null for a PDF root (there is no update log for an
+  immutable file); a reply still stamps its parent body's log, unchanged.
+- `createDraftAnnotation` takes a container discriminant instead of a bare `docId`.
+- `canUserAccessAnnotationYdoc` ([src/lib/annotation-authz.ts](src/lib/annotation-authz.ts))
+  takes `{ doc } | { file }` and routes to `canUserReadDoc` / `canUserReadFile`. Its `DRAFT`
+  owner-only rule is unchanged.
+- `/annotations` ([src/app/annotations/page.tsx](src/app/annotations/page.tsx)): a Container
+  column that links to either `/doc/…` or `/pdf/…`. Its `doc.proseJson` content-boundary
+  work is skipped for PDF rows — `quotedText` is already stored, so there is nothing to
+  excerpt from a document body.
+
+#### Panel — `src/components/pdf/PdfAnnotationPanel.tsx`
+
+Reuses `AnnotationNode`, `QuoteThreadHeader`, `AnnotationColorStyles`,
+`NewAnnotationComposer`, `LiveAnnotationComposer`, `OwnDraftsList`, `pseudo-border.ts` and
+`MarginNotes.module.css` unchanged.
+
+**One small refactor** makes the layout machinery shared rather than duplicated:
+[use-margin-notes-layout.ts](src/components/margin-notes/use-margin-notes-layout.ts) is
+already source-agnostic in design ("Surfaces differ in how they answer this — which is the
+whole reason this is a callback rather than a prop shape") but typed against a TipTap
+`Editor` in four places: the `anchored` gate, `resolveTops(editor)`, `observer.observe(editor.view.dom)`,
+and `editor.on("update")`. Replace those with a `{ element, onChange }` source supplied by
+`MarginNotesProvider`, so `resolveTops` becomes `() => Map<string, number>` and callers close
+over their own source. Mechanical, touching `margin-notes-context.tsx`,
+`use-margin-notes-layout.ts`, `AnnotationList.tsx`, `CommentEntryList.tsx`,
+`EditorAnnotationRail.tsx` — three working surfaces, so `npm run e2e`'s coverage of
+`/doc/[slug]` matters here.
+
+The hook's existing **`bounds`** option is exactly right for this shell: it is documented for
+"a surface whose article scrolls inside its own box", hides cards whose anchor has scrolled
+out of the band, and attaches the scroll listener. That is the PDF viewer precisely.
+
+`PdfAnnotationList` is a thin sibling of
+[AnnotationList.tsx](src/components/annotation/AnnotationList.tsx) — same shape, three
+differences: `resolveTops` converts quads → page element → CSS `y` instead of reading
+`coordsAtPos`; the `quoteIndex` sort mode orders by `(pageIndex, y)`; and there is **no
+`createPortal`**, because in the app shell the rail and the list are the same scroller.
+Un-sharing rather than parameterising follows §13c's own precedent (`AnnotationList` was
+deliberately un-shared from `CommentEntryList` once the rendering problems diverged).
+
+**The rail holds what is on screen, and is therefore never taller than the panel.**
+`resolveTops` ([PdfAnnotationSurface.tsx](src/components/pdf/PdfAnnotationSurface.tsx))
+answers only for annotations whose resolved rects intersect the viewer container's own rect —
+not for every annotation on a page pdfjs has built, which is a buffer extending well above and
+below the visible region. An id absent from that map is out of the rail; the panel's two modes
+are what the reader chooses between:
+
+- **Rail** — cards for passages on screen, each level with its own passage. It scrolls only
+  when more annotations are anchored on screen than fit beside them.
+- **All** — every annotation as a plain list in document order, positioned by nothing. This
+  is where an annotation the reader hasn't scrolled to lives, and the only place a
+  document-level one (no target at all) appears. Below the 768px breakpoint the panel is a
+  full-width overlay with no document beside it, so this is the only mode and the toggle is
+  not rendered.
+
+Out of the rail means `display: none`, **not unmounted**, and that is load-bearing twice
+over: a card can be holding an open reply composer — a live Hocuspocus connection and a
+`DRAFT` row — or a delete confirmation, and scrolling its passage off screen must not discard
+either; and the id list `usePdfMarginNotes` keys its effect on stays stable, so membership
+changing on every scroll doesn't tear down and rebuild its `ResizeObserver` and pdfjs
+subscription. The hook skips any card with a null `offsetParent` so a hidden one doesn't take
+a slot in the cascade at zero height.
+
+[margin-notes-layout.ts](src/lib/margin-notes-layout.ts) is unchanged and stays shared with
+the doc rail. Its clamp is one-sided by design — `cursor` starts at 0, so nothing is ever
+placed above the container's top — and with membership bounded to the visible band there is
+nothing left for a bottom clamp to catch.
+
+---
+
+### Phase 4 — Presence, viewport sync, and follow
+
+#### Transport
+
+A per-file ydoc `ydoc:pdf:<fileId>` that stays **empty** and carries awareness only —
+docs/PDF.md invariant 5 taken literally. Additions:
+
+- `src/lib/ydoc-names.ts`: `YDOC_PDF_PREFIX = "ydoc:pdf:"`, `ydocIdForFile`,
+  `fileIdFromYdocId`, and `docIdFromYdocId` excludes the new prefix the same way it already
+  excludes `ydoc:annotation:`.
+- `src/app/api/file/[id]/token/route.ts` mirroring
+  [api/doc/[id]/token/route.ts](src/app/api/doc/[id]/token/route.ts). Every token is
+  `readOnly: true` — nobody ever writes content to this document, and awareness is unaffected
+  by `connectionConfig.readOnly`.
+- `server/ydoc-hooks.ts` needs no branch: `ydocOnLoadDocument`'s `createIfAbsent` handles a
+  name nobody made, and `updateDocCache`/`updateAnnotationCache` already no-op on a prefix
+  that is neither. The row accrues one empty state and never changes.
+- `PdfPresenceProvider` mirrors
+  [doc-presence-context.tsx](src/components/annotation/doc-presence-context.tsx), exposing
+  the awareness object to sibling subtrees.
+
+#### Wire format (`src/lib/pdf-presence.ts`)
+
+```ts
+type PdfPresence = {
+  user: { id, name, color },                          // author palette
+  viewport: { pageIndex, pdfPoint: [left, top], zoomMode, t } | null,
+  selection: { pageIndex, quads: Quad[] } | null,
+  leading: boolean,          // "I'm presenting — come join me"
+  following: string | null,  // clientId being followed
+};
+```
+
+Never `scrollTop`/`scrollLeft`/raw scale (§9). `updateviewarea` is rAF-coalesced before
+anything reads it and throttled to ~10 Hz outbound; awareness coalesces, so nothing queues.
+
+Echo suppression uses all three §9 guards: an `applyingRemote` flag cleared on the rAF after
+the resulting `updateviewarea`; a ~2%-of-viewport-height tolerance compare; and a timestamp
+guard dropping inbound states older than the last applied.
+
+#### The three affordances
+
+1. **Broadcast + follow.** A reader sets `leading: true`; others see "N is presenting —
+   Follow". Following applies their viewport via
+   `scrollPageIntoView({ pageNumber, destArray: [pageIndex, {name:"XYZ"}, left, top, null] })`
+   — `null` zoom, so a follower sees the same *content* at their own zoom. Any genuine local
+   scroll gesture (distinguished from a programmatic one by `applyingRemote`) drops the
+   follow immediately, plus an explicit "Stop following". One-directional only; §9 is
+   explicit that symmetric mutual following is unusable.
+2. **Left pseudo-scrollbar.** A 1px line the full height of the viewer, with a circle per
+   remote reader at their document fraction, in their author color. Click → jump to that
+   position.
+3. **Right indicator strip.** Same 1px line, carrying (a) a viewport thumb showing the
+   visible fraction, drawn only when it would be ≥20px tall, and (b) one tick per annotation
+   at its document fraction in its author's color, clickable to jump.
+
+Both rails are pure functions of document fraction — that math goes in
+`src/lib/pdf-rail-layout.ts`, DOM-free, the same split
+[margin-notes-layout.ts](src/lib/margin-notes-layout.ts) makes and for the same reason.
+
+**Remote selections** are drawn into the same `.annoLayer` as annotation highlights, in the
+author's color, for whichever pages are rendered — "always show selection if it would be
+visible on other users' views" falls out of the layer only existing for rendered pages.
+
+---
+
+### Phase 5 — Documentation
+
+- **PLAN.md §19** — the whole design (per the §10 convention: a dedicated section, so no §10
+  entry). Must record: why annotations are Postgres rows and not a `Y.Map`; why the per-file
+  ydoc exists and is empty; why `Annotation.docId` went nullable; why bytes are on disk.
+- **CLAUDE.md** — `FILE_STORAGE_DIR` / `FILE_MAX_UPLOAD_BYTES` in the env list; the
+  `StoredFile`-not-`File` naming reason; "never position a PDF annotation off anything but
+  the live quads"; the pinned-pdfjs rule.
+- **docs/PERMISSIONS.md** — files as a fifth pair of tables, or a note that they follow the
+  doc tables exactly with `canViewFiles`/`canManageFiles` substituted.
+- **docs/PDF.md** — flip §12's "server-side normalised text?" open question to *settled:
+  stored*, and record the §10 deviation below.
+- **DEPLOY.md** — the nginx block, and that `FILE_STORAGE_DIR` is a second backup surface
+  `pg_dump` does not cover.
+- **docs/COLLAB.md** — a PDF quad anchor as a third strategy in its comparison, with the
+  point that it cannot drift because the bytes cannot change.
+- **scripts/integrity/check-pdf-anchors.ts** — the sibling of
+  `check-annotation-anchors.ts`: for every PDF annotation, slice `FilePageText` at
+  `position` and confirm it still equals `quotedText`. Like its sibling, this verifies a
+  claim written down once rather than a derived value, so nothing else would catch a break.
+
+---
+
+### Deviations from docs/PDF.md, and deferrals
+
+- **§10 names `PDFViewerApplication`; this uses `PDFViewer`.** `PDFViewerApplication` is the
+  bundled `web/viewer.html` application, not an importable library entry. `PDFViewer` +
+  `EventBus` + `PDFLinkService` is the library-level equivalent and exposes every internal
+  §5/§8 relies on. Same version-pinning discipline applies.
+- **§9 says annotations → ydoc.** Not taken, for the five reasons under *Decisions* above.
+  §9's viewport half is taken exactly as written.
+- **The right strip's viewport thumb ships disabled** (Phase 4 item 3a above), behind
+  `SHOW_VIEWPORT_THUMB` in `PdfRails.tsx` rather than deleted. The scrollbar sits about ten
+  pixels from the strip and says the same thing; two grey bars that close read as a
+  rendering fault rather than as one position shown twice. Keeping the code costs nothing
+  and buys the only on-screen check of the fraction arithmetic — the thumb is drawn from
+  `visibleFractionRange` over `buildPageOffsets`, the scrollbar beside it from the engine's
+  own `scrollTop / scrollHeight`, so the two disagreeing is exactly what a bug in that
+  arithmetic looks like. The 20px `MIN_VIEWPORT_THUMB_PX` rule and its e2e coverage stay as
+  specified, since the switch is the only thing between them and a visible thumb.
+- **Neither rail is "a 1px line the full height of the viewer"** (items 2 and 3 above), and
+  the viewer's scrollbar is restyled rather than native. Both follow from the same
+  requirement, which the phase description doesn't state: a marker at a document fraction
+  has to land where the scrollbar between the two rails says that fraction is. It didn't —
+  by up to 18px, from an arrow-button inset no API reports, and by a further 9px at any zoom
+  past fit-width, from a rail covering the container's border box while the track stops at
+  its client box. The rails are now pinned to `container.clientHeight` and the scrollbar is
+  drawn from `::-webkit-scrollbar` pseudos, after which the two agree to within 0.0px in
+  Chromium. The engine facts, the measurements, what this costs Firefox and Safari, and why
+  no e2e spec can see any of it: **STYLE.md, "Custom scrollbars, and anything positioned
+  beside one"**. Why it is done *here*: `PdfViewer.module.css` and `PdfRails.tsx`.
+- **§4 step 2 (fuzzy quote match) is deferred.** It only matters after a `textVersion` bump,
+  and §4 warns explicitly against running it synchronously (Hypothesis's ten-second stall).
+  Shipping it properly means a worker; steps 1, 3 and 4 make the viewer correct without it,
+  since quads always resolve.
+- **§3's lazy re-anchor on `textVersion` change is deferred** with it — nothing bumps the
+  version until the normaliser changes.
+- **The `Files` nav link is placed after `Users`/`Site Settings` in the same left group**,
+  which for a non-ADMIN means it is the only entry there. The literal reading ("to the right
+  of Users") can't hold for AUTHOR/EDITOR, who never see `Users`.
+- **The annotation panel speaks the file surface's vocabulary**, where `/doc/[slug]` speaks
+  the doc's. On `/pdf/[slug]`:
+  - The composer's visibility select offers exactly **PRIVATE** and **SHARED** — the words a
+    file's own visibility uses everywhere else (`DocVisibility`, `/files`' Visibility
+    column), so an annotation on a file doesn't introduce a second vocabulary for the same
+    distinction.
+  - The submit button reads **Save**. The select beside it already names the outcome; the
+    doc side spells the outcome out on the button instead, because there the button is the
+    only thing that does.
+  - There is therefore **no "Post & notify authors" on a file**, so `RAISED` is unreachable
+    from `/pdf/[slug]`. The path itself is live — `postAnnotation`'s `raise` branch mails a
+    file's owners, and a doc annotation offers it — so this is a gap in the PDF UI, not a
+    missing capability. Worth knowing before wondering why file owners get no mail.
+  - **The panel has no sort control**: order is (page, then down the page, creation time
+    breaking ties). Above the breakpoint this panel *is* the margin-note rail, where each
+    card sits level with its own passage, so any other order fights the positioning hook
+    rather than re-sorting the list. `AnnotationList` on `/doc/[slug]`, which is a plain
+    list below its own rail, keeps its sort dropdown.
+
+  The wording lives in `LiveAnnotationComposer`'s optional `container` prop (defaulting to
+  `"doc"`), threaded from the `AnnotationTarget` that `NewAnnotationComposer` and
+  `AnnotationNode` already carry — so the two surfaces share one composer and one submit
+  path, and only the labels and the option list differ.
+
+---
+
+### 19a. The engine assumptions under the PDF surface
+
+**Baseline: Safari 26 / iPadOS 18.4+.** Setting one is a judgement about *engines*, not
+hardware: Apple ships current Safari to macOS versions years past their last major release, so
+old hardware caps macOS and not Safari, and a stale WebKit is nearly always an un-updated one
+rather than an unsupportable one.
+
+Two independent WebKit-shaped problems sit under `/pdf/[slug]`, and neither is visible to
+`npx tsc`, `npx eslint` or the e2e suite — those run one engine, and it is the engine that has
+neither.
+
+**1. A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
+`pointerup` for one: a long-press hands the touch to WebKit's selection gesture recognizer,
+which emits `pointercancel` instead, and the selection handles are native views above the page
+emitting no pointer events at all. Keyboard selection (shift+arrows) delivers none on any
+platform. `PdfAnnotationSurface` therefore debounces `selectionchange` and lets `pointerup`
+short-circuit it, so a mouse drag still costs the single capture it always did — the
+conclusion §13's `AnnotationNode.handleBodySelect` reaches for the doc side. Having two
+triggers has two consequences:
+
+- **`capturePageFor` is awaited inside a try/catch.** Behind it is a worker round trip and a
+  parse of an untrusted PDF; an unhandled rejection there takes the capture with it and
+  presents as a selection captured and silently dropped — indistinguishable from the trigger
+  never firing.
+- **Overlapping async runs are reachable**, which a lone `pointerup` never made them: dragging
+  an iOS selection handle emits a `selectionchange` per pixel while a capture is still in
+  flight. Hence a generation counter, and a `cloneRange()` — `getRangeAt` returns the *live*
+  range, which otherwise mutates under the await.
+
+**2. pdfjs assumes built-ins WebKit does not have.** Exactly one needs patching at this
+baseline: `ReadableStream.prototype[Symbol.asyncIterator]`, which WebKit has never implemented
+and Safari 26.6.1 still lacks in both realms. `getTextContent` iterates its stream with
+`for await`, so without it **every text extraction throws** — on this surface, a selection that
+dies before it can be published or become an annotation.
+`src/lib/pdfjs-webkit-polyfills.ts` holds the patch as a source *string* so it can reach the
+worker realm as well as the main thread, and `ensurePdfWorker` builds the worker script as two
+static imports — the polyfill Blob module, then the vendor worker — because static imports are
+hoisted, so inlining the source above the import runs the vendor script first. docs/PDF.md
+§10's *Engine coupling* carries the measured table and the full account.
+
+**Keeping the claim honest.** A polyfill is a claim about an engine, and claims expire.
+`e2e/pdf-webkit-gaps.spec.ts` is the regression guard — it deletes the built-in in chromium and
+asserts a selection still anchors — and by construction it cannot notice expiry: it passes
+whether or not any real engine still lacks the built-in, and `page.addInitScript` does not
+reach workers, so it covers the main-thread half only. `scripts/probe-engine.ts` is the other
+half, feature-probing a real browser on the main thread *and* inside a module worker and
+printing both columns. **So bumping `pdfjs-dist` means running the probe and opening a PDF in a
+real Safari**, not only the §10 smoke test: pinning protects the API you call and says nothing
+about the runtime pdfjs assumes.
+
+---
+
+### Verification
+
+Per-phase, and each phase is independently shippable:
+
+- **Types/lint** — `npx tsc --noEmit`, `npx eslint .` after each phase.
+- **Phase 1** — `npm run e2e` with a new `e2e/files.spec.ts`: upload a small fixture PDF as
+  AUTHOR; assert it appears in `/files`, that an EDITOR sees it only when SHARED, that
+  another AUTHOR never does, and that ADMIN's `?showAllFiles=1` reveals a PRIVATE one.
+  Assert an over-limit upload is refused client-side, and that the download route honours a
+  `Range` request. A round-trip check that the stored `sha256` matches the bytes on disk.
+- **Phase 2/3** — `e2e/pdf-viewer.spec.ts`: open `/pdf/[slug]`, wait for `pagesinit`, select
+  a known phrase via `page.evaluate` over the text layer, post an annotation, reload, and
+  assert the highlight lands on the same quads and the card carries the same `quotedText`.
+  Then change zoom and rotation and assert the rects moved but the stored target didn't.
+- **Phase 4** — `e2e/pdf-sync.spec.ts` using the `secondUser()` fixture and two
+  `browser.newContext()`s (the browser pane's shared cookie jar makes this untestable by
+  hand): user A scrolls to page 12 and broadcasts, user B follows and lands on page 12, B
+  scrolls manually and the follow drops. Assert B's presence circle exists on A's left rail
+  at a plausible fraction before and after.
+- **Browser engine gaps** — `e2e/pdf-webkit-gaps.spec.ts` (§19a): deletes the built-in WebKit
+  lacks and asserts a selection still anchors. Simulated in chromium rather than run under a
+  `webkit` project, because chromium is where the suite actually runs and because Playwright's
+  WebKit will not launch on every machine (`playwright.config.ts` records the macOS 14 pin).
+  Confirm it *fails* with the polyfill disabled before trusting it — a test of a polyfill that
+  only ever passes proves nothing. It also drives the `selectionchange` path with no
+  `pointerup`, so both triggers are covered between it and the specs above. Two things it does
+  not reach: `scripts/probe-engine.ts` is what says whether the polyfill is still *needed* and
+  what covers the worker realm, and only a real iPad has the native selection gestures.
+- **Regression** — the full `npm run e2e` suite after the `use-margin-notes-layout` refactor,
+  which is the one change touching working surfaces.
+- **Integrity** — `npx tsx scripts/integrity/check-pdf-anchors.ts` on seeded content.
+- **By hand in the browser pane** — only for what the suite can't assert: that the two 1px
+  rails read well, that the viewport thumb's 20px threshold behaves at both extremes, and
+  that a rectangle selection over a figure produces a sensible highlight.

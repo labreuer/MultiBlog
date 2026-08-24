@@ -87,3 +87,9 @@ etherpad-authors.json
 # banner above, but with one extra consequence worth remembering: this is a
 # second backup surface, and `pg_dump` does not cover it (DEPLOY.md).
 /.file-storage/
+
+# pdfjs runtime data files, copied from node_modules by
+# scripts/copy-pdfjs-assets.ts (PLAN.md §19). A build product of a pinned
+# dependency, not repository content — same treatment as the generated icons
+# above. `predev`/`prebuild` in package.json make the copy unskippable.
+/public/pdfjs/

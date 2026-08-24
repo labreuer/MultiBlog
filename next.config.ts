@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
   // one yjs version is installed. Marking it external makes every server-side
   // layer resolve it through Node's own require cache instead.
   // https://github.com/yjs/yjs/issues/438
+  //
   // pdfjs-dist is external for a different reason (PLAN.md §19): the
   // server-side text extraction resolves pdfjs's *own* worker and standard-font
   // files by path (`createRequire(...).resolve`, src/lib/pdf-extract.ts), which

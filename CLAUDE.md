@@ -268,6 +268,36 @@ than the reasoning itself.
     `request.formData()` buffers the whole upload before user code sees it. nginx needs
     `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader
     names the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
+- **pdfjs is full of traps that fail in ways not resembling their cause** — a build error
+  that reads as a malformed URL of ours, a teardown error that reads as a missing `await`,
+  a scanned PDF rendering as blank pages with a working text layer over them. All of them,
+  verified against 6.2.108, are in **[docs/PDF.md](docs/PDF.md) §10** — read it before a
+  `pdfjs-dist` bump or when the viewer misbehaves inexplicably. Three consequences reach
+  outside the viewer and so are repeated here:
+  - **Never delete `e2e/pdf-assets.spec.ts` as trivial.** It asserts that each of pdfjs's
+    four runtime asset directories is served, and it is the only guard on any of them —
+    `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image decoder,
+    so no fixture-based test can cover it.
+  - **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs**, and the symptom is a
+    ~2% *scale* error rather than a layout one. `PdfViewer.module.css` restores
+    `content-box` for `.pdfViewer` and its descendants; don't "tidy" that away. Mechanism,
+    and the related border-box/padding-box trap in coordinate capture: docs/PDF.md §5.
+  - **Bumping `pdfjs-dist` needs `npx tsx scripts/probe-engine.ts` and a real Safari**, not
+    just the internals smoke test. Pinning protects the *API* pdfjs offers, not the
+    JavaScript runtime it assumes underneath — and WebKit ships those built-ins late or not
+    at all (`src/lib/pdfjs-webkit-polyfills.ts`, baseline Safari 26 / iPadOS 18.4+). A
+    chromium-only suite cannot see this class at all, and `e2e/pdf-webkit-gaps.spec.ts`
+    guards against regression without ever detecting that a patch has stopped being needed.
+    Which patches stand, the measured engine table, and the worker-realm import-order trap:
+    docs/PDF.md §10, PLAN.md §19a.
+- **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
+  file's `sha256` is its identity, so the bytes an anchor was measured against are by
+  construction the bytes every later reader sees — no tracking plugin, no per-transaction
+  re-resolution, no version stamp (`Annotation.ydocUpdateId` is meaningless for a file).
+  Don't reach for the doc side's drift machinery here. The one thing that *can* invalidate a
+  stored anchor is our own normaliser, so bump `NORMALISER_VERSION` (`src/lib/pdf-text.ts`)
+  on **any** behavioural change, however small. Full reasoning and the two obligations it
+  leaves: docs/PDF.md §4.
 - Site icons (favicon/manifest): [docs/FAVICON.md](docs/FAVICON.md).
 - The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
   exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
@@ -647,6 +677,12 @@ why nothing recomputes it and why a break there is silent.
   worth keeping in mind for anything sized the same way later, even though that specific
   component is gone (PLAN.md §15: a published post no longer surfaces a live-staleness
   signal at all, by decision — see §15h).
+- **A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
+  `pointerup` for one — a long-press hands the touch to WebKit's gesture recognizer
+  (`pointercancel` instead), and the drag handles are native views that fire nothing — and
+  shift+arrows delivers none anywhere. Either alone works on every desktop and silently does
+  nothing on a tablet, so debounce `selectionchange` and let `pointerup` short-circuit it
+  (`PdfAnnotationSurface`; `AnnotationNode` uses a plain timer for the same reason).
 - When matching one element's width to another's via `ResizeObserver` (e.g. `PostsTable`'s
   search box tracking the Title column's width): use the observed element's own
   `getBoundingClientRect().width` inside the callback, not the callback's own

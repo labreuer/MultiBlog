@@ -6,7 +6,9 @@
     "node": ">=24"
   },
   "scripts": {
+    "predev": "tsx scripts/copy-pdfjs-assets.ts",
     "dev": "next dev",
+    "prebuild": "tsx scripts/copy-pdfjs-assets.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
