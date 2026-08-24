@@ -71,6 +71,14 @@ type Fixtures = {
    * doc nobody has typed a title into yet doesn't have.
    */
   trackCreatedDoc: (docId: string) => void;
+  /**
+   * Auto-fixture, dev-target only (E2E_TARGET !== "prod"): watches the main
+   * page's responses for the two known dev-server 500 classes and names them
+   * in the test's annotations, so a red test says "known next-dev bug" instead
+   * of masquerading as an app regression. Both classes are compiled out of a
+   * production build — docs/playwright-flakiness.html, classes 3 and 4.
+   */
+  devServer500Watch: void;
 };
 
 export async function signIn(page: Page, email: string, password = TEST_PASSWORD): Promise<void> {
@@ -182,6 +190,42 @@ export const test = base.extend<Fixtures>({
       await deleteTestDoc(id);
     }
   },
+
+  devServer500Watch: [
+    async ({ page }, use, testInfo) => {
+      if (process.env.E2E_TARGET === "prod") {
+        await use();
+        return;
+      }
+      page.on("response", (response) => {
+        if (response.status() < 500) return;
+        void response
+          .text()
+          .catch(() => "")
+          .then((body) => {
+            // The dev error page embeds the server-side error message
+            // verbatim (data-next-error-message), so the body names the class.
+            let kind: string | null = null;
+            if (body.includes("useSession") && body.includes("must be wrapped in a")) {
+              kind =
+                "next-auth's dev-only SessionProvider invariant (playwright-flakiness class 4) — " +
+                "a transient Turbopack SSR module miss, impossible in a prod build; rerun, or use `npm run e2e`'s prod target";
+            } else if (body.includes("Unexpected end of JSON input") || body.includes("Failed to generate static paths")) {
+              kind =
+                "next dev's prerender-manifest tear (vercel/next.js#96664, playwright-flakiness class 3) — " +
+                "not an app bug; rerun, or use `npm run e2e`'s prod target";
+            }
+            if (kind) {
+              const line = `${response.request().method()} ${response.url()} → ${response.status()}: ${kind}`;
+              testInfo.annotations.push({ type: "dev-server-500", description: line });
+              console.warn(`[dev-server-500] ${line}`);
+            }
+          });
+      });
+      await use();
+    },
+    { auto: true },
+  ],
 });
 
 /** The post body's contenteditable. Both editors expose an accessible name. */
@@ -216,6 +260,27 @@ export async function gotoOk(page: Page, path: string): Promise<void> {
 }
 
 /**
+ * Revalidates an ISR path, then navigates to it — for asserting on content a
+ * fixture wrote *straight to the database*, on a page with `revalidate`.
+ *
+ * Against the prod target, such a write is invisible to the Full Route Cache
+ * (the server actions that would have called revalidatePath were bypassed),
+ * so a copy cached by an earlier test's visit gets served — up to the
+ * revalidate window stale. The POST hits the E2E_REVALIDATE-guarded
+ * /api/test/revalidate route (scripts/e2e-web.ps1 sets the var); against the
+ * dev target the route 404s and the plain goto is already fresh, so the
+ * failure is deliberately swallowed. Content written through a real server
+ * action doesn't need this — the action's own revalidatePath is the thing
+ * being bypassed.
+ */
+export async function freshGoto(page: Page, path: string): Promise<void> {
+  await page.request
+    .post("/api/test/revalidate", { data: { path }, failOnStatusCode: false })
+    .catch(() => {});
+  await page.goto(path);
+}
+
+/**
  * Text as a reader actually sees it on a public post page.
  *
  * AnnotatableArticle keeps two copies of the body in the DOM — a server-
@@ -230,7 +295,7 @@ export function visibleText(page: Page, text: string) {
 
 /** The editor's status line: connection state, diff counts, present authors. */
 export function statusLine(page: Page) {
-  return page.locator("p").filter({ hasText: /🟢 Live|🟡 Connecting|🔴 Disconnected/ });
+  return page.locator("p").filter({ hasText: /🟢 Live|🔵 Connected|🟡 Connecting|🔴 Disconnected/ });
 }
 
 /**
@@ -317,11 +382,50 @@ async function selectTextIn(page: Page, rootSelector: string, needle: string, nt
 }
 
 /**
- * DocEditor's counterpart — "🟢 Live" is the same synced signal, but there's
- * no Publish button to also check readiness against: a doc has no
- * save/publish step at all (PLAN.md §12k), so the provider having synced is
- * the only thing worth waiting for.
+ * DocEditor's counterpart — and since the badge gained "🔵 Connected",
+ * "🟢 Live" genuinely means the provider has *synced* (initial content
+ * applied), not merely that a websocket opened. That distinction is what
+ * makes this gate safe to type after: quote-anchoring once failed at
+ * workers=1 with the seeded body simply absent because the old
+ * connected-only badge passed this wait before syncStep2 had delivered
+ * anything (docs/playwright-flakiness.html, class 2). There's no Publish
+ * button to also check readiness against: a doc has no save/publish step at
+ * all (PLAN.md §12k), so synced is the only thing worth waiting for.
  */
 export async function waitForDocCollabReady(page: Page): Promise<void> {
   await expect(page.getByText("🟢 Live")).toBeVisible({ timeout: 30_000 });
+}
+
+/**
+ * Collapses the caret to the very start of the body editor, via a DOM Range
+ * plus a `selectionchange` dispatch — the same mechanism selectTextInBody
+ * uses, collapsed.
+ *
+ * Never do this with `Ctrl+A` + `ArrowLeft`: at synthetic keystroke speed
+ * (~15ms gaps) ProseMirror's ingestion of the native arrow-key collapse races
+ * the keystrokes that follow, and the next typed character can execute
+ * against the still-standing select-all *state* — replacing the entire
+ * document. That wiped quote-anchoring's first test in 20 of 30 measured
+ * runs, at every worker count, ~50% even solo on an idle server; this recipe
+ * went 12/12 in isolation and 6/6 on the real test
+ * (docs/playwright-flakiness.html, class 1). A human typing at >50ms gaps
+ * essentially can't hit the race, which is why the app itself is fine and
+ * only synthetic input bleeds.
+ */
+export async function collapseToBodyStart(page: Page): Promise<void> {
+  await bodyEditor(page).click();
+  await page.evaluate(() => {
+    const root = document.querySelector('[aria-label="Post body"]');
+    if (!root) throw new Error("Body editor not found.");
+    const node = document.createTreeWalker(root, NodeFilter.SHOW_TEXT).nextNode();
+    if (!node) throw new Error("Body editor has no text to collapse into.");
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.collapse(true);
+    const selection = window.getSelection();
+    if (!selection) throw new Error("No selection available.");
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
 }

@@ -92,7 +92,8 @@ than the reasoning itself.
   one Ctrl+C stops both. Individually: `npm run dev`, `npm run collab`.
 - `npm run stop:all` — stops a `dev:all` you (Claude) started, in one command instead of a
   netstat/parent-trace/taskkill dance across several. Verifies the port owner's command line
-  actually mentions this repo before touching anything (see `scripts/stop-dev.ps1`).
+  actually mentions this repo before touching anything (see `scripts/stop-all.ps1` —
+  which also stops an e2e prod web server on :3005 if one is running).
 - `.claude/launch.json` defines `web`, `collab`, and `web-prod` for the preview tool.
   `web-prod` runs `next start` on :3001 (so it can coexist with a `dev:all` on :3000) against
   whatever `npm run build` last produced — use it for anything caching-related, since
@@ -163,6 +164,12 @@ than the reasoning itself.
   it with `npx tsx that-file.ts` from the project root; delete the file afterward.
 - Dev account `labreuer@gmail.com` has role ADMIN.
 - `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`. Optional:
+  `E2E_WORKERS` — the Playwright worker count, defaulting to 2. Lives here rather than in
+  `playwright.config.ts` precisely because it is a property of the machine and not of the
+  repo: the committed 2 is right for the Windows desktop it was measured on and too many
+  for a 2-core laptop. `playwright.config.ts` already imports `dotenv/config` (it needs
+  `DATABASE_URL` for the DB helpers), so a value here is in `process.env` before
+  `defineConfig` evaluates. Optional:
   `NEXT_PUBLIC_COLLAB_URL` — leave unset for local dev; `src/lib/collab-url.ts`'s `getCollabUrl()`
   (the one function every client-side `HocuspocusProvider` call goes through) derives
   `ws://<the page's own host>:1234` per request instead, so the same running dev server
@@ -278,14 +285,28 @@ than the reasoning itself.
   typescript 7 is blocked separately by `typescript-eslint`'s `<6.1.0` peer. Both
   unblock when Next ships a refreshed lint config — recheck then, not before.
   Taking eslint 10 *would* drop the `brace-expansion` audit count from 9 to 6.
-- `npm run e2e` — Playwright end-to-end suite (~20s), covering publish/unpublish,
-  comment moderation, and two-author live collab. **Prefer it to driving the browser
-  pane by hand** for anything it already covers, and for anything worth covering: one
-  command replaces a dozen `read_page`/click round trips, and a spec can do the setup
-  *and* the `boundingBox()`/`getComputedStyle` measurement in one process. Fixtures
-  create and delete their own throwaway users/posts, and it reuses a `dev:all` you
-  already have running rather than starting (or killing) its own. Full details,
-  fixtures, and the gotchas that bite when writing new specs: [e2e/README.md](e2e/README.md).
+- `npm run e2e` — the full Playwright suite, against a **production build** on :3005
+  (builds first — a cold run pays `next build`; ~3min of suite proper on 2 workers).
+  Prod rather than `next dev` because two historical flake classes were dev-server
+  bugs a production build compiles out; the whole investigation is
+  [docs/playwright-flakiness.html](docs/playwright-flakiness.html). `npm run e2e:dev`
+  (or a bare `npx playwright test …`) is the dev-target loop for iterating on one
+  spec — :3000, one worker, reusing a `dev:all` you already have running rather than
+  starting (or killing) its own. **Prefer the suite to driving the browser pane by
+  hand** for anything it already covers, and for anything worth covering: one command
+  replaces a dozen `read_page`/click round trips, and a spec can do the setup *and*
+  the `boundingBox()`/`getComputedStyle` measurement in one process. Fixtures create
+  and delete their own throwaway users/posts. Full details, fixtures, and the gotchas
+  that bite when writing new specs: [e2e/README.md](e2e/README.md).
+  - **On macOS, `npm run e2e` doesn't run at all**: its `check-ports` prestep shells
+    through `pwsh`, which isn't installed, so the script dies before Playwright starts.
+    Use `npx playwright test` directly there. `npm run stop:all` is unavailable for the
+    same reason — stop a `dev:all` with `pkill -f "next dev"` and `pkill -f
+    "server/collab.ts"` instead.
+  - **The default 2 workers is a measurement from one machine, not a constant.** A
+    weaker one needs `E2E_WORKERS=1` (see the `.env` list above), or it produces scattered
+    failures across unrelated specs that all pass single-worker and read exactly like
+    real regressions. `--workers=1` on the command line is the one-off equivalent.
 - **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.**
   Symptom: the server logs `✓ Ready`, serves `/` fine, then prints
   `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs

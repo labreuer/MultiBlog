@@ -32,11 +32,49 @@ const adminLink = (page: Page) => page.locator("header").getByRole("link", { nam
  * session read and never re-reads the DB — see SessionRefresh.tsx).
  */
 async function visitDashboard(page: Page): Promise<void> {
-  const refreshed = page.waitForResponse(
-    (response) => response.url().includes("/api/auth/session") && response.request().method() === "POST",
-  );
-  await page.goto("/dashboard");
-  await refreshed;
+  // One POST is not the whole story against the prod target: the post-sign-in
+  // redirect can reach /dashboard as two loads (an RSC navigation and a full
+  // document load), and each mounts its own SessionRefresh — so a second
+  // update POST can trail the first by hundreds of milliseconds. A test that
+  // mutates the user row in that gap races it both ways: trace-verified, a
+  // trailing POST processed after deleteTestUser nulled the session early,
+  // and one processed after setTestUserRole delivered the new role *without*
+  // the /dashboard visit the test is about. So rather than awaiting one
+  // response, settle until the session endpoint has been quiet — no update
+  // POST in flight and none finished for a beat — which is target-shape
+  // agnostic (the dev target's single mount just pays the quiet interval).
+  // Quiet-time only, deliberately no in-flight bookkeeping: when the two
+  // mounts' POSTs race, next-auth aborts one client-side, and an aborted
+  // fetch can emit no requestfinished/requestfailed at all — an in-flight
+  // counter then sticks above zero forever (observed: two `request` events,
+  // one completion). Every observed event just restamps the clock; the POSTs
+  // themselves complete in well under 100ms, so 1.5s of silence after the
+  // last one is comfortably "no refresh is still coming".
+  const isRefresh = (u: string, method: string) => u.includes("/api/auth/session") && method === "POST";
+  let lastActivity = Date.now();
+  let seen = 0;
+  const stamp = (request: import("@playwright/test").Request) => {
+    if (isRefresh(request.url(), request.method())) {
+      seen += 1;
+      lastActivity = Date.now();
+    }
+  };
+  const restamp = (request: import("@playwright/test").Request) => {
+    if (isRefresh(request.url(), request.method())) {
+      lastActivity = Date.now();
+    }
+  };
+  page.on("request", stamp);
+  page.on("requestfinished", restamp);
+  page.on("requestfailed", restamp);
+  try {
+    await page.goto("/dashboard");
+    await expect.poll(() => seen > 0 && Date.now() - lastActivity >= 1_500, { timeout: 20_000 }).toBe(true);
+  } finally {
+    page.off("request", stamp);
+    page.off("requestfinished", restamp);
+    page.off("requestfailed", restamp);
+  }
 }
 
 test("visiting /dashboard picks up a role change made after sign-in", async ({ secondUser }) => {

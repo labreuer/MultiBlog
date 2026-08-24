@@ -842,6 +842,10 @@ function EditView({
 }) {
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  // "connected" is websocket-open, before auth + initial sync; "🟢 Live"
+  // additionally requires this (see DocEditor.tsx's `synced`). The provider
+  // never emits the false transition — onStatus below owns that direction.
+  const [synced, setSynced] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // EditView is only ever mounted with a fixed documentName for its whole
@@ -873,7 +877,11 @@ function EditView({
           name: documentName,
           document: ydoc,
           token,
-          onStatus: ({ status }) => setConnectionStatus(status),
+          onStatus: ({ status }) => {
+            setConnectionStatus(status);
+            if (status !== "connected") setSynced(false);
+          },
+          onSynced: () => setSynced(true),
           onAuthenticationFailed: ({ reason }) => setError(`Live editing unavailable: ${reason}`),
         });
         setProvider(instance);
@@ -900,7 +908,7 @@ function EditView({
   return (
     <div>
       <p className={styles.muted}>
-        {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
+        {connectionStatus === "connected" ? (synced ? "🟢 Live" : "🔵 Connected") : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
       </p>
       <CollabTitleField
         ydoc={ydoc}

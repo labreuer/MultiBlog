@@ -188,6 +188,17 @@ test.describe("admin table kit", () => {
 
       await rowFor(first).getByRole("button", { name: "Restore user" }).click();
       await expect.poll(() => borderOf(first)).toBe(SAVED);
+      // Settle on server truth before re-selecting: the SAVED border above is
+      // client state and turns before the Restore action's RSC refresh has
+      // replaced the table — and that replacement resets the row selection.
+      // Re-checking the boxes in that window leaves the "Set role" change
+      // below applying to an empty selection: a silent no-op, no POST at all
+      // (trace-verified — docs/playwright-flakiness.html, class 5; this was
+      // the suite's "server actions silently not applied" flake, 3 of the
+      // 30-run matrix's failures, always at 3 workers where the action→
+      // refresh round trip is slowest). The restored row offering "Delete
+      // user" again is something only the refreshed render can show.
+      await expect(rowFor(first).getByRole("button", { name: "Delete user" })).toBeVisible();
 
       await rowFor(first).getByRole("checkbox").check();
       await rowFor(second).getByRole("checkbox").check();

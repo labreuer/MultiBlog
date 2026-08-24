@@ -26,6 +26,7 @@ import {
   test,
   expect,
   bodyEditor,
+  collapseToBodyStart,
   deleteTextInBody,
   visibleText,
   waitForDocCollabReady,
@@ -86,8 +87,16 @@ test.describe("quote anchoring across publishes", () => {
     // Inserted at the very start, i.e. entirely before the quote — the anchor
     // should slide forward by exactly the inserted length and stay valid.
     const prefix = "Yesterday, ";
-    await bodyEditor(page).click();
-    await page.keyboard.press("Control+Home");
+    // A DOM Range collapsed at the first text node, not a keyboard chord.
+    // There's no portable document-start chord (`Control+Home` is
+    // Windows-only; macOS wants `Meta+ArrowUp`), and the previous recipe —
+    // `Ctrl+A` then `ArrowLeft` — races ProseMirror's ingestion of the arrow
+    // key's native collapse at synthetic keystroke speed: the first typed
+    // character could execute against the still-standing select-all state and
+    // replace the whole document. Wiped 20 of 30 measured runs at every
+    // worker count; the helper's recipe went 12/12 in isolation and 6/6 here
+    // (docs/playwright-flakiness.html, class 1; helper comment has the rest).
+    await collapseToBodyStart(page);
     await page.keyboard.type(prefix);
     await expect(bodyEditor(page)).toContainText(`${prefix}${QUOTED_BODY}`);
 

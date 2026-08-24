@@ -162,6 +162,9 @@ export const setSiteDefaultColumnOrder = (
 export const getDocState = (...args: Parameters<DbHandlers["getDocState"]>): Promise<DocState | null> =>
   call("getDocState", ...args);
 
+export const getDocAuthorEmails = (...args: Parameters<DbHandlers["getDocAuthorEmails"]>): Promise<string[]> =>
+  call("getDocAuthorEmails", ...args);
+
 export const getContributorFields = (
   ...args: Parameters<DbHandlers["getContributorFields"]>
 ): Promise<ContributorFields | null> => call("getContributorFields", ...args);

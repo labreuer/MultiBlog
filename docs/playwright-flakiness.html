@@ -1,0 +1,293 @@
+<title>MultiBlog Flake Forensics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --paper: #f7f8f7;
+    --card: #ffffff;
+    --ink: #1d2523;
+    --muted: #5c6b67;
+    --line: #d8dedc;
+    --accent: #0f766e;
+    --accent-ink: #0b5951;
+    --fail: #b3383d;
+    --fail-bg: #f8ecec;
+    --warn: #9a6b15;
+    --warn-bg: #f7f0e1;
+    --ok: #2e7d4f;
+    --ok-bg: #e9f2ec;
+    --mono-bg: #eef1f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #131715;
+      --card: #1a201e;
+      --ink: #dae3e0;
+      --muted: #93a49e;
+      --line: #2c3532;
+      --accent: #3fb8a8;
+      --accent-ink: #63cdbf;
+      --fail: #e08085;
+      --fail-bg: #2a1d1e;
+      --warn: #d9a84e;
+      --warn-bg: #292213;
+      --ok: #6fbe90;
+      --ok-bg: #17251d;
+      --mono-bg: #101413;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131715;
+    --card: #1a201e;
+    --ink: #dae3e0;
+    --muted: #93a49e;
+    --line: #2c3532;
+    --accent: #3fb8a8;
+    --accent-ink: #63cdbf;
+    --fail: #e08085;
+    --fail-bg: #2a1d1e;
+    --warn: #d9a84e;
+    --warn-bg: #292213;
+    --ok: #6fbe90;
+    --ok-bg: #17251d;
+    --mono-bg: #101413;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 {
+    font-family: "Spectral", Georgia, serif;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 { font-size: 2.3rem; font-weight: 700; letter-spacing: -0.01em; }
+  h2 { font-size: 1.5rem; font-weight: 600; margin-top: 3.25rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.13rem; font-weight: 600; margin-top: 1.8rem; }
+  p { margin: 0.85rem 0; }
+  a { color: var(--accent-ink); }
+  .kicker {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.6rem;
+  }
+  .dateline { color: var(--muted); font-size: 0.92rem; margin-top: 0.7rem; }
+
+  .verdict {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.4rem 1.5rem;
+    margin-top: 2rem;
+  }
+  .verdict p:first-child { margin-top: 0; }
+  .verdict p:last-child { margin-bottom: 0; }
+
+  code, pre, .mono {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.86em;
+  }
+  code { background: var(--mono-bg); padding: 0.08em 0.35em; border-radius: 3px; }
+  pre {
+    background: var(--mono-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    line-height: 1.55;
+    margin: 1rem 0;
+  }
+  pre code { background: none; padding: 0; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+    margin: 1.1rem 0;
+  }
+  .table-wrap { overflow-x: auto; }
+  th {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 0.45rem 0.9rem 0.45rem 0;
+    border-bottom: 1px solid var(--ink);
+  }
+  td { padding: 0.48rem 0.9rem 0.48rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.num, th.num { text-align: right; padding-right: 1.6rem; }
+
+  .chip {
+    display: inline-block;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    padding: 0.14rem 0.55rem;
+    border-radius: 999px;
+    vertical-align: 0.12em;
+    white-space: nowrap;
+  }
+  .chip.fail { color: var(--fail); background: var(--fail-bg); }
+  .chip.warn { color: var(--warn); background: var(--warn-bg); }
+  .chip.ok   { color: var(--ok);   background: var(--ok-bg); }
+
+  .class-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.3rem 1.5rem 1.4rem;
+    margin: 1.6rem 0;
+  }
+  .class-card .idx {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+  }
+  .class-card h3 { margin-top: 0.25rem; }
+  .class-card .stats { color: var(--muted); font-size: 0.92rem; margin: 0.3rem 0 0.9rem; }
+  .fixline { border-top: 1px dashed var(--line); margin-top: 1.1rem; padding-top: 0.9rem; }
+  .fixline .lbl {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ok);
+  }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.45rem 0; }
+  .note { color: var(--muted); font-size: 0.92rem; }
+  .refs li { font-size: 0.95rem; }
+</style>
+
+<main>
+  <div class="kicker">30 instrumented runs · both server logs captured · every failure traced</div>
+  <h1>MultiBlog Flake Forensics</h1>
+  <p class="dateline">Run overnight 2026-08-22 → 23 on the Windows desktop (i7-8700K, 6c/12t) · full suite (148 tests) × 10 rounds at workers 1, 2, and 3, interleaved, against one warm dev stack with both servers' output captured — the view Playwright normally can't see.</p>
+
+  <div class="verdict">
+    <p><strong>The suite is not one flaky thing — it is five separate diseases</strong>, and every observed failure traces to exactly one of them. The worst is not load-related at all: a keystroke-timing race in one spec's <code>Ctrl+A → ArrowLeft → type</code> recipe wiped 20 of 30 runs at <em>every</em> worker count, including single-worker at idle. Beneath it sits the historical pattern the config comment describes: a confirmed upstream <code>next dev</code> manifest-corruption bug firing ~once per run, a dev-only next-auth invariant that turns a transient SSR miss into a 500, dev-server queueing that only bites at 3 workers, and three small test-design races. <strong>All five have concrete fixes; the top one is proven working (6/6 on the real test, 24/24 on the isolated repro).</strong> The dev stack is fragile in dev-only ways — but most of tonight's red was ours, not Next's.</p>
+  </div>
+
+  <h2>The experiment</h2>
+  <p>Clean <code>.next</code>, both servers started with timestamped log capture, one discarded warm-up run to compile every route, then 30 measured runs interleaved 1-2-3 so drift spreads evenly. Failure traces were preserved per run; results correlated against byte-offset windows of the server logs.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Workers</th><th class="num">Runs red</th><th class="num">Test failures</th><th class="num">p50 req</th><th class="num">p99 req</th><th class="num">Requests ≥ 1s</th></tr>
+    <tr><td>1</td><td class="num">9 / 10</td><td class="num">10</td><td class="num">41 ms</td><td class="num">294 ms</td><td class="num">0.9 / run</td></tr>
+    <tr><td>2</td><td class="num">7 / 10</td><td class="num">8</td><td class="num">65 ms</td><td class="num">509 ms</td><td class="num">2.3 / run</td></tr>
+    <tr><td>3</td><td class="num">8 / 10</td><td class="num">16</td><td class="num">110 ms</td><td class="num">879 ms</td><td class="num">10.8 / run</td></tr>
+  </table></div>
+  <p class="note">~1,700 requests per run. Latency roughly doubles per added worker — the dev server serializes SSR, so parallel workers mostly queue. Take away failure class 1 below and the picture becomes the familiar one: workers=1 nearly clean, workers=3 scattered.</p>
+
+  <h2>The five failure classes</h2>
+  <p>Ranked by observed impact. Every red test in all 30 runs (and the warm-up) belongs to exactly one.</p>
+
+  <div class="class-card">
+    <span class="idx">CLASS 1</span> <span class="chip fail">20 / 30 RUNS</span> <span class="chip ok">FIX PROVEN</span>
+    <h3>The select-all wipe — a keystroke race, not a load problem</h3>
+    <p class="stats">quote-anchoring.spec.ts:83 · failed 7× at w1, 6× at w2, 7× at w3 · reproduces ~50% solo on an idle server</p>
+    <p>The spec types <code>Ctrl+A → ArrowLeft → "Yesterday, "</code> to prepend text. At synthetic keystroke speed (~15 ms gaps), ProseMirror's ingestion of the native ArrowLeft collapse races the typing: the DOM selection collapses (instrumented and confirmed), but PM's <em>state</em> selection is still the full-document AllSelection when the first character arrives — so the character <strong>replaces the entire document</strong>, and the deletion syncs to the server as a legitimate edit. The editor ends up containing exactly <code>"Yesterday, "</code>.</p>
+    <p>What it is <em>not</em>, established by elimination: not the annotation widget's deferred <code>setPendingAnnotation</code> dispatch (no-opping <code>capture</code> entirely still wiped 7/12); not the late-arriving collab seed (the instrument shows the seed present and selected in most wiped iterations); not my log-piping setup (bare servers: 5/12). Inserting a 75 ms pause between the keys cuts it sharply but not to zero — the ingest window is usually, not always, that short. A human typing at &gt;50 ms gaps essentially can't hit it, which is why the app is fine and only the suite bleeds.</p>
+    <div class="fixline"><span class="lbl">Fix — proven</span>
+    <p>Replace the chord with the codebase's own documented programmatic idiom: build a <em>collapsed</em> DOM Range at the body's first text node, dispatch <code>selectionchange</code>, then type. 12/12 clean in isolation, and the real test passes 6/6 with the patch (it failed 67% of tonight's runs unpatched):</p>
+<pre><code>await page.evaluate(() => {
+  const root = document.querySelector('[aria-label="Post body"]');
+  const node = document.createTreeWalker(root, NodeFilter.SHOW_TEXT).nextNode();
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  document.dispatchEvent(new Event("selectionchange"));
+});
+await page.keyboard.type(prefix);</code></pre>
+    <p>Worth promoting to a fixtures helper (<code>collapseToBodyStart(page)</code>) beside <code>selectTextInBody</code>, and auditing any other spec that types immediately over a fresh selection.</p></div>
+  </div>
+
+  <div class="class-card">
+    <span class="idx">CLASS 2</span> <span class="chip fail">1 / 30 DIRECT</span> <span class="chip warn">LATENT EVERYWHERE</span>
+    <h3>"🟢 Live" means connected, not synced</h3>
+    <p class="stats">quote-anchoring.spec.ts:117 · "fox " not found in an empty editor, at workers=1</p>
+    <p>DocEditor's badge is set from Hocuspocus's <code>onStatus</code> — which fires at <em>websocket open</em> (provider source, line 219), before authentication, <code>onLoadDocument</code>'s DB read, and the syncStep2 that actually delivers content (line 502). So <code>waitForDocCollabReady</code>, the gate every editing spec trusts, proves only that a socket opened. The gap is milliseconds when idle and hundreds under load; one run caught <code>deleteTextInBody</code> walking a still-empty editor after the gate passed. The warm-up trace shows the same thing from the other side: "Live" resolved ~330 ms <em>before</em> the seed arrived.</p>
+    <div class="fixline"><span class="lbl">Fix</span>
+    <p>Expose synced-ness and gate on it. The reading views already model this — <code>doc.spec.ts</code> waits on a <code>live-doc-synced</code> test id. Either make the badge itself require <code>connected &amp;&amp; synced</code> (arguably truer UX: "Live" currently shows before the doc's content is in), or add a <code>data-synced</code> attribute to the status line and have <code>waitForDocCollabReady</code> wait for that. One change fixes the class for every editing spec at once.</p></div>
+  </div>
+
+  <div class="class-card">
+    <span class="idx">CLASS 3</span> <span class="chip fail">17 TEARS · 1 KILL</span> <span class="chip warn">UPSTREAM, OPEN</span>
+    <h3>next dev corrupts its prerender manifest under concurrency</h3>
+    <p class="stats">vercel/next.js #96664 (fix PR unmerged) · fired at every worker count · killed landing.spec in r2-w3</p>
+    <p><code>loadStaticPaths</code> does a read-modify-write of <code>.next/dev/prerender-manifest.json</code> with no lock and no atomic rename — verified in the installed 16.2.11. Three routes have <code>generateStaticParams</code> (<code>/[slug]</code>, <code>/doc/[slug]</code>, <code>/pdf/[slug]</code>), and <code>revalidate = 60</code> makes dev re-run it every minute, so this fires all night with <em>zero</em> recompiles — 17 tears in this session. The catch explains both outcomes: a request holding a stale cached result absorbs the tear with just a log line; a cold-cache request <strong>500s</strong> — and the parse failure evicts the cache entry, so the next request runs cold too (bursts of 2–3 tears seconds apart, observed twice).</p>
+    <p>The collateral reaches routes that don't even use static params: the one landing.spec failure was <code>GET / 500 in 3.2s (next.js: 3.0s, application-code: 217ms)</code>, three seconds after a tear — invisible to the spec because it used plain <code>goto</code>, so it read as "contributor missing". Two reattributions follow: the config comment's <em>"server actions arriving with truncated bodies — Unexpected end of JSON input"</em> is this bug's error string (Next failing to parse <em>its own manifest</em>; the real body-truncation bug, #85810, is fixed in 16.2.11 and required a middleware this repo doesn't have). And <em>"all pass under --workers=1"</em> is no longer a reliable tell — the tear is concurrency-triggered, not worker-triggered; dev prefetches alone provide the concurrency.</p>
+    <div class="fixline"><span class="lbl">Mitigations (no upstream fix in any released version)</span>
+    <ul>
+      <li><strong>Run the suite against the prod build</strong> — <code>web-prod</code> already exists; Next's own Playwright guide recommends exactly this. Kills classes 3 and 4 outright and removes compile-latency noise. Cost: a build per session, and :3001 wiring.</li>
+      <li>Staying on dev: use <code>gotoOk</code> for <em>every</em> public-page navigation (13 plain <code>goto</code>s today) so a tear at least names itself instead of masquerading as a missing element.</li>
+      <li>Cheap tripwire: <code>JSON.parse</code> the manifest in <code>check-ports.ps1</code> — the sticky variant of this bug 500s every route until restart and is otherwise indistinguishable from "the suite broke".</li>
+    </ul></div>
+  </div>
+
+  <div class="class-card">
+    <span class="idx">CLASS 4</span> <span class="chip warn">0 / 30 HERE · KILLED THE 11:09 RUN</span>
+    <h3>The dev-only useSession 500</h3>
+    <p class="stats">next-auth invariant, dev builds only · needs a rebuild window · absent from steady-state runs by design</p>
+    <p>Your last pre-session run (yesterday 11:09) failed publish.spec with a 500 whose body carries the full stack: <code>[next-auth]: useSession must be wrapped in a &lt;SessionProvider /&gt;</code> thrown from <strong>CommentForm during SSR of /[slug]</strong> — while the root layout demonstrably wraps everything. The throw is env-gated (<code>process.env.NODE_ENV !== "production"</code>, verified in the installed copy): in production the same context miss renders as "signed out"; in dev it's a 500. The trigger profile matches Turbopack serving a mixed SSR module graph during rebuild windows (dev re-reads manifests per request while the bundler rewrites them — #97594). My 30 runs had no source edits, hence no rebuilds, hence zero occurrences — your normal edit-and-rerun workflow has them constantly. No exact upstream issue exists; the recovered stack would make a strong report.</p>
+    <div class="fixline"><span class="lbl">Fix</span>
+    <p>Nothing to change in the app — the layout is correct. Testing against the prod build removes the class; otherwise it remains a background rate tied to how often the dev server is compiling while the suite runs.</p></div>
+  </div>
+
+  <div class="class-card">
+    <span class="idx">CLASS 5</span> <span class="chip fail">12 OF 16 W3 FAILURES</span> <span class="chip ok">3 SMALL FIXES</span>
+    <h3>The workers=3 scatter — queueing, plus three real test bugs it exposes</h3>
+    <p class="stats">doc.spec:325 ×4 · admin-table:122 ×3 · pdf-annotations:332 ×2 · doc:387, doc:578, doc:169, landing ×1 each</p>
+    <p>At 3 workers, ~11 requests per run take ≥1 s and the tail reaches into 10–30 s budgets. Most of the scatter is plain latency (annotation-composer opens, a sign-in redirect). But three of the recurring ones are deterministic bugs that load merely exposes:</p>
+    <ul>
+      <li><strong>doc.spec.ts:325</strong> — <code>getByText(...).first()</code> on an annotation body that exists twice in the DOM (§13p: hidden SSR copy + live copy). <code>.first()</code> pins whichever is DOM-first; mount timing decides visibility. The README already documents this trap for post bodies and provides <code>visibleText()</code> — this call site needs the same <code>.filter({ visible: true })</code>, and the other dual-copy <code>.first()</code>s deserve an audit.</li>
+      <li><strong>admin-table.spec.ts:122</strong> — trace-verified: the final "Set role → AUTHOR" <code>selectOption</code> produced <strong>no POST at all</strong>. The spec re-checks rows right after a Restore whose only settle-signal is the row <em>border</em> — which turns SAVED from client state <em>before</em> the action's RSC refresh lands. The refresh then replaces the table, resets the selection, and the bulk apply silently no-ops against zero rows. Every server action in all three failure windows returned 200 in &lt;700 ms — the server was never the problem. Fix: assert server truth after Restore (the row's Delete button is back) before re-selecting; or make selection survive the refresh in the component.</li>
+      <li><strong>doc.spec.ts:169</strong> — one teardown failure: <code>Refusing to delete doc … non-throwaway (or missing) author</code>, the db.ts containment guard tripping on a fixture-teardown ordering race under parallelism.</li>
+    </ul>
+    <div class="fixline"><span class="lbl">Verdict on workers</span>
+    <p>The committed default of 2 remains right for this machine. 3 buys the same ~200 s wall clock as 2 (fixed costs dominate a 148-test suite; the ~50 s in the README predates its growth) while tripling the ≥1 s stragglers — all cost, no speed.</p></div>
+  </div>
+
+  <h2>Benign noise, catalogued</h2>
+  <p class="note">Seen in the captured logs, correlated against outcomes, and harmless — worth recognizing so they don't get re-investigated: the <code>[doc-cache]</code> ForeignKeyConstraintViolation (store-debounce racing fixture deletion — the documented logged-and-discarded case), <code>Doc not found</code> after teardown, <code>Error: aborted</code> when a context closes mid-request, permission-denial logs from doc-visibility's deliberate denial tests, and <code>Author list changed — please retry</code> optimistic-concurrency retries.</p>
+
+  <h2>What it takes to fix, in order</h2>
+  <p><span class="chip ok">STATUS 2026-08-23</span> Items 1, 2 and 4 below are <strong>implemented</strong>: quote-anchoring uses the Range recipe via a shared <code>collapseToBodyStart</code> fixture; the status badge gained "🔵 Connected" (socket open, pre-sync) so "🟢 Live" now means synced, on all three write surfaces; and <code>npm run e2e</code> targets a production build on :3005 (<code>scripts/e2e-web.ps1</code>), with <code>npm run e2e:dev</code> as the one-worker dev lane whose <code>devServer500Watch</code> fixture names the two dev-only 500 classes in a red test's annotations. Follow-on fixes the prod lane surfaced: invite links navigate path-relative, session-refresh settles the update-POST cadence (prod mounts <code>SessionRefresh</code> twice), and <code>SessionRefresh</code> navigates explicitly when the update reveals a dead session. The <code>.first()</code> audit is complete: doc.spec:325 now filters for visibility, and every other <code>.first()</code> in the suite was checked and cleared — the highlight locators are decoration attributes only the live copy carries (the static render's annotation mark uses the singular <code>data-annotation-id</code>), and the rest pick among same-visibility siblings. admin-table:122 now settles on server truth (the restored row offering "Delete user" again) before re-selecting, closing the silent-no-op race — and doc.spec:169's Settings test polls the doc's author emails from the DB after its optimistic checkbox toggles, closing the teardown race where an unlanded (or concurrency-rejected) re-add of the admin left the doc author-less at <code>deleteTestDoc</code> time. side-by-side:740 now settles on the dropdown gaining the group's server-issued option instead of the status line — investigation showed its "Saved" was only ever a flash on the create path (the panel re-renders into saved-group form when the id arrives), so the old 5s assert was racing a transient from the start. <strong>With that, every observed failure from the matrix has a landed fix; no known flake candidates remain.</strong></p>
+  <ol>
+    <li><span class="chip ok">PROVEN</span> Patch quote-anchoring:83's keystroke recipe (Range-collapse; ~15 lines, or a shared <code>collapseToBodyStart</code> helper). Removes two-thirds of current red on its own.</li>
+    <li>Give <code>waitForDocCollabReady</code> a real synced signal (badge requires synced, or a <code>data-synced</code> attribute). Small app + one-line spec change; closes the latent class for every editing spec.</li>
+    <li><code>.filter({ visible: true })</code> at doc.spec:325; settle-assert before re-selecting in admin-table:122. Two one-liners.</li>
+    <li>Decide the dev-vs-prod question: an <code>e2e:prod</code> lane against <code>web-prod</code> eliminates classes 3 and 4 wholesale (official Next guidance); staying dev-only means adopting <code>gotoOk</code> everywhere and living with a ~1-tear-per-run background rate that occasionally 500s a test.</li>
+    <li>Housekeeping: manifest-parse tripwire in check-ports; update the config comment (truncated-bodies reattribution, the workers=1 tell, the ~50 s figure); optionally report the useSession stack upstream.</li>
+  </ol>
+
+  <h2>Upstream references</h2>
+  <ul class="refs">
+    <li><a href="https://github.com/vercel/next.js/issues/96664">vercel/next.js #96664</a> — prerender-manifest RMW corruption (open; fix PR unmerged; verified present in 16.2.11)</li>
+    <li><a href="https://github.com/vercel/next.js/issues/97594">vercel/next.js #97594</a> — dev re-reads manifests per request during rebuilds (zero-byte reads 500 in-flight requests; webpack too)</li>
+    <li><a href="https://github.com/vercel/next.js/issues/85810">vercel/next.js #85810</a> — the <em>real</em> truncated-body bug: fixed in 16.1.0, required Node middleware this repo doesn't have</li>
+    <li><a href="https://nextjs.org/docs/app/guides/testing/playwright">Next.js Playwright guide</a> — "run your tests against your production code": <code>next build &amp;&amp; next start</code></li>
+    <li>Hocuspocus provider source: <code>status: Connected</code> at socket open; <code>synced</code> only on syncStep2 — the connected≠synced gap is by construction</li>
+  </ul>
+
+  <p class="note" style="margin-top:3rem">Method notes: the working tree was left untouched (all diagnostic edits reverted, throwaway data swept, servers stopped). Raw per-run logs, JSON reports, failure traces and the analysis scripts are in this session's scratchpad.</p>
+</main>

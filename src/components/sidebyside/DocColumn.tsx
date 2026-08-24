@@ -80,6 +80,11 @@ export default function DocColumn({
   const [readOnly, setReadOnly] = useState<boolean | null>(null);
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  // "connected" is websocket-open, before auth + initial sync; "🟢 Live"
+  // additionally requires this (see DocEditor.tsx's `synced` for the full
+  // account). The provider never emits the false transition — onStatus below
+  // owns that direction.
+  const [synced, setSynced] = useState(false);
   const [lineage, setLineage] = useState<{ documentName: string; lineageMs: number } | null>(null);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,7 +126,11 @@ export default function DocColumn({
         name: documentName,
         document: ydoc,
         token: fetchToken,
-        onStatus: ({ status }) => setConnectionStatus(status),
+        onStatus: ({ status }) => {
+          setConnectionStatus(status);
+          if (status !== "connected") setSynced(false);
+        },
+        onSynced: () => setSynced(true),
       });
       setProvider(instance);
     })();
@@ -182,7 +191,7 @@ export default function DocColumn({
         </div>
         {mode === "write" && (
           <p className={styles.statusLine}>
-            {connectionStatus === "connected" ? "🟢 Live" : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
+            {connectionStatus === "connected" ? (synced ? "🟢 Live" : "🔵 Connected") : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
           </p>
         )}
         <div className={styles.scroller}>
