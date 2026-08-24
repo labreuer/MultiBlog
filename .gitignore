@@ -81,3 +81,9 @@ next-env.d.ts
 # author->email mapping derived from it. Both are real data, not fixtures.
 dirty.db
 etherpad-authors.json
+
+# uploaded file bytes (src/lib/file-storage.ts, PLAN.md §19) — content-
+# addressed by sha256, path from FILE_STORAGE_DIR. Deployment content like the
+# banner above, but with one extra consequence worth remembering: this is a
+# second backup surface, and `pg_dump` does not cover it (DEPLOY.md).
+/.file-storage/

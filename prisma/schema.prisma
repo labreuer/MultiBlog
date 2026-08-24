@@ -131,6 +131,9 @@ model User {
   docAuthors           DocAuthor[]
   docUpdates           Doc[]                  @relation("DocUpdatedBy")
   docDeletions         Doc[]                  @relation("DocDeletedBy")
+  fileOwners           FileOwner[]
+  fileUpdates          StoredFile[]           @relation("FileUpdatedBy")
+  fileDeletions        StoredFile[]           @relation("FileDeletedBy")
   annotations          Annotation[]           @relation("AnnotationAuthor")
   annotationDeletions  Annotation[]           @relation("AnnotationDeletedBy")
   docLinks             DocLink[]
@@ -825,6 +828,155 @@ model DocLinkGroup {
 
   @@index([userId])
   @@map("doc_link_group")
+}
+
+// PLAN.md §19 — an uploaded file (a PDF today) that can be read and annotated
+// at /pdf/[slug], sharing docs' PRIVATE/SHARED model and annotation stack.
+//
+// **Named StoredFile, mapped to `file`.** The table is `file`; the generated
+// TypeScript type must not be `File`, which is a DOM/Node global the upload
+// path uses in the same modules. A model name that shadows a global is a
+// footgun that costs nothing to avoid, and `@@map` means the database never
+// sees the workaround.
+//
+// **The bytes are not here.** They live on disk, content-addressed by sha256
+// (src/lib/file-storage.ts, FILE_STORAGE_DIR). Prisma cannot stream a `Bytes`
+// column, so a 50MB file would land whole in Node's heap on upload *and* on
+// every one of PDF.js's range requests — the exact opposite of what the
+// viewer needs. UserAvatar's in-Postgres bytes are not a precedent against
+// this: those are ~10KB, served whole, and small enough that a blob column's
+// costs never arrive. The consequence to remember is an operational one:
+// FILE_STORAGE_DIR is a second backup surface that `pg_dump` does not cover
+// (DEPLOY.md).
+//
+// **sha256 is the file's real identity** (docs/PDF.md §2's DocId), which is
+// what makes the download URL immutable and what guarantees a PDF anchor can
+// never drift: the bytes an annotation was measured against are, by
+// construction, the bytes every later reader sees. Deliberately NOT unique —
+// two people may upload the same paper under different titles, visibilities
+// and bylines, and those are different documents socially even though the
+// storage layer stores one copy.
+model StoredFile {
+  id       String @id @default(cuid())
+  slug     String @unique
+  // Shown everywhere a doc shows its title; seeded from the upload filename
+  // and independently renamable afterwards.
+  title    String
+  // The name as uploaded, kept verbatim for the Content-Disposition on
+  // download and so a renamed file still says where it came from.
+  filename String
+  contentType String @map("content_type")
+  byteSize    Int    @map("byte_size")
+  sha256      String
+  // Null until the upload's server-side parse fills it in; also null for a
+  // non-PDF, should other types ever be allowed.
+  pageCount   Int?   @map("page_count")
+  // Reuses docs' vocabulary rather than cloning it: PRIVATE/SHARED already
+  // means one thing site-wide, and files' rule is specified as "the same as
+  // docs'". The *predicates* over it are separate (canViewFiles /
+  // canManageFiles, src/lib/role-checks.ts) so the two can diverge; the enum
+  // is shared because a third visibility word would be a UI regression.
+  visibility  DocVisibility @default(PRIVATE)
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedByUserId String?   @map("updated_by_user_id")
+  deletedByUserId String?   @map("deleted_by_user_id")
+  deletedAt       DateTime? @map("deleted_at")
+
+  owners      FileOwner[]
+  slugHistory FileSlugHistory[]
+  pageTexts   FilePageText[]
+  metrics     FileMetrics?
+  updatedBy   User?             @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
+  deletedBy   User?             @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
+
+  @@index([sha256])
+  @@map("file")
+}
+
+// /files' Owner(s) column, as a view — the same role
+// DocMetrics plays for /docs, and built the same way for the same reason:
+// by grouping file_owner, never by selecting FROM file. A view that reads
+// its own base table gets scanned twice on every sort through it, because
+// Prisma emits a LEFT JOIN for a to-one relation ordering and Postgres 18's
+// self-join elimination only collapses INNER joins (add_doc_metrics_view,
+// PLAN.md §16l).
+//
+// Size and Pages are plain stored columns on file and need neither this view
+// nor a trigger: unlike Doc's Length they are known at upload time and never
+// recomputed.
+view FileMetrics {
+  fileId          String  @unique @map("file_id")
+  owners          String? @map("owners")
+
+  file StoredFile @relation(fields: [fileId], references: [id])
+
+  @@map("file_metrics")
+}
+
+// Who a file belongs to (PLAN.md §19). Deliberately *not* called an author:
+// the people listed here didn't write the PDF, they hold it — the list is
+// seeded with whoever uploaded it and edited freely afterwards, and what it
+// confers is the byline-shaped display in /files' Owner(s) column, the right
+// to rename/re-slug/re-own/delete, and, for a PRIVATE file, the right to read
+// it at all (src/lib/file-authz.ts). DocAuthor/PostAuthor keep their name
+// because a doc's or post's listed users really did write it.
+model FileOwner {
+  fileId     String @map("file_id")
+  userId     String @map("user_id")
+  ownerOrder Int    @map("owner_order")
+
+  file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([fileId, userId])
+  @@map("file_owner")
+}
+
+// Redirect sources for a file's past slugs — same shape and rationale as
+// DocSlugHistory. Its own uniqueness namespace: a file, a doc and a post may
+// all share a slug and resolve to three different URLs, since /pdf/*, /doc/*
+// and the post catch-all never collide.
+model FileSlugHistory {
+  id        String   @id @default(cuid())
+  fileId    String   @map("file_id")
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@map("file_slug_history")
+}
+
+// PLAN.md §19 / docs/PDF.md §3 — the normalised text of one page, extracted
+// once at upload and stored rather than recomputed. This settles docs/PDF.md
+// §12's first open question, and it earns its keep twice:
+//
+//  1. It is what lets postAnnotation derive `quotedText` **server-side** for a
+//     PDF, by slicing this at the client's reported offsets and storing its own
+//     slice. Without it, honouring §12i's "the selected text is a request field
+//     only, never a column" would mean re-parsing the PDF on every post.
+//  2. It is the only thing scripts/integrity/check-pdf-anchors.ts can check a
+//     stored quote against, since there is no ydoc to replay for a file.
+//
+// textVersion is part of the key, not a column to overwrite: it names the
+// extractor+normaliser that produced this text (`${pdfjsVersion}/${n}`), and a
+// bump means the *old* rows stay valid for annotations already measured
+// against them while new ones are written alongside. Re-anchoring across a
+// bump is lazy and per-annotation (docs/PDF.md §3), which is only possible if
+// both generations are still on disk.
+model FilePageText {
+  fileId      String @map("file_id")
+  pageIndex   Int    @map("page_index")
+  textVersion String @map("text_version")
+  text        String
+
+  file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@id([fileId, pageIndex, textVersion])
+  @@map("file_page_text")
 }
 
 // A generic, standalone Yjs document store — PLAN.md §11. Keyed purely by the

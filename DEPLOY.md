@@ -787,3 +787,29 @@ script's own header comment). Before picking ports, confirm they're actually fre
 > swap math in §2h was sized for *one* instance's build; check `free -h` under normal load
 > once both are up, and consider resizing the plan rather than trusting swap to absorb a
 > second instance indefinitely.
+
+---
+
+## Uploaded files (PLAN.md §19)
+
+Two things about PDFs need saying at deploy time, and both are easy to miss because nothing
+fails loudly until someone tries a real upload.
+
+**nginx must accept a body as large as the app's limit.** Its default `client_max_body_size`
+is 1MB, which rejects every upload before it reaches Next — and rejects it with nginx's own
+HTML error page, so the app can say nothing useful about it. `deploy/nginx-app.conf.sample`
+carries the three directives (`client_max_body_size`, `client_body_timeout`,
+`proxy_request_buffering off`) with the reasoning inline. Keep the size at or above
+`FILE_MAX_UPLOAD_BYTES` (default 50MB).
+
+After a deploy, an ADMIN can confirm it end to end: /files has a **"Check upload limit"**
+button that pushes a full-size throwaway body through the proxy and reports whether it
+arrived. Running it once is cheaper than discovering the limit with somebody's real 40MB PDF.
+
+**`FILE_STORAGE_DIR` is a second backup surface, and `pg_dump` does not cover it.** Uploaded
+bytes live on disk, content-addressed by sha256 (`src/lib/file-storage.ts`) — see PLAN.md §19
+for why they are not a `bytea` column. A database restore without the matching storage
+directory leaves every `file` row pointing at bytes that aren't there; the download route
+answers 503 and logs the sha256, but the file is gone. Back the directory up alongside the
+database dump, and restore the two together.
+

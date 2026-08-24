@@ -6051,3 +6051,256 @@ resolved version, so this changes nothing about what's installed, only makes the
 supportable). `server/ydoc-hooks.ts`'s own `y-prosemirror` import is unaffected and correct
 as-is — a stateless Yjs↔ProseMirror conversion with no plugin-state lookup involved, not the
 same category of usage.
+
+## 19. PDF files and a collaborative PDF viewer
+
+### Context
+
+MultiBlog can host *docs* (TipTap over Yjs) but not *files*. The need is to upload PDFs,
+list and permission them the way docs already are, and read them in-browser with the same
+quote-anchored annotation conversation `/doc/[slug]` has — plus something docs never needed:
+multiple people reading one long document at different places, able to see and join each
+other's position.
+
+[docs/PDF.md](docs/PDF.md) settles the renderer (PDF.js) and the hard constraint
+(**annotations live outside the PDF; the file is read-only**), and recommends an anchor
+model, coordinate rules, layer structure and sync wire format. This plan adopts that
+document, with the deviations listed under *Deviations from docs/PDF.md* below.
+
+Intended outcome: `/files` (an admin table with upload) and `/pdf/[slug]` (a viewer with
+annotations, presence, and opt-in follow), reusing the existing annotation stack rather
+than growing a second one.
+
+---
+
+### Decisions taken
+
+#### Annotation storage — copy `/doc/[slug]`'s split, not a single ydoc
+
+The comparison, since it drives everything downstream:
+
+A single `ydoc:pdf:<fileId>` holding `Y.Map<id, Annotation>` (docs/PDF.md §9's literal
+recommendation) wins on three things: awareness needs a per-file ydoc *anyway*, so
+annotations would ride a connection that must exist regardless; the annotation list would
+update live where `/doc/[slug]` needs a `router.refresh()`; and offline creation would merge
+on reconnect.
+
+It loses on five, all specific to this codebase:
+
+1. **Hocuspocus authorizes the connection, not the keys.** Every connected client receives
+   every `Y.Map` entry. Two rules currently enforced in Postgres would break: a `DRAFT` is
+   invisible to everyone but its author (`getDocAnnotationsAsThreads`), and delete/restore is
+   `requireOwnOrAdmin` with a `deletedByUserId` audit. In a `Y.Map` anyone with a writable
+   connection can read another's draft and delete or resurrect any key, unattributed.
+2. **`/annotations` would go blind.** CLAUDE.md requires every admin table to filter, sort
+   and paginate in Postgres. A `Y.Map` is unqueryable from there, so PDF annotations would be
+   absent from that listing or need a second, JS-side one.
+3. **`RAISED` (notify authors) has no server trigger** — a `Y.Map` write is a client
+   mutation the Next server never sees, where `postAnnotation` is a server action that
+   flushes, validates, stamps and emails.
+4. **One never-truncated update log per PDF** carrying every keystroke of every annotation
+   body, downloaded in full on open. Today a body's history loads only when that body opens.
+5. **CRDT merge has nothing to merge.** A PDF annotation's *target* is written once and
+   never moves — the bytes are immutable and `docId` is a content hash (docs/PDF.md §4). The
+   only concurrently-edited thing is the body, which already has its own ydoc.
+
+So: **records → Postgres, ephemeral viewport → awareness**, which is the split
+`/doc/[slug]` already makes and docs/PDF.md invariant 5 states. The per-file ydoc still gets
+built — it just carries awareness and nothing else.
+
+#### The other two forks
+
+- **Bytes → content-addressed filesystem**, not a Postgres `bytea`. Prisma cannot stream a
+  `Bytes` column, so a 50MB file would land whole in Node's heap on upload *and* on every one
+  of PDF.js's range requests.
+- **`/pdf/[slug]` → full-viewport app shell**, not the page-scrolled `/doc/[slug]` layout.
+  This removes the need for PLAN.md §18's `createPortal`: the rail and the annotation list
+  are the same scroller, so cards are positioned within the panel that already owns them.
+
+---
+
+### Phase 0 — Dependency and version pin
+
+- `npm i pdfjs-dist@6.2.108` — **exact, no caret** (docs/PDF.md invariant 6, §10). ESM-only
+  (`.mjs`); `serverExternalPackages` in [next.config.ts](next.config.ts) may need it if the
+  Node-side text extraction (Phase 1) trips the same double-load issue `yjs` has.
+- `e2e/pdfjs-internals.spec.ts` — the smoke test §10 asks for. Asserts the specific internals
+  we touch still exist: `EventBus`, `PDFViewer.prototype.scrollPageIntoView`,
+  `pageView.div`, `viewport.convertToPdfPoint`, `viewport.convertToViewportRectangle`, and
+  the `textlayerrendered` / `updateviewarea` / `pagesinit` event names. An upgrade then fails
+  loudly here rather than silently at runtime.
+- Worker: set `GlobalWorkerOptions.workerPort = new Worker(new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url), { type: "module" })`.
+  Verify under Turbopack at implementation time; fall back to copying the worker into
+  `public/pdfjs/` from a `postinstall` script if the `new URL` form doesn't survive bundling.
+
+---
+
+### Phase 1 — The file table, storage, and upload
+
+#### Schema (`prisma/schema.prisma`)
+
+**Model named `StoredFile`, `@@map("file")`.** The table is `file`; the generated TS type
+must not be `File`, which would shadow the DOM/Node global that the upload code uses.
+
+```
+model StoredFile {
+  id, slug @unique, title, filename, contentType, byteSize Int, sha256 String,
+  pageCount Int?, visibility DocVisibility @default(PRIVATE),
+  createdAt, updatedAt, updatedByUserId, deletedByUserId, deletedAt
+  owners FileOwner[]  slugHistory FileSlugHistory[]
+  annotations Annotation[]  metrics FileMetrics?
+  @@map("file")
+}
+model FileOwner       { fileId, userId, ownerOrder, @@id([fileId, userId]) }
+model FileSlugHistory { id, fileId, slug @unique, createdAt }
+model FilePageText    { fileId, pageIndex, textVersion, text, @@id([fileId, pageIndex, textVersion]) }
+view  FileMetrics     { fileId @unique, owners String?, annotationCount Int }
+```
+
+- `DocVisibility` is reused as-is rather than cloned — it is already the site's
+  PRIVATE/SHARED vocabulary, and the user-facing rule is explicitly "same as docs".
+- **`FileOwner`, not `FileAuthor`.** Nobody listed on an uploaded PDF wrote it: the list is
+  seeded with whoever uploaded the file, is editable afterwards, and grants the `/files`
+  display line, the right to rename/re-slug/re-own/delete, and — for a `PRIVATE` file — the
+  right to read it at all. That is ownership, not credit. The word stops here:
+  `DocAuthor`/`PostAuthor` are accurate, and so is the shared filter kit
+  (`AuthorFilterPanel`, `authorFilterWhere`, `AuthorMode`), which `/files` reaches through
+  `ownerFilterWhere`/`listOwnerFilterOptions` and an aliased import rather than renaming.
+- `FileMetrics` is built by **grouping `file_owner`**, never selecting `FROM file` — the
+  lesson `add_doc_metrics_view` records (Postgres 18's self-join elimination only fires for
+  INNER joins, and Prisma emits a LEFT JOIN for a to-one ordering). `annotationCount` is a
+  filtered count (excludes soft-deleted), which is exactly the case CLAUDE.md says belongs
+  in a view. `byteSize`/`pageCount` are plain stored columns — no view, no trigger.
+- `FilePageText` holds the **normalised** page text (docs/PDF.md §3), extracted server-side
+  at upload. This resolves §12's first open question in favour of storing it, and it is what
+  lets `quotedText` stay server-derived (see Phase 3) without re-parsing the PDF per post.
+
+**`Annotation` gains a second container.** `docId` becomes nullable; `fileId String?` is
+added with `onDelete: Cascade`; a hand-written `CHECK ((doc_id IS NOT NULL) <> (file_id IS
+NOT NULL))` goes in the migration — same technique `DocLink`'s `mark_id`/`mark` CHECK uses,
+since Prisma has no CHECK DSL. Required→nullable is a plain `DROP NOT NULL` with no
+interactive backfill prompt, so this is one migration.
+
+**`pdfTarget Json?`** carries docs/PDF.md §2's `Target` verbatim — `{ pageIndex, quads,
+quote, position, textVersion }` — as one column rather than seven. That is invariant 3
+(renderer-neutral, a renderer swap is a rendering change not a data migration), and it
+follows `DocLink.mark`'s precedent of an anchor as a JSON blob. `quotedText` reuses the
+existing column for `quote.exact`, so `/annotations`' Quote column needs no PDF branch.
+
+A **reply** to a PDF annotation needs nothing new: §13p already anchors a reply into its
+parent annotation's own ydoc via `anchorFrom`/`anchorTo`, and a PDF annotation's body is an
+ordinary `ydoc:annotation:<id>`. Only *roots* use `pdfTarget`.
+
+#### Byte storage
+
+`FILE_STORAGE_DIR` (bare env var, gitignored path, default `.file-storage/`), laid out
+content-addressed: `<dir>/<sha256[0:2]>/<sha256>`. Dedupe is free, and the hash *is*
+docs/PDF.md's `DocId`. New `src/lib/file-storage.ts` (server-only) owns pathing, the
+streaming write, and the read stream.
+
+**This is a new backup surface** — `pg_dump` no longer captures everything. DEPLOY.md needs
+a line saying so.
+
+#### Upload route — `src/app/api/files/upload/route.ts`
+
+`POST /api/files/upload?filename=<encoded>` with the **raw bytes as the body**, not
+`multipart/form-data`. Two reasons: `await request.formData()` buffers the whole file into
+memory, and raw-body avoids pulling in a multipart parser. A Route Handler is not subject to
+Server Actions' `bodySizeLimit` at all — that is the limit the user asked to bypass, and
+this is how (`uploadContributorAvatar` in [src/app/actions/contributor.ts](src/app/actions/contributor.ts)
+documents the constraint from the other side).
+
+Flow: `request.body` → `createWriteStream(tmp)` while hashing incrementally and counting
+bytes; abort past `MAX_UPLOAD_BYTES` (`FILE_MAX_UPLOAD_BYTES` env, default 50 × 1024 × 1024);
+verify the `%PDF-` magic on the first chunk; `rename` into the content-addressed path;
+extract `pageCount` and per-page normalised text with `pdfjs-dist/legacy/build/pdf.mjs`;
+create the `StoredFile` + `FileOwner` + `FilePageText` rows in one transaction, claiming the
+slug through it (the `claimSlug` convention the importers use — `uniqueFileSlug` queries the
+global client and can't see rows the same transaction created).
+
+Slug from the upload filename, via the existing `slugify` + `RESERVED_SLUGS` machinery in
+[src/lib/slug.ts](src/lib/slug.ts); `src/lib/file-slug.ts` mirrors
+[src/lib/doc-slug.ts](src/lib/doc-slug.ts) exactly (`uniqueFileSlug`, `changeFileSlug`,
+`revertFileSlug`, its own namespace, no catch-all against post/doc slugs).
+
+#### Download route — `src/app/api/files/[id]/[hash]/route.ts`
+
+Session-gated by `canUserReadFile` (unlike the avatar route, which is deliberately public).
+Streams from disk with **`Range` support** — PDF.js range-requests a large PDF instead of
+pulling it whole. `ETag: "<sha256>"`, `Cache-Control: private, max-age=31536000, immutable`,
+and the same stale-hash graceful path the avatar route uses.
+
+#### nginx
+
+Add to the `location / { … }` block in
+[deploy/nginx-app.conf.sample](deploy/nginx-app.conf.sample):
+
+```nginx
+    # PDF uploads (PLAN.md §19). nginx's default client_max_body_size is 1m,
+    # which rejects every upload before it reaches Next. Keep this >= the app's
+    # FILE_MAX_UPLOAD_BYTES; the app reports a mismatch rather than hanging.
+    client_max_body_size 64m;
+    client_body_timeout  300s;
+    # Stream the body straight through instead of spooling 64m to disk first.
+    # Also makes an over-limit upload fail fast with a clean 413 up front.
+    proxy_request_buffering off;
+```
+
+#### Catching a misconfigured proxy
+
+Three layers, because an under-configured nginx fails in two different ways:
+
+1. **`GET /api/files/limits`** → `{ maxUploadBytes }`. The client refuses an over-sized file
+   locally, before any bytes leave the browser.
+2. **`413` on upload** → "The reverse proxy rejected this upload before it reached the app.
+   nginx's `client_max_body_size` is probably below the app's limit (N MB) — see
+   `deploy/nginx-app.conf.sample`." Uploads go through `XMLHttpRequest` rather than `fetch`,
+   for progress *and* because a proxy that resets the connection mid-body surfaces as an
+   opaque `TypeError: Failed to fetch`; a rejected `xhr` with `status === 0` on a body over
+   ~1MB gets the same message.
+3. **Admin-only "Check upload limit"** button on `/files`, which POSTs a
+   `MAX_UPLOAD_BYTES`-sized throwaway body to `/api/files/upload?probe=1` (discarded, no row
+   written). An honest end-to-end proxy check to run once after a deploy, rather than
+   discovering the limit with someone's real 40MB PDF.
+
+#### Permissions — `src/lib/file-authz.ts`
+
+Mirrors [src/lib/doc-authz.ts](src/lib/doc-authz.ts) function for function:
+`canUserReadFile` (SHARED → `canViewFiles`; PRIVATE → listed `FileOwner`s alone, no
+ADMIN/EDITOR bypass), `canUserManageFile`, `canEditAnySharedFile`, `readableFilesFor`.
+
+`canViewFiles` / `canManageFiles` go in [src/lib/role-checks.ts](src/lib/role-checks.ts)
+with the same role sets as their doc counterparts and **deliberately not delegating to
+them** — the precedent and its rationale are already written above `canManageDocs` and
+`canEditAnySharedDoc`. `role-checks.ts` is the right home because `SiteHeader` (a client
+component) needs `canManageFiles` for the nav link.
+
+#### `/files` page and nav
+
+- `src/lib/files-query.ts` over [src/lib/table-query.ts](src/lib/table-query.ts), + a
+  `FilesTable.tsx` built from `src/components/table/` — the kit, not a fresh `<table>`.
+  Columns, all sortable: Title, Filename, Owner(s) (`file_metrics.owners`), Visibility, Pages,
+  Size, Annotations (`file_metrics.annotationCount`), Created, Updated, Updated by, Slug,
+  Deleted at, Deleted. Slug/Created/Deleted default hidden, matching `/docs`.
+- Row scoping copies `docs/page.tsx`'s `authorScope` verbatim as `ownerScope`: own row in
+  `file_owner` OR
+  (`canEditAnySharedFile` && SHARED), with an **ADMIN-only `?showAllFiles=1` checkbox**. That
+  is exactly the rule asked for — ADMIN-only PRIVATE visibility, EDITOR sees all SHARED,
+  AUTHOR sees only their own.
+- Upload control above the table, where `/docs` has `+ New doc`.
+- [src/components/SiteHeader.tsx](src/components/SiteHeader.tsx): a `Files` link gated on
+  `canManageFiles` (ADMIN/EDITOR/AUTHOR). The user asked for it "to the right of Users";
+  `Users` is ADMIN-only and `Files` is AUTHOR-and-up, so it is pushed into `leftNav` after
+  the `users`/`site-settings` entries and will simply appear left of nothing for a
+  non-ADMIN. Flagging rather than deciding silently.
+- `scripts/test-file.ts` following the `test-doc.ts` containment convention.
+
+---
+
+### Phases 2–5 — the viewer, annotations and presence
+
+Everything from `/pdf/[slug]` onward — the viewer shell, PDF anchoring and
+annotations, presence and follow, and §19a's engine baseline — lands on the branch
+stacked on this one. Phase 1 above is self-contained without them: an uploaded file
+is stored, served with `Range` support, listed and managed at `/files`, and opened
+through the browser's own viewer at its download URL.
