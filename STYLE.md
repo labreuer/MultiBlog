@@ -83,9 +83,26 @@ value that two systems depend on invites drift.
   theme section for the enforced allow-list.
 - `body` font: `Arial, Helvetica, sans-serif` — the sitewide default. Individual page
   containers currently override this (see Typography below); nothing has unified it.
-- `* { margin: 0; padding: 0; box-sizing: border-box; }` — a hard reset. Anything
-  rendering list/blockquote content needs to restore spacing explicitly (see
-  `prose.module.css`, and the CLAUDE.md gotcha about it).
+- `* { margin: 0; padding: 0; box-sizing: border-box; }` — a hard reset, and it strips
+  default list and blockquote styling *everywhere*. `src/styles/prose.module.css` restores
+  it for rendered post content, so **any new surface rendering post content needs its
+  `.prose` class** or lists and quotes arrive unstyled.
+  - The `box-sizing` half also **breaks pdfjs**, and the symptom is a ~2% *scale* error
+    rather than a layout one. `PdfViewer.module.css` restores `content-box` for
+    `.pdfViewer` and its descendants; don't "tidy" that away. Mechanism, and the related
+    border-box/padding-box trap in coordinate capture: [docs/PDF.md](docs/PDF.md) §5.
+- `body { height: 100vh; height: 100dvh }` — load-bearing, not cosmetic. A flex item's
+  `flex-grow`/`flex-shrink` only has a budget to work with if its flex *container* has a
+  definite (not `min-height`-only) main size: `min-height` lets the container's own size
+  fall back to its content's, which defeats grow/shrink on children entirely. This is what
+  lets `DocEditor.module.css`'s `.container` — and everything nested under it,
+  `.editorFrame` → `.editorContent` — actually fill "the viewport minus the global
+  `SiteHeader`" instead of silently reverting to content-based sizing and producing an
+  always-present page scrollbar. `PostPublisher.module.css` has no equivalent budget to
+  manage: nothing in it is a live editing surface any more (PLAN.md §15c).
+- `body` also gets an implicit `overflow-y: auto`, as a side effect of its
+  `overflow-x: hidden`, which makes `documentElement` the effective scroller. Use
+  `window.scrollY`, **not** `body.scrollTop`, when checking scroll position or behavior.
 - Links: `a { color: var(--link); text-decoration: none; }`, `a:hover { text-decoration:
   underline; }` — sitewide default for **every** link except post titles (below).
 
@@ -247,7 +264,7 @@ by design, not by accident.
   font or line-height changes — this caused a real regression (fixed 2026-07-20) where
   the badge sat visibly low next to the serif `<h1>`/`<h2>` titles. Font-size is still
   set with `em` (not `rem`) so the badge scales with whichever heading it's next to —
-  see the em-vs-rem gotcha in CLAUDE.md — but centering itself is flexbox's job now,
+  see the em-vs-rem note under Measuring and sizing in JS below — but centering itself is flexbox's job now,
   not font metrics.
 - **Headerless label/value table** (`PostSettingsPanel.module.css` `.detailsTable`, added
   2026-07-21): a plain `<table>` with no `<thead>`, one `<tr>` per field, label in the
@@ -381,6 +398,33 @@ Anything that can exceed the viewport (a table, a code block, a diagram) belongs
 own `overflow-x: auto` container. Don't reach for a `@media` breakpoint: `overflow-x`
 is self-activating and needs no width threshold, which is why this section defines none.
 The existing breakpoints (900px, 480px, 1200px) are for *reflowing* layouts, not overflow.
+
+## Measuring and sizing in JS
+
+### Relative to the neighbour, not the root — `em`, not `rem`
+
+Sizing something as "half of the heading it sits next to" needs `em` (relative to the
+*immediate parent's* font-size), not `rem` (relative to the *root* font-size). `rem` gives
+you "half of whatever the root/site-header text renders at", which is a different — usually
+smaller — number than the actual surrounding `h1`/`h2`.
+
+The now-deleted `PostEditBadge.tsx`'s `(edit)`/`(edited)` link learned this the hard way:
+`0.5rem` came out as a *quarter* of the `h1` on the single-post page (32px) and a *third* of
+the `h2` in listings (24px), both because it was computing against the root's 16px instead of
+either heading's own size. Worth keeping in mind for anything sized the same way later, even
+though that component is gone (PLAN.md §15: a published post no longer surfaces a
+live-staleness signal at all, by decision — see §15h).
+
+### `ResizeObserver` — read the element, not the entry
+
+When matching one element's width to another's (e.g. `PostsTable`'s search box tracking the
+Title column's width), use the observed element's own `getBoundingClientRect().width` inside
+the callback, **not** the callback's own `entries[0].contentRect.width`.
+
+`contentRect` is always the *content* box — padding and border excluded — regardless of the
+element's `box-sizing`. So on a padded `<th>` it under-reports by the padding, and copying
+that value straight into another element's CSS `width` (itself `box-sizing: border-box` from
+the global reset) makes it visibly narrower than the element it is supposed to match.
 
 ## Custom scrollbars, and anything positioned beside one
 

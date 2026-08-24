@@ -63,7 +63,7 @@ async function republish(page: Page, postId: string): Promise<string> {
   return events[events.length - 1].id;
 }
 
-/** Drives the publish surface's scrub bar — a range input ignores fill()/click, per CLAUDE.md's recipe. */
+/** Drives the publish surface's scrub bar — a range input ignores fill()/click, per docs/BROWSER_PANE.md's recipe. */
 async function scrubTo(page: Page, value: number): Promise<void> {
   await page.getByLabel("Scrub through the doc's edit history").evaluate((el, v) => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;

@@ -21,7 +21,7 @@ type Props = {
   // DocEditor.module.css) rather than the TipTap Placeholder extension —
   // that extension lives in @tiptap/extensions, which this project doesn't
   // install, and adding it would drag in the exact-version peer-dep pinning
-  // CLAUDE.md already warns about for the title-editor's other bare
+  // docs/TIPTAP.md already warns about for the title-editor's other bare
   // extensions. Only DocEditor passes this; PostEditor's title has none.
   placeholder?: string;
   onTitleChange: (title: string) => void;

@@ -111,5 +111,5 @@ Nothing in the spec says how a user reaches /sidebyside/a+b. What entry point sh
 /sidebyside/a+a must redirect to /doc/a. Two columns on the same doc would build two
 distinct Y.Docs sharing one documentName, so attachIndexeddb (ref-counted per Y.Doc,
 a WeakMap) would create two IndexeddbPersistence instances against the same IndexedDB
-database — exactly the y-indexeddb#25 shape CLAUDE.md warns about, where each instance
+database — exactly the y-indexeddb#25 shape docs/YDOC.md warns about, where each instance
 re-persists what the other wrote. A redirect is the cheap correct fix.

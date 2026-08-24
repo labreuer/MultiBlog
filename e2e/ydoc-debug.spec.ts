@@ -69,7 +69,7 @@ test("read-only viewing writes nothing; editing attributes exactly the typing us
 
     // The duplication check: replaying row #1 plus every delta must
     // reproduce exactly what was typed, once — not doubled the way a
-    // mis-seeded post document can be (CLAUDE.md's restart-doubling gotcha).
+    // mis-seeded post document can be (docs/YDOC.md's restart-doubling gotcha).
     expect(await replayYdocText(doc.id)).toBe(marker);
   } finally {
     await page.goto("about:blank").catch(() => {});
@@ -166,7 +166,7 @@ test("the title-history panel lists only title-changing updates, and tells absen
 
 // A range input ignores fill()/click-based interaction in a way that doesn't
 // dispatch what React listens for, so set the value through the native setter
-// and fire the events by hand — the same recipe CLAUDE.md documents for
+// and fire the events by hand — the same recipe docs/BROWSER_PANE.md documents for
 // driving React-controlled inputs from javascript_tool.
 async function seekSlider(page: Page, value: number): Promise<void> {
   await page.getByLabel("Scrub through ydoc update history").evaluate((el, v) => {

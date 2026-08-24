@@ -30,7 +30,7 @@ const attachments = new Map<string, Attachment>();
 // copy merging into a server document that has been re-seeded (a structurally
 // new document, e.g. after a fresh scripts/test-ydoc.ts create reusing an
 // id, or any future re-seed path) is the client-side twin of the
-// restart-doubling gotcha in CLAUDE.md, and worse, because IndexedDB survives
+// restart-doubling gotcha in docs/YDOC.md, and worse, because IndexedDB survives
 // a closed tab. Fixed by keying the local database on the document's
 // *lineage* (its `ydoc.created_at`, which only changes when the row is
 // recreated) rather than on documentName alone — a re-seed then lands in a

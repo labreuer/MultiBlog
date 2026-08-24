@@ -316,7 +316,7 @@ work closed: `npm run dev` is `scripts/dev-web.ts` and passes `-p` explicitly, `
 separate databases and separate `.file-storage` directories — so Playwright adopting the other
 checkout's server, and the PDF-download 503s that followed from a shared `file` table, are both
 structurally impossible now rather than merely detected. The arrangement itself is a durable
-fact about the box and so lives in CLAUDE.md ("Two development slots"), not here.
+fact about the box and so lives in docs/DEV_SLOTS.md, not here.
 
 **What is still manual.** A slot is three values in `.env` plus a database, and I typed both
 slots' worth. `.env` is gitignored, so a newly created worktree starts with *no* `.env` at all:
@@ -361,3 +361,20 @@ script as the setup path, for the same reason `scripts/test-*.ts` each own their
 **Not urgent while there are two slots** — two is the number that fits in your head, and the
 manual path is now short. It stops being short at three, and stops working at all the first time
 a worktree is created by tooling rather than by hand.
+
+## ESLint stays on 9 and TypeScript on 5 — both gated on `eslint-config-next`
+
+`npm outdated` offers eslint 10 and typescript 7. Neither works yet, and neither is blocked
+on us:
+
+- **eslint 10** removed `context.getFilename()`, which `eslint-plugin-react` still calls, so
+  `npx eslint .` dies with `contextOrFilename.getFilename is not a function` before linting
+  anything ([eslint-plugin-react#4018](https://github.com/jsx-eslint/eslint-plugin-react/issues/4018),
+  a dup of #3977). `eslint-plugin-import`, `-react` and `-jsx-a11y` all cap their `eslint`
+  peer at `^9` and are pulled in by `eslint-config-next`, so this is not overridable.
+- **typescript 7** is blocked separately by `typescript-eslint`'s `<6.1.0` peer.
+
+Both unblock when Next ships a refreshed lint config — **recheck then, not before**.
+
+Worth knowing when weighing it: taking eslint 10 *would* drop the `brace-expansion` audit
+count from 9 to 6.

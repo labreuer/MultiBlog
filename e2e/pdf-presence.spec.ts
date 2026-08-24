@@ -6,7 +6,7 @@ import { ADMIN_EMAIL, createTestFile, deleteTestFile } from "./db";
 // **This is the file that needs two real browser contexts**, which is why it
 // can't be checked by hand in the browser pane at all: the pane's tabs share
 // one cookie jar, so signing in as a second user silently converts the first
-// (CLAUDE.md). Playwright's `secondUser()` fixture gives each identity its own
+// (docs/BROWSER_PANE.md). Playwright's `secondUser()` fixture gives each identity its own
 // context and its own jar.
 
 /** Enough pages that "page 1" and "page 9" are unambiguously different places. */

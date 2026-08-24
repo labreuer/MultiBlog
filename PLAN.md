@@ -259,7 +259,7 @@ toggle one level — it can't nest deeper).
   creating a new one. Necessary because Postgres `jsonb` doesn't preserve object key order on
   read-back, so a plain `JSON.stringify` compare against the doc as just typed would
   false-positive as "changed" on key order alone; it's also what makes "typed something, then
-  undid it" a no-op save, without inspecting the live Yjs doc. See TIPTAP.md for a ProseMirror
+  undid it" a no-op save, without inspecting the live Yjs doc. See docs/TIPTAP.md for a ProseMirror
   JSON-shape gotcha this equality check is sensitive to.
 - **No `status` column**: draft/scheduled/published is derived at read time
   (`derivePostStatus`, `src/lib/post-status.ts`) from `publish_revision_id`/`published_at`

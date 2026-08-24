@@ -25,7 +25,7 @@ Full flag reference and the design rationale for each stage live in the file hea
 of `import-etherpad.ts`, `dirty-db.ts`, `changeset.ts`, and `to-prosemirror.ts` — this
 file records the decisions someone reading the *app* (not the script) would need,
 and follows PLAN.md's section numbering only by cross-reference, since PLAN.md itself
-does not track one-shot imports (see CLAUDE.md's "One-shot data imports").
+does not track one-shot imports (see docs/TEST_DATA.md's "One-shot data imports").
 
 ## Why the history, not just the text
 

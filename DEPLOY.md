@@ -204,7 +204,7 @@ systemctl status postgresql      # should be active + enabled
 ```
 
 26.04's default repo ships a current major (16/17-class). That's fine for a fresh DB — you do
-**not** need to match dev's PG 14, and you do **not** need the PGDG apt repo. The default
+**not** need to match dev's PG 18, and you do **not** need the PGDG apt repo. The default
 cluster already listens only on `localhost:5432` (`listen_addresses = 'localhost'`), and
 Ubuntu's default `pg_hba.conf` accepts password auth on `127.0.0.1/32` (`scram-sha-256`), so
 the app connects over the loopback with a password and no `pg_hba` edits are required.

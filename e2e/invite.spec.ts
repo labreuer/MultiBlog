@@ -61,7 +61,7 @@ test.describe("email invites", () => {
 
       // A fresh context, not the signed-in admin's: the invitee has no
       // session yet, and the browser pane's shared-cookie-jar trap
-      // (CLAUDE.md) is exactly why Playwright specs use their own context
+      // (docs/BROWSER_PANE.md) is exactly why Playwright specs use their own context
       // per identity instead.
       const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
       const invitePage = await context.newPage();

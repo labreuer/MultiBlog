@@ -2,7 +2,7 @@
 // a second working tree can run beside this one without either fighting for
 // :3000.
 //
-// The machine runs two **slots** (CLAUDE.md, "Two development slots"). A slot
+// The machine runs two **slots** (docs/DEV_SLOTS.md). A slot
 // is a working tree plus its own `.env`, its own Postgres database and its own
 // `.file-storage`; what makes it a slot rather than a copy is exactly three
 // values, all read from `.env`:

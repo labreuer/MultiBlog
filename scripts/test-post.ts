@@ -1,5 +1,5 @@
 // Create or delete throwaway posts for manual testing (e.g. exercising
-// publish/unpublish/schedule, or performance/stress testing per CLAUDE.md's
+// publish/unpublish/schedule, or performance/stress testing per PERFORMANCE.md's
 // "copy content into a throwaway post rather than editing the real one"
 // note). Only ever touches posts authored solely by @example.com throwaway
 // accounts (see test-user.ts) — delete refuses a post with any other

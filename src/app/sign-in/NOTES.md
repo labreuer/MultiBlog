@@ -40,7 +40,7 @@ access it becomes the first support question, with nothing broken to find.
 
 The same staleness has a testing-side face — deleting a `User` row mid-session doesn't sign
 that browser out or revoke its role, so "the row is gone" is not proof a test session ended.
-CLAUDE.md's *Driving the browser pane* section covers that angle.
+docs/BROWSER_PANE.md covers that angle.
 
 ## /dashboard refreshes the session from the database
 

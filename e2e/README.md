@@ -195,7 +195,7 @@ the admin account.
   action ran.
 - **Two users means two browser contexts**, which `secondUser()` handles. Don't
   reach for two tabs: they share a cookie jar, and the second sign-in silently
-  re-authenticates the first (the same trap CLAUDE.md documents for the browser
+  re-authenticates the first (the same trap docs/BROWSER_PANE.md documents for the browser
   pane).
 - **`sendMail` is never stubbed or spied on.** Every address the suite creates
   is `@example.com`, and `src/lib/mail.ts` refuses to deliver to that domain
@@ -243,7 +243,7 @@ test("measure", async ({ page, draftDoc }) => {
 });
 ```
 
-For editing-latency work, the `execCommand('insertText')` loop CLAUDE.md
+For editing-latency work, the `execCommand('insertText')` loop PERFORMANCE.md
 describes runs the same way inside `page.evaluate`, timed with
 `performance.now()` — one command instead of a keystroke-by-keystroke drive
 through the browser pane.

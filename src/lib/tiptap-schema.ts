@@ -46,7 +46,7 @@ export const pmDocContentSchema = getSchema(docContentExtensions);
 // body can't itself carry the `annotation` anchor mark (an annotation on an
 // annotation isn't a thing this app has), and picking the wrong variant here
 // would silently let one be typed in and then vanish the moment it's
-// re-rendered through a schema that doesn't know the mark (CLAUDE.md's
+// re-rendered through a schema that doesn't know the mark (docs/TIPTAP.md's
 // "picking the wrong variant silently drops marks" warning, restated for a
 // third consumer).
 export const annotationContentExtensions = authorHighlightExtensions;

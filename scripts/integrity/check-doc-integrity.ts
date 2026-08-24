@@ -1,5 +1,5 @@
 // Verifies that a Doc row's cached columns still agree with the ydoc they are
-// cached from. A doc's ydoc is canonical (PLAN.md §3d/§12d, CLAUDE.md is
+// cached from. A doc's ydoc is canonical (PLAN.md §3d/§12d, docs/YDOC.md is
 // explicit that a doc's ydoc row IS the doc); `doc.title`, `doc.prose_json` and
 // `doc.prose_json_length` are all derived copies, written by
 // server/doc-cache.ts on the collab server's store debounce and by the
@@ -215,7 +215,7 @@ async function main() {
     // docContentExtensions, matching server/doc-cache.ts exactly: it is the
     // doc-side schema that includes the annotation mark, and decoding with a
     // narrower set would silently drop marks and report drift that isn't there
-    // (CLAUDE.md's note on picking the wrong schema variant).
+    // (docs/TIPTAP.md's note on picking the wrong schema variant).
     let bodyJSON: unknown;
     let bodyDecodeError: string | null = null;
     try {

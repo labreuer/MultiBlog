@@ -51,7 +51,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
     immediatelyRender: false,
     // The same aria-label/role pair the doc reading view's editor carries
     // (use-live-doc-content.ts) and for the same stated reason: it is what
-    // the e2e suite keys off instead of DOM order (CLAUDE.md's `.tiptap`
+    // the e2e suite keys off instead of DOM order (docs/TIPTAP.md's `.tiptap`
     // ordering note). This surface is the *original* selection-to-comment
     // one and had gone without, which is why nothing could address it —
     // `role: "textbox"` on an `editable: false` editor is the existing

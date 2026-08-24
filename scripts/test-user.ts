@@ -1,6 +1,6 @@
 // Create or delete throwaway user accounts (any role) for manual testing
 // (e.g. of concurrent-editing features, role-gated actions, or comment
-// trust/moderation states per CLAUDE.md). Restricted to @example.com
+// trust/moderation states per docs/TEST_DATA.md). Restricted to @example.com
 // addresses so it can never touch a real account.
 //
 // Usage:

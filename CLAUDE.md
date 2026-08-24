@@ -1,634 +1,221 @@
 # MultiBlog — notes for Claude
 
 Multi-author blog with revisions, real-time collab, and quote-anchored comments.
-Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually built vs. planned.
-Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMANCE.md).
-Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
-Styling conventions (colors, typography, CSS Modules vs. inline, custom scrollbars and
-anything positioned beside one): [STYLE.md](STYLE.md).
-Admin tables (`/posts`, `/docs`, `/users`, `/comments`, `/annotations`) all render through
-one kit — `src/components/table/` plus a per-table `*-query.ts` over `src/lib/table-query.ts`.
-Filters, sort, pagination and the show-deleted toggle live in the querystring and are
-applied in Postgres, never client-side; a new admin table means a `*-query.ts` and the
-kit's hooks, not a fresh `<table>`. Every column on every one of them sorts — the ones
-Prisma's `orderBy` can't reach (a joined byline, filtered counts) go through a database
-view keyed 1:1 on the table's primary key, which Prisma then treats as an ordinary to-one
-relation: `post_activity`, `post_metrics`, `doc_metrics`. Reach for that before
-denormalizing or re-sorting in JS. The exception is a value expensive to *compute* rather
-than merely awkward to reach — a view recomputes per query, and sorting through one has no
-`WHERE` to push down, so it evaluates the expression for every row in the table on every
-page load. That is why `/docs`' Length is a stored, trigger-maintained column
-(`Doc.proseJsonLength`) and not a view column. Rationale, measurements, costs and the
-phases still unbuilt: PLAN.md §16 (§16e, §16l).
-Above 1200px, comments/annotations that still point at live text sit in a right-hand rail,
-each card level with its own passage (PLAN.md §18) — `src/components/margin-notes/` plus
-the pure packing rule in `src/lib/margin-notes-layout.ts`. **Only those cards move.**
-`CommentSection`/`AnnotationSection` stay put below the article and keep the `<h2>`, the
-form/composer, the sort dropdown, and every anchorless entry (general discussion, a
-`DETACHED` thread, an annotation whose mark is gone); the anchored subset is `createPortal`ed
-into the rail so one component still owns sort order, the `hashchange` effect and the tree
-rendering. Below the breakpoint every surface is the single stacked list it always was, and
-so is a page whose JS never runs: the `.anchored` class is toggled from JS, never from a
-`@media` block. **CSS owns the two-column grid, JS owns only the vertical alignment** — so
-don't move the column layout into JS to "simplify", that split is what keeps the rail
-server-rendered in the right place. The two sides resolve an anchor differently and can't
-share that step: a post comment reads its stored `anchorFrom` against an immutable
-snapshot, while **a doc annotation has to be resolved against the live document, whichever
-of its two mechanisms anchored it** — `resolveAnnotationRanges`
-(`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail
-and jump target goes through it rather than knowing there are two.
-**Which mechanism follows the surface, never the permission** (PLAN.md §13o): the doc
-*editor* writes an `annotation` mark into the doc's ydoc (§12i) and leaves
-`anchorFrom`/`anchorTo`/`quotedText` null; either *reading* view writes those three columns
-and never touches the document, so a reader annotating a doc no longer causes a write to
-one they may not edit. Don't "unify" them by giving the reading views the mark back —
-that write is the thing being removed, not an implementation detail. A row has one or the
-other and never both; a null `anchorFrom` *is* "look for a mark instead".
-`Annotation.ydocUpdateId` is no longer metadata-only: it's the version stamp those offsets
-were measured against, and `quotedText` is derived server-side against exactly that state —
-so replaying to it reproduces the quote by construction. It still drives the scrubber jump
-it always did. Since §13q it names **the version the annotator was looking at**, not the
-log's tail at post time: the client captures a `Y.snapshot` in the same synchronous tick it
-reads the selection offsets (later is wrong — the freeze withholds the *render* while the
-Y.Doc keeps advancing), and `resolveUpdateIdForSnapshot` converts it. A bare state vector
-can't do this — deletions advance no clock, so ~10% of updates are invisible to one — and
-`Y.encodeStateVectorFromUpdate` is the wrong primitive for reading a *delta*'s clocks, which
-it answers with silence rather than an error. What keeps the conversion cheap is
-`Ydoc.lastUpdateId`, written by the store debounce beside the blob and state vector it
-already wrote: a rolling checkpoint the walk starts from. `scripts/integrity/check-annotation-anchors.ts`
-is what verifies the whole arrangement still holds. Never position a doc annotation off `Doc.proseJson` — it's a store-debounce
-snapshot, stale by seconds while anyone is typing; it's fine as the *seed* for which cards
-start in the rail, and nothing more.
-**A reply's anchor points into its parent annotation's body, not the doc** (§13p) — same
-three columns, different target ydoc, and therefore a different update log stamping them
-(`ydoc:annotation:<parentId>`). `postAnnotation` picks the target from
-`parentAnnotationId` rather than taking it as an argument, so there's no request that
-anchors a reply into the doc or a root into an annotation; an *anchorless* annotation still
-stamps the doc's log. Selecting text in a posted annotation is the gesture that opens (or
-re-points) that reply, which is why `AnnotationNode` renders bodies through
-`AnnotationBodyReader` — a read-only TipTap editor behind the SSR copy — rather than the
-static React tree alone: a browser `Selection` over static markup can't give ProseMirror
-positions, and static markup can't carry the highlight decorations either.
-How a remark stays attached to a passage while the passage moves — every strategy this
-codebase uses, the ones it doesn't, and how to pick: [docs/COLLAB.md](docs/COLLAB.md). Read it
-before adding another or "fixing" an anchor that looks fragile; several of the fragile-looking
-ones are deliberate, and one plausible fix has already been tried and reverted as too brittle.
-Authentication — session strategy, what the JWT bakes in, why sign-in is client-side:
-[src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
-Email delivery, rate limiting, and invites — why Resend, the `sendMail()` seam's contract,
-`user_invite`'s many-rows-per-user design, and what's deferred (verification, bulk
-invites): [docs/EMAIL.md](docs/EMAIL.md).
-Who may do what, as tables over roles × doc visibility × byline membership, plus where each
-rule lives so it can be re-derived: [docs/PERMISSIONS.md](docs/PERMISSIONS.md). A `PRIVATE`
-doc is its listed `DocAuthor`s' alone — no ADMIN/EDITOR bypass (PLAN.md §12e).
-Creating a doc from Markdown — `/docs`' file import and paste box, which heading becomes the
-title, why the parse is headless and server-side, why the size cap is 768 KB rather than a
-round number, and why the paste box is a textarea and not a clipboard read:
-[docs/DOC_IMPORT.md](docs/DOC_IMPORT.md). The four source files carry pointers into it rather
-than the reasoning itself.
+
+This file is loaded into every session, so it holds **triggers, not mechanisms**: the rule you
+need to know you're about to break, and where the reasoning lives. When a pointer below sounds
+relevant to what you're touching, read the file — the summary here is deliberately not enough
+to re-derive the decision from.
+
+## Where things are written down
+
+| | |
+|---|---|
+| [PLAN.md](PLAN.md) | Architecture and build order. §10 tracks what's actually built vs. planned. |
+| [TODO.md](TODO.md) | Open items carrying enough context to act on directly. |
+| [docs/COLLAB.md](docs/COLLAB.md) | How a remark stays attached to a passage while the passage moves — every strategy used, the ones rejected, and how to pick. |
+| [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
+| [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
+| [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
+| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. |
+| [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
+| [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Creating a doc from Markdown — file import and paste box. |
+| [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
+| [docs/DEV_SLOTS.md](docs/DEV_SLOTS.md) | Two working trees side by side: ports, hosts, databases. |
+| [docs/DATABASE.md](docs/DATABASE.md) | The Postgres cluster, what 18 doesn't change, migration recipes. |
+| [docs/TEST_DATA.md](docs/TEST_DATA.md) | Throwaway scripts, durable sample data, one-shot imports. |
+| [docs/BROWSER_PANE.md](docs/BROWSER_PANE.md) | Driving the preview browser (and why to prefer a spec). |
+| [STYLE.md](STYLE.md) | Colors, typography, CSS Modules vs. inline, layout, scrollbars. |
+| [PERFORMANCE.md](PERFORMANCE.md) | Findings, the perf-logging tool, and how to measure. |
+| [CACHING.md](CACHING.md) | Caching behavior and trade-offs (ISR, …). |
+| [DEPLOY.md](DEPLOY.md) | Self-managed Linode/Ubuntu deployment. |
+| [docs/FAVICON.md](docs/FAVICON.md) | Site icons and manifest. |
+| [e2e/README.md](e2e/README.md) · [scripts/integrity/README.md](scripts/integrity/README.md) · [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md) | Suite fixtures · integrity checks · auth strategy. |
+
+## Architecture invariants
+
+Each of these has been decided once and is easy to undo by accident. Read the linked section
+before changing the behavior it describes.
+
+- **Admin tables are one kit.** `/posts`, `/docs`, `/users`, `/comments`, `/annotations` all
+  render through `src/components/table/` plus a per-table `*-query.ts` over
+  `src/lib/table-query.ts`. Filters, sort, pagination and the show-deleted toggle live in the
+  querystring and are applied in Postgres, never client-side; a new admin table means a
+  `*-query.ts` and the kit's hooks, not a fresh `<table>`. Every column sorts — the ones
+  Prisma's `orderBy` can't reach go through a **database view keyed 1:1 on the primary key**
+  (`post_activity`, `post_metrics`, `doc_metrics`), which Prisma then treats as an ordinary
+  to-one relation. Reach for that before denormalizing or re-sorting in JS. The exception is a
+  value expensive to *compute* rather than awkward to reach: a view has no `WHERE` to push
+  down when sorted through, so it evaluates for every row on every page load — hence `/docs`'
+  Length being a stored, trigger-maintained column (`Doc.proseJsonLength`). PLAN.md §16, §16e,
+  §16l.
+- **Margin notes: only the cards move.** Above 1200px, comments/annotations still pointing at
+  live text are `createPortal`ed into a right-hand rail
+  (`src/components/margin-notes/`, packing rule in `src/lib/margin-notes-layout.ts`).
+  `CommentSection`/`AnnotationSection` stay put below the article and keep the `<h2>`, the
+  form, the sort dropdown and every anchorless entry, so one component still owns sort order,
+  the `hashchange` effect and the tree. **CSS owns the two-column grid, JS owns only the
+  vertical alignment** — don't move the column layout into JS to "simplify", that split is
+  what keeps the rail server-rendered in the right place. The `.anchored` class is toggled
+  from JS, never from a `@media` block. PLAN.md §18.
+- **An annotation's mechanism follows the surface, never the permission.** The doc *editor*
+  writes an `annotation` mark into the doc's ydoc and leaves `anchorFrom`/`anchorTo`/
+  `quotedText` null; either *reading* view writes those three columns and never touches the
+  document. A row has one or the other, never both — a null `anchorFrom` *is* "look for a mark
+  instead". Don't "unify" them by giving the reading views the mark back: that write is the
+  thing being removed, not an implementation detail. `resolveAnnotationRanges`
+  (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
+  jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
+- **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,
+  stale by seconds while anyone is typing. Fine as the *seed* for which cards start in the
+  rail, and nothing more.
+- **A reply's anchor points into its parent annotation's body, not the doc** — same three
+  columns, different target ydoc, different update log (`ydoc:annotation:<parentId>`).
+  `postAnnotation` picks the target from `parentAnnotationId` rather than taking it as an
+  argument. PLAN.md §13p.
+- **`Annotation.ydocUpdateId` is the version the annotator was looking at**, not the log's tail
+  at post time, and `quotedText` is derived server-side against exactly that state — so
+  replaying reproduces the quote by construction. `scripts/integrity/check-annotation-anchors.ts`
+  verifies the arrangement still holds. PLAN.md §13n, §13q.
+- **A PDF anchor cannot drift**, because a file's `sha256` is its identity — no tracking
+  plugin, no re-resolution, no version stamp. Don't reach for the doc side's drift machinery.
+  The one thing that *can* invalidate a stored anchor is our own normaliser, so bump
+  `NORMALISER_VERSION` (`src/lib/pdf-text.ts`) on **any** behavioural change. docs/PDF.md §4.
+- **Bumping `pdfjs-dist` is never routine**, and neither is deleting the test that looks
+  trivial. Pinning protects the *API* pdfjs offers, not the JavaScript runtime it assumes
+  underneath, and WebKit ships those built-ins late or not at all — so a bump needs
+  `npx tsx scripts/probe-engine.ts` and a real Safari, not just the chromium suite. And
+  `e2e/pdf-assets.spec.ts` is the only guard that pdfjs's four runtime asset directories are
+  served: `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image
+  decoder, so no fixture-based test can cover it. docs/PDF.md §10.
+- **A contributor's avatar is bytes in `user_avatar`, not a URL** — a separate table on purpose
+  (`/users` queries with `include:` and no `select:`, so an avatar column on `user` would drag
+  up to 100 blobs into that payload). `User.image` stays a URL string for the Auth.js adapter;
+  `resolveAvatarSrc` prefers the upload. `src/lib/avatar.ts` is server-only; `avatar-url.ts` is
+  the browser-safe half. There is deliberately **no "avatar from URL" path** — a server-side
+  fetch of a user-supplied URL is SSRF. PLAN.md §17n, §17o.
+- **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. PLAN.md §12e,
+  docs/PERMISSIONS.md.
+- **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**
+  (case-insensitive, first-created wins); its own title is never shown. Seed one with
+  `npx tsx scripts/seed-front-page.ts`. No `DocVisibility` check — the title alone is what
+  makes its body public here. PLAN.md §17c.
 
 ## Running
 
-**Two development slots.** This machine runs two working trees side by side, so a branch
-can be worked on without disturbing what the other tree is serving. A *slot* is a working
-tree plus its own `.env`, its own Postgres database and its own `.file-storage`; the three
-values that define one live in `.env` and are read through `scripts/dev-ports.ts` (and its
-hand-kept PowerShell mirror `scripts/dev-ports.ps1`):
+Two development slots — separate working trees, each with its own `.env`, database and
+`.file-storage`. Full rationale, and why `DEV_HOST` is not redundant with the ports:
+[docs/DEV_SLOTS.md](docs/DEV_SLOTS.md).
 
 | | slot A | slot B |
 |---|---|---|
-| working tree | `~/Claude/Projects/MultiBlog` (main worktree) | `~/git/MultiBlog` (git worktree) |
+| working tree | `~/Claude/Projects/MultiBlog` | `~/git/MultiBlog` |
 | `DEV_HOST` | `localhost` | `b.localhost` |
-| `WEB_PORT` (dev server) | 3000 | 3005 |
-| `WEB_PORT + 1` (preview tool's `web-prod`) | 3001 | 3006 |
-| `WEB_PORT + 2` (e2e prod target) | 3002 | 3007 |
+| `WEB_PORT` (dev) · `+1` (`web-prod`) · `+2` (e2e prod) | 3000 · 3001 · 3002 | 3005 · 3006 · 3007 |
 | `COLLAB_PORT` | 1234 | 1235 |
 | database | `multiblog` | `multiblog_b` |
 
-The other two web ports stay derived rather than configured: `WEB_PORT + 1` is the preview
-tool's `web-prod` and `WEB_PORT + 2` is the e2e prod target, so a slot owns three consecutive
-web ports and slots sit five apart — 3003/3004 are slack, and a third slot belongs at 3010.
-**Collab takes one port per slot and no block**, which is a fact about the app rather than a
-simplification: there is exactly one `new Server(...)` in the codebase (`server/collab.ts`),
-every `documentName` is `ydoc:`-prefixed and multiplexed over that one process (annotations
-included, via `ydoc:annotation:<id>`), and the e2e prod target reuses the running collab
-server rather than starting a second. Every port literal that used to be spread across
-`package.json`, `playwright.config.ts`, `check-ports.ps1`, `stop-all.ps1` and `e2e-web.ps1`
-now comes from that one module; `.claude/launch.json` is the deliberate exception, because
-the preview tool reads static JSON (see the bullet below).
-
-**`DEV_HOST` is not redundant with the ports, and that is the part worth remembering.**
-Cookies key on host and ignore port entirely — they predate the origin model — so two slots
-on one hostname share a single `authjs.session-token` however far apart their ports are:
-signing into one silently invalidates the other, and because the stale cookie is *present*
-rather than absent it fails as a JWT decrypt error, which reads like an auth regression.
-Every other browser store (IndexedDB, `localStorage`) is origin-scoped and so already
-separated by port alone. `*.localhost` is used rather than a hosts-file entry because it
-resolves to 127.0.0.1 through Node's own resolver with no entry and no elevation, is already
-in Next's built-in dev-origin allowlist (so it needs no `allowedDevOrigins` line), and is
-trusted by NextAuth under `next dev`. An invented TLD like `multiblog-b.test` fails the first
-two of those.
-
-Because the two trees share one repository, `git worktree list` from either shows both, and
-**the same branch cannot be checked out in both at once** — which is the guard that makes the
-arrangement safe rather than a second clone's honour system. Uncommitted work does *not*
-cross between them.
-
-- `npm run dev:all` — web (Next.js, `WEB_PORT`) + collab (Hocuspocus, `COLLAB_PORT`) via concurrently;
-  one Ctrl+C stops both. Individually: `npm run dev`, `npm run collab`. `npm run dev` is
-  `scripts/dev-web.ts`, not a bare `next dev`: Next resolves `--port` through commander's
-  `.default(3000).env('PORT')` while argv is parsed, and loads its own `.env` files later,
-  so **a `WEB_PORT` or `PORT` line in `.env` cannot reach it** — the port has to be on the
-  command line. This is not hypothetical: slot B carried an `APP_URL` naming its own port
-  for a while and went on binding :3000 every time, because nothing binds from `APP_URL`.
-- `npm run stop:all` — stops a `dev:all` you (Claude) started, in one command instead of a
-  netstat/parent-trace/taskkill dance across several. Verifies the port owner's command line
-  actually mentions this repo before touching anything (see `scripts/stop-all.ps1` —
-  which also stops an e2e prod web server on `WEB_PORT + 2` if one is running). It reads
-  this slot's ports from `scripts/dev-ports.ps1`, so run it from the tree you mean to stop
-  — it will not touch the other slot's servers.
-- `.claude/launch.json` defines `web`, `collab`, and `web-prod` for the preview tool.
-  `web-prod` runs `next start` on :3001 (so it can coexist with a `dev:all` on :3000) against
-  whatever `npm run build` last produced — use it for anything caching-related, since
-  `next dev` doesn't enforce the static/dynamic split or the Full Route Cache. It shells
-  through `pwsh` to set `AUTH_TRUST_HOST`/`AUTH_URL`, without which NextAuth rejects
-  `localhost:3001` as an `UntrustedHost` under `next start`. See CACHING.md's
-  2026-07-24 entry. **This file is the one place a port is still literal**, because the
-  preview tool reads static JSON and cannot compute `WEB_PORT + 1`. Its numbers are slot A's;
-  in slot B the `web`/`web-prod` entries point at ports nothing is listening on, so drive
-  that slot from `npm run dev:all` and open the pane on `http://b.localhost:3005` directly.
+- `npm run dev:all` — web (Next.js) + collab (Hocuspocus) via concurrently; one Ctrl+C stops
+  both. Individually: `npm run dev`, `npm run collab`.
+- `npm run stop:all` — stops a `dev:all` you started, in one command instead of a
+  netstat/parent-trace/taskkill dance. Reads this slot's ports, so run it from the tree you
+  mean to stop; it will not touch the other slot's servers.
+- `.claude/launch.json` defines `web`, `collab` and `web-prod` for the preview tool. Its
+  numbers are **slot A's** and cannot be computed — in slot B, drive from `npm run dev:all` and
+  open the pane on `http://b.localhost:3005` directly.
 - The user often runs `dev:all` themselves. **You may stop it** when the work needs it —
-  `npm run stop:all`, then restart via the preview tool. Standing permission, no need to
-  ask each time. Prefer attaching to what's already running (open the browser pane on
-  http://localhost:3000, or `http://b.localhost:3005` for slot B) when that would answer
-  the question, since a restart costs a cold
-  recompile and can poison `.next` (see the Checks section); but a schema change or a new
-  Prisma model *requires* the restart, and asking is worse than doing it. Say that you did.
+  `npm run stop:all`, then restart via the preview tool. Standing permission, no need to ask
+  each time. Prefer attaching to what's already running when that would answer the question,
+  since a restart costs a cold recompile and can poison `.next` (see Checks); but a schema
+  change or a new Prisma model *requires* the restart, and asking is worse than doing it. Say
+  that you did.
 
 ## Database
 
-- Local **Postgres 18** (Windows service `postgresql-x64-18`), owning port 5432. The
-  `multiblog` role/DB connect passwordless — the 18 instance trusts all local connections.
-  `psql -U multiblog -h 127.0.0.1 -d multiblog` just works. **Two databases in that one
-  cluster**, one per slot: `multiblog` (slot A) and `multiblog_b` (slot B, `~/git/MultiBlog`).
-  They are separate precisely so two branches can hold divergent migration state without
-  either one's `prisma migrate dev` detecting drift and offering the full reset described
-  further down this section — which is the failure this arrangement exists to prevent, and
-  the reason a second checkout must never be pointed at the first's `DATABASE_URL`. The
-  `multiblog` role has CREATEDB, so a further slot needs no superuser:
-  `psql -U multiblog -h 127.0.0.1 -d postgres -c "CREATE DATABASE multiblog_c OWNER multiblog"`,
-  then `npx prisma migrate deploy` and `npx tsx scripts/seed-sample-data.ts` from that tree. The old `postgresql-x64-14`
-  service is stopped, not uninstalled: its data directory still holds the pre-rebuild
-  database, recoverable with `pg_dump` by starting 14 on a spare port. That door closes if
-  14 is ever uninstalled.
-- **What Postgres 18 does *not* change, having been checked directly.** Worth recording
-  because each looks like it should help and doesn't:
-  - `jsonb_path_query(doc, '$.**.text')` **still double-counts** on 18.4, exactly as
-    `add_doc_length_function`'s header found on 14 (a lone `{"type":"text","text":"hello"}`
-    inside an array still yields `["hello","hello"]`). `doc_length`'s recursive CTE is not
-    a workaround waiting to be retired. `JSON_TABLE` (new in 17) doesn't help either — it
-    needs a known shape, and a TipTap document nests arbitrarily.
-  - **Virtual generated columns** (18's headline, and now the default) reject
-    user-defined functions outright: *"Virtual generated columns that make use of
-    user-defined functions are not yet supported."* So `doc_length(prose_json)` cannot
-    become one. A `STORED` column *is* accepted, and Prisma reads and sorts it correctly
-    — but `migrate diff` reads the generation expression as a column default and
-    permanently emits `ALTER COLUMN … DROP DEFAULT`, so every `migrate dev` would offer
-    to strip the generated-ness. Hence `Doc.proseJsonLength` being a plain column plus a
-    trigger (`doc_sync_prose_json_length`) instead: Migrate doesn't introspect triggers,
-    so the trigger is invisible to it and the diff stays clean. **Never assign to that
-    column** — the trigger owns it, on `INSERT` and on any `UPDATE` naming `prose_json`.
-    A bypass (`DISABLE TRIGGER`, `COPY`, a restore) drifts silently; the `length-cache`
-    check in `scripts/integrity/check-doc-integrity.ts` is what catches it, and a no-op
-    `UPDATE doc SET prose_json = prose_json WHERE id = …` re-fires the trigger to repair.
-  - **Self-join elimination** is on by default and does work (an inner join of a table to
-    itself on the primary key collapses to one scan) — but it only fires for `INNER` joins,
-    and Prisma emits a `LEFT JOIN` for a to-one relation ordering no matter how the
-    relation is declared. So it does not rescue a view that reads its own base table. See
-    `add_post_metrics_view` and PLAN.md §16l.
-  - **B-tree skip scan** changes nothing here: every composite index this schema relies on
-    (`post_publication_event(post_id, created_at)`, `post_author`/`doc_author`'s composite
-    primary keys) is already queried on its leading column.
-- Restarting the Postgres service needs an elevated shell — ask the user to do it.
-- `npx prisma generate` fails with EPERM while the dev server runs (query-engine DLL is
+Local **Postgres 18**, one cluster, one database per slot; `psql -U multiblog -h 127.0.0.1 -d
+multiblog` connects passwordless. The cluster layout, what Postgres 18 does *not* change, and
+the two migration recipes that bite (adding a required column; repairing a checksum after
+editing an applied migration) are in [docs/DATABASE.md](docs/DATABASE.md) — read it before
+running `prisma migrate dev` on anything unusual.
+
+- **Restarting the Postgres service needs an elevated shell** — ask the user to do it.
+- `npx prisma generate` fails with **EPERM while the dev server runs** (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
-- **Adding a new model needs the dev server restarted, not just regenerated** — and the
-  failure doesn't look like a stale client. `next dev` holds the generated `PrismaClient` in
-  module memory, so after `prisma migrate dev` adds a model, the *running* server still has
-  the client from before it existed: `prisma.yourNewModel` is `undefined`, and the first
-  query dies with `TypeError: Cannot read properties of undefined (reading 'findMany')`
-  pointing at your own query line. Typecheck passes (the regenerated types on disk are
-  correct), which makes it read like a logic bug in the code you just wrote. Restarting web
-  is the whole fix. Distinct from the EPERM case above: that one is generate refusing to
-  *write*, this one is a successful write the running process never picks up.
+- **Adding a new model needs the dev server restarted, not just regenerated** — and the failure
+  doesn't look like a stale client. `next dev` holds the generated `PrismaClient` in module
+  memory, so after `prisma migrate dev` adds a model the *running* server still has the client
+  from before it existed: `prisma.yourNewModel` is `undefined`, and the first query dies with
+  `TypeError: Cannot read properties of undefined (reading 'findMany')` pointing at your own
+  query line. Typecheck passes, which makes it read like a logic bug in the code you just
+  wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
+  refusing to *write*, this one is a successful write the running process never picks up.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
-- One-off DB scripts (seeding/inspecting data outside the app) can't `require()` the
-  generated client with plain `node -e` — it's TS source, not compiled JS. Write a `.ts`
-  file importing `prisma` from `./src/lib/prisma` (same as `server/collab.ts` does) and run
-  it with `npx tsx that-file.ts` from the project root; delete the file afterward.
+- **One-off DB scripts can't `require()` the generated client with plain `node -e`** — it's TS
+  source, not compiled JS. Write a `.ts` file importing `prisma` from `./src/lib/prisma` (same
+  as `server/collab.ts` does), run it with `npx tsx that-file.ts` from the project root, and
+  delete it afterward.
+- `.env` is never committed. Every variable, and the bare-vs-`NEXT_PUBLIC_` rule that decides
+  whether a change needs a restart or a rebuild: [docs/ENV.md](docs/ENV.md).
 - Dev account `labreuer@gmail.com` has role ADMIN.
-- `.env` (never committed): `DATABASE_URL`, `AUTH_SECRET`, `APP_URL`, `COLLAB_PORT`, plus
-  `DEV_HOST` and `WEB_PORT` — the three values that make this tree a *slot* rather than
-  a copy (see Running above; `scripts/dev-ports.ts` is where they are read). `DEV_HOST` and
-  `WEB_PORT` both default sensibly when absent (`localhost`, 3000), so an unedited `.env`
-  behaves exactly as it did before slots existed. Optional:
-  `E2E_WORKERS` — the Playwright worker count. It is an **override, not the setting**: the
-  default is derived in `playwright.config.ts` from `os.cpus().length`, clamped so it never
-  exceeds the count an actual measurement produced. That derivation is why no machine is
-  described here any more — this entry used to say the committed 2 was right for "the
-  desktop it was measured on" and too many for "a 2-core laptop", which left the reader to
-  translate their own hardware into a number with no way to check the translation. Set this
-  only to contradict the derivation, and the symptom that warrants it is specific: red tests
-  scattering across unrelated specs, not repeating between runs, all passing at
-  `E2E_WORKERS=1`. `playwright.config.ts` already imports `dotenv/config` (it needs
-  `DATABASE_URL` for the DB helpers), so a value here is in `process.env` before
-  `defineConfig` evaluates. Optional:
-  `NEXT_PUBLIC_COLLAB_URL` — leave unset for local dev; `src/lib/collab-url.ts`'s `getCollabUrl()`
-  (the one function every client-side `HocuspocusProvider` call goes through) derives
-  `ws://<the page's own host>:<NEXT_PUBLIC_COLLAB_PORT>` per request instead, so the same running dev server
-  works from `localhost` *and* a LAN IP (e.g. testing from a phone) with no restart. Set it
-  explicitly only for a real deployment (a different host/subdomain, or `wss://`) — once set,
-  it pins every client to that one value, same as before. `next.config.ts`'s
-  `allowedDevOrigins` is the separate, unrelated setting for letting a non-localhost origin
-  reach the Next dev server itself (HMR, RSC) at all — needed for the same phone-on-LAN case,
-  but for the web server rather than the collab one, and it does need a **restart** (not
-  `getCollabUrl()`'s zero-restart) since it's read at `next dev` startup. `COLLAB_PORT` is bare,
-  not `NEXT_PUBLIC_`, so it isn't readable client-side at all — which is why there is a
-  separate `NEXT_PUBLIC_COLLAB_PORT` holding the same number for the browser (defaulting to
-  `1234`). That pair is what lets a second slot move its collab port *without* pinning
-  `NEXT_PUBLIC_COLLAB_URL`: pinning the URL also pins the host, which silently defeats the
-  per-request derivation above. Slot B did exactly that until `NEXT_PUBLIC_COLLAB_PORT`
-  existed. Being a `NEXT_PUBLIC_` var it is substituted by textual match at build time, so
-  `src/lib/collab-url.ts` must keep reading it as a full literal member expression.
-  **`NEXT_PUBLIC_COLLAB_URL` is the browser's answer only.** The Next *server* also calls the
-  collab process directly over plain HTTP (`/admin/ydoc-snapshot`, `/admin/annotation-mark`,
-  `/admin/annotation-unmark`, `/admin/annotation-flush`); that origin comes from
-  `src/lib/collab-http-origin.ts` — `COLLAB_INTERNAL_URL` (optional, bare) falling back to
-  `http://127.0.0.1:${COLLAB_PORT}` — and must **never** be derived from
-  `NEXT_PUBLIC_COLLAB_URL`. It was, and the bug was invisible locally and total in production:
-  the public URL is `wss://<host>/collab`, nginx forwards `/collab/...` unrewritten, the
-  handler matches on `/admin/...`, and Hocuspocus answers an unmatched path with a
-  **`200 "Welcome to Hocuspocus!"`** — so all four endpoints silently no-opped while the
-  websocket worked fine. Symptom was "Annotation can't be empty." on every annotation. PLAN.md
-  §13m has the full account; the generalizable half is that a `NEXT_PUBLIC_` var answers "how
-  does the *browser* reach this", which is the wrong question for a server-to-server call and
-  happens to give the same answer as the right one only until a reverse proxy exists.
-  Optional: `FILE_STORAGE_DIR` (default `.file-storage/`) and `FILE_MAX_UPLOAD_BYTES`
-  (default 50MB) — both bare, so a deployment changes its upload limit with a **restart, not
-  a rebuild**. That is why the browser learns the limit from `/api/files/limits` rather than
-  from a baked-in constant: the client-side pre-check and the server's enforcement are then
-  provably the same number.
-  Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
-  `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
-  deployment's title survives `git pull` instead of living in a tracked file. Also optional:
-  `SITE_BANNER`/`SITE_BANNER_ASPECT`/`SITE_BANNER_ALT` (`src/lib/site-banner.ts`, PLAN.md
-  §17b) — the landing page's banner image, path plus aspect ratio plus alt text. Bare, not
-  `NEXT_PUBLIC_`, on purpose: unlike `NEXT_PUBLIC_SITE_TITLE`, these are read server-side
-  only, so changing them needs a **restart, not a rebuild** — and the image file itself
-  (`public/banner.*`, gitignored) needs neither, since `public/` is served straight from
-  disk at runtime. Also optional: `RESEND_API_KEY`/`MAIL_FROM` (`src/lib/mail.ts`,
-  [docs/EMAIL.md](docs/EMAIL.md)) — bare, not `NEXT_PUBLIC_`, so also a restart not a
-  rebuild; unset keeps every environment on the logging stub. Any recipient on
-  `@example.com`/`@sample.invalid` is never delivered to in any environment regardless of
-  whether a key is set, so `npm run e2e` stays safe with a live key in `.env`. Also optional:
-  `RESEND_INVITE_TEMPLATE_ID` — a Resend Template id for the invite email specifically
-  (`sendUserInvite`, `src/app/actions/users.ts`); unset falls back to a plain text/subject
-  send rather than failing, so invites work with no template ever created in the dashboard.
-- **A contributor's avatar is bytes in `user_avatar`, not a URL** (PLAN.md §17n), served from
-  `/api/avatar/<userId>/<hash>` where `hash` is a content hash — so the URL changes whenever
-  the image does, which is what lets the route answer `Cache-Control: immutable` and use the
-  same hash as its `ETag`. Three things not to undo:
-  - **It's a separate table on purpose.** `src/app/users/page.tsx` queries with `include:` and
-    no `select:`, so every scalar column comes back; an avatar column on `user` would drag up
-    to 100 blobs into that page's payload silently. Any query that wants an avatar names
-    `avatar: { select: { hash: true } }` — never `bytes`, which only the route handler reads.
-  - **`User.image` stays a URL string.** It's the Auth.js adapter's field (`PrismaAdapter`),
-    populated from an OAuth profile; `resolveAvatarSrc` (`src/lib/avatar-url.ts`) prefers the
-    upload and falls back to it, then to the initials circle.
-  - **`src/lib/avatar.ts` is server-only** (`sharp`, `node:crypto`). `avatar-url.ts` holds the
-    browser-safe half, because `ContributorCard` builds these URLs and is imported by the
-    `"use client"` `ContributorPanel`, so it compiles into the client bundle too.
-  Uploads are always re-encoded (160px square WebP) rather than stored as sent — that's what
-  strips EXIF/GPS from a phone photo, and `.rotate()` bakes the orientation flag into the
-  pixels first so the strip doesn't leave it sideways. **The user picks the crop, in the
-  browser** (`AvatarCropper.tsx`, PLAN.md §17o), so what's POSTed is a fixed ~320px square of
-  tens of KB whatever the source was — which is why there is no byte cap anywhere and why
-  Next's 1MB `bodySizeLimit` and nginx's 1MB `client_max_body_size` can stay at their
-  defaults. Don't add one back: the guard that actually bounds ingestion cost is
-  `MAX_INPUT_PIXELS` (50MP), since bytes predict decode cost badly. There is deliberately **no
-  "avatar from URL" path**: a server-side fetch of a user-supplied URL is SSRF. `sharp` is a
-  direct dependency pinned at the range its pre-existing `overrides` entry uses — npm rejects
-  a direct dep whose spec doesn't match its own override.
-- **An uploaded PDF is bytes on disk, not a `bytea`** (PLAN.md §19) — content-addressed at
-  `FILE_STORAGE_DIR/<sha256[0:2]>/<sha256>`, served from `/api/files/<id>/<hash>` with `Range`
-  support so PDF.js can render page 1 of a large scan without transferring all of it. Prisma
-  cannot stream a `Bytes` column, which is the whole argument: a 50MB file would land in
-  Node's heap on upload *and* on every one of pdfjs's range requests. `UserAvatar`'s
-  in-Postgres bytes are not a counter-precedent — those are ~10KB and served whole.
-  Consequences worth remembering:
-  - **`FILE_STORAGE_DIR` is a second backup surface `pg_dump` does not cover** (DEPLOY.md).
-  - **Never delete a file's bytes without counting references first.** Content addressing
-    means two `StoredFile` rows can legitimately share one blob; `deleteBytesIfUnreferenced`
-    takes the surviving count as an argument for exactly that reason.
-  - The Prisma model is **`StoredFile`**, `@@map("file")`. The table is `file`; the generated
-    TS type must not be `File`, which is a DOM/Node global the upload path uses.
-  - **A file's listed users are `FileOwner`s, not authors** (PLAN.md §19): nobody on that
-    list wrote the PDF. The list is seeded with the uploader, editable afterwards, and grants
-    `/files`' Owner(s) line, the right to rename/re-slug/re-own/delete, and read access to a
-    `PRIVATE` file. `DocAuthor`/`PostAuthor` are "author" because a doc's or post's listed
-    users really did write it, and the shared filter kit (`AuthorFilterPanel`,
-    `authorFilterWhere`, `AuthorMode`) is named for those two surfaces; `/files` reaches it
-    through the `ownerFilterWhere`/`listOwnerFilterOptions` wrappers and an aliased import,
-    and every option it added defaults to what `/docs` and `/posts` pass, which is what keeps
-    those two tables out of it. Don't "unify" the two vocabularies in either direction.
-  - Upload is a **Route Handler taking a raw body**, not a Server Action and not multipart:
-    actions carry a 1MB `bodySizeLimit` that raising would raise site-wide, and
-    `request.formData()` buffers the whole upload before user code sees it. nginx needs
-    `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader
-    names the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
-- **pdfjs is full of traps that fail in ways not resembling their cause** — a build error
-  that reads as a malformed URL of ours, a teardown error that reads as a missing `await`,
-  a scanned PDF rendering as blank pages with a working text layer over them. All of them,
-  verified against 6.2.108, are in **[docs/PDF.md](docs/PDF.md) §10** — read it before a
-  `pdfjs-dist` bump or when the viewer misbehaves inexplicably. Three consequences reach
-  outside the viewer and so are repeated here:
-  - **Never delete `e2e/pdf-assets.spec.ts` as trivial.** It asserts that each of pdfjs's
-    four runtime asset directories is served, and it is the only guard on any of them —
-    `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image decoder,
-    so no fixture-based test can cover it.
-  - **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs**, and the symptom is a
-    ~2% *scale* error rather than a layout one. `PdfViewer.module.css` restores
-    `content-box` for `.pdfViewer` and its descendants; don't "tidy" that away. Mechanism,
-    and the related border-box/padding-box trap in coordinate capture: docs/PDF.md §5.
-  - **Bumping `pdfjs-dist` needs `npx tsx scripts/probe-engine.ts` and a real Safari**, not
-    just the internals smoke test. Pinning protects the *API* pdfjs offers, not the
-    JavaScript runtime it assumes underneath — and WebKit ships those built-ins late or not
-    at all (`src/lib/pdfjs-webkit-polyfills.ts`, baseline Safari 26 / iPadOS 18.4+). A
-    chromium-only suite cannot see this class at all, and `e2e/pdf-webkit-gaps.spec.ts`
-    guards against regression without ever detecting that a patch has stopped being needed.
-    Which patches stand, the measured engine table, and the worker-realm import-order trap:
-    docs/PDF.md §10 (PLAN.md §19a records only the baseline, as a decision).
-- **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
-  file's `sha256` is its identity, so the bytes an anchor was measured against are by
-  construction the bytes every later reader sees — no tracking plugin, no per-transaction
-  re-resolution, no version stamp (`Annotation.ydocUpdateId` is meaningless for a file).
-  Don't reach for the doc side's drift machinery here. The one thing that *can* invalidate a
-  stored anchor is our own normaliser, so bump `NORMALISER_VERSION` (`src/lib/pdf-text.ts`)
-  on **any** behavioural change, however small. Full reasoning and the two obligations it
-  leaves: docs/PDF.md §4.
-- Site icons (favicon/manifest): [docs/FAVICON.md](docs/FAVICON.md).
-- The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
-  exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
-  own title is never shown, only its body. Seed one with `npx tsx scripts/seed-front-page.ts`
-  (create-if-absent, never clears anything). No `DocVisibility` check: a doc's `visibility`
-  still gates `/doc/<slug>` exactly as before, but the title alone is what makes its body
-  public here — see PLAN.md §17c for why gating on `SHARED` would be wrong.
-- Adding a **required** (non-nullable, no `@default`) column to a table that already has
-  rows: `prisma migrate dev` normally prompts interactively for how to backfill existing
-  rows, which doesn't work non-interactively. Instead, add the field nullable first and
-  migrate, backfill via `psql`/a script, then drop the `?` and migrate again — the second
-  migration is a plain `ALTER COLUMN ... SET NOT NULL` with no prompt, since every row
-  already has a value by then. See `adminInitials`'s two migrations
-  (`add_admin_initials_nullable`, `make_admin_initials_required`) for the pattern.
-- **Editing a migration file after it's been applied makes the next `migrate dev` demand a
-  full database reset** — and the message says so in a way that's easy to accept by reflex:
-  *"The migration `…` was modified after it was applied. We need to reset the `public`
-  schema … All data will be lost."* Prisma records a SHA-256 of each `migration.sql` in
-  `_prisma_migrations.checksum`, and any edit — including appending a hand-written backfill
-  to a file `migrate dev` just generated — invalidates it. **Do not reset a dev database
-  holding real content.** When the database genuinely already reflects the edited file (the
-  DDL ran, and the backfill was applied by hand), the schema and the file agree and only the
-  recorded checksum is stale, so correct that instead:
-  ```
-  sha256sum prisma/migrations/<name>/migration.sql
-  psql -U multiblog -h 127.0.0.1 -d multiblog \
-    -c "UPDATE _prisma_migrations SET checksum='<hash>' WHERE migration_name='<name>';"
-  ```
-  Take a `pg_dump` first (`.db-backups/`, the convention that directory exists for). Note the
-  `pg_dump` on `PATH` is the **14.2** one from the stopped `postgresql-x64-14` install and
-  refuses an 18.4 server (`server version mismatch`) — use
-  `"/c/Program Files/PostgreSQL/18/bin/pg_dump.exe"`. Better still, put the backfill in the
-  file *before* the first `migrate dev` run, or in its own follow-up migration.
 
 ## Checks & verification
 
 ### Automated
 
-- Typecheck `npx tsc --noEmit`; lint `npx eslint .`.
-- **ESLint stays on 9 and TypeScript on 5 — both are gated on `eslint-config-next`,
-  not on us.** `npm outdated` offers eslint 10 and typescript 7; neither works yet.
-  eslint 10 removed `context.getFilename()`, which `eslint-plugin-react` still calls, so
-  `npx eslint .` dies with `contextOrFilename.getFilename is not a function` before
-  linting anything ([eslint-plugin-react#4018](https://github.com/jsx-eslint/eslint-plugin-react/issues/4018),
-  a dup of #3977). `eslint-plugin-import`/`-react`/`-jsx-a11y` all cap their `eslint`
-  peer at `^9` and are pulled in by `eslint-config-next`, so this is not overridable.
-  typescript 7 is blocked separately by `typescript-eslint`'s `<6.1.0` peer. Both
-  unblock when Next ships a refreshed lint config — recheck then, not before.
-  Taking eslint 10 *would* drop the `brace-expansion` audit count from 9 to 6.
-- `npm run e2e` — the full Playwright suite, against a **production build** on `WEB_PORT + 2`
-  (:3002 in slot A)
-  (builds first — a cold run pays `next build`; ~2min of suite proper once warm on a
-  6c/12t desktop — e2e/README.md names the rig behind every timing it quotes).
-  Prod rather than `next dev` because two historical flake classes were dev-server
-  bugs a production build compiles out; the whole investigation is
-  [docs/playwright-flakiness.html](docs/playwright-flakiness.html). `npm run e2e:dev`
-  (or a bare `npx playwright test …`) is the dev-target loop for iterating on one
-  spec — `WEB_PORT` (:3000 in slot A), one worker, reusing a `dev:all` you already have running rather than
-  starting (or killing) its own. **Prefer the suite to driving the browser pane by
-  hand** for anything it already covers, and for anything worth covering: one command
-  replaces a dozen `read_page`/click round trips, and a spec can do the setup *and*
-  the `boundingBox()`/`getComputedStyle` measurement in one process. Fixtures create
-  and delete their own throwaway users/posts. Full details, fixtures, and the gotchas
-  that bite when writing new specs: [e2e/README.md](e2e/README.md).
-  - **On macOS, `npm run e2e` doesn't run at all**: its `check-ports` prestep shells
-    through `pwsh`, which isn't installed, so the script dies before Playwright starts.
-    Use `npx playwright test` directly there. `npm run stop:all` is unavailable for the
-    same reason — stop a `dev:all` with `pkill -f "next dev"` and `pkill -f
-    "server/collab.ts"` instead.
-  - **The worker count is derived from the machine, and `E2E_WORKERS` overrides it.**
-    `playwright.config.ts` scales the prod default with `os.cpus().length` up to a measured
-    ceiling, so a smaller box gets fewer workers with nothing to edit and nobody to ask. The
-    dev lane is always 1 and is *not* derived — its limit is the dev server serializing SSR,
-    not the CPU, so there is no core count at which raising it would help. What too many
-    workers looks like, if you override upward: scattered failures across unrelated specs
-    that all pass single-worker and read exactly like real regressions. `--workers=1` on the
-    command line is the one-off equivalent of the env var.
-- **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.**
-  Symptom: the server logs `✓ Ready`, serves `/` fine, then prints
-  `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs
-  indefinitely and every spec dies in `auth.setup.ts` with `page.goto: net::ERR_ABORTED`
-  or a 60s timeout. It reads exactly like an auth regression and isn't one; the same
-  commit passes a full run once `.next` is gone. `rm -rf .next` is the whole fix
-  (`Remove-Item -Recurse -Force .next`). Playwright kills the dev server it started at
-  the end of a run, so this is most likely on the run *after* a suite that started its
-  own — i.e. when you're bisecting a dependency bump and least want a phantom failure.
-  Check `.next/dev/logs/next-development.log` for a `Compiling …` line with no matching
-  completion before blaming your changes.
+- Typecheck `npx tsc --noEmit`; lint `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
+  `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
+- `npm run e2e` — the full Playwright suite against a **production build** on `WEB_PORT + 2`
+  (builds first; ~2min of suite proper once warm). Prod rather than `next dev` because two
+  historical flake classes were dev-server bugs a production build compiles out — the whole
+  investigation is [docs/playwright-flakiness.html](docs/playwright-flakiness.html).
+  `npm run e2e:dev` is the dev-target loop for iterating on one spec: `WEB_PORT`, one worker,
+  reusing a `dev:all` you already have running.
+  **Prefer the suite to driving the browser pane by hand** for anything it already covers, and
+  for anything worth covering: one command replaces a dozen `read_page`/click round trips, and
+  a spec can do the setup *and* the `boundingBox()`/`getComputedStyle` measurement in one
+  process. Fixtures create and delete their own throwaway rows. Details and the gotchas that
+  bite when writing new specs: [e2e/README.md](e2e/README.md).
+  - **On macOS `npm run e2e` doesn't run at all**: its `check-ports` prestep shells through
+    `pwsh`, which isn't installed. Use `npx playwright test` directly there. `npm run stop:all`
+    is unavailable for the same reason — use `pkill -f "next dev"` and
+    `pkill -f "server/collab.ts"`.
+  - **The worker count is derived from the machine**; `E2E_WORKERS` overrides it (docs/ENV.md).
+    Too many workers looks like scattered failures across unrelated specs that all pass
+    single-worker and read exactly like real regressions.
+- **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.** Symptom:
+  the server logs `✓ Ready`, serves `/` fine, then prints
+  `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs and every
+  spec dies in `auth.setup.ts` with `page.goto: net::ERR_ABORTED` or a 60s timeout. It reads
+  exactly like an auth regression and isn't one. `rm -rf .next` is the whole fix
+  (`Remove-Item -Recurse -Force .next`). Most likely on the run *after* a suite that started
+  its own dev server — i.e. when you're bisecting a dependency bump and least want a phantom
+  failure. Check `.next/dev/logs/next-development.log` for a `Compiling …` line with no
+  matching completion before blaming your changes.
 
-### Driving the browser pane
+### By hand
 
-Everything in this subsection is **browser-pane behavior specifically**. None of it
-applies under Playwright — which is half the reason to prefer `npm run e2e` for
-anything repeatable.
-
-- Verify changes live in the pane before reporting them done — for behavior the suite
-  doesn't cover, or when you need to *look* at something rather than assert on it.
-- The `computer` screenshot action reliably times out in this environment — verify with
-  `read_page` / `javascript_tool` measurements (bounding rects, computed styles) instead.
-  Coordinate-based clicks are collateral damage: `computer` refuses `left_click` with a
-  `coordinate` until a screenshot has cached the viewport dimensions, so coordinates are
-  never an available fallback here. If you genuinely need an image, `page.screenshot()`
-  in a throwaway spec produces one.
-- `computer`'s `ref`-based clicks can silently no-op on the editor's action buttons — the
-  call reports success and nothing happens (seen repeatedly on Publish in the old
-  `PostEditor`, before `PostPublisher` replaced it, PLAN.md §15c). When a click appears to
-  do nothing, drive it from `javascript_tool` instead:
-  `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Publish').click()`
-  dispatches a real React-visible click and works every time. Confirm the result via
-  `get_page_text` rather than assuming.
-- To set the editor's content in one shot (rather than the per-character benchmark loop
-  below), focus `.tiptap`, select its contents with a `Range`, then
-  `document.execCommand('insertText', false, "…")` — collapsing the range first appends,
-  leaving it selected replaces. Wrap it in an IIFE: `javascript_tool` reuses one scope
-  across calls, so a bare `const t = …` fails with "already declared" on the second call.
-- The browser pane's console buffer accumulates across navigations; for a clean error
-  check, open a fresh tab.
-- Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` are baked
-  into the session cookie once at sign-in and never re-read from the DB on later requests.
-  Deleting a throwaway `User` row mid-session does **not** sign them out or revoke their
-  role — the browser tab keeps showing (and acting as) that stale identity until an explicit
-  sign-out or the JWT expires. Don't take "the user row is gone" as proof a test session has
-  ended; click Sign out (or open a fresh tab) before relying on the signed-out UI state.
-- The browser pane's tabs share one cookie jar. If you sign in as a second user in tab B,
-  tab A silently becomes that second user too the next time it does a fresh navigation —
-  an already-loaded tab's live WS connection/React state keeps its original identity only
-  until you reload or navigate it. Do each test user's sign-in in its own tab, and only
-  reload a tab when you actually mean to switch who it's authenticated as. This is why
-  anything concurrent (two authors editing one post) belongs in a spec instead: Playwright
-  gives each identity its own `browser.newContext()`, with its own jar — see the
-  `secondUser()` fixture and `e2e/collab.spec.ts`.
-
-### Throwaway test data
-
-- `scripts/test-user.ts` (create/delete accounts of any role, optionally with a
-  `Commenter` row for trust/moderation states), `scripts/test-doc.ts` (create/delete docs,
-  optionally seeded with body text), `scripts/test-post.ts` (create/delete posts against a
-  `--doc <id>`, draft or published, with a moderation policy — PLAN.md §15: a post is
-  always a snapshot of some doc, never independently authored), `scripts/test-comment.ts`
-  (list a post's comments and their statuses), `scripts/test-file.ts` (create/list/delete
-  uploaded PDFs — it *generates* its own document via `scripts/make-test-pdf.ts` and pushes it
-  through the real storage and extraction path, so a fixture file is indistinguishable from an
-  uploaded one), `scripts/test-ydoc.ts` (create/list/delete
-  standalone documents in the ydoc stack, PLAN.md §11 — `--garbage` writes bytes that
-  aren't a valid Yjs update at all, to exercise `/ydoc-debug`'s "not TipTap-compatible"
-  error path on purpose). Each script's header comment documents its own flags — read that
-  rather than a copy here, which is what will go stale. Defaults worth knowing without
-  opening anything:
-  `test-admin@example.com`, role `ADMIN`, password always `testpass123`.
-- `test-user.ts`/`test-doc.ts`/`test-post.ts`/`test-comment.ts`/`test-file.ts` all refuse to touch
-  anything but `@example.com` accounts and docs/posts authored solely by them, so they
-  can't reach real data by mistake. Delete a post or doc *before* its author: once its
-  only author is gone, "no authors" is indistinguishable from a real one that lost its
-  author some other way, so `delete` refuses it. Delete a post *before* its doc too —
-  `Post.docId` has no `ON DELETE CASCADE` (PLAN.md §15), so a doc with a post still
-  pointing at it can't be removed underneath it. `test-ydoc.ts` uses the equivalent
-  containment for a table with no email column: it only ever creates ids under the
-  `ydoc:test-` prefix (`src/lib/ydoc-names.ts`) and refuses to `delete` anything else.
-- `scripts/seed-sample-data.ts` is the odd one out, and deliberately inverts the convention
-  above. It seeds *durable* sample content for a freshly rebuilt database — four docs, four
-  posts spanning draft/scheduled/published, six comments across every status (one thread
-  quote-anchored), and four annotations, one left document-level on purpose so
-  `/annotations` has a row exercising that state. Its addresses are `@sample.invalid`
-  (RFC 2606, guaranteed unroutable) rather than `@example.com`, and its titles carry no
-  `E2E ` prefix, precisely so the e2e teardown *doesn't* sweep it back out.
-  - Re-running is idempotent rather than additive: it clears its own content first, and
-    `--reset` does only that clearing step. Both paths empty the content tables wholesale,
-    so both refuse unless the doc count is 0 (fresh database) or exactly
-    `SAMPLE_DOCS.length` (its own output) — `--force` is the deliberate override, and the
-    check counts soft-deleted docs too, since a doc in the trash is still content the clear
-    would destroy.
-  - **User rows are the exception no flag widens**: only the three `@sample.invalid`
-    addresses are ever deleted, so an account someone actually signed up with survives both
-    paths. Sample accounts use the same `testpass123` as the throwaway scripts.
-  - The collab server has to be running, or the anchored annotations quietly degrade to
-    document-level — `applyAnnotationMark` reaches the doc's live ydoc through it (§12i).
-    A doc's title is seeded into its own Yjs fragment as well as the column, because the
-    fragment is canonical (§3d) and `server/doc-cache.ts` otherwise writes an empty title
-    straight over the column on first flush.
-- The e2e suite needs none of this — its fixtures create and clean up their own rows
-  (`e2e/db-worker.ts`, same `@example.com` guard, plus the `ydoc:test-` prefix guard for
-  `e2e/ydoc-debug.spec.ts`), and a teardown project sweeps whatever a crashed run left
-  behind.
-
-### One-shot data imports
-
-Two, both carrying their rationale in a long file header rather than here — read the header
-before touching either, and prefer copying their shape to inventing a third one:
-
-- `scripts/import-legacy.ts` — a pre-§15 MultiBlog database into the present schema.
-- `scripts/etherpad/import-etherpad.ts` — an Etherpad Lite `dirty.db`, preserving full
-  per-revision edit history: each pad becomes a Doc plus one `ydoc_update` row per
-  Etherpad revision, timestamped and attributed. `--verify` replays the whole file and
-  checks it against the atext Etherpad itself stored at every 100th revision and at
-  head, without touching the database; `--list-authors` prints the `--authors` mapping
-  skeleton; `--dry-run` does the real import and rolls it back. Run all three, in that
-  order, before a live run. Full rationale: `scripts/etherpad/README.md`.
-
-Both share the conventions worth knowing: an existing user is matched by email and never
-duplicated, slugs are claimed through the transaction (`claimSlug` — `uniqueDocSlug`/
-`uniqueUserSlug` query the global client and can't see rows the same import just created),
-the `ydoc` blob is always recomputed as `Y.mergeUpdates` over the rows being written rather
-than copied from a source, and `@updatedAt` columns need raw SQL to backdate. Afterwards,
-`scripts/integrity/` is the acceptance test — run all three of its checks, ydoc first (a bad
-blob makes the doc- and annotation-side checks report faults that evaporate once it's
-repaired). See [scripts/integrity/README.md](scripts/integrity/README.md) for which link of
-the `ydoc_update → ydoc.ydoc → doc.*` chain each one covers, and why
-`check-annotation-anchors` is the odd one out: it verifies a *claim written down once*
-("at update N, characters [a, b) read exactly this") rather than a derived value, which is
-why nothing recomputes it and why a break there is silent.
-
-### Performance measurement
-
-- For editing-latency benchmarks, `document.execCommand('insertText', false, char)` in a
-  loop inside the editor's `.tiptap` element, timed with `performance.now()` per call, drives
-  a real ProseMirror transaction through the normal path (mark-tagging, Yjs sync,
-  decorations) without OS input-pipeline noise — reproducible enough for relative
-  before/after comparisons. `execCommand('delete', false)` undoes it the same way,
-  character-for-character, to restore test content afterward. The same loop runs inside
-  `page.evaluate` in a spec, which is one command rather than a per-keystroke drive
-  through the pane, and can print its numbers straight to stdout.
-- For performance/stress testing at a realistic content size, copy the target content into
-  a throwaway post rather than editing the real one directly — removes any risk from a
-  botched restore step.
-- To A/B a performance change against actual history rather than guessing: confirm
-  `git status` is clean, `git checkout <old-commit>`, stop/restart `dev:all` (checkout
-  doesn't hot-reload cleanly across many files — the collab server especially needs a real
-  restart), measure, then `git checkout <branch-name>` and restart again. With uncommitted
-  work, `git stash push -u` / `git stash pop` does the same job without needing a commit.
-
-### Restarting the collab server
-
-- **Restarting never duplicates a document's content.** `ydocOnLoadDocument`
-  (`server/ydoc-hooks.ts`) creates its `ydoc` row *eagerly*, in `createIfAbsent`'s
-  transaction, before any client's content is ever applied — there's no window where a
-  killed server "never got around to" persisting a row, so a restart always finds one
-  waiting and re-seeds from the actual same lineage rather than building a structurally
-  new document. This used to be a contrast worth drawing against posts, which had their
-  own lazily-created `PostCollab` row and a real doubling bug; posts have no editable
-  content of their own any more (PLAN.md §15), so there's nothing left to contrast against.
-- **A doc's `ydoc` row *is* the doc, with no fallback to re-seed from** — unlike the old
-  post-editing days, there is no revision to fall back to, and an annotation's anchor is a
-  mark embedded in that exact row's content (§12i), not a position computed against it.
-  Deleting `ydoc`/`ydoc_update` for a doc's id and letting it re-seed doesn't recover
-  anything — there's nothing to re-seed from, and `createIfAbsent` would just build an
-  *empty* document under that id, discarding every paragraph and every annotation the doc
-  ever had. If a doc's `ydoc` row is ever genuinely corrupted, the only way back is the
-  update log itself (`ydoc_update`, never truncated), replayed via `/ydoc-debug` (a doc's
-  `ydoc:<docId>` row is just another entry in the same table an ADMIN can select there) —
-  not a delete-and-restart.
+- The browser pane is for behavior the suite doesn't cover, or when you need to *look* at
+  something rather than assert on it. **Don't reach for it — or for the e2e suite — on UI work
+  unprompted**; Conventions below says when it comes up instead. Screenshots time out in this
+  environment, `ref` clicks can silently no-op, and all tabs share one cookie jar:
+  [docs/BROWSER_PANE.md](docs/BROWSER_PANE.md).
+- Throwaway users/docs/posts/comments/files/ydocs, the durable `@sample.invalid` seed, and the
+  two one-shot importers: [docs/TEST_DATA.md](docs/TEST_DATA.md). Each script's own header
+  documents its flags. Defaults: `test-admin@example.com`, role `ADMIN`, password
+  `testpass123`.
+- Measuring editing latency, stress-testing at realistic size, and A/B-ing against history:
+  PERFORMANCE.md's "Measuring by hand".
+- Restarting the collab server never duplicates content, and **a doc's `ydoc` row *is* the doc,
+  with no fallback to re-seed from** — deleting it and letting it re-seed discards every
+  paragraph and annotation the doc ever had. [docs/YDOC.md](docs/YDOC.md).
 
 ## Gotchas
+
+The topic-specific ones live with their topic — [docs/TIPTAP.md](docs/TIPTAP.md) for the
+editor, [docs/YDOC.md](docs/YDOC.md) for the document stack, [STYLE.md](STYLE.md) for CSS,
+[docs/PDF.md](docs/PDF.md) §10 for pdfjs. These are the ones that apply whatever you're
+working on.
 
 - **Never call `toLocaleString()`/`toLocaleDateString()` on a date in a `"use client"`
   component.** It reads the *runtime's* locale and timezone, and the App Router renders client
@@ -640,206 +227,49 @@ why nothing recomputes it and why a break there is silent.
   a nested `<time>` is invalid HTML — being a hook it can't be called in a `.map()` either, so
   render a small per-item component, as `YdocDebug`'s `DocOption` does). The identical call in
   a **Server** Component is fine and must not be "fixed" — it's formatted once and shipped as a
-  finished string in the RSC payload (`app/doc/[slug]/page.tsx` does this deliberately). Only a
-  client component's copy renders on both sides. A call site whose data arrives from a
-  client-side fetch is also fine, since it was never in the SSR HTML — that's why the scrub bars
-  and most of `YdocDebug` were left alone. This class is **invisible to every local check**,
-  including `npm run e2e` and `web-prod`: locally the dev server and the browser are one
-  machine and so always agree. Same reason PLAN.md §13m's collab bug survived to production.
-- `globals.css` has `* { margin: 0; padding: 0 }` — it strips default list/blockquote
-  styling everywhere. `src/styles/prose.module.css` restores it for rendered post content;
-  any new surface rendering post content needs its `.prose` class.
-- **No hex/named color literal anywhere in `src/` outside `src/app/globals.css`,
-  `src/lib/author-colors.ts` (the author palette + `NEUTRAL_THREAD_COLOR`), and the handful
-  named in STYLE.md's Dark theme section.** Every color is one of `globals.css`'s tokens —
-  `style={{ color: "var(--text-secondary)" }}` is valid CSS and is the convention for inline
-  styles, not just CSS Modules. `light-dark()` only accepts `<color>` arguments, so a
-  percentage or other number that needs to change with scheme (the anchor-highlight tints)
-  goes through the `--dark: 0/1` flag and `calc()`, not `light-dark()` itself. Full rationale,
-  the token list, and the grep guard: STYLE.md's Dark theme section.
-- `body` gets implicit `overflow-y: auto` (side effect of its `overflow-x: hidden`), and
-  `documentElement` is the effective scroller — use `window.scrollY`, not
-  `body.scrollTop`, when checking scroll behavior.
-- TipTap v3's StarterKit already bundles Link, Bold and Italic (among others) and
-  undo/redo: never add any of those extensions **alongside StarterKit** in the same
-  schema, and pass `undoRedo: false` when combining StarterKit with the Collaboration
-  extension (`undoRedo` stays on wherever there's no `Collaboration` to own the history
-  stack instead — `blurbExtensions` below is the one schema in this codebase where that
-  inversion applies). `@tiptap/extension-document`/`-paragraph`/`-text` *are* declared
-  deps, which isn't a violation of that: they're for schemas built **without** StarterKit
-  at all, so nothing is double-registered — the **title** editor's `titleExtensions`
-  (`CollabTitleField.tsx`) and the **contributor blurb**'s `blurbExtensions`
-  (`ContributorPanel.tsx`, PLAN.md §17f), both constrained to `content: "paragraph"` so a
-  second block is structurally impossible. `blurbExtensions` also declares
-  `@tiptap/extension-bold`/`-italic` directly for the same reason — StarterKit has no
-  option to keep only `document`/`text` and drop everything else, so building the schema
-  from scratch is the only way to get "exactly one paragraph, a couple of marks, nothing
-  else". Pin every one of these to the same exact version as `@tiptap/core` when
-  installing — `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0`
-  exactly, and npm fails the install.
-- **TipTap v3's `setContent` takes an options object where v2 took a boolean**:
-  `editor.commands.setContent(json, { emitUpdate: false })`, not `setContent(json, false)`.
-  The v2 form is a type error (`Type 'false' has no properties in common with type
-  'SetContentOptions'`) but reads as obviously-correct against any pre-v3 example or answer,
-  so it's worth recognizing rather than re-deriving. Used by `LiveDocBody.tsx` to push live
-  Yjs updates into a non-`Collaboration` editor without re-emitting them.
-- **TipTap v3's `Collaboration` extension binds through `@tiptap/y-tiptap`, not
-  `y-prosemirror`** — a separate package (Tiptap's own fork,
-  `node_modules/@tiptap/extension-collaboration/dist/index.js` imports every one of
-  `ySyncPlugin`/`ySyncPluginKey`/`absolutePositionToRelativePosition`/
-  `relativePositionToAbsolutePosition` from it). Reading a Collaboration-bound editor's
-  sync-plugin state (`ySyncPluginKey.getState(editor.state)`, e.g. to reach the
-  y-prosemirror binding's `ProsemirrorMapping` for a relative-position conversion) needs
-  the key imported from `@tiptap/y-tiptap`, or `PluginKey.getState()`'s identity match
-  silently fails: it doesn't throw, it just returns `undefined`, indistinguishable from
-  "this editor has no Collaboration binding at all." `src/lib/yjs-relative-anchor.ts`
-  shipped with the wrong import for one review cycle (PLAN.md §18f) — every selection on
-  `/doc/[slug]/edit` silently failed to capture, caught only by manual testing, not by
-  `npx tsc`, `eslint`, or the e2e suite (nothing exercises that page's *selecting* text,
-  only typing into it). `y-prosemirror` itself stays a real dependency — `server/
-  ydoc-hooks.ts` uses it correctly for stateless Yjs↔ProseMirror conversion server-side,
-  which never touches a `PluginKey` — the trap is specifically about plugin-state lookups
-  against a live client-side `Editor`.
-- The TipTap schema is shared by the editor, Hocuspocus doc-seeding, and public rendering
-  via `src/lib/tiptap-schema.ts` — change it only there so the three can't drift. It holds
-  *two* schemas: `contentExtensions` (post body) and `titleExtensions` (the title, a separate
-  Yjs fragment — see PLAN.md §3d). Each has mark-layered variants stacked on it rather than
-  a parallel definition, and picking the wrong one silently drops marks on
-  decode/render: body is `contentExtensions` → `authorHighlightExtensions` (working Yjs
-  session) → `docContentExtensions` (that plus the annotation mark, doc side only, PLAN.md
-  §12i); title is `titleExtensions` → `titleAuthorHighlightExtensions`. Anything decoding a
-  *doc's* ydoc wants `docContentExtensions` — `server/doc-cache.ts` and
-  `src/lib/ydoc-render.ts` both do.
-- `CollaborationCaret` has no per-field awareness key: every instance writes
-  `awareness.cursor`. Two of them on one provider (e.g. body + title editors sharing a
-  `Y.Doc`) therefore render each other's positions against the wrong fragment. Only the body
-  editor gets one; the title field syncs text without remote carets.
-- The `Collaboration` extension's `onFirstRender` is **not** "the doc has synced": with the
-  collab server unreachable it fires right away against the still-empty fragment, so anything
-  that treats empty-means-empty (a title-changed comparison) sees "" as real content.
-  `HocuspocusProvider`'s own `onSynced`/`onStatus` is the signal for that — see
-  `use-live-doc-content.ts`'s `synced` (read-only taps) and `DocEditor.tsx`'s
-  `connectionStatus` (the write side). `onFirstRender` also fires *during* `useEditor`'s
-  render, so calling a parent `setState` from it trips React's "state update on a component
-  that hasn't mounted yet"; report upward from an effect instead (`CollabTitleField.tsx`).
-- `document.querySelector('.tiptap')` now matches the **title** editor first — the body editor
-  is `querySelectorAll('.tiptap')[1]`. Relevant to the editing-latency benchmark and
-  content-setting recipes above, which target `.tiptap`. Both editors also carry an
-  `aria-label` (`Title` / `Post body`) on their contenteditable, which is what the e2e
-  suite keys off instead of DOM order.
-- ProseMirror drops custom attributes where inline decorations overlap; the quote-highlight
-  extension pre-splits ranges into non-overlapping segments (`data-thread-ids`, plural).
-- `authorHighlight` marks (per-author color-coding, `src/lib/author-highlight-extension.ts`)
-  live in a doc's working Yjs state and nothing ever removes them from the doc itself — a
-  doc has no save step to hook a reset into (PLAN.md §12k), unlike the old post editor's
-  `clearAuthorHighlights`, which doesn't exist any more. They just accumulate in the doc
-  forever. What keeps them out of *published* content is `postContentFromYdoc`
-  (`src/lib/post-content.ts`), which strips `authorHighlight` (and `annotation`) from a
-  snapshot before it's ever written to `Post.proseJson` (PLAN.md §15b) — the live doc a
-  reader edits and the copy a post publishes are different JSON from that point on.
-- `CollaborationCaret`'s default `render` shows an always-visible name label. We override it
-  (`renderCaret` in `CollabEditorBody.tsx`) to draw just a colored bar, with the name in a
-  CSS `:hover`-only tooltip (`.collabCaret`/`.collabCaretLabel` in `DocEditor.module.css`,
-  shared by every `CollabEditorBody` consumer). The local user's own cursor was never
-  affected either way — y-prosemirror's cursor plugin filters out the local clientID before
-  `render` is ever called.
-- A flex item's `flex-grow`/`flex-shrink` only has a budget to work with if its flex
-  *container* has a definite (not `min-height`-only) main size — `min-height` lets the
-  container's own size fall back to its content's, which defeats grow/shrink on children
-  entirely. `body` (`globals.css`) sets `height: 100vh`/`100dvh` for exactly this reason: it's
-  what lets `DocEditor.module.css`'s `.container` (and everything nested under it —
-  `.editorFrame` → `.editorContent`) actually fill "the viewport minus the global
-  `SiteHeader`" instead of silently reverting to content-based sizing and producing an
-  always-present page scrollbar. `PostPublisher.module.css` has no equivalent budget to
-  manage — nothing in it is a live editing surface any more (PLAN.md §15c).
-- Sizing something as "half of the heading it sits next to" needs `em` (relative to the
-  *immediate parent's* font-size), not `rem` (relative to the *root* font-size) — `rem` gives
-  you "half of whatever the root/site-header text renders at," which is a different, usually
-  smaller, number than the actual surrounding `h1`/`h2`. The now-deleted `PostEditBadge.tsx`'s
-  `(edit)`/`(edited)` link learned this the hard way: `0.5rem` came out as a *quarter* of the
-  `h1` on the single-post page (32px) and a *third* of the `h2` in listings (24px), both
-  because it was computing against the root's 16px instead of either heading's own size —
-  worth keeping in mind for anything sized the same way later, even though that specific
-  component is gone (PLAN.md §15: a published post no longer surfaces a live-staleness
-  signal at all, by decision — see §15h).
+  finished string in the RSC payload. A call site whose data arrives from a client-side fetch
+  is also fine, since it was never in the SSR HTML. **This class is invisible to every local
+  check**, including `npm run e2e` and `web-prod`: locally the dev server and the browser are
+  one machine and so always agree. Same reason PLAN.md §13m's collab bug survived to
+  production.
+- **No hex or named color literal anywhere in `src/`** outside `src/app/globals.css`,
+  `src/lib/author-colors.ts`, and the handful named in STYLE.md's Dark theme section. Every
+  color is one of `globals.css`'s tokens — `style={{ color: "var(--text-secondary)" }}` is the
+  convention for inline styles, not just CSS Modules. STYLE.md has the token list and the grep
+  guard.
+- **Any new surface rendering post content needs the `.prose` class.** `globals.css`'s
+  `* { margin: 0; padding: 0 }` strips default list and blockquote styling everywhere;
+  `src/styles/prose.module.css` is what restores it.
 - **A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
   `pointerup` for one — a long-press hands the touch to WebKit's gesture recognizer
   (`pointercancel` instead), and the drag handles are native views that fire nothing — and
   shift+arrows delivers none anywhere. Either alone works on every desktop and silently does
   nothing on a tablet, so debounce `selectionchange` and let `pointerup` short-circuit it
   (`PdfAnnotationSurface`; `AnnotationNode` uses a plain timer for the same reason).
-- When matching one element's width to another's via `ResizeObserver` (e.g. `PostsTable`'s
-  search box tracking the Title column's width): use the observed element's own
-  `getBoundingClientRect().width` inside the callback, not the callback's own
-  `entries[0].contentRect.width` — `contentRect` is always the *content* box (padding and
-  border excluded) regardless of the element's `box-sizing`, so on a padded `<th>` it under-
-  reports by the padding, and copying that value straight into another element's CSS `width`
-  (itself `box-sizing: border-box` from the global reset) makes it visibly narrower than the
-  element it's supposed to match.
-- **One document stack, one Hocuspocus process and port, two sub-namespaces within it**
-  (PLAN.md §11/§15): every `documentName` is `ydoc:`-prefixed, handled by
-  `server/ydoc-hooks.ts` against the `ydoc`/`ydoc_update`/`ydoc_snapshot` tables. There used
-  to be a second, older stack for post documents (bare cuid names, `post_collab`/
-  `post_collab_update`, a parallel set of hooks in `server/collab.ts`) — that's gone; posts
-  are immutable snapshots now, with nothing of their own to edit (§15). `server/collab.ts`
-  keeps only dispatch: `onAuthenticate` rejects any non-`ydoc:` name outright (the real
-  chokepoint, since registering it is what makes Hocuspocus require auth on every
-  connection at all), and the other hooks call straight into `ydoc-hooks.ts`.
-  `isYdocDocument`/`YDOC_PREFIX` (`src/lib/ydoc-names.ts`) still exist, but their job
-  changed: not routing away from a legacy path any more, just carving out the
-  `ydoc:annotation:` sub-namespace and the `ydoc:test-` containment guard. A `ydoc:` name
-  nobody has explicitly created via `scripts/test-ydoc.ts`, `scripts/test-doc.ts`, or
-  `/ydoc-debug`'s "New document" button just starts empty.
-- **`y-indexeddb`** (`src/lib/ydoc-persistence.ts`, PLAN.md §11e — also used by
-  `DocEditor.tsx` and `DocColumn.tsx`'s write mode, §14l): never construct a second
-  `IndexeddbPersistence` for a `Y.Doc` that already has one.
-  [y-indexeddb#25](https://github.com/yjs/y-indexeddb/issues/25) — each instance re-persists
-  updates the *other* instance already wrote, because the library's own guard only excludes
-  itself as an origin, not sibling instances. `attachIndexeddb` is ref-counted per local
-  IndexedDB database *name* (a `Map`, not a `WeakMap<Y.Doc>` — re-keyed in PLAN.md §14l
-  Phase 0), so React StrictMode's double-invoked effects (same `Y.Doc`, attached twice)
-  reuse the one instance, *and* a second attach for a genuinely different `Y.Doc` against
-  the same name is refused outright rather than silently building a competing instance —
-  the shape `/side-by-side/<a>/<a>` would hit if the route didn't already reject it (PLAN.md
-  §14c). Separately, the local IndexedDB database is keyed by the document's *lineage*
-  (`ydoc.created_at`, fetched from `/api/ydoc/[id]/token` alongside the collab token) rather
-  than by `documentName` alone — `created_at` only changes if the row is ever recreated,
-  i.e. exactly when the server has built a structurally new document, so a stale local copy
-  can never merge into a re-seeded one. Attach the lineage-keyed store *before* connecting,
-  never cache it to attach earlier — caching would let a stale copy merge in before the
-  mismatch could be detected, which is the bug this avoids, not a race around it.
-- **`/ydoc-debug`'s replay slider is deliberately unoptimized** (PLAN.md §11h) — no debounce, no
-  cache of other positions, no precompute. Backward scrubbing across a long log *is* supposed to
-  stutter: Yjs updates are append-only with no un-apply, so going back rebuilds from the nearest
-  snapshot while going forward just advances the doc already in hand. Don't "fix" it. Two things
-  to know before reading its numbers: (a) the `Y.encodeStateAsUpdate` behind the `(+N)` size
-  delta runs on every scrub step and is pure instrumentation — it's outside the timer because
-  it isn't part of the rebuild, but on a large document it can cost more than the rebuild the
-  timer reports, so the ms figure is not the per-step cost of the view; (b) forward is *not*
-  always incremental — jumping forward across a newer snapshot rebuilds from that snapshot,
-  which is both correct and cheaper than replaying the deltas in between, and is the only way a
-  snapshot earns its keep on a forward jump. The `forward`/`rebuild` marker at the head of the
-  status line is what tells the two apart.
 - **A Next dynamic-route `params` value arrives percent-encoded, not literal.** `getParamValue`
-  in `next/dist/shared/lib/router/utils/get-dynamic-param.js` runs `encodeURIComponent` on every
-  string param before handing it to user code — verified against `next@16.2.11`. A route that
-  tried to pack two ids into one segment (`/side-by-side/[pair]`, meaning `a+b`) would see
-  `params.pair === "a%2Bb"`, not `"a+b"`, so `.split("+")` would silently return one element and
-  404 every URL — a `+`-means-space assumption that's true for query strings and false here
-  (`getRouteMatcher` already `decodeURIComponent`s the captured group; the `%2B` comes from the
-  *re*-encode after that). `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path segments
-  specifically to never need to decode anything.
-- **A doc link's anchor (PLAN.md §14) is a plain JSON blob in Postgres, not a mark in the doc's
-  ydoc** — the opposite of an annotation's anchor (§13), and deliberately: a link joins two
-  *different* docs, and no single ydoc can hold that. The cost is drift, paid for by re-running
-  `findQuoteOccurrences` against the current document on every content change (§14d) — memoized
-  per column, since the read surface does this on every remote keystroke, not just at load.
-  Persisting a corrected offset only ever happens from a column in *write* mode: a read column's
-  view is always at least one Yjs update behind, so a "correction" it computed was already stale,
-  and persisting it would be N concurrent readers last-writer-wins on the one field whose entire
-  job is precision.
+  runs `encodeURIComponent` on every string param before handing it to user code (verified
+  against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see
+  `"a%2Bb"` and `.split("+")` would 404 every URL — a `+`-means-space assumption that's true
+  for query strings and false here. `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path
+  segments specifically to never need to decode anything.
+- **A doc link's anchor is a plain JSON blob in Postgres, not a mark in the doc's ydoc** — the
+  opposite of an annotation's, and deliberately: a link joins two *different* docs, and no
+  single ydoc can hold that. The cost is drift, paid for by re-running `findQuoteOccurrences`
+  against the current document on every content change. **Persisting a corrected offset only
+  ever happens from a column in *write* mode** — a read column's view is always at least one
+  Yjs update behind. PLAN.md §14, §14d.
+- **One document stack, one Hocuspocus process, two sub-namespaces within it.** Every
+  `documentName` is `ydoc:`-prefixed; `onAuthenticate` rejects anything else outright.
+  docs/YDOC.md.
 
 ## Conventions
 
 - Commit only when the user explicitly asks. Commit messages explain *why*, not just what.
+- **Don't test UI changes unprompted** — no browser pane, no e2e run. Stop at
+  `npx tsc --noEmit` and `npx eslint .`, report the change as done, and say that UI testing
+  was deferred.
+- **But before committing a change that touched the UI, ask whether to test it first** — if
+  it hasn't been tested already. The commit is the moment the question is worth asking, and
+  the answer is the user's; don't quietly commit untested UI, and don't quietly go test it
+  either.
 - Flag deviations from PLAN.md and judgment calls explicitly when reporting work.

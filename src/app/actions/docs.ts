@@ -185,7 +185,7 @@ export async function importMarkdownDocAction(
   // Unlike createDoc's equivalent throw, this one is reachable-ish and so is
   // reported rather than thrown: /docs gates the control on the same check
   // (§12f), but a role changed mid-session still carries the old one in the JWT
-  // until sign-out (CLAUDE.md, session strategy), so the form can outlive the
+  // until sign-out (docs/BROWSER_PANE.md, session strategy), so the form can outlive the
   // permission that drew it.
   if (!canManageDocs(session.user.role)) {
     return { error: "You don't have permission to create docs." };

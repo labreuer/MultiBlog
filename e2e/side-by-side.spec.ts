@@ -521,7 +521,7 @@ test.describe("side-by-side group bar", () => {
       // the instant activeGroupId changes — selecting before the read
       // column has synced (SideBySideDocBody's `ready`/staticBody swap, §12g)
       // races against decorations that don't exist yet, same class of
-      // issue CLAUDE.md's onFirstRender-isn't-synced gotcha describes for
+      // issue docs/TIPTAP.md's onFirstRender-isn't-synced gotcha describes for
       // the write column.
       await expect(page.locator('[data-side="left"] [data-testid="live-doc-synced"]')).toBeAttached();
 

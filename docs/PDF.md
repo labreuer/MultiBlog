@@ -90,6 +90,47 @@ load time and hold it in client state.
 
 ---
 
+## 2a. The file's bytes — on disk, not a `bytea`
+
+An uploaded PDF is bytes on the filesystem (PLAN.md §19), content-addressed at
+`FILE_STORAGE_DIR/<sha256[0:2]>/<sha256>` and served from `/api/files/<id>/<hash>` with
+`Range` support, so PDF.js can render page 1 of a large scan without transferring all of it.
+
+**Prisma cannot stream a `Bytes` column, which is the whole argument**: a 50MB file would
+land in Node's heap on upload *and* on every one of pdfjs's range requests. `UserAvatar`'s
+in-Postgres bytes are not a counter-precedent — those are ~10KB and served whole.
+
+Consequences worth remembering:
+
+- **`FILE_STORAGE_DIR` is a second backup surface `pg_dump` does not cover** (DEPLOY.md).
+- **Never delete a file's bytes without counting references first.** Content addressing means
+  two `StoredFile` rows can legitimately share one blob; `deleteBytesIfUnreferenced` takes the
+  surviving count as an argument for exactly that reason.
+- The Prisma model is **`StoredFile`**, `@@map("file")`. The table is `file`; the generated TS
+  type must not be `File`, which is a DOM/Node global the upload path uses.
+- Upload is a **Route Handler taking a raw body** — not a Server Action and not multipart.
+  Actions carry a 1MB `bodySizeLimit` that raising would raise site-wide, and
+  `request.formData()` buffers the whole upload before user code sees it. nginx needs
+  `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader names
+  the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
+
+### A file's listed users are `FileOwner`s, not authors
+
+Nobody on that list wrote the PDF. The list is seeded with the uploader, is editable
+afterwards, and grants `/files`' Owner(s) line, the right to rename / re-slug / re-own /
+delete, and read access to a `PRIVATE` file.
+
+`DocAuthor`/`PostAuthor` are "author" because a doc's or post's listed users really did write
+it, and the shared filter kit (`AuthorFilterPanel`, `authorFilterWhere`, `AuthorMode`) is
+named for those two surfaces. `/files` reaches it through the
+`ownerFilterWhere`/`listOwnerFilterOptions` wrappers and an aliased import, and every option
+it added defaults to what `/docs` and `/posts` pass — which is what keeps those two tables out
+of it.
+
+**Don't "unify" the two vocabularies in either direction.**
+
+---
+
 ## 3. Text normalisation
 
 Anchoring correctness depends entirely on this being **deterministic and versioned**.
