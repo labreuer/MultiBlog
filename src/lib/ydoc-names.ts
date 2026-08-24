@@ -53,10 +53,37 @@ export function ydocIdForDoc(docId: string): string {
 }
 
 export function docIdFromYdocId(ydocId: string): string | null {
-  if (!ydocId.startsWith(YDOC_PREFIX) || ydocId.startsWith(YDOC_ANNOTATION_PREFIX)) {
+  if (
+    !ydocId.startsWith(YDOC_PREFIX) ||
+    ydocId.startsWith(YDOC_ANNOTATION_PREFIX) ||
+    ydocId.startsWith(YDOC_PDF_PREFIX)
+  ) {
     return null;
   }
   return ydocId.slice(YDOC_PREFIX.length);
+}
+
+// PLAN.md §19 — a file's presence channel. A sub-namespace for the same reason
+// the annotation one is: isYdocDocument stays a single YDOC_PREFIX check, so
+// server/collab.ts routes these to ydoc-hooks.ts with no change there at all.
+//
+// **This document stays empty, forever, on purpose.** A PDF's content is
+// immutable bytes on disk; there is nothing collaborative to store. What the
+// connection carries is *awareness* — viewport position and live selection —
+// which docs/PDF.md invariant 5 requires be ephemeral and unpersisted. Putting
+// viewport updates in the ydoc would bloat the update log badly for a document
+// whose whole value is that it never changes.
+//
+// So the row exists only because Hocuspocus awareness rides a document
+// connection. It accrues one empty state and no updates.
+export const YDOC_PDF_PREFIX = `${YDOC_PREFIX}pdf:`;
+
+export function ydocIdForFile(fileId: string): string {
+  return `${YDOC_PDF_PREFIX}${fileId}`;
+}
+
+export function fileIdFromYdocId(ydocId: string): string | null {
+  return ydocId.startsWith(YDOC_PDF_PREFIX) ? ydocId.slice(YDOC_PDF_PREFIX.length) : null;
 }
 
 /** Path the collab server's onRequest hook listens on for §12i's annotation-mark endpoint. */

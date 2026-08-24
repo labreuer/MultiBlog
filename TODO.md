@@ -302,3 +302,59 @@ own editor comes first.
 [§6](docs/COLLAB.md#6-anchors-carried-in-the-awareness-channel) is the alternative worth
 weighing against it — it fits this case better than durable anchoring does, and would make an
 in-progress selection visible to other people on the page, which no option here does today.
+
+---
+
+## The e2e port configuration ignores this checkout's own `.env`
+
+**Status:** open, found 2026-08-23. Worked around by running on the default ports with the
+second working copy stopped, which is why nothing is broken today and why it will bite again
+the moment both are up at once.
+
+`.env` puts this checkout on `APP_URL="http://localhost:3002"` and `COLLAB_PORT=1236` - the
+`+2` offset from the repo default pair - with a comment saying why: *"so a dev:all on the
+default ports can coexist."* That is a real arrangement, not a leftover; there is a second
+working copy of this repo on the box (`C:\Users\labreuer\Claude\Projects\MultiBlog`, on its own
+branch) that owns 3000/1234.
+
+**Only the collab half of that is honoured.** `server/collab.ts` reads `COLLAB_PORT`, and
+`playwright.config.ts` reads it too (via its `dotenv/config` import), so collab is
+self-consistent on 1236 and so is the browser (`NEXT_PUBLIC_COLLAB_URL` pins it there). The web
+half is not honoured anywhere:
+
+- `package.json`'s `"dev"` is a bare `next dev` with no `-p`, so Next binds its own default
+  3000. `APP_URL` is what the app *advertises* (`appUrl()`, email links); nothing reads it to
+  pick a bind port.
+- `playwright.config.ts:7` hardcodes `BASE_URL = "http://localhost:3000"`.
+- `scripts/check-ports.ps1`'s `$ports` is the literal `@(3000, 1234)` - and the 1234 is stale
+  independently of any of this, since collab actually listens on `COLLAB_PORT`.
+
+**What it costs when both copies are running.** `reuseExistingServer: true` is unconditional, so
+Playwright adopts whatever answers on 3000 - which is the *other* checkout, running a different
+branch. Two failures stack, and neither names its own cause:
+
+1. The suite silently tests the other working copy's code. Edits under test are never served.
+2. `.file-storage` is gitignored and per-checkout while the `file` table is shared through one
+   Postgres, so the fixtures write an uploaded PDF's bytes into *this* checkout's storage dir
+   and the adopted server looks for them in *its own*. Every download 503s
+   (`src/app/api/files/[id]/[hash]/route.ts` - "File contents are missing"), the viewer never
+   loads, and all eight PDF specs die on `waitForViewer` timeouts. It reads as a pdfjs or viewer
+   regression and is neither. Deterministic, so `--workers=1` does not distinguish it.
+
+`check-ports.ps1` exists to catch precisely this and does the job well - it would have named the
+foreign PID and its command line in one line. But it only runs as part of `npm run e2e`, and
+running a *subset* of specs (`npx playwright test pdf-annotations`) goes straight to Playwright
+and skips the guard. That gap is worth closing too: there is no way today to run a few specs
+*through* the preflight short of `npm run check-ports && npx playwright test <specs>` by hand.
+
+**The fix**, which restores what `.env` already intends rather than adding a new idea:
+
+- Derive `BASE_URL` from `APP_URL` (or introduce a plain `PORT` and derive both from it).
+- Pass that port to `next dev` explicitly in the `webServer` command, since Next will not take
+  it from `APP_URL`.
+- Make `check-ports.ps1` read the same two values instead of literals, so it guards the ports
+  the suite will actually use.
+
+With that, the suite runs on 3002/1236 and never contends with the other working copy at all -
+no stopping anybody's dev server, and the adopt-a-stranger failure becomes impossible rather
+than merely detected.

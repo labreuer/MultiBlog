@@ -10,7 +10,7 @@
 // The admin tables that carry these preferences. A string union rather than a
 // free-form key, so a typo in a page is a type error instead of a silently
 // ignored preference.
-export type AdminTableName = "posts" | "docs" | "users" | "comments" | "annotations";
+export type AdminTableName = "posts" | "docs" | "files" | "users" | "comments" | "annotations";
 
 export function columnOrderFor(stored: unknown, table: AdminTableName): string[] | null {
   if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return null;

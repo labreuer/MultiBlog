@@ -1,0 +1,26 @@
+/* PLAN.md §19 — /files' own bits, alongside the shared table kit's
+   AdminTable.module.css. Mirrors DocsTable.module.css. */
+
+.titleCell {
+  cursor: pointer;
+}
+
+.showAllFilesRow {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* Filename is secondary information next to Title, and often long. */
+.filenameCell {
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  word-break: break-all;
+}
+
+/* Right-aligned so the digits line up when scanning a column of sizes and
+   page counts, which is the only way these two columns get read. */
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

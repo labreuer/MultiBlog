@@ -1,0 +1,269 @@
+/* PLAN.md §19 — the annotation panel beside the PDF, and the highlight layer
+   drawn over it. */
+
+.panelInner {
+  padding: 0.75rem;
+}
+
+.heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.empty {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* The captured selection, shown above the composer so that "Annotate" over the
+   document has a visible consequence in the panel. */
+.pendingQuote {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--link);
+  border-radius: 4px;
+  background: var(--accent-wash);
+  font-size: 0.85rem;
+}
+
+.pendingLabel {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  margin-bottom: 0.25rem;
+}
+
+.pendingQuote blockquote {
+  margin: 0;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--link);
+  color: var(--foreground);
+  /* A long selection shouldn't push the editor off screen. */
+  max-height: 6.5em;
+  overflow-y: auto;
+}
+
+.pendingClear {
+  margin-top: 0.35rem;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.pendingClear:hover {
+  color: var(--foreground);
+}
+
+/* **Rail mode only: the chrome floats over the cards.**
+
+   Both children are put in the same grid cell, which does two things one
+   `display: grid` cannot obviously be doing. First, it moves the cards'
+   coordinate origin from the bottom of the chrome to the top of the panel —
+   the layout hook measures `targetTop` against `.cards`' own rect, so with the
+   chrome above it in normal flow, every passage in the viewer's top ~150px
+   resolved to a negative offset and was clamped flat against the chrome's
+   underside. Those cards are now placed where their passage actually is.
+   Second, it gives a card somewhere to *be* while it is still arriving: one
+   entering from the top materialises under the chrome and slides out from
+   beneath it, rather than appearing at full height in a single frame the
+   moment its passage crosses the viewer's top edge.
+
+   The chrome is therefore opaque and paints over whatever is beneath it, which
+   is the intended behaviour and not an oversight — `z-index` because both
+   children are positioned and DOM order would otherwise put the cards on top,
+   `align-self: start` so it claims only its own height instead of stretching
+   over the whole column, and the negative margins so its background reaches
+   `.panelInner`'s padding gutters instead of leaving a card visible in them.
+
+   Not applied in list mode ("Show all"), where the chrome must take up space
+   like anything else or the first entries in the list would be permanently
+   underneath it. */
+.stack {
+  display: grid;
+  /* Cancels `.panelInner`'s *top* padding only, so the grid cell — and with it
+     a card's zero — starts at the panel's own top edge. The horizontal padding
+     is left in place: `.card` is `width: 100%` against its containing block, so
+     moving the side padding onto `.cards` would widen every card by it. */
+  margin-top: -0.75rem;
+}
+
+.stack > .chrome {
+  grid-area: 1 / 1;
+  /* `top: 0` against the panel's scrollport. The margin-top above puts the
+     chrome's resting position there already, so it does not jump on first
+     stick — worth keeping true if either number changes. */
+  position: sticky;
+  top: 0;
+  align-self: start;
+  z-index: 2;
+  /* Out to the panel's edges, with the padding put back inside, so a card
+     passing underneath isn't visible in the gutters either side. */
+  margin: 0 -0.75rem;
+  padding: 0.75rem 0.75rem 0.5rem;
+  background: var(--surface);
+}
+
+/* The positioned region. `position: relative` makes it the containing block
+   for the absolutely-placed cards the layout hook writes `top` onto; its own
+   height is set by that hook, since absolutely positioned children contribute
+   none. */
+.cards {
+  position: relative;
+}
+
+.stack > .cards {
+  grid-area: 1 / 1;
+}
+
+/* A card the layout hook has not positioned yet. It has just lost its
+   `display: none` and has no `top` of its own, so it is sitting in normal flow
+   at the top of the container — one frame later the hook moves it to its
+   passage. Hiding it for that frame is the difference between a card arriving
+   at the edge of the viewport and a card appearing to load at the top of the
+   panel and jump. `visibility`, not `display`: the hook has to be able to
+   measure its height on exactly that frame. Rail mode only — nothing is
+   positioned in the list, so nothing there is ever unplaced. */
+.stack > .cards [data-margin-note-id]:not([data-placed]) {
+  visibility: hidden;
+}
+
+.card {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+/* An annotation whose passage isn't on screen — most of them, most of the time.
+   Out of the rail entirely, so the column stays the height of the panel; "All"
+   is where these are read. Hidden rather than unmounted: a card can be holding
+   an open reply composer, and scrolling past its passage must not discard it. */
+.notInRail {
+  display: none;
+}
+
+/* The Rail/All switch. Deliberately plain text rather than a button-looking
+   control: it sits directly above the cards and competes with them for
+   attention otherwise. */
+.modeRow {
+  margin: 0.5rem 0 0.25rem;
+  text-align: right;
+}
+
+.modeToggle,
+.emptyLink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.modeToggle:hover,
+.emptyLink:hover {
+  color: var(--foreground);
+}
+
+.pageBadge {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 0 0.3em;
+  margin-right: 0.4em;
+  cursor: pointer;
+}
+
+.pageBadge:hover {
+  color: var(--foreground);
+  border-color: var(--link);
+}
+
+/* The floating "Annotate this" control that appears over a live selection. */
+.selectionPopover {
+  position: fixed;
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow-color);
+  padding: 0.25rem;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.selectionPopover button {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.selectionPopover button:hover {
+  background: var(--surface-hover);
+}
+
+/* Highlight rectangles inside our .annoLayer (components/pdf/anno-layer.ts).
+   Global, because that layer's DOM is built imperatively rather than by React,
+   so it carries no CSS-module hashes. */
+:global(.annoLayer) {
+  position: absolute;
+  inset: 0;
+  /* Below the text layer, so native selection keeps working over a highlight
+     (docs/PDF.md §6). */
+  z-index: 1;
+  /* Inert as a whole; hit-testing is a delegated listener plus
+     elementsFromPoint, which sees through pointer-events: none. */
+  pointer-events: none;
+
+  /* **The alpha lives here, on the group, not on each rect — that is what
+     stops overlapping highlights from blending.** Every .annoRect below is an
+     *opaque* fill; `opacity` on this layer renders it as a group into its own
+     buffer first, so within that buffer the last rect painted simply covers
+     whatever is under it, and the flattened result is composited over the page
+     exactly once. Give each rect its own translucent fill instead (as this did
+     before) and two authors' highlights over the same words compound into a
+     third, darker colour belonging to neither of them.
+
+     Which rect is "last" is DOM order: paint order for positioned siblings at
+     the same z-index is tree order, and anno-layer.ts appends in the order the
+     entries arrive — oldest annotation first, so the newest wins an overlap,
+     and remote selections after all of them so a live one is always visible.
+
+     A unitless number rather than the `--anchor-tint` percentage the doc-side
+     highlights use (globals.css) even though the values are the same 26% ->
+     44%: an unsupported percentage would make this declaration invalid and
+     leave opacity at 1, i.e. opaque bars covering the page text. A plain
+     number has no such failure mode. */
+  --anno-alpha: calc(0.26 + var(--dark) * 0.18);
+  opacity: var(--anno-alpha);
+}
+
+:global(.annoRect) {
+  position: absolute;
+  /* Opaque, per the group-opacity note above. The author's color arrives as
+     --anno-color, validated against SAFE_COLOR before it is ever written
+     (STYLE.md: no color literals outside the palette modules). The fallback is
+     the neutral thread color. */
+  background: var(--anno-color, #999999);
+  border-radius: 2px;
+}
+
+/* The annotation whose card is focused. It can't simply be *more opaque* any
+   more — the group owns the alpha — so it reads stronger by being shaded
+   toward the scheme's extreme instead: darker on light, lighter on dark. */
+:global(.annoRect[data-anno-active="true"]) {
+  background: color-mix(in srgb, var(--anno-color, #999999) 70%, var(--shade-target));
+}

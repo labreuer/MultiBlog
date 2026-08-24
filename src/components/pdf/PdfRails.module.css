@@ -1,0 +1,129 @@
+/* PLAN.md §19 Phase 4 — the two 1px rails flanking the viewer.
+   Left: where other readers are. Right: where you are, and where the
+   annotations are. */
+
+/* Width is CSS's; **height is pinned inline from JS** to the viewer container's
+   clientHeight (PdfRails.tsx's `railStyle`), because that is where the vertical
+   scrollbar's track ends and these markers have to agree with it. That is the
+   same "CSS owns the columns, JS owns only the vertical" split the doc-side
+   margin notes use — don't move the flex sizing here into JS to match. */
+.rail {
+  position: relative;
+  flex: 0 0 18px;
+  /* The 1px line the markers sit on, drawn as a background rather than a child
+     so nothing can scroll or reflow it out of alignment with them. */
+  background:
+    linear-gradient(var(--border), var(--border)) center / 1px 100% no-repeat;
+}
+
+.leftRail {
+  border-right: 1px solid var(--border-subtle);
+}
+
+.rightRail {
+  border-left: 1px solid var(--border-subtle);
+}
+
+/* A remote reader's position: a circle in their author color, centred on the
+   line. `top` is written from JS as a percentage of the rail's height. */
+.readerDot {
+  position: absolute;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  margin-top: -5px;
+  border-radius: 50%;
+  border: 1px solid var(--background);
+  padding: 0;
+  cursor: pointer;
+  transition: top 0.15s ease-out;
+}
+
+.readerDot:hover,
+.readerDot:focus-visible {
+  transform: scale(1.35);
+}
+
+/* Someone broadcasting an invitation. A ring rather than a different colour —
+   the colour is their identity and must not change to mean something else. */
+.leadingDot {
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+/* The portion of the document currently visible, on the right-hand strip.
+   Drawn only when it would be at least MIN_VIEWPORT_THUMB_PX tall — below that
+   it is indistinguishable from an annotation tick, which would make the strip
+   harder to read rather than easier (PLAN.md §19).
+
+   **Currently unused at runtime, and not dead.** PdfRails.tsx's
+   `SHOW_VIEWPORT_THUMB` is off; the class is what that switch turns back on. */
+.viewportThumb {
+  position: absolute;
+  left: 50%;
+  width: 7px;
+  margin-left: -3.5px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* One tick per annotation, in its author's colour. */
+.annotationTick {
+  position: absolute;
+  left: 50%;
+  width: 11px;
+  height: 3px;
+  margin-left: -5.5px;
+  margin-top: -1.5px;
+  border: none;
+  border-radius: 1px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.annotationTick:hover,
+.annotationTick:focus-visible {
+  height: 5px;
+  margin-top: -2.5px;
+}
+
+/* The follow control, in the viewer toolbar. */
+.followBar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.followChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.followChip:hover {
+  border-color: var(--link);
+}
+
+.followChipActive {
+  border-color: var(--link);
+  background: var(--accent-wash);
+}
+
+.swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}

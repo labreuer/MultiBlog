@@ -19,6 +19,8 @@ import type {
   TestYdoc,
   TestYdocSnapshot,
   TestDoc,
+  TestFile,
+  FileAnnotationFacts,
   DocState,
   AnnotationState,
   TestDocLink,
@@ -36,6 +38,8 @@ export type {
   TestYdoc,
   TestYdocSnapshot,
   TestDoc,
+  TestFile,
+  FileAnnotationFacts,
   DocState,
   AnnotationState,
   TestDocLink,
@@ -140,6 +144,16 @@ export const addTestPostAuthor = (...args: Parameters<DbHandlers["addTestPostAut
 
 export const deleteTestDoc = (...args: Parameters<DbHandlers["deleteTestDoc"]>): Promise<void> =>
   call("deleteTestDoc", ...args);
+
+export const createTestFile = (...args: Parameters<DbHandlers["createTestFile"]>): Promise<TestFile> =>
+  call("createTestFile", ...args);
+
+export const deleteTestFile = (...args: Parameters<DbHandlers["deleteTestFile"]>): Promise<void> =>
+  call("deleteTestFile", ...args);
+
+export const getFileAnnotationFacts = (
+  ...args: Parameters<DbHandlers["getFileAnnotationFacts"]>
+): Promise<FileAnnotationFacts[]> => call("getFileAnnotationFacts", ...args);
 
 export const clearColumnOrder = (...args: Parameters<DbHandlers["clearColumnOrder"]>): Promise<void> =>
   call("clearColumnOrder", ...args);

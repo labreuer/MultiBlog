@@ -31,6 +31,9 @@ Every gate in the app is one of these predicates, sometimes combined with a
 | `canManagePosts` | ✅ | ✅ | ✅ | ❌ | ❌ | `role-checks.ts` |
 | `canManageDocs` | ✅ | ✅ | ✅ | ❌ | ❌ | `role-checks.ts` |
 | `canViewDocs` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `canViewFiles` | ✅ | ✅ | ✅ | ✅ | ❌ | `role-checks.ts` |
+| `canManageFiles` | ✅ | ✅ | ✅ | ❌ | ❌ | `role-checks.ts` |
+| `canManageAnySharedFile` | ✅ | ✅ | ❌ | ❌ | ❌ | `file-authz.ts` |
 
 Two pairs here hold the same roles as each other and are still kept apart on purpose, so
 that the doc rule and the post rule can move independently rather than one silently dragging
@@ -175,6 +178,47 @@ reading only", table 4's edit rows would collapse onto table 2's, `canUserEditDo
 reduce to a plain `DocAuthor` lookup with no visibility read, and this predicate would be
 deleted outright rather than merely renamed. Not decided.
 
+## Files (PLAN.md §19)
+
+**An uploaded file carries docs' visibility model, with its own predicates.** `StoredFile`
+reuses the `DocVisibility` enum — PRIVATE/SHARED already means one thing site-wide, and a
+third word would be a UI regression — but `canViewFiles`/`canManageFiles`/`canManageAnySharedFile`
+are stated independently of their doc counterparts rather than delegating to them. Same role
+sets today; the separation exists so the two can diverge without one silently dragging the
+other, which is the reasoning `canManageDocs` vs. `canManagePosts` already records.
+
+**A file's listed users are its owners, not its authors.** The join table is `file_owner`
+(`FileOwner`), not `file_author`, and `/files`' column is Owner(s) — nobody listed on an
+uploaded PDF wrote it. The list is seeded with whoever uploaded the file and is editable
+afterwards, and what it grants is control plus read access to a PRIVATE file. Everywhere
+below, read "in `file_owner`" for the doc tables' "in `doc_author`"; `doc_author` and
+`post_author` keep their name because a doc's or post's listed users really did write it.
+
+The four tables above therefore apply to files as written, with these substitutions and one
+structural difference:
+
+| Doc rule | File equivalent |
+|---|---|
+| Read `/doc/[slug]` | Read `/pdf/[slug]`, and fetch its bytes from `/api/files/…` |
+| Edit `/doc/[slug]/edit` | **No equivalent** — a file has no editable content |
+| Visibility / owners / slug / delete | `canUserManageFile` (`src/app/actions/files.ts`) |
+| Listed in `/docs` (+ ADMIN "Show all docs") | Listed in `/files` (+ ADMIN "Show all files") |
+| Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same `requireOwnOrAdmin` |
+| Collab connection | Presence only, and **always read-only** (`/api/file/[id]/token`) |
+
+Two consequences worth stating plainly, because they are what the user-facing rule asked for:
+
+- **An AUTHOR sees only their own files**, PRIVATE *and* SHARED, because
+  `canManageAnySharedFile` is ADMIN/EDITOR — exactly as `/docs` behaves.
+- **The bytes route answers 404, not 403**, to someone who may not read a PRIVATE file.
+  Whether such a file exists is itself something its non-owners shouldn't learn, and unlike
+  `/pdf/[slug]` (which shows a visible Forbidden, matching `/doc/[slug]`) that route is
+  reachable by guessing an id.
+
+`/annotations` lists annotations on **both** containers, each scoped by its own read rule.
+That it can see PDF annotations at all is one of the reasons they are Postgres rows rather
+than entries in a per-file ydoc (PLAN.md §19).
+
 ## Where each rule lives
 
 Re-derive from these rather than trusting the tables after an authz change:
@@ -183,7 +227,13 @@ Re-derive from these rather than trusting the tables after an authz change:
 |---|---|
 | The role predicates (all but `canEditAnySharedDoc`) | `src/lib/role-checks.ts` |
 | Read / edit a doc; the two `where`-clause equivalents | `src/lib/doc-authz.ts` |
-| Annotation ydoc access (DRAFT is owner-only, even from ADMIN) | `src/lib/annotation-authz.ts` |
+| Read / manage a file; its `where`-clause equivalent | `src/lib/file-authz.ts` |
+| `/files` row scoping + the "Show all files" override | `src/app/files/page.tsx` |
+| File mutations (visibility, title, slug, delete) | `src/app/actions/files.ts` |
+| Who owns a file (`file_owner`, the doc tables' `doc_author`) | `prisma/schema.prisma`'s `FileOwner` |
+| File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
+| File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |
+| Annotation ydoc access (DRAFT is owner-only, even from ADMIN; asks whichever container the annotation has) | `src/lib/annotation-authz.ts` |
 | `/docs` row scoping + the "Show all docs" override | `src/app/docs/page.tsx` |
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |

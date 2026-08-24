@@ -6,7 +6,9 @@
     "node": ">=24"
   },
   "scripts": {
+    "predev": "tsx scripts/copy-pdfjs-assets.ts",
     "dev": "next dev",
+    "prebuild": "tsx scripts/copy-pdfjs-assets.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -50,6 +52,7 @@
     "jose": "^6.2.4",
     "next": "16.2.11",
     "next-auth": "^5.0.0-beta.32",
+    "pdfjs-dist": "6.2.108",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sharp": "^0.35.3",

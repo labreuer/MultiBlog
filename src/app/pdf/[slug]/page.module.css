@@ -1,0 +1,10 @@
+/* PLAN.md §19 — /pdf/[slug]. The viewer supplies its own full-height shell
+   (PdfViewer.module.css); the only thing needed here is the refusal state,
+   which is an ordinary centred page rather than an app shell. */
+
+.forbidden {
+  max-width: 640px;
+  margin: 4rem auto;
+  font-family: sans-serif;
+  text-align: center;
+}

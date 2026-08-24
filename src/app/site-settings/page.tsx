@@ -10,6 +10,7 @@ import SiteSettingsTable, { type ConfigRow, type DefaultColumnsRow } from "@/com
 const TABLE_LABELS: Record<AdminTableName, string> = {
   posts: "/posts",
   docs: "/docs",
+  files: "/files",
   users: "/users",
   comments: "/comments",
   annotations: "/annotations",

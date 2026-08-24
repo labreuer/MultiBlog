@@ -20,12 +20,18 @@ import bcrypt from "bcryptjs";
 import * as Y from "yjs";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
-import { prisma } from "@/lib/prisma";
+import { readFile } from "node:fs/promises";
+import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
+import { uniqueFileSlug } from "@/lib/file-slug";
+import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
+import { extractPdf } from "@/lib/pdf-extract";
+import { parsePdfTarget } from "@/lib/pdf-anchor";
+import { buildTestPdf } from "../scripts/make-test-pdf";
 import {
   contentExtensions,
   titleExtensions,
@@ -408,6 +414,175 @@ export async function addTestPostAuthor(postId: string, email: string): Promise<
   });
 }
 
+export type TestFile = {
+  id: string;
+  slug: string;
+  title: string;
+  sha256: string;
+  pageCount: number;
+  byteSize: number;
+  /** Normalised text of each page, index 0 = page 1 — what a spec asserts a selection against. */
+  pages: string[];
+};
+
+/**
+ * A throwaway uploaded file (PLAN.md §19).
+ *
+ * Goes through the **real** storage and extraction path — storeUploadStream and
+ * extractPdf, not a hand-written row — so a fixture file is byte-for-byte what
+ * the upload route would have produced. A shortcut here (a fake sha256, an
+ * empty file_page_text) would leave every viewer and anchoring spec testing a
+ * shape production never creates.
+ *
+ * Text comes from scripts/make-test-pdf.ts, and the returned `pages` are the
+ * extractor's own output rather than the input strings — normalisation joins
+ * lines and collapses whitespace, so what a spec must search for on screen is
+ * this, not what was written into the PDF.
+ */
+export async function createTestFile(opts: {
+  /** The file's sole owner — a file has owners, not authors (schema.prisma's FileOwner). */
+  ownerEmail: string;
+  title?: string;
+  visibility?: DocVisibility;
+  pages?: string[][];
+}): Promise<TestFile> {
+  const { ownerEmail, title = uniqueTitle("file"), visibility = "PRIVATE" } = opts;
+  assertSafe(ownerEmail);
+
+  const owner = await prisma.user.findUnique({ where: { email: ownerEmail } });
+  if (!owner) throw new Error(`No such test user: ${ownerEmail}`);
+
+  const pageLines = opts.pages ?? [
+    ["The quick brown fox jumps over the lazy dog.", "Page one of a throwaway test document."],
+    ["Page two begins here, well past the first screenful.", "Distinctive phrase: xylophone marmalade."],
+  ];
+
+  const bytes = buildTestPdf(pageLines);
+  const stored = await storeUploadStream(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
+  );
+  const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
+
+  const file = await prisma.storedFile.create({
+    data: {
+      slug: await uniqueFileSlug(title),
+      title,
+      filename: `${title.replace(/[^\w.-]+/g, "-")}.pdf`,
+      contentType: "application/pdf",
+      byteSize: stored.byteSize,
+      sha256: stored.sha256,
+      pageCount: parsed.pageCount,
+      visibility,
+      updatedByUserId: owner.id,
+      owners: { create: { userId: owner.id, ownerOrder: 0 } },
+    },
+    select: { id: true, slug: true },
+  });
+  await prisma.filePageText.createMany({
+    data: parsed.pages.map((text, pageIndex) => ({
+      fileId: file.id,
+      pageIndex,
+      textVersion: parsed.textVersion,
+      text,
+    })),
+  });
+
+  return {
+    id: file.id,
+    slug: file.slug,
+    title,
+    sha256: stored.sha256,
+    pageCount: parsed.pageCount,
+    byteSize: stored.byteSize,
+    pages: parsed.pages,
+  };
+}
+
+/** Same @example.com containment as deleteTestDoc, plus the shared-bytes rule. */
+export type FileAnnotationFacts = {
+  id: string;
+  bodyText: string;
+  /** The stored quote — derived server-side at post time, never client-supplied. */
+  quotedText: string;
+  pageIndex: number | null;
+  quadCount: number;
+  position: { start: number; end: number } | null;
+  textVersion: string | null;
+  /** The page text this server extracted at upload, at the target's own textVersion. */
+  pageTextAtTarget: string | null;
+};
+
+/**
+ * The stored anchor of every annotation on a file, alongside the page text the
+ * *server* holds for it.
+ *
+ * Returning both is the point: it lets a spec assert that `quotedText` is
+ * exactly `pageText.slice(position.start, position.end)` — that is, that the
+ * quote was cut from the server's own extraction rather than accepted from the
+ * client (PLAN.md §19, §12i's "a request field only, never a column"). Nothing
+ * observable in the browser can distinguish those two.
+ */
+export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnotationFacts[]> {
+  const annotations = await prisma.annotation.findMany({
+    where: { fileId, status: { not: "DRAFT" } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, bodyText: true, quotedText: true, pdfTarget: true },
+  });
+
+  return Promise.all(
+    annotations.map(async (a) => {
+      const target = parsePdfTarget(a.pdfTarget);
+      const pageText = target
+        ? await prisma.filePageText.findUnique({
+            where: {
+              fileId_pageIndex_textVersion: {
+                fileId,
+                pageIndex: target.pageIndex,
+                textVersion: target.textVersion,
+              },
+            },
+            select: { text: true },
+          })
+        : null;
+
+      return {
+        id: a.id,
+        bodyText: a.bodyText,
+        quotedText: a.quotedText,
+        pageIndex: target?.pageIndex ?? null,
+        quadCount: target?.quads.length ?? 0,
+        position: target?.position ?? null,
+        textVersion: target?.textVersion ?? null,
+        pageTextAtTarget: pageText?.text ?? null,
+      };
+    }),
+  );
+}
+
+export async function deleteTestFile(idOrSlug: string): Promise<void> {
+  const file = await prismaIncludingDeleted.storedFile.findFirst({
+    where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    select: { id: true, title: true, sha256: true, owners: { select: { user: { select: { email: true } } } } },
+  });
+  if (!file) return;
+
+  const unsafe = file.owners.filter((o) => !SAFE_EMAIL.test(o.user.email));
+  if (file.owners.length === 0 || unsafe.length > 0) {
+    throw new Error(`Refusing to delete file "${file.title}" — it has a non-throwaway (or missing) owner.`);
+  }
+
+  await prismaIncludingDeleted.storedFile.delete({ where: { id: file.id } });
+  // Content-addressed storage means another file may share these bytes; only
+  // sweep them once nothing points at them.
+  const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
+  await deleteBytesIfUnreferenced(file.sha256, remaining);
+}
+
 export async function deleteTestDoc(idOrSlug: string): Promise<void> {
   const doc = await prisma.doc.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
@@ -750,7 +925,11 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
       anchorTo: a.anchorTo,
       quotedText: a.quotedText,
       ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
-      quoteMatchesAtStamp: await quoteMatchesAtStamp(a),
+      // `docId` is re-supplied rather than read off the row: the query above
+      // filters on it, so it is non-null here, but Annotation.docId is a
+      // nullable column since files became a second container (PLAN.md §19)
+      // and the type can't see the where clause.
+      quoteMatchesAtStamp: await quoteMatchesAtStamp({ ...a, docId }),
       deletedAt: a.deletedAt?.toISOString() ?? null,
     })),
   );
@@ -1058,7 +1237,13 @@ export async function countAllYdocs(): Promise<number> {
  * an authorless one, which is what one becomes the moment its only author
  * is deleted.
  */
-export async function sweepTestData(): Promise<{ posts: number; docs: number; users: number; ydocs: number }> {
+export async function sweepTestData(): Promise<{
+  posts: number;
+  docs: number;
+  files: number;
+  users: number;
+  ydocs: number;
+}> {
   const stalePosts = await prisma.post.findMany({
     where: {
       title: { startsWith: E2E_TITLE_PREFIX },
@@ -1092,6 +1277,21 @@ export async function sweepTestData(): Promise<{ posts: number; docs: number; us
     }
   }
 
+  // PLAN.md §19 — files, before users, for exactly the reason posts and docs
+  // go first: deleteTestFile refuses an ownerless file, and deleting the only
+  // owner is what makes one. Also unlike a doc, a file owns *bytes* on disk,
+  // so a missed sweep leaks storage rather than just a row.
+  const staleFiles = await prismaIncludingDeleted.storedFile.findMany({
+    where: {
+      title: { startsWith: E2E_TITLE_PREFIX },
+      owners: { every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
+    },
+    select: { id: true, owners: { select: { userId: true } } },
+  });
+  for (const file of staleFiles) {
+    if (file.owners.length > 0) await deleteTestFile(file.id);
+  }
+
   const staleUsers = await prisma.user.findMany({
     where: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
     select: { email: true },
@@ -1099,13 +1299,32 @@ export async function sweepTestData(): Promise<{ posts: number; docs: number; us
   for (const user of staleUsers) await deleteTestUser(user.email);
 
   // Anonymous commenters the moderation specs invent have no User row.
-  await prisma.commenter.deleteMany({
+  //
+  // Their *comments* go first. `comment.commenter_id` is RESTRICT, so a
+  // commenter whose comment outlived its own spec (a crashed run, a Ctrl+C
+  // mid-test) makes this deleteMany fail outright with a foreign-key
+  // violation — which then fails the teardown for the whole suite, long after
+  // and far away from whatever actually crashed. Deleting the comments first
+  // makes the sweep idempotent under exactly the conditions it exists for.
+  const staleCommenters = await prisma.commenter.findMany({
     where: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
+    select: { id: true },
   });
+  const staleCommenterIds = staleCommenters.map((c) => c.id);
+  if (staleCommenterIds.length > 0) {
+    await prisma.comment.deleteMany({ where: { commenterId: { in: staleCommenterIds } } });
+    await prisma.commenter.deleteMany({ where: { id: { in: staleCommenterIds } } });
+  }
 
   const staleYdocs = await prisma.ydoc.deleteMany({ where: { id: { startsWith: "ydoc:test-" } } });
 
-  return { posts: stalePosts.length, docs: staleDocs.length, users: staleUsers.length, ydocs: staleYdocs.count };
+  return {
+    posts: stalePosts.length,
+    docs: staleDocs.length,
+    files: staleFiles.length,
+    users: staleUsers.length,
+    ydocs: staleYdocs.count,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1125,6 +1344,9 @@ const handlers = {
   getDocAuthorEmails,
   addTestPostAuthor,
   deleteTestDoc,
+  createTestFile,
+  deleteTestFile,
+  getFileAnnotationFacts,
   getDocState,
   getContributorFields,
   getAvatarFacts,

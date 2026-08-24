@@ -4,7 +4,8 @@ Multi-author blog with revisions, real-time collab, and quote-anchored comments.
 Architecture and build order: [PLAN.md](PLAN.md) — §10 tracks what's actually built vs. planned.
 Performance findings and the opt-in perf-logging tool: [PERFORMANCE.md](PERFORMANCE.md).
 Caching behavior/trade-offs (ISR, ...): [CACHING.md](CACHING.md).
-Styling conventions (colors, typography, CSS Modules vs. inline): [STYLE.md](STYLE.md).
+Styling conventions (colors, typography, CSS Modules vs. inline, custom scrollbars and
+anything positioned beside one): [STYLE.md](STYLE.md).
 Admin tables (`/posts`, `/docs`, `/users`, `/comments`, `/annotations`) all render through
 one kit — `src/components/table/` plus a per-table `*-query.ts` over `src/lib/table-query.ts`.
 Filters, sort, pagination and the show-deleted toggle live in the querystring and are
@@ -195,6 +196,11 @@ than the reasoning itself.
   §13m has the full account; the generalizable half is that a `NEXT_PUBLIC_` var answers "how
   does the *browser* reach this", which is the wrong question for a server-to-server call and
   happens to give the same answer as the right one only until a reverse proxy exists.
+  Optional: `FILE_STORAGE_DIR` (default `.file-storage/`) and `FILE_MAX_UPLOAD_BYTES`
+  (default 50MB) — both bare, so a deployment changes its upload limit with a **restart, not
+  a rebuild**. That is why the browser learns the limit from `/api/files/limits` rather than
+  from a baked-in constant: the client-side pre-check and the server's enforcement are then
+  provably the same number.
   Optional: `NEXT_PUBLIC_SITE_TITLE` (defaults to `"MultiBlog"`,
   `src/lib/site-config.ts`) — deliberately env-sourced rather than hardcoded so a real
   deployment's title survives `git pull` instead of living in a tracked file. Also optional:
@@ -236,6 +242,63 @@ than the reasoning itself.
   "avatar from URL" path**: a server-side fetch of a user-supplied URL is SSRF. `sharp` is a
   direct dependency pinned at the range its pre-existing `overrides` entry uses — npm rejects
   a direct dep whose spec doesn't match its own override.
+- **An uploaded PDF is bytes on disk, not a `bytea`** (PLAN.md §19) — content-addressed at
+  `FILE_STORAGE_DIR/<sha256[0:2]>/<sha256>`, served from `/api/files/<id>/<hash>` with `Range`
+  support so PDF.js can render page 1 of a large scan without transferring all of it. Prisma
+  cannot stream a `Bytes` column, which is the whole argument: a 50MB file would land in
+  Node's heap on upload *and* on every one of pdfjs's range requests. `UserAvatar`'s
+  in-Postgres bytes are not a counter-precedent — those are ~10KB and served whole.
+  Consequences worth remembering:
+  - **`FILE_STORAGE_DIR` is a second backup surface `pg_dump` does not cover** (DEPLOY.md).
+  - **Never delete a file's bytes without counting references first.** Content addressing
+    means two `StoredFile` rows can legitimately share one blob; `deleteBytesIfUnreferenced`
+    takes the surviving count as an argument for exactly that reason.
+  - The Prisma model is **`StoredFile`**, `@@map("file")`. The table is `file`; the generated
+    TS type must not be `File`, which is a DOM/Node global the upload path uses.
+  - **A file's listed users are `FileOwner`s, not authors** (PLAN.md §19): nobody on that
+    list wrote the PDF. The list is seeded with the uploader, editable afterwards, and grants
+    `/files`' Owner(s) line, the right to rename/re-slug/re-own/delete, and read access to a
+    `PRIVATE` file. `DocAuthor`/`PostAuthor` are "author" because a doc's or post's listed
+    users really did write it, and the shared filter kit (`AuthorFilterPanel`,
+    `authorFilterWhere`, `AuthorMode`) is named for those two surfaces; `/files` reaches it
+    through the `ownerFilterWhere`/`listOwnerFilterOptions` wrappers and an aliased import,
+    and every option it added defaults to what `/docs` and `/posts` pass, which is what keeps
+    those two tables out of it. Don't "unify" the two vocabularies in either direction.
+  - Upload is a **Route Handler taking a raw body**, not a Server Action and not multipart:
+    actions carry a 1MB `bodySizeLimit` that raising would raise site-wide, and
+    `request.formData()` buffers the whole upload before user code sees it. nginx needs
+    `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader
+    names the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
+- **pdfjs is full of traps that fail in ways not resembling their cause** — a build error
+  that reads as a malformed URL of ours, a teardown error that reads as a missing `await`,
+  a scanned PDF rendering as blank pages with a working text layer over them. All of them,
+  verified against 6.2.108, are in **[docs/PDF.md](docs/PDF.md) §10** — read it before a
+  `pdfjs-dist` bump or when the viewer misbehaves inexplicably. Three consequences reach
+  outside the viewer and so are repeated here:
+  - **Never delete `e2e/pdf-assets.spec.ts` as trivial.** It asserts that each of pdfjs's
+    four runtime asset directories is served, and it is the only guard on any of them —
+    `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image decoder,
+    so no fixture-based test can cover it.
+  - **`globals.css`'s `* { box-sizing: border-box }` breaks pdfjs**, and the symptom is a
+    ~2% *scale* error rather than a layout one. `PdfViewer.module.css` restores
+    `content-box` for `.pdfViewer` and its descendants; don't "tidy" that away. Mechanism,
+    and the related border-box/padding-box trap in coordinate capture: docs/PDF.md §5.
+  - **Bumping `pdfjs-dist` needs `npx tsx scripts/probe-engine.ts` and a real Safari**, not
+    just the internals smoke test. Pinning protects the *API* pdfjs offers, not the
+    JavaScript runtime it assumes underneath — and WebKit ships those built-ins late or not
+    at all (`src/lib/pdfjs-webkit-polyfills.ts`, baseline Safari 26 / iPadOS 18.4+). A
+    chromium-only suite cannot see this class at all, and `e2e/pdf-webkit-gaps.spec.ts`
+    guards against regression without ever detecting that a patch has stopped being needed.
+    Which patches stand, the measured engine table, and the worker-realm import-order trap:
+    docs/PDF.md §10 (PLAN.md §19a records only the baseline, as a decision).
+- **A PDF anchor cannot drift, and that is why its code is so much smaller than a doc's.** A
+  file's `sha256` is its identity, so the bytes an anchor was measured against are by
+  construction the bytes every later reader sees — no tracking plugin, no per-transaction
+  re-resolution, no version stamp (`Annotation.ydocUpdateId` is meaningless for a file).
+  Don't reach for the doc side's drift machinery here. The one thing that *can* invalidate a
+  stored anchor is our own normaliser, so bump `NORMALISER_VERSION` (`src/lib/pdf-text.ts`)
+  on **any** behavioural change, however small. Full reasoning and the two obligations it
+  leaves: docs/PDF.md §4.
 - Site icons (favicon/manifest): [docs/FAVICON.md](docs/FAVICON.md).
 - The landing page's preamble (`/`, PLAN.md §17c) is the body of whichever `Doc` is titled
   exactly `FRONT PAGE` (case-insensitive, first-created wins if more than one exists) — its
@@ -369,14 +432,17 @@ anything repeatable.
   optionally seeded with body text), `scripts/test-post.ts` (create/delete posts against a
   `--doc <id>`, draft or published, with a moderation policy — PLAN.md §15: a post is
   always a snapshot of some doc, never independently authored), `scripts/test-comment.ts`
-  (list a post's comments and their statuses), `scripts/test-ydoc.ts` (create/list/delete
+  (list a post's comments and their statuses), `scripts/test-file.ts` (create/list/delete
+  uploaded PDFs — it *generates* its own document via `scripts/make-test-pdf.ts` and pushes it
+  through the real storage and extraction path, so a fixture file is indistinguishable from an
+  uploaded one), `scripts/test-ydoc.ts` (create/list/delete
   standalone documents in the ydoc stack, PLAN.md §11 — `--garbage` writes bytes that
   aren't a valid Yjs update at all, to exercise `/ydoc-debug`'s "not TipTap-compatible"
   error path on purpose). Each script's header comment documents its own flags — read that
   rather than a copy here, which is what will go stale. Defaults worth knowing without
   opening anything:
   `test-admin@example.com`, role `ADMIN`, password always `testpass123`.
-- `test-user.ts`/`test-doc.ts`/`test-post.ts`/`test-comment.ts` all refuse to touch
+- `test-user.ts`/`test-doc.ts`/`test-post.ts`/`test-comment.ts`/`test-file.ts` all refuse to touch
   anything but `@example.com` accounts and docs/posts authored solely by them, so they
   can't reach real data by mistake. Delete a post or doc *before* its author: once its
   only author is gone, "no authors" is indistinguishable from a real one that lost its
@@ -612,6 +678,12 @@ why nothing recomputes it and why a break there is silent.
   worth keeping in mind for anything sized the same way later, even though that specific
   component is gone (PLAN.md §15: a published post no longer surfaces a live-staleness
   signal at all, by decision — see §15h).
+- **A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
+  `pointerup` for one — a long-press hands the touch to WebKit's gesture recognizer
+  (`pointercancel` instead), and the drag handles are native views that fire nothing — and
+  shift+arrows delivers none anywhere. Either alone works on every desktop and silently does
+  nothing on a tablet, so debounce `selectionchange` and let `pointerup` short-circuit it
+  (`PdfAnnotationSurface`; `AnnotationNode` uses a plain timer for the same reason).
 - When matching one element's width to another's via `ResizeObserver` (e.g. `PostsTable`'s
   search box tracking the Title column's width): use the observed element's own
   `getBoundingClientRect().width` inside the callback, not the callback's own

@@ -139,7 +139,7 @@ export default function AnnotationList({ entries, docId }: Props) {
             color={entry.color}
           />
         )}
-        <AnnotationNode annotation={entry.root} docId={docId} />
+        <AnnotationNode annotation={entry.root} target={{ kind: "doc", id: docId }} />
       </div>
     );
   };
