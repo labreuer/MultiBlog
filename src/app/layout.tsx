@@ -57,7 +57,21 @@ export default function RootLayout({
             carries the relay's token, and a NEXT_PUBLIC_ var would bake that
             into every client bundle this machine ever built, a production one
             included. Guarded on NODE_ENV as well as on the variable, so
-            setting it in a deployed environment still does nothing. */}
+            setting it in a deployed environment still does nothing.
+
+            A plain synchronous <script>, deliberately, and not `next/script`
+            with beforeInteractive. What this injection has to guarantee is
+            that it runs *before React hydrates* — the relay captures
+            console.error to see hydration mismatches, and a capture installed
+            afterwards sees nothing. A sync tag here executes during parse,
+            while React's own bundle is a deferred module that cannot run until
+            parsing ends, so the ordering is plain to read. `next/script`
+            emitted only a <link rel=preload> and left execution to Next's own
+            scheduling, which is both harder to reason about and did not
+            silence React's "script tag while rendering React component"
+            advisory anyway. That advisory is self-inflicted and dev-only;
+            scripts/remote-console.ts filters it out of its own capture rather
+            than letting the tool report its own footprint as a finding. */}
         {process.env.NODE_ENV !== "production" && process.env.REMOTE_CONSOLE_SRC ? (
           // eslint-disable-next-line @next/next/no-sync-scripts
           <script src={process.env.REMOTE_CONSOLE_SRC} />

@@ -167,6 +167,50 @@ const CLIENT_SRC = `(function () {
 ${SERIALIZE_SRC}
 ${RUN_SRC}
 
+  // Console capture, installed before anything else this script does.
+  //
+  // This exists for one class the relay could not otherwise reach: a React
+  // hydration mismatch (#418). Its *symptom* — server text differing from
+  // client text — is indistinguishable after the fact from behaviour that is
+  // deliberately different across hydration, which is exactly what
+  // LocalTime.tsx does on purpose. Only React's own console.error, emitted at
+  // hydration, separates the bug from the design.
+  //
+  // Reaching it depends on load order and is not luck: layout.tsx renders this
+  // as a plain synchronous <script>, so it executes during parse, while
+  // React's own bundle is a deferred module that cannot run until parsing
+  // finishes. The patch is therefore in place before hydration begins.
+  // Bounded, and it still forwards to the real console so nothing is hidden
+  // from a human looking at Web Inspector.
+  // The one message this tool causes by existing: layout.tsx renders the
+  // <script> that loads this file inside the React tree, and React advises
+  // against that in dev. Dropping it here keeps the relay from reporting its
+  // own footprint as a finding — the alternative spellings were tried and
+  // next/script does not silence it either (see layout.tsx).
+  var SELF_INFLICTED = /Encountered a script tag while rendering React component/;
+  window.__rcConsole = [];
+  ["error", "warn"].forEach(function (level) {
+    var original = console[level];
+    console[level] = function () {
+      try {
+        // Flatten first and match on the whole message, not on arguments[0]:
+        // Next's dev overlay wraps console.error itself and forwards to this
+        // patch with its own argument shape, so a check on the first argument
+        // silently never fires. (That the overlay sits *above* this patch is
+        // also why the capture still sees everything — it forwards.)
+        var text = Array.prototype.map.call(arguments, function (a) {
+          if (a instanceof Error) return a.name + ": " + a.message;
+          if (typeof a === "string") return a;
+          try { return JSON.stringify(a); } catch (e) { return String(a); }
+        }).join(" ").slice(0, 800);
+        if (!SELF_INFLICTED.test(text) && window.__rcConsole.length < 200) {
+          window.__rcConsole.push({ level: level, text: text, at: Math.round(performance.now()) });
+        }
+      } catch (e) { /* never let instrumentation break the page */ }
+      return original.apply(console, arguments);
+    };
+  });
+
   var worker = null;
   var workerWaiters = {};
   function ensureWorker() {
