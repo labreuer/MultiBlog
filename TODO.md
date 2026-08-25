@@ -378,3 +378,25 @@ Both unblock when Next ships a refreshed lint config — **recheck then, not bef
 
 Worth knowing when weighing it: taking eslint 10 *would* drop the `brace-expansion` audit
 count from 9 to 6.
+
+---
+
+## The PDF side panel's Collab tab is a stub
+
+**Status:** shipped empty on purpose, 2026-08-25. `PdfCollabPanel` renders "Nothing here yet."
+
+`/pdf/[slug]`'s side panel is three tabs — Annotations, Metadata, Collab (PLAN.md §19's
+deviation list). The third exists so the strip is the shape it will keep rather than growing a
+tab later and moving the other two; it was not left half-built.
+
+What is likely to go in it, and why this is a note rather than a decision: Phase 4's presence
+pieces sit in the chrome *around* the viewer. The
+**follow bar** (`PdfFollowBar` — the reader list plus "lead"/"follow") is squeezed into the
+toolbar beside the page and zoom controls, which is a row of document controls and a poor home
+for a list of people. The **left rail** (`PdfPresenceRail`) says where readers are as marks
+down the edge, which is the right medium for position and no medium at all for names, colors or
+"who is here". A pane can carry both in words.
+
+Neither is a given. Moving the follow bar out of the toolbar changes a control readers can
+currently reach without opening anything, so it is worth deciding whether the pane *replaces*
+it or duplicates it — and that is the actual open question, not the markup.

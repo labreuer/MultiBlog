@@ -15,8 +15,9 @@ import {
 // columns staying unwritten.
 //
 // A note on what is *not* here. There is no spec driving the tagger on a PDF:
-// /pdf/[slug] is a full-height `ssr: false` island and the chips sit above it,
-// which the doc and post specs already exercise the same component through.
+// /pdf/[slug] is a full-height `ssr: false` island and its chips are the
+// Metadata tab of the viewer's side panel — the same component the doc and
+// post specs already exercise, two containers further in.
 // And there is no part-tagging spec, because there is no part-tagging — that
 // is the tie-off, asserted directly against the columns at the end rather than
 // through a UI that deliberately can't reach them.

@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
-import PdfViewer, { type PdfViewerHandle } from "./PdfViewer";
+import PdfViewer, { type PdfPane, type PdfViewerHandle } from "./PdfViewer";
 import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } from "./PdfAnnotationPanel";
+import PdfMetadataPanel from "./PdfMetadataPanel";
+import PdfCollabPanel from "./PdfCollabPanel";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
@@ -38,6 +40,12 @@ import styles from "./PdfAnnotations.module.css";
 // landscape is wider than its own portrait width, so this covers both.
 const POSITIONED_MEDIA_QUERY = "(min-width: 768px)";
 
+// The side panel's tab ids. Plain strings rather than an enum because they are
+// also half of each tab's and pane's DOM id, which `aria-controls` pairs up.
+const ANNOTATIONS_PANE = "annotations";
+const METADATA_PANE = "metadata";
+const COLLAB_PANE = "collab";
+
 // How long a selection has to stop changing before it's captured. Matches
 // AnnotationNode's constant of the same name, for the same reason: a drag emits
 // a selection update per pixel, and each capture behind this one is a pdfjs
@@ -49,12 +57,22 @@ type Props = {
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
+  /**
+   * The Metadata pane's contents, rendered on the *server* and handed in as a
+   * prop — see PdfSurfaceClient's header for why it can't be imported here.
+   */
+  metadata: ReactNode;
 };
 
-export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }: Props) {
+export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, metadata }: Props) {
   const handleRef = useRef<PdfViewerHandle | null>(null);
   const [ready, setReady] = useState(false);
+  // Two separate questions, and the UI asks them in two places: the toolbar's
+  // icon says whether there is a panel at all, the tabs inside it say which
+  // pane. Keeping them apart is what lets closing and reopening the panel come
+  // back to the tab you were on.
   const [panelOpen, setPanelOpen] = useState(true);
+  const [activePane, setActivePane] = useState(ANNOTATIONS_PANE);
   const [positioned, setPositioned] = useState(false);
   // The captured selection waiting to become an annotation, plus a token that
   // changes on every capture. The token is what remounts the composer: two
@@ -552,6 +570,15 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
     [fileId, entries, resolveTops, subscribe, positioned, jumpTo, pending],
   );
 
+  const panes = useMemo<PdfPane[]>(
+    () => [
+      { value: ANNOTATIONS_PANE, label: "Annotations", content: panel },
+      { value: METADATA_PANE, label: "Metadata", content: <PdfMetadataPanel>{metadata}</PdfMetadataPanel> },
+      { value: COLLAB_PANE, label: "Collab", content: <PdfCollabPanel /> },
+    ],
+    [panel, metadata],
+  );
+
   return (
     // DocPresenceProvider is here because LiveAnnotationComposer publishes
     // "who's composing" into it and throws without one. Its awareness stays
@@ -564,7 +591,9 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
           fileUrl={fileUrl}
           title={title}
           onReady={onReady}
-          panel={panel}
+          panes={panes}
+          activePane={activePane}
+          onSelectPane={setActivePane}
           panelOpen={panelOpen}
           onTogglePanel={() => setPanelOpen((open) => !open)}
           presenceRail={
@@ -601,7 +630,11 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
               onClick={() => {
                 setPending((previous) => ({ target: popover.target, key: (previous?.key ?? 0) + 1 }));
                 setPopover(null);
+                // Both, and neither is enough alone: the composer they just
+                // asked for is in the annotations pane, which is no help if the
+                // panel is closed or if they are looking at Metadata.
                 setPanelOpen(true);
+                setActivePane(ANNOTATIONS_PANE);
                 // Clearing the selection stops the highlight-under-highlight
                 // confusion once the composer opens with the same passage
                 // quoted in it.

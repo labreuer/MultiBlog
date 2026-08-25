@@ -84,18 +84,21 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
     root: entry.root,
   }));
 
-  // PLAN.md §20d — outside PdfSurfaceClient rather than inside it. That
-  // component is a client island behind `ssr: false` (PdfViewerClient's own
-  // header says why that boundary has to exist), and a Server Component cannot
-  // be rendered from inside one — so the chips sit above the viewer, where the
-  // page is still server-rendered. Gated by this page's canUserReadFile above,
-  // exactly as the doc page's chips are gated by canUserReadDoc.
+  // PLAN.md §20d — the keyword chips, handed to the viewer as its Metadata
+  // pane.
+  //
+  // Passed as a prop, not imported by the client island: PdfSurfaceClient is a
+  // `"use client"` module behind `ssr: false`, which may not import a Server
+  // Component but may receive one already rendered (its header has the whole
+  // reason). Gated by this page's canUserReadFile above, exactly as the doc
+  // page's chips are gated by canUserReadDoc.
   return (
-    <>
-      <div className={styles.keywords}>
-        <KeywordChips target={{ kind: "file", id: file.id }} />
-      </div>
-      <PdfSurfaceClient fileId={file.id} fileUrl={fileUrl} title={file.title} entries={entries} />
-    </>
+    <PdfSurfaceClient
+      fileId={file.id}
+      fileUrl={fileUrl}
+      title={file.title}
+      entries={entries}
+      metadata={<KeywordChips target={{ kind: "file", id: file.id }} />}
+    />
   );
 }
