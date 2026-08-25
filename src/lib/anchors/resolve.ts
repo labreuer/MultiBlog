@@ -1,7 +1,8 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { findQuoteOccurrences } from "./quote-occurrences";
+import { findQuoteOccurrences } from "../quote-occurrences";
+import type { AnchorRange } from "./types";
 
-export type AnchorRange = { from: number; to: number };
+export type { AnchorRange } from "./types";
 
 // PLAN.md §13o — the one rule for "do these offsets still name this text",
 // shared by every surface that has to answer it, so none of them can drift
@@ -9,9 +10,17 @@ export type AnchorRange = { from: number; to: number };
 //
 //   - server/ydoc-hooks.ts's handleApplyAnnotationMark, deciding where to
 //     put the doc editor's mark (§12i's "the one place it can miss");
-//   - annotation-anchor-capture.ts, deciding what a reading-view annotation
+//   - capture.ts beside this file, deciding what a reading-view annotation
 //     stores, against the state its ydocUpdateId stamps;
-//   - collectAnnotationAnchors below, deciding where a card sits *now*.
+//   - annotation-highlight-extension.ts, deciding where a card sits *now*.
+//
+// PLAN.md §20h moved it here from src/lib/annotation-anchors.ts unchanged. It
+// is the resolve half of the shared anchor library, and it is shared by
+// *mechanism* rather than by consumer: any `DOC_RANGE` anchor answers this
+// question the same way, whether the row that holds it belongs to an
+// annotation or to a tag assignment (§20b). Nothing about it is
+// annotation-specific, which is exactly why the old name had stopped being
+// accurate.
 //
 // Cheapest first, and deliberately only two steps. Exact offsets are the
 // overwhelmingly common case and cost nothing. The fallback is a whole-

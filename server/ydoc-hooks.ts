@@ -18,7 +18,7 @@ import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
-import { resolveAnchorInDoc } from "../src/lib/annotation-anchors";
+import { resolveAnchorInDoc } from "../src/lib/anchors";
 import { annotationIdFromYdocId } from "../src/lib/ydoc-names";
 import {
   ydocStore,
@@ -387,7 +387,7 @@ export async function handleApplyAnnotationMark(
       const node = pmDocContentSchema.nodeFromJSON(json);
 
       // The same verify-then-unique-search rule the reading views' own
-      // capture uses (src/lib/annotation-anchors.ts) — shared rather than
+      // capture uses (src/lib/anchors/resolve.ts) — shared rather than
       // restated so the two mechanisms can't come to disagree about what
       // "this quote is still here" means (PLAN.md §13o).
       const range = resolveAnchorInDoc(node, from, to, quotedText);
