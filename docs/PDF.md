@@ -454,38 +454,33 @@ Pinning `pdfjs-dist` fixes the API you call. It does nothing about the second co
 is to the *JavaScript runtime* pdfjs assumes underneath it — and pdfjs tracks new built-ins
 closely, while WebKit ships them late or not at all. **Baseline: Safari 26 / iPadOS 18.4+.**
 
-Three gaps have broken the viewer in Safari over time. **Two are still patched**, both in
-`src/lib/pdfjs-webkit-polyfills.ts`, and the split between all three is the useful part —
-one permanent, one a lag that has not aged out yet, one that genuinely has:
+**Two built-ins are patched**, both in `src/lib/pdfjs-webkit-polyfills.ts`. They fail for
+different reasons, and the difference decides when each may be removed:
 
-- **`ReadableStream.prototype[Symbol.asyncIterator]`** — the permanent one. WebKit has
-  *never* implemented it, in either realm, and
-  Safari 26.6.1 still does not. `getTextContent` iterates its stream with
-  `for await (const value of readableStream)`, so **every text extraction throws** — which on
-  this surface means a selection is captured and then dies before it can be published or
-  become an annotation.
-- **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** — the other standing patch, and the
-  one with a lesson attached. It was deleted when the baseline was set, on the belief that
-  these shipped in Safari 18.4 alongside the `Iterator` global, and **restored on 2026-08-25
-  after a real iPhone 13 Pro on iOS 18.6.2 — inside this very baseline — rendered a toolbar
-  and no document**, throwing
-  `this.#methodPromises.getOrInsertComputed is not a function`. pdfjs calls
-  `.getOrInsertComputed` 68 times and `.getOrInsert` twice, across `pdf.mjs`,
-  `pdf.worker.mjs` and `pdf.sandbox.mjs`, and guards none of them — so the first `Map` either
-  realm touches throws, which is why the symptom is a viewer that mounts and renders nothing
-  rather than one that fails partway. They actually land in **Safari 26.2**
+- **`ReadableStream.prototype[Symbol.asyncIterator]`** — WebKit has *never* implemented it, in
+  either realm, and does not at Safari 26.6.1. `getTextContent` iterates its stream with
+  `for await (const value of readableStream)`, so without the patch **every text extraction
+  throws** — which on this surface means a selection is captured and then dies before it can
+  be published or become an annotation. This one does not age out.
+- **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** — absent below **Safari 26.2**
   ([MDN compatibility data](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/getOrInsert#browser_compatibility):
   Safari 26.2, Safari on iOS mirroring it, Chrome 145, Firefox 144, Node 26 — Baseline "newly
-  available" only since February 2026). Unlike the stream patch above, this one *will*
-  legitimately age out, once the baseline's floor passes 26.2.
-- **The `Iterator` global** — *version lag*, genuinely shipped in Safari 18.4, and correctly
-  deleted when the baseline was set. Worth remembering anyway for its shape: pdfjs
-  polyfills `Iterator.prototype.join` itself, guarded by
-  `typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
-  So on an engine without it, the failure was a `ReferenceError` thrown out of pdfjs's
-  top-level module body before a line of its own logic ran: the viewer never mounted, and the
-  stack pointed at our `import * as pdfjs`. A `typeof` guard protects the property, not the
-  object it hangs off.
+  available" since February 2026), which is *inside* the baseline's own range, so every
+  supported engine below that lacks them. pdfjs calls `.getOrInsertComputed` 68 times and
+  `.getOrInsert` twice, across `pdf.mjs`, `pdf.worker.mjs` and `pdf.sandbox.mjs`, and guards
+  none of them — so the first `Map` either realm touches throws
+  (`this.#methodPromises.getOrInsertComputed is not a function`), which is why the symptom is
+  a viewer that mounts its toolbar and renders **no document at all** rather than one that
+  fails partway. This patch may be deleted once the baseline's floor rises past 26.2 —
+  measured, per the rule below, not assumed.
+
+A third gap, the **`Iterator` global**, needs no patch: it shipped in Safari 18.4, the
+baseline's floor. Its shape is worth keeping in mind anyway, because it is the one that
+defeats a `typeof` guard. pdfjs polyfills `Iterator.prototype.join` itself, guarded by
+`typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
+On an engine without it the failure is a `ReferenceError` out of pdfjs's top-level module body
+before a line of its own logic runs: the viewer never mounts, and the stack points at our
+`import * as pdfjs`. **A `typeof` guard protects the property, not the object it hangs off.**
 
 **Measure the floor, not the ceiling.** `npx tsx scripts/probe-engine.ts` runs the checks on
 the main thread *and* inside a module worker of whatever browser is on this machine, and
@@ -494,17 +489,15 @@ phone** over the LAN, which is the only way to reach the bottom of the supported
 Playwright's WebKit will not launch on macOS 14, and Appium needs an Xcode newer than macOS
 14 accepts, so neither fence moves without a newer Mac (docs/ENV.md).
 
-That distinction is the whole reason the `Map` patch above came back. The rule was already
-"add a patch on a failure, remove one on a **measurement**, never on an assumption about who
-has updated" — and the deletion did follow it. The measurement was simply taken on Safari
-26.6.1, the *newest* engine in the baseline, and generalized to a range whose floor is
-iPadOS 18.4. A single desktop Safari is blind to this class in exactly the way a
-chromium-only suite is. So: **the measurement that licenses deleting a patch has to come
-from the oldest engine the baseline claims to support.**
+So the rule has two halves, and the second is the one that is easy to miss: **add a patch on a
+failure, remove one on a measurement — and take that measurement on the oldest engine the
+baseline claims to support, not the newest one to hand.** A measurement from a single current
+desktop Safari says nothing about an 18.x device, and is blind to this class in exactly the way
+a chromium-only suite is. Delete a patch on the strength of one and the viewer breaks
+completely — toolbar, no document — for every reader on an in-baseline iPhone or iPad.
 
-Two columns are measured, on the dates given. The *shipped in* column is orientation, not
-evidence — it is what was misread once already; prefer MDN's compatibility data, which is
-where the 26.2 above comes from.
+Two columns below are measured, on the dates given. The *shipped in* column is orientation and
+not evidence — prefer MDN's compatibility data, which is where the 26.2 above comes from.
 
 | built-in | Safari 26.6.1 (2026-08-22) | iOS 18.6.2 (2026-08-25) | shipped in |
 | --- | --- | --- | --- |
@@ -572,16 +565,13 @@ answers "what does the engine have", the real Safari answers "does the viewer wo
 neither substitutes for the other: a bump can start using a built-in the probe has never
 heard of.
 
-The same asymmetry applies to input, and here the record needs correcting on evidence.
-Anything reading `window.getSelection()` must still settle on `selectionchange` (debounced)
-— **but for a reason that survives measurement: shift+arrow selection emits no pointer event
-on any platform.** That one cannot age out.
+The same asymmetry applies to input. Anything reading `window.getSelection()` must settle on
+`selectionchange` (debounced) as well as `pointerup`, and the reason is **shift+arrow
+selection, which emits no pointer event on any platform.**
 
-This section used to justify it differently: that a long-press on iPadOS emits no
-`pointerup` because WebKit's selection gesture recognizer fires `pointercancel` instead, and
-that the selection handles are native views above the page emitting nothing. **Both were
-measured false** (2026-08-25, `scripts/remote-console.ts`, instrumenting 18 event types in
-the page):
+Touch does *not* need that fallback, which is worth stating plainly because the opposite is
+widely believed and was written here once. Measured 2026-08-25 with
+`scripts/remote-console.ts`, instrumenting 18 event types in the page:
 
 | gesture | iPhone 13 Pro, iOS 18.6.2 | iPad, iPadOS 18.6 |
 | --- | --- | --- |
@@ -589,16 +579,20 @@ the page):
 | dragging a selection handle | 74 `pointermove` over 113px, 36 `selectionchange`, **`pointerup`** | 76 `pointermove` over 290px, 36 `selectionchange`, **`pointerup`** |
 | `pointercancel` in either | **0** | **0** |
 
-The handles are not opaque: every `pointermove` carried live coordinates and targeted the
-text-layer element under the touch. `pointercancel` *is* real — 5 of 5 scroll gestures on the
-annotation panel produced one, pointer events stopping at the cancel while `touchmove` kept
-flowing — so the original observation was true of **scrolling**, which cancels pointers on
-every touch platform, and appears to have been attached to selection by mistake.
+The selection handles are not opaque to the page: every `pointermove` carries live coordinates
+and targets the text-layer element under the touch.
 
-Two things follow. **Keep the `pointerup` path** — it is live on both devices, and a reader
-who believed the old text might reasonably have deleted it as unreachable. And **keep the
-debounce**, which the traces vindicate independently: `selectionchange` fires long before
-`pointerup` and is the only signal that reports a selection *growing* mid-drag.
+`pointercancel` belongs to **scrolling**, not selection — 5 of 5 scroll gestures produce one,
+pointer events stopping at the cancel while `touchmove` keeps flowing. That is ordinary
+behaviour on every touch platform, and it is the thing to expect when a gesture turns out to
+be a scroll rather than a drag.
+
+So both triggers are live on touch, and both earn their place. **`pointerup` fires on every
+touch selection** — do not remove that branch as desktop-only; it is what settles a selection
+promptly instead of after the debounce. **`selectionchange` fires long before it** (~660-740ms
+into a long-press, against ~1.2-1.4s to `pointerup`) and is the only signal that reports a
+selection *growing* mid-drag, which is what the keyboard case needs and what makes overlapping
+async runs reachable — see the note just below on the generation counter.
 
 Having two triggers instead of one has a consequence worth stating before you write the
 handler: **overlapping async runs become reachable**, which a lone `pointerup` never made
