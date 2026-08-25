@@ -2,11 +2,25 @@ import type * as Y from "yjs";
 import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
-import { materializeYdocAt } from "./ydoc-snapshot";
-import { resolveAnchorInDoc } from "./annotation-anchors";
+import { materializeYdocAt } from "../ydoc-snapshot";
+import { resolveAnchorInDoc } from "./resolve";
 
-// PLAN.md §13o — what a reading-view annotation actually stores, and the one
-// place `Annotation.quotedText` is ever written.
+// PLAN.md §13o — what a ydoc-backed anchor actually stores, and the one place
+// a `quoted_text` is ever written.
+//
+// **Server-only.** It reaches Postgres through `materializeYdocAt`, which is
+// why `src/lib/anchors/index.ts` deliberately does not re-export it: the pure
+// half of this library (resolve, target, selector, types) is imported by
+// `annotation-highlight-extension.ts`, which ships to the browser, and a
+// barrel that mixed the two would drag PrismaClient into the client bundle.
+// Same split `avatar.ts`/`avatar-url.ts` already makes.
+//
+// PLAN.md §20h moved it here from src/lib/annotation-anchor-capture.ts. The
+// only change is the name: it was never annotation-specific — every argument
+// is about a ydoc and a range — and a `keyword_anchor` row with a `DOC_RANGE`
+// selector (PR 2) establishes its quote through this same call. The
+// invariant below is what §20b means by "one integrity checker covers every
+// anchor row in the system."
 //
 // **Resolved against the state `ydocUpdateId` names, not the live one.** That
 // is the whole point of stamping it: the stored triple (anchorFrom, anchorTo,
@@ -36,7 +50,7 @@ import { resolveAnchorInDoc } from "./annotation-anchors";
 //
 // Null means document-level: the annotation still posts, with no anchor. That
 // is a state every surface already renders (§12h), not a failure.
-export async function captureAnnotationAnchor(opts: {
+export async function captureAnchorInYdoc(opts: {
   /** The ydoc the offsets are into — a doc's, or an annotation's own (§13p). */
   ydocId: string;
   /** The version stamp being written alongside; the state to resolve against. */
@@ -68,7 +82,7 @@ export async function captureAnnotationAnchor(opts: {
     // document-level is a state the reader already understands. Logged
     // because "my annotation lost its quote" is otherwise indistinguishable
     // from a rendering bug.
-    console.error(`[annotation-anchor] couldn't resolve an anchor in ${ydocId}@${throughUpdateId}:`, err);
+    console.error(`[anchor] couldn't resolve an anchor in ${ydocId}@${throughUpdateId}:`, err);
     return null;
   } finally {
     doc?.destroy();
