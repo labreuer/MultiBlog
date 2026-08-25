@@ -243,12 +243,16 @@ working on.
 - **Any new surface rendering post content needs the `.prose` class.** `globals.css`'s
   `* { margin: 0; padding: 0 }` strips default list and blockquote styling everywhere;
   `src/styles/prose.module.css` is what restores it.
-- **A text selection settles on `selectionchange`, not `pointerup`.** iPadOS delivers no
-  `pointerup` for one — a long-press hands the touch to WebKit's gesture recognizer
-  (`pointercancel` instead), and the drag handles are native views that fire nothing — and
-  shift+arrows delivers none anywhere. Either alone works on every desktop and silently does
-  nothing on a tablet, so debounce `selectionchange` and let `pointerup` short-circuit it
-  (`PdfAnnotationSurface`; `AnnotationNode` uses a plain timer for the same reason).
+- **A text selection settles on `selectionchange`, not `pointerup`.** The reason is
+  **shift+arrows, which delivers no pointer event anywhere** — that one is permanent. So
+  debounce `selectionchange` and let `pointerup` short-circuit it (`PdfAnnotationSurface`;
+  `AnnotationNode` uses a plain timer for the same reason). This entry used to claim iOS
+  fires `pointercancel` rather than `pointerup` for a long-press, and that the drag handles
+  are native views firing nothing; **both were measured false** on iOS 18.6.2 and iPadOS 18.6
+  (2026-08-25, `scripts/remote-console.ts`) — a long-press ends in `pointerup`, and dragging a
+  handle emits 76 `pointermove`s with live coordinates. `pointercancel` is real but belongs to
+  *scrolling*, which cancels pointers on every touch platform. Keep the `pointerup` path:
+  it is live on both devices, not dead code. docs/PDF.md §10.
 - **A Next dynamic-route `params` value arrives percent-encoded, not literal.** `getParamValue`
   runs `encodeURIComponent` on every string param before handing it to user code (verified
   against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see

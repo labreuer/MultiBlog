@@ -572,12 +572,33 @@ answers "what does the engine have", the real Safari answers "does the viewer wo
 neither substitutes for the other: a bump can start using a built-in the probe has never
 heard of.
 
-The same asymmetry applies to input. Text selection on iPadOS emits no `pointerup` — a
-long-press hands the touch to WebKit's selection gesture recognizer, which fires
-`pointercancel`, and the selection handles are native views above the page that emit no
-pointer events at all. Anything reading `window.getSelection()` must settle on
-`selectionchange` (debounced) as well, or it will work on every desktop and silently do
-nothing on a tablet.
+The same asymmetry applies to input, and here the record needs correcting on evidence.
+Anything reading `window.getSelection()` must still settle on `selectionchange` (debounced)
+— **but for a reason that survives measurement: shift+arrow selection emits no pointer event
+on any platform.** That one cannot age out.
+
+This section used to justify it differently: that a long-press on iPadOS emits no
+`pointerup` because WebKit's selection gesture recognizer fires `pointercancel` instead, and
+that the selection handles are native views above the page emitting nothing. **Both were
+measured false** (2026-08-25, `scripts/remote-console.ts`, instrumenting 18 event types in
+the page):
+
+| gesture | iPhone 13 Pro, iOS 18.6.2 | iPad, iPadOS 18.6 |
+| --- | --- | --- |
+| long-press to select | `pointerdown` → `selectionchange` (+660ms) → **`pointerup`** (+1375ms) | `pointerdown` → `selectionchange` (+741ms) → **`pointerup`** (+1155ms) |
+| dragging a selection handle | 74 `pointermove` over 113px, 36 `selectionchange`, **`pointerup`** | 76 `pointermove` over 290px, 36 `selectionchange`, **`pointerup`** |
+| `pointercancel` in either | **0** | **0** |
+
+The handles are not opaque: every `pointermove` carried live coordinates and targeted the
+text-layer element under the touch. `pointercancel` *is* real — 5 of 5 scroll gestures on the
+annotation panel produced one, pointer events stopping at the cancel while `touchmove` kept
+flowing — so the original observation was true of **scrolling**, which cancels pointers on
+every touch platform, and appears to have been attached to selection by mistake.
+
+Two things follow. **Keep the `pointerup` path** — it is live on both devices, and a reader
+who believed the old text might reasonably have deleted it as unreachable. And **keep the
+debounce**, which the traces vindicate independently: `selectionchange` fires long before
+`pointerup` and is the only signal that reports a selection *growing* mid-drag.
 
 Having two triggers instead of one has a consequence worth stating before you write the
 handler: **overlapping async runs become reachable**, which a lone `pointerup` never made
