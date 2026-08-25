@@ -1,0 +1,154 @@
+/* PLAN.md §20d — the keyword strip that sits under an object's byline.
+   Every color is a globals.css token; no literal appears here (STYLE.md). */
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+}
+
+.label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  /* globals.css strips list styling site-wide; this list is chips, not prose. */
+  list-style: none;
+}
+
+.chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+/* --- the tagger, a <details> panel like SiteHeader's tool menus --- */
+
+.tagger {
+  position: relative;
+  display: inline-block;
+}
+
+.taggerSummary {
+  cursor: pointer;
+  padding: 0.1rem 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  /* The default disclosure triangle would read as a second glyph beside the
+     "+", which is already the affordance. */
+  list-style: none;
+}
+
+.taggerSummary::-webkit-details-marker {
+  display: none;
+}
+
+.taggerSummary:hover {
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+/* Absolutely positioned rather than fixed, unlike SiteHeader's panels: this
+   one sits in normal document flow with a positioned ancestor right there, so
+   it needs none of that component's measure-and-place machinery. */
+.taggerPanel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 16rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 4px 12px var(--shadow-color);
+}
+
+.taggerInput {
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.taggerCreate {
+  margin-top: 0.35rem;
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--accent-wash);
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+}
+
+.taggerHeading {
+  margin-top: 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.taggerList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+  list-style: none;
+}
+
+.taggerList button {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.taggerList button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.taggerList button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.taggerError {
+  margin-top: 0.5rem;
+  color: var(--error);
+  font-size: 0.8rem;
+}

@@ -89,6 +89,20 @@ enum AnnotationStatus {
   @@map("annotation_status")
 }
 
+// PLAN.md §20b — which *mechanism* a part-anchor's offsets are expressed in.
+// Null on a row means the anchor names the whole object, which is the only
+// thing PR 1 writes (§20h); both writers arrive in PR 2.
+//
+// `POST_RANGE` is deliberately absent. It is honest only once part-anchors
+// join comment_thread's publish-time remap (§5), and `ALTER TYPE … ADD VALUE`
+// is cheap — an enum value with no writer for several sections is not (§20i).
+enum SelectorKind {
+  DOC_RANGE
+  PDF_TEXT
+
+  @@map("selector_kind")
+}
+
 model User {
   id               String           @id @default(cuid())
   email            String           @unique
@@ -120,33 +134,37 @@ model User {
   orcid               String? @map("orcid")
   website             String? @map("website")
 
-  avatar               UserAvatar?
-  accounts             Account[]
-  sessions             Session[]
-  postAuthors          PostAuthor[]           @relation("PostAuthorUser")
-  postAuthorGrants     PostAuthor[]           @relation("PostAuthorCreatedBy")
-  commenter            Commenter?
-  passwordResetTokens  PasswordResetToken[]
-  commentStatusChanges Comment[]              @relation("CommentStatusChangedBy")
-  commentDeletions     Comment[]              @relation("CommentDeletedBy")
-  publicationEvents    PostPublicationEvent[] @relation("PublicationEventActor")
-  deletedBy            User?                  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
-  deletedUsers         User[]                 @relation("UserDeletedBy")
-  postDeletions        Post[]                 @relation("PostDeletedBy")
-  slugHistory          UserSlugHistory[]
-  ydocSnapshots        YdocSnapshot[]         @relation("YdocSnapshotUser")
-  docAuthors           DocAuthor[]
-  docUpdates           Doc[]                  @relation("DocUpdatedBy")
-  docDeletions         Doc[]                  @relation("DocDeletedBy")
-  fileOwners           FileOwner[]
-  fileUpdates          StoredFile[]           @relation("FileUpdatedBy")
-  fileDeletions        StoredFile[]           @relation("FileDeletedBy")
-  annotations          Annotation[]           @relation("AnnotationAuthor")
-  annotationDeletions  Annotation[]           @relation("AnnotationDeletedBy")
-  docLinks             DocLink[]
-  docLinkGroups        DocLinkGroup[]
-  invites              UserInvite[]           @relation("UserInviteRecipient")
-  invitesSent          UserInvite[]           @relation("UserInviteSender")
+  avatar                     UserAvatar?
+  accounts                   Account[]
+  sessions                   Session[]
+  postAuthors                PostAuthor[]           @relation("PostAuthorUser")
+  postAuthorGrants           PostAuthor[]           @relation("PostAuthorCreatedBy")
+  commenter                  Commenter?
+  passwordResetTokens        PasswordResetToken[]
+  commentStatusChanges       Comment[]              @relation("CommentStatusChangedBy")
+  commentDeletions           Comment[]              @relation("CommentDeletedBy")
+  publicationEvents          PostPublicationEvent[] @relation("PublicationEventActor")
+  deletedBy                  User?                  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
+  deletedUsers               User[]                 @relation("UserDeletedBy")
+  postDeletions              Post[]                 @relation("PostDeletedBy")
+  slugHistory                UserSlugHistory[]
+  ydocSnapshots              YdocSnapshot[]         @relation("YdocSnapshotUser")
+  docAuthors                 DocAuthor[]
+  docUpdates                 Doc[]                  @relation("DocUpdatedBy")
+  docDeletions               Doc[]                  @relation("DocDeletedBy")
+  fileOwners                 FileOwner[]
+  fileUpdates                StoredFile[]           @relation("FileUpdatedBy")
+  fileDeletions              StoredFile[]           @relation("FileDeletedBy")
+  annotations                Annotation[]           @relation("AnnotationAuthor")
+  annotationDeletions        Annotation[]           @relation("AnnotationDeletedBy")
+  docLinks                   DocLink[]
+  docLinkGroups              DocLinkGroup[]
+  invites                    UserInvite[]           @relation("UserInviteRecipient")
+  invitesSent                UserInvite[]           @relation("UserInviteSender")
+  keywordsCreated            Keyword[]              @relation("KeywordCreatedBy")
+  keywordDeletions           Keyword[]              @relation("KeywordDeletedBy")
+  keywordAssignments         KeywordAssignment[]    @relation("KeywordAssignedBy")
+  keywordAssignmentDeletions KeywordAssignment[]    @relation("KeywordAssignmentDeletedBy")
 
   @@map("user")
 }
@@ -334,6 +352,7 @@ model Post {
   publicationEvents PostPublicationEvent[] @relation("PostEvents")
   deletedBy         User?                  @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory       PostSlugHistory[]
+  keywordAnchors    KeywordAnchor[]        @relation("KeywordAnchorPost")
   activity          PostActivity?
   metrics           PostMetrics?
 
@@ -460,12 +479,18 @@ model PostPublicationEvent {
   actorId        String?              @map("actor_id") // null = system
   createdAt      DateTime             @default(now()) @map("created_at")
 
-  post         Post            @relation("PostEvents", fields: [postId], references: [id], onDelete: Cascade)
-  doc          Doc?            @relation(fields: [docId], references: [id], onDelete: SetNull)
-  ydocSnapshot YdocSnapshot?   @relation(fields: [ydocSnapshotId], references: [id], onDelete: SetNull)
-  actor        User?           @relation("PublicationEventActor", fields: [actorId], references: [id])
-  livePostOf   Post?           @relation("PublishEvent")
-  threads      CommentThread[]
+  post           Post            @relation("PostEvents", fields: [postId], references: [id], onDelete: Cascade)
+  doc            Doc?            @relation(fields: [docId], references: [id], onDelete: SetNull)
+  ydocSnapshot   YdocSnapshot?   @relation(fields: [ydocSnapshotId], references: [id], onDelete: SetNull)
+  actor          User?           @relation("PublicationEventActor", fields: [actorId], references: [id])
+  livePostOf     Post?           @relation("PublishEvent")
+  threads        CommentThread[]
+  // PLAN.md §20b — the post-side coordinate axis, and inert in PR 1: nothing
+  // writes keyword_anchor.anchored_event_id until POST_RANGE exists (§20i).
+  // SetNull rather than Cascade, matching how every other pointer *into* this
+  // log is treated: an event is provenance, and losing the pointer costs the
+  // ability to re-derive, not the row that pointed at it.
+  keywordAnchors KeywordAnchor[] @relation("KeywordAnchorEvent")
 
   @@index([postId, createdAt])
   @@map("post_publication_event")
@@ -603,6 +628,7 @@ model Doc {
   posts             Post[]
   publicationEvents PostPublicationEvent[]
   metrics           DocMetrics?
+  keywordAnchors    KeywordAnchor[]        @relation("KeywordAnchorDoc")
 
   @@map("doc")
 }
@@ -796,12 +822,16 @@ model Annotation {
   // column is the display copy, this blob is the anchor.
   pdfTarget          Json?            @map("pdf_target")
 
-  doc       Doc?         @relation(fields: [docId], references: [id], onDelete: Cascade)
-  file      StoredFile?  @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  parent    Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
-  replies   Annotation[] @relation("AnnotationReplies")
-  user      User         @relation("AnnotationAuthor", fields: [userId], references: [id])
-  deletedBy User?        @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
+  doc            Doc?            @relation(fields: [docId], references: [id], onDelete: Cascade)
+  file           StoredFile?     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  parent         Annotation?     @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
+  replies        Annotation[]    @relation("AnnotationReplies")
+  user           User            @relation("AnnotationAuthor", fields: [userId], references: [id])
+  deletedBy      User?           @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
+  // PLAN.md §20b — anchors *pointing at* this annotation's body, not anchors
+  // belonging to it. The annotation's own anchor columns stay where they are
+  // until PR 2 moves them onto `annotation_anchor` (§20e).
+  keywordAnchors KeywordAnchor[] @relation("KeywordAnchorAnnotation")
 
   @@index([docId])
   @@index([fileId])
@@ -927,13 +957,14 @@ model StoredFile {
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")
 
-  owners      FileOwner[]
-  slugHistory FileSlugHistory[]
-  pageTexts   FilePageText[]
-  annotations Annotation[]
-  metrics     FileMetrics?
-  updatedBy   User?             @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
-  deletedBy   User?             @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
+  owners         FileOwner[]
+  slugHistory    FileSlugHistory[]
+  pageTexts      FilePageText[]
+  annotations    Annotation[]
+  metrics        FileMetrics?
+  keywordAnchors KeywordAnchor[]   @relation("KeywordAnchorFile")
+  updatedBy      User?             @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
+  deletedBy      User?             @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
 
   @@index([sha256])
   @@map("file")
@@ -1024,6 +1055,224 @@ model FilePageText {
 
   @@id([fileId, pageIndex, textVersion])
   @@map("file_page_text")
+}
+
+// PLAN.md §20c — a term in the site's vocabulary.
+//
+// Deliberately *not* a row in one W3C-style annotation supertable with a
+// motivation column (§20a's first rejected shape): `Annotation` carries a live
+// ydoc body, caches, an `AnnotationStatus` lifecycle and a raise/notify flow,
+// and a keyword assignment has none of those. Folding them together would be
+// the false unification this schema keeps warning about, and every consumer
+// would pay a branch on `motivation` forever.
+//
+// Soft-deletes with the ordinary deletedByUserId+deletedAt pair, and **joins
+// the $extends filter** in src/lib/prisma.ts — it has an admin table
+// (`/keywords`) that needs `prismaIncludingDeleted` to offer restore, exactly
+// as `storedFile` does. Its assignments deliberately do not; see below.
+//
+// Uniqueness is on two columns, only one of which Prisma can express: `slug`
+// carries @unique here, and a hand-written `CREATE UNIQUE INDEX … ON keyword
+// (lower(name))` lives in the migration. Slug uniqueness alone would admit
+// "Epistemology" and "epistemology" as distinct terms, which is a vocabulary
+// bug rather than a display one.
+//
+// Slugs are their own namespace (`/keyword/*`), like docs' and files' —
+// `keywordSlugInUse` checks `keyword` only. **No slug history table in v1**: a
+// renamed keyword breaks inbound `/keyword/…` links until it earns one (§20i).
+model Keyword {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  description String?
+
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  deletedByUserId String?   @map("deleted_by_user_id")
+  deletedAt       DateTime? @map("deleted_at")
+
+  createdBy   User                @relation("KeywordCreatedBy", fields: [createdById], references: [id])
+  deletedBy   User?               @relation("KeywordDeletedBy", fields: [deletedByUserId], references: [id])
+  assignments KeywordAssignment[]
+  metrics     KeywordMetrics?
+
+  @@index([createdById])
+  @@map("keyword")
+}
+
+// PLAN.md §20c — **one act of tagging**, the `doc_link_group` analogue.
+//
+// It owns 1..n anchors and carries who tagged and when. Tagging a whole doc is
+// one assignment with one selector-less anchor; PR 2's part-tagging adds
+// anchors, not concepts. That is the whole reason this row exists rather than
+// the keyword pointing at objects directly: one act that spans three passages
+// is one record, undone as one.
+//
+// **Does not join the $extends soft-delete filter** in src/lib/prisma.ts, and
+// filters `deletedAt` by hand instead. Stated here so the divergence reads as
+// chosen rather than missed (the §14b convention): that filter intercepts
+// top-level operations only, and an assignment is read almost exclusively
+// through a `keyword_anchor` include, which it cannot reach. A model that
+// joined the filter and was then read nested would look protected and not be.
+model KeywordAssignment {
+  id        String   @id @default(cuid())
+  keywordId String   @map("keyword_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  deletedByUserId String?   @map("deleted_by_user_id")
+  deletedAt       DateTime? @map("deleted_at")
+
+  keyword   Keyword         @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  user      User            @relation("KeywordAssignedBy", fields: [userId], references: [id])
+  deletedBy User?           @relation("KeywordAssignmentDeletedBy", fields: [deletedByUserId], references: [id])
+  anchors   KeywordAnchor[]
+
+  @@index([keywordId])
+  @@index([userId])
+  @@map("keyword_assignment")
+}
+
+// PLAN.md §20b — one targeted part of one act of tagging, and the canonical
+// statement of **the anchor row shape**. `AnnotationAnchor` (PR 2, §20e)
+// repeats it verbatim below its own owner FK.
+//
+// **The object side is an exclusive arc of four nullable FKs**, exactly one
+// non-null, enforced by a hand-written `CHECK (num_nonnulls(…) = 1)` in the
+// migration (Prisma has no CHECK DSL — the `doc_link` and `add_file_model`
+// convention). Real FKs rather than a `(type, id)` pair because this schema
+// leans hard on cascades: deleting a doc must take every anchor pointing at
+// it. The cost, accepted with eyes open, is that **a new targetable kind is a
+// migration** — one column, one index, one CHECK edit, per anchor table.
+// §20i names the signals that would justify the supertype pivot instead, and
+// why not now. src/lib/anchors/target.ts is this arc's TypeScript face.
+//
+// **A keyword part-anchor uses the column mechanism on every surface,
+// including the doc editor.** That is a deliberate, recorded deviation from
+// §13o's "an annotation's mechanism follows the surface" — read `annotation`'s
+// comment above, which describes the opposite rule, and §14a for why the two
+// comments sit next to each other saying different things. A keyword mark
+// would add a second mark type to the collaborative doc grammar, a second
+// `excludes: ""` growth path and a second decoration-splitting layer, for
+// ranges lighter-weight than discussion threads. The zero-rows convention
+// keeps the door open if editor-applied keyword ranges ever prove to need
+// mark-grade drift immunity (§20f).
+//
+// **Anchors have no soft delete of their own.** Removing one part of a
+// multi-part act deletes that row; removing the act soft-deletes the
+// assignment. An anchor is a part of a record, not a record.
+model KeywordAnchor {
+  id           String @id @default(cuid())
+  assignmentId String @map("assignment_id")
+
+  // The object arc — exactly one non-null.
+  docId              String? @map("doc_id")
+  postId             String? @map("post_id")
+  fileId             String? @map("file_id")
+  targetAnnotationId String? @map("target_annotation_id")
+
+  // The part selector — **all null means the whole object**, which is every
+  // row PR 1 writes. A second hand-written CHECK keeps them null *together*:
+  //   (selector_kind IS NULL) = (anchor_from IS NULL AND anchor_to IS NULL AND selector IS NULL)
+  // — which is what makes shipping these columns before their writer honest,
+  // the way §14b's num_nonnulls(mark_id, mark) made `mark_id` honest. The
+  // CHECK is permanent either way.
+  //
+  // `quoted_text` is **derived server-side against the state the stamp names**,
+  // never stored as the client sent it (§13o's trust rule). Replay the target
+  // to `ydoc_update_id` and textBetween(anchor_from, anchor_to) *is*
+  // `quoted_text`, by construction — which is what lets one integrity checker
+  // cover every anchor row in the system (§20g).
+  //
+  // `selector` is opaque jsonb — PDF quads/quote/position/textVersion,
+  // before/after context, blocks, `v` — the same trade `pdf_target` and
+  // `doc_link.mark` already make. Nothing in Postgres sorts or filters inside
+  // it, so no GIN index. Every read goes through `parseSelector`
+  // (src/lib/anchors/selector.ts), never a cast.
+  selectorKind SelectorKind? @map("selector_kind")
+  anchorFrom   Int?          @map("anchor_from")
+  anchorTo     Int?          @map("anchor_to")
+  quotedText   String        @default("") @map("quoted_text")
+  selector     Json?
+
+  // The coordinate system the offsets are expressed in.
+  //
+  // `ydoc_update_id` **names the log of this row's own target**: a row
+  // targeting a doc stamps the doc's log, a row targeting an annotation body
+  // stamps that annotation's log. This is §13p's overload dissolved — the
+  // stamp and the target live on the same row, so they cannot be chosen
+  // independently. No relation column, same plain-BigInt precedent as
+  // `Annotation.ydocUpdateId` and `YdocSnapshot.lastYdocUpdateId`.
+  //
+  // `anchored_event_id` is the **post-side** axis — publication events, not
+  // ydoc updates (§5). It ships inert: nullable, no writer, on the §13p
+  // `proseJsonUpdateId` precedent, because building the seam costs one column
+  // now rather than a migration under live data later. `POST_RANGE` is
+  // deferred with it (§20i).
+  ydocUpdateId    BigInt? @map("ydoc_update_id")
+  anchoredEventId String? @map("anchored_event_id")
+
+  /// Position within a multi-part act. Every PR 1 row is 0.
+  partOrder Int @default(0) @map("part_order")
+
+  assignment       KeywordAssignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  doc              Doc?                  @relation("KeywordAnchorDoc", fields: [docId], references: [id], onDelete: Cascade)
+  post             Post?                 @relation("KeywordAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
+  file             StoredFile?           @relation("KeywordAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
+  targetAnnotation Annotation?           @relation("KeywordAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
+  anchoredEvent    PostPublicationEvent? @relation("KeywordAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
+
+  @@index([assignmentId])
+  @@index([docId])
+  @@index([postId])
+  @@index([fileId])
+  @@index([targetAnnotationId])
+  @@map("keyword_anchor")
+}
+
+// PLAN.md §20d — `/keywords`' derived columns, as a view keyed 1:1 on
+// keyword.id, so Prisma sees a to-one relation and every column sorts in
+// Postgres rather than in JS (§16e).
+//
+// **Built by grouping keyword_assignment/keyword_anchor, never `FROM
+// keyword`** — doc_metrics' double-scan lesson (§16l): a view that reads its
+// own base table gets that table scanned twice on every sort through it,
+// because Prisma emits a LEFT JOIN for a to-one relation ordering and
+// Postgres 18's self-join elimination only collapses INNER joins.
+//
+// The cost is the same harmless semantic difference doc_metrics carries: a
+// keyword nobody has used has **no row here at all**, so the relation is the
+// optional part. The page reads `keyword.metrics?.x ?? 0` and sorts with the
+// relation ordered `nulls: "last"`.
+//
+// Every aggregate here is cheap (`count(*) FILTER`, `max`), so nothing needs
+// the trigger-maintained-column treatment `Doc.proseJsonLength` gets — the
+// §16l view-vs-column rule decides that, not taste, and it decides "view"
+// until sorting by usage measures badly at real scale.
+view KeywordMetrics {
+  keywordId       String    @unique @map("keyword_id")
+  // **Every count is nullable, and that is load-bearing rather than pedantic.**
+  // A view's columns carry no NOT NULL (DocMetrics says the same), but the
+  // NULLs that actually arrive here come from the LEFT JOIN rather than from
+  // the view: a keyword nobody has used has no row at all, so Prisma's join
+  // back to it yields NULLs in every column. Declared non-null, Prisma rejects
+  // the `{ sort, nulls }` orderBy form — and plain `DESC` puts those NULLs
+  // *first* in Postgres, so sorting /keywords by most-used would lead with the
+  // terms nobody has ever applied. Nullable is what lets the page say
+  // `nulls: "last"` and mean it. (file_metrics is declared the other way and
+  // gets away with it only because every file has an owner, so its FULL OUTER
+  // JOIN always emits a row.)
+  assignmentCount Int?      @map("assignment_count")
+  docCount        Int?      @map("doc_count")
+  postCount       Int?      @map("post_count")
+  fileCount       Int?      @map("file_count")
+  annotationCount Int?      @map("annotation_count")
+  lastUsedAt      DateTime? @map("last_used_at")
+
+  keyword Keyword @relation(fields: [keywordId], references: [id])
+
+  @@map("keyword_metrics")
 }
 
 // A generic, standalone Yjs document store — PLAN.md §11. Keyed purely by the

@@ -94,6 +94,16 @@ export default function SiteHeader() {
             </summary>
             <div className={styles.dropdownPanel}>
               <Link href="/annotations">Annotations</Link>
+              {/* PLAN.md §20d — beside Annotations rather than as a top-level
+                  entry. Both are cross-cutting views *over* content rather
+                  than content itself, and both are gated on canManageDocs, so
+                  the group is already the right shape. A keyword spans posts
+                  and files too, which argues for top level — but a nav entry
+                  earns top level by how often it is the destination, and a
+                  vocabulary table is somewhere you go to curate, not to read.
+                  AUTHORIZED users, who may apply keywords but not open this
+                  table, reach terms through the chips instead. */}
+              <Link href="/keywords">Keywords</Link>
             </div>
           </details>
         </span>

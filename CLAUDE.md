@@ -17,7 +17,7 @@ to re-derive the decision from.
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
-| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. |
+| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Keywords have their own section: minting vs. applying vs. curating. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Creating a doc from Markdown — file import and paste box. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
@@ -66,6 +66,24 @@ before changing the behavior it describes.
   thing being removed, not an implementation detail. `resolveAnnotationRanges`
   (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
   jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
+- **One anchor row shape, per-consumer tables.** `keyword_anchor` (and, from PR 2,
+  `annotation_anchor`) share a column shape by *compiler*, not by convention:
+  `src/lib/anchors/` holds the target arc as a discriminated union, `parseSelector`, and the
+  capture/resolve pair, and every consumer goes through it. The object side is four nullable
+  FKs with exactly one non-null, enforced by a hand-written CHECK — so **a new targetable kind
+  is a migration** (one column, one index, one CHECK edit, per anchor table), which is the
+  cost §20a took on deliberately over an `anchor` table with an owner arc or one W3C-style
+  supertable. What is unified is the *envelope*, never the selector: each mechanism keeps its
+  own physics, and COLLAB.md's "there is no universal anchor" is unchanged. `src/lib/anchors/`
+  is split browser-safe (`index.ts`) vs. server (`capture.ts`) the way `avatar-url.ts` and
+  `avatar.ts` are — don't barrel them together. PLAN.md §20a, §20b.
+- **A keyword chip is exactly as private as the thing it is on, structurally.** `KeywordChips`
+  renders only from inside a page that has already run its own gate and takes a resolved
+  `AnchorTarget` rather than a slug, so it can't be mounted on an ungated surface; it
+  deliberately adds no second check. It also reads **no session** — `/[slug]` is statically
+  generated, and a dynamic API there throws at build (§12f) — so everything viewer-shaped
+  lives in a client island that asks the server on open. `/keyword/[slug]` is three per-type
+  queries wearing three existing predicates, never one UNION. PLAN.md §20d, docs/PERMISSIONS.md.
 - **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,
   stale by seconds while anyone is typing. Fine as the *seed* for which cards start in the
   rail, and nothing more.
@@ -173,6 +191,13 @@ running `prisma migrate dev` on anything unusual.
 
 - Typecheck `npx tsc --noEmit`; lint `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
   `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
+- `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
+  dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
+  and the right home for exactly one kind of thing — pure functions whose *rejection surface*
+  is the point (`src/lib/anchors/`'s `parseSelector`, the target arc, `resolveAnchorInDoc`'s
+  three tiers). A table of malformed inputs is not something to drive a browser through, and
+  the e2e suite's proof for a pure refactor is a two-minute production build. Don't reach for
+  it for anything involving Prisma, a ydoc or the DOM — those have better tools here already.
 - `npm run e2e` — the full Playwright suite against a **production build** on `WEB_PORT + 2`
   (builds first; ~2min of suite proper once warm). Prod rather than `next dev` because two
   historical flake classes were dev-server bugs a production build compiles out — the whole
@@ -208,8 +233,8 @@ running `prisma migrate dev` on anything unusual.
   unprompted**; Conventions below says when it comes up instead. Screenshots time out in this
   environment, `ref` clicks can silently no-op, and all tabs share one cookie jar:
   [docs/BROWSER_PANE.md](docs/BROWSER_PANE.md).
-- Throwaway users/docs/posts/comments/files/ydocs, the durable `@sample.invalid` seed, and the
-  two one-shot importers: [docs/TEST_DATA.md](docs/TEST_DATA.md). Each script's own header
+- Throwaway users/docs/posts/comments/files/keywords/ydocs, the durable `@sample.invalid` seed,
+  and the two one-shot importers: [docs/TEST_DATA.md](docs/TEST_DATA.md). Each script's own header
   documents its flags. Defaults: `test-admin@example.com`, role `ADMIN`, password
   `testpass123`.
 - Measuring editing latency, stress-testing at realistic size, and A/B-ing against history:
