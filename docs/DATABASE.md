@@ -64,6 +64,65 @@ Every composite index this schema relies on — `post_publication_event(post_id,
 `post_author` and `doc_author`'s composite primary keys — is already queried on its leading
 column.
 
+## Keeping `schema.prisma` format-clean
+
+`npx prisma format` is the canonical formatter and there is no `--check` flag for it (checked
+against `prisma@7.9`). Two things follow, and the second is the one that bites.
+
+**It rewrites the whole file, not the block you edited.** Alignment is per-block and derived
+from the longest field name in that block, so adding a field longer than the current longest
+legitimately realigns everything around it — that part is a real consequence of your change
+and reads fine in a diff. What does not read fine is what happens on a file that has *drifted*:
+every misalignment anyone ever left behind gets swept into whatever commit happened to run the
+formatter. That is not hypothetical. It is how this file came to be reformatted as a side
+effect of adding the keyword models (PLAN.md §20), where 249 of 399 changed lines were
+whitespace and `git blame` on them pointed at a commit about keywords. The reformat was split
+back out into its own commit, which is where the rule below comes from.
+
+**So: run it every time, and read the diff before staging.** The file is clean, so a run is a
+no-op plus your own block's realignment. Anything it touches *outside* your edit is
+pre-existing drift — commit that separately. Once, on its own, with a message saying so.
+
+### The LF pin
+
+`.gitattributes` carries `*.prisma text eol=lf`. `prisma format` always writes LF, and this is
+a Windows checkout with `core.autocrlf=true`, so without the pin every single run rewrote all
+~1100 lines from CRLF to LF — which made "did the formatter change anything?" a question no
+byte comparison could answer, and printed `LF will be replaced by CRLF` on every `git add` of
+the schema.
+
+**Nothing in the repository changed when that line was added, and nothing will.** Git already
+stored this file as LF: `core.autocrlf` converts CRLF→LF on the way *in*, so the blob, the
+index and every past commit are already LF. The pin only stops the conversion happening on the
+way back *out*, at checkout. Verified by A/B: re-checkout without the rule gives 1088 CR bytes,
+with it gives 0, and `git diff` is empty either way.
+
+Extending the pin to the rest of the tree is a separate decision with a real cost and no
+urgency: the repo is overwhelmingly CRLF in the working tree (216 `.ts`, 109 `.tsx`, 54 `.css`
+at the time of writing), so `* text=auto eol=lf` would rewrite every one of those files on disk
+— again with zero repository diff, but touching every mtime and every open editor buffer. The
+schema earns the pin on its own because a *tool* rewrites it; nothing rewrites the `.tsx` files
+but you.
+
+### The check
+
+`npm run check:schema` fails if the schema isn't what the formatter would produce, and
+`npx tsx scripts/check-schema-format.ts --write` fixes it. Three things about that script are
+deliberate and worth not "simplifying" away:
+
+- **It never leaves the file modified.** A check that silently rewrites your working tree is a
+  formatter wearing a check's name, and this whole section exists because unasked-for rewrites
+  are the hazard.
+- **It does not use `prisma format && git diff --exit-code prisma/schema.prisma`.** That
+  one-liner conflates "the schema is misformatted" with "the schema has uncommitted edits" —
+  and the second is true exactly when you are mid-schema-change, which is precisely when you
+  would run the check. It would cry wolf on every real use and be ignored within a week. The
+  script compares the file against its own formatted self and says nothing about git.
+- **It still normalises line endings before comparing**, even with the pin above. The pin
+  governs what *git* writes at checkout; it does not stop an editor, a script, or a
+  copy-paste from putting CRLF back, and a check that reports a difference on content identical
+  line for line is a check that gets ignored.
+
 ## Adding a required column to a table that already has rows
 
 `prisma migrate dev` normally prompts interactively for how to backfill existing rows, which

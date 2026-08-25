@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check:schema": "tsx scripts/check-schema-format.ts",
     "collab": "tsx watch server/collab.ts",
     "collab:prod": "tsx server/collab.ts",
     "dev:all": "concurrently -n web,collab -c blue,magenta \"npm:dev\" \"npm:collab\"",
