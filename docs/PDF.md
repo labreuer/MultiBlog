@@ -454,63 +454,90 @@ Pinning `pdfjs-dist` fixes the API you call. It does nothing about the second co
 is to the *JavaScript runtime* pdfjs assumes underneath it — and pdfjs tracks new built-ins
 closely, while WebKit ships them late or not at all. **Baseline: Safari 26 / iPadOS 18.4+.**
 
-Three gaps have broken the viewer in Safari over time. Only one is still patched, and the
-split between them is the useful part:
+**Two built-ins are patched**, both in `src/lib/pdfjs-webkit-polyfills.ts`. They fail for
+different reasons, and the difference decides when each may be removed:
 
-- **`ReadableStream.prototype[Symbol.asyncIterator]`** — the standing one, patched in
-  `src/lib/pdfjs-webkit-polyfills.ts`. WebKit has *never* implemented it, in either realm, and
-  Safari 26.6.1 still does not. `getTextContent` iterates its stream with
-  `for await (const value of readableStream)`, so **every text extraction throws** — which on
-  this surface means a selection is captured and then dies before it can be published or
-  become an annotation.
-- **The `Iterator` global** and **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** —
-  both were *version lag*, both shipped in Safari 18.4, and both patches were **deleted** when
-  the baseline was set. The `Iterator` one is worth remembering anyway for its shape: pdfjs
-  polyfills `Iterator.prototype.join` itself, guarded by
-  `typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
-  So on an engine without it, the failure was a `ReferenceError` thrown out of pdfjs's
-  top-level module body before a line of its own logic ran: the viewer never mounted, and the
-  stack pointed at our `import * as pdfjs`. A `typeof` guard protects the property, not the
-  object it hangs off.
+- **`ReadableStream.prototype[Symbol.asyncIterator]`** — WebKit has *never* implemented it, in
+  either realm, and does not at Safari 26.6.1. `getTextContent` iterates its stream with
+  `for await (const value of readableStream)`, so without the patch **every text extraction
+  throws** — which on this surface means a selection is captured and then dies before it can
+  be published or become an annotation. This one does not age out.
+- **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** — absent below **Safari 26.2**
+  ([MDN compatibility data](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/getOrInsert#browser_compatibility):
+  Safari 26.2, Safari on iOS mirroring it, Chrome 145, Firefox 144, Node 26 — Baseline "newly
+  available" since February 2026), which is *inside* the baseline's own range, so every
+  supported engine below that lacks them. pdfjs calls `.getOrInsertComputed` 68 times and
+  `.getOrInsert` twice, across `pdf.mjs`, `pdf.worker.mjs` and `pdf.sandbox.mjs`, and guards
+  none of them — so the first `Map` either realm touches throws
+  (`this.#methodPromises.getOrInsertComputed is not a function`), which is why the symptom is
+  a viewer that mounts its toolbar and renders **no document at all** rather than one that
+  fails partway. This patch may be deleted once the baseline's floor rises past 26.2 —
+  measured, per the rule below, not assumed.
 
-**Measured baseline — Safari 26.6.1 (2026-08-22), both realms.** `npx tsx scripts/probe-engine.ts`
-serves one page that runs the checks on the main thread *and* inside a module worker, opens it
-in a browser, and prints both columns. Re-run it on a `pdfjs-dist` bump rather than re-deriving
-this from memory — and **delete** a patch the same way, on a measurement rather than an
-assumption that everyone has updated.
+A third gap, the **`Iterator` global**, needs no patch: it shipped in Safari 18.4, the
+baseline's floor. Its shape is worth keeping in mind anyway, because it is the one that
+defeats a `typeof` guard. pdfjs polyfills `Iterator.prototype.join` itself, guarded by
+`typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
+On an engine without it the failure is a `ReferenceError` out of pdfjs's top-level module body
+before a line of its own logic runs: the viewer never mounts, and the stack points at our
+`import * as pdfjs`. **A `typeof` guard protects the property, not the object it hangs off.**
 
-Only the **Safari 26.6.1** column is measured. The *shipped in* column is from release notes
-and is orientation, not evidence.
+**Measure the floor, not the ceiling.** `npx tsx scripts/probe-engine.ts` runs the checks on
+the main thread *and* inside a module worker of whatever browser is on this machine, and
+prints both columns. `npx tsx scripts/remote-console.ts` runs the same list on a **real
+phone** over the LAN, which is the only way to reach the bottom of the supported range —
+Playwright's WebKit will not launch on macOS 14, and Appium needs an Xcode newer than macOS
+14 accepts, so neither fence moves without a newer Mac (docs/ENV.md).
 
-| built-in | Safari 26.6.1 | shipped in |
-| --- | --- | --- |
-| `ReadableStream.prototype[Symbol.asyncIterator]` (and `.values`) | **absent** | never |
-| `Iterator` global | present | 18.4 |
-| `Map.prototype.getOrInsert` / `.getOrInsertComputed` | present | 18.4 |
-| `URL.parse` / `URL.canParse` | present | 18.0 / 17.0 |
-| `Response.prototype.bytes`, `Uint8Array.fromBase64` / `.toBase64` / `.toHex` | present | 18.0 / 26 |
-| `Float16Array`, `Promise.withResolvers`, `AbortSignal.any`, `Set.prototype.intersection` | present | 26 / 17.4 |
+So the rule has two halves, and the second is the one that is easy to miss: **add a patch on a
+failure, remove one on a measurement — and take that measurement on the oldest engine the
+baseline claims to support, not the newest one to hand.** A measurement from a single current
+desktop Safari says nothing about an 18.x device, and is blind to this class in exactly the way
+a chromium-only suite is. Delete a patch on the strength of one and the viewer breaks
+completely — toolbar, no document — for every reader on an in-baseline iPhone or iPad.
 
-`Iterator.prototype.join` is *itself* still absent on 26.6.1 — pdfjs's own polyfill for it
-fires and works, now that the global its guard dereferences exists. The guard was the bug,
-never the method. `Float16Array` and `Uint8Array.fromBase64` are worth a glance in that table
-too: pdfjs feature-detects the first (`FeatureTest.isFloat16ArraySupported`, falling back to
-`Float32Array`) and does **not** guard the second, which it uses for XFA images and signature
-decompression — a narrow path, but the one to suspect if the baseline ever moves backwards.
+Two columns below are measured, on the dates given. The *shipped in* column is orientation and
+not evidence — prefer MDN's compatibility data, which is where the 26.2 above comes from.
+
+| built-in | Safari 26.6.1 (2026-08-22) | iOS 18.6.2 (2026-08-25) | shipped in |
+| --- | --- | --- | --- |
+| `ReadableStream.prototype[Symbol.asyncIterator]` (and `.values`) | **absent** | **absent** | never |
+| `Map.prototype.getOrInsert` / `.getOrInsertComputed` | present | **absent** | 26.2 |
+| `Iterator` global | present | present | 18.4 |
+| `Iterator.prototype.join` | absent | absent | — (pdfjs polyfills it itself) |
+| `URL.parse` / `URL.canParse` | present | present | 18.0 / 17.0 |
+| `Response.prototype.bytes`, `Uint8Array.fromBase64` / `.toBase64` / `.toHex` | present | present | 18.0 / 26 |
+| `Float16Array`, `Promise.withResolvers`, `AbortSignal.any`, `Set.prototype.intersection` | present | present | 26 / 17.4 |
+| `DecompressionStream` | present | present | — |
+
+iPhone 13 Pro, iOS 18.6.2, Safari 18.6, both realms — every absence above is absent in the
+worker too, which is what makes the source-string arrangement load-bearing rather than
+tidy. Note what the iOS column settles in the *other* direction: `Float16Array` and
+`Uint8Array.fromBase64` were the rows to suspect if the baseline ever moved backwards, and
+they are present at 18.6.2. The row that broke was the one already believed settled.
+
+`Iterator.prototype.join` is absent in both measured columns, and that is fine: pdfjs's own
+polyfill for it fires and works, now that the global its guard dereferences exists. The guard
+was the bug, never the method. Of the rest, `Float16Array` is feature-detected by pdfjs
+(`FeatureTest.isFloat16ArraySupported`, falling back to `Float32Array`), while
+`Uint8Array.fromBase64` is **not** guarded — it is used for XFA images and signature
+decompression, a narrow path, and the one to watch if the baseline's floor ever drops below
+Safari 18.
 
 Four things generalise beyond the specific patches:
 
 1. **A patch has to reach both realms, and may need to land before pdfjs's module body rather
    than merely before its first call.** pdfjs runs a worker, which is its own realm and
-   inherits nothing from the main thread's prototypes — and the surviving gap is used on both
-   sides (the worker iterates a `DecompressionStream`'s readable side the same way). There is
+   inherits nothing from the main thread's prototypes — and both surviving gaps are used on
+   both sides (the worker iterates a `DecompressionStream`'s readable side the same way, and
+   was measured missing the `Map` upsert methods too). There is
    no hook to run code before the vendor worker's own top-level body, so `ensurePdfWorker`
    builds the worker script as a Blob, which is why the polyfill is exported as a *source
    string* and not merely executed. **The obvious spelling of that Blob is wrong.**
    `<polyfill source>` followed by `import "<vendor>"` puts the patches in the module's *own
    body*, and static imports are hoisted, so the vendor worker script runs before them. The
-   surviving patch tolerates that (it is needed before pdfjs's first call, and lands in the
-   gap); the deleted `Iterator` one did not, because it was dereferenced during evaluation.
+   surviving patches tolerate that (each is needed before pdfjs's first call, and lands in
+   the gap); the deleted `Iterator` one did not, because it was dereferenced during evaluation.
    The polyfill is therefore its own Blob module imported ahead of the vendor's — kept that
    way after `Iterator` left, because the inlined form was right by luck rather than design.
 2. **The failure never names the missing built-in.** WebKit reports the async-iterator gap as
@@ -538,12 +565,34 @@ answers "what does the engine have", the real Safari answers "does the viewer wo
 neither substitutes for the other: a bump can start using a built-in the probe has never
 heard of.
 
-The same asymmetry applies to input. Text selection on iPadOS emits no `pointerup` — a
-long-press hands the touch to WebKit's selection gesture recognizer, which fires
-`pointercancel`, and the selection handles are native views above the page that emit no
-pointer events at all. Anything reading `window.getSelection()` must settle on
-`selectionchange` (debounced) as well, or it will work on every desktop and silently do
-nothing on a tablet.
+The same asymmetry applies to input. Anything reading `window.getSelection()` must settle on
+`selectionchange` (debounced) as well as `pointerup`, and the reason is **shift+arrow
+selection, which emits no pointer event on any platform.**
+
+Touch does *not* need that fallback, which is worth stating plainly because the opposite is
+widely believed and was written here once. Measured 2026-08-25 with
+`scripts/remote-console.ts`, instrumenting 18 event types in the page:
+
+| gesture | iPhone 13 Pro, iOS 18.6.2 | iPad, iPadOS 18.6 |
+| --- | --- | --- |
+| long-press to select | `pointerdown` → `selectionchange` (+660ms) → **`pointerup`** (+1375ms) | `pointerdown` → `selectionchange` (+741ms) → **`pointerup`** (+1155ms) |
+| dragging a selection handle | 74 `pointermove` over 113px, 36 `selectionchange`, **`pointerup`** | 76 `pointermove` over 290px, 36 `selectionchange`, **`pointerup`** |
+| `pointercancel` in either | **0** | **0** |
+
+The selection handles are not opaque to the page: every `pointermove` carries live coordinates
+and targets the text-layer element under the touch.
+
+`pointercancel` belongs to **scrolling**, not selection — 5 of 5 scroll gestures produce one,
+pointer events stopping at the cancel while `touchmove` keeps flowing. That is ordinary
+behaviour on every touch platform, and it is the thing to expect when a gesture turns out to
+be a scroll rather than a drag.
+
+So both triggers are live on touch, and both earn their place. **`pointerup` fires on every
+touch selection** — do not remove that branch as desktop-only; it is what settles a selection
+promptly instead of after the debounce. **`selectionchange` fires long before it** (~660-740ms
+into a long-press, against ~1.2-1.4s to `pointerup`) and is the only signal that reports a
+selection *growing* mid-drag, which is what the keyboard case needs and what makes overlapping
+async runs reachable — see the note just below on the generation counter.
 
 Having two triggers instead of one has a consequence worth stating before you write the
 handler: **overlapping async runs become reachable**, which a lone `pointerup` never made

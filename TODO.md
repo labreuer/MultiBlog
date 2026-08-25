@@ -40,6 +40,50 @@ are. `npm run e2e` and `web-prod` cannot catch either, and never will:
    both per-context (`timezoneId`, `locale`), so this is a config change rather than new specs.
    Nothing today varies either, so every future instance lands in production the same way.
 
+**Measured 2026-08-25, on a real iPhone (iOS 18.6.2) via `scripts/remote-console.ts`.** The
+device was set to `Asia/Tokyo` against a `America/Los_Angeles` server — a divergence of a full
+calendar day — and 13 pages were loaded with `console.error` captured from before hydration:
+`/docs` `/files` `/posts` `/annotations` `/users` `/` `/search` `/ydoc-debug`, a post, a doc,
+both editor routes, and a post with comments. **Zero hydration errors.** The teeth are
+verifiable rather than assumed: the post page's `<time>` elements read `8/26/2026, 2:46 AM`
+where the server would have emitted `8/25/2026, 10:46 AM`.
+
+So the **date** half of this class is now empirically clean, and the reason generalises: every
+`toLocale*` on a date in a client component (`PostSnapshotScrubBar`, `DocScrubBar`,
+`YdocDebug`) renders only behind a client-side fetch, so the text is never in the SSR HTML;
+every other call site is a Server Component. That is a property of today's code, not a
+guarantee — item 2 is still what would keep it true.
+
+**Item 1 is still unverified, and there is a trap for whoever tries.** Setting the phone's
+**Region** to Germany does *not* move `navigator.language`, which stayed `en-US`; iOS keys
+`Intl` off the **Language** setting instead. With Region alone changed, `DocsTable` rendered
+`1,380` on both sides and nothing diverged. Reproducing item 1 on a device therefore means
+changing the phone's language outright — which is why the Playwright `locale` option in item 2
+is the cheaper path to it.
+
+---
+
+## Mobile layout: nav tap targets, and the PDF annotations panel covering the document
+
+**Status:** both measured 2026-08-25 on an iPhone 13 Pro (390×663 viewport) and reproduced on
+an iPad, via `scripts/remote-console.ts`. Neither is a regression; both are simply invisible to
+a suite that only ever renders at desktop widths.
+
+1. **Header nav tap targets are ~19–20px tall.** `MultiBlog`, `Posts`, `Docs`, `Users`,
+   `Files`, `Site Settings` all measure 19–20px high against Apple's 44pt guidance, on every
+   page swept. Nothing is broken — they are tappable — but they are roughly half the
+   recommended target and sit adjacent to one another in a horizontally scrolling row.
+
+2. **`/pdf/[slug]` opens the annotations panel over the document at narrow widths.** The
+   `aside` carries `panelOpen` on first load, so a phone visitor lands on a PDF page and sees
+   "Annotations" with no PDF until they find "Hide annotations". Reproduced across reloads and
+   on both devices; the iPad hits it too, because landscape is **1194px** — six pixels under
+   the 1200px threshold where the margin-notes rail engages (PLAN.md §18).
+
+Worth noting what is *not* wrong: no page overflows horizontally. `documentElement.scrollWidth`
+equals the 390px viewport everywhere, and the elements reaching 857px are inside a parent with
+`overflow-x: auto`, which is the intended scroll container.
+
 ---
 
 ## Observability of swallowed bulk-action failures

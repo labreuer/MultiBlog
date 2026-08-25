@@ -6,14 +6,21 @@ import { ADMIN_EMAIL, createTestFile, deleteTestFile, type TestFile } from "./db
 // suite: chromium has it, so every other spec exercises the one engine where
 // the bug can't happen.
 //
-// This covered three gaps once. Two of them — the `Iterator` global and the
-// TC39 Map upsert methods — were version lag, and left with their polyfills
-// when the baseline moved to Safari 26 / iPadOS 18.4+ (PLAN.md §19a for the
-// baseline itself; docs/PDF.md §10 for which gaps were measured, and when).
-// `ReadableStream`'s async iteration is the one WebKit has never implemented
-// at all, so it is the one that stays. `scripts/probe-engine.ts` is how that
-// distinction is drawn on evidence; run it before adding or removing a case
-// here.
+// This covers two gaps of the three it has covered over time, and the one that
+// left and came back is the cautionary tale. `ReadableStream`'s async
+// iteration is the one WebKit has never implemented at all, so it always
+// stays. The TC39 Map upsert methods were removed as version lag when the
+// baseline moved to Safari 26 / iPadOS 18.4+ — and restored on 2026-08-25,
+// because they land in Safari **26.2**, not 18.4, so every engine at the
+// baseline's floor lacks them: a real iPhone on iOS 18.6.2 rendered the
+// toolbar and no document. Only the `Iterator` global was correctly retired.
+//
+// The removal was made on a measurement, as the rule requires — but on Safari
+// 26.6.1, the newest engine in the range rather than the oldest. So: run
+// `scripts/probe-engine.ts` before adding or removing a case here, and for a
+// *removal* run `scripts/remote-console.ts` against a device at the baseline's
+// floor, since that is the only thing either fence lets us reach (PLAN.md §19a
+// for the baseline; docs/PDF.md §10 for what was measured, and when).
 //
 // Simulated by *deleting* the built-in before any page script runs, rather
 // than by adding a webkit project. Three reasons, in order of weight:
@@ -44,6 +51,18 @@ const DROP_STREAM_ASYNC_ITERATION = () => {
   delete ReadableStream.prototype[Symbol.asyncIterator];
   // @ts-expect-error the .values alias goes with it
   delete ReadableStream.prototype.values;
+};
+
+/**
+ * Deletes the TC39 Map upsert methods, as every WebKit below Safari 26.2 does.
+ * Measured absent on iOS 18.6.2 — inside the supported baseline — where their
+ * absence renders the viewer's toolbar and no document at all.
+ */
+const DROP_MAP_UPSERT = () => {
+  // @ts-expect-error removing a built-in on purpose
+  delete Map.prototype.getOrInsert;
+  // @ts-expect-error same
+  delete Map.prototype.getOrInsertComputed;
 };
 
 async function makeFile(): Promise<TestFile> {
@@ -89,6 +108,7 @@ async function selectViaSelectionChange(page: import("@playwright/test").Page, n
 test.describe("pdf viewer without WebKit's missing built-ins", () => {
   for (const [name, drop] of [
     ["ReadableStream async iteration", DROP_STREAM_ASYNC_ITERATION],
+    ["Map upsert methods", DROP_MAP_UPSERT],
   ] as const) {
     test(`a selection still anchors without ${name}`, async ({ page }) => {
       await page.addInitScript(drop);

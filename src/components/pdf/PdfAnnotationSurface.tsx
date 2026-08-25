@@ -340,16 +340,25 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries }
     //  - **`selectionchange`, debounced** is the one that fires for everything
     //    else. It is deliberately *not* the sole trigger on desktop — it emits
     //    per character of drag, and the capture behind it is a worker round
-    //    trip — but pointerup alone cannot see:
-    //      * an iPadOS long-press, where WebKit's selection gesture recognizer
-    //        claims the touch and the DOM gets `pointercancel` instead;
-    //      * a drag of iOS's selection handles, which are native views above
-    //        the page and emit no pointer events on `document` at all;
-    //      * a keyboard selection (shift+arrows), which emits none either.
-    //    Before this, none of the three published anything, so an iPad reader's
-    //    selection was invisible to everyone else and raised no Annotate
-    //    popover for the reader themselves. AnnotationNode's handleBodySelect
-    //    settles on a timer for the same reason.
+    //    trip — but pointerup alone cannot see a **keyboard selection
+    //    (shift+arrows), which emits no pointer event on any platform.** That
+    //    is the permanent reason this trigger exists.
+    //
+    //    Two further reasons used to be listed here — an iPadOS long-press
+    //    supposedly yielding `pointercancel` rather than `pointerup`, and the
+    //    selection handles supposedly being native views emitting nothing on
+    //    `document`. Both were **measured false** on 2026-08-25 against a real
+    //    iPhone 13 Pro (iOS 18.6.2) and iPad (iPadOS 18.6), by instrumenting 18
+    //    event types in the page via scripts/remote-console.ts: a long-press
+    //    ends in `pointerup` (+1375ms / +1155ms), and dragging a handle emits
+    //    74-76 `pointermove`s with live coordinates, `pointercancel` never once.
+    //    The cancel is real for *scrolling*, which is where the observation
+    //    seems to have come from. docs/PDF.md §10 has the traces.
+    //
+    //    **So do not delete the pointerup branch as unreachable on touch** —
+    //    it fires there, and it is what makes a touch selection settle
+    //    promptly rather than after the debounce. AnnotationNode's
+    //    handleBodySelect settles on a timer for the same reason.
     //
     // They share one timer rather than running independently, so a mouse drag
     // costs the same single capture it always did: the per-pixel
