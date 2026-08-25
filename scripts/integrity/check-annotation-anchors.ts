@@ -53,8 +53,33 @@
 //      *somewhere* — one that never landed is document-level, which is a
 //      state the system renders rather than a fault.
 //
-// Cost: one replay per distinct (ydoc, stamp) pair, memoised — several
-// annotations on one doc at one stamp cost one materialisation, not one each.
+// AND, SINCE PLAN.md §20g, THE SAME INVARIANT OVER `tag_anchor`.
+//
+// The replay invariant is a **per-row property**, not an annotation-specific
+// one: "materialize the state the stamp names; textBetween(anchor_from,
+// anchor_to) must equal quoted_text" is true of any anchor row whose selector
+// is a range into a ydoc, whoever owns it. So one checker walks every anchor
+// table rather than one per consumer family, which is the point of the shared
+// row shape (§20b) — a second copy of this logic would be a second thing to
+// keep in step with §13o's trust rule.
+//
+// In PR 1 that walk is **trivially green**: every tag_anchor row is
+// whole-object (all four part columns null, guaranteed by
+// tag_anchor_selector_columns_check), so there is no quote to verify and
+// the walk reports zero rows checked. That is not a reason to defer it. The
+// walk existing now means PR 2's first part-anchor is verified the moment it
+// is written, rather than a checker being retrofitted to data already in the
+// database — and the "0 of N" line is itself the assertion that PR 1 kept its
+// tie-off promise.
+//
+// The script keeps its name. §20g says this one generalizes, and renaming a
+// script referenced from three READMEs and CLAUDE.md to gain accuracy it will
+// lose again at the next consumer family is churn; the header is where the
+// scope is stated.
+//
+// Cost: one replay per distinct (ydoc, stamp) pair, memoised across *both*
+// walks — several annotations and tag anchors on one doc at one stamp cost
+// one materialisation between them, not one each.
 
 import "dotenv/config";
 import * as Y from "yjs";
@@ -64,6 +89,7 @@ import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
 import { materializeYdocAt } from "../../src/lib/ydoc-snapshot";
 import { ydocIdForDoc, ydocIdForAnnotation } from "../../src/lib/ydoc-names";
 import { requireDocAnnotationId } from "../../src/lib/annotation-container";
+import { targetFromColumns } from "../../src/lib/anchors";
 import {
   annotationContentExtensions,
   docContentExtensions,
@@ -74,7 +100,10 @@ import {
 import type { JSONContent } from "@tiptap/core";
 
 type Level = "error" | "warn";
-type Finding = { level: Level; annotationId: string; check: string; detail: string };
+// `subject` rather than `annotationId` since §20g: a finding now names either
+// an annotation or a tag_anchor row, and the row id is what a reader needs
+// either way.
+type Finding = { level: Level; subject: string; check: string; detail: string };
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -83,8 +112,8 @@ function arg(name: string): string | undefined {
 
 const verbose = process.argv.includes("--verbose");
 const findings: Finding[] = [];
-const report = (level: Level, annotationId: string, check: string, detail: string) =>
-  findings.push({ level, annotationId, check, detail });
+const report = (level: Level, subject: string, check: string, detail: string) =>
+  findings.push({ level, subject, check, detail });
 
 // Several annotations routinely share a doc and a stamp — a burst of replies
 // posted against one state, or two readers annotating the same paragraph
@@ -113,6 +142,118 @@ function nodeAt(ydocId: string, throughUpdateId: bigint, isAnnotationBody: boole
 
   materialised.set(key, pending);
   return pending;
+}
+
+// PLAN.md §20g — the tag side of the same invariant.
+//
+// Only `DOC_RANGE` rows have anything to verify. A whole-object row (every
+// part column null) makes no claim about any text, and a `PDF_TEXT` row is
+// checked against stored page text rather than a replay — a different question
+// with a different failure mode, which is why check-pdf-anchors.ts exists as a
+// sibling rather than a branch in here (the same split §19 already made).
+async function checkTagAnchors(docFilter: string | undefined): Promise<{ checked: number; total: number }> {
+  const rows = await prisma.tagAnchor.findMany({
+    where: docFilter ? { docId: docFilter } : {},
+    select: {
+      id: true,
+      docId: true,
+      postId: true,
+      fileId: true,
+      targetAnnotationId: true,
+      selectorKind: true,
+      anchorFrom: true,
+      anchorTo: true,
+      quotedText: true,
+      ydocUpdateId: true,
+    },
+  });
+
+  let checked = 0;
+
+  for (const row of rows) {
+    if (row.selectorKind !== "DOC_RANGE") continue;
+    checked++;
+
+    // §20b — the stamp names the log of *this row's own target*, which is what
+    // dissolves §13p's overload: a row targeting a doc stamps the doc's log, a
+    // row targeting an annotation body stamps that annotation's. Deriving the
+    // ydoc from the arc rather than from the owner is the whole difference.
+    const target = targetFromColumns(row);
+    if (!target) {
+      // Unreachable while tag_anchor_one_target_check holds — which
+      // scripts/integrity/check-tag-constraints.ts is what proves.
+      report("error", row.id, "target-arc", "no single target: the object arc is malformed");
+      continue;
+    }
+    if (target.kind === "post" || target.kind === "file") {
+      report(
+        "error",
+        row.id,
+        "target-mechanism",
+        `a DOC_RANGE selector on a ${target.kind} has no ydoc to replay — a post is a snapshot (POST_RANGE, §20i) ` +
+          `and a file's anchor is a PDF_TEXT blob (§19)`,
+      );
+      continue;
+    }
+
+    if (row.ydocUpdateId === null) {
+      report("warn", row.id, "stamp-present", "part-anchored but no ydoc_update_id to resolve the offsets against");
+      continue;
+    }
+
+    const isAnnotationBody = target.kind === "annotation";
+    const targetYdocId = isAnnotationBody ? ydocIdForAnnotation(target.id) : ydocIdForDoc(target.id);
+
+    const stamp = await prisma.ydocUpdate.findUnique({
+      where: { id: row.ydocUpdateId },
+      select: { ydocId: true },
+    });
+    if (!stamp) {
+      report("error", row.id, "stamp-exists", `ydoc_update ${row.ydocUpdateId} does not exist`);
+      continue;
+    }
+    if (stamp.ydocId !== targetYdocId) {
+      report("error", row.id, "stamp-exists", `stamped against ${stamp.ydocId} but its anchor targets ${targetYdocId}`);
+      continue;
+    }
+
+    const node = await nodeAt(targetYdocId, row.ydocUpdateId, isAnnotationBody);
+    if (!node) {
+      report("error", row.id, "quote-at-stamp", `couldn't replay ${targetYdocId} to ${row.ydocUpdateId}`);
+      continue;
+    }
+    if (row.anchorFrom === null || row.anchorTo === null) {
+      // The CHECK admits a DOC_RANGE row with a selector blob and no offsets
+      // (it is a group-wide equality, not a per-kind rule — see
+      // check-tag-constraints.ts's KNOWN_RESIDUALS). Nothing writes one;
+      // if something ever does, this is where it surfaces.
+      report("error", row.id, "quote-at-stamp", "DOC_RANGE with no offsets to verify");
+      continue;
+    }
+    if (row.anchorTo > node.content.size) {
+      report(
+        "error",
+        row.id,
+        "quote-at-stamp",
+        `anchor [${row.anchorFrom}, ${row.anchorTo}) runs past the document's size (${node.content.size}) at that stamp`,
+      );
+      continue;
+    }
+
+    const actual = node.textBetween(row.anchorFrom, row.anchorTo, " ");
+    if (actual !== row.quotedText) {
+      report(
+        "error",
+        row.id,
+        "quote-at-stamp",
+        `stored ${JSON.stringify(row.quotedText)} but the document at that stamp reads ${JSON.stringify(actual)}`,
+      );
+    } else if (verbose) {
+      console.log(`  ok  ${row.id}  ${JSON.stringify(row.quotedText.slice(0, 40))} @ ${row.ydocUpdateId}`);
+    }
+  }
+
+  return { checked, total: rows.length };
 }
 
 async function main() {
@@ -262,15 +403,18 @@ async function main() {
     }
   }
 
+  const tagWalk = await checkTagAnchors(docId);
+
   const errors = findings.filter((f) => f.level === "error");
   const warns = findings.filter((f) => f.level === "warn");
 
   console.log(
-    `\nchecked ${checked} anchored annotation(s) of ${annotations.length} total — ` +
+    `\nchecked ${checked} anchored annotation(s) of ${annotations.length} total, and ` +
+      `${tagWalk.checked} part-anchored tag row(s) of ${tagWalk.total} total — ` +
       `${errors.length} error(s), ${warns.length} warning(s)`,
   );
   for (const f of [...errors, ...warns]) {
-    console.log(`  ${f.level.toUpperCase().padEnd(5)} ${f.annotationId}  ${f.check}: ${f.detail}`);
+    console.log(`  ${f.level.toUpperCase().padEnd(5)} ${f.subject}  ${f.check}: ${f.detail}`);
   }
 
   await prisma.$disconnect();

@@ -108,3 +108,29 @@ npx tsx scripts/integrity/check-pdf-anchors.ts [--file <idOrSlug>] [--verbose]
 
 Unlike the other three it does **not** need to run after the ydoc check: it touches no ydoc
 at all, so its findings are never downstream of a bad blob.
+
+## `check-tag-constraints.ts` — the odd one out, again
+
+Every other script here verifies **stored data**. This one verifies the **schema**: that
+`add_tags`' two hand-written CHECK constraints and its `lower(name)` unique index actually
+reject what their comments claim, by attempting each violation inside a transaction it always
+rolls back.
+
+It exists because nothing else can reach them. `npx tsc --noEmit` sees TypeScript, and every
+violation is well-typed. `npm run e2e` drives the UI, and the UI never attempts one — the
+server actions build valid rows by construction, so a suite that only walks the happy path
+cannot tell a live constraint from a comment describing one. And a migration that silently
+failed to add a constraint (docs/DATABASE.md's edit-an-applied-migration recipe, a restore
+from a dump taken before it) leaves a database that behaves correctly right up until
+something writes a bad row.
+
+Run it after either of docs/DATABASE.md's two migration recipes. It also prints its own
+**known residuals** — what the specified CHECK deliberately does not catch — because "which
+constraint covers this?" is the question it exists to answer, and an honest answer includes
+the gaps.
+
+`check-annotation-anchors.ts` also walks `tag_anchor` since PLAN.md §20g: the replay
+invariant is a per-row property, so one checker covers every anchor table rather than one per
+consumer family. In PR 1 that walk reports `0 of 0` — every tag anchor is whole-object and
+makes no claim about any text — and the zero is itself the assertion that PR 1 kept its
+tie-off promise.

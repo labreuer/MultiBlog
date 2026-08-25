@@ -6,6 +6,7 @@ import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
 import { getFileAnnotationsAsThreads } from "@/lib/annotation-data";
 import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
+import TagChips from "@/components/tags/TagChips";
 import styles from "./page.module.css";
 
 // PLAN.md §19 — the PDF reading view.
@@ -83,5 +84,18 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
     root: entry.root,
   }));
 
-  return <PdfSurfaceClient fileId={file.id} fileUrl={fileUrl} title={file.title} entries={entries} />;
+  // PLAN.md §20d — outside PdfSurfaceClient rather than inside it. That
+  // component is a client island behind `ssr: false` (PdfViewerClient's own
+  // header says why that boundary has to exist), and a Server Component cannot
+  // be rendered from inside one — so the chips sit above the viewer, where the
+  // page is still server-rendered. Gated by this page's canUserReadFile above,
+  // exactly as the doc page's chips are gated by canUserReadDoc.
+  return (
+    <>
+      <div className={styles.tags}>
+        <TagChips target={{ kind: "file", id: file.id }} />
+      </div>
+      <PdfSurfaceClient fileId={file.id} fileUrl={fileUrl} title={file.title} entries={entries} />
+    </>
+  );
 }

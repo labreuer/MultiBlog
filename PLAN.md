@@ -6642,3 +6642,433 @@ Per-phase, and each phase is independently shippable:
 - **By hand in the browser pane** — only for what the suite can't assert: that the two 1px
   rails read well, that the viewport thumb's 20px threshold behaves at both extremes, and
   that a rectangle selection over a figure produces a sensible highlight.
+
+## 20. Tags, and the anchor envelope they share with annotations
+
+Tags are new: a vocabulary of terms (`tag`), applied to content by acts of tagging
+(`tag_assignment`), where one act may target **the whole of, or parts of** a doc, a post,
+an uploaded file, or an annotation's body — several parts at once, the way one
+`doc_link_group` already spans several `doc_link` rows. Annotations then adopt the same
+shape: their anchor columns move off the `annotation` row into `annotation_anchor` rows, one
+per targeted part, which is what makes a multi-part annotation possible at all.
+
+**What is being unified is the envelope, not the selector.** COLLAB.md's conclusion stands:
+the selector mechanism follows the target's mutability and the writer's rights, and there is
+no universal anchor. What generalizes is only "this row names one target — an object, and
+optionally a part of it." Every mechanism keeps its own physics: the doc editor's mark stays
+a mark (§12i/§13o), a reading-view range stays offsets-plus-stamp (§13o), a PDF anchor stays
+a measured-once blob (§19), a post part-anchor would still remap at publish (§5).
+
+Ships as **two PRs**: PR 1 is the shared library plus whole-object tags, complete and
+tied off on its own; PR 2 is part-targeting plus the annotation migration. §20h has the
+split.
+
+### 20a. One row-shape, per-consumer tables — and the shapes rejected
+
+Three shapes were considered and two rejected:
+
+- **One W3C-style annotation supertable** (everything is an "annotation" with a motivation
+  column; a tag is an annotation whose body is a tag) — rejected. `Annotation` carries a
+  live ydoc body, caches, an `AnnotationStatus` lifecycle, and a raise/notify flow; a tag
+  assignment has none of those. Folding them together would be the false unification this
+  document keeps warning about, and every consumer would pay branches on `motivation`
+  forever.
+- **One shared `anchor` table with an owner arc** (`annotation_id?`/`assignment_id?`/…) —
+  rejected. Two exclusive arcs in one table, every new consumer widening it, cascades running
+  through CHECK-guarded nullable FKs, and Prisma include gymnastics on the owner side. The
+  queries that would benefit ("everything anchored here, regardless of kind") are not hot
+  paths — every surface fetches annotations and tag chips separately because it renders
+  them differently.
+- **Per-consumer anchor tables sharing one column shape** — chosen. `annotation_anchor` and
+  `tag_anchor` each carry a plain required owner FK with a clean cascade, and the same
+  target/selector/stamp columns by convention. The precedent is the four slug-history tables:
+  same shape, separate tables, because Prisma has no polymorphic relations — except here the
+  shape is also held together by one TS type and one capture/resolve library
+  (`src/lib/anchors/`, extracted from `annotation-anchors.ts` /
+  `annotation-anchor-capture.ts`), so the sharing is enforced by the compiler rather than by
+  review.
+
+The **object side** is an exclusive arc of four nullable FKs — `doc_id`, `post_id`,
+`file_id`, `target_annotation_id` — exactly one non-null, enforced by a hand-written
+`CHECK (num_nonnulls(…) = 1)` (no CHECK DSL in Prisma; the `doc_link` and `add_file_model`
+convention). Real FKs rather than a `(type, id)` pair because this schema leans hard on
+cascades: deleting a doc must take every anchor pointing at it. The cost, accepted with eyes
+open: **a new targetable kind is a migration** — one column, one index, one CHECK edit, per
+anchor table. That stays cheap while the arc lives only in these leaf tables; §20i names the
+signals that would justify the supertype pivot, and why not now.
+
+### 20b. The anchor row shape
+
+Shown once, on `TagAnchor`; `AnnotationAnchor` (§20e) repeats it verbatim below its own
+owner FK.
+
+```
+model TagAnchor {
+  id           String  @id @default(cuid())
+  assignmentId String  @map("assignment_id")
+
+  // Object arc — exactly one non-null (hand-written CHECK); all Cascade.
+  docId              String? @map("doc_id")
+  postId             String? @map("post_id")
+  fileId             String? @map("file_id")
+  targetAnnotationId String? @map("target_annotation_id")
+
+  // Part selector — all null ⇒ the whole object.
+  selectorKind SelectorKind? @map("selector_kind")   // DOC_RANGE | PDF_TEXT
+  anchorFrom   Int?          @map("anchor_from")
+  anchorTo     Int?          @map("anchor_to")
+  quotedText   String        @default("") @map("quoted_text")
+  selector     Json?
+
+  // Version stamps — the coordinate system the offsets are expressed in.
+  ydocUpdateId    BigInt? @map("ydoc_update_id")
+  anchoredEventId String? @map("anchored_event_id")
+
+  partOrder Int @default(0) @map("part_order")
+
+  // relations: assignment (Cascade), doc/post/file/targetAnnotation (all
+  // Cascade), anchoredEvent (SetNull); named @relations where a model
+  // appears twice (annotation is both an owner and a target).
+  @@index([assignmentId])
+  @@index([docId])
+  @@index([postId])
+  @@index([fileId])
+  @@index([targetAnnotationId])
+  @@map("tag_anchor")
+}
+```
+
+The rules the columns inherit, each already established elsewhere and now holding per row:
+
+- **`quoted_text` is derived server-side against the state the stamp names**, never stored
+  as the client sent it — §13o's trust rule. Replay the target to `ydoc_update_id` and
+  `textBetween(anchor_from, anchor_to)` *is* `quoted_text`, by construction, which is what
+  lets one integrity checker cover every anchor row in the system (§20g).
+- **`ydoc_update_id` names the log of the row's own target.** A row targeting a doc stamps
+  the doc's log; a row targeting an annotation body stamps that annotation's log. This is
+  §13p's overload dissolved: the stamp and the target live on the same row, so they cannot be
+  chosen independently.
+- **`anchored_event_id` is the post-side axis** — publication events, not ydoc updates
+  (§5). It ships inert: nullable, no writer, on the §13p `proseJsonUpdateId` precedent
+  (building the seam costs one column now rather than a migration under live data later).
+  `POST_RANGE` is deferred with it (§20i).
+- **`selector` is opaque jsonb** — PDF quads/quote/position/textVersion, `before`/`after`
+  context, `blocks`, `v` — the same trade `pdf_target` and `doc_link.mark` already make.
+  Nothing in Postgres sorts or filters inside it, so no GIN index.
+- A second hand-written CHECK makes shipping the part columns before their writer honest,
+  the way §14b's `num_nonnulls(mark_id, mark)` made `mark_id` honest:
+  `(selector_kind IS NULL) = (anchor_from IS NULL AND anchor_to IS NULL AND selector IS NULL)`.
+  PR 1 writes only whole-object rows; the CHECK is permanent either way.
+
+Selector kinds are the enum `SelectorKind { DOC_RANGE, PDF_TEXT }`, both writers arriving in
+PR 2. `POST_RANGE` is added when its feature is (`ALTER TYPE … ADD VALUE` is cheap; an enum
+value with no writer for several sections is not).
+
+### 20c. Tag schema (PR 1)
+
+```
+model Tag {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  description String?
+  createdById String  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  deletedByUserId String?   @map("deleted_by_user_id")
+  deletedAt       DateTime? @map("deleted_at")
+  @@map("tag")
+}
+
+model TagAssignment {
+  id        String   @id @default(cuid())
+  tagId String   @map("tag_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  deletedByUserId String?   @map("deleted_by_user_id")
+  deletedAt       DateTime? @map("deleted_at")
+  // tag (Cascade), user; anchors TagAnchor[]
+  @@index([tagId])
+  @@index([userId])
+  @@map("tag_assignment")
+}
+```
+
+- **An assignment is one act of tagging** — the `doc_link_group` analogue. It owns 1..n
+  anchors and carries who tagged and when. Tagging a whole doc is one assignment with one
+  selector-less anchor; PR 2's part-tagging adds anchors, not concepts.
+- **Anchors have no soft delete of their own.** Removing one part of a multi-part act
+  deletes that row; removing the act soft-deletes the assignment. An anchor is a part of a
+  record, not a record.
+- **Soft-delete wiring:** `tag` joins the `$extends` filter in `src/lib/prisma.ts` (it
+  has an admin table that needs `prismaIncludingDeleted` to offer restore, same as
+  `storedFile`). `tag_assignment` does **not** join it and filters by hand — the filter
+  intercepts top-level operations only, and assignments are read almost exclusively through
+  `tag_anchor` includes, which it cannot reach. Stating that here so the divergence reads
+  as chosen, not missed (the §14b convention).
+- **Hand-written DDL** in the migration, with comments citing this section: both CHECKs from
+  §20b, and `CREATE UNIQUE INDEX … ON tag (lower(name))` — slug uniqueness alone would
+  admit "Epistemology" and "epistemology" as distinct terms.
+- **Slugs are their own namespace** (`/tag/*`), like docs' and files': `tagSlugInUse`
+  checks `tag` only. No slug history table in v1 — a renamed tag breaks inbound
+  `/tag/…` links until it earns one (§20i).
+- **Whole-object dedup is app-level find-first** in the action (same tag, same object,
+  same user → no second assignment). The DB-enforced version needs `tag_id` denormalized
+  onto the anchor for a partial unique index; deferred until concurrent tagging is a thing
+  that happens (§20i).
+
+### 20d. Tag surfaces (PR 1)
+
+- **Chips on the object pages** — `/doc/[slug]`, post pages, `/pdf/[slug]`: one indexed
+  `tag_anchor` query by container, joined through live assignments to terms.
+  Server-rendered; gated by the page's own access check, so a PRIVATE doc's chips are as
+  private as the doc.
+- **`/tag/[slug]`** — the browse page, as **per-type sections** (docs tagged K, posts
+  tagged K, files tagged K), each an indexed, SQL-paginated query wearing that type's
+  existing permission predicate (`publishedPostWhere`, doc visibility + `DocAuthor`,
+  `file-authz`). Deliberately not an interleaved single timeline: that is a UNION view that
+  would re-implement four permission models in one place — the easiest leak to write and the
+  hardest to see. Counts shown here come from the filtered queries, never from the view
+  below, for the same reason.
+- **`/tags`** — an admin table through the §16 kit: `tags-query.ts` over
+  `table-query.ts`, plus a `tag_metrics` view keyed 1:1 on `tag_id` (assignment
+  count, per-type object counts, last used) so every column sorts. Built by grouping the
+  assignment/anchor tables, **never `FROM tag`** — `doc_metrics`' double-scan lesson
+  (§16l). All cheap aggregates (`count(*) FILTER`, `max`); nothing here is
+  expensive-to-compute, so no trigger-maintained column unless sorting by usage measures
+  badly at real scale (the §16l view-vs-column rule decides, not taste).
+- **Permissions** get their own rows in docs/PERMISSIONS.md before the actions land.
+  Proposed defaults, confirmed there rather than here: applying or removing your own tag on
+  a surface follows the permission to annotate that surface; creating a new term follows the
+  same; renaming, merging, and deleting terms is ADMIN/EDITOR. Open question §20j-1.
+- **Cache:** tagging revalidates the tagged object's own path; `/tag/[slug]` renders
+  dynamic (it is permission-shaped per viewer, so ISR would be wrong anyway). CACHING.md gets
+  a line when built.
+- **Tie-off:** at the end of PR 1 the part columns exist, constrained, and unwritten; no UI
+  mentions parts. The feature is complete as "tag whole things": chips, browse, admin,
+  fixtures that create and delete their own throwaway tags (docs/TEST_DATA.md gets the
+  script), and e2e specs for tag → chip → browse → untag.
+
+### 20e. Anchors become rows on the annotation side (PR 2)
+
+`annotation_anchor` — owner FK `annotation_id` (Cascade) plus the §20b shape — and a
+migration of the existing columns onto it, expand-and-contract:
+
+1. **Add + backfill.** Every annotation with a column anchor gets one `DOC_RANGE` row
+   (offsets, quote, stamp copied); every `pdf_target` becomes one `PDF_TEXT` row with the
+   blob as `selector` (renderer-neutral as before, docs/PDF.md invariant 3 untouched); a
+   reply's row targets its parent (`target_annotation_id`), which is where its stamp now
+   lives. Mark-anchored and document-level annotations get **zero rows** — see below.
+2. **Readers switch** behind `resolveAnnotationRanges`, which stays the one function that
+   answers "where is this annotation" for every surface (§13o). `/annotations`' Quote column
+   reads the first anchor row (`part_order`), with a count badge when there are more.
+3. **`postAnnotation` switches** to writing rows — taking a list of ranges, verifying each
+   independently against the stamped state (§13o's rule per part).
+4. **Drop the old columns** — a second migration in the same PR, gated on
+   `check-annotation-anchors` reporting parity between columns and rows on the real
+   database. A true expand-and-contract would put the drop a deploy behind the backfill;
+   with one operator and an integrity script standing where the soak would be, same-PR is
+   accepted. Recorded as a deviation.
+
+**Zero anchor rows means "look for the editor's mark, else document-level"** — today's
+`anchor_from IS NULL` semantics lifted to the row count. Deliberately no `DOC_MARK` row
+kind: a DB row saying "there is a mark" duplicates, and can drift from, information the
+ydoc holds exactly — a mark deleted with its text would orphan the row. Absence of rows is
+the record, and the §12h degradation story is unchanged.
+
+**`annotation.doc_id`/`file_id` stay.** They are the container — permissions, cascades,
+`/annotations`, and the rail fetch all key on them. Anchor rows add precision inside the
+container; v1 enforces target-equals-container (roots) and target-equals-parent (replies)
+in `postAnnotation`, not in the DB, leaving cross-container annotation a future decision
+(§20i) rather than a present hazard.
+
+**The stamp un-overload, and its backfill.** With coordinate stamps on anchor rows,
+`Annotation.ydocUpdateId` shrinks back to §13n's original meaning — which doc state the
+author was looking at, driving the "at this revision" control. New anchored replies stamp
+both: the doc's log on the annotation row, the parent's log on the anchor row. Existing
+anchored replies hold a parent-log value the annotation-level column can no longer honestly
+mean, so backfill sets it **null** there — "unknown," the §13q convention, hiding the
+control for exactly the rows where it currently points a doc scrubber at a foreign log
+(§13p's accepted cost, now retired).
+
+### 20f. Multi-part semantics (PR 2)
+
+- **Column-mechanism multi-part** is several `DOC_RANGE`/`PDF_TEXT` rows under one owner,
+  ordered by `part_order`. Parts verify independently at capture: a part the stamped state
+  cannot confirm is not stored (the client is told), and an annotation whose every part
+  fails degrades to document-level — zero rows, exactly like a lost mark.
+- **Mark-mechanism multi-part** costs no schema at all — the same mark id at several
+  discontiguous ranges — but `collectAnnotationMarkRanges` currently collapses a split mark
+  to first-through-last, and must instead return segments (coalescing adjacent runs,
+  preserving gaps). `resolveAnnotationRanges`' consumers move from "a range" to "ranges";
+  the rail packs a card at its first attached part and the jump affordance cycles through
+  the rest.
+- **Tag part-anchors use the column mechanism on every surface, including the doc
+  editor.** This is a deliberate, recorded deviation from §13o's "mechanism follows the
+  surface": a tag mark would add a second mark type to the collaborative doc grammar,
+  a second `excludes: ""` growth path, and a second decoration-splitting layer, for ranges
+  lighter-weight than discussion threads. The zero-rows convention keeps the door open if
+  editor-applied tag ranges ever prove to need mark-grade drift immunity. The schema
+  comment on `tag_anchor` says this out loud, adjacent to `annotation`'s comment
+  describing the opposite — §14a's rule.
+- **Part-tags join the rail** by feeding the same plugin state and per-transaction resolve
+  pass as annotation ranges — preserving `annotation-marks.ts`' "one pass for every id"
+  rule, so twenty tag ranges cost what twenty more annotations would, bounded by §13o's
+  tiering.
+
+### 20g. Performance and integrity
+
+- Every hot query is an indexed FK lookup on tables sized like `annotation`. The doc
+  reading page adds one batched `include` (anchor rows on the annotations it already
+  fetches) and one `tag_anchor` query by container — constant query count, no N+1.
+- No new per-keystroke O(document × text) surface: resolution stays client-side and tiered
+  (map → windowed search → one global scan, §13o), shared by both families in one pass.
+- Writes are one transaction: owner row plus N anchor rows.
+- Indexes are the plain per-column set in §20b; partial (`WHERE doc_id IS NOT NULL`)
+  variants are a later, hand-written upgrade if these tables ever get large enough to care.
+- `scripts/integrity/check-annotation-anchors.ts` generalizes: the replay invariant
+  ("materialize the state the stamp names; `textBetween` must equal `quoted_text`") is a
+  per-row property, so one checker walks `annotation_anchor` and `tag_anchor` alike —
+  PR 1 adds the walk (trivially green with only whole-object rows), PR 2 makes it earn its
+  keep, and it is the parity gate for §20e step 4.
+
+### 20h. Build order — two PRs
+
+**PR 1 — the shared layer, and whole-object tags.**
+
+1. Extract `src/lib/anchors/`: the anchor TS type (target arc as a discriminated union,
+   selector kinds), `parseSelector` (the `parseDocLinkMark` convention — every jsonb read
+   goes through a parse, never a cast), and the capture/resolve functions refactored out of
+   `annotation-anchor-capture.ts`/`annotation-anchors.ts`. Pure refactor; annotations
+   unchanged; the e2e suite is the proof.
+2. Migration: `tag`, `tag_assignment`, `tag_anchor` (§20b/§20c), with the
+   hand-written CHECKs, `lower(name)` unique index, and arc indexes.
+3. `tag_metrics` view migration + schema `view` block (§16e caveats apply verbatim).
+4. PERMISSIONS.md rows; server actions: create term, tag object (find-first dedup), untag,
+   admin rename/delete.
+5. Surfaces: chips on the three object pages; `/tag/[slug]` per-type sections;
+   `/tags` through the kit.
+6. Tie-off: e2e specs (tag → chip → browse → untag; `/tags` sort through the view);
+   throwaway-tag script in docs/TEST_DATA.md; integrity walk from §20g. Part columns
+   present, constrained, unwritten.
+
+§20k records what PR 1 actually shipped — only the places it deviates from, or decides
+something left open by, the sections above.
+
+**PR 2 — part-targeting, and the annotation migration.**
+
+7. Tag part-capture on the reading views (columns + stamp, §20f), rail integration.
+8. `annotation_anchor` + backfill script (§20e steps 1–2); readers behind
+   `resolveAnnotationRanges`; `/annotations` Quote column off rows.
+9. `postAnnotation` writes rows; multi-part capture UI; per-part verify.
+10. `collectAnnotationMarkRanges` returns segments; rail packs first-part, jump cycles.
+11. Integrity parity run on the real database, then the column-drop migration (§20e
+    step 4) and the §20e stamp backfill.
+12. e2e: multi-part annotation (create three parts, cards resolve, jump cycles); anchored
+    reply still resolves against its parent; PDF annotation round-trips through its
+    `PDF_TEXT` row.
+
+### 20i. Deferred, with reasons
+
+- **`doc_link` onto the shape.** `doc_link_group` ≈ assignment, `doc_link` ≈ anchor plus
+  role/color; compatible, and nothing in §14 requires the move. Migrating it buys
+  uniformity, not capability — do it if the shared library makes §14d's resolve path
+  cheaper to maintain, not before.
+- **Cross-container anchors.** Structurally ready (the arc doesn't care), semantically
+  not: visibility across mixed-permission targets needs a PERMISSIONS.md decision first —
+  conjunctive (visible only if every target is) is the safe default when it comes up.
+- **`POST_RANGE`.** Honest only once part-anchors join `comment_thread`'s publish-time
+  remap (§5); until then a post is whole-object-only. `anchored_event_id` ships inert so
+  this is a feature, not a migration.
+- **Targets that are mutable but unlogged** — `Comment.body`, `contributorBlurb`. No log
+  means no stamp axis, so the replay invariant is unbuildable and offsets into them would
+  be text-search-and-hope (COLLAB.md strategy 4's fragility, stored). If they become
+  targets, they get **whole-object anchors only** until they gain a log or a snapshot
+  discipline. This is the rule that keeps the envelope honest as kinds multiply.
+- **Tag slug history; DB-enforced whole-object dedup; partial arc indexes.** Each a
+  small, known upgrade with a named trigger condition above.
+- **The supertype pivot.** If targetable kinds push past the high single digits, or a
+  third-plus consumer family lands, or a feature needs "any object" pervasively (a
+  cross-type activity feed, global search), the classic answer is an `object(id, kind)`
+  supertype every targetable row joins 1:1, collapsing each anchor table's arc to one FK.
+  Not now: at four kinds it is backfill, two-step creates, and rerouted delete paths for
+  no present gain. The current design quarantines the arc in the anchor tables and the one
+  TS union, which is precisely what keeps that future rewrite small if it ever earns
+  itself.
+
+### 20j. Open questions
+
+1. **Who may mint terms?** The §20d proposal ties term creation to the annotate
+   permission, which means AUTHORIZED users grow the vocabulary. If curation matters more
+   than friction, restrict creation to AUTHOR+ and let AUTHORIZED users only apply
+   existing terms. PERMISSIONS.md decides.
+2. **Merge semantics.** Renaming a term is an UPDATE; merging two terms means re-pointing
+   assignments and deduping collisions per object. Admin-only either way; the merge action
+   can wait for the first real duplicate pair.
+3. **Does `/tag/[slug]` paginate per section or cap-with-link?** Per-section
+   querystring pagination matches the kit's habits; a cap ("first 20, see all") reads
+   better on a mixed page. Decide when the page has real content to look at.
+
+### 20k. PR 1 as built (2026-08-24)
+
+Steps 1–6 of §20h, complete and tied off. What follows is only where the build **differs from
+or decides something left open by** the sections above; everything unmentioned went in as
+written.
+
+**The shared library split in two, browser-safe and server.** `src/lib/anchors/index.ts`
+exports the pure half (`resolveAnchorInDoc`, the target arc, `parseSelector`);
+`src/lib/anchors/capture.ts` is imported explicitly by server callers. §20h said "extract
+`src/lib/anchors/`" and did not say this, but a single barrel would have dragged PrismaClient
+into every client bundle wanting `resolveAnchorInDoc` — `annotation-highlight-extension.ts`
+imports it and ships to the browser. The `avatar.ts`/`avatar-url.ts` precedent, applied.
+`captureAnnotationAnchor` became `captureAnchorInYdoc`: it was never annotation-specific.
+
+**A unit-test runner arrived with it.** `npm run test:unit` — `node --import tsx --test` over
+`src/**/*.test.ts`, no new dependency. §20h calls step 1 a pure refactor whose proof is the
+e2e suite; that proof is a two-minute production build, and the three resolve tiers and
+`parseSelector`'s rejection surface are tables of inputs rather than things to drive a browser
+through. 19 cases, sub-second. CLAUDE.md says when to reach for it and when not to.
+
+**A schema-level integrity script, `check-tag-constraints.ts`.** §20g's replay walk covers
+stored data; nothing covered the *DDL*. It attempts each violation in a rolled-back
+transaction and asserts Postgres refuses it. It earned itself immediately: it caught that
+§20b's stated CHECK — `(selector_kind IS NULL) = (anchor_from IS NULL AND anchor_to IS NULL
+AND selector IS NULL)` — is a **group-wide equality, not a per-kind rule**, so a `DOC_RANGE`
+row with offsets and no `selector` blob is legal. That is correct and load-bearing: it is
+exactly the shape §20e step 1's backfill writes, since today's annotation column anchors carry
+offsets, a quote and a stamp but no context blob. A stricter CHECK would have blocked PR 2's
+migration. The residual it leaves — `PDF_TEXT` with offsets and no blob — is printed by the
+script rather than buried, and belongs with PR 2's writer.
+
+**`tag_metrics`' count columns are declared nullable, and it matters.** A term nobody has
+used has no view row (the `doc_metrics` semantic, §16l), so Prisma's LEFT JOIN yields NULL —
+and plain `DESC` puts NULLs *first* in Postgres, which made "sort by most used" lead with
+never-applied terms. Declared non-null, Prisma rejects the `{ sort, nulls }` form. Nullable
+plus `nulls: "last"` is the fix. Caught by the e2e spec, not by review. `file_metrics` is
+declared the other way and escapes this only because every file has an owner, so its FULL
+OUTER JOIN always emits a row.
+
+**Chips read no session at all**, which is not how §20d's "server-rendered" reads at first.
+`/[slug]` carries `generateStaticParams` and `revalidate = 60`, and a dynamic API there throws
+`DYNAMIC_SERVER_USAGE` at build (§12f) — so reaching for `auth()` to decide whether to draw a
+tagger would have broken the build on the page tags most need to reach. Which terms are on
+an object is the same answer for every viewer who can see it; everything viewer-shaped moved
+into a client island that calls `loadTaggerState` when opened. The build output confirms
+`/[slug]` is still `●`.
+
+**§20j-1 decided: minting a term is the same permission as applying one.** AUTHORIZED users
+grow the vocabulary. **§20j-3 decided: per-section cap, not per-section pagination** —
+`PAGE_CAP = 50` with an honest "showing the first N" line, since three `?page=` params on one
+page is a URL nobody can read for a page that has a handful of rows per type. Both recorded in
+docs/PERMISSIONS.md and `tag-browse.ts` respectively, both cheap to revisit.
+
+**One judgment call not in §20d**: tagging requires a signed-in AUTHORIZED account on *every*
+surface, posts included. "Follows the permission to annotate that surface" read literally
+would open post-tagging to COMMENTER and to signed-out visitors, since commenting is open to
+both — and a tag is curatorial where a comment is conversational. docs/PERMISSIONS.md states
+it as a judgment call rather than as a reading.
+
+**Also decided in passing**: `/tags` sets the same bar as every other admin table
+(`canManageDocs`), not `canApplyTags` — an AUTHORIZED user reaches the vocabulary through
+the tagger and `/tag/[slug]` instead of a seventh visibility tier. The four arc legs are
+all live in the action and authz layer, including annotations, though only three have chip UI;
+the fourth is one `canUserTagTarget` branch rather than a hole to fill in later.

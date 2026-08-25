@@ -20,6 +20,8 @@ import type {
   TestYdocSnapshot,
   TestDoc,
   TestFile,
+  TestTag,
+  TagFacts,
   FileAnnotationFacts,
   DocState,
   AnnotationState,
@@ -39,6 +41,8 @@ export type {
   TestYdocSnapshot,
   TestDoc,
   TestFile,
+  TestTag,
+  TagFacts,
   FileAnnotationFacts,
   DocState,
   AnnotationState,
@@ -150,6 +154,26 @@ export const createTestFile = (...args: Parameters<DbHandlers["createTestFile"]>
 
 export const deleteTestFile = (...args: Parameters<DbHandlers["deleteTestFile"]>): Promise<void> =>
   call("deleteTestFile", ...args);
+
+// PLAN.md §20 — tag fixtures. See db-worker.ts's createTestTag for why
+// containment here is by E2E_ title prefix rather than by an author email.
+export const createTestTag = (...args: Parameters<DbHandlers["createTestTag"]>): Promise<TestTag> =>
+  call("createTestTag", ...args);
+
+export const tagWithTestTag = (
+  ...args: Parameters<DbHandlers["tagWithTestTag"]>
+): Promise<{ assignmentId: string }> => call("tagWithTestTag", ...args);
+
+export const getTagFacts = (...args: Parameters<DbHandlers["getTagFacts"]>): Promise<TagFacts | null> =>
+  call("getTagFacts", ...args);
+
+export const getTagAnchorPartColumns = (
+  ...args: Parameters<DbHandlers["getTagAnchorPartColumns"]>
+): Promise<Awaited<ReturnType<DbHandlers["getTagAnchorPartColumns"]>>> =>
+  call("getTagAnchorPartColumns", ...args);
+
+export const deleteTestTag = (...args: Parameters<DbHandlers["deleteTestTag"]>): Promise<void> =>
+  call("deleteTestTag", ...args);
 
 export const getFileAnnotationFacts = (
   ...args: Parameters<DbHandlers["getFileAnnotationFacts"]>

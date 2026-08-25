@@ -59,6 +59,46 @@ export function canManageFiles(role: Role): boolean {
   return FILE_MANAGER_ROLES.includes(role);
 }
 
+// PLAN.md §20d / §20j-1 — the two tag predicates. Both are here rather
+// than in tag-authz.ts by this file's own rule: what earns a place is a
+// **client** consumer, and there are two — SiteHeader's Tags link, and the
+// tagger on every object page deciding whether to render its "+ tag" control
+// at all.
+//
+// **Applying a tag, and minting a term, are the same permission**, and it is
+// the permission to annotate a surface (canViewDocs/canViewFiles' role set).
+// That is §20d's proposal, adopted; docs/PERMISSIONS.md carries the decision
+// and the argument against the alternative. The alternative, still open as
+// §20j-1, is to let AUTHORIZED users apply only *existing* terms and restrict
+// minting to AUTHOR+ — a curation-over-friction trade that becomes a one-line
+// change here plus a branch in createTag, and is worth making the moment
+// the vocabulary shows drift rather than growth.
+//
+// Note this is a role floor, not the whole rule. Whether a particular *object*
+// may be tagged is src/lib/tag-authz.ts's canUserTagTarget, which asks
+// that object's own read gate — so an AUTHORIZED reader can tag a SHARED doc
+// and not a PRIVATE one they aren't listed on.
+export const TAG_TAGGER_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR", "AUTHORIZED"];
+
+export function canApplyTags(role: Role): boolean {
+  return TAG_TAGGER_ROLES.includes(role);
+}
+
+// Renaming and deleting a *term* — as distinct from applying one. A term is
+// shared vocabulary: renaming it rewrites every chip site-wide, and deleting
+// it retracts every tag anyone ever applied. That is an editorial act on other
+// people's work, which is why it stops at ADMIN/EDITOR however many terms a
+// given AUTHOR happens to have minted.
+//
+// Same two roles as canEditAnyPost and canEditAnySharedDoc, and deliberately
+// not defined in terms of either — the delegation would preserve exactly the
+// coupling those separations exist to break.
+export const TAG_CURATOR_ROLES: Role[] = ["ADMIN", "EDITOR"];
+
+export function canCurateTags(role: Role): boolean {
+  return TAG_CURATOR_ROLES.includes(role);
+}
+
 // Who may carry a byline on a doc or post — the option list for the /docs and
 // /posts Authors filter (src/lib/author-filter.ts), and what the two edit
 // pages already hardcode inline when deciding who's eligible to be added as a

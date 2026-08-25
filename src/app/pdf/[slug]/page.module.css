@@ -8,3 +8,16 @@
   font-family: sans-serif;
   text-align: center;
 }
+
+/* PLAN.md §20d — the tag strip, above the viewer.
+   `flex: 0 0 auto` against body's 100dvh flex column (globals.css): the viewer
+   below is `flex: 1 1 auto`, so it absorbs whatever height this doesn't take
+   and the page still fits the viewport with no second scrollbar. Without the
+   `0 0` the strip would be a shrink candidate too and could collapse when a
+   term list wraps. Horizontal padding matches the viewer's own toolbar so the
+   two rows line up at the left edge. */
+.tags {
+  flex: 0 0 auto;
+  padding: 0 0.75rem;
+  font-family: sans-serif;
+}

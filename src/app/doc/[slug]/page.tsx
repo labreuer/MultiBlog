@@ -22,6 +22,7 @@ import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { DocScrubProvider } from "@/components/DocScrubContext";
 import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
+import TagChips from "@/components/tags/TagChips";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -168,6 +169,13 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                       </div>
                     }
                   />
+                  {/* PLAN.md §20d — gated by this page's own canUserReadDoc
+                      above, which is what makes a PRIVATE doc's chips exactly
+                      as private as the doc. Below the body rather than in the
+                      byline: a tag says what the whole document is about,
+                      so it reads as a footer to the text rather than as part
+                      of its attribution. */}
+                  <TagChips target={{ kind: "doc", id: doc.id }} />
                   <AnnotationSection docId={doc.id} threads={threads} />
                 </div>
                 <MarginNotesRail className={styles.rail} />
