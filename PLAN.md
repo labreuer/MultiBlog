@@ -6589,6 +6589,46 @@ descriptions *above*, which is this document's own business.
   `"doc"`), threaded from the `AnnotationTarget` that `NewAnnotationComposer` and
   `AnnotationNode` already carry — so the two surfaces share one composer and one submit
   path, and only the labels and the option list differ.
+- **The annotation panel is a tabbed side panel, and its toolbar control is an icon** —
+  Phase 3 specified one button reading "Annotations / Hide annotations". There are three
+  things worth putting beside the viewer — the annotations, the tag chips (§20d) and a
+  pane held for presence — and the column has room for exactly one at a time.
+
+  The two questions are therefore asked in two places. The toolbar carries a **show/hide
+  icon** and says nothing about contents; the panel carries a **tab strip** — Annotations ·
+  Metadata · Collab — and says nothing about whether it is open. A fourth pane touches the
+  panel alone, and closing and reopening comes back to the tab you were on. The icon is a
+  drawn pane outline whose right section is **filled while the panel is open**, so the button
+  reports state rather than only naming its target: `aria-pressed` alone is invisible to
+  everyone not using a screen reader, and the toolbar's other glyphs (‹ › ⟳) are directional
+  or rotational with no character available for this one.
+
+  **The Collab tab ships empty**, deliberately, so the strip is the shape it will keep.
+  TODO.md carries what is likely to go in it.
+
+  Two things are load-bearing, each recorded where it is done as well as here:
+
+  - **Every pane stays mounted, and a hidden one is `display: none`.** The same fact
+    `PdfAnnotationPanel`'s header records about individual cards holds for the panel as a
+    whole: a card can be holding an open reply composer, which is a live Hocuspocus
+    connection and a DRAFT row, so changing tabs has to hide the annotations rather than
+    unmount them.
+  - **The tab strip is a sibling above the panes, never a child of one.** `.panel` is both
+    the scroller and the box `use-pdf-margin-notes.ts` measures a card's `targetTop` against
+    — put the strip inside it and every card keeps the `top` it already had while its content
+    starts lower, so the entire rail slips down by the strip's height. As a sibling the panel
+    box simply begins further down, which the hook re-measures on its next frame and gets
+    right by construction.
+
+  **Why the chips live in a pane rather than above the viewer.** On every other object page the
+  strip costs one line of a document that scrolls. This page is a full-viewport app shell
+  whose whole point is that the viewer fills the height, so a strip above it would take that
+  height from the PDF on every file, tagged or not. The pane holds only tags and is named
+  for the category anyway: the file's own facts — size, page count, uploader, visibility —
+  belong in it too, and a pane called "Tags" would have to be renamed to take them.
+  Mechanically it is a rendered Server Component handed across the `ssr: false` boundary as a
+  prop (`PdfSurfaceClient`'s header), which is the only way anything server-rendered gets
+  inside that island.
 
 ---
 
@@ -7066,6 +7106,12 @@ surface, posts included. "Follows the permission to annotate that surface" read 
 would open post-tagging to COMMENTER and to signed-out visitors, since commenting is open to
 both — and a tag is curatorial where a comment is conversational. docs/PERMISSIONS.md states
 it as a judgment call rather than as a reading.
+
+**On `/pdf/[slug]` the chips are a panel tab rather than a strip.** Not a §20d departure —
+same component, same gate, same `tagsForTarget` query, only a different container. A strip
+above the viewer would take height from the PDF permanently on a page whose layout exists to
+give the document the whole viewport, so the chips are the **Metadata** tab of the side panel
+instead. §19's deviation list carries the mechanism and the constraints it has to respect.
 
 **Also decided in passing**: `/tags` sets the same bar as every other admin table
 (`canManageDocs`), not `canApplyTags` — an AUTHORIZED user reaches the vocabulary through
