@@ -84,7 +84,10 @@ before changing the behavior it describes.
 - **Bumping `pdfjs-dist` is never routine**, and neither is deleting the test that looks
   trivial. Pinning protects the *API* pdfjs offers, not the JavaScript runtime it assumes
   underneath, and WebKit ships those built-ins late or not at all — so a bump needs
-  `npx tsx scripts/probe-engine.ts` and a real Safari, not just the chromium suite. And
+  `npx tsx scripts/probe-engine.ts` and a real Safari, not just the chromium suite. **And
+  removing a polyfill needs a measurement from the *oldest* engine the baseline claims, not
+  the newest** — `npx tsx scripts/remote-console.ts` against a real phone. One was deleted on
+  a Safari 26.6.1 reading and broke the viewer outright on an in-baseline iOS 18.6.2. And
   `e2e/pdf-assets.spec.ts` is the only guard that pdfjs's four runtime asset directories are
   served: `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image
   decoder, so no fixture-based test can cover it. docs/PDF.md §10.

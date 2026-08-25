@@ -454,18 +454,32 @@ Pinning `pdfjs-dist` fixes the API you call. It does nothing about the second co
 is to the *JavaScript runtime* pdfjs assumes underneath it — and pdfjs tracks new built-ins
 closely, while WebKit ships them late or not at all. **Baseline: Safari 26 / iPadOS 18.4+.**
 
-Three gaps have broken the viewer in Safari over time. Only one is still patched, and the
-split between them is the useful part:
+Three gaps have broken the viewer in Safari over time. **Two are still patched**, both in
+`src/lib/pdfjs-webkit-polyfills.ts`, and the split between all three is the useful part —
+one permanent, one a lag that has not aged out yet, one that genuinely has:
 
-- **`ReadableStream.prototype[Symbol.asyncIterator]`** — the standing one, patched in
-  `src/lib/pdfjs-webkit-polyfills.ts`. WebKit has *never* implemented it, in either realm, and
+- **`ReadableStream.prototype[Symbol.asyncIterator]`** — the permanent one. WebKit has
+  *never* implemented it, in either realm, and
   Safari 26.6.1 still does not. `getTextContent` iterates its stream with
   `for await (const value of readableStream)`, so **every text extraction throws** — which on
   this surface means a selection is captured and then dies before it can be published or
   become an annotation.
-- **The `Iterator` global** and **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** —
-  both were *version lag*, both shipped in Safari 18.4, and both patches were **deleted** when
-  the baseline was set. The `Iterator` one is worth remembering anyway for its shape: pdfjs
+- **`Map.prototype.getOrInsert` / `.getOrInsertComputed`** — the other standing patch, and the
+  one with a lesson attached. It was deleted when the baseline was set, on the belief that
+  these shipped in Safari 18.4 alongside the `Iterator` global, and **restored on 2026-08-25
+  after a real iPhone 13 Pro on iOS 18.6.2 — inside this very baseline — rendered a toolbar
+  and no document**, throwing
+  `this.#methodPromises.getOrInsertComputed is not a function`. pdfjs calls
+  `.getOrInsertComputed` 68 times and `.getOrInsert` twice, across `pdf.mjs`,
+  `pdf.worker.mjs` and `pdf.sandbox.mjs`, and guards none of them — so the first `Map` either
+  realm touches throws, which is why the symptom is a viewer that mounts and renders nothing
+  rather than one that fails partway. They actually land in **Safari 26.2**
+  ([MDN compatibility data](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/getOrInsert#browser_compatibility):
+  Safari 26.2, Safari on iOS mirroring it, Chrome 145, Firefox 144, Node 26 — Baseline "newly
+  available" only since February 2026). Unlike the stream patch above, this one *will*
+  legitimately age out, once the baseline's floor passes 26.2.
+- **The `Iterator` global** — *version lag*, genuinely shipped in Safari 18.4, and correctly
+  deleted when the baseline was set. Worth remembering anyway for its shape: pdfjs
   polyfills `Iterator.prototype.join` itself, guarded by
   `typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
   So on an engine without it, the failure was a `ReferenceError` thrown out of pdfjs's
@@ -473,44 +487,64 @@ split between them is the useful part:
   stack pointed at our `import * as pdfjs`. A `typeof` guard protects the property, not the
   object it hangs off.
 
-**Measured baseline — Safari 26.6.1 (2026-08-22), both realms.** `npx tsx scripts/probe-engine.ts`
-serves one page that runs the checks on the main thread *and* inside a module worker, opens it
-in a browser, and prints both columns. Re-run it on a `pdfjs-dist` bump rather than re-deriving
-this from memory — and **delete** a patch the same way, on a measurement rather than an
-assumption that everyone has updated.
+**Measure the floor, not the ceiling.** `npx tsx scripts/probe-engine.ts` runs the checks on
+the main thread *and* inside a module worker of whatever browser is on this machine, and
+prints both columns. `npx tsx scripts/remote-console.ts` runs the same list on a **real
+phone** over the LAN, which is the only way to reach the bottom of the supported range —
+Playwright's WebKit will not launch on macOS 14, and Appium needs an Xcode newer than macOS
+14 accepts, so neither fence moves without a newer Mac (docs/ENV.md).
 
-Only the **Safari 26.6.1** column is measured. The *shipped in* column is from release notes
-and is orientation, not evidence.
+That distinction is the whole reason the `Map` patch above came back. The rule was already
+"add a patch on a failure, remove one on a **measurement**, never on an assumption about who
+has updated" — and the deletion did follow it. The measurement was simply taken on Safari
+26.6.1, the *newest* engine in the baseline, and generalized to a range whose floor is
+iPadOS 18.4. A single desktop Safari is blind to this class in exactly the way a
+chromium-only suite is. So: **the measurement that licenses deleting a patch has to come
+from the oldest engine the baseline claims to support.**
 
-| built-in | Safari 26.6.1 | shipped in |
-| --- | --- | --- |
-| `ReadableStream.prototype[Symbol.asyncIterator]` (and `.values`) | **absent** | never |
-| `Iterator` global | present | 18.4 |
-| `Map.prototype.getOrInsert` / `.getOrInsertComputed` | present | 18.4 |
-| `URL.parse` / `URL.canParse` | present | 18.0 / 17.0 |
-| `Response.prototype.bytes`, `Uint8Array.fromBase64` / `.toBase64` / `.toHex` | present | 18.0 / 26 |
-| `Float16Array`, `Promise.withResolvers`, `AbortSignal.any`, `Set.prototype.intersection` | present | 26 / 17.4 |
+Two columns are measured, on the dates given. The *shipped in* column is orientation, not
+evidence — it is what was misread once already; prefer MDN's compatibility data, which is
+where the 26.2 above comes from.
 
-`Iterator.prototype.join` is *itself* still absent on 26.6.1 — pdfjs's own polyfill for it
-fires and works, now that the global its guard dereferences exists. The guard was the bug,
-never the method. `Float16Array` and `Uint8Array.fromBase64` are worth a glance in that table
-too: pdfjs feature-detects the first (`FeatureTest.isFloat16ArraySupported`, falling back to
-`Float32Array`) and does **not** guard the second, which it uses for XFA images and signature
-decompression — a narrow path, but the one to suspect if the baseline ever moves backwards.
+| built-in | Safari 26.6.1 (2026-08-22) | iOS 18.6.2 (2026-08-25) | shipped in |
+| --- | --- | --- | --- |
+| `ReadableStream.prototype[Symbol.asyncIterator]` (and `.values`) | **absent** | **absent** | never |
+| `Map.prototype.getOrInsert` / `.getOrInsertComputed` | present | **absent** | 26.2 |
+| `Iterator` global | present | present | 18.4 |
+| `Iterator.prototype.join` | absent | absent | — (pdfjs polyfills it itself) |
+| `URL.parse` / `URL.canParse` | present | present | 18.0 / 17.0 |
+| `Response.prototype.bytes`, `Uint8Array.fromBase64` / `.toBase64` / `.toHex` | present | present | 18.0 / 26 |
+| `Float16Array`, `Promise.withResolvers`, `AbortSignal.any`, `Set.prototype.intersection` | present | present | 26 / 17.4 |
+| `DecompressionStream` | present | present | — |
+
+iPhone 13 Pro, iOS 18.6.2, Safari 18.6, both realms — every absence above is absent in the
+worker too, which is what makes the source-string arrangement load-bearing rather than
+tidy. Note what the iOS column settles in the *other* direction: `Float16Array` and
+`Uint8Array.fromBase64` were the rows to suspect if the baseline ever moved backwards, and
+they are present at 18.6.2. The row that broke was the one already believed settled.
+
+`Iterator.prototype.join` is absent in both measured columns, and that is fine: pdfjs's own
+polyfill for it fires and works, now that the global its guard dereferences exists. The guard
+was the bug, never the method. Of the rest, `Float16Array` is feature-detected by pdfjs
+(`FeatureTest.isFloat16ArraySupported`, falling back to `Float32Array`), while
+`Uint8Array.fromBase64` is **not** guarded — it is used for XFA images and signature
+decompression, a narrow path, and the one to watch if the baseline's floor ever drops below
+Safari 18.
 
 Four things generalise beyond the specific patches:
 
 1. **A patch has to reach both realms, and may need to land before pdfjs's module body rather
    than merely before its first call.** pdfjs runs a worker, which is its own realm and
-   inherits nothing from the main thread's prototypes — and the surviving gap is used on both
-   sides (the worker iterates a `DecompressionStream`'s readable side the same way). There is
+   inherits nothing from the main thread's prototypes — and both surviving gaps are used on
+   both sides (the worker iterates a `DecompressionStream`'s readable side the same way, and
+   was measured missing the `Map` upsert methods too). There is
    no hook to run code before the vendor worker's own top-level body, so `ensurePdfWorker`
    builds the worker script as a Blob, which is why the polyfill is exported as a *source
    string* and not merely executed. **The obvious spelling of that Blob is wrong.**
    `<polyfill source>` followed by `import "<vendor>"` puts the patches in the module's *own
    body*, and static imports are hoisted, so the vendor worker script runs before them. The
-   surviving patch tolerates that (it is needed before pdfjs's first call, and lands in the
-   gap); the deleted `Iterator` one did not, because it was dereferenced during evaluation.
+   surviving patches tolerate that (each is needed before pdfjs's first call, and lands in
+   the gap); the deleted `Iterator` one did not, because it was dereferenced during evaluation.
    The polyfill is therefore its own Blob module imported ahead of the vendor's — kept that
    way after `Iterator` left, because the inlined form was right by luck rather than design.
 2. **The failure never names the missing built-in.** WebKit reports the async-iterator gap as
