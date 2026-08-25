@@ -139,6 +139,14 @@ editing an applied migration) are in [docs/DATABASE.md](docs/DATABASE.md) — re
 running `prisma migrate dev` on anything unusual.
 
 - **Restarting the Postgres service needs an elevated shell** — ask the user to do it.
+- **`npx prisma format` after editing `schema.prisma` — then read what it changed.** It
+  rewrites the *whole file*, so on a drifted one it sweeps up every misalignment ever left
+  behind and buries your handful of real lines in a hundred cosmetic ones. The file is
+  format-clean now, so a run is a no-op plus your own block's realignment; **anything it
+  touches outside your edit is pre-existing drift and gets its own commit.**
+  `npm run check:schema` is the fail-if-dirty version (`--write` to fix). Why it matters, why
+  the obvious `git diff --exit-code` version of that check is wrong, and why `.gitattributes`
+  pins this one file to LF: [docs/DATABASE.md](docs/DATABASE.md).
 - `npx prisma generate` fails with **EPERM while the dev server runs** (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
 - **Adding a new model needs the dev server restarted, not just regenerated** — and the failure

@@ -1,8 +1,15 @@
 // Prisma schema for MultiBlog — see PLAN.md §4 for the data model rationale.
+//
+// **Run `npx prisma format` after editing this file, and read what it changed.** It
+// rewrites the WHOLE file, not the block you touched, so anything it moves outside your
+// own edit is pre-existing drift and belongs in its own commit rather than buried in
+// yours. This file is format-clean as of the commit that added this note, so a run should
+// now be a no-op plus your own block's realignment. `npm run check:schema` is the
+// fail-if-dirty version; docs/DATABASE.md has the reasoning.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
   // `views` is still a preview feature in Prisma 7.9 — it's what makes the
   // `view` block below generate a model at all. See PostActivity for why a
   // view earns its keep here.
@@ -378,7 +385,7 @@ view PostActivity {
 // byline is not a count, and "approved comments, excluding soft-deleted ones"
 // is a *filtered* count `_count` can't express either.
 view PostMetrics {
-  postId String @unique @map("post_id")
+  postId        String  @unique @map("post_id")
   // NULL for a post with no authors — sorted `nulls: "last"` so such a post
   // stays out of the way in both directions, and rendered as "" so the cell
   // reads exactly as it did when this was a JS join over the authors include.
@@ -549,11 +556,11 @@ model Comment {
 // (§12d) — nullable because they're empty until the first store, i.e. for a
 // doc that's been created but never edited.
 model Doc {
-  id              String        @id @default(cuid())
-  slug            String        @unique
-  title           String
-  visibility      DocVisibility @default(PRIVATE)
-  proseJson       Json?         @map("prose_json")
+  id                String        @id @default(cuid())
+  slug              String        @unique
+  title             String
+  visibility        DocVisibility @default(PRIVATE)
+  proseJson         Json?         @map("prose_json")
   // Character count of proseJson, maintained by the doc_sync_prose_json_length
   // trigger — never assign to it. A plain column rather than a GENERATED one
   // because Prisma reads a generated column's expression as a default and
@@ -563,7 +570,7 @@ model Doc {
   // sorting by it, not just the page. @default(0) so
   // `doc.create()` needn't name it; the trigger overwrites it on INSERT
   // anyway.
-  proseJsonLength Int           @default(0) @map("prose_json_length")
+  proseJsonLength   Int           @default(0) @map("prose_json_length")
   // PLAN.md §13q — which `ydoc_update` row `proseJson` above is the content
   // of, written by the same `updateDocCache` pass.
   //
@@ -579,13 +586,13 @@ model Doc {
   // system. This one describes a cached rendering; that one describes where a
   // quotation was measured. They are stamped from different logs for a reply
   // (§13p) and mean different things everywhere.
-  proseJsonUpdateId BigInt?     @map("prose_json_update_id")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  proseJsonUpdateId BigInt?       @map("prose_json_update_id")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
   // Updated when Prisma would update updatedAt. Sloppy with concurrent writes.
-  updatedByUserId String?       @map("updated_by_user_id")
-  deletedByUserId String?       @map("deleted_by_user_id")
-  deletedAt       DateTime?     @map("deleted_at")
+  updatedByUserId   String?       @map("updated_by_user_id")
+  deletedByUserId   String?       @map("deleted_by_user_id")
+  deletedAt         DateTime?     @map("deleted_at")
 
   authors           DocAuthor[]
   updatedBy         User?                  @relation("DocUpdatedBy", fields: [updatedByUserId], references: [id])
@@ -611,7 +618,7 @@ model Doc {
 // /docs' other derived value, Length, would have forced this view to read doc;
 // it is a stored column instead (Doc.proseJsonLength).
 view DocMetrics {
-  docId String @unique @map("doc_id")
+  docId  String  @unique @map("doc_id")
   // Never NULL in practice: a doc with no authors simply has no row here now
   // that the view groups doc_author, so the *relation* is the optional part.
   // Still declared nullable because a view's columns carry no NOT NULL.
@@ -893,20 +900,20 @@ model DocLinkGroup {
 // and bylines, and those are different documents socially even though the
 // storage layer stores one copy.
 model StoredFile {
-  id       String @id @default(cuid())
-  slug     String @unique
+  id          String        @id @default(cuid())
+  slug        String        @unique
   // Shown everywhere a doc shows its title; seeded from the upload filename
   // and independently renamable afterwards.
-  title    String
+  title       String
   // The name as uploaded, kept verbatim for the Content-Disposition on
   // download and so a renamed file still says where it came from.
-  filename String
-  contentType String @map("content_type")
-  byteSize    Int    @map("byte_size")
+  filename    String
+  contentType String        @map("content_type")
+  byteSize    Int           @map("byte_size")
   sha256      String
   // Null until the upload's server-side parse fills it in; also null for a
   // non-PDF, should other types ever be allowed.
-  pageCount   Int?   @map("page_count")
+  pageCount   Int?          @map("page_count")
   // Reuses docs' vocabulary rather than cloning it: PRIVATE/SHARED already
   // means one thing site-wide, and files' rule is specified as "the same as
   // docs'". The *predicates* over it are separate (canViewFiles /
@@ -1029,9 +1036,9 @@ model FilePageText {
 // on demand, never implicitly, that lets a truncation-aware reader resolve a
 // replay base without walking the log from row 1 (invariant 2).
 model Ydoc {
-  id          String   @id
-  ydoc        Bytes
-  stateVector Bytes    @map("state_vector")
+  id           String   @id
+  ydoc         Bytes
+  stateVector  Bytes    @map("state_vector")
   // PLAN.md §13q — which `ydoc_update` row the two columns above correspond
   // to, written in the same store-debounce pass that writes them.
   //
@@ -1047,9 +1054,9 @@ model Ydoc {
   // backfilled: the honest value for an existing row is "unknown", and a
   // guessed one would be indistinguishable from a real one while sending the
   // walk to the wrong place.
-  lastUpdateId BigInt? @map("last_update_id")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  lastUpdateId BigInt?  @map("last_update_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   updates   YdocUpdate[]
   snapshots YdocSnapshot[]
