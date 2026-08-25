@@ -97,6 +97,33 @@ red tests scattering across unrelated specs, not repeating between runs, all pas
 `DATABASE_URL` for the DB helpers), so a value here is in `process.env` before
 `defineConfig` evaluates.
 
+### Testing on a real phone — `REMOTE_CONSOLE_SRC`, `REMOTE_CONSOLE_PORT`, `REMOTE_CONSOLE_TOKEN`
+
+`scripts/remote-console.ts` puts a JS console on a real device over the LAN, because the
+two paths that would normally cover one are both fenced off by this machine's macOS
+ceiling: Playwright's WebKit will not launch on macOS 14 (`playwright.config.ts` records
+it), and Appium/WebDriverAgent has to *build onto the device*, which needs an Xcode newer
+than macOS 14 accepts. Neither fence moves without a newer Mac.
+
+| variable | default | notes |
+|---|---|---|
+| `REMOTE_CONSOLE_SRC` | — | Full `<script>` URL, token included. When set, `src/app/layout.tsx` injects the relay client into every page, which is the only way to reach the **app's** DOM — a standalone page on the relay's own port is a different origin and can measure the engine but not see one of our elements. |
+| `REMOTE_CONSOLE_PORT` | 4322 | Deliberately outside both slot blocks (3000-3002, 3005-3007) and clear of `scripts/probe-engine.ts`'s 4321. |
+| `REMOTE_CONSOLE_TOKEN` | random per run | Pin it so `REMOTE_CONSOLE_SRC` survives a relay restart. Unpinned, a restart silently invalidates the URL baked into the app, which reads as the relay hanging rather than as a stale token. |
+
+All three bare, and `REMOTE_CONSOLE_SRC` **must** stay that way: it carries the relay's
+token, and a `NEXT_PUBLIC_` spelling would bake that into every client bundle this machine
+ever built, a production one included. The layout guards on `NODE_ENV` as well, so setting
+it in a deployed environment still does nothing.
+
+This is an arbitrary-code channel into a browser. `/eval` and `/status` are refused from
+anything but loopback, so only this machine can submit code; the token stops another device
+on the subnet from collecting commands meant for the phone. Anything that can fetch
+`client.js` has the token, which is the deliberate limit — it is defended to the same
+standard as `next.config.ts`'s `allowedDevOrigins`, for the same LAN, and no further.
+Nothing is written to disk and no state outlives the process. Don't leave it running, and
+take the `.env` line back out when the session ends.
+
 ## File storage
 
 | variable | default | notes |

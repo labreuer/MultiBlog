@@ -1,18 +1,41 @@
-// The one built-in pdfjs-dist needs that WebKit does not have.
+// The built-ins pdfjs-dist needs that WebKit does not have.
 //
-// **Baseline: Safari 26 / iPadOS 18.4+.** Two more patches used to live here —
-// the `Iterator` global and `Map.prototype.getOrInsert`/`.getOrInsertComputed`
-// — and both were deleted when that baseline was set, because Safari has
-// shipped both since 18.4. `scripts/probe-engine.ts` is what established that,
-// by feature-probing a real Safari in both realms rather than reading release
-// notes; docs/PDF.md §10 records the measurement. Re-run it on a `pdfjs-dist`
-// bump instead of adding a patch on suspicion — and delete a patch the same
-// way, on a measurement rather than an assumption that everyone has updated.
+// **Baseline: Safari 26 / iPadOS 18.4+.** Two patches live here, and they fail
+// for opposite reasons — one permanent, one a version lag that has not aged
+// out yet:
 //
-// What is left is not a version lag and will not age out the way those two
-// did: WebKit has *never* implemented
-// `ReadableStream.prototype[Symbol.asyncIterator]`, and Safari 26.6.1 still
-// lacks it on the main thread and in workers alike.
+//   - `ReadableStream.prototype[Symbol.asyncIterator]` — WebKit has *never*
+//     implemented it, in either realm, and Safari 26.6.1 still does not.
+//   - `Map.prototype.getOrInsert` / `.getOrInsertComputed` — these land in
+//     **Safari 26.2**, which is *inside* the baseline's own range, so every
+//     supported engine below that lacks them.
+//
+// A third patch, for the `Iterator` global, was deleted correctly: it really
+// did ship in Safari 18.4, the baseline's floor.
+//
+// **The Map patch was deleted once, in error, and restoring it is the reason
+// to read this comment.** The deletion followed the rule below — it was made
+// on a measurement, not an assumption — but the measurement was taken on
+// Safari 26.6.1, the *newest* engine in the baseline, and generalized to a
+// range whose floor is iPadOS 18.4. Confirmed on a real iPhone 13 Pro running
+// iOS 18.6.2, which is squarely inside the supported range: both methods are
+// `undefined` in both realms, pdfjs calls `getOrInsertComputed` 68 times
+// without a guard, and the viewer renders its toolbar and then nothing at all
+// —
+//     this.#methodPromises.getOrInsertComputed is not a function
+// MDN's compatibility data is what settles the version, against release notes
+// that were read as 18.4: Safari 26.2, Safari on iOS mirroring it, Chrome 145,
+// Firefox 144, Node 26 — "newly available" only since February 2026.
+// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/getOrInsert#browser_compatibility
+//
+// So the rule that governs this file needs its missing half: add a patch on a
+// failure, remove one on a measurement — **and take that measurement on the
+// oldest engine the baseline claims to support, not the newest one to hand.**
+// A single desktop Safari is blind to this class in exactly the way §10 says a
+// chromium-only suite is. `scripts/probe-engine.ts` answers for whatever
+// browser is on this machine; `scripts/remote-console.ts` is what reaches a
+// real phone, and is how the numbers above were taken. docs/PDF.md §10 records
+// both columns.
 //
 // Exported as a source *string*, not just executed here, because the worker
 // realm can't be patched by importing this module the normal way: pdfjs is
@@ -78,6 +101,38 @@ if (typeof ReadableStream.prototype[Symbol.asyncIterator] !== "function") {
     };
   };
   ReadableStream.prototype[Symbol.asyncIterator] = ReadableStream.prototype.values;
+}
+
+// --- Map upsert (TC39 "Map.prototype.getOrInsert") ------------------------
+// pdfjs-dist 6.x calls these pervasively and never guards them: 68 calls to
+// .getOrInsertComputed and 2 to .getOrInsert across pdf.mjs, pdf.worker.mjs
+// and pdf.sandbox.mjs. So the *first* Map either realm touches throws, which
+// is why the symptom is a viewer that mounts its toolbar and renders no
+// document rather than a page that fails halfway.
+//
+// Needed in both realms for the ordinary reason — a worker inherits nothing
+// from the main thread's prototypes — and measured absent in both on iOS
+// 18.6.2. Shipping in Safari 26.2 (see the header) means this one *will*
+// eventually age out, unlike the stream patch above it; delete it when the
+// baseline's floor rises past 26.2, and delete it on a probe of a device at
+// that floor rather than on this comment.
+//
+// Semantics follow the proposal: insert only when the key is genuinely
+// absent, so a stored \`undefined\` is not overwritten — \`has\` rather than a
+// \`get(key) === undefined\` test, which is the one way to get this wrong. The
+// computed form calls its callback only on a miss, which is the whole point
+// of the method, and passes the key through as the proposal specifies.
+if (typeof Map.prototype.getOrInsert !== "function") {
+  Map.prototype.getOrInsert = function (key, value) {
+    if (!this.has(key)) this.set(key, value);
+    return this.get(key);
+  };
+}
+if (typeof Map.prototype.getOrInsertComputed !== "function") {
+  Map.prototype.getOrInsertComputed = function (key, callback) {
+    if (!this.has(key)) this.set(key, callback(key));
+    return this.get(key);
+  };
 }
 `;
 
