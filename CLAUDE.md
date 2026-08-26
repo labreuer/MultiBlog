@@ -109,6 +109,19 @@ before changing the behavior it describes.
   `e2e/pdf-assets.spec.ts` is the only guard that pdfjs's four runtime asset directories are
   served: `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image
   decoder, so no fixture-based test can cover it. docs/PDF.md §10.
+- **`router.refresh()` is not a delivery mechanism behind an `ssr: false` boundary.** It is a
+  React transition, and during a transition React holds the old UI rather than dropping to a
+  fallback — so a render that never commits is completely silent: no error, no spinner, no
+  console line, nothing to find. `/pdf/[slug]`'s viewer sits behind `next/dynamic({ ssr: false
+  })` and lost roughly half of all posted annotations to this, for as long as it existed, until
+  the surface started fetching its own list (`loadPdfAnnotationEntries`, overlaid on the
+  server's `entries` prop and keyed on that prop's identity so it stands down the moment a real
+  refresh lands). Don't collapse that back into a bare `router.refresh()`, and don't wire the
+  reload context into `/doc/[slug]` for symmetry — that surface renders annotations straight out
+  of the server tree with no such boundary, which is exactly why the context's default is a
+  no-op. The precondition to recognise is a shape rather than a file: **a client island behind
+  `ssr: false` whose content arrives only through a refresh.**
+  docs/playwright-flakiness.html class 6.
 - **A contributor's avatar is bytes in `user_avatar`, not a URL** — a separate table on purpose
   (`/users` queries with `include:` and no `select:`, so an avatar column on `user` would drag
   up to 100 blobs into that payload). `User.image` stays a URL string for the Auth.js adapter;
@@ -141,6 +154,21 @@ Two development slots — separate working trees, each with its own `.env`, data
 - `npm run stop:all` — stops a `dev:all` you started, in one command instead of a
   netstat/parent-trace/taskkill dance. Reads this slot's ports, so run it from the tree you
   mean to stop; it will not touch the other slot's servers.
+- **Before switching branches, run `npm run check-ports` — and if a dev server is up, say so
+  before you switch.** It is read-only, and names per port whether anything is listening and
+  whether it belongs to this repo; whose server it is barely matters, since the user is the one
+  who will hit the breakage either way. **A running `next dev` does not survive a branch switch
+  that changes which route files exist.** Git deletes the file, Turbopack unregisters the route,
+  and git restoring it a second later does not bring it back — so checking out a branch that
+  predates a merge, *then* pulling, leaves routes permanently missing from a server that looks
+  perfectly healthy. The tell is a **404 on a route whose file is plainly on disk** while its
+  siblings still answer, and it is worth knowing because a permission problem never looks like
+  this: an anonymous request to a gated route 307s to `/sign-in`, an unregistered one 404s. The
+  same delete-and-restore under `git stash push -u` takes untracked files with it and surfaces
+  instead as `Module not found` for a path that exists. Related, same tree: `npm run e2e` runs
+  `next build`, which writes production artifacts into the `.next` a running dev server is using.
+  **Restart afterwards rather than leaving it** — `npm run stop:all`, remove `.next`, start
+  again — and say that you did.
 - `.claude/launch.json` defines `web`, `collab` and `web-prod` for the preview tool. Its
   numbers are **slot A's** and cannot be computed — in slot B, drive from `npm run dev:all` and
   open the pane on `http://b.localhost:3005` directly.

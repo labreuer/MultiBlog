@@ -7,6 +7,8 @@ import PdfViewer, { type PdfPane, type PdfViewerHandle } from "./PdfViewer";
 import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import PdfMetadataPanel from "./PdfMetadataPanel";
 import PdfCollabPanel from "./PdfCollabPanel";
+import { loadPdfAnnotationEntries } from "@/app/actions/annotations";
+import { AnnotationReloadProvider } from "@/components/annotation/annotation-reload-context";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
@@ -116,10 +118,50 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   // re-run a render, leaving the ref describing a tree that was never
   // committed). Declared *before* the layer effect so it has already run by the
   // time that one attaches.
-  const entriesRef = useRef(entries);
+  // PLAN.md §19 — what this surface renders: the server's list, until a post
+  // gives us a fresher one.
+  //
+  // **A posted annotation cannot reach the panel through `router.refresh()`
+  // alone here.** That refresh is a React *transition*, and this whole surface
+  // sits behind `next/dynamic({ ssr: false })` — a Suspense boundary. During a
+  // transition React keeps showing the old UI rather than dropping to a
+  // fallback, so a refresh that doesn't commit promptly is completely silent:
+  // no error, no spinner, no console line, just a panel still reading "No
+  // annotations yet" while a fully parsed payload sits on the client. Measured
+  // against a production build on one worker: ~50% of posts had not rendered
+  // 2.5s later and ~25% were still missing at 15s, with the page *idle* — zero
+  // scroll events, zero DOM mutations — and any unrelated click rendering them
+  // at once. docs/playwright-flakiness.html carries the forensics.
+  //
+  // So the composer says it posted and we ask the server ourselves. This fetch
+  // is ours: we know when it lands, and nothing about it can be deprioritised.
+  // `router.refresh()` still runs underneath — it is what reconciles the rest
+  // of the page — and the effect below stands down the moment it does, so the
+  // server prop stays the single source of truth rather than this becoming a
+  // parallel one.
+  // The local copy remembers **which `entries` it was fetched against**, and is
+  // used only while that is still the prop in hand. So a refresh landing later
+  // supersedes it by simply existing — no effect resetting state, no window
+  // where the two disagree, and no way for this to become a second source of
+  // truth that outlives its usefulness.
+  const [refetched, setRefetched] = useState<{ base: PdfAnnotationEntry[]; list: PdfAnnotationEntry[] } | null>(null);
+  const liveEntries = refetched?.base === entries ? refetched.list : entries;
+
+  const reloadEntries = useCallback(() => {
+    const base = entries;
+    loadPdfAnnotationEntries(fileId)
+      .then((list) => setRefetched({ base, list }))
+      // Deliberately quiet, and deliberately not an empty list: the panel keeps
+      // whatever it is already showing. The annotation is written either way —
+      // this only decides how soon it is drawn — so the worst a failure here
+      // costs is the wait this exists to remove.
+      .catch(() => {});
+  }, [fileId, entries]);
+
+  const entriesRef = useRef(liveEntries);
   useEffect(() => {
-    entriesRef.current = entries;
-  }, [entries]);
+    entriesRef.current = liveEntries;
+  }, [liveEntries]);
 
   // Set by the layer effect below; called when the annotation set changes so
   // the highlights follow a post or a delete without waiting for a scroll.
@@ -235,7 +277,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   useEffect(() => {
     layerRedrawRef.current?.();
     notify();
-  }, [entries, notify]);
+  }, [liveEntries, notify]);
 
   // ---- selection capture --------------------------------------------------
   const capturePageFor = useCallback(async (pageIndex: number): Promise<CapturePage | null> => {
@@ -523,7 +565,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   // One tick per anchored annotation, at its own document fraction.
   const ticks = useMemo((): AnnotationTick[] => {
     if (!handle) return [];
-    return entries.flatMap((entry) => {
+    return liveEntries.flatMap((entry) => {
       const target = entry.target;
       // Same rule as the highlight above — a deleted thread leaves no tick.
       if (!target || !entryHasVisibleContent(entry)) return [];
@@ -542,7 +584,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
         },
       ];
     });
-  }, [entries, handle]);
+  }, [liveEntries, handle]);
 
   const jumpToReader = useCallback((reader: RemoteReader) => {
     const current = handleRef.current;
@@ -564,19 +606,24 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
 
   const panel = useMemo(
     () => (
-      <PdfAnnotationPanel
-        fileId={fileId}
-        entries={entries}
-        resolveTops={resolveTops}
-        subscribe={subscribe}
-        positioned={positioned}
-        onJumpTo={jumpTo}
-        pendingTarget={pending?.target ?? null}
-        pendingKey={pending?.key ?? 0}
-        onClearPending={() => setPending(null)}
-      />
+      // Everything that can change this file's annotations renders inside
+      // here — the composer, every card's Reply, every card's Delete — so one
+      // provider covers all of them without a prop per path.
+      <AnnotationReloadProvider reload={reloadEntries}>
+        <PdfAnnotationPanel
+          fileId={fileId}
+          entries={liveEntries}
+          resolveTops={resolveTops}
+          subscribe={subscribe}
+          positioned={positioned}
+          onJumpTo={jumpTo}
+          pendingTarget={pending?.target ?? null}
+          pendingKey={pending?.key ?? 0}
+          onClearPending={() => setPending(null)}
+        />
+      </AnnotationReloadProvider>
     ),
-    [fileId, entries, resolveTops, subscribe, positioned, jumpTo, pending],
+    [fileId, liveEntries, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries],
   );
 
   const panes = useMemo<PdfPane[]>(

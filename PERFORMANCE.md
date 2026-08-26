@@ -480,3 +480,59 @@ selection gesture can start. That collapses the editor column to the static
 column above, i.e. flat in N. What it depends on — annotation bodies staying
 immutable — is the subject of docs/COLLAB.md's 2026-08-13 log entry, which is
 where the design consequences live.
+
+## 2026-08-26 — `setVisibleRange` fires twice per scroll: measured, and the fix saves nothing
+
+**Prompt:** noted as a wart while fixing the PDF annotation refresh bug — "`setVisibleRange`
+re-renders on every pdfjs event unconditionally; `visibleFractionRange` returns a fresh object
+literal, so there is no bail-out." → "Measure first."
+
+**Branch:** `pdf-refresh`, on top of `main` at `0862e40`.
+
+**The claim under test.** `PdfAnnotationSurface`'s `onMoved` runs on five signals
+(`updateviewarea`, `pagerendered`, `scalechanging`, `rotationchanging`, and the container's own
+`scroll`) and ends in `setVisibleRange(visibleFractionRange(…))`. `visibleFractionRange`
+returns a fresh object literal every call, so `useState`'s `Object.is` bail-out can never fire
+— not even when the numbers are identical. On the viewer's hottest path that looked like free
+waste sitting there for the taking.
+
+**Methodology.** A throwaway spec (`e2e/zz-visible-range-probe.spec.ts`) plus window-hung
+counters temporarily added to the component; both reverted after the run. Against the
+**production** build on :3002, because dev's StrictMode would double every render count. An
+8-page throwaway PDF, `container.hover()`, then 40 × `mouse.wheel(0, 120)` at 16 ms intervals
+— a real wheel scroll through the browser's own input path rather than a `scrollTop` write,
+which would bypass the very event pairing under investigation. Counters: renders (incremented
+in the component body), `onMoved` calls, and whether each call's range was value-identical to
+the one before it.
+
+| | renders | onMoved | changed | same | wasted |
+|---|---|---|---|---|---|
+| wheel scroll, 2.3–2.4 s | 59 | 85 | 40 | 45 | **53%** |
+| idle, 3 s | 0 | 0 | 0 | 0 | — |
+| scrolled to the bottom | 3 | 5 | 0 | 0 (5 null) | 0% |
+
+**The wart is real.** 53% of `setVisibleRange` calls during a scroll carry a range identical to
+the previous one — 85 calls for 40 actual movements. The cause is exactly as suspected: pdfjs
+emits `updateviewarea` *and* the container emits `scroll` for one physical scroll, so nearly
+every movement is reported twice.
+
+**And fixing it saves nothing.** With a functional updater comparing `start`/`end` and
+returning `prev` when unchanged, the render count was **59 — identical, to the digit**, across
+an input sequence deterministic enough that `onMoved`, `changed` and `same` all reproduced
+exactly too. React's batching had already absorbed the duplicates: each one arrives in the same
+batch as the changed call it accompanies, so the render it appears to cause was going to happen
+regardless.
+
+**Two methodological notes, because the first version of this measurement was worthless.**
+`playwright.config.ts` sets `reuseExistingServer: true` — a run against a server still
+listening from the previous run measures the *old* bundle, and an unchanged number then proves
+nothing at all. Worse, an unchanged number is also exactly what a true negative result looks
+like. The two are only distinguishable with a positive control, so the probe grew a `bailouts`
+counter: it read 45, which is what proves the new code was compiled, live, and taking the
+early-return path on every duplicate. Without it this entry would have been a coin flip
+reported as a finding.
+
+**Verdict: not worth doing.** The code stays as it is, and this entry exists so the wart does
+not get "fixed" again on the same reasoning. The idle row is the other half of the reassurance:
+nothing fires when nothing moves, so there is no background churn either — the handler is
+noisy per scroll, not noisy per second.
