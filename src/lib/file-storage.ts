@@ -56,7 +56,27 @@ export function maxUploadBytes(): number {
 }
 
 export function storageDir(): string {
-  return resolve(process.env.FILE_STORAGE_DIR || DEFAULT_STORAGE_DIR);
+  // The two cases are split apart, rather than the tidier
+  // `resolve(process.env.FILE_STORAGE_DIR || DEFAULT_STORAGE_DIR)`, for the sake
+  // of the *build* — at runtime the two forms are identical. Next traces each
+  // route's file dependencies (NFT) by statically evaluating path expressions,
+  // and the `||` form collapses to a single *partly* known value: a relative
+  // path with an unknown component, which the tracer anchors at `process.cwd()`
+  // and then traces as a glob over the whole project. The upload route's NFT
+  // list therefore claimed every file in the repo, next.config.ts included, and
+  // `next build` warned that "the whole project was traced unintentionally".
+  // Split, each branch is something the tracer can settle: a fully known
+  // `<root>/.file-storage` — runtime state, not a build input, and normally
+  // absent at build time — or a fully unknown path, which it declines to trace
+  // rather than guessing.
+  //
+  // The `/* turbopackIgnore: true */` comment that warning itself prescribes
+  // does **not** work here; measured against next@16.2.11, it is honoured on
+  // `require`/`import` and not on a `node:path` call. Nor does setting
+  // FILE_STORAGE_DIR silence it — a bare env var is never inlined into server
+  // code, so the tracer sees an unknown either way.
+  const configured = process.env.FILE_STORAGE_DIR;
+  return configured ? resolve(configured) : resolve(DEFAULT_STORAGE_DIR);
 }
 
 // Two levels: <dir>/<first two hex chars>/<full hash>. The fan-out exists
