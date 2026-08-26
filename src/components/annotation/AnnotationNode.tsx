@@ -15,6 +15,7 @@ import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "../LocalTime";
 import AnnotationBodyReader, { type BodySelection } from "./AnnotationBodyReader";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
+import { useAnnotationReload } from "./annotation-reload-context";
 import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
 import { useDocScrub } from "../DocScrubContext";
 import styles from "./AnnotationNode.module.css";
@@ -101,6 +102,7 @@ export function hasNonDeletedDescendant(annotation: AnnotationNodeData): boolean
 // The doc-side sibling of CommentNode (PLAN.md §13c) — un-shared from it now
 // that an annotation and a post comment no longer share a rendering problem.
 export default function AnnotationNode({ annotation, target, depth = 0 }: Props) {
+  const reloadAnnotations = useAnnotationReload();
   const router = useRouter();
   const { data: session } = useSession();
   const viewerId = session?.user?.id ?? null;
@@ -190,6 +192,10 @@ export default function AnnotationNode({ annotation, target, depth = 0 }: Props)
         await deleteAnnotation(annotation.id);
         setJustDeleted(true);
         router.refresh();
+        // And a surface that can't count on that refresh landing says so —
+        // on /pdf/[slug] this is what takes the card, its highlight and its
+        // tick away together rather than eventually.
+        reloadAnnotations();
       } catch (e) {
         setDeleteError(e instanceof Error ? e.message : "Failed to delete annotation.");
       }
@@ -322,6 +328,7 @@ export default function AnnotationNode({ annotation, target, depth = 0 }: Props)
           onPosted={() => {
             setPosted(true);
             closeReply();
+            reloadAnnotations();
           }}
           onCancel={closeReply}
         />
