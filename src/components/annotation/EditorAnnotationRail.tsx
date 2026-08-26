@@ -89,11 +89,14 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
   //
   // Held in state and replaced only when the order genuinely changes, which
   // is the discipline the layout hook's own `reportedIdsRef` follows for the
-  // same reason: this recomputes on every keystroke of a live document, and
+  // same reason: this recomputes on every transaction of a live document, and
   // re-rendering every card for a sort that came out identical is exactly the
   // cost margin notes go out of their way to avoid. Reordering takes text
-  // being *moved*, so in practice it fires when an annotation appears or its
-  // passage is deleted.
+  // being *moved*, so in practice it fires when an annotation appears, when
+  // its anchors first resolve, or when its passage is deleted. The walk itself
+  // is the remaining per-transaction cost and is the same one the aligned
+  // layout already pays per keystroke; PERFORMANCE.md is where to take it if
+  // that ever shows up in a measurement.
   const context = useMarginNotes();
   const orderingEditor = context?.editor ?? null;
   const subscribe = context?.subscribe;
@@ -119,10 +122,19 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
       setOrder((prev) => (prev.length === next.length && prev.every((id, i) => id === next[i]) ? prev : next));
     };
     recompute();
-    orderingEditor.on("update", recompute);
+    // `transaction`, not `update`. A column anchor resolves into *plugin*
+    // state, and `setAnnotationAnchors` delivers it as a meta-only transaction
+    // — which tiptap does not report as an update, because `update` fires on
+    // `docChanged` alone. Listening to the wrong one is invisible in the
+    // aligned layout, whose positions are re-measured on scroll and resize
+    // anyway, and produced exactly one symptom here: every reading-view
+    // annotation sorted as anchorless and collected below the marks, because
+    // the order was computed once at mount and the news of the anchors
+    // resolving never arrived.
+    orderingEditor.on("transaction", recompute);
     const unsubscribe = subscribe?.(recompute);
     return () => {
-      orderingEditor.off("update", recompute);
+      orderingEditor.off("transaction", recompute);
       unsubscribe?.();
     };
   }, [queued, orderingEditor, subscribe, entries]);
