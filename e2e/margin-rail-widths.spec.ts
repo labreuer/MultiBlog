@@ -419,7 +419,7 @@ test.describe("the doc editor's phone-landscape focus mode", () => {
       const widths = await page
         .locator("[data-margin-note-id]")
         .evaluateAll((els) => els.map((el) => getComputedStyle(el).borderLeftWidth));
-      expect(widths).toEqual(["2px", "2px"]);
+      expect(widths).toEqual(["3px", "3px"]);
 
       // And nothing is marked in the aligned layout, where an out-of-band card
       // is hidden instead and the marker would have nothing to say.
