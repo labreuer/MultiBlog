@@ -532,7 +532,7 @@ Four reflow breakpoints, each with one job:
 | `max-width: 480px` | Touch targets and padding (editor toolbar, `DocEditor`) |
 | `max-width: 900px` | `/side-by-side`'s two doc columns stack (PLAN.md §14f); the landing page's contributor rail drops below the posts (§17l) |
 | `min-width: 1180px` | Comments/annotations move from below the article into a margin rail (§18) |
-| `(orientation: landscape) and (max-height: 500px)` | The doc editor drops every piece of stacked chrome, and its rail becomes a scrolling queue rather than a margin (§18c, §18f) |
+| `(orientation: landscape) and (max-height: 500px)` | The doc editor drops every piece of stacked chrome, and its rail becomes a scrolling queue — marking the cards whose passage is on screen rather than aligning to them (§18c, §18f) |
 
 The fourth is the only one that asks about **height**, and the only one scoped
 to a single route. A phone held sideways has width to spare and about 390px of

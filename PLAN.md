@@ -5867,10 +5867,10 @@ advantages are worth most.
 Three consequences worth stating, because each is a reversal:
 
 - The layout hook grew a `positioned` option and now returns `live` alongside `anchored`.
-  `live && !positioned` deliberately takes the same teardown branch as "no rail at all",
-  because a queue wants precisely what that branch leaves behind: no inline styles and no
-  observers. Rotating out of the wide layout is what makes the teardown load-bearing
-  rather than tidiness.
+  Its measurement pass runs either way and `positioned` decides only what the pass
+  *writes*: a packed `top` per card, or an on-screen marker. Rotating out of the wide
+  layout is what makes its teardown branch load-bearing rather than tidiness — a card
+  still carrying an absolute `top` would be drawn at a stale offset inside a flow list.
 - **The anchorless pre-filter moved out of the page.** `/doc/[slug]/edit` used to drop
   `quotedText === ""` entries server-side; a server component cannot know which
   presentation is on screen, so it now ships every thread and the rail decides. The wide
@@ -5881,10 +5881,20 @@ Three consequences worth stating, because each is a reversal:
   channel the positioned pass uses and committed to state only when the order actually
   changes.
 
-No navigation between the text and the queue was built, deliberately: tapping an
-annotated passage to scroll its card was considered and declined — in an editor a tap is
-how a caret is placed, and hijacking it to move a side column is the wrong trade. The
-card→passage direction already exists either way (`QuoteThreadHeader`'s jump).
+**What replaces alignment is a marker, not navigation.** A card whose passage is inside
+the editor's visible band carries `data-on-screen`, and the queue colours its left border
+for it. That answers the question alignment answered — *which of these is about the text
+in front of me* — while moving nothing, which is why the border is always present and only
+its colour changes: a border appearing would shift every card's text sideways the moment
+the document scrolled. The predicate is the same one the bounded pass uses to decide what
+to *hide*, so the window's machinery became the marker's.
+
+Navigation between the text and the queue was considered and declined. Tapping an
+annotated passage to scroll its card is the obvious gesture and the wrong one: in an
+editor a tap is how a caret is placed, and hijacking it to move a side column trades a
+constant cost for an occasional convenience. Next/previous controls, gutter markers and a
+selection-triggered reveal are the live alternatives if the marker proves too coarse. The
+card→passage direction already exists regardless (`QuoteThreadHeader`'s jump).
 
 `CollabEditorBody` marks that scroll frame with `data-editor-scroll`
 (`src/components/editor-scroll.ts`). An attribute rather than a class because CSS-module
