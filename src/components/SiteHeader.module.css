@@ -104,14 +104,37 @@
    overflow-y computes to auto too and an absolutely-positioned panel dropping
    below the header would be clipped by it. Fixed escapes any such ancestor;
    the price is that top/left have to be set from JS, which SiteHeader does on
-   toggle and again whenever the row scrolls under it. */
+   toggle and again whenever the row scrolls under it.
+
+   The column is not decorative. globals.css strips every default margin, and a
+   panel's entries are <a>s — inline boxes — so without it a second entry sets
+   beside the first with nothing between them ("AnnotationsTags"). Every
+   panel held exactly one link until Tags joined Annotations, which is why
+   this went unnoticed. The panel's own horizontal padding moves to the rows so
+   each one's hover wash reaches the full width of the menu. */
 .dropdownPanel {
   position: fixed;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 8rem;
   background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 6px 10px;
+  box-shadow: 0 4px 12px var(--shadow-color);
+  padding: 4px 0;
   white-space: nowrap;
+}
+
+/* The wash replaces globals.css's underline-on-hover rather than joining it:
+   on a full-width row the underline reads as a link that happens to be in a
+   box, and the highlight reads as the menu entry it is. */
+.dropdownItem {
+  padding: 4px 12px;
+}
+
+.dropdownItem:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
 }

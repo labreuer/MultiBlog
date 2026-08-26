@@ -2,7 +2,7 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { resolveAnchorInDoc, type AnchorRange } from "./annotation-anchors";
+import { resolveAnchorInDoc, type AnchorRange } from "./anchors";
 import { buildSegments } from "./decoration-segments";
 
 // PLAN.md §13o — the inline highlight for a **column-anchored** annotation

@@ -52,6 +52,21 @@
   cursor: default;
 }
 
+/* The side-panel toggle. `.toolbar button` above already gives it its border,
+   padding and color; the flex is only so the inline SVG centres in the box
+   instead of sitting on the text baseline and leaving a phantom descender
+   under it. The pressed background says the same thing the icon's fill does —
+   deliberately twice, since a toggle that only changes an interior fill is easy
+   to read as decoration. */
+.panelToggle {
+  display: inline-flex;
+  align-items: center;
+}
+
+.panelToggle[aria-pressed="true"] {
+  background: var(--surface-hover);
+}
+
 .pageInput {
   width: 4ch;
   text-align: right;
@@ -114,7 +129,7 @@
    where the scrollbar says they should.
 
    Scoped to this one container on purpose — nothing else on the page has a rail to
-   agree with, and `.panel` below keeps the platform scrollbar. */
+   agree with, and the panes below keep the platform scrollbar. */
 .viewerContainer::-webkit-scrollbar {
   /* Narrow, with the thumb filling it edge to edge rather than inset by a
      transparent border — an inset thumb sits below its own box, and the rails
@@ -140,18 +155,86 @@
   background: var(--text-secondary);
 }
 
-/* The annotation panel. A column beside the viewer above the breakpoint; a
-   full-width overlay below it, since there is no room for both and no page
-   to scroll to instead. 768px (not the doc rail's 1200px, PdfAnnotationSurface's
-   POSITIONED_MEDIA_QUERY) so an iPad in portrait — the narrowest common iPad
-   width — still gets both side by side. The width itself narrows on its way
-   down to that floor via clamp() so the viewer keeps a usable share of a
-   768px-wide screen instead of losing 360px of it outright to the panel. */
-.panel {
+/* The side panel: a tab strip over one pane. A column beside the viewer above
+   the breakpoint; a full-width overlay below it, since there is no room for
+   both and no page to scroll to instead. 768px (not the doc rail's 1200px,
+   PdfAnnotationSurface's POSITIONED_MEDIA_QUERY) so an iPad in portrait — the
+   narrowest common iPad width — still gets both side by side. The width itself
+   narrows on its way down to that floor via clamp() so the viewer keeps a
+   usable share of a 768px-wide screen instead of losing 360px of it outright
+   to the panel. */
+.panelColumn {
   display: none;
+  flex-direction: column;
   flex: 0 0 clamp(260px, 40vw, 360px);
+  /* So `.panel` below is the thing that scrolls: without this a flex item
+     refuses to shrink under its content, and the column would grow past the
+     shell instead of the pane getting a scrollbar. */
+  min-height: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--surface);
+}
+
+.panelColumnOpen {
+  display: flex;
+}
+
+@media (max-width: 767px) {
+  .panelColumnOpen {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    flex: none;
+    border-left: none;
+  }
+}
+
+/* **The tab strip is the column's child, never a pane's.** `.panel` below is
+   both the scroller and the box `use-pdf-margin-notes.ts` measures a card's
+   `targetTop` against — put the strip inside it and every card keeps the `top`
+   it had while its content starts lower, so the whole rail slips by the
+   strip's height. As a sibling the strip simply makes the panel box begin
+   further down, which the hook re-measures on its next frame and gets right by
+   construction. It also has to be outside the scroller for the plainer reason
+   that a tab strip which scrolls away is not a tab strip. */
+.tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.9rem;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tab {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.1rem;
+  border: none;
+  /* Sits *on* the strip's own bottom rule rather than above it, which is what
+     makes the underline and the rule read as one line rather than two. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--foreground);
+}
+
+.tabActive {
+  color: var(--foreground);
+  border-bottom-color: var(--link);
+}
+
+/* One tab's pane. Only the selected one is displayed; the rest stay mounted
+   and hidden (PdfViewer's `panes` prop says why that is load-bearing). */
+.panel {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   /* `relative`, so the anchored cards inside can be absolutely positioned
      against this scroller rather than against the viewport. */
@@ -160,16 +243,6 @@
 
 .panelOpen {
   display: block;
-}
-
-@media (max-width: 767px) {
-  .panelOpen {
-    position: absolute;
-    inset: 0;
-    z-index: 20;
-    flex: none;
-    border-left: none;
-  }
 }
 
 .status {

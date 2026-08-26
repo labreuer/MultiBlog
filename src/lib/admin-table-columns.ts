@@ -98,6 +98,24 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "editedAt", label: "Edited at", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
+  // PLAN.md §20d. Six of these read the tag_metrics view; the four
+  // per-type counts default hidden so an existing admin's table doesn't
+  // silently widen by four columns (§16m) — Assignments is the one usage
+  // number the landing view shows.
+  tags: [
+    { key: "name", label: "Name" },
+    { key: "description", label: "Description" },
+    { key: "assignments", label: "Assignments" },
+    { key: "lastUsed", label: "Last used" },
+    { key: "createdBy", label: "Created by" },
+    { key: "created", label: "Created at" },
+    { key: "docs", label: "Docs", defaultHidden: true },
+    { key: "posts", label: "Posts", defaultHidden: true },
+    { key: "files", label: "Files", defaultHidden: true },
+    { key: "annotations", label: "Annotations", defaultHidden: true },
+    { key: "slug", label: "Slug", defaultHidden: true },
+    { key: "deletedAt", label: "Deleted at", defaultHidden: true },
+  ],
   annotations: [
     { key: "doc", label: "Doc" },
     { key: "author", label: "Author" },

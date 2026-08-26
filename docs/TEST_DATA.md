@@ -24,6 +24,9 @@ which is what will go stale.** What follows is only what each one is *for*.
 - **`scripts/test-file.ts`** — create/list/delete uploaded PDFs. It *generates* its own
   document via `scripts/make-test-pdf.ts` and pushes it through the real storage and
   extraction path, so a fixture file is indistinguishable from an uploaded one.
+- **`scripts/test-tag.ts`** — create/tag/untag/list/delete throwaway tags (PLAN.md
+  §20). Writes **whole-object anchors** only, the one shape PR 1 creates, and goes through the
+  same find-first dedup the server action does.
 - **`scripts/test-ydoc.ts`** — create/list/delete standalone documents in the ydoc stack
   (PLAN.md §11). `--garbage` writes bytes that aren't a valid Yjs update at all, to exercise
   `/ydoc-debug`'s "not TipTap-compatible" error path on purpose.
@@ -38,6 +41,15 @@ refuse to touch anything but `@example.com` accounts and docs/posts/files author
 solely by them, so they cannot reach real data by mistake. `test-ydoc.ts` uses the
 equivalent containment for a table with no email column: it only ever creates ids under the
 `ydoc:test-` prefix (`src/lib/ydoc-names.ts`) and refuses to `delete` anything else.
+
+`test-tag.ts` needs **two** guards, and the second one is the non-obvious half. The first
+is the usual one: the term's creator must be an `@example.com` account. The second is that
+deleting a tag *cascades its assignments*, so a throwaway term a **real** account has
+since applied to something is no longer throwaway data — `delete` refuses it and names who
+tagged with it. There is no flag that widens this; retract the real tags first if you mean
+it. The e2e suite guards the same table differently, by the `E2E ` name prefix, because §20c
+makes a term's name unique case-insensitively and a fixture therefore can't collide with a
+real term.
 
 ### Deletion order
 
@@ -105,7 +117,7 @@ before touching either, and prefer copying their shape to inventing a third one:
 
 ### Afterwards
 
-`scripts/integrity/` is the acceptance test — run all three of its checks, **ydoc first**: a
+`scripts/integrity/` is the acceptance test — run all of its checks, **ydoc first**: a
 bad blob makes the doc- and annotation-side checks report faults that evaporate once it's
 repaired. See [../scripts/integrity/README.md](../scripts/integrity/README.md) for which link
 of the `ydoc_update → ydoc.ydoc → doc.*` chain each one covers, and why

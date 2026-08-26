@@ -1,0 +1,20 @@
+/* PLAN.md §19 — the plain panes of the side panel: Metadata, Collab. Shared
+   because they have the same job, which the annotation pane does not: hold a
+   little content in a narrow scroller. PdfAnnotations.module.css stays separate
+   — it is about a positioned card column with a sticky, overlapping chrome. */
+
+.pane {
+  padding: 0.75rem;
+}
+
+/* The tag strip carries `margin: 0.75rem 0` for the object pages, where it
+   sits between a byline and a body. Here it is the first thing in the box, so
+   that margin would double the padding above it. */
+.pane > :first-child {
+  margin-top: 0;
+}
+
+.placeholder {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}

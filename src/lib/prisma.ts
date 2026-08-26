@@ -82,6 +82,20 @@ export const prisma = client.$extends({
     storedFile: {
       $allOperations: (params) => excludeSoftDeleted(params.operation, params.args, params.query),
     },
+    // PLAN.md §20c — joins for the same reason storedFile does: the same
+    // deletedByUserId/deletedAt pair, and an admin table (/tags) that
+    // reaches for prismaIncludingDeleted precisely so it can offer a restore.
+    //
+    // `tagAssignment` is deliberately NOT here, and filters by hand
+    // instead. This extension intercepts *top-level* operations only, and an
+    // assignment is read almost exclusively through a `tag_anchor`
+    // include, which it cannot reach — so joining would make the model look
+    // protected while every real read went around it. §20c states the
+    // divergence as chosen rather than missed; this is the other half of that
+    // statement.
+    tag: {
+      $allOperations: (params) => excludeSoftDeleted(params.operation, params.args, params.query),
+    },
   },
 });
 

@@ -1,0 +1,54 @@
+/* PLAN.md §20d — /tag/[slug]. Every color is a globals.css token (STYLE.md). */
+
+.container {
+  max-width: 720px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+.title {
+  font-size: 1.8rem;
+}
+
+.description {
+  margin-top: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.empty {
+  margin-top: 1.5rem;
+  color: var(--text-muted);
+}
+
+.section {
+  margin-top: 2rem;
+}
+
+.sectionTitle {
+  font-size: 1.1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.25rem;
+}
+
+.count {
+  color: var(--text-muted);
+  font-weight: normal;
+  font-size: 0.9rem;
+}
+
+.list {
+  margin-top: 0.6rem;
+  padding-left: 1.2rem;
+  list-style: disc;
+}
+
+.list li {
+  margin-bottom: 0.3rem;
+}
+
+.capped,
+.back {
+  margin-top: 2rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
