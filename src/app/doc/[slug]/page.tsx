@@ -166,16 +166,22 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                             <button type="submit">Publish as blog post</button>
                           </form>
                         )}
+                        {/* PLAN.md §20k — a second line of the byline rather
+                            than a block below the text, and "bare" is what
+                            drops the "Keywords" label. Gated by this page's own
+                            canUserReadDoc above (docs/PERMISSIONS.md, "Chips
+                            are as private as the thing they are on").
+
+                            The `key` is load-bearing and this is not a list:
+                            it is a Server Component with element siblings
+                            inside a prop that crosses into DocView, a client
+                            component. Drop it and the page logs "Each child in
+                            a list should have a unique key prop" against this
+                            div — CLAUDE.md's Gotchas has why. */}
+                        <KeywordChips key="keywords" target={{ kind: "doc", id: doc.id }} variant="bare" />
                       </div>
                     }
                   />
-                  {/* PLAN.md §20d — gated by this page's own canUserReadDoc
-                      above, which is what makes a PRIVATE doc's chips exactly
-                      as private as the doc. Below the body rather than in the
-                      byline: a keyword says what the whole document is about,
-                      so it reads as a footer to the text rather than as part
-                      of its attribution. */}
-                  <KeywordChips target={{ kind: "doc", id: doc.id }} />
                   <AnnotationSection docId={doc.id} threads={threads} />
                 </div>
                 <MarginNotesRail className={styles.rail} />

@@ -1,6 +1,6 @@
 import { keywordsForTarget } from "@/lib/keyword-data";
 import type { AnchorTarget } from "@/lib/anchors";
-import KeywordStrip from "./KeywordStrip";
+import KeywordStrip, { type KeywordStripVariant } from "./KeywordStrip";
 
 // PLAN.md §20d — the keyword strip on an object page: /doc/[slug], a post
 // page, /pdf/[slug].
@@ -24,7 +24,13 @@ import KeywordStrip from "./KeywordStrip";
 // Everything viewer-shaped lives in the client island below, which asks the
 // server for its own state when someone actually opens it.
 
-export default async function KeywordChips({ target }: { target: AnchorTarget }) {
+export default async function KeywordChips({
+  target,
+  variant = "section",
+}: {
+  target: AnchorTarget;
+  variant?: KeywordStripVariant;
+}) {
   const chips = await keywordsForTarget(target);
-  return <KeywordStrip target={target} chips={chips} />;
+  return <KeywordStrip target={target} chips={chips} variant={variant} />;
 }

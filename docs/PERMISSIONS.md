@@ -246,6 +246,14 @@ from inside a page that has already run its own gate — `canUserReadDoc`, `canU
 mount it on a surface that hasn't gated first. It deliberately runs no second check of its
 own: a second gate is a second thing that can disagree with the first.
 
+**One surface reaches the chips by a different path, and it is gated differently.** The doc
+editor's Settings panel (`/doc/[slug]/edit`) renders `KeywordStrip` directly, fed by
+`loadTaggerState` rather than by `KeywordChips`' server-side read — so its chips are gated by
+`canUserTagTarget`, the *tag* rule, on top of the edit gate the page itself already ran. That
+is stricter than the read rule above, never looser: `canUserTagTarget` is "you may tag what
+you may read, plus a role floor", so anything it returns was readable anyway. Worth knowing
+because the paragraph above is about `KeywordChips`, and this surface does not go through it.
+
 **`/keyword/[slug]` is three queries, not one UNION.** Each per-type section wears the
 predicate that already governs its own type, so the PRIVATE-doc rule in tables 1–4 holds
 there unchanged, ADMIN and EDITOR included. An interleaved timeline would mean
