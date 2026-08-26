@@ -136,3 +136,52 @@ test("parseSelector will not read a blob under the wrong kind", () => {
   assert.equal(parseSelector(null, DOC_RANGE), null);
   assert.equal(parseSelector("POST_RANGE", DOC_RANGE), null);
 });
+
+// PR 2 — the write side of the DOC_RANGE blob. deriveDocRangeSelector's
+// output must round-trip through parseDocRangeSelector (via parseSelector),
+// and its edges are position arithmetic: a range at the document's start has
+// nothing before it, and a cross-block range counts its blocks.
+import { deriveDocRangeSelector } from "./selector";
+import { pmDocContentSchema } from "../tiptap-schema";
+
+function docOf(...paragraphs: string[]) {
+  return pmDocContentSchema.nodeFromJSON({
+    type: "doc",
+    content: paragraphs.map((text) => ({
+      type: "paragraph",
+      ...(text ? { content: [{ type: "text", text }] } : {}),
+    })),
+  });
+}
+
+test("deriveDocRangeSelector captures context and round-trips through parseSelector", () => {
+  const body = "The quick brown fox jumps over the lazy dog near the river bank.";
+  const quote = "jumps over";
+  const from = body.indexOf(quote) + 1;
+  const derived = deriveDocRangeSelector(docOf(body), from, from + quote.length);
+  assert.equal(derived.before, "The quick brown fox ");
+  assert.equal(derived.after, " the lazy dog near the river bank.");
+  assert.equal(derived.blocks, 1);
+  assert.deepEqual(parseSelector("DOC_RANGE", derived)?.selector, derived);
+});
+
+test("a range at the document's start has empty before-context, not an error", () => {
+  const derived = deriveDocRangeSelector(docOf("Short."), 1, 6);
+  assert.equal(derived.before, "");
+  assert.equal(derived.after, ".");
+  assert.equal(derived.blocks, 1);
+});
+
+test("context is clamped to ~50 characters on each side", () => {
+  const long = "x".repeat(200);
+  const derived = deriveDocRangeSelector(docOf(long), 101, 102);
+  assert.equal(derived.before.length, 50);
+  assert.equal(derived.after.length, 50);
+});
+
+test("a cross-block range counts its blocks", () => {
+  const doc = docOf("First half here", "second half here");
+  // From inside the first paragraph to inside the second.
+  const derived = deriveDocRangeSelector(doc, 7, 24);
+  assert.equal(derived.blocks, 2);
+});
