@@ -298,7 +298,6 @@ export default function DocEditor({
             onSelectionUpdate={widget.capture}
             onContentUpdate={widget.reresolve}
             annotationAnchors={annotationAnchors}
-            synced={synced}
           />
         ) : (
           <p>Connecting to live editor…</p>

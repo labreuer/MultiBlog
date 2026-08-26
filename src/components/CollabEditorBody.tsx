@@ -68,10 +68,6 @@ type Props = {
   // they're rewriting. Empty on every embedder that doesn't supply them,
   // which costs one plugin with nothing to draw.
   annotationAnchors?: AnnotationAnchorInput[];
-  // Whether the initial sync has delivered the document yet. Only the doc
-  // editor passes it, and only because of the anchor push below; a surface
-  // with no column-anchored annotations has nothing that depends on it.
-  synced?: boolean;
 };
 
 // Stable default — see DocReadingBody's identical constant.
@@ -110,7 +106,6 @@ export default function CollabEditorBody({
   onSelectionUpdate,
   onContentUpdate,
   annotationAnchors = EMPTY_ANCHORS,
-  synced,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
@@ -189,6 +184,25 @@ export default function CollabEditorBody({
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
+  // "This editor's document has text in it." An empty ProseMirror doc is one
+  // empty paragraph, `content.size === 2`, so anything above that is real
+  // content — arriving either at construction (the reading views, from
+  // initialBodyJSON) or later as a Yjs transaction (every collaborative
+  // surface). Latches: it answers "has the document arrived", which cannot
+  // become false again by someone selecting all and deleting.
+  const [hasContent, setHasContent] = useState(false);
+  useEffect(() => {
+    if (!editor || hasContent) return;
+    const check = () => {
+      if (editor.state.doc.content.size > 2) setHasContent(true);
+    };
+    check();
+    editor.on("update", check);
+    return () => {
+      editor.off("update", check);
+    };
+  }, [editor, hasContent]);
+
   // useEditor's `editable` option is only read at construction time, not
   // reactive — toggling it later (e.g. after a soft delete) requires calling
   // setEditable directly.
@@ -200,7 +214,7 @@ export default function CollabEditorBody({
   // construction (a reader posts an annotation, this page refreshes) and the
   // extension's options were read once. PLAN.md §13o.
   //
-  // `synced` is in the dependency list because a *collaborative* editor's
+  // `hasContent` is in the dependency list because a *collaborative* editor's
   // document does not exist yet when this first runs. A column anchor is
   // resolved by finding its `quotedText` in the document
   // (annotation-highlight-extension.ts's `resolveAll`), and this editor starts
@@ -214,15 +228,19 @@ export default function CollabEditorBody({
   // view was invisible in the doc editor's rail — the one place PLAN.md §13o
   // says both mechanisms must answer alike.
   //
-  // Pushing again on the sync is the fix the extension already asks for. This
-  // flag is the right trigger rather than a document-changed check because it
-  // means precisely "the content in front of you is the document" (DocEditor's
-  // own note on it), which is the precondition for a text search to be
-  // meaningful. Guarded by e2e/doc.spec.ts.
+  // The trigger is the document having text, and not the provider's `synced`,
+  // which was the first attempt and is a *different* fact: it fires when the
+  // sync message has been processed, which may be either side of the
+  // y-prosemirror transaction that puts the content into this editor. Losing
+  // that race leaves every anchor unresolved exactly as before, and which way
+  // it falls varies by engine — measured 2026-08-26 on one machine, where an
+  // iPhone resolved them and a desktop Chromium did not, from the same server
+  // on the same commit. `hasContent` is the condition `resolveAll` actually
+  // needs, so there is no race left to lose. Guarded by e2e/doc.spec.ts.
   useEffect(() => {
     if (!editor) return;
     setAnnotationAnchors(editor.view, annotationAnchors);
-  }, [editor, annotationAnchors, synced]);
+  }, [editor, annotationAnchors, hasContent]);
 
   useEffect(() => {
     return () => {

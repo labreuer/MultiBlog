@@ -23,18 +23,32 @@
    so this needs no media query of its own; the attribute simply never appears
    in the aligned layout.
 
-   The transparent border is always present and only its colour changes, because
-   "move nothing" is the entire point of marking rather than scrolling — a
-   border appearing would shift every card's text sideways the moment you
-   scrolled the document. Addressed by the cards' own data attribute rather
-   than by MarginNotes.module.css's `.entry`, which is shared with the reading
-   views and the PDF panel and has no business growing a rule for this. */
+   The transparent border is always present and only its colour changes, and
+   the background is a fill rather than anything that reflows, because "move
+   nothing" is the entire point of marking rather than scrolling — anything
+   that occupied space would shift every card's text the moment you scrolled
+   the document.
+
+   **Loud on purpose.** This began as a 2px border alone and was invisible on a
+   real iPhone in landscape (2026-08-26) while reading fine on a desktop. Two
+   things about that viewport work against a hairline at the card's edge: iOS
+   applies text autosizing, which inflates the type by roughly 1.4× here while
+   leaving borders and padding at exactly the pixels they were given, and the
+   card's left edge sits immediately beside the rail's own divider, where two
+   near-adjacent vertical lines read as one. A fill cannot lose either
+   argument.
+
+   Addressed by the cards' own data attribute rather than by
+   MarginNotes.module.css's `.entry`, which is shared with the reading views and
+   the PDF panel and has no business growing a rule for this. */
 .queue [data-margin-note-id] {
-  border-left: 2px solid transparent;
-  padding-left: 8px;
-  transition: border-color 0.15s ease;
+  border-left: 3px solid transparent;
+  padding-left: 10px;
+  padding-right: 10px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .queue [data-margin-note-id][data-on-screen] {
   border-left-color: var(--link);
+  background: var(--surface-hover);
 }
