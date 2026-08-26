@@ -27,6 +27,8 @@ import {
   visibleText,
   QUOTED_BODY,
   QUOTED_TEXT,
+  QUOTE_FROM,
+  QUOTE_TO,
 } from "./fixtures";
 import {
   countDocYdocUpdates,
@@ -35,6 +37,7 @@ import {
   getAnnotationStates,
   markPresentAtStamp,
   addTestDocAuthor,
+  createTestAnnotation,
 } from "./db";
 import { ADMIN_EMAIL } from "./naming";
 import { uniqueTitle } from "./naming";
@@ -547,6 +550,43 @@ test.describe("annotations", () => {
   // The other side of PLAN.md §13o's split. e2e/text-selection.spec.ts already
   // covers where the editor's marker sits; this covers what posting from it
   // actually writes, which is the thing that must not follow the reading view.
+  test("an annotation written from a reading view is visible in the editor's rail too", async ({
+    page,
+    sharedDoc,
+  }) => {
+    // PLAN.md §13o's claim in the direction nothing covered: the editor is
+    // supposed to answer for *both* mechanisms, and EditorAnnotationRail's own
+    // header says a reader's column-anchored annotation "is precisely what the
+    // author needs to see while editing the passage it is about".
+    //
+    // It wasn't. A column anchor resolves by finding its quotedText in the
+    // document, and this editor's document starts empty and fills from Yjs, so
+    // the one anchor push happened against an empty doc, failed, and was never
+    // retried (annotation-highlight-extension.ts's tier 3 leaves a failed scan
+    // detached until the next push, and there was no next push). Every
+    // annotation written from a reading view was invisible here. The fix is a
+    // second push once `synced` says the document has arrived; this is what
+    // fails without it.
+    const annotation = await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: "Written against stored offsets.",
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+    });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(`/doc/${sharedDoc.id}/edit`);
+    await waitForDocCollabReady(page);
+
+    // The anchor resolved against the live document: the highlight decoration
+    // exists, which is the thing that was missing outright.
+    await expect(page.locator(`[data-annotation-ids~="${annotation.id}"]`).first()).toBeVisible({ timeout: 15_000 });
+
+    // And the card is *drawn*, not merely present — the bounded rail hides a
+    // card it cannot place, which is exactly how this failure looked.
+    await expect(page.locator(`[data-thread-id="${annotation.id}"]`)).toBeVisible();
+  });
+
   test("the doc editor's own widget still anchors with a mark, and stores no offsets", async ({
     page,
     sharedDoc,

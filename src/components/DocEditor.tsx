@@ -9,6 +9,7 @@ import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
 import { UNTITLED_DOC } from "@/lib/doc-title";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { EDITOR_FOCUS_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 import { useEditorAnnotationWidget } from "@/lib/use-editor-annotation-widget";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
@@ -41,7 +42,15 @@ import styles from "./DocEditor.module.css";
 // isn't any until 856. Between the two, everything still works — a doc's
 // annotations are composed from its reading view (/doc/[slug]), which has
 // its own selection popover and no width floor.
-const ANNOTATION_WIDGET_MEDIA_QUERY = "(min-width: 900px)";
+// …and the second clause is phone-landscape focus mode, where the premise of
+// the derivation above no longer holds. That 900px answers "is this window
+// wide enough that a centred 800px column leaves a gutter", and in focus mode
+// the column is not centred and not 800px: the gutter is *reserved*, a 44px
+// gap between the editor and the rail that is MARKER_GAP +
+// ANNOTATE_MARKER_SIZE + MARKER_GAP by construction (DocEditor.module.css).
+// So the marker has its room at 844px there, where the width test alone would
+// say no and leave a phone able to read annotations but not write them.
+const ANNOTATION_WIDGET_MEDIA_QUERY = `(min-width: 900px), ${EDITOR_FOCUS_MEDIA_QUERY}`;
 
 type Props = {
   docId: string;
@@ -231,7 +240,11 @@ export default function DocEditor({
   const annotationAnchors = useMemo(() => annotationAnchorInputs(annotations), [annotations]);
 
   return (
-    <div className={styles.container}>
+    // data-doc-editor-scroller names the box that becomes the horizontal
+    // scroller in phone-landscape focus mode (DocEditor.module.css). An
+    // attribute rather than a class so it survives CSS Modules unhashed and
+    // can be addressed from e2e, the same hook pattern as the two below.
+    <div className={styles.container} data-doc-editor-scroller="">
       {/* data-doc-editor-column is the `:has()` scope for the height-floor
           rule in EditorChrome.module.css — see DocSettingsPanel's <details>. */}
       <div className={styles.mainColumn} data-doc-editor-column="" ref={containerRef}>
@@ -285,6 +298,7 @@ export default function DocEditor({
             onSelectionUpdate={widget.capture}
             onContentUpdate={widget.reresolve}
             annotationAnchors={annotationAnchors}
+            synced={synced}
           />
         ) : (
           <p>Connecting to live editor…</p>
@@ -357,7 +371,11 @@ export default function DocEditor({
           onDeletedChange={setDeleted}
         />
       </div>
-      <div className={styles.rail}>
+      {/* data-editor-rail is this rail's stable handle — nothing in CSS needs
+          it now that the row scrolls as one piece, but it is what e2e
+          measures the rail's own geometry through, and a hashed module class
+          is not something a spec should be reaching for. */}
+      <div className={styles.rail} data-editor-rail="">
         <EditorAnnotationRail entries={annotations} docId={docId} />
       </div>
     </div>

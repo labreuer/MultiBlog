@@ -68,6 +68,10 @@ type Props = {
   // they're rewriting. Empty on every embedder that doesn't supply them,
   // which costs one plugin with nothing to draw.
   annotationAnchors?: AnnotationAnchorInput[];
+  // Whether the initial sync has delivered the document yet. Only the doc
+  // editor passes it, and only because of the anchor push below; a surface
+  // with no column-anchored annotations has nothing that depends on it.
+  synced?: boolean;
 };
 
 // Stable default — see DocReadingBody's identical constant.
@@ -106,6 +110,7 @@ export default function CollabEditorBody({
   onSelectionUpdate,
   onContentUpdate,
   annotationAnchors = EMPTY_ANCHORS,
+  synced,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
@@ -194,10 +199,30 @@ export default function CollabEditorBody({
   // Same reason as `editable` above: the anchor set changes after
   // construction (a reader posts an annotation, this page refreshes) and the
   // extension's options were read once. PLAN.md §13o.
+  //
+  // `synced` is in the dependency list because a *collaborative* editor's
+  // document does not exist yet when this first runs. A column anchor is
+  // resolved by finding its `quotedText` in the document
+  // (annotation-highlight-extension.ts's `resolveAll`), and this editor starts
+  // empty and fills from Yjs — so the first push searched an empty document,
+  // failed, and by that extension's tier-3 rule was never retried: "detachment
+  // is re-evaluated on the next anchor push instead". There was no next push,
+  // because `annotationAnchors` is memoised from server data and never changes
+  // identity. The effect was therefore correct for the reading views, whose
+  // editor is built around `initialBodyJSON` and has its text from the first
+  // frame, and silently wrong here: every annotation written from a reading
+  // view was invisible in the doc editor's rail — the one place PLAN.md §13o
+  // says both mechanisms must answer alike.
+  //
+  // Pushing again on the sync is the fix the extension already asks for. This
+  // flag is the right trigger rather than a document-changed check because it
+  // means precisely "the content in front of you is the document" (DocEditor's
+  // own note on it), which is the precondition for a text search to be
+  // meaningful. Guarded by e2e/doc.spec.ts.
   useEffect(() => {
     if (!editor) return;
     setAnnotationAnchors(editor.view, annotationAnchors);
-  }, [editor, annotationAnchors]);
+  }, [editor, annotationAnchors, synced]);
 
   useEffect(() => {
     return () => {

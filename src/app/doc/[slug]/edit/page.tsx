@@ -6,6 +6,7 @@ import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
 import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
+import { EDITOR_MARGIN_NOTES_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import DocEditor from "@/components/DocEditor";
@@ -57,14 +58,20 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
     getDocAnnotationsAsThreads(doc.id),
   ]);
 
-  // PLAN.md §18c — the editing view shows presently-anchored annotations
-  // beside the text and nothing else, so the general-discussion threads are
-  // dropped here rather than shipped and then hidden. This is a cheap
-  // pre-filter on a store-debounce snapshot, not the decision: which marks
-  // actually exist is re-resolved against the live document on every
-  // measurement (EditorAnnotationRail), which is the only answer that stays
-  // true while someone is typing.
-  const annotations = buildAnnotationEntries(threads).filter((entry) => entry.quotedText !== "");
+  // Every thread, anchorless ones included. This used to pre-filter to
+  // `quotedText !== ""` on the grounds that the editing view shows
+  // presently-anchored annotations and nothing else (PLAN.md §18c) — true of
+  // the wide layout, and false of the phone-landscape queue, which lists all
+  // of them precisely so an author can see there are twelve rather than the
+  // two beside the current viewport.
+  //
+  // A server component cannot make that choice: which presentation is on
+  // screen is a media query. So the filtering moved to the one place that
+  // knows — EditorAnnotationRail — and the wide layout drops an anchorless
+  // card exactly as before, by the bounded pass finding no position for it
+  // (use-margin-notes-layout.ts). Nothing is shipped that isn't wanted by one
+  // of the two presentations.
+  const annotations = buildAnnotationEntries(threads);
 
   return (
     // AnnotationMoveProvider: required by AnnotationPopover's own
@@ -77,7 +84,10 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
     // feeds it its own read-only tap) — same channel either way.
     <DocPresenceProvider>
       <AnnotationMoveProvider>
-        <MarginNotesProvider>
+        {/* The one surface that overrides the rail's threshold: on a phone
+            in landscape the rail engages where 1180px alone would refuse
+            (EDITOR_MARGIN_NOTES_MEDIA_QUERY). */}
+        <MarginNotesProvider query={EDITOR_MARGIN_NOTES_MEDIA_QUERY}>
           <DocEditor
             docId={doc.id}
             slug={doc.slug}

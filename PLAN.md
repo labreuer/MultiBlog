@@ -5849,6 +5849,43 @@ only the last of which needed new machinery:
   caller — cards track the internal scroll, and one whose anchor has left the frame is
   hidden rather than pinned to an edge.
 
+**As built, both of those first and third points are now true of the *wide* layout only.**
+In phone-landscape focus mode (STYLE.md's fourth breakpoint) the same rail renders as a
+**queue**: every annotation the doc has, in document order, anchorless ones last, in
+normal flow inside a column that scrolls on its own. Nothing is aligned to its passage
+and nothing is hidden for being out of frame.
+
+The reason is that the two presentations answer different questions. A margin is right
+for *reading* — a reader wants the note beside the sentence, and alignment is what makes
+a rail better than a list. A queue is right for *revising*: an author working through
+annotations needs to see that there are twelve rather than the two beside the current
+viewport, needs to read a long note without the document moving, and needs their place in
+the list not to shift on every keystroke. On a phone held sideways the passage and its
+card are inches apart anyway, so alignment buys least exactly where the queue's
+advantages are worth most.
+
+Three consequences worth stating, because each is a reversal:
+
+- The layout hook grew a `positioned` option and now returns `live` alongside `anchored`.
+  `live && !positioned` deliberately takes the same teardown branch as "no rail at all",
+  because a queue wants precisely what that branch leaves behind: no inline styles and no
+  observers. Rotating out of the wide layout is what makes the teardown load-bearing
+  rather than tidiness.
+- **The anchorless pre-filter moved out of the page.** `/doc/[slug]/edit` used to drop
+  `quotedText === ""` entries server-side; a server component cannot know which
+  presentation is on screen, so it now ships every thread and the rail decides. The wide
+  layout drops them exactly as before — by the bounded pass finding no position for them.
+- DOM order is now load-bearing in one of the two modes, where the aligned rail never
+  cared about it (its visual order comes from where cards are *placed*). Entries arrive
+  ordered by `createdAt`, so the queue sorts by resolved anchor, recomputed on the same
+  channel the positioned pass uses and committed to state only when the order actually
+  changes.
+
+No navigation between the text and the queue was built, deliberately: tapping an
+annotated passage to scroll its card was considered and declined — in an editor a tap is
+how a caret is placed, and hijacking it to move a side column is the wrong trade. The
+card→passage direction already exists either way (`QuoteThreadHeader`'s jump).
+
 `CollabEditorBody` marks that scroll frame with `data-editor-scroll`
 (`src/components/editor-scroll.ts`). An attribute rather than a class because CSS-module
 names are hashed per build and so aren't addressable from a `querySelector` in another

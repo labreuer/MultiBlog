@@ -6,3 +6,14 @@
 .rail {
   height: 100%;
 }
+
+/* Queue mode (phone-landscape focus mode, STYLE.md's fourth breakpoint): the
+   cards are in normal flow inside a rail that scrolls, so the list is as tall
+   as its content instead of being the fixed window .rail describes above.
+   A class rather than a media query, because the component decides which
+   presentation it is rendering and the CSS should not have to agree
+   independently — the media query lives in one place, matched by
+   EDITOR_FOCUS_MEDIA_QUERY. */
+.queue {
+  height: auto;
+}
