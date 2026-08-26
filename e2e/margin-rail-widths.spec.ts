@@ -43,8 +43,7 @@ const NARROW = { width: 1024, height: 768 };
 async function boxes(page: Page) {
   const article = await bodyEditor(page).boundingBox();
   const card = await page.locator("[data-margin-note-id]").first().boundingBox();
-  if (!article || !card) throw new Error("Expected both the article and one annotation card to be laid out.");
-  return { article, card };
+  return article && card ? { article, card } : null;
 }
 
 /**
@@ -53,15 +52,27 @@ async function boxes(page: Page) {
  * Returned as a number rather than a boolean so a failure reports how far off
  * it landed, which is the difference between "the breakpoint didn't fire" and
  * "the rail is overlapping the prose".
+ *
+ * NaN, not a throw, when either box is missing. Crossing the breakpoint moves
+ * a card between the rail's portal and the section below, and for a tick
+ * neither is laid out — `boundingBox()` answers null. A throw inside
+ * `expect.poll` aborts the whole test instead of being retried, so this
+ * returns a value that simply fails the comparison and polls again. It failed
+ * exactly this way against the prod target while passing on dev, which is the
+ * timing difference the suite targets prod for in the first place.
  */
 async function besideBy(page: Page): Promise<number> {
-  const { article, card } = await boxes(page);
+  const measured = await boxes(page);
+  if (!measured) return Number.NaN;
+  const { article, card } = measured;
   return Math.round(card.x - (article.x + article.width));
 }
 
 /** The same, vertically: how far the card's top sits below the article's bottom. */
 async function belowBy(page: Page): Promise<number> {
-  const { article, card } = await boxes(page);
+  const measured = await boxes(page);
+  if (!measured) return Number.NaN;
+  const { article, card } = measured;
   return Math.round(card.y - (article.y + article.height));
 }
 
