@@ -524,3 +524,27 @@ bundle and copying the working tree.
 `resolve(/*turbopackIgnore: true*/ process.env.FILE_STORAGE_DIR || DEFAULT_STORAGE_DIR)` — or
 give the default an absolute base so the dynamic part is scoped. Worth confirming the warning
 actually clears rather than moving to the next dynamic call in that module.
+
+---
+
+## The viewport thumb disappears at the very bottom of a PDF
+
+**Found:** 2026-08-26, incidentally, while measuring `setVisibleRange` (PERFORMANCE.md's entry
+for that date has the harness).
+
+Scrolled to `scrollHeight`, `fractionAtViewportY` returned null for 5 of 5 calls, so
+`visibleRange` goes null and `PdfRails` draws no thumb. The null is deliberate and documented
+in that function: at the extreme edges the probed y can fall in a gap between pages, or on a
+page pdfjs has not built, and it "treats as no thumb rather than guessing".
+
+What that reasoning did not account for is that the bottom edge of a scrolled-to-the-end
+container lands in the padding *below the last page* — so this is not an edge case that
+occasionally bites. **It happens at the end of every document.** The reader arrives at the last
+page and the position indicator vanishes, which reads as breakage rather than as a principled
+refusal to guess.
+
+Options, cheapest first: clamp the bottom probe to the last rendered page's bottom before
+giving up; or have `onMoved` keep the previous range when one end returns null while the other
+still resolves. The first is more honest about what is being shown; the second is one line.
+
+Not urgent — the strip's annotation ticks still render, only the thumb goes.
