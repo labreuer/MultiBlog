@@ -17,7 +17,7 @@ to re-derive the decision from.
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
-| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. |
+| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Keywords have their own section: minting vs. applying vs. curating. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Creating a doc from Markdown — file import and paste box. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
@@ -66,6 +66,24 @@ before changing the behavior it describes.
   thing being removed, not an implementation detail. `resolveAnnotationRanges`
   (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
   jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
+- **One anchor row shape, per-consumer tables.** `keyword_anchor` (and, from PR 2,
+  `annotation_anchor`) share a column shape by *compiler*, not by convention:
+  `src/lib/anchors/` holds the target arc as a discriminated union, `parseSelector`, and the
+  capture/resolve pair, and every consumer goes through it. The object side is four nullable
+  FKs with exactly one non-null, enforced by a hand-written CHECK — so **a new targetable kind
+  is a migration** (one column, one index, one CHECK edit, per anchor table), which is the
+  cost §20a took on deliberately over an `anchor` table with an owner arc or one W3C-style
+  supertable. What is unified is the *envelope*, never the selector: each mechanism keeps its
+  own physics, and COLLAB.md's "there is no universal anchor" is unchanged. `src/lib/anchors/`
+  is split browser-safe (`index.ts`) vs. server (`capture.ts`) the way `avatar-url.ts` and
+  `avatar.ts` are — don't barrel them together. PLAN.md §20a, §20b.
+- **A keyword chip is exactly as private as the thing it is on, structurally.** `KeywordChips`
+  renders only from inside a page that has already run its own gate and takes a resolved
+  `AnchorTarget` rather than a slug, so it can't be mounted on an ungated surface; it
+  deliberately adds no second check. It also reads **no session** — `/[slug]` is statically
+  generated, and a dynamic API there throws at build (§12f) — so everything viewer-shaped
+  lives in a client island that asks the server on open. `/keyword/[slug]` is three per-type
+  queries wearing three existing predicates, never one UNION. PLAN.md §20d, docs/PERMISSIONS.md.
 - **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,
   stale by seconds while anyone is typing. Fine as the *seed* for which cards start in the
   rail, and nothing more.
@@ -142,6 +160,14 @@ editing an applied migration) are in [docs/DATABASE.md](docs/DATABASE.md) — re
 running `prisma migrate dev` on anything unusual.
 
 - **Restarting the Postgres service needs an elevated shell** — ask the user to do it.
+- **`npx prisma format` after editing `schema.prisma` — then read what it changed.** It
+  rewrites the *whole file*, so on a drifted one it sweeps up every misalignment ever left
+  behind and buries your handful of real lines in a hundred cosmetic ones. The file is
+  format-clean now, so a run is a no-op plus your own block's realignment; **anything it
+  touches outside your edit is pre-existing drift and gets its own commit.**
+  `npm run check:schema` is the fail-if-dirty version (`--write` to fix). Why it matters, why
+  the obvious `git diff --exit-code` version of that check is wrong, and why `.gitattributes`
+  pins this one file to LF: [docs/DATABASE.md](docs/DATABASE.md).
 - `npx prisma generate` fails with **EPERM while the dev server runs** (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
 - **Adding a new model needs the dev server restarted, not just regenerated** — and the failure
@@ -168,6 +194,13 @@ running `prisma migrate dev` on anything unusual.
 
 - Typecheck `npx tsc --noEmit`; lint `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
   `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
+- `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
+  dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
+  and the right home for exactly one kind of thing — pure functions whose *rejection surface*
+  is the point (`src/lib/anchors/`'s `parseSelector`, the target arc, `resolveAnchorInDoc`'s
+  three tiers). A table of malformed inputs is not something to drive a browser through, and
+  the e2e suite's proof for a pure refactor is a two-minute production build. Don't reach for
+  it for anything involving Prisma, a ydoc or the DOM — those have better tools here already.
 - `npm run e2e` — the full Playwright suite against a **production build** on `WEB_PORT + 2`
   (builds first; ~2min of suite proper once warm). Prod rather than `next dev` because two
   historical flake classes were dev-server bugs a production build compiles out — the whole
@@ -203,8 +236,8 @@ running `prisma migrate dev` on anything unusual.
   unprompted**; Conventions below says when it comes up instead. Screenshots time out in this
   environment, `ref` clicks can silently no-op, and all tabs share one cookie jar:
   [docs/BROWSER_PANE.md](docs/BROWSER_PANE.md).
-- Throwaway users/docs/posts/comments/files/ydocs, the durable `@sample.invalid` seed, and the
-  two one-shot importers: [docs/TEST_DATA.md](docs/TEST_DATA.md). Each script's own header
+- Throwaway users/docs/posts/comments/files/keywords/ydocs, the durable `@sample.invalid` seed,
+  and the two one-shot importers: [docs/TEST_DATA.md](docs/TEST_DATA.md). Each script's own header
   documents its flags. Defaults: `test-admin@example.com`, role `ADMIN`, password
   `testpass123`.
 - Measuring editing latency, stress-testing at realistic size, and A/B-ing against history:
@@ -259,6 +292,18 @@ working on.
   `"a%2Bb"` and `.split("+")` would 404 every URL — a `+`-means-space assumption that's true
   for query strings and false here. `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path
   segments specifically to never need to decode anything.
+- **A Server Component handed to a client component as a prop needs a `key` if it has
+  siblings** — even though nothing there is a list. A JSX tree passed across that boundary is
+  *serialized into the RSC payload* rather than rendered in place, and the Flight server's
+  `renderFragment` stamps every keyless element in an array it serializes as "key not yet
+  checked". Only a **Server Component** then trips the check, in `renderFunctionComponent`:
+  host elements and client references are serialized by other paths and stay silent, so the
+  one child that warns is the one that looks least like a list item. The symptom is "Each
+  child in a list should have a unique key prop" pointing at a `<div>` whose children are
+  plainly static — `/doc/[slug]`'s byline is the live example, and `/pdf/[slug]`'s chips
+  escape it only by being a whole prop value with no siblings. **Invisible to every automated
+  check here**: `tsc` and `eslint` can't see it, and `npm run e2e` asserts on the DOM, not the
+  console. Dev-only, since the production Flight build runs no such validation.
 - **A doc link's anchor is a plain JSON blob in Postgres, not a mark in the doc's ydoc** — the
   opposite of an annotation's, and deliberately: a link joins two *different* docs, and no
   single ydoc can hold that. The cost is drift, paid for by re-running `findQuoteOccurrences`

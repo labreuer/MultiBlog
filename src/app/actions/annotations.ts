@@ -17,7 +17,7 @@ import {
   requireDocAnnotationId,
   type AnnotationTarget,
 } from "@/lib/annotation-container";
-import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
+import { captureAnchorInYdoc } from "@/lib/anchors/capture";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import {
@@ -138,7 +138,7 @@ export async function postAnnotation(opts: {
   anchorTo?: number;
   // The client's own reading of its selection. In "mark" mode the collab
   // server verifies the offsets against it; in "columns" mode
-  // captureAnnotationAnchor does. Never stored as sent either way — §12i's
+  // captureAnchorInYdoc does. Never stored as sent either way — §12i's
   // "a request field only, never a column" survives the column's arrival.
   quotedText?: string;
   // "Notify authors" (PLAN.md §13d) — RAISED is LIVE plus the doc's byline
@@ -324,7 +324,7 @@ export async function postAnnotation(opts: {
       // A malformed or undecodable snapshot, or a store failure. Falls to the
       // tail below, which is exactly the behaviour before this existed — the
       // anchor stays self-consistent with whatever gets stamped either way
-      // (captureAnnotationAnchor re-derives against it), so this degrades
+      // (captureAnchorInYdoc re-derives against it), so this degrades
       // rather than fails.
       console.error(`[annotations] couldn't resolve the client's version for ${anchorYdocId}:`, err);
     }
@@ -341,7 +341,7 @@ export async function postAnnotation(opts: {
   // posted with.
   let capturedAnchor: { from: number; to: number; quotedText: string } | null = null;
   if (anchorRequested && anchorMode === "columns" && ydocUpdateId !== null) {
-    capturedAnchor = await captureAnnotationAnchor({
+    capturedAnchor = await captureAnchorInYdoc({
       ydocId: anchorYdocId,
       throughUpdateId: ydocUpdateId,
       // The two targets are different documents with different schemas —

@@ -422,3 +422,105 @@ Both unblock when Next ships a refreshed lint config — **recheck then, not bef
 
 Worth knowing when weighing it: taking eslint 10 *would* drop the `brace-expansion` audit
 count from 9 to 6.
+
+---
+
+## The PDF side panel's Collab tab is a stub
+
+**Status:** shipped empty on purpose, 2026-08-25. `PdfCollabPanel` renders "Nothing here yet."
+
+`/pdf/[slug]`'s side panel is three tabs — Annotations, Metadata, Collab (PLAN.md §19's
+deviation list). The third exists so the strip is the shape it will keep rather than growing a
+tab later and moving the other two; it was not left half-built.
+
+What is likely to go in it, and why this is a note rather than a decision: Phase 4's presence
+pieces sit in the chrome *around* the viewer. The
+**follow bar** (`PdfFollowBar` — the reader list plus "lead"/"follow") is squeezed into the
+toolbar beside the page and zoom controls, which is a row of document controls and a poor home
+for a list of people. The **left rail** (`PdfPresenceRail`) says where readers are as marks
+down the edge, which is the right medium for position and no medium at all for names, colors or
+"who is here". A pane can carry both in words.
+
+Neither is a given. Moving the follow bar out of the toolbar changes a control readers can
+currently reach without opening anything, so it is worth deciding whether the pane *replaces*
+it or duplicates it — and that is the actual open question, not the markup.
+
+---
+
+## A dangling `updated_by_user_id` takes the whole doc cache down with it
+
+**Status:** observed once in a full `npm run e2e` run on 2026-08-25 (166 tests, 1 occurrence).
+Caught and logged, never thrown — the suite is green and stays green.
+
+```
+[doc-cache] failed to update prose_json for ydoc:cmt92grwu…: P2003
+Foreign key constraint violated on the constraint: `doc_updated_by_user_id_fkey`
+  at updateDocCache (server/doc-cache.ts:44)
+  at ydocOnStoreDocument (server/ydoc-hooks.ts:148)
+```
+
+`ydocOnStoreDocument` is **debounced**, and it stamps `updated_by_user_id` from Hocuspocus's
+`lastContext.userId` — whichever connection most recently drove the document. If that user row
+is deleted between the last edit and the debounce firing, the stamp points at nothing and
+Postgres refuses the write.
+
+**The bug isn't the refusal, it's the blast radius.** `updateDocCache` writes `prose_json`,
+`title`, `prose_json_update_id` and `updated_by_user_id` in **one** `updateMany`, so the FK
+aborts all four. The doc keeps a stale content cache permanently and silently: `/docs` reports
+the old Length (`Doc.proseJsonLength` is trigger-maintained off `prose_json`), and every surface
+seeded from `proseJson` reads stale. The comment above that field reasons about attribution
+alone — "shouldn't erase the last real editor" — and does not consider that the stamp can take
+the content with it. The `try` around the write is doing its job (§11c: nothing throws into a
+Hocuspocus hook); it just can't distinguish "couldn't record who" from "couldn't record what".
+
+**How it happens today: only in tests.** No application path hard-deletes a `User`. The three
+that do are `e2e/db-worker.ts:177`, `scripts/test-user.ts:135` and
+`scripts/seed-sample-data.ts:481`, and the e2e case is the observed one — a throwaway author
+edits a doc, the fixture deletes the user, the debounce lands after. The doc is being deleted
+too, so nothing is lost there. That is why this is a robustness note and not a bug hunt.
+
+**Probable fix, and it is a decision rather than a mechanical change.** Catch `P2003` and retry
+once without `updatedByUserId`: the content cache is the thing that matters and the attribution
+is best-effort, so losing only the stamp is the honest degradation. Costs nothing on the normal
+path and one extra round trip in the rare one — unlike splitting it into two unconditional
+writes, which would put a second round trip on every store debounce.
+
+**What will not work, so nobody spends an afternoon on it:** `onDelete: SetNull` on the
+relation (`schema.prisma:623`). That governs what happens when a *referenced* row is deleted,
+not what happens when you write a reference to a row that is already gone — which is this case.
+
+---
+
+## Turbopack traces the whole project through `file-storage.ts`
+
+**Status:** a build warning on every `next build`, since the file-upload work (`44b9d8a`,
+`52d7a15`). Harmless here today; recorded so it isn't rediscovered as a mystery.
+
+```
+Turbopack build encountered 1 warnings:
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally.
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/lib/file-storage.ts
+    ./src/app/api/files/upload/route.ts
+```
+
+`storageDir()` is `resolve(process.env.FILE_STORAGE_DIR || ".file-storage")`
+(`src/lib/file-storage.ts:58`) — a bare `resolve()` with no base, so it resolves against
+`process.cwd()`, and the default is a *relative* path. That is exactly the shape the warning
+names: a filesystem operation the tracer cannot bound to a subfolder, so it concludes the
+entire project might be read at runtime and traces all of it.
+
+**Why it costs nothing right now:** `next.config.ts` sets no `output: "standalone"`, so the
+`.nft.json` trace files Next writes are not consumed by anything. DEPLOY.md ships the repo and
+runs `next start` against `.next/`. The warning matters the day this moves to a standalone or
+containerised build, where an over-broad trace is the difference between copying the server
+bundle and copying the working tree.
+
+**Fix when it matters:** Turbopack's own suggestion —
+`resolve(/*turbopackIgnore: true*/ process.env.FILE_STORAGE_DIR || DEFAULT_STORAGE_DIR)` — or
+give the default an absolute base so the dynamic part is scoped. Worth confirming the warning
+actually clears rather than moving to the next dynamic call in that module.

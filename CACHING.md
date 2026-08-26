@@ -290,3 +290,30 @@ never actually depended on the hash; a browser revalidates on every
 navigation regardless. The hash's job is avoiding a redundant fetch once a
 given hash is already cached — real, but not the reason changing the icon
 now works where it didn't before.
+
+## Keywords (PLAN.md §20d)
+
+Three rules, and the middle one is the one that shaped the components.
+
+**Tagging revalidates the tagged object's own path**, and only that: `/doc/<slug>`,
+`/<postSlug>`, `/pdf/<slug>`, plus `/keywords` for the admin table's usage counts.
+`src/app/actions/keywords.ts`'s `pathForTarget` is the single place that mapping lives.
+
+**`/keyword/[slug]` is `force-dynamic`, and not for freshness.** The page is
+*permission-shaped per viewer* — an ADMIN and an AUTHORIZED reader see different docs under
+the same URL — so a shared cache entry would be a leak rather than a staleness bug. It is
+declared explicitly rather than left to whether some call inside happens to opt out.
+
+**The chips do not cost the post page its static generation.** `/[slug]` carries
+`generateStaticParams` and `revalidate = 60`, and a route eligible for static generation that
+also calls a dynamic API throws `DYNAMIC_SERVER_USAGE` at build (PLAN.md §12f). So
+`KeywordChips` reads **no session at all**: which terms are on an object is the same answer
+for every viewer who can see the object, and everything viewer-shaped — may you tag this, what
+are your own tags here — lives in a client island that asks the server when someone opens it
+(`loadTaggerState`). Verified by the build output, where `/[slug]` is still `●`.
+
+The consequence to remember is the ordinary ISR one, and `e2e/keywords.spec.ts` hits it: a tag
+written **straight to the database** (a fixture, a `scripts/test-keyword.ts` run) is invisible
+to the Full Route Cache, so a post page cached by an earlier visit keeps serving chips without
+it for up to the revalidate window. A tag applied through the real action is fine — its own
+`revalidatePath` is exactly what the direct write bypasses.

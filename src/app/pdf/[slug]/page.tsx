@@ -6,6 +6,7 @@ import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
 import { getFileAnnotationsAsThreads } from "@/lib/annotation-data";
 import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
+import KeywordChips from "@/components/keywords/KeywordChips";
 import styles from "./page.module.css";
 
 // PLAN.md §19 — the PDF reading view.
@@ -83,5 +84,21 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
     root: entry.root,
   }));
 
-  return <PdfSurfaceClient fileId={file.id} fileUrl={fileUrl} title={file.title} entries={entries} />;
+  // PLAN.md §20d — the keyword chips, handed to the viewer as its Metadata
+  // pane.
+  //
+  // Passed as a prop, not imported by the client island: PdfSurfaceClient is a
+  // `"use client"` module behind `ssr: false`, which may not import a Server
+  // Component but may receive one already rendered (its header has the whole
+  // reason). Gated by this page's canUserReadFile above, exactly as the doc
+  // page's chips are gated by canUserReadDoc.
+  return (
+    <PdfSurfaceClient
+      fileId={file.id}
+      fileUrl={fileUrl}
+      title={file.title}
+      entries={entries}
+      metadata={<KeywordChips target={{ kind: "file", id: file.id }} />}
+    />
+  );
 }

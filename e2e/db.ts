@@ -20,6 +20,8 @@ import type {
   TestYdocSnapshot,
   TestDoc,
   TestFile,
+  TestKeyword,
+  KeywordFacts,
   FileAnnotationFacts,
   DocState,
   AnnotationState,
@@ -39,6 +41,8 @@ export type {
   TestYdocSnapshot,
   TestDoc,
   TestFile,
+  TestKeyword,
+  KeywordFacts,
   FileAnnotationFacts,
   DocState,
   AnnotationState,
@@ -150,6 +154,26 @@ export const createTestFile = (...args: Parameters<DbHandlers["createTestFile"]>
 
 export const deleteTestFile = (...args: Parameters<DbHandlers["deleteTestFile"]>): Promise<void> =>
   call("deleteTestFile", ...args);
+
+// PLAN.md §20 — keyword fixtures. See db-worker.ts's createTestKeyword for why
+// containment here is by E2E_ title prefix rather than by an author email.
+export const createTestKeyword = (...args: Parameters<DbHandlers["createTestKeyword"]>): Promise<TestKeyword> =>
+  call("createTestKeyword", ...args);
+
+export const tagWithTestKeyword = (
+  ...args: Parameters<DbHandlers["tagWithTestKeyword"]>
+): Promise<{ assignmentId: string }> => call("tagWithTestKeyword", ...args);
+
+export const getKeywordFacts = (...args: Parameters<DbHandlers["getKeywordFacts"]>): Promise<KeywordFacts | null> =>
+  call("getKeywordFacts", ...args);
+
+export const getKeywordAnchorPartColumns = (
+  ...args: Parameters<DbHandlers["getKeywordAnchorPartColumns"]>
+): Promise<Awaited<ReturnType<DbHandlers["getKeywordAnchorPartColumns"]>>> =>
+  call("getKeywordAnchorPartColumns", ...args);
+
+export const deleteTestKeyword = (...args: Parameters<DbHandlers["deleteTestKeyword"]>): Promise<void> =>
+  call("deleteTestKeyword", ...args);
 
 export const getFileAnnotationFacts = (
   ...args: Parameters<DbHandlers["getFileAnnotationFacts"]>

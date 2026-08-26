@@ -12,6 +12,7 @@ import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
 import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
+import KeywordChips from "@/components/keywords/KeywordChips";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -132,6 +133,12 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
                 threads={quoteHighlights}
                 staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
               />
+              {/* PLAN.md §20d — a published post is public, so its chips are
+                  too; the gate that matters is publishedPostWhere above, which
+                  this page has already applied. KeywordChips reads no session,
+                  which is what keeps this route's generateStaticParams and
+                  `revalidate` intact (§12f). */}
+              <KeywordChips target={{ kind: "post", id: post.id }} />
               <CommentSection postId={post.id} />
               <p>
                 <Link href="/">← Back to all posts</Link>
