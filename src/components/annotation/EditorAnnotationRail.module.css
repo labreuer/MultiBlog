@@ -17,3 +17,24 @@
 .queue {
   height: auto;
 }
+
+/* PLAN.md §18c — the card whose passage is on screen right now. `data-on-screen`
+   is written by the layout hook's marking pass, which runs only for a queue,
+   so this needs no media query of its own; the attribute simply never appears
+   in the aligned layout.
+
+   The transparent border is always present and only its colour changes, because
+   "move nothing" is the entire point of marking rather than scrolling — a
+   border appearing would shift every card's text sideways the moment you
+   scrolled the document. Addressed by the cards' own data attribute rather
+   than by MarginNotes.module.css's `.entry`, which is shared with the reading
+   views and the PDF panel and has no business growing a rule for this. */
+.queue [data-margin-note-id] {
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.queue [data-margin-note-id][data-on-screen] {
+  border-left-color: var(--link);
+}

@@ -31,7 +31,8 @@ import {
   QUOTE_FROM,
   QUOTE_TO,
 } from "./fixtures";
-import { createTestAnnotation, getAnnotationStates } from "./db";
+import { createTestAnnotation, createTestDoc, deleteTestDoc, getAnnotationStates } from "./db";
+import { EDITOR_SCROLL_ATTRIBUTE } from "../src/components/editor-scroll";
 import { ADMIN_EMAIL } from "./naming";
 import type { Page } from "@playwright/test";
 
@@ -357,6 +358,77 @@ test.describe("the doc editor's phone-landscape focus mode", () => {
     await expect
       .poll(() => cards.first().evaluate((el) => getComputedStyle(el).position), { timeout: 10_000 })
       .toBe("absolute");
+  });
+
+  test("marks the cards whose passage is on screen, and moves nothing when the document scrolls", async ({
+    page,
+  }) => {
+    // A document tall enough to scroll inside the editor's own frame, with a
+    // distinct word at each end to anchor against. The fixture doc's body is a
+    // single sentence, which can never have an off-screen passage.
+    const body = `ALPHA ${"filler ".repeat(700)}OMEGA`;
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: body });
+    try {
+      const alpha = await createTestAnnotation({
+        docId: doc.id,
+        authorEmail: ADMIN_EMAIL,
+        bodyText: "At the top.",
+        anchor: { from: 1, to: 6, quotedText: "ALPHA" },
+      });
+      const omegaAt = body.indexOf("OMEGA") + 1;
+      const omega = await createTestAnnotation({
+        docId: doc.id,
+        authorEmail: ADMIN_EMAIL,
+        bodyText: "At the bottom.",
+        anchor: { from: omegaAt, to: omegaAt + "OMEGA".length, quotedText: "OMEGA" },
+      });
+
+      await page.setViewportSize(IPAD_LANDSCAPE);
+      await page.goto(`/doc/${doc.id}/edit`);
+      await waitForDocCollabReady(page);
+      await page.setViewportSize(PHONE_LANDSCAPE);
+      await expect(page.locator("[data-margin-note-id]")).toHaveCount(2);
+
+      const frame = page.locator(`[${EDITOR_SCROLL_ATTRIBUTE}]`);
+      const markedIds = () =>
+        page
+          .locator("[data-margin-note-id][data-on-screen]")
+          .evaluateAll((els) => els.map((el) => el.getAttribute("data-thread-id")));
+
+      // Both cards are listed either way — that is the queue. What the marker
+      // adds is which of them is about the text in front of you.
+      await frame.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+      await expect.poll(markedIds, { timeout: 10_000 }).toEqual([alpha.id]);
+
+      // "Move nothing" is the property, so it gets an assertion rather than a
+      // comment: the cards sit exactly where they did before the document
+      // scrolled underneath them.
+      const before = await page.locator("[data-margin-note-id]").first().boundingBox();
+      await frame.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await expect.poll(markedIds, { timeout: 10_000 }).toEqual([omega.id]);
+      const after = await page.locator("[data-margin-note-id]").first().boundingBox();
+      expect(Math.round(after!.y)).toBe(Math.round(before!.y));
+      expect(Math.round(after!.x)).toBe(Math.round(before!.x));
+
+      // The marker is a colour change on a border that is always there, so it
+      // cannot shift the text it sits beside.
+      const widths = await page
+        .locator("[data-margin-note-id]")
+        .evaluateAll((els) => els.map((el) => getComputedStyle(el).borderLeftWidth));
+      expect(widths).toEqual(["2px", "2px"]);
+
+      // And nothing is marked in the aligned layout, where an out-of-band card
+      // is hidden instead and the marker would have nothing to say.
+      await page.setViewportSize(IPAD_LANDSCAPE);
+      await expect.poll(markedIds, { timeout: 10_000 }).toEqual([]);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(doc.id);
+    }
   });
 
   test("fits the viewport rather than spilling into a page scroll", async ({ page, sharedDoc }) => {

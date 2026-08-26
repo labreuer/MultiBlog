@@ -41,14 +41,18 @@ export type MarginNotesLayoutOptions = {
   // neither — the article and the rail move together, so every card's offset
   // within its container is invariant under scroll.
   bounds?: () => { top: number; bottom: number } | null;
-  // False to leave every card in normal flow — no absolute positioning, no
-  // measurement, no observers — while the rail itself still renders. The doc
+  // False to leave every card in normal flow, laid out by CSS. The doc
   // editor's phone-landscape focus mode is the only caller that passes it
   // (PLAN.md §18c): there the rail is a scrollable queue in document order
   // rather than a margin, so aligning a card with its passage is not merely
   // unnecessary but wrong — it would fight the rail's own scrolling, since
   // `targetTop` is measured against a container whose top moves as you
   // scroll it.
+  //
+  // It still *measures*, and that is the point rather than an oversight: what
+  // a queue owes the reader is which of its cards is about the text in front
+  // of them, which is the one thing alignment gave away for free. So the pass
+  // runs, asks the same in-band question, and marks instead of placing.
   //
   // Distinct from `wide` being false, which means "no rail at all". This
   // means "a rail, laid out by CSS". Consumers therefore get two booleans
@@ -94,11 +98,11 @@ export function useMarginNotesLayout({
   // failure, which leaves every card in the section below rather than
   // stranding the anchored ones in a column that never got positioned.
   const live = (context?.wide ?? false) && editor !== null;
-  // …and its cards are positioned against their passages unless the caller
-  // has asked for flow layout. Everything below this line is about the
-  // positioned case; `live && !positioned` deliberately falls into the same
-  // teardown branch as "no rail", because a queue wants exactly what that
-  // branch leaves behind: no inline styles and no observers.
+  // …and its cards are positioned against their passages unless the caller has
+  // asked for flow layout. The effect below runs for either — a queue needs the
+  // same measurements to mark with — so it gates on `live`, and `positioned`
+  // decides only what the pass writes: a packed `top` per card, or an
+  // on-screen marker. `anchored` is what consumers key their markup off.
   const anchored = live && positioned;
 
   // The effect below runs on a small, stable dependency list so it isn't
@@ -125,14 +129,15 @@ export function useMarginNotesLayout({
 
     const cards = () => Array.from(container.querySelectorAll<HTMLElement>("[data-margin-note-id]"));
 
-    if (!anchored || !editor) {
-      // Back to normal flow: drop every inline style this hook owns, so a
-      // viewport narrowed across the breakpoint doesn't leave cards frozen at
-      // their last absolute position.
+    if (!live || !editor) {
+      // Back to normal flow: drop every inline style and attribute this hook
+      // owns, so a viewport narrowed across the breakpoint doesn't leave cards
+      // frozen at their last absolute position or wearing a stale marker.
       container.style.height = "";
       for (const card of cards()) {
         card.style.top = "";
         card.style.visibility = "";
+        card.removeAttribute("data-on-screen");
       }
       reportedIdsRef.current = null;
       return;
@@ -152,6 +157,36 @@ export function useMarginNotesLayout({
       }
 
       const elements = cards();
+
+      // The marking pass, for a queue (PLAN.md §18c). Same question the
+      // bounded pass below asks — is this card's passage inside the editor's
+      // visible band — and a different answer to it: mark the card rather than
+      // hide it, and move nothing. A queue's whole premise is that the reader
+      // scrolls it themselves, so what it owes them is *which of these is
+      // about what I am looking at*, which is the one thing an aligned rail
+      // gives away for free and a list does not.
+      //
+      // Written as an attribute for CSS to pick up rather than as React state
+      // for the same reason the positions are (see this function's header):
+      // it changes on every scroll tick of a live document, and re-rendering
+      // every card for it would undo the care the rest of this file takes.
+      if (!positioned) {
+        for (const element of elements) {
+          const id = element.dataset.marginNoteId;
+          const top = id === undefined ? undefined : tops.get(id);
+          const onScreen =
+            band !== null && top !== undefined && top >= band.top - BOUNDS_SLACK && top <= band.bottom;
+          element.toggleAttribute("data-on-screen", onScreen);
+          // Belt and braces against a rotation that lands here first: a card
+          // still carrying the positioned pass's inline styles would be drawn
+          // at a stale offset inside a flow list.
+          element.style.top = "";
+          element.style.visibility = "";
+        }
+        container.style.height = "";
+        return;
+      }
+
       const measurements: MarginNoteMeasurement[] = [];
       const hidden: HTMLElement[] = [];
       const byId = new Map<string, HTMLElement>();
@@ -159,6 +194,9 @@ export function useMarginNotesLayout({
       for (const element of elements) {
         const id = element.dataset.marginNoteId;
         if (!id) continue;
+        // Only a queue marks; here an out-of-band card is hidden outright, so
+        // the marker would have nothing to say.
+        element.removeAttribute("data-on-screen");
         const top = tops.get(id);
         // In a bounded surface an anchorless card has nowhere to go — the
         // rail is a fixed-height window onto the visible text, not a list
@@ -212,10 +250,17 @@ export function useMarginNotesLayout({
     // reply composer, a delete confirmation appearing. Observing the editor
     // too catches the article reflowing (a late font, an image) without a
     // ProseMirror transaction to hear about it.
+    // The editor's own DOM in both modes — the article reflowing (a late font,
+    // an image) moves anchors with no ProseMirror transaction to hear about it.
+    // The container and the cards only matter to the positioned pass, whose
+    // packing depends on card heights: a marker does not, so a queue skips
+    // observers it would only ever answer by recomputing the same booleans.
     const observer = new ResizeObserver(schedule);
-    observer.observe(container);
     observer.observe(editor.view.dom);
-    for (const card of cards()) observer.observe(card);
+    if (positioned) {
+      observer.observe(container);
+      for (const card of cards()) observer.observe(card);
+    }
 
     window.addEventListener("resize", schedule);
     // Local edits and, on a live doc, remote ones that arrive as real
@@ -242,7 +287,7 @@ export function useMarginNotesLayout({
     // is bounded for its whole lifetime or isn't — and its current value is
     // reached through boundsRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchored, editor, subscribe, idKey]);
+  }, [live, positioned, editor, subscribe, idKey]);
 
   return { live, anchored, containerRef, railElement: context?.railElement ?? null };
 }
