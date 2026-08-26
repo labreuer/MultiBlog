@@ -109,6 +109,19 @@ before changing the behavior it describes.
   `e2e/pdf-assets.spec.ts` is the only guard that pdfjs's four runtime asset directories are
   served: `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image
   decoder, so no fixture-based test can cover it. docs/PDF.md §10.
+- **`router.refresh()` is not a delivery mechanism behind an `ssr: false` boundary.** It is a
+  React transition, and during a transition React holds the old UI rather than dropping to a
+  fallback — so a render that never commits is completely silent: no error, no spinner, no
+  console line, nothing to find. `/pdf/[slug]`'s viewer sits behind `next/dynamic({ ssr: false
+  })` and lost roughly half of all posted annotations to this, for as long as it existed, until
+  the surface started fetching its own list (`loadPdfAnnotationEntries`, overlaid on the
+  server's `entries` prop and keyed on that prop's identity so it stands down the moment a real
+  refresh lands). Don't collapse that back into a bare `router.refresh()`, and don't wire the
+  reload context into `/doc/[slug]` for symmetry — that surface renders annotations straight out
+  of the server tree with no such boundary, which is exactly why the context's default is a
+  no-op. The precondition to recognise is a shape rather than a file: **a client island behind
+  `ssr: false` whose content arrives only through a refresh.**
+  docs/playwright-flakiness.html class 6.
 - **A contributor's avatar is bytes in `user_avatar`, not a URL** — a separate table on purpose
   (`/users` queries with `include:` and no `select:`, so an avatar column on `user` would drag
   up to 100 blobs into that payload). `User.image` stays a URL string for the Auth.js adapter;
