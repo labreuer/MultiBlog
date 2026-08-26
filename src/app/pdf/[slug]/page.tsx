@@ -3,9 +3,7 @@ import { auth } from "@/lib/auth";
 import { canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
 import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
-import { getFileAnnotationsAsThreads } from "@/lib/annotation-data";
-import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
-import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
+import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
 import TagChips from "@/components/tags/TagChips";
 import styles from "./page.module.css";
 
@@ -69,20 +67,9 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
   // *highlights* and the *cards* have to come from one snapshot, or the two
   // could disagree about which annotations exist.
   //
-  // buildAnnotationEntries is reused verbatim — it is a server module (it runs
-  // @tiptap/static-renderer, whose output ships in the RSC payload), and the
-  // thread → entry transform is identical for both containers. Only the PDF
-  // target is extra, joined back on by thread id rather than by position so it
-  // cannot depend on that function's ordering.
-  const threads = await getFileAnnotationsAsThreads(file.id);
-  const targets = new Map(threads.map((thread) => [thread.id, thread.pdfTarget]));
-  const entries: PdfAnnotationEntry[] = buildAnnotationEntries(threads).map((entry) => ({
-    threadId: entry.threadId,
-    quotedText: entry.quotedText,
-    color: entry.color,
-    target: targets.get(entry.threadId) ?? null,
-    root: entry.root,
-  }));
+  // Shared with `loadPdfAnnotationEntries`, which the surface calls after a
+  // post — see that action, and PdfAnnotationSurface's `liveEntries`.
+  const entries = await pdfAnnotationEntriesFor(file.id);
 
   // PLAN.md §20d — the tag chips, handed to the viewer as its Metadata
   // pane.
