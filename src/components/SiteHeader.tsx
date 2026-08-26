@@ -30,6 +30,17 @@ export default function SiteHeader() {
     panel.style.left = `${rect.left}px`;
   }
 
+  // Picking an entry closes the menu, which nothing else here would do: a
+  // <details> toggles only from its own <summary>, useCloseOnOutsideClick
+  // deliberately ignores clicks *inside* the panel, and this component is
+  // mounted in the root layout — so a <Link> navigates client-side without
+  // ever unmounting it, and the menu would ride along to the page just
+  // chosen. Setting .open on the node rather than holding it in state for the
+  // same reason that hook does: nothing renders off it.
+  function closeMenu(details: HTMLDetailsElement | null) {
+    if (details) details.open = false;
+  }
+
   // A fixed panel doesn't travel with the row it belongs to, so re-place it
   // whenever anything moves that row. Closing the menu instead was the first
   // attempt and is subtly wrong: scrolling an element into view *before*
@@ -71,7 +82,13 @@ export default function SiteHeader() {
               ▾
             </summary>
             <div className={styles.dropdownPanel}>
-              <Link href="/comments">Comments</Link>
+              <Link
+                href="/comments"
+                className={styles.dropdownItem}
+                onClick={() => closeMenu(postsMenuRef.current)}
+              >
+                Comments
+              </Link>
             </div>
           </details>
         </span>
@@ -93,7 +110,13 @@ export default function SiteHeader() {
               ▾
             </summary>
             <div className={styles.dropdownPanel}>
-              <Link href="/annotations">Annotations</Link>
+              <Link
+                href="/annotations"
+                className={styles.dropdownItem}
+                onClick={() => closeMenu(docsMenuRef.current)}
+              >
+                Annotations
+              </Link>
               {/* PLAN.md §20d — beside Annotations rather than as a top-level
                   entry. Both are cross-cutting views *over* content rather
                   than content itself, and both are gated on canManageDocs, so
@@ -103,7 +126,13 @@ export default function SiteHeader() {
                   vocabulary table is somewhere you go to curate, not to read.
                   AUTHORIZED users, who may apply keywords but not open this
                   table, reach terms through the chips instead. */}
-              <Link href="/keywords">Keywords</Link>
+              <Link
+                href="/keywords"
+                className={styles.dropdownItem}
+                onClick={() => closeMenu(docsMenuRef.current)}
+              >
+                Keywords
+              </Link>
             </div>
           </details>
         </span>
