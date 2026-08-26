@@ -28,7 +28,20 @@ import styles from "./TagChips.module.css";
 // (§20c's app-level dedup), so two people typing the same new term at the same
 // moment get one term, not an error for the slower one.
 
-export default function TagTagger({ target }: { target: AnchorTarget }) {
+export default function TagTagger({
+  target,
+  onChange,
+}: {
+  target: AnchorTarget;
+  /**
+   * Fired after a term is applied or retracted, for a caller that draws this
+   * object's tags from *client* state — the doc editor's Settings panel,
+   * which is out of reach of both `revalidatePath` and the `router.refresh()`
+   * below. An object page's chips are server-rendered and need none of it.
+   * PLAN.md §20k.
+   */
+  onChange?: () => void;
+}) {
   const router = useRouter();
   const [state, setState] = useState<TaggerState | null>(null);
   const [draft, setDraft] = useState("");
@@ -60,6 +73,7 @@ export default function TagTagger({ target }: { target: AnchorTarget }) {
         // panel doesn't render the chips.
         setState(await loadTaggerState(target.kind, target.id));
         router.refresh();
+        onChange?.();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to update tags.");
       }
@@ -67,7 +81,11 @@ export default function TagTagger({ target }: { target: AnchorTarget }) {
   }
 
   const options = state?.options ?? [];
-  const applied = new Set(state?.appliedTagIds ?? []);
+  const chips = state?.applied ?? [];
+  const applied = new Set(chips.map((c) => c.id));
+  // The subset this viewer may take back off — §20c's rule, arriving as a
+  // field on each chip rather than as a second list to keep in step.
+  const own = chips.filter((c) => c.ownAssignmentId !== null);
   const query = draft.trim().toLowerCase();
   const matches = options.filter((o) => o.name.toLowerCase().includes(query)).slice(0, 12);
   // An exact case-insensitive hit means "apply that one", not "mint a
@@ -146,15 +164,15 @@ export default function TagTagger({ target }: { target: AnchorTarget }) {
               </ul>
             )}
 
-            {state.own.length > 0 && (
+            {own.length > 0 && (
               <>
                 <p className={styles.taggerHeading}>Your tags here</p>
                 <ul className={styles.taggerList}>
-                  {state.own.map((tag) => (
-                    <li key={tag.assignmentId}>
+                  {own.map((tag) => (
+                    <li key={tag.ownAssignmentId}>
                       <button
                         type="button"
-                        onClick={() => run(() => untagObject(tag.assignmentId))}
+                        onClick={() => run(() => untagObject(tag.ownAssignmentId!))}
                         disabled={pending}
                         aria-label={`Remove tag ${tag.name}`}
                       >

@@ -1,6 +1,6 @@
 import { tagsForTarget } from "@/lib/tag-data";
 import type { AnchorTarget } from "@/lib/anchors";
-import TagStrip from "./TagStrip";
+import TagStrip, { type TagStripVariant } from "./TagStrip";
 
 // PLAN.md §20d — the tag strip on an object page: /doc/[slug], a post
 // page, /pdf/[slug].
@@ -24,7 +24,13 @@ import TagStrip from "./TagStrip";
 // Everything viewer-shaped lives in the client island below, which asks the
 // server for its own state when someone actually opens it.
 
-export default async function TagChips({ target }: { target: AnchorTarget }) {
+export default async function TagChips({
+  target,
+  variant = "section",
+}: {
+  target: AnchorTarget;
+  variant?: TagStripVariant;
+}) {
   const chips = await tagsForTarget(target);
-  return <TagStrip target={target} chips={chips} />;
+  return <TagStrip target={target} chips={chips} variant={variant} />;
 }

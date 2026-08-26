@@ -10,6 +10,14 @@
   font-size: 0.85rem;
 }
 
+/* The bare variant (TagStrip's own type documents the split). Both of its
+   containers — /doc/[slug]'s byline block, the doc editor's Settings fieldset
+   — already supply the space below, so all this needs is enough to read as its
+   own line rather than as a wrapped continuation of whatever is above it. */
+.stripBare {
+  margin: 0.3rem 0 0;
+}
+
 .label {
   color: var(--text-muted);
   text-transform: uppercase;

@@ -21,6 +21,12 @@ import {
 // And there is no part-tagging spec, because there is no part-tagging — that
 // is the tie-off, asserted directly against the columns at the end rather than
 // through a UI that deliberately can't reach them.
+//
+// The doc editor's Settings panel *is* covered, at the end, and for a reason
+// the reading view doesn't need: its chips are client state fetched when the
+// panel opens, so the `revalidatePath` every other surface leans on cannot
+// reach them. `onChange` is the only thing that brings them back, and it has
+// no server-side fallback to be wrong about.
 
 /**
  * The tagger panel's disclosure, wherever the strip is rendered.
@@ -31,6 +37,35 @@ import {
  */
 function tagger(page: import("@playwright/test").Page) {
   return page.getByLabel("Add or remove tags");
+}
+
+/**
+ * The doc editor's Settings panel, by the attribute rather than by its
+ * summary's text.
+ *
+ * `data-doc-settings` is already load-bearing (EditorChrome.module.css keys the
+ * editor's height floor off it, see DocSettingsPanel), so it is the one handle
+ * here that cannot be renamed without something else breaking loudly first.
+ */
+function settingsPanel(page: import("@playwright/test").Page) {
+  return page.locator("details[data-doc-settings]");
+}
+
+/**
+ * The Settings panel's Tags fieldset, and within it the one line that says
+ * the chips haven't been fetched yet.
+ *
+ * Scoped this tightly on purpose: a bare `getByText("Loading…")` matches two
+ * different things here. The field shows one while its own state is null, and
+ * TagTagger shows one *inside its popover* while its state is — and a
+ * closed <details> still has its content in the DOM, so the tagger's line is
+ * there from the moment the field finishes loading. `> p` is the field's own,
+ * since once loaded its only direct child is the strip.
+ */
+function tagField(page: import("@playwright/test").Page) {
+  return settingsPanel(page)
+    .locator("fieldset")
+    .filter({ has: page.locator("legend", { hasText: "Tags" }) });
 }
 
 test.describe("tags", () => {
@@ -236,5 +271,72 @@ test.describe("tags", () => {
       quotedText: "",
       hasSelector: false,
     });
+  });
+
+  test("the doc editor's Settings panel fetches its chips when it opens", async ({ page, sharedDoc }) => {
+    // Applied by nobody's browser — the panel has to read this from the
+    // database on open, which is the path a UI-driven tag would hide.
+    await tagWithTestTag({
+      tagId: tag.id,
+      target: { kind: "doc", id: sharedDoc.id },
+      taggerEmail: ADMIN_EMAIL,
+    });
+
+    await gotoOk(page, `/doc/${sharedDoc.slug}/edit`);
+    const settings = settingsPanel(page);
+
+    // Nothing is fetched until the panel is opened. That's the whole reason
+    // the field isn't a prop on DocEditor, so it is worth pinning: a chip here
+    // would mean the read is being paid for on every editing session, most of
+    // which never open Settings at all.
+    //
+    // Asserted against the DOM rather than by role, and on the field's own
+    // *loading line* rather than only on the chip's absence. A closed <details>
+    // hides its subtree from the accessibility tree, so `getByRole` finds
+    // nothing here whether or not the fetch has happened — the absence of a
+    // chip alone would pass for the wrong reason.
+    await expect(tagField(page).locator("> p")).toHaveCount(1);
+    await expect(settings.locator('a[href^="/tag/"]')).toHaveCount(0);
+
+    await settings.locator("> summary").click();
+    await expect(tagField(page).locator("> p")).toHaveCount(0);
+    await expect(settings.getByRole("link", { name: tag.name })).toBeVisible();
+    // The same strip an object page carries, so the "+ tag" control is
+    // here too rather than a lookalike built out of the panel's own parts.
+    await expect(settings.getByLabel("Add or remove tags")).toBeVisible();
+  });
+
+  test("tagging from the Settings panel updates the panel's own chips", async ({ page, sharedDoc }) => {
+    await gotoOk(page, `/doc/${sharedDoc.slug}/edit`);
+    const settings = settingsPanel(page);
+    await settings.locator("> summary").click();
+
+    // Opened, and empty — so the chip that appears below is this tag and not
+    // a stale render.
+    await expect(settings.getByLabel("Add or remove tags")).toBeVisible();
+    await expect(settings.getByRole("link", { name: tag.name })).toHaveCount(0);
+
+    await settings.getByLabel("Add or remove tags").click();
+    await page.getByLabel("Find or add a tag").fill(tag.name);
+    await page.getByRole("button", { name: tag.name, exact: true }).click();
+
+    // **This assertion is the point of the test.** These chips are client
+    // state fetched when the panel opened, so the action's revalidatePath —
+    // which is what refreshes the chips on /doc/[slug] — cannot reach them.
+    // TagTagger's `onChange` is the only thing that can, and nothing on
+    // the server compensates if it stops being called.
+    await expect(settings.getByRole("link", { name: tag.name })).toBeVisible();
+
+    const tagged = await getTagFacts(tag.id);
+    expect(tagged?.taggers).toEqual([ADMIN_EMAIL]);
+    expect(tagged?.targets).toEqual([{ kind: "doc", id: sharedDoc.id }]);
+
+    // Retracting runs back through the same seam — from "Your tags here",
+    // since the panel deliberately grew no removal control of its own.
+    await page.getByRole("button", { name: `Remove tag ${tag.name}` }).click();
+    await expect(settings.getByRole("link", { name: tag.name })).toHaveCount(0);
+
+    const untagged = await getTagFacts(tag.id);
+    expect(untagged?.taggers).toEqual([]);
   });
 });

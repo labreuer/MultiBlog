@@ -285,6 +285,18 @@ working on.
   `"a%2Bb"` and `.split("+")` would 404 every URL — a `+`-means-space assumption that's true
   for query strings and false here. `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path
   segments specifically to never need to decode anything.
+- **A Server Component handed to a client component as a prop needs a `key` if it has
+  siblings** — even though nothing there is a list. A JSX tree passed across that boundary is
+  *serialized into the RSC payload* rather than rendered in place, and the Flight server's
+  `renderFragment` stamps every keyless element in an array it serializes as "key not yet
+  checked". Only a **Server Component** then trips the check, in `renderFunctionComponent`:
+  host elements and client references are serialized by other paths and stay silent, so the
+  one child that warns is the one that looks least like a list item. The symptom is "Each
+  child in a list should have a unique key prop" pointing at a `<div>` whose children are
+  plainly static — `/doc/[slug]`'s byline is the live example, and `/pdf/[slug]`'s chips
+  escape it only by being a whole prop value with no siblings. **Invisible to every automated
+  check here**: `tsc` and `eslint` can't see it, and `npm run e2e` asserts on the DOM, not the
+  console. Dev-only, since the production Flight build runs no such validation.
 - **A doc link's anchor is a plain JSON blob in Postgres, not a mark in the doc's ydoc** — the
   opposite of an annotation's, and deliberately: a link joins two *different* docs, and no
   single ydoc can hold that. The cost is drift, paid for by re-running `findQuoteOccurrences`

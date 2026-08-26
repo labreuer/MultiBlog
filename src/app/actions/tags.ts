@@ -6,7 +6,7 @@ import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canApplyTags, canCurateTags } from "@/lib/role-checks";
 import { canUserRemoveAssignment, canUserTagTarget } from "@/lib/tag-authz";
 import { tagNameInUse, uniqueTagSlug } from "@/lib/tag-slug";
-import { tagsForTarget, listTagOptions, type TagOption } from "@/lib/tag-data";
+import { tagsForTarget, listTagOptions, type TagChip, type TagOption } from "@/lib/tag-data";
 import { targetToColumns, targetFromColumns, parseAnchorTargetKind, type AnchorTarget } from "@/lib/anchors";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
@@ -109,10 +109,13 @@ async function pathForTarget(target: AnchorTarget): Promise<string | null> {
 export type TaggerState = {
   canTag: boolean;
   options: TagOption[];
-  /** Every term on this object, by anyone — so the picker can grey them out. */
-  appliedTagIds: string[];
-  /** This viewer's own tags here, the only ones they may retract. */
-  own: { tagId: string; name: string; assignmentId: string }[];
+  /**
+   * Every term on this object, by anyone, exactly as the chips render them —
+   * `ownAssignmentId` included, which is what says whether this viewer may
+   * retract it (§20c: an assignment is its author's). One array rather than an
+   * id list plus a separate "yours" list; §20k has why.
+   */
+  applied: TagChip[];
 };
 
 export async function loadTaggerState(targetKind: string, targetId: string): Promise<TaggerState> {
@@ -120,7 +123,7 @@ export async function loadTaggerState(targetKind: string, targetId: string): Pro
   const target = toTarget(targetKind, targetId);
 
   if (!(await canUserTagTarget(session.user.id, session.user.role, target))) {
-    return { canTag: false, options: [], appliedTagIds: [], own: [] };
+    return { canTag: false, options: [], applied: [] };
   }
 
   const [options, chips] = await Promise.all([
@@ -128,14 +131,7 @@ export async function loadTaggerState(targetKind: string, targetId: string): Pro
     tagsForTarget(target, session.user.id),
   ]);
 
-  return {
-    canTag: true,
-    options,
-    appliedTagIds: chips.map((c) => c.id),
-    own: chips
-      .filter((c) => c.ownAssignmentId !== null)
-      .map((c) => ({ tagId: c.id, name: c.name, assignmentId: c.ownAssignmentId! })),
-  };
+  return { canTag: true, options, applied: chips };
 }
 
 /**

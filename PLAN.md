@@ -7113,6 +7113,34 @@ above the viewer would take height from the PDF permanently on a page whose layo
 give the document the whole viewport, so the chips are the **Metadata** tab of the side panel
 instead. §19's deviation list carries the mechanism and the constraints it has to respect.
 
+**On `/doc/[slug]` the chips are a second line of the byline**, not a block below the text — a
+tag says what the whole document is about, which is the same kind of fact as who wrote it
+and when, so it belongs with the rest of the document's metadata. The strip therefore has two
+variants (`TagStrip`'s own type documents the split), and the question they answer is
+whether the strip has to name itself: a **section** — a post page, the PDF viewer's Metadata
+pane — carries the "Tags" label, because nothing around it says what the row is; a
+**bare** one carries none, because it has been dropped into something that already says so.
+One prop rather than two, because it is one decision.
+
+**Not in §20d: the doc editor's Settings panel gets a Tags field.** §20d put chips on
+reading surfaces only, and `/doc/[slug]/edit` is where the rest of a doc's metadata is
+administered — authors, visibility, URL — so tags being absent there was a gap rather
+than a boundary. It is `TagStrip` itself, `bare` under a `<legend>Tags</legend>` —
+not a lookalike built from the panel's own parts. What a chip looks like, where it links, who
+may tag, what the popover offers, how you retract your own tag: all of it stays in one place,
+so the two surfaces cannot drift. The panel contributes the fieldset and nothing else, and in
+particular **no second permission check** — `canUserTagTarget` reads a doc through
+soft-delete-filtered `prisma`, so a binned doc is already untaggable and the tagger says so on
+open; a client-side guard beside that could only disagree with it.
+
+The one asymmetry left is where the chips come from, and it is the reason for the two seams
+this needed. An object page server-renders them and the actions' `revalidatePath` brings them
+back; the panel fetches them when it opens, which is out of reach of both that and
+`router.refresh()` — hence `TagTagger`'s optional `onChange`, passed through by
+`TagStrip`. And `TaggerState` now carries `applied: TagChip[]` instead of an id list
+plus a separate "yours" list, because the panel has to *name* the applied terms; both of the
+old fields are `filter`s over the new one.
+
 **Also decided in passing**: `/tags` sets the same bar as every other admin table
 (`canManageDocs`), not `canApplyTags` — an AUTHORIZED user reaches the vocabulary through
 the tagger and `/tag/[slug]` instead of a seventh visibility tier. The four arc legs are
