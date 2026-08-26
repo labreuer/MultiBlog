@@ -37,7 +37,7 @@
   display: none;
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1180px) {
   .container {
     max-width: 1180px;
     gap: 2.5rem;
