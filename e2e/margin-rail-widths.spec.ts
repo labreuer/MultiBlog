@@ -28,8 +28,6 @@ import {
   waitForDocCollabReady,
   QUOTED_TEXT,
   QUOTED_BODY,
-  QUOTE_FROM,
-  QUOTE_TO,
 } from "./fixtures";
 import { createTestAnnotation, createTestDoc, deleteTestDoc, getAnnotationStates } from "./db";
 import { EDITOR_SCROLL_ATTRIBUTE } from "../src/components/editor-scroll";
@@ -310,54 +308,63 @@ test.describe("the doc editor's phone-landscape focus mode", () => {
     await expect(drawn).toHaveCount(2);
   });
 
-  test("orders the queue by the document, not by when each note was written", async ({ page, sharedDoc }) => {
-    // QUOTED_BODY is "The quick brown fox jumps over the lazy dog near the
-    // river bank.", so "lazy dog" sits *after* "brown fox jumps" in the text
-    // while being written first here. `entries` arrive ordered by createdAt
-    // (annotation-data.ts), so a queue that rendered them as they came would
-    // show these in exactly the wrong order — and one that happened to agree
-    // with the document would prove nothing.
-    //
-    // Column-anchored rows rather than annotations authored through the widget:
-    // two round trips through the composer is a slow and flaky way to arrange a
-    // fact about sorting, and both mechanisms resolve in this editor (PLAN.md
-    // §13o — as of the `synced` re-push, without which this test could not be
-    // written at all).
-    const dogAt = QUOTED_BODY.indexOf("lazy dog") + 1;
-    const dog = await createTestAnnotation({
-      docId: sharedDoc.id,
-      authorEmail: ADMIN_EMAIL,
-      bodyText: "About the dog.",
-      anchor: { from: dogAt, to: dogAt + "lazy dog".length, quotedText: "lazy dog" },
-    });
-    const fox = await createTestAnnotation({
-      docId: sharedDoc.id,
-      authorEmail: ADMIN_EMAIL,
-      bodyText: "About the fox.",
-      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
-    });
+  test("orders the queue by the document, not by when each note was written", async ({ page }) => {
+    // Its own document, and a big one, because the bug this guards is a race
+    // that a small document cannot lose. A column anchor resolves into plugin
+    // state, delivered as a meta-only transaction — and if the ordering
+    // listener is watching for document *updates* instead, that news never
+    // arrives and every column anchor sorts as anchorless. On the one-sentence
+    // fixture doc the content is already in the Y.Doc before the editor is
+    // constructed, so the anchors resolve at construction and the bug is
+    // invisible; on a real doc (twelve paragraphs, measured 2026-08-26) it
+    // is not. The body below is what makes the test able to fail.
+    const body = `ALPHA ${"filler ".repeat(700)}OMEGA`;
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: body });
+    try {
+      // Created last-first, so createdAt order (which is the order `entries`
+      // arrive in, annotation-data.ts) is the reverse of document order.
+      const omegaAt = body.indexOf("OMEGA") + 1;
+      const omega = await createTestAnnotation({
+        docId: doc.id,
+        authorEmail: ADMIN_EMAIL,
+        bodyText: "At the end.",
+        anchor: { from: omegaAt, to: omegaAt + "OMEGA".length, quotedText: "OMEGA" },
+      });
+      const alpha = await createTestAnnotation({
+        docId: doc.id,
+        authorEmail: ADMIN_EMAIL,
+        bodyText: "At the start.",
+        anchor: { from: 1, to: 6, quotedText: "ALPHA" },
+      });
 
-    await page.setViewportSize(IPAD_LANDSCAPE);
-    await page.goto(`/doc/${sharedDoc.id}/edit`);
-    await waitForDocCollabReady(page);
-    await page.setViewportSize(PHONE_LANDSCAPE);
+      await page.setViewportSize(IPAD_LANDSCAPE);
+      await page.goto(`/doc/${doc.id}/edit`);
+      await waitForDocCollabReady(page);
+      await page.setViewportSize(PHONE_LANDSCAPE);
 
-    const cards = page.locator("[data-margin-note-id]");
-    await expect(cards).toHaveCount(2);
-    // By thread id: a fixture-made card has no body ydoc and so no text to
-    // read (see createTestAnnotation).
-    await expect
-      .poll(() => cards.evaluateAll((els) => els.map((el) => el.getAttribute("data-thread-id"))), { timeout: 10_000 })
-      .toEqual([fox.id, dog.id]);
+      const cards = page.locator("[data-margin-note-id]");
+      await expect(cards).toHaveCount(2);
+      // By thread id: a fixture-made card has no body ydoc and so no text to
+      // read (see createTestAnnotation).
+      await expect
+        .poll(() => cards.evaluateAll((els) => els.map((el) => el.getAttribute("data-thread-id"))), {
+          timeout: 10_000,
+        })
+        .toEqual([alpha.id, omega.id]);
 
-    // The cards are in flow here, where the wide layout places them
-    // absolutely — asserted because it is the mechanism the ordering rests on:
-    // DOM order is the visual order only once nothing is positioning them.
-    expect(await cards.first().evaluate((el) => getComputedStyle(el).position)).toBe("static");
-    await page.setViewportSize(IPAD_LANDSCAPE);
-    await expect
-      .poll(() => cards.first().evaluate((el) => getComputedStyle(el).position), { timeout: 10_000 })
-      .toBe("absolute");
+      // The cards are in flow here, where the wide layout places them
+      // absolutely — asserted because it is the mechanism the ordering rests
+      // on: DOM order is the visual order only once nothing is positioning
+      // them.
+      expect(await cards.first().evaluate((el) => getComputedStyle(el).position)).toBe("static");
+      await page.setViewportSize(IPAD_LANDSCAPE);
+      await expect
+        .poll(() => cards.first().evaluate((el) => getComputedStyle(el).position), { timeout: 10_000 })
+        .toBe("absolute");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(doc.id);
+    }
   });
 
   test("marks the cards whose passage is on screen, and moves nothing when the document scrolls", async ({
