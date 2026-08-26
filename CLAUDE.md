@@ -154,6 +154,21 @@ Two development slots — separate working trees, each with its own `.env`, data
 - `npm run stop:all` — stops a `dev:all` you started, in one command instead of a
   netstat/parent-trace/taskkill dance. Reads this slot's ports, so run it from the tree you
   mean to stop; it will not touch the other slot's servers.
+- **Before switching branches, run `npm run check-ports` — and if a dev server is up, say so
+  before you switch.** It is read-only, and names per port whether anything is listening and
+  whether it belongs to this repo; whose server it is barely matters, since the user is the one
+  who will hit the breakage either way. **A running `next dev` does not survive a branch switch
+  that changes which route files exist.** Git deletes the file, Turbopack unregisters the route,
+  and git restoring it a second later does not bring it back — so checking out a branch that
+  predates a merge, *then* pulling, leaves routes permanently missing from a server that looks
+  perfectly healthy. The tell is a **404 on a route whose file is plainly on disk** while its
+  siblings still answer, and it is worth knowing because a permission problem never looks like
+  this: an anonymous request to a gated route 307s to `/sign-in`, an unregistered one 404s. The
+  same delete-and-restore under `git stash push -u` takes untracked files with it and surfaces
+  instead as `Module not found` for a path that exists. Related, same tree: `npm run e2e` runs
+  `next build`, which writes production artifacts into the `.next` a running dev server is using.
+  **Restart afterwards rather than leaving it** — `npm run stop:all`, remove `.next`, start
+  again — and say that you did.
 - `.claude/launch.json` defines `web`, `collab` and `web-prod` for the preview tool. Its
   numbers are **slot A's** and cannot be computed — in slot B, drive from `npm run dev:all` and
   open the pane on `http://b.localhost:3005` directly.
