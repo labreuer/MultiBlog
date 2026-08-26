@@ -142,7 +142,7 @@
 
 /* The annotation panel. A column beside the viewer above the breakpoint; a
    full-width overlay below it, since there is no room for both and no page
-   to scroll to instead. 768px (not the doc rail's 1200px, PdfAnnotationSurface's
+   to scroll to instead. 768px (not the doc rail's 1180px, PdfAnnotationSurface's
    POSITIONED_MEDIA_QUERY) so an iPad in portrait — the narrowest common iPad
    width — still gets both side by side. The width itself narrows on its way
    down to that floor via clamp() so the viewer keeps a usable share of a

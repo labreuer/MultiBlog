@@ -12,11 +12,15 @@ export const MARGIN_NOTE_GAP = 12;
 // The one place the wide/narrow threshold is written for JS. The CSS side
 // (each page's own `.layout`) uses the identical string in a `@media` block,
 // deliberately mobile-first so the two can be compared literally rather than
-// as a value and its off-by-one complement — a `max-width: 1199px` mirror
+// as a value and its off-by-one complement — a `max-width: 1179px` mirror
 // would be the same rule spelled differently, which is exactly how the two
-// drift apart later. 1200px is a fourth documented width alongside STYLE.md's
-// 680/800/1040: an 800px reading column plus a 340px rail plus the gap.
-export const MARGIN_NOTES_MEDIA_QUERY = "(min-width: 1200px)";
+// drift apart later. 1180px is the fourth documented width alongside
+// STYLE.md's 680/800/1040 — an 800px reading column plus the 2.5rem gap plus
+// a 340px rail — and the threshold *is* that width, so the rail engages
+// exactly when its layout fits rather than at a round number above it. It was
+// 1200px until an iPad measured 1194 in landscape (TODO.md): six pixels short
+// of a threshold whose layout had twenty to spare.
+export const MARGIN_NOTES_MEDIA_QUERY = "(min-width: 1180px)";
 
 export type MarginNoteMeasurement = {
   id: string;
