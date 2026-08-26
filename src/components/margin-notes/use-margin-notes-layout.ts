@@ -41,6 +41,19 @@ export type MarginNotesLayoutOptions = {
   // neither — the article and the rail move together, so every card's offset
   // within its container is invariant under scroll.
   bounds?: () => { top: number; bottom: number } | null;
+  // False to leave every card in normal flow — no absolute positioning, no
+  // measurement, no observers — while the rail itself still renders. The doc
+  // editor's phone-landscape focus mode is the only caller that passes it
+  // (PLAN.md §18c): there the rail is a scrollable queue in document order
+  // rather than a margin, so aligning a card with its passage is not merely
+  // unnecessary but wrong — it would fight the rail's own scrolling, since
+  // `targetTop` is measured against a container whose top moves as you
+  // scroll it.
+  //
+  // Distinct from `wide` being false, which means "no rail at all". This
+  // means "a rail, laid out by CSS". Consumers therefore get two booleans
+  // back, not one.
+  positioned?: boolean;
 };
 
 // How far above the visible band an anchor may sit and still have its card
@@ -69,17 +82,24 @@ export function useMarginNotesLayout({
   ids,
   onAnchoredIdsChange,
   bounds,
+  positioned = true,
 }: MarginNotesLayoutOptions) {
   const context = useMarginNotes();
   const containerRef = useRef<HTMLDivElement>(null);
   const editor = context?.editor ?? null;
   const subscribe = context?.subscribe;
-  // Only actually anchored once there's a provider, a wide viewport, and a
-  // mounted editor to measure. Consumers key their whole split off this, so
+  // There is a rail at all once there's a provider, a qualifying viewport and
+  // a mounted editor to measure. Consumers key their whole split off this, so
   // every other case renders the one plain stacked list — including a JS
   // failure, which leaves every card in the section below rather than
   // stranding the anchored ones in a column that never got positioned.
-  const anchored = (context?.wide ?? false) && editor !== null;
+  const live = (context?.wide ?? false) && editor !== null;
+  // …and its cards are positioned against their passages unless the caller
+  // has asked for flow layout. Everything below this line is about the
+  // positioned case; `live && !positioned` deliberately falls into the same
+  // teardown branch as "no rail", because a queue wants exactly what that
+  // branch leaves behind: no inline styles and no observers.
+  const anchored = live && positioned;
 
   // The effect below runs on a small, stable dependency list so it isn't
   // tearing down observers every render; anything that changes per render
@@ -224,5 +244,5 @@ export function useMarginNotesLayout({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchored, editor, subscribe, idKey]);
 
-  return { anchored, containerRef, railElement: context?.railElement ?? null };
+  return { live, anchored, containerRef, railElement: context?.railElement ?? null };
 }

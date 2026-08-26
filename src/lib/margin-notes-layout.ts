@@ -22,6 +22,34 @@ export const MARGIN_NOTE_GAP = 12;
 // of a threshold whose layout had twenty to spare.
 export const MARGIN_NOTES_MEDIA_QUERY = "(min-width: 1180px)";
 
+// The doc editor's second answer to the same question, and the only surface
+// with one. A phone held sideways has room *across* for the rail and almost
+// none down the page, which is the opposite of what the width threshold above
+// asks about: at 844×390 the rail fits beside the editor perfectly well, and
+// 1180px says no because it is reasoning about a desktop window.
+//
+// Written as short-and-wide rather than as "is this a phone", because height
+// is what the mode actually reacts to — the point of it is that vertical
+// space is scarce enough to be worth spending the site header on.
+// `max-height: 500px` clears every phone in landscape (the tallest is around
+// 430 CSS px) and excludes every iPad, whose landscape height is 834. It
+// therefore also catches a desktop window dragged unusually short, which is
+// deliberate: the trade it makes is about available height, and a 400px-tall
+// window has the same problem a phone does.
+export const EDITOR_FOCUS_MEDIA_QUERY = "(orientation: landscape) and (max-height: 500px)";
+
+// What the doc editor's rail gates on: either the desktop width or the
+// phone-landscape mode. A comma is `or` in a media query list and matchMedia
+// parses one exactly as CSS does, so this stays a single string with a
+// character-identical mirror in DocEditor.module.css — the same discipline
+// the threshold above documents, applied to a list rather than one feature.
+//
+// Only this surface gets it. The reading views keep MARGIN_NOTES_MEDIA_QUERY
+// alone, because their rail costs 340px of a *reading column* rather than of
+// an editor whose width is already elastic: at 844px wide the post page would
+// be asking a phone to read prose in 464 pixels.
+export const EDITOR_MARGIN_NOTES_MEDIA_QUERY = `${MARGIN_NOTES_MEDIA_QUERY}, ${EDITOR_FOCUS_MEDIA_QUERY}`;
+
 export type MarginNoteMeasurement = {
   id: string;
   // Where this card wants its top edge, in the coordinate space of whatever
