@@ -34,7 +34,7 @@ import styles from "./PdfAnnotations.module.css";
 // waiting to become an annotation" state that the popover raises and the panel
 // consumes.
 
-// Deliberately *not* the doc side's 1200px rail breakpoint (that's an 800px
+// Deliberately *not* the doc side's 1180px rail breakpoint (that's an 800px
 // reading column + a 340px rail's own math, src/lib/margin-notes-layout.ts).
 // This panel is a fixed-width card list beside a viewer that has nothing to
 // reflow, not a rail that needs room for live prose — so it can go narrower.

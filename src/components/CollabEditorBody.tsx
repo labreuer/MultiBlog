@@ -184,6 +184,25 @@ export default function CollabEditorBody({
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
+  // "This editor's document has text in it." An empty ProseMirror doc is one
+  // empty paragraph, `content.size === 2`, so anything above that is real
+  // content — arriving either at construction (the reading views, from
+  // initialBodyJSON) or later as a Yjs transaction (every collaborative
+  // surface). Latches: it answers "has the document arrived", which cannot
+  // become false again by someone selecting all and deleting.
+  const [hasContent, setHasContent] = useState(false);
+  useEffect(() => {
+    if (!editor || hasContent) return;
+    const check = () => {
+      if (editor.state.doc.content.size > 2) setHasContent(true);
+    };
+    check();
+    editor.on("update", check);
+    return () => {
+      editor.off("update", check);
+    };
+  }, [editor, hasContent]);
+
   // useEditor's `editable` option is only read at construction time, not
   // reactive — toggling it later (e.g. after a soft delete) requires calling
   // setEditable directly.
@@ -194,10 +213,34 @@ export default function CollabEditorBody({
   // Same reason as `editable` above: the anchor set changes after
   // construction (a reader posts an annotation, this page refreshes) and the
   // extension's options were read once. PLAN.md §13o.
+  //
+  // `hasContent` is in the dependency list because a *collaborative* editor's
+  // document does not exist yet when this first runs. A column anchor is
+  // resolved by finding its `quotedText` in the document
+  // (annotation-highlight-extension.ts's `resolveAll`), and this editor starts
+  // empty and fills from Yjs — so the first push searched an empty document,
+  // failed, and by that extension's tier-3 rule was never retried: "detachment
+  // is re-evaluated on the next anchor push instead". There was no next push,
+  // because `annotationAnchors` is memoised from server data and never changes
+  // identity. The effect was therefore correct for the reading views, whose
+  // editor is built around `initialBodyJSON` and has its text from the first
+  // frame, and silently wrong here: every annotation written from a reading
+  // view was invisible in the doc editor's rail — the one place PLAN.md §13o
+  // says both mechanisms must answer alike.
+  //
+  // The trigger is the document having text, and not the provider's `synced`,
+  // which was the first attempt and is a *different* fact: it fires when the
+  // sync message has been processed, which may be either side of the
+  // y-prosemirror transaction that puts the content into this editor. Losing
+  // that race leaves every anchor unresolved exactly as before, and which way
+  // it falls varies by engine — measured 2026-08-26 on one machine, where an
+  // iPhone resolved them and a desktop Chromium did not, from the same server
+  // on the same commit. `hasContent` is the condition `resolveAll` actually
+  // needs, so there is no race left to lose. Guarded by e2e/doc.spec.ts.
   useEffect(() => {
     if (!editor) return;
     setAnnotationAnchors(editor.view, annotationAnchors);
-  }, [editor, annotationAnchors]);
+  }, [editor, annotationAnchors, hasContent]);
 
   useEffect(() => {
     return () => {

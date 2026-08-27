@@ -164,6 +164,27 @@ body > main {
   min-width: 0;
 }
 
+/* The doc editor's phone-landscape focus mode (DocEditor.module.css, and
+   EDITOR_FOCUS_MEDIA_QUERY for the reasoning): on a phone held sideways the
+   editor and its annotation rail are the whole page, and the site header is
+   the single largest thing competing for the ~390px of height there is.
+
+   Here rather than in the editor's own module because SiteHeader is rendered
+   by the root layout — a page cannot hide its own layout's chrome from a
+   stylesheet it doesn't share. `:has()` scopes it to the one route that has
+   the mode, keyed off the same unhashed `[data-doc-editor-column]` hook
+   EditorChrome.module.css already uses (and the same support argument its
+   comment makes: `:has()` is more widely supported than the `light-dark()`
+   this file's dark theme is built on).
+
+   Body is a flex column, so the header's height goes to the editor without
+   anything else having to be told. */
+@media (orientation: landscape) and (max-height: 500px) {
+  body:has([data-doc-editor-column]) > header {
+    display: none;
+  }
+}
+
 * {
   box-sizing: border-box;
   padding: 0;

@@ -43,11 +43,25 @@ type MarginNotesContextValue = {
 
 const MarginNotesContext = createContext<MarginNotesContextValue | null>(null);
 
-export function MarginNotesProvider({ children }: { children: ReactNode }) {
+// `query` exists for exactly one surface: the doc editor, which answers "is
+// there room beside the document" differently from a reading view because its
+// text column is elastic where theirs is a fixed reading measure
+// (EDITOR_MARGIN_NOTES_MEDIA_QUERY's own note). It is a prop rather than a
+// second context so the split stays where the decision is made — at the one
+// mount site that differs — instead of every consumer learning there are two
+// answers. Whatever is passed must be mirrored character-for-character by the
+// surface's own CSS, which is the whole reason these are shared constants.
+export function MarginNotesProvider({
+  children,
+  query = MARGIN_NOTES_MEDIA_QUERY,
+}: {
+  children: ReactNode;
+  query?: string;
+}) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [railElement, setRailElement] = useState<HTMLElement | null>(null);
   const listenersRef = useRef(new Set<() => void>());
-  const wide = useMediaQuery(MARGIN_NOTES_MEDIA_QUERY);
+  const wide = useMediaQuery(query);
 
   const subscribe = useCallback((listener: () => void) => {
     const listeners = listenersRef.current;

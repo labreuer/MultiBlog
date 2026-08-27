@@ -108,6 +108,13 @@ the admin account.
   Schedule stay disabled until `PostSnapshotScrubBar` has loaded the backing
   doc's history — `await expect(page.getByRole("button", { name: "Publish",
   exact: true })).toBeEnabled()`.
+- **`waitForDocCollabReady` cannot be used in the doc editor's phone-landscape
+  focus mode.** It waits for the connection badge to be *visible*, and that
+  badge is one of the things the mode hides (STYLE.md's fourth breakpoint), so
+  it times out at a short-landscape viewport no matter how ready the editor is.
+  `margin-rail-widths.spec.ts` loads and waits at a desktop size first and then
+  resizes, which is also the honest case — a phone opening a doc that already
+  has annotations on it.
 - **Comments are rate-limited to 5 per IP per 10 minutes**
   (`src/lib/rate-limit.ts`), and every worker shares 127.0.0.1. Create comments
   with `createComment()` (straight to the DB) unless the test is *about* the
