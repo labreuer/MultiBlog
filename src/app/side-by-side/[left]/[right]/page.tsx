@@ -1,11 +1,12 @@
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import * as Y from "yjs";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
+import { gated, titleWhenOk } from "@/lib/route-access";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
@@ -55,6 +56,53 @@ async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; static
   return { bodyJSON: EMPTY_DOC, staticBody: <p style={{ color: "var(--error)" }}>{result.error}</p> };
 }
 
+// The two-argument case the envelope's memo was built to take: `gated` keys on
+// every argument, so a pair resolves once for the request just as a single doc
+// does.
+//
+// §14c — if either doc is unreadable the *whole page* is forbidden rather than
+// one column beside a placeholder: this page's only purpose is comparison, and
+// the "Link to…" picker (§14k) only ever offers docs the viewer can already
+// read, so the sole way to reach a mismatched pair is a shared URL. The title
+// answers the same way rather than leaking half a pair.
+const loadPairForRead = gated(async (user, left: string, right: string) => {
+  const [leftDoc, rightDoc] = await Promise.all([
+    resolveDocParam(left, DOC_SELECT),
+    resolveDocParam(right, DOC_SELECT),
+  ]);
+  if (!leftDoc || leftDoc.deletedByUserId !== null || !rightDoc || rightDoc.deletedByUserId !== null) {
+    return "not-found";
+  }
+  // §14c — two columns on one doc would build two distinct Y.Docs sharing
+  // one documentName, which is exactly the y-indexeddb#25 shape Phase 0's
+  // attachIndexeddb re-key guards against from the client side; rejecting
+  // it here is also a semantic rejection, not just a workaround — a link
+  // with both ends in one doc has no representation in "← N  M → (+Y)".
+  if (leftDoc.id === rightDoc.id) {
+    return "not-found";
+  }
+  const [leftReadable, rightReadable] = await Promise.all([
+    canUserReadDoc(user.id, user.role, leftDoc),
+    canUserReadDoc(user.id, user.role, rightDoc),
+  ]);
+  if (!leftReadable || !rightReadable) {
+    return "forbidden";
+  }
+  return { leftDoc, rightDoc };
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ left: string; right: string }>;
+}): Promise<Metadata> {
+  const { left, right } = await params;
+  return titleWhenOk(
+    await loadPairForRead(left, right),
+    ({ leftDoc, rightDoc }) => `${docTitleOrFallback(leftDoc.title)} ∥ ${docTitleOrFallback(rightDoc.title)}`,
+  );
+}
+
 // Dynamic for the same reasons /doc/[slug]/page.tsx is (§12f): per-user
 // gated, and the decode-from-ydoc fallback above is a live decode.
 export default async function SideBySidePage({
@@ -63,40 +111,18 @@ export default async function SideBySidePage({
   params: Promise<{ left: string; right: string }>;
 }) {
   const { left, right } = await params;
-  const session = await auth();
-  if (!session?.user) {
+  // Free — generateMetadata already ran this for the same request.
+  const access = await loadPairForRead(left, right);
+  if (access.status === "signed-out") {
     redirect("/sign-in");
   }
-
-  const [leftDoc, rightDoc] = await Promise.all([
-    resolveDocParam(left, DOC_SELECT),
-    resolveDocParam(right, DOC_SELECT),
-  ]);
-
-  if (!leftDoc || leftDoc.deletedByUserId !== null || !rightDoc || rightDoc.deletedByUserId !== null) {
+  if (access.status === "redirect") {
+    redirect(access.to);
+  }
+  if (access.status === "not-found") {
     notFound();
   }
-
-  // §14c — two columns on one doc would build two distinct Y.Docs sharing
-  // one documentName, which is exactly the y-indexeddb#25 shape Phase 0's
-  // attachIndexeddb re-key guards against from the client side; rejecting
-  // it here is also a semantic rejection, not just a workaround — a link
-  // with both ends in one doc has no representation in "← N  M → (+Y)".
-  if (leftDoc.id === rightDoc.id) {
-    notFound();
-  }
-
-  const [leftReadable, rightReadable] = await Promise.all([
-    canUserReadDoc(session.user.id, session.user.role, leftDoc),
-    canUserReadDoc(session.user.id, session.user.role, rightDoc),
-  ]);
-
-  // §14c — if either doc is unreadable, the whole page is forbidden rather
-  // than one column beside a placeholder: this page's only purpose is
-  // comparison, and the "Link to…" picker (§14k) only ever offers docs
-  // the viewer can already read, so the sole way to reach a mismatched pair
-  // is a shared URL.
-  if (!leftReadable || !rightReadable) {
+  if (access.status === "forbidden") {
     return (
       <main className={styles.forbidden}>
         <h1>Forbidden</h1>
@@ -104,6 +130,10 @@ export default async function SideBySidePage({
       </main>
     );
   }
+  const {
+    value: { leftDoc, rightDoc },
+    user,
+  } = access;
 
   const [leftBody, rightBody, groups] = await Promise.all([
     loadBody(leftDoc),
@@ -133,9 +163,9 @@ export default async function SideBySidePage({
         }}
         initialGroups={groups}
         initialOtherDocLinksCount={otherDocLinksCount}
-        userId={session.user.id}
-        userName={session.user.name ?? session.user.email ?? "Anonymous"}
-        userColor={session.user.color}
+        userId={user.id}
+        userName={user.name ?? user.email ?? "Anonymous"}
+        userColor={user.color}
       />
     </main>
   );

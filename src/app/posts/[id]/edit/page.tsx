@@ -1,21 +1,16 @@
 import { notFound, redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import type { Metadata } from "next";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
+import { gated, titleWhenOk } from "@/lib/route-access";
 import { derivePostStatus } from "@/lib/post-status";
 import { editableDocsFor } from "@/lib/doc-authz";
 import PostPublisher from "@/components/PostPublisher";
 
-export default async function EditPostPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/sign-in");
-  }
-
-  // prismaIncludingDeleted rather than the soft-delete-filtered prisma — a
-  // soft-deleted post must still load here so its Settings panel can offer
-  // Undelete; the ordinary prisma client would 404 it instead.
+// prismaIncludingDeleted rather than the soft-delete-filtered prisma — a
+// soft-deleted post must still load here so its Settings panel can offer
+// Undelete; the ordinary prisma client would 404 it instead.
+const loadPostForEdit = gated(async (user, id: string) => {
   const post = await prismaIncludingDeleted.post.findUnique({
     where: { id },
     include: {
@@ -25,11 +20,38 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     },
   });
   if (!post) {
+    return "not-found";
+  }
+  const isOwner = post.authors.some((a) => a.userId === user.id);
+  if (!canEditAnyPost(user.role) && !isOwner) {
+    return "forbidden";
+  }
+  return post;
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  return titleWhenOk(await loadPostForEdit(id), (post) => `✎ ${post.title}`);
+}
+
+export default async function EditPostPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  // Free — generateMetadata already ran this for the same request.
+  const access = await loadPostForEdit(id);
+  if (access.status === "signed-out") {
+    redirect("/sign-in");
+  }
+  if (access.status === "redirect") {
+    redirect(access.to);
+  }
+  if (access.status === "not-found") {
     notFound();
   }
-
-  const isOwner = post.authors.some((a) => a.userId === session.user.id);
-  if (!canEditAnyPost(session.user.role) && !isOwner) {
+  if (access.status === "forbidden") {
     return (
       <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
         <h1>Forbidden</h1>
@@ -37,6 +59,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       </main>
     );
   }
+  const { value: post, user } = access;
 
   const status = derivePostStatus(post);
 
@@ -50,7 +73,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   // actually publish from; the post's own current doc is always included
   // even for an ADMIN/EDITOR browsing someone else's byline-only doc, since
   // editableDocsFor already returns every doc for those roles.
-  const editableDocs = await editableDocsFor(session.user.id, session.user.role);
+  const editableDocs = await editableDocsFor(user.id, user.role);
 
   // The scrub bar should open on the point this post is actually live from,
   // not the doc's head — a bigint can't cross the RSC boundary (same reason

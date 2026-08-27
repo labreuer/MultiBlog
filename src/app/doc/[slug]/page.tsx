@@ -1,10 +1,11 @@
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import * as Y from "yjs";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
+import { gated, titleWhenOk } from "@/lib/route-access";
 import { canUserReadDoc, canUserEditDoc, readableDocsFor } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { createPostFromDoc } from "@/app/actions/posts";
@@ -34,34 +35,60 @@ const EMPTY_DOC: JSONContent = { type: "doc", content: [{ type: "paragraph" }] }
 // calls a dynamic API throws DYNAMIC_SERVER_USAGE at build, §10 item 17).
 // prose_json is what keeps this cheap, not a Next cache — see CACHING.md.
 
-export default async function PublicDocPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/sign-in");
-  }
+const DOC_SELECT = {
+  id: true,
+  title: true,
+  visibility: true,
+  proseJson: true,
+  deletedByUserId: true,
+  updatedAt: true,
+  authors: {
+    orderBy: { bylineOrder: "asc" },
+    select: { userId: true, user: { select: { slug: true, name: true } } },
+  },
+} as const;
 
-  const doc = await resolveDocParam(slug, {
-    id: true,
-    title: true,
-    visibility: true,
-    proseJson: true,
-    deletedByUserId: true,
-    updatedAt: true,
-    authors: {
-      orderBy: { bylineOrder: "asc" },
-      select: { userId: true, user: { select: { slug: true, name: true } } },
-    },
-  });
+// One select for both callers rather than a narrow one for the title: the memo
+// in `gated` keys on arguments, so two different selects would be two misses
+// and so two queries, which is the thing being removed.
+const loadDocForRead = gated(async (user, slug: string) => {
+  const doc = await resolveDocParam(slug, DOC_SELECT);
   // resolveDocParam uses prismaIncludingDeleted (the editor needs a deleted
   // doc to still resolve, for its Settings panel's Undelete) — the reading
   // route is the caller that must not show a soft-deleted doc, so it checks
   // deletedByUserId itself rather than relying on the soft-delete extension.
   if (!doc || doc.deletedByUserId !== null) {
+    return "not-found";
+  }
+  if (!(await canUserReadDoc(user.id, user.role, doc))) {
+    return "forbidden";
+  }
+  return doc;
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  return titleWhenOk(await loadDocForRead(slug), (doc) => docTitleOrFallback(doc.title));
+}
+
+export default async function PublicDocPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  // Free — generateMetadata already ran this for the same request.
+  const access = await loadDocForRead(slug);
+  if (access.status === "signed-out") {
+    redirect("/sign-in");
+  }
+  if (access.status === "redirect") {
+    redirect(access.to);
+  }
+  if (access.status === "not-found") {
     notFound();
   }
-
-  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
+  if (access.status === "forbidden") {
     return (
       <main className={styles.forbidden}>
         <h1>Forbidden</h1>
@@ -69,9 +96,10 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
       </main>
     );
   }
+  const { value: doc, user } = access;
 
-  const canEdit = await canUserEditDoc(session.user.id, session.user.role, doc.id);
-  const otherDocs = (await readableDocsFor(session.user.id, session.user.role)).filter((d) => d.id !== doc.id);
+  const canEdit = await canUserEditDoc(user.id, user.role, doc.id);
+  const otherDocs = (await readableDocsFor(user.id, user.role)).filter((d) => d.id !== doc.id);
 
   // PLAN.md §13o — fetched here rather than inside AnnotationSection because
   // the body needs them too: a column-anchored annotation's highlight is a
@@ -138,7 +166,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                     initialBodyJSON={bodyJSON}
                     staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
                     canEdit={canEdit}
-                    userColor={session.user.color}
+                    userColor={user.color}
                     annotationAnchors={annotationAnchors}
                     byline={
                       // A <div>, not <p> — <form> isn't valid inside <p> (HTML

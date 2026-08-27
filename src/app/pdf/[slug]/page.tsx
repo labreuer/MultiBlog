@@ -1,7 +1,8 @@
 import { notFound, redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import type { Metadata } from "next";
 import { canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
+import { gated, titleWhenOk } from "@/lib/route-access";
 import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
 import TagChips from "@/components/tags/TagChips";
@@ -17,13 +18,13 @@ import styles from "./page.module.css";
 // bytes are named; the viewer itself is a client island behind `ssr: false`
 // (see PdfViewerClient for why that boundary has to exist at all).
 
-export default async function PdfPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/sign-in");
-  }
-
+// The one route whose resolver can answer "somewhere else": a past slug
+// redirects to the current one rather than rendering here, so a shared link
+// doesn't quietly become the canonical URL — the same contract /doc/[slug] has
+// through resolveDocParam. That is the `redirect` arm of Access, and it is
+// returned *before* the gate so the ordering the body used to have is
+// unchanged.
+const loadFileForRead = gated(async (user, slug: string) => {
   const resolved = await resolveFileParam(slug, {
     id: true,
     slug: true,
@@ -33,23 +34,45 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
     deletedByUserId: true,
   });
   if (!resolved) {
-    notFound();
+    return "not-found";
   }
-  // A past slug redirects to the current one rather than rendering here, so a
-  // shared link doesn't quietly become the canonical URL — same contract
-  // /doc/[slug] has through resolveDocParam.
   if (resolved.redirectTo) {
-    redirect(resolved.redirectTo);
+    return { redirect: resolved.redirectTo };
   }
-
-  const file = resolved.file;
   // resolveFileParam uses prismaIncludingDeleted so a management route could
   // offer an undelete; this is the reading route, so it checks itself.
-  if (file.deletedByUserId !== null) {
+  if (resolved.file.deletedByUserId !== null) {
+    return "not-found";
+  }
+  if (!(await canUserReadFile(user.id, user.role, resolved.file))) {
+    return "forbidden";
+  }
+  return resolved.file;
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  return titleWhenOk(await loadFileForRead(slug), (file) => file.title);
+}
+
+export default async function PdfPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  // Free — generateMetadata already ran this for the same request.
+  const access = await loadFileForRead(slug);
+  if (access.status === "signed-out") {
+    redirect("/sign-in");
+  }
+  if (access.status === "redirect") {
+    redirect(access.to);
+  }
+  if (access.status === "not-found") {
     notFound();
   }
-
-  if (!(await canUserReadFile(session.user.id, session.user.role, file))) {
+  if (access.status === "forbidden") {
     return (
       <main className={styles.forbidden}>
         <h1>Forbidden</h1>
@@ -57,6 +80,7 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
       </main>
     );
   }
+  const file = access.value;
 
   // The hash is in the path, which is what makes this URL immutable and lets
   // the download route answer `immutable` — see the route's own header.
