@@ -59,6 +59,11 @@ export type DocRow = {
   // doc's full body never has to reach this component to show its length
   // (PLAN.md §16l).
   length: number;
+  // Live, non-DRAFT annotations on the doc, replies included — read off
+  // doc_metrics.annotation_count, a *filtered* count Prisma's `_count` has no
+  // way to express in an orderBy. The /files twin of this column is
+  // FileRow.annotationCount, counting the same thing the same way.
+  annotationCount: number;
   deletedAt: Date | null;
   deleted: boolean;
   canEdit: boolean;
@@ -70,6 +75,7 @@ const SORTABLE_KEYS = [
   "visibility",
   "created",
   "length",
+  "annotations",
   "slug",
   "updatedAt",
   "updatedBy",
@@ -204,6 +210,25 @@ export default function DocsTable({
       sortKey: "length",
       nowrap: true,
       cell: (row) => row.length.toLocaleString(),
+    },
+    {
+      key: "annotations",
+      header: "Annotations",
+      sortKey: "annotations",
+      nowrap: true,
+      // Off by default (§16i/§16m), unlike /files' identically-named column,
+      // which is shown: a PDF is something people mark up and the count is
+      // most of what /files has to say about one, where /docs already leads
+      // with recency and authorship and most docs carry no annotations at all.
+      // Declared here rather than down with the default-hidden Doc columns
+      // because this is where it renders once turned on and reordered — next
+      // to Length, the other derived measure of the document.
+      defaultHidden: true,
+      // Blank rather than "0" for a doc nobody has annotated, the same way
+      // /files and /tags print their counts: a column of zeroes reads as
+      // noise, and what an admin turns this on for is which docs have
+      // discussion on them.
+      cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
     },
     // Defaulted hidden (§16l/§16i): real Doc columns available on request.
     // slug is otherwise unused here (Title/Edit link on row.id). created
@@ -373,13 +398,17 @@ export default function DocsTable({
         notes={
           <p style={{ marginTop: 8 }}>
             Every column here sorts except <strong>Edit</strong>, which is a link rather than a value.{" "}
-            <strong>Author(s)</strong> goes through the <code>doc_metrics</code>{" "}
-            view — the byline joined in SQL across a doc&apos;s authors, which a plain <code>ORDER BY</code> could not
-            name. <strong>Length</strong> is a
+            <strong>Author(s)</strong> and <strong>Annotations</strong> go through the <code>doc_metrics</code>{" "}
+            view — the byline joined in SQL across a doc&apos;s authors, and a count that excludes deleted and
+            still-private draft annotations, neither of which a plain <code>ORDER BY</code> could name. That count is
+            every live remark on the doc rather than every thread: a reply counts as its own annotation, the same way
+            /files counts them. <strong>Length</strong> is a
             stored character count of the document body, measured in Postgres and kept current by a trigger, so sorting
-            by it costs no more than sorting by a date (PLAN.md §16l). <strong>Slug</strong>, <strong>Updated</strong>{" "}
-            and <strong>Deleted at</strong> are hidden by default (Columns picker, above). This listing shows every{" "}
-            <strong>SHARED</strong> doc to an ADMIN or EDITOR, plus the <strong>PRIVATE</strong> docs you carry a
+            by it costs no more than sorting by a date (PLAN.md §16l). <strong>Annotations</strong>,{" "}
+            <strong>Slug</strong>, <strong>Created</strong> and <strong>Deleted at</strong> are hidden by default
+            (Columns picker, above) — sorting by one of them from a hand-edited URL still works while it is
+            hidden. This listing shows every <strong>SHARED</strong> doc to an ADMIN or EDITOR, plus the{" "}
+            <strong>PRIVATE</strong> docs you carry a
             byline on. ADMIN accounts also get a &quot;Show all docs&quot; checkbox above, which adds everyone
             else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md).
             The <strong>Authors</strong> filter narrows this listing; it never widens it. Without &quot;Show all

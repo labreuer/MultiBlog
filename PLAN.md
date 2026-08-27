@@ -4375,6 +4375,7 @@ of these into a shape Prisma already handles:
 | `/posts` | Comments | `post_metrics.approved_count`/`pending_count` | `count(*) FILTER` per status, excluding soft-deleted |
 | `/posts` | Last edit by/at | `post_activity.last_editor_name`/`last_event_at` | the argmax over `PostPublicationEvent` |
 | `/docs` | Author(s) | `doc_metrics.byline` | `string_agg`, as above |
+| `/docs` | Annotations | `doc_metrics.annotation_count` | `count(*)` of live, non-DRAFT annotations — replies included, so it counts remarks and not threads |
 | `/docs` | Length | `Doc.proseJsonLength` | a stored column, not a view — §16l has the reasoning |
 
 Each view **also displays** the value it sorts (`include: { activity: true }` and friends, rather
@@ -4426,10 +4427,14 @@ shows for such a post anyway.
 `GROUP BY` over `post_author`/`comment` want different plans, and merging them would force one
 shape onto both while changing the row-presence semantics the nulls-last ordering depends on.
 The two differ from each other in the same way, and deliberately — `post_metrics` reads `FROM post`
-so every post has a row, while `doc_metrics` groups `doc_author`, so a doc with *no* authors has no
-row at all. Both render as the same empty cell and sort the same way, since each relation is
+so every post has a row, while `doc_metrics` never reads `doc` at all: it `FULL OUTER JOIN`s an
+aggregate over `doc_author` to one over `annotation`, so a doc with *neither* authors nor
+annotations has no row at all, and one with annotations but no authors has a row with a NULL
+byline. Both render as the same empty cell and sort the same way, since each relation is
 optional and byline is ordered nulls-last either way; §16l has why `doc_metrics` is worth the
-difference.
+difference. `file_metrics` is the same `FULL OUTER JOIN` of owners against annotations, and
+`add_doc_annotation_count` is where `doc_metrics` adopted it — a second aggregate keyed on the same
+id is exactly what a single `GROUP BY` over the join table cannot carry.
 
 Two things Prisma views make you live with: they take `@unique`, never `@id` ("Views cannot have
 primary keys"), and **Prisma Migrate does not manage them** — `migrate diff` emits no DDL for a
@@ -4803,11 +4808,16 @@ themselves; they all call `docContentFromYdoc`, the same derivation `server/doc-
   help: it only fires on `INNER` joins, while Prisma emits a `LEFT JOIN` for a to-one
   relation ordering regardless of how the relation's optionality is declared (it also refuses
   a 1:1 with both sides required). `post_metrics` pays this — it reads `FROM post`, which is
-  the readable shape and gives every post a row. `doc_metrics` avoids it by grouping
-  `doc_author` instead, which is only possible because Length is a column rather than a view
-  expression; the same trick would work for `post_metrics` as a `FULL OUTER JOIN` of its two
-  aggregates, at the cost of readability and of making both counts nullable for a post with
-  authors but no comments. Not worth it for one avoided scan of a small table.
+  the readable shape and gives every post a row. `doc_metrics` avoids it by aggregating the
+  owned tables instead — `doc_author` for the byline, `annotation` for the count — which is
+  only possible because Length is a column rather than a view expression; the same trick
+  would work for `post_metrics` as a `FULL OUTER JOIN` of its two aggregates, at the cost of
+  readability and of making both counts nullable for a post with authors but no comments. Not
+  worth it for one avoided scan of a small table. When `doc_metrics` grew its second
+  aggregate (`add_doc_annotation_count`) that `FULL OUTER JOIN` stopped being hypothetical
+  there: a single `GROUP BY` over `doc_author` has nowhere to put a count keyed on the same
+  id, so the choice was that join or a `FROM doc` rewrite that would have reintroduced the
+  double scan.
 - **Prisma issues the two halves of a view differently, and only one is a join.** An
   `orderBy` through a view is a `LEFT JOIN`; an `include`/`select` of it is a separate
   `WHERE <pk> IN (…)` query. Worth knowing because it means the display path costs one flat
@@ -4835,7 +4845,10 @@ Added, all `defaultHidden: true` — present in the picker, absent from the defa
 - `/posts`: `slug`, `moderationPolicy`, `deletedAt`.
 - `/docs`: `slug`, `deletedAt`, and (since §16n below) `created` — `updatedAt` swapped into its
   spot instead, shown and sorted by default. `updatedAt` was itself `defaultHidden` when this
-  list was first built.
+  list was first built. `annotations` (`doc_metrics.annotation_count`) joined the list when it
+  was added, and is the one entry here that is *not* a plain Doc column: /files shows its
+  identically-named column by default and /docs does not, because a PDF is a thing people mark
+  up while most docs carry no annotations at all.
 - `/users`: `deletedAt`.
 - `/comments`: `ipAddress`, `statusChangedBy` (sorts through the comment's own `statusChangedBy`
   relation, the same to-one-relation `orderBy` pattern §16i's `post_activity`/`post_metrics` use,

@@ -633,22 +633,31 @@ model Doc {
   @@map("doc")
 }
 
-// The joined byline /docs shows as "Author(s)", as a database view (PLAN.md
-// §16e/§16l). Same caveats as PostMetrics; see add_doc_metrics_view.
+// /docs' Author(s) and Annotations columns, as a database view (PLAN.md
+// §16e/§16l). Same caveats as PostMetrics; see add_doc_metrics_view and
+// add_doc_annotation_count.
 //
-// Unlike PostMetrics this is built by grouping doc_author rather than by
-// selecting FROM doc, so it never references the base table. That is what
-// keeps Prisma's LEFT JOIN back to doc from scanning it twice on every sort
-// through the view — Postgres 18's self-join elimination only collapses INNER
-// joins, so the second scan has to be removed rather than optimised away.
-// /docs' other derived value, Length, would have forced this view to read doc;
-// it is a stored column instead (Doc.proseJsonLength).
+// Unlike PostMetrics neither branch of this view selects FROM doc, so it never
+// references the base table. That is what keeps Prisma's LEFT JOIN back to doc
+// from scanning it twice on every sort through the view — Postgres 18's
+// self-join elimination only collapses INNER joins, so the second scan has to
+// be removed rather than optimised away. /docs' third derived value, Length,
+// would have forced this view to read doc; it is a stored column instead
+// (Doc.proseJsonLength).
 view DocMetrics {
-  docId  String  @unique @map("doc_id")
-  // Never NULL in practice: a doc with no authors simply has no row here now
-  // that the view groups doc_author, so the *relation* is the optional part.
-  // Still declared nullable because a view's columns carry no NOT NULL.
-  byline String? @map("byline")
+  docId           String  @unique @map("doc_id")
+  // NULL for a doc that has annotations but no authors — the FULL OUTER JOIN
+  // gives such a doc a row where the old doc_author-only form gave it none
+  // (add_doc_annotation_count). A doc with *neither* is still rowless, so the
+  // relation stays the optional part too, and both cases render the same empty
+  // cell and sort `nulls: "last"`.
+  byline          String? @map("byline")
+  // Live, non-DRAFT annotations on the doc, replies included — a *filtered*
+  // count, which is why it is here rather than a Prisma `_count`: `_count` is
+  // unconditional and cannot express either exclusion in an orderBy. COALESCEd
+  // to 0 in the view and so declared non-null, matching FileMetrics, which
+  // means orderBy takes a bare direction rather than the {sort, nulls} form.
+  annotationCount Int     @map("annotation_count")
 
   doc Doc @relation(fields: [docId], references: [id])
 
