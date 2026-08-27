@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/authz";
 import { getSiteSettings } from "@/lib/site-settings";
@@ -6,6 +7,8 @@ import { SITE_TITLE } from "@/lib/site-config";
 import { columnOrderFor, type AdminTableName } from "@/lib/column-order";
 import { ADMIN_TABLE_COLUMNS, codeDefaultColumns } from "@/lib/admin-table-columns";
 import SiteSettingsTable, { type ConfigRow, type DefaultColumnsRow } from "@/components/SiteSettingsTable";
+
+export const metadata: Metadata = { title: "Site settings" };
 
 const TABLE_LABELS: Record<AdminTableName, string> = {
   posts: "/posts",

@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const tag = await tagBySlug(slug);
   if (!tag) return {};
-  return { title: tag.name, description: tag.description ?? undefined };
+  return { title: `#${tag.name}`, description: tag.description ?? undefined };
 }
 
 export default async function TagPage({ params }: { params: Promise<{ slug: string }> }) {

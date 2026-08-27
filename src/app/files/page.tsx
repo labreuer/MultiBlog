@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
@@ -11,6 +12,8 @@ import { ownerFilterWhere, listOwnerFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import FilesTable from "@/components/FilesTable";
 import FileUploader from "@/components/FileUploader";
+
+export const metadata: Metadata = { title: "Files" };
 
 // PLAN.md §19 — the file listing, deliberately /docs' twin (src/app/docs/page.tsx)
 // down to the ADMIN-only scoping override, so the two admin tables can't drift

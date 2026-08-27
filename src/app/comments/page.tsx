@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
@@ -9,6 +10,8 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
 import CommentsTable from "@/components/CommentsTable";
 import styles from "./page.module.css";
+
+export const metadata: Metadata = { title: "Comments" };
 
 // Deep-link-only filters (no dedicated dropdown yet — see the page's Help
 // section): ?post=<postId>, ?author=<userId>, ?commenter=<commenterId>.

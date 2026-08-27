@@ -1,8 +1,21 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
 import AuthorByline from "@/components/AuthorByline";
+
+// No gate to repeat, unlike the doc and post surfaces — the results are
+// publishedPostWhere() only, and the query came from the viewer's own URL.
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}): Promise<Metadata> {
+  const { q } = await searchParams;
+  const query = q?.trim() ?? "";
+  return { title: query ? `Search: ${query}` : "Search" };
+}
 
 export default async function SearchPage({
   searchParams,

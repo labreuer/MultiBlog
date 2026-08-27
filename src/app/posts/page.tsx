@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
@@ -11,6 +12,8 @@ import { parsePostsFilters, type PostsFilters, type PostsSortKey } from "@/lib/p
 import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import PostsTable from "@/components/PostsTable";
+
+export const metadata: Metadata = { title: "Posts" };
 
 function buildFilterWhere(filters: PostsFilters): Prisma.PostWhereInput {
   const where: Prisma.PostWhereInput = {};
