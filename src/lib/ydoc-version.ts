@@ -116,7 +116,7 @@ export type VersionResolution = {
  *
  * Exact, always. There is deliberately no bail-out to "just use the tail": an
  * approximate stamp would silently break the one thing the stamp is for, and
- * unlike the offsets (which `captureAnnotationAnchor` re-derives against
+ * unlike the offsets (which `captureAnchorInYdoc` re-derives against
  * whatever it stamps, so they stay self-consistent either way) there is nothing
  * downstream that would notice. When the walk is long the caller checkpoints so
  * the *next* one is short — see `postAnnotation`. Paying once is the answer, not

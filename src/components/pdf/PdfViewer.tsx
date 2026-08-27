@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } from "@/lib/pdfjs-client";
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
 import "pdfjs-dist/web/pdf_viewer.css";
@@ -27,6 +27,42 @@ export type PdfViewerHandle = {
   container: HTMLDivElement;
 };
 
+/** One tab in the side panel, and the pane it selects. */
+export type PdfPane = {
+  /** Stable id; also part of the tab's and the pane's DOM ids, which
+      `aria-controls`/`aria-labelledby` pair up. */
+  value: string;
+  /** The tab's text, and the pane's accessible name. */
+  label: string;
+  content: ReactNode;
+};
+
+/**
+ * The "show the side panel" glyph: a pane outline with the right section
+ * divided off, filled while the panel is open.
+ *
+ * **The fill tracks state rather than naming the target.** A fixed glyph would
+ * make the button say "side panel" and leave `aria-pressed` as the only thing
+ * saying whether there is one, which is invisible to everyone not using a
+ * screen reader. Drawn rather than lettered because the toolbar's other glyphs
+ * are all directional or rotational and there is no character for this.
+ *
+ * `currentColor` throughout, so it inherits `.toolbar button`'s color and needs
+ * no token of its own (STYLE.md: no color literals in src/).
+ */
+function SidePanelIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" strokeWidth="1.2" />
+      {/* Inset by half the stroke width so the fill sits inside the outline
+          rather than straddling it, and re-rounded on the right to follow the
+          rect's own `rx`. */}
+      {open && <path d="M10 3.1 H12.5 A1.4 1.4 0 0 1 13.9 4.5 V11.5 A1.4 1.4 0 0 1 12.5 12.9 H10 Z" fill="currentColor" />}
+    </svg>
+  );
+}
+
 type Props = {
   /** The download route's URL, hash included so it is immutable and cacheable. */
   fileUrl: string;
@@ -37,8 +73,20 @@ type Props = {
    * props, because those features drive pdfjs imperatively too.
    */
   onReady?: (handle: PdfViewerHandle) => void;
-  /** Rendered into the right-hand panel column. Absent until Phase 3. */
-  panel?: ReactNode;
+  /**
+   * The side panel's tabs, in order. Absent until Phase 3.
+   *
+   * **Every pane stays mounted; only the selected one is displayed.** The same
+   * fact PdfAnnotationPanel's header records about individual cards holds for
+   * the panel as a whole: a hidden card can be holding an open reply composer,
+   * which is a live Hocuspocus connection and a DRAFT row, so changing tabs —
+   * or closing the panel — must hide the annotations rather than unmount them.
+   */
+  panes?: PdfPane[];
+  /** The selected tab's `value`. */
+  activePane?: string;
+  onSelectPane?: (value: string) => void;
+  /** Whether the panel is showing at all — what the toolbar's icon toggles. */
   panelOpen?: boolean;
   onTogglePanel?: () => void;
   /** Rendered in the left presence rail slot. Absent until Phase 4. */
@@ -55,7 +103,9 @@ export default function PdfViewer({
   fileUrl,
   title,
   onReady,
-  panel,
+  panes = [],
+  activePane,
+  onSelectPane,
   panelOpen = true,
   onTogglePanel,
   presenceRail,
@@ -215,6 +265,25 @@ export default function PdfViewer({
     handle.viewer.currentScaleValue = value;
   }, []);
 
+  // Arrow-key movement across the tab strip, which a row of <button>s does not
+  // get for free. **Focus follows selection** (the "automatic activation"
+  // tablist pattern) rather than waiting for Enter: every pane is already
+  // mounted, so selecting one loads nothing and there is nothing to protect a
+  // reader from doing by accident.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const moveTab = (event: KeyboardEvent<HTMLDivElement>) => {
+    const index = panes.findIndex((pane) => pane.value === activePane);
+    let next: number;
+    if (event.key === "ArrowRight") next = (index + 1) % panes.length;
+    else if (event.key === "ArrowLeft") next = (index - 1 + panes.length) % panes.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = panes.length - 1;
+    else return;
+    event.preventDefault();
+    onSelectPane?.(panes[next].value);
+    tabsRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  };
+
   const rotate = useCallback(() => {
     const handle = handleRef.current;
     if (!handle) return;
@@ -271,9 +340,21 @@ export default function PdfViewer({
 
         {followBar}
 
-        {panel && onTogglePanel && (
-          <button type="button" onClick={onTogglePanel} aria-label="Toggle annotations" aria-pressed={panelOpen}>
-            {panelOpen ? "Hide annotations" : "Annotations"}
+        {/* The toolbar answers only "is there a panel"; *which* pane is the
+            panel's own business and lives on the tabs inside it. Splitting it
+            that way keeps this row a row of document controls — page, zoom,
+            rotate — rather than a place that also names the panel's contents,
+            and it means adding a fourth pane later touches nothing here. */}
+        {panes.length > 0 && onTogglePanel && (
+          <button
+            type="button"
+            className={styles.panelToggle}
+            onClick={onTogglePanel}
+            aria-pressed={panelOpen}
+            aria-label={panelOpen ? "Hide the side panel" : "Show the side panel"}
+            title={panelOpen ? "Hide the side panel" : "Show the side panel"}
+          >
+            <SidePanelIcon open={panelOpen} />
           </button>
         )}
       </div>
@@ -294,7 +375,49 @@ export default function PdfViewer({
 
         {indicatorStrip}
 
-        {panel && <aside className={`${styles.panel} ${panelOpen ? styles.panelOpen : ""}`}>{panel}</aside>}
+        {panes.length > 0 && (
+          <div className={`${styles.panelColumn} ${panelOpen ? styles.panelColumnOpen : ""}`}>
+            {/* The strip is a sibling *above* the panes, never a child of one —
+                `.panel` is the scroller and the box use-pdf-margin-notes.ts
+                measures a card's `targetTop` against, so anything inserted
+                between the two shifts every card by its own height. The
+                stylesheet carries the long version. */}
+            <div ref={tabsRef} className={styles.tabs} role="tablist" aria-label="Side panel" onKeyDown={moveTab}>
+              {panes.map((pane) => (
+                <button
+                  key={pane.value}
+                  id={`pdf-tab-${pane.value}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={pane.value === activePane}
+                  aria-controls={`pdf-pane-${pane.value}`}
+                  // Roving tabindex: a tablist is one tab stop, and the arrow
+                  // keys move within it (see moveTab).
+                  tabIndex={pane.value === activePane ? 0 : -1}
+                  className={`${styles.tab} ${pane.value === activePane ? styles.tabActive : ""}`}
+                  onClick={() => onSelectPane?.(pane.value)}
+                >
+                  {pane.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Each pane its own `.panel`, all of them mounted, only the
+                selected one displayed — the `panes` prop above says why the
+                mounting is load-bearing. */}
+            {panes.map((pane) => (
+              <div
+                key={pane.value}
+                id={`pdf-pane-${pane.value}`}
+                role="tabpanel"
+                aria-labelledby={`pdf-tab-${pane.value}`}
+                className={`${styles.panel} ${pane.value === activePane ? styles.panelOpen : ""}`}
+              >
+                {pane.content}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

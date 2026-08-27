@@ -1,0 +1,43 @@
+/* PLAN.md §20d — /tags' own bits, alongside the shared table kit's
+   AdminTable.module.css. Mirrors FilesTable.module.css. */
+
+.nameCell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+/* The ADMIN/EDITOR rename affordance. Deliberately quiet: it sits next to
+   every term's name, and a term is renamed roughly never. */
+.renameButton {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+.renameButton:hover:not(:disabled) {
+  color: var(--foreground);
+}
+
+.renameButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A description is secondary information next to the term itself, and often a
+   full sentence. Same treatment /files gives Filename. */
+.descriptionCell {
+  color: var(--text-secondary);
+  font-size: 0.9em;
+}
+
+/* Right-aligned so the digits line up when scanning a column of counts, which
+   is the only way the usage columns get read. */
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

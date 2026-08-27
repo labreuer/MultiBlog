@@ -4,6 +4,8 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { updateDocVisibility, updateDocAuthor, updateDocAuthorOrder, deleteDoc, restoreDoc } from "@/app/actions/docs";
+import { loadTaggerState, type TaggerState } from "@/app/actions/tags";
+import TagStrip from "@/components/tags/TagStrip";
 import { DocVisibility, type Role } from "@/generated/prisma/enums";
 import styles from "./DocSettingsPanel.module.css";
 
@@ -50,6 +52,12 @@ export default function DocSettingsPanel({
   const usersById = useMemo(() => new Map(eligibleUsers.map((u) => [u.id, u])), [eligibleUsers]);
   const dragIdRef = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  // PLAN.md §20k — the terms already on this doc, fetched when the panel is
+  // first opened rather than passed down from edit/page.tsx: a per-viewer read
+  // for a panel most editing sessions never open. Same argument TagTagger
+  // makes for its own popover.
+  const [tags, setTags] = useState<TaggerState | null>(null);
 
   function handleVisibilityChange(next: DocVisibility) {
     const prev = visibilityValue;
@@ -112,6 +120,16 @@ export default function DocSettingsPanel({
     });
   }
 
+  function loadTags() {
+    startTransition(async () => {
+      try {
+        setTags(await loadTaggerState("doc", docId));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't load tags.");
+      }
+    });
+  }
+
   function handleDeleteToggle() {
     setError(null);
     startTransition(async () => {
@@ -141,7 +159,9 @@ export default function DocSettingsPanel({
       data-doc-settings=""
       className={styles.details}
       onToggle={(e) => {
-        if (e.currentTarget.open) e.currentTarget.scrollIntoView({ block: "start", behavior: "smooth" });
+        if (!e.currentTarget.open) return;
+        e.currentTarget.scrollIntoView({ block: "start", behavior: "smooth" });
+        if (tags === null) loadTags();
       }}
     >
       <summary className={styles.summary}>Settings</summary>
@@ -188,6 +208,29 @@ export default function DocSettingsPanel({
               );
             })}
           </div>
+        </fieldset>
+
+        {/* PLAN.md §20k — literally the strip an object page carries, so the
+            two cannot drift; the only difference is where the chips come from,
+            which is what `onChange` is for. No client-side guard on a deleted
+            doc either: canUserTagTarget reads through soft-delete-filtered
+            `prisma`, so a binned doc is already untaggable and the tagger says
+            so on open. This surface is also the one exception to
+            docs/PERMISSIONS.md's "chips are as private as the thing they are
+            on" paragraph — see the note under it. */}
+        <fieldset className={styles.field}>
+          <legend className={styles.label}>Tags</legend>
+          {tags === null ? (
+            <p className={styles.hint}>Loading…</p>
+          ) : (
+            <TagStrip
+              target={{ kind: "doc", id: docId }}
+              chips={tags.applied}
+              // "bare" because the <legend> above already says Tags.
+              variant="bare"
+              onChange={loadTags}
+            />
+          )}
         </fieldset>
 
         <table className={styles.detailsTable}>

@@ -205,8 +205,6 @@ export default function PdfAnnotationPanel({
   // top of the panel; everything below scrolls past underneath it.
   const chrome = (
     <div className={styles.chrome}>
-      <h2 className={styles.heading}>Annotations</h2>
-
       {/* What the reader just selected, shown *before* the editor so that
           clicking "Annotate" over the document has a visible result here —
           otherwise the capture succeeds silently and the panel looks unchanged.

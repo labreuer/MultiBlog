@@ -17,7 +17,7 @@ to re-derive the decision from.
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
-| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. |
+| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Tags have their own section: minting vs. applying vs. curating. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Creating a doc from Markdown — file import and paste box. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
@@ -66,6 +66,24 @@ before changing the behavior it describes.
   thing being removed, not an implementation detail. `resolveAnnotationRanges`
   (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
   jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
+- **One anchor row shape, per-consumer tables.** `tag_anchor` (and, from PR 2,
+  `annotation_anchor`) share a column shape by *compiler*, not by convention:
+  `src/lib/anchors/` holds the target arc as a discriminated union, `parseSelector`, and the
+  capture/resolve pair, and every consumer goes through it. The object side is four nullable
+  FKs with exactly one non-null, enforced by a hand-written CHECK — so **a new targetable kind
+  is a migration** (one column, one index, one CHECK edit, per anchor table), which is the
+  cost §20a took on deliberately over an `anchor` table with an owner arc or one W3C-style
+  supertable. What is unified is the *envelope*, never the selector: each mechanism keeps its
+  own physics, and COLLAB.md's "there is no universal anchor" is unchanged. `src/lib/anchors/`
+  is split browser-safe (`index.ts`) vs. server (`capture.ts`) the way `avatar-url.ts` and
+  `avatar.ts` are — don't barrel them together. PLAN.md §20a, §20b.
+- **A tag chip is exactly as private as the thing it is on, structurally.** `TagChips`
+  renders only from inside a page that has already run its own gate and takes a resolved
+  `AnchorTarget` rather than a slug, so it can't be mounted on an ungated surface; it
+  deliberately adds no second check. It also reads **no session** — `/[slug]` is statically
+  generated, and a dynamic API there throws at build (§12f) — so everything viewer-shaped
+  lives in a client island that asks the server on open. `/tag/[slug]` is three per-type
+  queries wearing three existing predicates, never one UNION. PLAN.md §20d, docs/PERMISSIONS.md.
 - **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,
   stale by seconds while anyone is typing. Fine as the *seed* for which cards start in the
   rail, and nothing more.
@@ -91,6 +109,19 @@ before changing the behavior it describes.
   `e2e/pdf-assets.spec.ts` is the only guard that pdfjs's four runtime asset directories are
   served: `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image
   decoder, so no fixture-based test can cover it. docs/PDF.md §10.
+- **`router.refresh()` is not a delivery mechanism behind an `ssr: false` boundary.** It is a
+  React transition, and during a transition React holds the old UI rather than dropping to a
+  fallback — so a render that never commits is completely silent: no error, no spinner, no
+  console line, nothing to find. `/pdf/[slug]`'s viewer sits behind `next/dynamic({ ssr: false
+  })` and lost roughly half of all posted annotations to this, for as long as it existed, until
+  the surface started fetching its own list (`loadPdfAnnotationEntries`, overlaid on the
+  server's `entries` prop and keyed on that prop's identity so it stands down the moment a real
+  refresh lands). Don't collapse that back into a bare `router.refresh()`, and don't wire the
+  reload context into `/doc/[slug]` for symmetry — that surface renders annotations straight out
+  of the server tree with no such boundary, which is exactly why the context's default is a
+  no-op. The precondition to recognise is a shape rather than a file: **a client island behind
+  `ssr: false` whose content arrives only through a refresh.**
+  docs/playwright-flakiness.html class 6.
 - **A contributor's avatar is bytes in `user_avatar`, not a URL** — a separate table on purpose
   (`/users` queries with `include:` and no `select:`, so an avatar column on `user` would drag
   up to 100 blobs into that payload). `User.image` stays a URL string for the Auth.js adapter;
@@ -123,6 +154,21 @@ Two development slots — separate working trees, each with its own `.env`, data
 - `npm run stop:all` — stops a `dev:all` you started, in one command instead of a
   netstat/parent-trace/taskkill dance. Reads this slot's ports, so run it from the tree you
   mean to stop; it will not touch the other slot's servers.
+- **Before switching branches, run `npm run check-ports` — and if a dev server is up, say so
+  before you switch.** It is read-only, and names per port whether anything is listening and
+  whether it belongs to this repo; whose server it is barely matters, since the user is the one
+  who will hit the breakage either way. **A running `next dev` does not survive a branch switch
+  that changes which route files exist.** Git deletes the file, Turbopack unregisters the route,
+  and git restoring it a second later does not bring it back — so checking out a branch that
+  predates a merge, *then* pulling, leaves routes permanently missing from a server that looks
+  perfectly healthy. The tell is a **404 on a route whose file is plainly on disk** while its
+  siblings still answer, and it is worth knowing because a permission problem never looks like
+  this: an anonymous request to a gated route 307s to `/sign-in`, an unregistered one 404s. The
+  same delete-and-restore under `git stash push -u` takes untracked files with it and surfaces
+  instead as `Module not found` for a path that exists. Related, same tree: `npm run e2e` runs
+  `next build`, which writes production artifacts into the `.next` a running dev server is using.
+  **Restart afterwards rather than leaving it** — `npm run stop:all`, remove `.next`, start
+  again — and say that you did.
 - `.claude/launch.json` defines `web`, `collab` and `web-prod` for the preview tool. Its
   numbers are **slot A's** and cannot be computed — in slot B, drive from `npm run dev:all` and
   open the pane on `http://b.localhost:3005` directly.
@@ -142,6 +188,14 @@ editing an applied migration) are in [docs/DATABASE.md](docs/DATABASE.md) — re
 running `prisma migrate dev` on anything unusual.
 
 - **Restarting the Postgres service needs an elevated shell** — ask the user to do it.
+- **`npx prisma format` after editing `schema.prisma` — then read what it changed.** It
+  rewrites the *whole file*, so on a drifted one it sweeps up every misalignment ever left
+  behind and buries your handful of real lines in a hundred cosmetic ones. The file is
+  format-clean now, so a run is a no-op plus your own block's realignment; **anything it
+  touches outside your edit is pre-existing drift and gets its own commit.**
+  `npm run check:schema` is the fail-if-dirty version (`--write` to fix). Why it matters, why
+  the obvious `git diff --exit-code` version of that check is wrong, and why `.gitattributes`
+  pins this one file to LF: [docs/DATABASE.md](docs/DATABASE.md).
 - `npx prisma generate` fails with **EPERM while the dev server runs** (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
 - **Adding a new model needs the dev server restarted, not just regenerated** — and the failure
@@ -168,6 +222,13 @@ running `prisma migrate dev` on anything unusual.
 
 - Typecheck `npx tsc --noEmit`; lint `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
   `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
+- `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
+  dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
+  and the right home for exactly one kind of thing — pure functions whose *rejection surface*
+  is the point (`src/lib/anchors/`'s `parseSelector`, the target arc, `resolveAnchorInDoc`'s
+  three tiers). A table of malformed inputs is not something to drive a browser through, and
+  the e2e suite's proof for a pure refactor is a two-minute production build. Don't reach for
+  it for anything involving Prisma, a ydoc or the DOM — those have better tools here already.
 - `npm run e2e` — the full Playwright suite against a **production build** on `WEB_PORT + 2`
   (builds first; ~2min of suite proper once warm). Prod rather than `next dev` because two
   historical flake classes were dev-server bugs a production build compiles out — the whole
@@ -203,8 +264,8 @@ running `prisma migrate dev` on anything unusual.
   unprompted**; Conventions below says when it comes up instead. Screenshots time out in this
   environment, `ref` clicks can silently no-op, and all tabs share one cookie jar:
   [docs/BROWSER_PANE.md](docs/BROWSER_PANE.md).
-- Throwaway users/docs/posts/comments/files/ydocs, the durable `@sample.invalid` seed, and the
-  two one-shot importers: [docs/TEST_DATA.md](docs/TEST_DATA.md). Each script's own header
+- Throwaway users/docs/posts/comments/files/tags/ydocs, the durable `@sample.invalid` seed,
+  and the two one-shot importers: [docs/TEST_DATA.md](docs/TEST_DATA.md). Each script's own header
   documents its flags. Defaults: `test-admin@example.com`, role `ADMIN`, password
   `testpass123`.
 - Measuring editing latency, stress-testing at realistic size, and A/B-ing against history:
@@ -259,6 +320,18 @@ working on.
   `"a%2Bb"` and `.split("+")` would 404 every URL — a `+`-means-space assumption that's true
   for query strings and false here. `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path
   segments specifically to never need to decode anything.
+- **A Server Component handed to a client component as a prop needs a `key` if it has
+  siblings** — even though nothing there is a list. A JSX tree passed across that boundary is
+  *serialized into the RSC payload* rather than rendered in place, and the Flight server's
+  `renderFragment` stamps every keyless element in an array it serializes as "key not yet
+  checked". Only a **Server Component** then trips the check, in `renderFunctionComponent`:
+  host elements and client references are serialized by other paths and stay silent, so the
+  one child that warns is the one that looks least like a list item. The symptom is "Each
+  child in a list should have a unique key prop" pointing at a `<div>` whose children are
+  plainly static — `/doc/[slug]`'s byline is the live example, and `/pdf/[slug]`'s chips
+  escape it only by being a whole prop value with no siblings. **Invisible to every automated
+  check here**: `tsc` and `eslint` can't see it, and `npm run e2e` asserts on the DOM, not the
+  console. Dev-only, since the production Flight build runs no such validation.
 - **A doc link's anchor is a plain JSON blob in Postgres, not a mark in the doc's ydoc** — the
   opposite of an annotation's, and deliberately: a link joins two *different* docs, and no
   single ydoc can hold that. The cost is drift, paid for by re-running `findQuoteOccurrences`

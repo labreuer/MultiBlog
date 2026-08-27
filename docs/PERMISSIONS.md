@@ -34,6 +34,8 @@ Every gate in the app is one of these predicates, sometimes combined with a
 | `canViewFiles` | ✅ | ✅ | ✅ | ✅ | ❌ | `role-checks.ts` |
 | `canManageFiles` | ✅ | ✅ | ✅ | ❌ | ❌ | `role-checks.ts` |
 | `canManageAnySharedFile` | ✅ | ✅ | ❌ | ❌ | ❌ | `file-authz.ts` |
+| `canApplyTags` | ✅ | ✅ | ✅ | ✅ | ❌ | `role-checks.ts` |
+| `canCurateTags` | ✅ | ✅ | ❌ | ❌ | ❌ | `role-checks.ts` |
 
 Two pairs here hold the same roles as each other and are still kept apart on purpose, so
 that the doc rule and the post rule can move independently rather than one silently dragging
@@ -219,6 +221,80 @@ Two consequences worth stating plainly, because they are what the user-facing ru
 That it can see PDF annotations at all is one of the reasons they are Postgres rows rather
 than entries in a per-file ydoc (PLAN.md §19).
 
+## Tags (PLAN.md §20)
+
+**A term is vocabulary; an assignment is one person's act of tagging.** The two have
+different owners and therefore different rules, and conflating them is the mistake this
+section exists to prevent — a term belongs to the site, an assignment belongs to whoever made
+it.
+
+| Permission | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER | signed out |
+|---|---|---|---|---|---|---|
+| See a chip on something you can already read | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `/tag/[slug]` (the page itself) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Create a term | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Apply a term to an object you may read | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Remove **your own** tag | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Remove **anyone's** tag | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Rename a term / change its URL | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Delete or restore a term | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `/tags` (the admin table) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+**Chips are as private as the thing they are on, structurally.** `TagChips` is rendered
+from inside a page that has already run its own gate — `canUserReadDoc`, `canUserReadFile`,
+`publishedPostWhere` — and takes a resolved target rather than a slug, so there is no way to
+mount it on a surface that hasn't gated first. It deliberately runs no second check of its
+own: a second gate is a second thing that can disagree with the first.
+
+**One surface reaches the chips by a different path, and it is gated differently.** The doc
+editor's Settings panel (`/doc/[slug]/edit`) renders `TagStrip` directly, fed by
+`loadTaggerState` rather than by `TagChips`' server-side read — so its chips are gated by
+`canUserTagTarget`, the *tag* rule, on top of the edit gate the page itself already ran. That
+is stricter than the read rule above, never looser: `canUserTagTarget` is "you may tag what
+you may read, plus a role floor", so anything it returns was readable anyway. Worth knowing
+because the paragraph above is about `TagChips`, and this surface does not go through it.
+
+**`/tag/[slug]` is three queries, not one UNION.** Each per-type section wears the
+predicate that already governs its own type, so the PRIVATE-doc rule in tables 1–4 holds
+there unchanged, ADMIN and EDITOR included. An interleaved timeline would mean
+re-implementing three permission models in one query — the easiest leak to write and the
+hardest to see, since a wrong answer looks exactly like a right one. The counts each section
+shows come from those filtered queries and **never** from the `tag_metrics` view, which
+counts everything live and has no viewer.
+
+**Tagging requires a signed-in AUTHORIZED account on every surface — including posts.** §20d
+frames the rule as "applying a tag follows the permission to annotate that surface", and read
+literally that would open post-tagging to COMMENTER and to signed-out visitors, since
+commenting on a published post is open to both. That is not what it means. A tag is
+curatorial where a comment is conversational: it changes what a term denotes and what
+`/tag/[slug]` lists, for everyone. So all three surfaces take the same role floor, and
+`canUserTagTarget` ANDs it with the object's own read gate. **Recorded as a judgment call**,
+not a reading — §20d's wording admits the looser interpretation and this deliberately
+declines it.
+
+**Who may mint a term is PLAN.md §20j-1, and this is the answer.** Creating a term is the
+same permission as applying one, so AUTHORIZED users grow the vocabulary. The alternative —
+AUTHORIZED users apply only existing terms, AUTHOR+ mint new ones — trades friction for
+curation and is a one-line change in `role-checks.ts` plus a branch in `createTag`. Worth
+making the moment the vocabulary shows drift rather than growth; not worth pre-empting.
+
+**`/tags` sets the same bar as every other admin table** (`canManageDocs`, AUTHOR and up)
+rather than matching `canApplyTags`. An AUTHORIZED user who may create and apply terms
+still cannot open the table — they reach the vocabulary through the tagger's picker and
+through `/tag/[slug]`. Inventing a seventh visibility tier for one listing would be a UI
+regression before it was a security improvement.
+
+**A term carries no visibility of its own.** The tagger's picker offers every live term to
+anyone who may tag anything, unfiltered — knowing that "Epistemology" exists reveals nothing
+about what has been tagged with it. Everything that *would* reveal something is behind the
+per-type sections above.
+
+**Deleting a term is a soft delete that keeps its assignments.** Every reader filters on the
+term's own `deleted_at`, so a deleted term draws no chips and answers no `/tag/[slug]`,
+while the record of who applied it to what survives for a restore to bring back. Deleting the
+*object* instead cascades its anchors away outright — an anchor pointing at a deleted doc is
+unreachable, not merely stale.
+
 ## Where each rule lives
 
 Re-derive from these rather than trusting the tables after an authz change:
@@ -241,8 +317,17 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Doc mutations (visibility, byline, slug, delete) | `src/app/actions/docs.ts` |
 | Annotation create / delete / restore | `src/app/actions/annotations.ts` |
 | Doc links | `src/app/actions/doc-links.ts` |
+| Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |
+| Who may tag which object; who may retract an assignment | `src/lib/tag-authz.ts` |
+| Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts` |
+| `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
+| `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
+
+`e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader
+seeing a public post's chip but no tagger, and the EDITOR who cannot see a PRIVATE doc under
+a term they can otherwise browse.
 
 `e2e/doc-visibility.spec.ts` pins these tables' load-bearing rows — the PRIVATE denials for
 ADMIN and EDITOR, the byline author's access, the `SHARED` carve-out, the `/docs` override's
