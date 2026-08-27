@@ -46,6 +46,15 @@ function buildOrderBy(sort: SortColumn<DocsSortKey>[]): Prisma.DocOrderByWithRel
         // and no per-row recomputation of doc_length. NOT NULL (a doc with no
         // body yet measures 0), so no nulls handling, unlike byline above.
         return { proseJsonLength: dir };
+      case "annotations":
+        // Back through doc_metrics, like authors above — a *filtered* count
+        // (live, non-DRAFT), which Prisma's `_count` can't express. No `nulls`
+        // handling, unlike byline beside it: the view COALESCEs the count to 0
+        // so the column is declared non-null and Prisma rejects the
+        // {sort, nulls} form for it. A doc with no view row at all — no
+        // authors *and* no annotations — still sorts as a NULL *relation*,
+        // which Prisma puts last. Same arrangement as /files' annotations key.
+        return { metrics: { annotationCount: dir } };
       case "slug":
         return { slug: dir };
       case "updatedAt":
@@ -136,9 +145,9 @@ export default async function DocsPage({
         deletedByUserId: true,
         deletedAt: true,
         proseJsonLength: true,
-        // The byline is read from the same view that sorts it, so the
-        // displayed and sorted expressions can't drift (§16e).
-        metrics: { select: { byline: true } },
+        // Both view columns are read from the same view that sorts them, so
+        // the displayed and sorted expressions can't drift (§16e).
+        metrics: { select: { byline: true, annotationCount: true } },
         // Still needed, but only for the ids: canEdit below is a membership
         // test, not a display value. The User join this used to carry (for
         // adminInitials) is the view's job now.
@@ -163,6 +172,9 @@ export default async function DocsPage({
     // NULL only when the doc has no authors — the same empty cell the JS join
     // produced for that case.
     authors: doc.metrics?.byline ?? "",
+    // 0 when the doc has no view row at all (no authors and no annotations);
+    // the view itself already COALESCEs the count for every doc that does.
+    annotationCount: doc.metrics?.annotationCount ?? 0,
     visibility: doc.visibility,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,

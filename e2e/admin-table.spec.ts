@@ -11,6 +11,7 @@ import {
   addTestPostAuthor,
   clearColumnOrder,
   createComment,
+  createTestAnnotation,
   createTestDoc,
   createTestPost,
   createTestUser,
@@ -367,10 +368,11 @@ test.describe("admin table kit", () => {
     }
   });
 
-  // PLAN.md §16l — /docs' last two, through doc_metrics. Length is the one
-  // that also retired a second round trip, so this covers both the ordering
-  // and that the number still renders from the view.
-  test("Author(s) and Length sort through the doc_metrics view", async ({ page }) => {
+  // PLAN.md §16l — /docs' three derived columns. Length is the one that also
+  // retired a second round trip, so this covers both the ordering and that the
+  // number still renders from the view; Annotations is the one whose count is
+  // *filtered*, which is why it is a view column rather than a `_count`.
+  test("Author(s), Length and Annotations sort through the doc_metrics view", async ({ page }) => {
     const token = `dmetrics${Date.now()}`;
     const aaAuthor = uniqueEmail("dmetrics-aa");
     const zzAuthor = uniqueEmail("dmetrics-zz");
@@ -393,6 +395,12 @@ test.describe("admin table kit", () => {
       title: uniqueTitle(`${token} longer`),
       bodyText: longBody,
     });
+    // Two LIVE annotations on the *short* doc and none on the long one, so the
+    // annotation order is the reverse of the length order and neither
+    // assertion can pass by accident on the other's arrangement. They cascade
+    // away with the doc, so the finally below needs nothing added.
+    await createTestAnnotation({ docId: shortDoc.id, authorEmail: aaAuthor, bodyText: "First remark." });
+    await createTestAnnotation({ docId: shortDoc.id, authorEmail: zzAuthor, bodyText: "Second remark." });
 
     try {
       const table = page.getByRole("table").first();
@@ -423,6 +431,29 @@ test.describe("admin table kit", () => {
 
       await expect(page.getByRole("row").filter({ hasText: shortDoc.title })).toContainText("AA");
       await expect(page.getByRole("row").filter({ hasText: longDoc.title })).toContainText("ZZ");
+
+      // Ascending puts the uncounted doc first — the view COALESCEs a doc with
+      // no annotations to 0 rather than leaving it NULL, so this is a plain
+      // numeric order and not a nulls-last one.
+      await page.goto(`/docs?q=${token}&sort=annotations:asc&showAllDocs=1`);
+      expect(await titlesInOrder()).toEqual([longDoc.title, shortDoc.title]);
+
+      await page.goto(`/docs?q=${token}&sort=annotations:desc&showAllDocs=1`);
+      expect(await titlesInOrder()).toEqual([shortDoc.title, longDoc.title]);
+
+      // The count renders from the same view column that sorted it — and the
+      // sorts above prove the other half of §16m's arrangement on the way
+      // past: Annotations is defaultHidden, so those pages never drew this
+      // column at all, and a sort through a hidden column is still honoured.
+      // ?cols= is how it is asked for; with only Title beside it the cell
+      // index is 2 (0 is the alwaysVisible select column).
+      await page.goto(`/docs?q=${token}&cols=title,annotations&showAllDocs=1`);
+      await expect(page.getByRole("columnheader", { name: "Annotations" })).toBeVisible();
+      const annotationCell = (title: string) =>
+        table.getByRole("row").filter({ hasText: title }).getByRole("cell").nth(2);
+      await expect(annotationCell(shortDoc.title)).toHaveText("2");
+      // Blank, not "0", for a doc nobody has annotated.
+      await expect(annotationCell(longDoc.title)).toHaveText("");
 
       await page.goto(`/docs?q=${token}&showAllDocs=1`);
       await page.getByRole("columnheader", { name: "Length" }).click();

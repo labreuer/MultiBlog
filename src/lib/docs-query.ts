@@ -13,18 +13,25 @@ import {
 
 // /docs' querystring vocabulary (PLAN.md §16e).
 
-// Two of these keys name something no plain `ORDER BY` on `doc` could, and
+// Three of these keys name something no plain `ORDER BY` on `doc` could, and
 // they get there by different routes — worth keeping straight:
 //
-//   authors  `doc_metrics.byline` — adminInitials string_agg'd across
-//            DocAuthor in byline order. A to-many Prisma could otherwise only
-//            `_count`, so it needs the view to become a to-one relation.
-//   length   `Doc.proseJsonLength` — a stored column, kept current by the
-//            doc_sync_prose_json_length trigger, rather than a view column:
-//            doc_length is a recursive walk over the whole body and a view
-//            recomputes per query, so sorting through one would walk every doc
-//            in the table on every page load. Storing it makes that one walk
-//            per collab flush instead (PLAN.md §16l).
+//   authors      `doc_metrics.byline` — adminInitials string_agg'd across
+//                DocAuthor in byline order. A to-many Prisma could otherwise
+//                only `_count`, so it needs the view to become a to-one
+//                relation.
+//   annotations  `doc_metrics.annotation_count` — a *filtered* count
+//                (non-deleted, non-DRAFT, replies included), which `_count`
+//                has no way to express in an orderBy. Deliberately the twin
+//                of /files' annotations key (src/lib/files-query.ts), down to
+//                the filter, so the two tables count the same thing.
+//   length       `Doc.proseJsonLength` — a stored column, kept current by
+//                the doc_sync_prose_json_length trigger, rather than a view
+//                column: doc_length is a recursive walk over the whole body
+//                and a view recomputes per query, so sorting through one
+//                would walk every doc in the table on every page load.
+//                Storing it makes that one walk per collab flush instead
+//                (PLAN.md §16l).
 // slug/created/deletedAt are plain Doc columns, defaulted hidden (§16l) —
 // available without cluttering the default view. updatedAt is shown (and
 // sorted) by default instead of created: "what changed recently" is a more
@@ -36,6 +43,7 @@ export type DocsSortKey =
   | "visibility"
   | "created"
   | "length"
+  | "annotations"
   | "slug"
   | "updatedAt"
   | "updatedBy"
@@ -47,6 +55,7 @@ const SORT_KEYS: readonly DocsSortKey[] = [
   "visibility",
   "created",
   "length",
+  "annotations",
   "slug",
   "updatedAt",
   "updatedBy",
