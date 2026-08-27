@@ -1,3 +1,6 @@
 # Shell scripts are pasted into / executed on Linux hosts; CRLF there yields
 # `$'\r': command not found` or `env: $'bash\r': No such file or directory`.
 *.sh text eol=lf
+
+# `prisma format` always writes LF
+*.prisma text eol=lf

@@ -17,7 +17,9 @@ import {
   requireDocAnnotationId,
   type AnnotationTarget,
 } from "@/lib/annotation-container";
-import { captureAnnotationAnchor } from "@/lib/annotation-anchor-capture";
+import { captureAnchorInYdoc } from "@/lib/anchors/capture";
+import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
+import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import {
@@ -138,7 +140,7 @@ export async function postAnnotation(opts: {
   anchorTo?: number;
   // The client's own reading of its selection. In "mark" mode the collab
   // server verifies the offsets against it; in "columns" mode
-  // captureAnnotationAnchor does. Never stored as sent either way — §12i's
+  // captureAnchorInYdoc does. Never stored as sent either way — §12i's
   // "a request field only, never a column" survives the column's arrival.
   quotedText?: string;
   // "Notify authors" (PLAN.md §13d) — RAISED is LIVE plus the doc's byline
@@ -324,7 +326,7 @@ export async function postAnnotation(opts: {
       // A malformed or undecodable snapshot, or a store failure. Falls to the
       // tail below, which is exactly the behaviour before this existed — the
       // anchor stays self-consistent with whatever gets stamped either way
-      // (captureAnnotationAnchor re-derives against it), so this degrades
+      // (captureAnchorInYdoc re-derives against it), so this degrades
       // rather than fails.
       console.error(`[annotations] couldn't resolve the client's version for ${anchorYdocId}:`, err);
     }
@@ -341,7 +343,7 @@ export async function postAnnotation(opts: {
   // posted with.
   let capturedAnchor: { from: number; to: number; quotedText: string } | null = null;
   if (anchorRequested && anchorMode === "columns" && ydocUpdateId !== null) {
-    capturedAnchor = await captureAnnotationAnchor({
+    capturedAnchor = await captureAnchorInYdoc({
       ydocId: anchorYdocId,
       throughUpdateId: ydocUpdateId,
       // The two targets are different documents with different schemas —
@@ -646,4 +648,36 @@ async function postFileAnnotation(opts: {
   revalidatePath("/files");
   revalidatePath("/annotations");
   return {};
+}
+
+/**
+ * Every annotation on one file, in the shape /pdf/[slug]'s panel renders.
+ *
+ * **Why a read lives in an actions file.** The PDF surface cannot get a posted
+ * annotation on screen through `router.refresh()` alone: that refresh is a
+ * React *transition*, rendering into the `next/dynamic({ ssr: false })`
+ * Suspense boundary the whole viewer sits behind, and during a transition
+ * React holds the old UI rather than showing a fallback — so a refresh that
+ * doesn't commit promptly is invisible. This is the fetch the client owns and
+ * can await. PdfAnnotationSurface's `liveEntries` has the measurements.
+ *
+ * Gated here rather than inherited: unlike `pdfAnnotationEntriesFor`, which
+ * takes a resolved id from a page that has already run its check, this is
+ * reachable directly with any id a client cares to send. It throws rather than
+ * returning `[]` on refusal, so a caller can leave the list it already has
+ * standing instead of blanking the panel on a permission error.
+ */
+export async function loadPdfAnnotationEntries(fileId: string): Promise<PdfAnnotationEntry[]> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+  const file = await prisma.storedFile.findUnique({
+    where: { id: fileId },
+    select: { id: true, visibility: true },
+  });
+  if (!file || !(await canUserReadFile(session.user.id, session.user.role, file))) {
+    throw new Error("You don't have permission to read this file.");
+  }
+  return pdfAnnotationEntriesFor(fileId);
 }

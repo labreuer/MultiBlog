@@ -83,6 +83,15 @@
   font-size: 0.85rem;
 }
 
+/* PLAN.md §20d — the Keywords field is KeywordStrip, which brings its own
+   stylesheet (KeywordChips.module.css). Nothing here styles a chip, a pill or
+   a picker; this is only the one line the field needs while it loads. */
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 .errorMessage {
   color: var(--error);
 }

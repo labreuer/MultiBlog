@@ -4,10 +4,11 @@
 import { test as teardown } from "@playwright/test";
 import { sweepTestData, disconnect } from "./db";
 
-teardown("remove throwaway users, posts, docs, files and commenters", async () => {
-  const { posts, docs, files, users, ydocs } = await sweepTestData();
+teardown("remove throwaway users, posts, docs, files, keywords and commenters", async () => {
+  const { posts, docs, files, keywords, users, ydocs } = await sweepTestData();
   console.log(
-    `e2e cleanup: removed ${posts} post(s), ${docs} doc(s), ${files} file(s), ${users} user(s), ${ydocs} ydoc(s).`,
+    `e2e cleanup: removed ${posts} post(s), ${docs} doc(s), ${files} file(s), ` +
+      `${keywords} keyword(s), ${users} user(s), ${ydocs} ydoc(s).`,
   );
   disconnect();
 });

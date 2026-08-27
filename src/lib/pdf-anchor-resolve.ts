@@ -8,7 +8,7 @@ import type { PdfTarget } from "./pdf-anchor";
 //
 // **The important thing about this file is how little it does.** On the doc
 // side, an anchor has to be re-found on every keystroke because the document
-// moves under it (src/lib/annotation-anchors.ts, and the three-tier tracking in
+// moves under it (src/lib/anchors/resolve.ts, and the three-tier tracking in
 // annotation-highlight-extension.ts). A PDF cannot move: `sha256` is the file's
 // identity, so the bytes an anchor was measured against are, by construction,
 // the bytes every later reader sees. The quads are therefore *always* correct,

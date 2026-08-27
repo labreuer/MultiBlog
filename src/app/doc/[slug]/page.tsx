@@ -22,6 +22,7 @@ import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { DocScrubProvider } from "@/components/DocScrubContext";
 import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
+import KeywordChips from "@/components/keywords/KeywordChips";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -165,6 +166,19 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                             <button type="submit">Publish as blog post</button>
                           </form>
                         )}
+                        {/* PLAN.md §20k — a second line of the byline rather
+                            than a block below the text, and "bare" is what
+                            drops the "Keywords" label. Gated by this page's own
+                            canUserReadDoc above (docs/PERMISSIONS.md, "Chips
+                            are as private as the thing they are on").
+
+                            The `key` is load-bearing and this is not a list:
+                            it is a Server Component with element siblings
+                            inside a prop that crosses into DocView, a client
+                            component. Drop it and the page logs "Each child in
+                            a list should have a unique key prop" against this
+                            div — CLAUDE.md's Gotchas has why. */}
+                        <KeywordChips key="keywords" target={{ kind: "doc", id: doc.id }} variant="bare" />
                       </div>
                     }
                   />

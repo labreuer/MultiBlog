@@ -137,6 +137,17 @@ baked-in constant: the client-side pre-check and the server's enforcement are th
 the same number. nginx's `client_max_body_size` has to be raised to match
 (`deploy/nginx-app.conf.sample`).
 
+**Don't fold `FILE_STORAGE_DIR`'s default into the path call.** `resolve(process.env.X ||
+"some/default")` reads as the tidy form and costs a build warning: Next's file tracer
+statically evaluates path expressions, and that one is a *partly* known relative path, which
+it anchors at `process.cwd()` and traces as a glob over the entire repository — so `next
+build` reports "the whole project was traced unintentionally", naming `next.config.ts` as the
+file that should never have been traced. `storageDir()` (`src/lib/file-storage.ts`) branches
+on the variable instead, which leaves the tracer one fully known path and one fully unknown
+one, and it handles both. The `turbopackIgnore` comment the warning suggests does not apply
+to a `node:path` call, and setting the variable doesn't help either — a bare env var is never
+inlined into server code.
+
 ## Site presentation
 
 | variable | default | notes |

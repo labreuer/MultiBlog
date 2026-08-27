@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createDraftAnnotation, postAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { useAnnotationMove } from "./annotation-move-context";
+import { useAnnotationReload } from "./annotation-reload-context";
 import type { AnnotationTarget } from "@/lib/annotation-container";
 import styles from "./AnnotationComposer.module.css";
 
@@ -50,6 +51,7 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const { movedDraft, setMovedDraft } = useAnnotationMove();
+  const reloadAnnotations = useAnnotationReload();
 
   // PLAN.md §13g — "Move to bottom" hands this slot an already-created
   // draft (same row, same ydoc, nothing copied). If this slot already had
@@ -119,6 +121,10 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
         onPosted={() => {
           setOpen(null);
           onSettled?.();
+          // Narrower than onSettled deliberately: that one also fires on a
+          // cancel and on a private save, neither of which changes the list
+          // any surface is drawing.
+          reloadAnnotations();
         }}
         onCancel={() => {
           setOpen(null);

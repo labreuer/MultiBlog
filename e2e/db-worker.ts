@@ -28,6 +28,8 @@ import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { uniqueFileSlug } from "@/lib/file-slug";
+import { uniqueKeywordSlug } from "@/lib/keyword-slug";
+import { targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
 import { parsePdfTarget } from "@/lib/pdf-anchor";
@@ -1258,10 +1260,159 @@ export async function countAllYdocs(): Promise<number> {
  * an authorless one, which is what one becomes the moment its only author
  * is deleted.
  */
+// PLAN.md §20 — keyword fixtures.
+//
+// Containment differs from every other helper here, and has to. A keyword has
+// no email column and no author list to gate on, so the rail is the **name**:
+// every term this creates is prefixed E2E_TITLE_PREFIX, exactly as a throwaway
+// doc's or post's title is, and sweepTestData finds them the same way. That
+// works because §20c makes a term's name unique case-insensitively, so an "E2E "
+// prefix cannot collide with a real term either.
+//
+// These write rows directly rather than through src/app/actions/keywords.ts,
+// like every other fixture here: an action needs a session, and a fixture that
+// went through one could only ever set up states the UI can already reach.
+export type TestKeyword = { id: string; slug: string; name: string };
+
+export async function createTestKeyword(opts: {
+  /** The term's creator — an @example.com throwaway account. */
+  creatorEmail: string;
+  name?: string;
+  description?: string;
+}): Promise<TestKeyword> {
+  const { creatorEmail, name = uniqueTitle("keyword"), description } = opts;
+  assertSafe(creatorEmail);
+
+  const creator = await prisma.user.findUnique({ where: { email: creatorEmail } });
+  if (!creator) throw new Error(`No such test user: ${creatorEmail}`);
+
+  return prisma.keyword.create({
+    data: {
+      slug: await uniqueKeywordSlug(name),
+      name,
+      description: description ?? null,
+      createdById: creator.id,
+    },
+    select: { id: true, slug: true, name: true },
+  });
+}
+
+/**
+ * One act of tagging: an assignment plus its single **whole-object** anchor —
+ * the only shape PR 1 writes (§20h), and the shape
+ * keyword_anchor_selector_columns_check keeps honest.
+ */
+export async function tagWithTestKeyword(opts: {
+  keywordId: string;
+  target: AnchorTarget;
+  taggerEmail: string;
+}): Promise<{ assignmentId: string }> {
+  const { keywordId, target, taggerEmail } = opts;
+  assertSafe(taggerEmail);
+
+  const tagger = await prisma.user.findUnique({ where: { email: taggerEmail } });
+  if (!tagger) throw new Error(`No such test user: ${taggerEmail}`);
+
+  const assignment = await prisma.keywordAssignment.create({
+    data: { keywordId, userId: tagger.id },
+    select: { id: true },
+  });
+  await prisma.keywordAnchor.create({
+    data: { assignmentId: assignment.id, ...targetToColumns(target) },
+  });
+  return { assignmentId: assignment.id };
+}
+
+export type KeywordFacts = {
+  name: string;
+  slug: string;
+  deleted: boolean;
+  /** Live assignments, by tagger email — what a spec asserts a tag/untag against. */
+  taggers: string[];
+  /** Every live anchor's target, so a spec can check the arc leg that was written. */
+  targets: { kind: string; id: string }[];
+};
+
+export async function getKeywordFacts(idOrSlug: string): Promise<KeywordFacts | null> {
+  const keyword = await prismaIncludingDeleted.keyword.findFirst({
+    where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    select: {
+      name: true,
+      slug: true,
+      deletedAt: true,
+      assignments: {
+        where: { deletedAt: null },
+        select: {
+          user: { select: { email: true } },
+          anchors: { select: { docId: true, postId: true, fileId: true, targetAnnotationId: true } },
+        },
+      },
+    },
+  });
+  if (!keyword) return null;
+
+  const targets: { kind: string; id: string }[] = [];
+  for (const assignment of keyword.assignments) {
+    for (const anchor of assignment.anchors) {
+      if (anchor.docId) targets.push({ kind: "doc", id: anchor.docId });
+      if (anchor.postId) targets.push({ kind: "post", id: anchor.postId });
+      if (anchor.fileId) targets.push({ kind: "file", id: anchor.fileId });
+      if (anchor.targetAnnotationId) targets.push({ kind: "annotation", id: anchor.targetAnnotationId });
+    }
+  }
+
+  return {
+    name: keyword.name,
+    slug: keyword.slug,
+    deleted: keyword.deletedAt !== null,
+    taggers: keyword.assignments.map((a) => a.user.email),
+    targets,
+  };
+}
+
+/**
+ * Every part column on every anchor of one term — the tie-off assertion (§20d).
+ *
+ * PR 1 ships the part columns "present, constrained, and unwritten," which is a
+ * claim nothing else checks: the UI has no part-tagging control, so no test that
+ * drives the UI can tell an unwritten column from an absent one. This reads them
+ * directly so the promise is a red test if it is ever broken by accident.
+ */
+export async function getKeywordAnchorPartColumns(keywordId: string): Promise<
+  { selectorKind: string | null; anchorFrom: number | null; anchorTo: number | null; quotedText: string; hasSelector: boolean }[]
+> {
+  const anchors = await prismaIncludingDeleted.keywordAnchor.findMany({
+    where: { assignment: { keywordId } },
+    select: { selectorKind: true, anchorFrom: true, anchorTo: true, quotedText: true, selector: true },
+  });
+  return anchors.map((a) => ({
+    selectorKind: a.selectorKind,
+    anchorFrom: a.anchorFrom,
+    anchorTo: a.anchorTo,
+    quotedText: a.quotedText,
+    hasSelector: a.selector !== null,
+  }));
+}
+
+export async function deleteTestKeyword(idOrSlug: string): Promise<void> {
+  const keyword = await prismaIncludingDeleted.keyword.findFirst({
+    where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    select: { id: true, name: true },
+  });
+  if (!keyword) return;
+  if (!keyword.name.startsWith(E2E_TITLE_PREFIX)) {
+    throw new Error(`Refusing to delete keyword "${keyword.name}" — not an ${E2E_TITLE_PREFIX}fixture.`);
+  }
+  // Hard delete: assignments and anchors cascade. A fixture should leave
+  // nothing behind, unlike the app's soft delete.
+  await prismaIncludingDeleted.keyword.delete({ where: { id: keyword.id } });
+}
+
 export async function sweepTestData(): Promise<{
   posts: number;
   docs: number;
   files: number;
+  keywords: number;
   users: number;
   ydocs: number;
 }> {
@@ -1313,6 +1464,19 @@ export async function sweepTestData(): Promise<{
     if (file.owners.length > 0) await deleteTestFile(file.id);
   }
 
+  // PLAN.md §20 — keywords, before users, for the same reason posts and docs go
+  // first: keyword.created_by_id is RESTRICT, so a term outliving its creator
+  // makes deleteTestUser fail with a foreign-key violation far away from
+  // whatever actually crashed. Named by the E2E_ title prefix rather than by an
+  // author email, since a term has neither (createTestKeyword's header).
+  const staleKeywords = await prismaIncludingDeleted.keyword.findMany({
+    where: { name: { startsWith: E2E_TITLE_PREFIX } },
+    select: { id: true },
+  });
+  for (const keyword of staleKeywords) {
+    await prismaIncludingDeleted.keyword.delete({ where: { id: keyword.id } });
+  }
+
   const staleUsers = await prisma.user.findMany({
     where: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
     select: { email: true },
@@ -1343,6 +1507,7 @@ export async function sweepTestData(): Promise<{
     posts: stalePosts.length,
     docs: staleDocs.length,
     files: staleFiles.length,
+    keywords: staleKeywords.length,
     users: staleUsers.length,
     ydocs: staleYdocs.count,
   };
@@ -1367,6 +1532,11 @@ const handlers = {
   deleteTestDoc,
   createTestFile,
   deleteTestFile,
+  createTestKeyword,
+  tagWithTestKeyword,
+  getKeywordFacts,
+  getKeywordAnchorPartColumns,
+  deleteTestKeyword,
   getFileAnnotationFacts,
   getDocState,
   getContributorFields,
