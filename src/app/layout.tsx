@@ -16,7 +16,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: SITE_TITLE,
+  // `template` applies to every *child* segment that sets a plain string
+  // title, so one line here suffixes all of them and no page repeats the site
+  // name itself. `default` is what a segment setting no title of its own gets
+  // — this layout's own segment (`/`), and every `{}` a generateMetadata
+  // returns, including the ones route-access.ts's titleWhenOk produces for a
+  // viewer who may not read the thing. Those stay bare: the template is not
+  // applied to the default.
+  //
+  // A page that must keep its exact title takes `{ absolute: "…" }` instead of
+  // a string; nothing does today.
+  title: { default: SITE_TITLE, template: `%s | ${SITE_TITLE}` },
   description: "A multi-author blog with revisions and quote-anchored comments.",
   alternates: {
     types: { "application/rss+xml": "/rss.xml" },

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
@@ -9,6 +10,8 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import { parseTagsFilters, type TagsFilters, type TagsSortKey } from "@/lib/tags-query";
 import type { SortColumn } from "@/lib/table-sort";
 import TagsTable from "@/components/TagsTable";
+
+export const metadata: Metadata = { title: "Tags" };
 
 // PLAN.md §20d — the tag vocabulary, through the §16 admin-table kit.
 //

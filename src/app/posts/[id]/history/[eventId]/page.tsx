@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 import { extractText, diffText } from "@/lib/diff";
 import { Prisma } from "@/generated/prisma/client";
+
+export const metadata: Metadata = { title: "Diff" };
 
 // PLAN.md §15 — diffs one PUBLISHED/SCHEDULED event against the previous
 // event (by createdAt) that actually carried content, the direct successor

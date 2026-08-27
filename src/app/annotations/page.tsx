@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
@@ -11,6 +12,8 @@ import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
 import AnnotationsTable, { type AnnotationRow } from "@/components/AnnotationsTable";
+
+export const metadata: Metadata = { title: "Annotations" };
 
 // Deep-link-only filters (no dedicated dropdown yet, same convention as
 // comments-query.ts's parseDeepLinkWhere): ?doc=<docId>, ?author=<userId>

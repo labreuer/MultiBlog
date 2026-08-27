@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import SignInForm from "./sign-in-form";
+
+export const metadata: Metadata = { title: "Sign in" };
 
 // Server component so the failed-sign-in message survives a no-JavaScript POST,
 // which lands here as a fresh document load carrying `?error=1` (see

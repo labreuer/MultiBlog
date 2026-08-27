@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
 import { uniquePostSlug } from "@/lib/post-slug";
 import SlugManager from "@/components/SlugManager";
+
+export const metadata: Metadata = { title: "Post url" };
 
 export default async function PostSlugPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

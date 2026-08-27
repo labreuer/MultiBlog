@@ -55,7 +55,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!author) {
     return {};
   }
-  return { title: author.user.name ?? "Author" };
+  return { title: `@${author.user.name ?? "Author"}` };
 }
 
 export default async function AuthorPage({ params }: { params: Promise<{ slug: string }> }) {

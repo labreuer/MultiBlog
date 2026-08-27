@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
 import ModerateCommentButtons from "@/components/ModerateCommentButtons";
+
+export const metadata: Metadata = { title: "Moderate comments" };
 
 export default async function ModerateCommentsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

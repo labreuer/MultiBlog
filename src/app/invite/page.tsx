@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { findLiveInvite } from "@/lib/invite";
 import InviteForm from "./invite-form";
+
+export const metadata: Metadata = { title: "Accept invite" };
 
 export default async function InvitePage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token } = await searchParams;

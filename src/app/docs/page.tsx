@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
@@ -14,6 +15,8 @@ import type { SortColumn } from "@/lib/table-sort";
 import DocsTable from "@/components/DocsTable";
 import DocImportButton from "@/components/DocImportButton";
 import styles from "./page.module.css";
+
+export const metadata: Metadata = { title: "Docs" };
 
 function buildFilterWhere(filters: DocsFilters): Prisma.DocWhereInput {
   const where: Prisma.DocWhereInput = {};
