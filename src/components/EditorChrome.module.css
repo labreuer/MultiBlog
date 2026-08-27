@@ -132,6 +132,22 @@
   min-height: 0;
 }
 
+/* And the doc editor's phone-landscape focus mode yields the floor for the
+   same reason, without needing anything to be open: 300px of floor plus a
+   wrapping toolbar does not fit in a landscape phone's ~390px, and what
+   doesn't fit spills into the page scroll this file's header describes. In a
+   mode whose entire premise is that the viewport is the document, a page
+   scroll under the editor is the one thing that must not happen.
+
+   Scoped to the doc editor's column, so the other consumers of this chrome
+   (DocColumn, YdocDebug's EditView) keep their floor — neither hides any
+   chrome in landscape, so neither has the height to spare. */
+@media (orientation: landscape) and (max-height: 500px) {
+  [data-doc-editor-column] .editorContent {
+    min-height: 0;
+  }
+}
+
 /* .tiptap is the actual contenteditable ProseMirror node, rendered by the
    TipTap library itself (unscoped, hence :global). Without this, it's only
    as tall as its content, leaving dead space below short content that

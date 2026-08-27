@@ -1000,16 +1000,37 @@ async function quoteMatchesAtStamp(a: {
  * table lists; a test that needs a real anchor wants the UI flow in
  * doc.spec.ts instead, which needs the collab server running.
  */
+/**
+ * An annotation row, optionally column-anchored (PLAN.md §13o: the reading
+ * views' mechanism — stored offsets plus the quote, no mark in the document).
+ * `annotationAnchorInputs` needs all three of `anchorFrom`/`anchorTo`/a
+ * non-empty `quotedText` before an anchor resolves anywhere, so they are one
+ * option rather than three.
+ *
+ * Writes columns only: there is no ydoc for the annotation's *body*, which is
+ * where the rail and the reading list actually render it from. So a row made
+ * here shows as a card with an empty body, and `bodyText` is visible only on
+ * the surfaces that read the column (`/annotations`). A test that needs to
+ * tell two of these apart should key off `data-thread-id`, which is the
+ * returned id, rather than off any text.
+ */
 export async function createTestAnnotation(opts: {
   docId: string;
   authorEmail: string;
   bodyText: string;
+  anchor?: { from: number; to: number; quotedText: string };
 }): Promise<{ id: string }> {
-  const { docId, authorEmail, bodyText } = opts;
+  const { docId, authorEmail, bodyText, anchor } = opts;
   assertSafe(authorEmail);
   const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
   const annotation = await prisma.annotation.create({
-    data: { docId, userId: author.id, bodyText, status: "LIVE" },
+    data: {
+      docId,
+      userId: author.id,
+      bodyText,
+      status: "LIVE",
+      ...(anchor ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText } : {}),
+    },
   });
   return { id: annotation.id };
 }

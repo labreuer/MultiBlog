@@ -37,7 +37,7 @@
   display: none;
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1180px) {
   .container {
     max-width: 1180px;
     gap: 2.5rem;
@@ -49,6 +49,94 @@
     flex: 0 0 340px;
     min-height: 0;
     overflow: hidden;
+  }
+}
+
+/* Phone-landscape focus mode: the document and its annotations, and nothing
+   else at all. Mirrors EDITOR_FOCUS_MEDIA_QUERY
+   (src/lib/margin-notes-layout.ts), which the provider on this route matches
+   at runtime as the second half of EDITOR_MARGIN_NOTES_MEDIA_QUERY.
+
+   A phone held sideways has around 390px of height and no shortage of width,
+   so everything here is a trade of vertical chrome for document: the title,
+   the connection badge, the "View and Annotate" link and the settings panel
+   are all *stacked above or below* the editor and each cost height that the
+   text needs more. The site header goes the same way, from globals.css —
+   it lives in the root layout, so this file cannot reach it.
+
+   Nothing is removed from the DOM, only hidden: turning the phone back to
+   portrait restores every one of them with no state to rebuild, and the
+   title still round-trips its Yjs fragment while out of sight. */
+@media (orientation: landscape) and (max-height: 500px) {
+  /* The row is deliberately wider than the phone and scrolls sideways as one
+     piece — editor, gutter and a full-width rail together — rather than the
+     rail being a narrow window with a scroller of its own. Scrolling the row
+     is what lets an annotation be read in full *and* written: the composer
+     opens where the marker is, and a marker that only ever had a sliver
+     beside it had nowhere to open into.
+
+     The scroller is this element and not the page, which is the rule
+     STYLE.md's "Narrow viewports and horizontal overflow" states: `html, body
+     { overflow-x: hidden }` in globals.css clips page-level horizontal
+     overflow unreachably, so anything that can exceed the viewport carries
+     its own `overflow-x: auto`. Naming overflow-y too is not redundant — a
+     box cannot have one axis clipped and the other visible, so leaving it out
+     would silently make this a vertical scroller as well, competing with
+     .editorContent's own. */
+  .container {
+    max-width: none;
+    padding: 0.25rem;
+    /* 44px exactly, not a round number chosen for looks: MARKER_GAP +
+       ANNOTATE_MARKER_SIZE + MARKER_GAP (use-editor-annotation-widget.ts) is
+       the width the annotate marker needs beside the text, and the marker's
+       preferred position is `frameRect.right + MARKER_GAP` — so a gutter of
+       exactly that lands it in the gap, clear of both the text and the rail,
+       with no clamping. This is what ANNOTATION_WIDGET_MEDIA_QUERY's second
+       clause is relying on: at these widths the room isn't inferred from the
+       window, it is reserved here. */
+    gap: 44px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .titleInput,
+  .statusLine,
+  .docNote {
+    display: none;
+  }
+
+  /* The settings panel, by its own unhashed attribute hook rather than a
+     class from its module — the same reason EditorChrome.module.css reaches
+     for `[data-doc-settings]`. */
+  .mainColumn [data-doc-settings] {
+    display: none;
+  }
+
+  /* A definite width, because a flex item in a scroll container would
+     otherwise shrink to fit and there would be nothing to scroll. 116px is
+     the 44px marker gutter plus a 72px peek of the rail: enough to see that
+     a card is there and whose it is, with the rest a swipe away. */
+  .mainColumn {
+    flex: 0 0 calc(100% - 116px);
+  }
+
+  /* Its full desktop width, since the row scrolls to it — so a card here is
+     the same card, wrapped the same way, rather than a squeezed variant.
+     And its own vertical scroller, because in this mode the rail is a queue
+     in document order rather than a window onto the visible text
+     (EditorAnnotationRail): every annotation is listed, including ones whose
+     passage is nowhere near the screen, so the column is routinely taller
+     than a landscape phone. Both axes named because a box cannot have one
+     clipped and the other visible — the card is exactly the rail's width, so
+     there is nothing across to scroll to. */
+  .rail {
+    display: block;
+    position: relative;
+    flex: 0 0 340px;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border-left: 1px solid var(--border-subtle);
   }
 }
 

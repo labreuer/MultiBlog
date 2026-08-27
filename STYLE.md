@@ -397,7 +397,7 @@ The `min-width: 0` half is untestable locally, per above.
 Anything that can exceed the viewport (a table, a code block, a diagram) belongs in its
 own `overflow-x: auto` container. Don't reach for a `@media` breakpoint: `overflow-x`
 is self-activating and needs no width threshold, which is why this section defines none.
-The existing breakpoints (900px, 480px, 1200px) are for *reflowing* layouts, not overflow.
+The existing breakpoints (900px, 480px, 1180px) are for *reflowing* layouts, not overflow.
 
 ## Measuring and sizing in JS
 
@@ -525,18 +525,68 @@ the suite currently justifies. Verify by hand, headed, or with a throwaway pixel
 
 ## Breakpoints and centred-column widths
 
-Three reflow breakpoints, each with one job:
+Four reflow breakpoints, each with one job:
 
 | Breakpoint | Reflows |
 | --- | --- |
 | `max-width: 480px` | Touch targets and padding (editor toolbar, `DocEditor`) |
 | `max-width: 900px` | `/side-by-side`'s two doc columns stack (PLAN.md §14f); the landing page's contributor rail drops below the posts (§17l) |
-| `min-width: 1200px` | Comments/annotations move from below the article into a margin rail (§18) |
+| `min-width: 1180px` | Comments/annotations move from below the article into a margin rail (§18) |
+| `(orientation: landscape) and (max-height: 500px)` | The doc editor drops every piece of stacked chrome, and its rail becomes a scrolling queue — marking the cards whose passage is on screen rather than aligning to them (§18c, §18f) |
 
-The 1200px one is written **mobile-first** — single column by default, two columns
-inside `@media (min-width: 1200px)` — where the other two are max-width. That is not
+The fourth is the only one that asks about **height**, and the only one scoped
+to a single route. A phone held sideways has width to spare and about 390px of
+height, so the editor spends the site header, the title, the connection badge,
+the "View and Annotate" link and the settings panel on room to write.
+`max-height: 500px` clears every phone in landscape (the tallest is around
+430px) and excludes every iPad, whose landscape height is 834. It catches a
+desktop window dragged unusually short too, which is deliberate — the trade is
+about available height, and a 400px-tall window has a phone's problem.
+
+The width it buys back is spent on a row that is **wider than the phone and
+scrolls sideways as one piece**: the editor column, a 44px gutter, and the rail
+at its full desktop 340px. This is the "Narrow viewports and horizontal
+overflow" rule above rather than an exception to it — the scroller is
+`.container`, not the page, because `html, body { overflow-x: hidden }` would
+clip a page-level overflow unreachably.
+
+Three consequences worth knowing before touching it.
+
+- The 44px gutter is **derived, not chosen**: `MARKER_GAP +
+  ANNOTATE_MARKER_SIZE + MARKER_GAP` from `use-editor-annotation-widget.ts`,
+  whose preferred marker position is `frameRect.right + MARKER_GAP`. A gutter
+  of exactly that lands the annotate marker between the text and the rail with
+  no clamping, which is what lets an annotation be *written* here and not only
+  read. `ANNOTATION_WIDGET_MEDIA_QUERY` has a second clause for the same
+  reason: its 900px floor asks whether a centred 800px column leaves a gutter,
+  and in this mode the gutter is reserved instead of inferred.
+- The site header is hidden from `globals.css` rather than from the editor's
+  own module, because it belongs to the root layout;
+  `body:has([data-doc-editor-column])` is what keeps that off every other
+  route.
+- The rail engaging at 844px makes the doc editor the one surface whose
+  margin-notes threshold is *not* `MARGIN_NOTES_MEDIA_QUERY` — it passes
+  `EDITOR_MARGIN_NOTES_MEDIA_QUERY` to `MarginNotesProvider`, and the reading
+  views deliberately do not, since their 340px rail comes out of a fixed
+  reading measure rather than an elastic editor.
+
+**`viewport-fit: cover` was tried here and reverted, on a device reading.**
+Safari's default letterboxes the page inside the display's safe area — measured
+at roughly 48 CSS px of black down each edge on a notched iPhone in landscape,
+and in this mode those strips are the most obvious thing on screen. `cover`
+hands them to the page, and the route declared it with the content padded back
+inside the safe area by `env(safe-area-inset-*)`. On a real phone the sensor
+housing obscured text regardless, and the mechanism is worth keeping rather
+than the attempt: padding a **scroll container** by the insets only offsets
+where its content *starts*: scrolled content passes straight through the padding
+region, and this row is a scroll container by design. Protecting it would take a
+non-scrolling wrapper holding the insets, and the strips are not worth that. So
+the letterboxing stays, and it is Safari's, not ours.
+
+The 1180px one is written **mobile-first** — single column by default, two columns
+inside `@media (min-width: 1180px)` — where the other two are max-width. That is not
 drift: `src/lib/margin-notes-layout.ts`'s `MARGIN_NOTES_MEDIA_QUERY` is matched at
-runtime by the positioning hook, and a `max-width: 1199px` mirror in CSS would be the
+runtime by the positioning hook, and a `max-width: 1179px` mirror in CSS would be the
 same rule spelled as its off-by-one complement, which is exactly how the two drift apart
 later. Anything else keying JS off a breakpoint should do the same.
 
@@ -547,8 +597,10 @@ Four centred-column widths now, and they are one decision rather than four:
   measure and never changes; every wider number below is 800 plus something.
 - **1040px** — a listings-width main column plus the landing page's 280px contributor
   rail and its gap (§17l).
-- **1180px** — 800 + 2.5rem + a 340px margin-notes rail (§18). Applied only inside the
-  1200px breakpoint, so the reading column itself is untouched at every narrower width.
+- **1180px** — 800 + 2.5rem + a 340px margin-notes rail (§18). Also the breakpoint it is
+  applied inside, so the rail engages exactly when this width fits and the reading column
+  is untouched at every narrower one. It was a 1200px threshold over a 1180px layout until
+  an iPad measured 1194 in landscape and fell six pixels short of twenty pixels of slack.
 
 ## The admin-table kit (`components/table/`)
 

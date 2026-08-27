@@ -6,6 +6,7 @@ import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
 import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
+import { EDITOR_MARGIN_NOTES_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import DocEditor from "@/components/DocEditor";
@@ -57,14 +58,9 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
     getDocAnnotationsAsThreads(doc.id),
   ]);
 
-  // PLAN.md §18c — the editing view shows presently-anchored annotations
-  // beside the text and nothing else, so the general-discussion threads are
-  // dropped here rather than shipped and then hidden. This is a cheap
-  // pre-filter on a store-debounce snapshot, not the decision: which marks
-  // actually exist is re-resolved against the live document on every
-  // measurement (EditorAnnotationRail), which is the only answer that stays
-  // true while someone is typing.
-  const annotations = buildAnnotationEntries(threads).filter((entry) => entry.quotedText !== "");
+  // "focus mode" pulls all annotations rather than just anchored ones and we
+  // don't know whether we're in it at this point
+  const annotations = buildAnnotationEntries(threads);
 
   return (
     // AnnotationMoveProvider: required by AnnotationPopover's own
@@ -77,7 +73,10 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
     // feeds it its own read-only tap) — same channel either way.
     <DocPresenceProvider>
       <AnnotationMoveProvider>
-        <MarginNotesProvider>
+        {/* The one surface that overrides the rail's threshold: on a phone
+            in landscape the rail engages where 1180px alone would refuse
+            (EDITOR_MARGIN_NOTES_MEDIA_QUERY). */}
+        <MarginNotesProvider query={EDITOR_MARGIN_NOTES_MEDIA_QUERY}>
           <DocEditor
             docId={doc.id}
             slug={doc.slug}

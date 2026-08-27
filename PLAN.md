@@ -5698,8 +5698,11 @@ hypothetical; it is how the spec came to be written this way.
 Built 2026-08-12. A comment thread and an annotation both already know exactly which
 passage they belong to, and both spent that knowledge on a quoted-text header at the top
 of an entry in a list below the article. The reader had to hold the mapping across a
-scroll. Above 1200px there is room not to ask, so each card is positioned level with its
-own quote.
+scroll. Above 1180px there is room not to ask, so each card is positioned level with its
+own quote. (1200px as built, and 1180 since an iPad measured 1194 in landscape — six
+pixels short of a threshold whose layout had twenty to spare. The threshold now *is* the
+composed width, 800 + 2.5rem + 340; STYLE.md's centred-column widths carry that arithmetic,
+and `src/lib/margin-notes-layout.ts` is the one place JS writes it.)
 
 **Only the anchored cards move.** `CommentSection` and `AnnotationSection` stay exactly
 where they were, below the article, and keep everything that isn't a placeable card: the
@@ -5849,6 +5852,53 @@ only the last of which needed new machinery:
   caller — cards track the internal scroll, and one whose anchor has left the frame is
   hidden rather than pinned to an edge.
 
+**As built, both of those first and third points are now true of the *wide* layout only.**
+In phone-landscape focus mode (STYLE.md's fourth breakpoint) the same rail renders as a
+**queue**: every annotation the doc has, in document order, anchorless ones last, in
+normal flow inside a column that scrolls on its own. Nothing is aligned to its passage
+and nothing is hidden for being out of frame.
+
+The reason is that the two presentations answer different questions. A margin is right
+for *reading* — a reader wants the note beside the sentence, and alignment is what makes
+a rail better than a list. A queue is right for *revising*: an author working through
+annotations needs to see that there are twelve rather than the two beside the current
+viewport, needs to read a long note without the document moving, and needs their place in
+the list not to shift on every keystroke. On a phone held sideways the passage and its
+card are inches apart anyway, so alignment buys least exactly where the queue's
+advantages are worth most.
+
+Three consequences worth stating, because each is a reversal:
+
+- The layout hook grew a `positioned` option and now returns `live` alongside `anchored`.
+  Its measurement pass runs either way and `positioned` decides only what the pass
+  *writes*: a packed `top` per card, or an on-screen marker. Rotating out of the wide
+  layout is what makes its teardown branch load-bearing rather than tidiness — a card
+  still carrying an absolute `top` would be drawn at a stale offset inside a flow list.
+- **The anchorless pre-filter moved out of the page.** `/doc/[slug]/edit` used to drop
+  `quotedText === ""` entries server-side; a server component cannot know which
+  presentation is on screen, so it now ships every thread and the rail decides. The wide
+  layout drops them exactly as before — by the bounded pass finding no position for them.
+- DOM order is now load-bearing in one of the two modes, where the aligned rail never
+  cared about it (its visual order comes from where cards are *placed*). Entries arrive
+  ordered by `createdAt`, so the queue sorts by resolved anchor, recomputed on the same
+  channel the positioned pass uses and committed to state only when the order actually
+  changes.
+
+**What replaces alignment is a marker, not navigation.** A card whose passage is inside
+the editor's visible band carries `data-on-screen`, and the queue colours its left border
+for it. That answers the question alignment answered — *which of these is about the text
+in front of me* — while moving nothing, which is why the border is always present and only
+its colour changes: a border appearing would shift every card's text sideways the moment
+the document scrolled. The predicate is the same one the bounded pass uses to decide what
+to *hide*, so the window's machinery became the marker's.
+
+Navigation between the text and the queue was considered and declined. Tapping an
+annotated passage to scroll its card is the obvious gesture and the wrong one: in an
+editor a tap is how a caret is placed, and hijacking it to move a side column trades a
+constant cost for an occasional convenience. Next/previous controls, gutter markers and a
+selection-triggered reveal are the live alternatives if the marker proves too coarse. The
+card→passage direction already exists regardless (`QuoteThreadHeader`'s jump).
+
 `CollabEditorBody` marks that scroll frame with `data-editor-scroll`
 (`src/components/editor-scroll.ts`). An attribute rather than a class because CSS-module
 names are hashed per build and so aren't addressable from a `querySelector` in another
@@ -5974,7 +6024,9 @@ width or padding changes.
 The *expanded* panel is best-effort about staying out of the way — `placePopover` still
 slides it left to fit, so above ~1200px it lands clear of the text and below that it
 overlaps. Accepted: by then it is a panel the author deliberately opened, not one that
-appeared over their work.
+appeared over their work. That ~1200 is the panel's own width against the 800px column and
+has nothing to do with §18's rail threshold, which is 1180 — worth naming, because two
+unrelated ~1200s in one document is how one of them gets "corrected" into the other.
 - `provisionalPlacement` moved out of `use-selection-popover.ts` into
   `popover-placement.ts` as a shared export — both hooks need the identical two-phase
   bootstrap (a same-batch provisional placement so the popover exists in the DOM before
@@ -6316,7 +6368,13 @@ redirect, as `resolveDocParam` does), gate on `canUserReadFile`, render the shel
   `[presence rail | viewer | indicator strip | annotation panel]`, the viewer scrolling
   inside its own box. `globals.css`'s `height: 100vh/100dvh` on `body` is what gives that
   box a definite main size — the same budget `DocEditor.module.css`'s `.container` relies on.
-  Below `MARGIN_NOTES_MEDIA_QUERY` (1200px) the panel becomes a toggled overlay.
+  Below **768px** the panel becomes a toggled overlay. Not `MARGIN_NOTES_MEDIA_QUERY`,
+  which this line named and the build never used: `POSITIONED_MEDIA_QUERY` in
+  `PdfAnnotationSurface.tsx`, mirrored by `PdfViewer.module.css`'s `max-width: 767px`,
+  shipped at 768px in this phase's own commit so that the narrowest iPad in portrait still
+  gets viewer and panel side by side. A fixed-width card list beside a viewer with nothing
+  to reflow can go narrower than a rail that needs room for live prose — and the doc rail's
+  own threshold is 1180px in any case (§18).
 - Toolbar: page number/count, prev/next, zoom (`page-fit`, `page-width`, numeric), rotate.
 
 ---
