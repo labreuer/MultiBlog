@@ -49,7 +49,7 @@ before changing the behavior it describes.
   down when sorted through, so it evaluates for every row on every page load — hence `/docs`'
   Length being a stored, trigger-maintained column (`Doc.proseJsonLength`). PLAN.md §16, §16e,
   §16l.
-- **Margin notes: only the cards move.** Above 1200px, comments/annotations still pointing at
+- **Margin notes: only the cards move.** Above 1180px, comments/annotations still pointing at
   live text are `createPortal`ed into a right-hand rail
   (`src/components/margin-notes/`, packing rule in `src/lib/margin-notes-layout.ts`).
   `CommentSection`/`AnnotationSection` stay put below the article and keep the `<h2>`, the
@@ -57,7 +57,10 @@ before changing the behavior it describes.
   the `hashchange` effect and the tree. **CSS owns the two-column grid, JS owns only the
   vertical alignment** — don't move the column layout into JS to "simplify", that split is
   what keeps the rail server-rendered in the right place. The `.anchored` class is toggled
-  from JS, never from a `@media` block. PLAN.md §18.
+  from JS, never from a `@media` block. 1180 is a *composed* width (800 + 2.5rem + 340) and
+  moves when the layout does, so it is never a round number to round off; the doc *editor*'s
+  rail matches a second clause besides it (phone landscape), where its cards are a queue
+  rather than aligned. PLAN.md §18, §18c.
 - **An annotation's mechanism follows the surface, never the permission.** The doc *editor*
   writes an `annotation` mark into the doc's ydoc and leaves `anchorFrom`/`anchorTo`/
   `quotedText` null; either *reading* view writes those three columns and never touches the

@@ -5698,8 +5698,11 @@ hypothetical; it is how the spec came to be written this way.
 Built 2026-08-12. A comment thread and an annotation both already know exactly which
 passage they belong to, and both spent that knowledge on a quoted-text header at the top
 of an entry in a list below the article. The reader had to hold the mapping across a
-scroll. Above 1200px there is room not to ask, so each card is positioned level with its
-own quote.
+scroll. Above 1180px there is room not to ask, so each card is positioned level with its
+own quote. (1200px as built, and 1180 since an iPad measured 1194 in landscape — six
+pixels short of a threshold whose layout had twenty to spare. The threshold now *is* the
+composed width, 800 + 2.5rem + 340; STYLE.md's centred-column widths carry that arithmetic,
+and `src/lib/margin-notes-layout.ts` is the one place JS writes it.)
 
 **Only the anchored cards move.** `CommentSection` and `AnnotationSection` stay exactly
 where they were, below the article, and keep everything that isn't a placeable card: the
@@ -6021,7 +6024,9 @@ width or padding changes.
 The *expanded* panel is best-effort about staying out of the way — `placePopover` still
 slides it left to fit, so above ~1200px it lands clear of the text and below that it
 overlaps. Accepted: by then it is a panel the author deliberately opened, not one that
-appeared over their work.
+appeared over their work. That ~1200 is the panel's own width against the 800px column and
+has nothing to do with §18's rail threshold, which is 1180 — worth naming, because two
+unrelated ~1200s in one document is how one of them gets "corrected" into the other.
 - `provisionalPlacement` moved out of `use-selection-popover.ts` into
   `popover-placement.ts` as a shared export — both hooks need the identical two-phase
   bootstrap (a same-batch provisional placement so the popover exists in the DOM before
@@ -6363,7 +6368,13 @@ redirect, as `resolveDocParam` does), gate on `canUserReadFile`, render the shel
   `[presence rail | viewer | indicator strip | annotation panel]`, the viewer scrolling
   inside its own box. `globals.css`'s `height: 100vh/100dvh` on `body` is what gives that
   box a definite main size — the same budget `DocEditor.module.css`'s `.container` relies on.
-  Below `MARGIN_NOTES_MEDIA_QUERY` (1200px) the panel becomes a toggled overlay.
+  Below **768px** the panel becomes a toggled overlay. Not `MARGIN_NOTES_MEDIA_QUERY`,
+  which this line named and the build never used: `POSITIONED_MEDIA_QUERY` in
+  `PdfAnnotationSurface.tsx`, mirrored by `PdfViewer.module.css`'s `max-width: 767px`,
+  shipped at 768px in this phase's own commit so that the narrowest iPad in portrait still
+  gets viewer and panel side by side. A fixed-width card list beside a viewer with nothing
+  to reflow can go narrower than a rail that needs room for live prose — and the doc rail's
+  own threshold is 1180px in any case (§18).
 - Toolbar: page number/count, prev/next, zoom (`page-fit`, `page-width`, numeric), rotate.
 
 ---

@@ -18,8 +18,8 @@ export const MARGIN_NOTE_GAP = 12;
 // STYLE.md's 680/800/1040 — an 800px reading column plus the 2.5rem gap plus
 // a 340px rail — and the threshold *is* that width, so the rail engages
 // exactly when its layout fits rather than at a round number above it. It was
-// 1200px until an iPad measured 1194 in landscape (TODO.md): six pixels short
-// of a threshold whose layout had twenty to spare.
+// 1200px until an iPad measured 1194 in landscape (PLAN.md §18): six pixels
+// short of a threshold whose layout had twenty to spare.
 export const MARGIN_NOTES_MEDIA_QUERY = "(min-width: 1180px)";
 
 // The doc editor's second answer to the same question, and the only surface
