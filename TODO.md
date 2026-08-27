@@ -63,22 +63,35 @@ is the cheaper path to it.
 
 ---
 
-## Mobile layout: nav tap targets, and the PDF annotations panel covering the document
+## Mobile layout: nav tap targets, and the PDF side panel covering the document
 
-**Status:** both measured 2026-08-25 on an iPhone 13 Pro (390×663 viewport) and reproduced on
-an iPad, via `scripts/remote-console.ts`. Neither is a regression; both are simply invisible to
-a suite that only ever renders at desktop widths.
+**Status:** both measured 2026-08-25 on an iPhone 13 Pro (390×663 viewport) via
+`scripts/remote-console.ts`. Item 1 was reproduced on an iPad; item 2's iPad reading was too,
+but its stated cause does not hold up and the observation needs redoing (see below). Neither is
+a regression; both are simply invisible to a suite that only ever renders at desktop widths.
 
 1. **Header nav tap targets are ~19–20px tall.** `MultiBlog`, `Posts`, `Docs`, `Users`,
    `Files`, `Site Settings` all measure 19–20px high against Apple's 44pt guidance, on every
    page swept. Nothing is broken — they are tappable — but they are roughly half the
    recommended target and sit adjacent to one another in a horizontally scrolling row.
 
-2. **`/pdf/[slug]` opens the annotations panel over the document at narrow widths.** The
-   `aside` carries `panelOpen` on first load, so a phone visitor lands on a PDF page and sees
-   "Annotations" with no PDF until they find "Hide annotations". Reproduced across reloads and
-   on both devices; the iPad hits it too, because landscape is **1194px** — six pixels under
-   the 1200px threshold where the margin-notes rail engages (PLAN.md §18).
+2. **`/pdf/[slug]` opens the side panel over the document on phones.** `panelOpen` starts
+   `true` (`PdfAnnotationSurface.tsx`), and under 768px `.panelColumnOpen` is
+   `position: absolute; inset: 0` — a full-screen overlay. So a phone visitor lands on a PDF
+   page and sees the panel with no PDF until they find the toolbar's toggle, which since the
+   panel became tabbed is an icon button labelled "Hide the side panel" rather than the
+   "Hide annotations" text this item was first written against (PLAN.md §19's deviations).
+   Reproduced across reloads.
+
+   **The iPad half of this needs re-observing, and the reason first given for it was wrong.**
+   It said the iPad hit the same thing because landscape is 1194px, six pixels under the
+   margin-notes rail's threshold — but this panel has never used that threshold. 768px
+   (`POSITIONED_MEDIA_QUERY`, mirrored by `PdfViewer.module.css`'s `max-width: 767px`) shipped
+   in the same commit as the viewer itself, deliberately, so that the narrowest iPad in
+   portrait still gets both side by side; every iPad in landscape is far above it and gets the
+   panel as a column, not an overlay. So whatever the iPad showed, this overlay does not
+   explain it, and the phone reading is the only one this item can currently account for. (The
+   rail's own threshold is 1180px now regardless, PLAN.md §18.)
 
 Worth noting what is *not* wrong: no page overflows horizontally. `documentElement.scrollWidth`
 equals the 390px viewport everywhere, and the elements reaching 857px are inside a parent with
