@@ -28,13 +28,6 @@
    — a border appearing would shift every card's text sideways the moment you
    scrolled the document.
 
-   It was briefly a 3px accent over a filled background, on the belief that a
-   hairline was invisible on a phone. It wasn't: Safari was serving a stale CSS
-   bundle and had no rule to apply at all (2026-08-26). Recorded because the
-   evidence for "too subtle" looked exactly like the evidence for "not
-   deployed", and the next person to see nothing here should clear the cache
-   before redesigning anything.
-
    Addressed by the cards' own data attribute rather than by
    MarginNotes.module.css's `.entry`, which is shared with the reading views and
    the PDF panel and has no business growing a rule for this. */

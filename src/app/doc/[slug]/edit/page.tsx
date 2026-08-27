@@ -58,19 +58,8 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
     getDocAnnotationsAsThreads(doc.id),
   ]);
 
-  // Every thread, anchorless ones included. This used to pre-filter to
-  // `quotedText !== ""` on the grounds that the editing view shows
-  // presently-anchored annotations and nothing else (PLAN.md §18c) — true of
-  // the wide layout, and false of the phone-landscape queue, which lists all
-  // of them precisely so an author can see there are twelve rather than the
-  // two beside the current viewport.
-  //
-  // A server component cannot make that choice: which presentation is on
-  // screen is a media query. So the filtering moved to the one place that
-  // knows — EditorAnnotationRail — and the wide layout drops an anchorless
-  // card exactly as before, by the bounded pass finding no position for it
-  // (use-margin-notes-layout.ts). Nothing is shipped that isn't wanted by one
-  // of the two presentations.
+  // "focus mode" pulls all annotations rather than just anchored ones and we
+  // don't know whether we're in it at this point
   const annotations = buildAnnotationEntries(threads);
 
   return (
