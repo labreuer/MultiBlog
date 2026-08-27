@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canUserEditDoc } from "@/lib/doc-authz";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import SlugManager from "@/components/SlugManager";
+
+export const metadata: Metadata = { title: "Doc url" };
 
 export default async function DocSlugPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;

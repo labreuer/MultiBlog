@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const keyword = await keywordBySlug(slug);
   if (!keyword) return {};
-  return { title: keyword.name, description: keyword.description ?? undefined };
+  return { title: `#${keyword.name}`, description: keyword.description ?? undefined };
 }
 
 export default async function KeywordPage({ params }: { params: Promise<{ slug: string }> }) {

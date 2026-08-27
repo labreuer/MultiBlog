@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/core";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
@@ -11,6 +12,8 @@ import { parseUsersFilters, type UsersFilters, type UsersSortKey } from "@/lib/u
 import type { SortColumn } from "@/lib/table-sort";
 import { appUrl } from "@/lib/app-url";
 import UsersTable from "@/components/UsersTable";
+
+export const metadata: Metadata = { title: "Users" };
 
 function buildFilterWhere(filters: UsersFilters): Prisma.UserWhereInput {
   const where: Prisma.UserWhereInput = {};

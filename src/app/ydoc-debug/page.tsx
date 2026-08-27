@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import YdocDebug from "@/components/YdocDebug";
+
+export const metadata: Metadata = { title: "Ydoc debug" };
 
 // Admin-only proving ground for the standalone ydoc persistence stack
 // (PLAN.md §11) — deliberately separate from every post-editing surface, so

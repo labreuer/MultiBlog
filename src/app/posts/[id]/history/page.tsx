@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
+
+export const metadata: Metadata = { title: "History" };
 
 // PLAN.md §15 — a post's history is now its publish/schedule/unpublish
 // events, not a list of independently-saved revisions: there's nothing to

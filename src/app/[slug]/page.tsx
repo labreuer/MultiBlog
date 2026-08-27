@@ -54,7 +54,7 @@ export async function generateMetadata({
     return {};
   }
   return {
-    title: post.title,
+    title: `¶ ${post.title}`,
     description: extractText(post.proseJson).slice(0, 160),
   };
 }

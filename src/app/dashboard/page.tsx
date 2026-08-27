@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/core";
 import { auth, signOut } from "@/lib/auth";
 import { canManagePosts, isAdmin } from "@/lib/authz";
@@ -7,6 +8,8 @@ import { prisma } from "@/lib/prisma";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
 import SessionRefresh from "@/components/SessionRefresh";
 import ContributorPanel from "@/components/ContributorPanel";
+
+export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const session = await auth();
