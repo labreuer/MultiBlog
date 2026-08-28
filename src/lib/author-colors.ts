@@ -17,3 +17,28 @@ export function colorForSeed(seed: string): string {
   }
   return AUTHOR_COLOR_PALETTE[hash % AUTHOR_COLOR_PALETTE.length];
 }
+
+// The one formula for "this author's highlight wash" — shared by
+// AuthorHighlightStyles and the dashboard Settings color sample so the two
+// can't drift (docs/DASHBOARD.md "The color sample").
+export function authorHighlightBackground(color: string): string {
+  return `color-mix(in srgb, ${color} var(--anchor-tint), transparent)`;
+}
+
+// Black or white for the avatar fallback's initials on a solid `color` fill.
+// Needed because User.color is unclamped by decision (docs/DASHBOARD.md) —
+// a near-white pick would leave white initials invisible. Perceptual
+// mid-gray threshold (0.5) rather than the WCAG-optimal ~0.179: the strict
+// threshold would flip the house default blue (#5b8cff) to black initials,
+// while 0.5 changes only genuinely light fills. Fine for glyphs that are
+// decorative (aria-hidden, the full name always beside them). Unrecognized
+// input gets white, the behavior all fills had before this existed.
+export function onAuthorColor(color: string): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) return "#ffffff";
+  const channel = (i: number) => {
+    const c = parseInt(color.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+  return luminance > 0.5 ? "#000000" : "#ffffff";
+}

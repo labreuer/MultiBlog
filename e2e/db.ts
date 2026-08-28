@@ -28,6 +28,7 @@ import type {
   TestDocLink,
   DocLinkFields,
   ContributorFields,
+  UserIdentityFields,
   AvatarFacts,
   TestInvite,
 } from "./db-worker";
@@ -49,6 +50,7 @@ export type {
   TestDocLink,
   DocLinkFields,
   ContributorFields,
+  UserIdentityFields,
   AvatarFacts,
   TestInvite,
 } from "./db-worker";
@@ -206,6 +208,10 @@ export const getDocAuthorEmails = (...args: Parameters<DbHandlers["getDocAuthorE
 export const getContributorFields = (
   ...args: Parameters<DbHandlers["getContributorFields"]>
 ): Promise<ContributorFields | null> => call("getContributorFields", ...args);
+
+export const getUserIdentityFields = (
+  ...args: Parameters<DbHandlers["getUserIdentityFields"]>
+): Promise<UserIdentityFields | null> => call("getUserIdentityFields", ...args);
 
 export const getAvatarFacts = (...args: Parameters<DbHandlers["getAvatarFacts"]>): Promise<AvatarFacts | null> =>
   call("getAvatarFacts", ...args);

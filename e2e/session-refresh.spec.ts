@@ -12,10 +12,12 @@ import { setTestUserRole, deleteTestUser } from "./db";
 
 // The admin-only header link, i.e. proof that the *client* session (which
 // SiteHeader reads via useSession) was refreshed, not just the server render.
-// Scoped to the header on purpose: /dashboard renders its own "Manage users"
-// link behind the same role check, and getByRole name matching is
-// case-insensitive *and* substring-based, so an unscoped locator still matches
-// both ("Users" is inside "Manage users") and trips strict mode.
+// Scoped to the header on purpose: getByRole name matching is
+// case-insensitive *and* substring-based, so any page content containing
+// "Users" matches too and trips strict mode — /dashboard's own "Manage
+// users" link did exactly that until the top menu replaced it (2026-08-27),
+// and the scope keeps this meaning "the header nav's link" whatever the
+// page body grows next.
 const adminLink = (page: Page) => page.locator("header").getByRole("link", { name: "Users", exact: true });
 
 /**
@@ -81,7 +83,7 @@ test("visiting /dashboard picks up a role change made after sign-in", async ({ s
   const { user, page } = await secondUser({ role: "COMMENTER" });
 
   await visitDashboard(page);
-  await expect(page.getByText("Role: COMMENTER")).toBeVisible();
+  await expect(page.getByText("(COMMENTER)")).toBeVisible();
   await expect(adminLink(page)).toHaveCount(0);
 
   await setTestUserRole(user.email, "ADMIN");
@@ -94,7 +96,7 @@ test("visiting /dashboard picks up a role change made after sign-in", async ({ s
   await expect(adminLink(page)).toHaveCount(0);
 
   await visitDashboard(page);
-  await expect(page.getByText("Role: ADMIN")).toBeVisible();
+  await expect(page.getByText("(ADMIN)")).toBeVisible();
   await expect(adminLink(page)).toBeVisible();
 
   // And the refreshed cookie outlives the visit — the whole point of updating

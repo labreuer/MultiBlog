@@ -1,4 +1,5 @@
 import type { AuthorColorMap } from "@/lib/use-author-colors";
+import { authorHighlightBackground } from "@/lib/author-colors";
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const SAFE_COLOR = /^#[0-9a-fA-F]{3,8}$/;
@@ -13,7 +14,7 @@ export default function AuthorHighlightStyles({ colors }: { colors: AuthorColorM
     .filter(([id, info]) => SAFE_ID.test(id) && SAFE_COLOR.test(info.color))
     .map(
       ([id, info]) =>
-        `.author-highlight[data-author-id="${id}"] { background-color: color-mix(in srgb, ${info.color} var(--anchor-tint), transparent); }`,
+        `.author-highlight[data-author-id="${id}"] { background-color: ${authorHighlightBackground(info.color)}; }`,
     )
     .join("\n");
 
