@@ -14,9 +14,12 @@ type Props = {
   status: ThreadStatus;
   context: string | null;
   color: string;
+  /** Same pixels, interactivity stripped — for the dashboard Settings
+      color sample (docs/DASHBOARD.md "The color sample"). */
+  preview?: boolean;
 };
 
-export default function QuoteThreadHeader({ threadId, quotedText, status, context, color }: Props) {
+export default function QuoteThreadHeader({ threadId, quotedText, status, context, color, preview = false }: Props) {
   const [showContext, setShowContext] = useState(false);
   const detached = status === "DETACHED";
 
@@ -55,11 +58,21 @@ export default function QuoteThreadHeader({ threadId, quotedText, status, contex
     <div className={styles.wrapper}>
       <div className={styles.row}>
         <div
-          onClick={detached ? () => setShowContext((v) => !v) : jumpToQuote}
-          role="button"
-          aria-label={detached ? "Show where this quote used to appear" : "Jump to quoted text in the article"}
+          {...(preview
+            ? {}
+            : {
+                onClick: detached ? () => setShowContext((v) => !v) : jumpToQuote,
+                role: "button",
+                "aria-label": detached
+                  ? "Show where this quote used to appear"
+                  : "Jump to quoted text in the article",
+              })}
           className={styles.markerColumn}
-          style={detached ? { width: HEAD_WIDTH } : ({ width: HEAD_WIDTH, "--thread-color": color } as CSSProperties)}
+          style={{
+            ...(detached ? { width: HEAD_WIDTH } : ({ width: HEAD_WIDTH, "--thread-color": color } as CSSProperties)),
+            // .markerColumn's cursor: pointer promises a click this mode ignores.
+            ...(preview ? { cursor: "default" } : {}),
+          }}
         >
           <svg
             width={HEAD_WIDTH}

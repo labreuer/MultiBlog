@@ -1,13 +1,3 @@
-.panel {
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--border);
-}
-
-.heading {
-  margin-bottom: 0.75rem;
-}
-
 .field {
   display: flex;
   flex-direction: column;
@@ -39,8 +29,21 @@
   padding: 0.4rem;
 }
 
+/* Sized to match what it edits — ContributorCard's .blurb, not article
+   prose. docs/DASHBOARD.md "Section cards". */
 .editorContent {
+  font-size: 0.9rem;
+}
+
+.editorContent :global(p) {
+  margin: 0;
+}
+
+/* On the contenteditable itself — a wrapper-only min-height leaves the
+   editable region one line tall. */
+.editorContent :global(.tiptap) {
   min-height: 3em;
+  padding: 0.3rem 0.4rem;
 }
 
 .actions {
@@ -48,10 +51,6 @@
   align-items: center;
   gap: 0.75rem;
   margin-top: 1rem;
-}
-
-.saveButton {
-  padding: 0.4rem 1rem;
 }
 
 .error {

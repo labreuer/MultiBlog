@@ -644,6 +644,22 @@ export async function getAvatarFacts(email: string): Promise<AvatarFacts | null>
   };
 }
 
+export type UserIdentityFields = {
+  name: string | null;
+  adminInitials: string;
+  color: string;
+};
+
+// The dashboard Settings card's three self-service fields
+// (src/app/actions/account-settings.ts), read back for assertions.
+export async function getUserIdentityFields(email: string): Promise<UserIdentityFields | null> {
+  assertSafe(email);
+  return prisma.user.findUnique({
+    where: { email },
+    select: { name: true, adminInitials: true, color: true },
+  });
+}
+
 export async function getContributorFields(email: string): Promise<ContributorFields | null> {
   assertSafe(email);
   const user = await prisma.user.findUnique({
@@ -1540,6 +1556,7 @@ const handlers = {
   getFileAnnotationFacts,
   getDocState,
   getContributorFields,
+  getUserIdentityFields,
   getAvatarFacts,
   clearColumnOrder,
   getSiteDefaultColumnOrder,

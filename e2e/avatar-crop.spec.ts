@@ -10,7 +10,7 @@
 // as an image." The `naturalWidth` assertion below is what catches it: a
 // revoked blob: URL leaves it at 0.
 import type { Browser, Locator, Page } from "@playwright/test";
-import { test, expect, signIn } from "./fixtures";
+import { test, expect, signIn, openDashboardCard } from "./fixtures";
 import { createTestUser, deleteTestUser, getAvatarFacts, uniqueEmail } from "./db";
 
 // Portrait, so the cover scale is set by the width and only the vertical offset
@@ -73,6 +73,7 @@ test("avatar cropper: previews the picked file, positions it, and uploads the cr
     page = await signedInAs(browser, email);
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Contributor profile" })).toBeVisible();
+    await openDashboardCard(page, "Contributor profile");
 
     const png = await makePortraitPng(page, SOURCE_W, SOURCE_H);
     await page.getByLabel("Photo").setInputFiles({ name: "portrait.png", mimeType: "image/png", buffer: png });
@@ -139,6 +140,9 @@ test("avatar cropper: previews the picked file, positions it, and uploads the cr
     // And the extremes are reachable by dragging the thumb itself, not just by
     // fill() — the gesture a person actually uses.
     const slider = page.getByRole("slider");
+    // Raw mouse gestures don't auto-scroll the way click() would, and the
+    // slider can start below the fold (docs/DASHBOARD.md "e2e notes").
+    await slider.scrollIntoViewIfNeeded();
     const sBox = (await slider.boundingBox())!;
     const sMidY = sBox.y + sBox.height / 2;
     await page.mouse.move(sBox.x + 4, sMidY);

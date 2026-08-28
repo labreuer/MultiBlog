@@ -58,7 +58,10 @@
   /* misc */
   --shadow-color: light-dark(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.6));
   --on-author-color: #ffffff; /* text/glyph on a solid User.color fill —
-                                  scheme-independent on purpose */
+                                  scheme-independent on purpose. The avatar
+                                  fallback no longer uses it: its initials
+                                  pick black or white per fill
+                                  (onAuthorColor, author-colors.ts). */
   --shade-target: light-dark(#000000, #ffffff); /* "shade toward" for hover
                                   states built with color-mix() */
 

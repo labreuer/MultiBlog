@@ -1,0 +1,79 @@
+/* Shared chrome for the account surfaces — the auth pages (/sign-in,
+   /sign-up, /forgot-password, /reset-password) and /dashboard, which share
+   one visual identity: the card, the label-over-input field, and the house
+   button. Named for the domain rather than one page (STYLE.md's "shared
+   across several" clause); the dashboard half's decisions live in
+   docs/DASHBOARD.md. Consumers add their own layout-only classes (widths,
+   margins, <summary> behavior) — nothing here should conflict with them. */
+
+/* The auth pages' column; /dashboard keeps its own wider main. */
+.main {
+  max-width: 360px;
+  margin: 4rem auto;
+  font-family: sans-serif;
+}
+
+.card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  padding: 1rem;
+}
+
+.card h1 {
+  font-size: 1.35rem;
+  margin-bottom: 1rem;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Label wraps its input (so no htmlFor bookkeeping), styled like
+   ContributorPanel's .field. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.field input {
+  font: inherit;
+  font-size: 1rem;
+  color: var(--foreground);
+  background: var(--surface);
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.error {
+  color: var(--error);
+}
+
+.button {
+  padding: 0.4rem 1rem;
+  font-weight: bold;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The under-card links (sign up / forgot password / back to sign in). */
+.links {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}

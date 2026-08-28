@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { signInAction } from "@/app/actions/sign-in";
+import styles from "@/styles/account.module.css";
 
 export default function SignInForm({ initialError }: { initialError: string | null }) {
   const router = useRouter();
@@ -48,34 +49,34 @@ export default function SignInForm({ initialError }: { initialError: string | nu
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Sign in</h1>
-      {/* No `method`/`encType` here on purpose: React derives both from the
-          function `action` and warns if they're also passed by hand. */}
-      <form
-        action={signInAction}
-        onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: 12 }}
-      >
-        <label>
-          Email
-          <input name="email" type="email" required autoComplete="email" />
-        </label>
-        <label>
-          Password
-          <input name="password" type="password" required autoComplete="current-password" />
-        </label>
-        {error && <p style={{ color: "var(--error)" }}>{error}</p>}
-        <button type="submit" disabled={pending}>
-          {pending ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
-      <p>
-        No account? <Link href="/sign-up">Sign up</Link>
-      </p>
-      <p>
-        <Link href="/forgot-password">Forgot password?</Link>
-      </p>
+    <main className={styles.main}>
+      <div className={styles.card}>
+        <h1>Sign in</h1>
+        {/* No `method`/`encType` here on purpose: React derives both from the
+            function `action` and warns if they're also passed by hand. */}
+        <form action={signInAction} onSubmit={handleSubmit} className={styles.form}>
+          <label className={styles.field}>
+            Email
+            <input name="email" type="email" required autoComplete="email" />
+          </label>
+          <label className={styles.field}>
+            Password
+            <input name="password" type="password" required autoComplete="current-password" />
+          </label>
+          {error && <p className={styles.error}>{error}</p>}
+          <button type="submit" disabled={pending} className={styles.button}>
+            {pending ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+      </div>
+      <div className={styles.links}>
+        <p>
+          No account? <Link href="/sign-up">Sign up</Link>
+        </p>
+        <p>
+          <Link href="/forgot-password">Forgot password?</Link>
+        </p>
+      </div>
     </main>
   );
 }

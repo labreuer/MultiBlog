@@ -13,7 +13,7 @@
 // The banner is also untested here — it's an env var (SITE_BANNER) plus a
 // gitignored file, not app state this suite's fixtures control either way.
 import type { Browser, Page } from "@playwright/test";
-import { test, expect, freshGoto, signIn } from "./fixtures";
+import { test, expect, freshGoto, openDashboardCard, signIn } from "./fixtures";
 import { createTestUser, deleteTestUser, getAvatarFacts, getContributorFields, uniqueEmail } from "./db";
 
 // A fresh browser context, not the shared `page`'s — the browser pane's
@@ -120,6 +120,9 @@ test("dashboard panel: self-service edits reach the front page; opting out clear
     contributorPage = await signedInAs(browser, email);
     await contributorPage.goto("/dashboard");
     await expect(contributorPage.getByRole("heading", { name: "Contributor profile" })).toBeVisible();
+    // The heading (in the card's <summary>) shows while collapsed; the panel
+    // inside doesn't until the card is expanded.
+    await openDashboardCard(contributorPage, "Contributor profile");
 
     await contributorPage.getByLabel("ORCID iD").fill("0000-0002-1825-0097");
     await contributorPage.getByLabel("Website").fill("https://example.com");
@@ -189,6 +192,9 @@ test("avatar upload: re-encodes and resizes, serves immutably, and removal falls
     contributorPage = await signedInAs(browser, email);
     await contributorPage.goto("/dashboard");
     await expect(contributorPage.getByRole("heading", { name: "Contributor profile" })).toBeVisible();
+    // The heading (in the card's <summary>) shows while collapsed; the panel
+    // inside doesn't until the card is expanded.
+    await openDashboardCard(contributorPage, "Contributor profile");
 
     // No avatar yet → the initials circle, and nothing to remove.
     await expect(contributorPage.getByRole("button", { name: "Remove photo" })).toHaveCount(0);

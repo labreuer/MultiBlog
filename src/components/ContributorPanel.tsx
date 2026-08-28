@@ -14,8 +14,8 @@ import EditorToolbar from "./EditorToolbar";
 import ContributorCard from "./ContributorCard";
 import AvatarCropper from "./AvatarCropper";
 import { AVATAR_SIZE } from "@/lib/avatar-url";
-import proseStyles from "@/styles/prose.module.css";
 import styles from "./ContributorPanel.module.css";
+import account from "@/styles/account.module.css";
 
 const EMPTY_BLURB: JSONContent = { type: "doc", content: [{ type: "paragraph" }] };
 
@@ -163,8 +163,7 @@ export default function ContributorPanel({
   }
 
   return (
-    <div className={styles.panel}>
-      <h2 className={styles.heading}>Contributor profile</h2>
+    <div>
 
       <div className={styles.field}>
         <label htmlFor="contributor-avatar">Photo</label>
@@ -210,7 +209,7 @@ export default function ContributorPanel({
         <label>Blurb</label>
         <div className={styles.editorFrame}>
           {editor && <EditorToolbar editor={editor} tools={["bold", "italic"]} />}
-          <EditorContent editor={editor} className={`${styles.editorContent} ${proseStyles.prose}`} />
+          <EditorContent editor={editor} className={styles.editorContent} />
         </div>
       </div>
 
@@ -230,7 +229,7 @@ export default function ContributorPanel({
       </div>
 
       <div className={styles.actions}>
-        <button type="button" onClick={handleSave} disabled={saving} className={styles.saveButton}>
+        <button type="button" onClick={handleSave} disabled={saving} className={account.button}>
           {saving ? "Saving…" : "Save"}
         </button>
         {saved && !saving && <span>Saved.</span>}

@@ -273,6 +273,18 @@ export async function gotoOk(page: Page, path: string): Promise<void> {
  * action doesn't need this — the action's own revalidatePath is the thing
  * being bypassed.
  */
+/**
+ * Expands one of /dashboard's <details> cards; reach inside a card only
+ * after this (docs/DASHBOARD.md "e2e notes"). Checks `open` first —
+ * clicking an already-open summary would collapse it.
+ */
+export async function openDashboardCard(page: Page, name: string): Promise<void> {
+  const card = page.locator("details").filter({ has: page.getByRole("heading", { name, exact: true }) });
+  if (!(await card.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await card.locator("summary").click();
+  }
+}
+
 export async function freshGoto(page: Page, path: string): Promise<void> {
   await page.request
     .post("/api/test/revalidate", { data: { path }, failOnStatusCode: false })

@@ -3,11 +3,18 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/core";
 import { auth, signOut } from "@/lib/auth";
-import { canManagePosts, isAdmin } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
+import { canManageDocs } from "@/lib/doc-authz";
+import { canEditAuthorIdentity, canViewAuthorColorRoster, COLOR_ROSTER_ROLES } from "@/lib/authz";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
+import { docTitleOrFallback } from "@/lib/doc-title";
 import SessionRefresh from "@/components/SessionRefresh";
+import LocalTime from "@/components/LocalTime";
 import ContributorPanel from "@/components/ContributorPanel";
+import AccountSettings from "@/components/AccountSettings";
+import styles from "./page.module.css";
+import account from "@/styles/account.module.css";
+import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -40,56 +47,165 @@ export default async function DashboardPage() {
     },
   });
 
+  // Byline membership doubles as the Edit-link gate; the soft-delete
+  // extension already excludes deleted docs. docs/DASHBOARD.md "Recent docs".
+  const recentDocs = await prisma.doc.findMany({
+    where: { authors: { some: { userId: session.user.id } } },
+    orderBy: { updatedAt: "desc" },
+    take: 10,
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      updatedAt: true,
+      // The same string_agg of admin_initials the /docs table shows, joined
+      // in byline order by the doc_metrics view (§16e).
+      metrics: { select: { byline: true } },
+    },
+  });
+
+  // The EDITOR+ author-color roster (docs/DASHBOARD.md "Settings"). Sorted
+  // in JS on the shown label — Prisma orderBy can't interleave named and
+  // unnamed users (author-filter.ts's rationale).
+  const colorRoster = canViewAuthorColorRoster(session.user.role)
+    ? (
+        await prisma.user.findMany({
+          where: { role: { in: COLOR_ROSTER_ROLES } },
+          select: { id: true, name: true, email: true, adminInitials: true, color: true },
+        })
+      )
+        .map((u) => ({ ...u, label: u.name ?? u.email }))
+        .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }))
+    : null;
+
   return (
-    <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "sans-serif" }}>
+    <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
       {/* Pulls role/name/color back from the DB into the JWT on every visit, so
           a promotion doesn't wait for a sign-out. This first render can still
           show the pre-refresh values for a beat; the router.refresh() it fires
           corrects them. */}
       <SessionRefresh />
       <h1>Dashboard</h1>
-      <p>Signed in as {session.user.email}</p>
-      <p>Role: {session.user.role}</p>
-      {canManagePosts(session.user.role) && (
-        <p>
-          <Link href="/posts">Manage posts</Link>
-        </p>
-      )}
-      {canManagePosts(session.user.role) && (
-        <p>
-          <Link href="/comments">Manage comments</Link>
-        </p>
-      )}
-      {isAdmin(session.user.role) && (
-        <p>
-          <Link href="/users">Manage users</Link>
-        </p>
-      )}
-      {contributor && contributor.isListedContributor && (
-        <ContributorPanel
-          name={contributor.name ?? session.user.email ?? "You"}
-          slug={contributor.slug}
-          color={contributor.color}
-          adminInitials={contributor.adminInitials}
-          avatarSrc={resolveAvatarSrc({
-            userId: session.user.id,
-            avatarHash: contributor.avatar?.hash,
-            image: contributor.image,
-          })}
-          hasUploadedAvatar={contributor.avatar !== null}
-          contributorBlurb={contributor.contributorBlurb as JSONContent | null}
-          contributorOrder={contributor.contributorOrder}
-          orcid={contributor.orcid}
-          website={contributor.website}
+      <p>
+        Signed in as {session.user.email} ({session.user.role})
+      </p>
+      <details className={`${account.card} ${styles.card}`} open>
+        {/* Links to this section's own where clause on /docs; plain text for
+            anyone /docs would bounce. docs/DASHBOARD.md "Section cards". */}
+        <summary>
+          <h2>
+          {contributor && canManageDocs(session.user.role) ? (
+            <Link href={`/docs?authors=${contributor.slug}`}>Recent docs</Link>
+          ) : (
+            "Recent docs"
+          )}
+          </h2>
+        </summary>
+        <div className={styles.cardBody}>
+        {recentDocs.length === 0 ? (
+          <p style={{ color: "var(--text-secondary)" }}>No docs yet.</p>
+        ) : (
+          <table style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.5rem" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>Title</th>
+                <th style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>Edit</th>
+                <th style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>Author(s)</th>
+                <th style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentDocs.map((doc) => (
+                <tr key={doc.id}>
+                  <td style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
+                    <Link href={`/doc/${doc.slug}`}>{docTitleOrFallback(doc.title)}</Link>
+                  </td>
+                  <td style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
+                    <Link href={`/doc/${doc.slug}/edit`}>edit</Link>
+                  </td>
+                  <td style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>{doc.metrics?.byline ?? ""}</td>
+                  <td style={{ textAlign: "left", padding: "0.25rem 1rem 0.25rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
+                    <LocalTime value={doc.updatedAt} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        </div>
+      </details>
+      <details className={`${account.card} ${styles.card}`}>
+        <summary>
+          <h2>Settings</h2>
+        </summary>
+        <div className={styles.cardBody}>
+        {/* contributor is null only for a soft-deleted account with a live
+            session; the fallback just keeps the picker valid. */}
+        <AccountSettings
+          name={contributor?.name ?? ""}
+          adminInitials={contributor?.adminInitials ?? ""}
+          color={contributor?.color ?? NEUTRAL_THREAD_COLOR}
+          canEditAuthorIdentity={canEditAuthorIdentity(session.user.role)}
         />
+        {colorRoster && (
+          <div style={{ marginTop: "1rem" }}>
+            <h3>Author colors</h3>
+            {colorRoster.map((u) => (
+              <p key={u.id} style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem" }}>
+                <span
+                  aria-hidden
+                  style={{
+                    display: "inline-block",
+                    width: 16,
+                    height: 16,
+                    backgroundColor: u.color,
+                    border: "1px solid var(--border)",
+                    borderRadius: 3,
+                  }}
+                />
+                {u.label}
+                <span style={{ color: "var(--text-secondary)" }}>({u.adminInitials})</span>
+              </p>
+            ))}
+          </div>
+        )}
+        </div>
+      </details>
+      {contributor && contributor.isListedContributor && (
+        <details className={`${account.card} ${styles.card}`}>
+          <summary>
+            <h2>Contributor profile</h2>
+          </summary>
+          <div className={styles.cardBody}>
+            <ContributorPanel
+              name={contributor.name ?? session.user.email ?? "You"}
+              slug={contributor.slug}
+              color={contributor.color}
+              adminInitials={contributor.adminInitials}
+              avatarSrc={resolveAvatarSrc({
+                userId: session.user.id,
+                avatarHash: contributor.avatar?.hash,
+                image: contributor.image,
+              })}
+              hasUploadedAvatar={contributor.avatar !== null}
+              contributorBlurb={contributor.contributorBlurb as JSONContent | null}
+              contributorOrder={contributor.contributorOrder}
+              orcid={contributor.orcid}
+              website={contributor.website}
+            />
+          </div>
+        </details>
       )}
       <form
         action={async () => {
           "use server";
           await signOut({ redirectTo: "/" });
         }}
+        style={{ marginTop: "1.5rem" }}
       >
-        <button type="submit">Sign out</button>
+        <button type="submit" className={account.button}>
+          Sign out
+        </button>
       </form>
     </main>
   );

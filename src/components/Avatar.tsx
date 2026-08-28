@@ -1,3 +1,4 @@
+import { onAuthorColor } from "@/lib/author-colors";
 import styles from "./Avatar.module.css";
 
 export type AvatarProps = {
@@ -27,7 +28,13 @@ export default function Avatar({ src, color, initials, size }: AvatarProps) {
     return (
       <div
         className={styles.fallback}
-        style={{ backgroundColor: color, width: size, height: size, fontSize: Math.round(size * 0.35) }}
+        style={{
+          backgroundColor: color,
+          color: onAuthorColor(color),
+          width: size,
+          height: size,
+          fontSize: Math.round(size * 0.35),
+        }}
         aria-hidden="true"
       >
         {initials}

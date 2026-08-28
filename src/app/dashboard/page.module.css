@@ -1,0 +1,25 @@
+/* The dashboard's collapsible section cards — native <details>, defaults
+   via the `open` attribute in page.tsx (docs/DASHBOARD.md "Section cards").
+   Visual identity (border/fill/padding) comes from account.module.css's
+   .card, applied alongside this class; here is only what's specific to the
+   <details> arrangement, so the two never fight over a property. */
+.card {
+  margin-top: 1.5rem;
+}
+
+.card > summary {
+  cursor: pointer;
+}
+
+/* Keep the disclosure marker and the heading on one line — a block-level
+   h2 wraps below summary's list-item marker. */
+.card > summary > h2 {
+  display: inline-block;
+  vertical-align: middle;
+  /* ~25% under the 1.5em browser default. */
+  font-size: 1.125rem;
+}
+
+.cardBody {
+  margin-top: 0.75rem;
+}
