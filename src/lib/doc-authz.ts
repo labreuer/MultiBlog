@@ -91,16 +91,62 @@ export type ReadableDoc = { id: string; slug: string; title: string };
 // only thing keeping the two honest with each other, since Prisma has no way
 // to share a boolean predicate between a per-row check and a query filter.
 export async function readableDocsFor(userId: string, role: Role): Promise<ReadableDoc[]> {
-  const or: Prisma.DocWhereInput[] = [];
-  if (canViewDocs(role)) or.push({ visibility: "SHARED" });
-  if (canManageDocs(role)) or.push({ visibility: "PRIVATE", authors: { some: { userId } } });
-  if (or.length === 0) return [];
+  const where = readableDocsWhere(userId, role);
+  if (!where) return [];
 
   return prisma.doc.findMany({
-    where: { deletedByUserId: null, OR: or },
+    where,
     select: { id: true, slug: true, title: true },
     orderBy: { title: "asc" },
   });
+}
+
+// readableDocsFor's where clause on its own, shared with searchReadableDocsFor
+// below so the two can't drift; null means this viewer can read no docs at
+// all, which both callers turn into [] without touching the database.
+function readableDocsWhere(userId: string, role: Role): Prisma.DocWhereInput | null {
+  const or: Prisma.DocWhereInput[] = [];
+  if (canViewDocs(role)) or.push({ visibility: "SHARED" });
+  if (canManageDocs(role)) or.push({ visibility: "PRIVATE", authors: { some: { userId } } });
+  if (or.length === 0) return null;
+  return { deletedByUserId: null, OR: or };
+}
+
+// readableDocsFor filtered by title for the editor toolbar's link popover
+// (LinkControls.tsx): the top `limit` matches, title-prefix matches first.
+// Two queries wearing the same predicate rather than one with a computed
+// orderBy, because Prisma has no way to sort by "does the title start with
+// the query" — the second query only runs when the first comes back short,
+// and excludes the rows the first already returned.
+export async function searchReadableDocsFor(
+  userId: string,
+  role: Role,
+  query: string,
+  limit = 5,
+): Promise<ReadableDoc[]> {
+  const where = readableDocsWhere(userId, role);
+  if (!where) return [];
+  const select = { id: true, slug: true, title: true } as const;
+
+  const prefix = await prisma.doc.findMany({
+    where: { ...where, title: { startsWith: query, mode: "insensitive" } },
+    select,
+    orderBy: { title: "asc" },
+    take: limit,
+  });
+  if (prefix.length >= limit) return prefix;
+
+  const contains = await prisma.doc.findMany({
+    where: {
+      ...where,
+      title: { contains: query, mode: "insensitive" },
+      id: { notIn: prefix.map((doc) => doc.id) },
+    },
+    select,
+    orderBy: { title: "asc" },
+    take: limit - prefix.length,
+  });
+  return [...prefix, ...contains];
 }
 
 // canUserEditDoc expressed as a `where` clause — the same relationship

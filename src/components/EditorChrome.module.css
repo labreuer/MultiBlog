@@ -39,9 +39,104 @@
   flex: 0 0 auto;
 }
 
+/* inline-flex centering because the buttons' content is a Tabler SVG, which
+   as a plain inline element would sit on the text baseline and hang low. */
 .toolbarButton {
   min-height: 36px;
   padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The link button + its popover (LinkControls.tsx). The popover is
+   position: fixed like AnnotationPopover — placed by placePopover in
+   viewport coordinates — so it escapes any overflow-clipping ancestor (an
+   annotation card's editor, /side-by-side's scroller) instead of being cut
+   off at its edge. */
+.linkGroup {
+  display: inline-flex;
+}
+
+.linkPopover {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 10px;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+/* The input and its dropdown. position: relative so the result list can
+   hang off the input's bottom edge, over the Save/Cancel row, the way a
+   combobox's menu does, instead of pushing that row down and back up as
+   results come and go. Being absolute it adds nothing to the popover's own
+   height, which is why LinkControls measures the list separately when
+   placing the popover. */
+.linkInputWrap {
+  position: relative;
+  display: flex;
+}
+
+.linkInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* Same box as .quoteMenu, so the toolbar's two dropdowns read as one kind
+   of thing. */
+.linkResults {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 6px var(--shadow-color);
+  z-index: 1;
+}
+
+.linkResult {
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Hover and the keyboard highlight look the same, and the list keeps them
+   from disagreeing: mouseenter moves the highlight, mouseleave clears it. */
+.linkResult:hover,
+.linkResultActive {
+  background: var(--surface-hover);
+}
+
+.linkButtons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 /* Split button: .quoteGroup has no gap of its own, so the two buttons sit
@@ -54,8 +149,8 @@
 .quoteDropdownTrigger {
   min-height: 36px;
   padding: 4px 6px;
-  line-height: 1;
-  font-size: 0.6rem;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
 }
 

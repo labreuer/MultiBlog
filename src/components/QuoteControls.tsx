@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
+import { IconBlockquote, IconChevronDown } from "@tabler/icons-react";
 import styles from "./EditorChrome.module.css";
 
 // Split button: "Quote" keeps its existing toggle behavior (wrap/unwrap one
@@ -37,9 +38,11 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
         type="button"
         className={styles.toolbarButton}
         disabled={disabled}
+        aria-label="Quote"
+        title="Quote"
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
       >
-        Quote
+        <IconBlockquote size={18} />
       </button>
       <button
         type="button"
@@ -50,7 +53,7 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
       >
-        ▼
+        <IconChevronDown size={14} />
       </button>
       {open && !disabled && (
         <div className={styles.quoteMenu} role="menu">
