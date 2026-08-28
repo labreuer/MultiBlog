@@ -4,6 +4,7 @@ import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { updateAccountSettings } from "@/app/actions/account-settings";
+import account from "@/styles/account.module.css";
 import { authorHighlightBackground } from "@/lib/author-colors";
 import QuoteThreadHeader from "./QuoteThreadHeader";
 import proseStyles from "@/styles/prose.module.css";
@@ -19,17 +20,6 @@ export type AccountSettingsProps = {
 // The highlighted run and the mock comment's blockquote are the same string
 // on purpose — the sample depicts a comment quoting the highlighted passage.
 const SAMPLE_QUOTE = "the fishermen mend their nets on the quay";
-
-// Prominence without a fill: bold, padded, rounded on a neutral border —
-// the same treatment ContributorPanel's .saveButton wears, stated in both
-// places because one is inline-styled and the other a module.
-const saveButtonStyle: CSSProperties = {
-  padding: "0.4rem 1rem",
-  fontWeight: "bold",
-  border: "1px solid var(--border)",
-  borderRadius: 4,
-  cursor: "pointer",
-};
 
 const rowStyle: CSSProperties = { display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" };
 const labelStyle: CSSProperties = { width: 90 };
@@ -113,7 +103,7 @@ export default function AccountSettings({ name, adminInitials, color, canEditAut
         </>
       )}
       <div style={rowStyle}>
-        <button type="button" onClick={handleSave} disabled={saving} style={{ ...saveButtonStyle, ...(saving ? { opacity: 0.6, cursor: "default" } : {}) }}>
+        <button type="button" onClick={handleSave} disabled={saving} className={account.button}>
           {saving ? "Saving…" : "Save"}
         </button>
         {saved && <span style={{ color: "var(--success)" }}>Saved.</span>}

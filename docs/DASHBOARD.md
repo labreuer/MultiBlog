@@ -13,7 +13,10 @@ Each major section is a native `<details className={styles.card}>` with its
 disclosure rather than a client component on purpose: the collapse works in
 server-rendered HTML with zero JS state, and a card's default comes down to
 whether `open` is present in the JSX — Recent docs starts open, Settings and
-Contributor profile start collapsed.
+Contributor profile start collapsed. The cards' visual identity (and the
+house button the Save/Sign out buttons wear) is `src/styles/account.module.css`,
+shared with the auth pages; the dashboard module keeps only the
+`<details>`-specific rules, split so the two never set the same property.
 
 Two consequences worth knowing:
 

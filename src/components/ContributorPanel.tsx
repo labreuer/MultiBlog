@@ -15,6 +15,7 @@ import ContributorCard from "./ContributorCard";
 import AvatarCropper from "./AvatarCropper";
 import { AVATAR_SIZE } from "@/lib/avatar-url";
 import styles from "./ContributorPanel.module.css";
+import account from "@/styles/account.module.css";
 
 const EMPTY_BLURB: JSONContent = { type: "doc", content: [{ type: "paragraph" }] };
 
@@ -228,7 +229,7 @@ export default function ContributorPanel({
       </div>
 
       <div className={styles.actions}>
-        <button type="button" onClick={handleSave} disabled={saving} className={styles.saveButton}>
+        <button type="button" onClick={handleSave} disabled={saving} className={account.button}>
           {saving ? "Saving…" : "Save"}
         </button>
         {saved && !saving && <span>Saved.</span>}

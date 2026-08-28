@@ -13,6 +13,7 @@ import LocalTime from "@/components/LocalTime";
 import ContributorPanel from "@/components/ContributorPanel";
 import AccountSettings from "@/components/AccountSettings";
 import styles from "./page.module.css";
+import account from "@/styles/account.module.css";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -88,7 +89,7 @@ export default async function DashboardPage() {
       <p>
         Signed in as {session.user.email} ({session.user.role})
       </p>
-      <details className={styles.card} open>
+      <details className={`${account.card} ${styles.card}`} open>
         {/* Links to this section's own where clause on /docs; plain text for
             anyone /docs would bounce. docs/DASHBOARD.md "Section cards". */}
         <summary>
@@ -133,7 +134,7 @@ export default async function DashboardPage() {
         )}
         </div>
       </details>
-      <details className={styles.card}>
+      <details className={`${account.card} ${styles.card}`}>
         <summary>
           <h2>Settings</h2>
         </summary>
@@ -171,7 +172,7 @@ export default async function DashboardPage() {
         </div>
       </details>
       {contributor && contributor.isListedContributor && (
-        <details className={styles.card}>
+        <details className={`${account.card} ${styles.card}`}>
           <summary>
             <h2>Contributor profile</h2>
           </summary>
@@ -202,18 +203,7 @@ export default async function DashboardPage() {
         }}
         style={{ marginTop: "1.5rem" }}
       >
-        {/* Same treatment as the two Save buttons (AccountSettings'
-            saveButtonStyle, ContributorPanel's .saveButton). */}
-        <button
-          type="submit"
-          style={{
-            padding: "0.4rem 1rem",
-            fontWeight: "bold",
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            cursor: "pointer",
-          }}
-        >
+        <button type="submit" className={account.button}>
           Sign out
         </button>
       </form>
