@@ -31,6 +31,26 @@ Never add any of those **alongside StarterKit** in the same schema, and pass
 `undoRedo` stays *on* wherever there is no `Collaboration`. `blurbExtensions` is the one
 schema in this codebase where that inversion applies.
 
+### A link opens from its bubble, not from a click
+
+`EDITOR_LINK_OPTIONS` (`src/lib/tiptap-schema.ts`) turns Link's `openOnClick` off in both
+live editors, and `src/components/LinkBubble.tsx` — favicon, href, copy/edit/remove, shown
+while the caret is in a link — is where following one moved to. A click in a link now places
+the caret, which is what the browser was already promising: the UA gives `<a>` `cursor: auto`,
+and inside a `contenteditable` that resolves to the I-beam, so the navigation the click plugin
+bolted on never had an affordance — and with it on, there was no way to click *into* link text
+to edit it. `"whenNotEditable"` is not a middle ground in the installed build: it is mapped
+straight to `true`, and the click plugin already stands down in a read-only view.
+
+For a link into one of this site's own docs — `/doc/<id-or-slug>`, relative or absolute on
+this origin — the bubble adds a second block: the doc's title, then its authors with the last
+edit at the right, what the reading route's byline shows. Fetched by `previewLinkedDoc`
+(`src/app/actions/docs.ts`) the first time the bubble shows for that link and kept for half a
+minute, through the reading route's own gate, and with the route's own answers: a doc the
+viewer may not read shows "You don't have permission to read this doc." in the block's place
+(the route renders Forbidden there rather than a 404, so the bubble reveals nothing following
+the link wouldn't), and a doc that doesn't exist adds nothing.
+
 ### Why `@tiptap/extension-document`/`-paragraph`/`-text` are still declared deps
 
 They are for schemas built **without** StarterKit at all, so nothing is double-registered:

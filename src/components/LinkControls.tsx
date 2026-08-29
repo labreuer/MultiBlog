@@ -16,6 +16,7 @@ import {
   type PopoverAnchor,
   type PopoverPlacement,
 } from "@/lib/popover-placement";
+import LinkBubble from "./LinkBubble";
 import styles from "./EditorChrome.module.css";
 
 // The toolbar's link button and its popover: one text box that is either a
@@ -106,6 +107,7 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Guards against out-of-order search responses: only the newest request's
   // result is allowed to land. Bumped on open/close too, so a response still
   // in flight when the popover closes can't populate a reopened one.
@@ -215,6 +217,17 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
       document.removeEventListener("keydown", handleKey);
     };
   }, [open, close]);
+
+  // Select the box's text on open, so an existing href is replaced by typing
+  // rather than appended to — the usual reason to edit a link is to swap it
+  // — instead of wherever autoFocus's focus() happened to leave the caret,
+  // which differs by browser. An empty box has nothing to select and
+  // select() is a no-op on it. A layout effect so the selection is in place
+  // before the first paint: the input's own mount (the autoFocus) commits
+  // before this component's layout effects, so it is focused by now.
+  useLayoutEffect(() => {
+    if (open) inputRef.current?.select();
+  }, [open]);
 
   // The doc search is driven from here rather than an effect on `value`, so
   // the debounce and the every-Nth-keystroke path share one timer and a
@@ -336,12 +349,17 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
       >
         <IconLink size={18} />
       </button>
+      {/* The bubble under a link the caret is in (LinkBubble.tsx). Hidden
+          while this popover is open, and its Edit is this popover, at the
+          selection. */}
+      <LinkBubble editor={editor} disabled={disabled} suppressed={open} onEdit={() => openPopover(true)} />
       {open &&
         placement &&
         createPortal(
           <div ref={popoverRef} className={styles.linkPopover} style={placement}>
             <div className={styles.linkInputWrap}>
               <input
+                ref={inputRef}
                 className={styles.linkInput}
                 value={value}
                 autoFocus

@@ -8,6 +8,7 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
+import { EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./AnnotationBody.module.css";
@@ -62,7 +63,7 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ undoRedo: false }),
+      StarterKit.configure({ undoRedo: false, link: EDITOR_LINK_OPTIONS }),
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({ provider, user: { id: userId, name: userName, color: userColor } }),
       // eslint-disable-next-line react-hooks/refs -- getAuthorId is only ever invoked from the AuthorHighlight plugin's appendTransaction, on a real ProseMirror transaction dispatch, never during React's render

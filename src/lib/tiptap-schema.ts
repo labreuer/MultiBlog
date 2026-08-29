@@ -9,6 +9,25 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
 import { Annotation } from "./annotation-extension";
 
+// StarterKit's Link options for a *live* editor. CollabEditorBody and
+// AnnotationBody each build their own StarterKit (undo/redo off, since
+// Collaboration owns history) and both take these, so they can't drift.
+// Only Link's click plugin is affected — contentExtensions below is a
+// schema, and the mark renders the same either way, so it doesn't need
+// them.
+//
+// openOnClick off: a click in a link places the caret, like a click
+// anywhere else. With it on, every click (every tap, on a phone) opened
+// the target in a new tab, and there was no way to click *into* link text
+// to edit it. The browser had been saying as much all along — the UA
+// gives <a> `cursor: auto`, which resolves to the I-beam over editable
+// text, so the navigation the plugin bolted on never had an affordance.
+// Following a link moved to LinkBubble.tsx, where the href is a real <a>.
+// Don't reach for "whenNotEditable" as a middle ground: the installed
+// build maps it straight to `true`, and the click plugin already stands
+// down in a read-only view, so it is the same setting under another name.
+export const EDITOR_LINK_OPTIONS = { openOnClick: false } as const;
+
 // The node/mark schema used for a post's content. Shared between the
 // editor, the Hocuspocus doc-seeding step, and the public renderer so
 // they can never drift out of sync with each other.

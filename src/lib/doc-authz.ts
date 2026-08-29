@@ -120,6 +120,22 @@ function readableDocsWhere(userId: string, role: Role): Prisma.DocWhereInput | n
 export type LinkableDoc = ReadableDoc & { updatedAt: Date };
 export type LinkableDocJson = ReadableDoc & { updatedAt: string };
 
+// The link bubble's preview of a linked doc (LinkBubble.tsx, fetched through
+// previewLinkedDoc in src/app/actions/docs.ts): what the reading route's
+// byline shows — the title, the authors in byline order, the last edit — as
+// a block under the bubble's row, or "forbidden" for a doc that exists and
+// isn't this viewer's to read, the same answer the route itself gives.
+// Authors in the shape AuthorByline takes; updatedAt an ISO string on the
+// wire, as LinkableDocJson's is.
+export type LinkedDocPreview =
+  | {
+      status: "ok";
+      title: string;
+      authors: { userId: string; slug: string; name: string | null }[];
+      updatedAt: string;
+    }
+  | { status: "forbidden" };
+
 // How many rows the picker fetches. Inside the 5–10 band every mainstream
 // link picker lands in; the dropdown shows about five and scrolls for the
 // rest, so the cut is visible rather than a silent cap.
