@@ -106,6 +106,11 @@
   display: flex;
   flex-direction: column;
   padding: 4px 0;
+  /* About five and a half two-line rows. The half row is what says there's
+     more below — on a touch device the scrollbar is an overlay that only
+     appears once you scroll, so a clean cut would read as the end. */
+  max-height: 17rem;
+  overflow-y: auto;
   background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
@@ -114,16 +119,34 @@
   z-index: 1;
 }
 
+.linkResultsHeading {
+  padding: 4px 12px 2px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .linkResult {
-  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
   text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   background: none;
   border: none;
   color: inherit;
   cursor: pointer;
+}
+
+.linkResultTitle,
+.linkResultMeta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.linkResultMeta {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
 }
 
 /* Hover and the keyboard highlight look the same, and the list keeps them

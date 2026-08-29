@@ -6,8 +6,9 @@ import type { Editor } from "@tiptap/react";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { IconLink } from "@tabler/icons-react";
 import { searchLinkableDocs } from "@/app/actions/docs";
-import type { ReadableDoc } from "@/lib/doc-authz";
+import type { LinkableDocJson } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
+import { relativeTime } from "@/lib/relative-time";
 import {
   placePopover,
   popoverBoundsFor,
@@ -19,15 +20,17 @@ import styles from "./EditorChrome.module.css";
 
 // The toolbar's link button and its popover: one text box that is either a
 // URL (saved as typed) or a search over readable docs' titles (picking a
-// result links to /doc/<slug>). Anything starting with http:// or https://
-// is taken as a URL and never searched.
+// result links to /doc/<slug>); left empty, it offers the most recently
+// edited docs. Anything starting with http://, https:// or "/" — the last
+// being what picking a doc writes, so reopening such a link doesn't search
+// its own path as a title — is taken as a URL and never searched.
 //
 // The popover is portaled to <body>: on phones the toolbar is a sideways
 // scroller with an edge-fade mask (EditorChrome.module.css), and a mask
 // applies to every descendant — position: fixed included — so left in the
 // toolbar's subtree the popover would be faded out wherever it hangs past
 // the toolbar's box. Same reason QuoteControls' menu is portaled.
-const URL_LIKE = /^https?:\/\//i;
+const URL_LIKE = /^(https?:\/\/|\/)/i;
 
 // A search fires SEARCH_DEBOUNCE_MS after the last keystroke, or on every
 // KEYS_PER_FORCED_SEARCH-th keystroke since the last search if the debounce
@@ -85,8 +88,14 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
   const [hadLink, setHadLink] = useState(false);
   // The docs alongside the query that produced them, so the emphasis in the
   // list matches what was actually searched rather than what has been typed
-  // since the request went out.
-  const [results, setResults] = useState<{ query: string; docs: ReadableDoc[] }>({ query: "", docs: [] });
+  // since the request went out. `receivedAt` anchors the rows' "edited … ago"
+  // text: taken when the response lands, not at render, so it's stable
+  // across re-renders and keeps Date.now() off the render path.
+  const [results, setResults] = useState<{ query: string; docs: LinkableDocJson[]; receivedAt: number }>({
+    query: "",
+    docs: [],
+    receivedAt: 0,
+  });
   // Keyboard highlight in the result list; -1 is "none" (Enter saves the
   // typed text instead of picking a doc).
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -112,6 +121,19 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
   }, []);
   useEffect(() => cancelPendingSearch, [cancelPendingSearch]);
 
+  // An empty query is a real search: the action answers it with the most
+  // recently edited docs.
+  const runSearch = (query: string) => {
+    cancelPendingSearch();
+    keysSinceSearchRef.current = 0;
+    const seq = ++searchSeqRef.current;
+    void searchLinkableDocs(query).then((found) => {
+      if (searchSeqRef.current !== seq) return;
+      setResults({ query, docs: found, receivedAt: Date.now() });
+      setActiveIndex(-1);
+    });
+  };
+
   const close = useCallback(() => {
     cancelPendingSearch();
     searchSeqRef.current += 1;
@@ -125,16 +147,20 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
     const pos = atSelection ? editor.state.selection.to : null;
     const anchor = anchorFor(editor, pos, buttonRef.current);
     if (!anchor) return;
+    const initial = (editor.getAttributes("link").href as string | undefined) ?? "";
     setAnchorPos(pos);
     setPlacement(provisionalPlacement(anchor));
-    setValue((editor.getAttributes("link").href as string | undefined) ?? "");
+    setValue(initial);
     setHadLink(editor.isActive("link"));
     cancelPendingSearch();
     searchSeqRef.current += 1;
     keysSinceSearchRef.current = 0;
-    setResults({ query: "", docs: [] });
+    setResults({ query: "", docs: [], receivedAt: 0 });
     setActiveIndex(-1);
     setOpen(true);
+    // Nothing URL-shaped in the box (usually: nothing at all) — offer the
+    // recent docs straight away rather than waiting for a keystroke.
+    if (!URL_LIKE.test(initial.trim())) runSearch(initial.trim());
   };
 
   // Read by the shortcut plugin, which is registered once per editor and
@@ -190,29 +216,19 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
     };
   }, [open, close]);
 
-  const runSearch = (query: string) => {
-    cancelPendingSearch();
-    keysSinceSearchRef.current = 0;
-    const seq = ++searchSeqRef.current;
-    void searchLinkableDocs(query).then((found) => {
-      if (searchSeqRef.current !== seq) return;
-      setResults({ query, docs: found });
-      setActiveIndex(-1);
-    });
-  };
-
   // The doc search is driven from here rather than an effect on `value`, so
   // the debounce and the every-Nth-keystroke path share one timer and a
   // forced search cancels the pending debounced one instead of both firing.
-  // URL-shaped input is never searched — it's a URL, not a title query.
+  // URL-shaped input is never searched — it's a URL, not a title query. An
+  // emptied box goes back to the recent list, through the same debounce.
   const handleChange = (next: string) => {
     setValue(next);
     setActiveIndex(-1);
     cancelPendingSearch();
     const query = next.trim();
-    if (!query || URL_LIKE.test(query)) {
+    if (URL_LIKE.test(query)) {
       keysSinceSearchRef.current = 0;
-      setResults({ query: "", docs: [] });
+      setResults({ query: "", docs: [], receivedAt: 0 });
       return;
     }
     keysSinceSearchRef.current += 1;
@@ -276,7 +292,14 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
     applyHref(href, href);
   };
 
-  const selectDoc = (doc: ReadableDoc) => applyHref(`/doc/${doc.slug}`, docTitleOrFallback(doc.title));
+  const selectDoc = (doc: LinkableDocJson) => applyHref(`/doc/${doc.slug}`, docTitleOrFallback(doc.title));
+
+  // Keep the keyboard highlight in view: the menu shows about five rows and
+  // scrolls for the rest.
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, listId]);
 
   const { docs } = results;
   const handleInputKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -340,6 +363,11 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
                   className={styles.linkResults}
                   onMouseLeave={() => setActiveIndex(-1)}
                 >
+                  {results.query === "" && (
+                    <div role="presentation" className={styles.linkResultsHeading}>
+                      Recently edited
+                    </div>
+                  )}
                   {docs.map((doc, index) => (
                     <button
                       key={doc.id}
@@ -352,7 +380,10 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
                       onMouseEnter={() => setActiveIndex(index)}
                       onClick={() => selectDoc(doc)}
                     >
-                      {emphasizeMatch(docTitleOrFallback(doc.title), results.query)}
+                      <span className={styles.linkResultTitle}>
+                        {emphasizeMatch(docTitleOrFallback(doc.title), results.query)}
+                      </span>
+                      <span className={styles.linkResultMeta}>Edited {relativeTime(doc.updatedAt, results.receivedAt)}</span>
                     </button>
                   ))}
                 </div>

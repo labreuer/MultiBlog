@@ -112,25 +112,51 @@ function readableDocsWhere(userId: string, role: Role): Prisma.DocWhereInput | n
   return { deletedByUserId: null, OR: or };
 }
 
-// readableDocsFor filtered by title for the editor toolbar's link popover
-// (LinkControls.tsx): the top `limit` matches, title-prefix matches first.
-// Two queries wearing the same predicate rather than one with a computed
-// orderBy, because Prisma has no way to sort by "does the title start with
-// the query" — the second query only runs when the first comes back short,
-// and excludes the rows the first already returned.
+// The link picker's row (LinkControls.tsx): a readable doc plus when it was
+// last edited, which is what tells a dozen near-identical titles apart.
+// `updatedAt` is a Date from these queries and an ISO string on the wire
+// (LinkableDocJson) — the server action converts, so the client never
+// depends on a Date surviving the action boundary.
+export type LinkableDoc = ReadableDoc & { updatedAt: Date };
+export type LinkableDocJson = ReadableDoc & { updatedAt: string };
+
+// How many rows the picker fetches. Inside the 5–10 band every mainstream
+// link picker lands in; the dropdown shows about five and scrolls for the
+// rest, so the cut is visible rather than a silent cap.
+export const LINK_PICKER_LIMIT = 8;
+
+const linkableSelect = { id: true, slug: true, title: true, updatedAt: true } as const;
+
+// readableDocsFor's most recently edited rows — what the picker offers before
+// anything is typed, since the doc someone wants to link is usually one they
+// were just working on.
+export async function recentReadableDocsFor(
+  userId: string,
+  role: Role,
+  limit = LINK_PICKER_LIMIT,
+): Promise<LinkableDoc[]> {
+  const where = readableDocsWhere(userId, role);
+  if (!where) return [];
+  return prisma.doc.findMany({ where, select: linkableSelect, orderBy: { updatedAt: "desc" }, take: limit });
+}
+
+// readableDocsFor filtered by title: the top `limit` matches, title-prefix
+// matches first. Two queries wearing the same predicate rather than one with
+// a computed orderBy, because Prisma has no way to sort by "does the title
+// start with the query" — the second query only runs when the first comes
+// back short, and excludes the rows the first already returned.
 export async function searchReadableDocsFor(
   userId: string,
   role: Role,
   query: string,
-  limit = 5,
-): Promise<ReadableDoc[]> {
+  limit = LINK_PICKER_LIMIT,
+): Promise<LinkableDoc[]> {
   const where = readableDocsWhere(userId, role);
   if (!where) return [];
-  const select = { id: true, slug: true, title: true } as const;
 
   const prefix = await prisma.doc.findMany({
     where: { ...where, title: { startsWith: query, mode: "insensitive" } },
-    select,
+    select: linkableSelect,
     orderBy: { title: "asc" },
     take: limit,
   });
@@ -142,7 +168,7 @@ export async function searchReadableDocsFor(
       title: { contains: query, mode: "insensitive" },
       id: { notIn: prefix.map((doc) => doc.id) },
     },
-    select,
+    select: linkableSelect,
     orderBy: { title: "asc" },
     take: limit - prefix.length,
   });

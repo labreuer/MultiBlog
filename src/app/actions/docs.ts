@@ -8,7 +8,13 @@ import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { changeDocSlug, revertDocSlug as revertDocSlugInDb, uniqueDocSlug } from "@/lib/doc-slug";
 import { slugify } from "@/lib/slug";
-import { canManageDocs, canUserEditDoc, searchReadableDocsFor, type ReadableDoc } from "@/lib/doc-authz";
+import {
+  canManageDocs,
+  canUserEditDoc,
+  recentReadableDocsFor,
+  searchReadableDocsFor,
+  type LinkableDocJson,
+} from "@/lib/doc-authz";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { contentExtensions, titleExtensions } from "@/lib/tiptap-schema";
 import { docContentFromYdoc } from "@/lib/doc-content";
@@ -431,15 +437,19 @@ export async function bulkSetDocVisibility(docIds: string[], visibility: DocVisi
 }
 
 
-// The editor toolbar's link-popover doc search (LinkControls.tsx): title
-// matches among the docs this viewer may read, prefix matches first, capped
-// at 5. Returns [] rather than redirecting when signed out: every surface
-// carrying the toolbar is already gated, so an expired session mid-keystroke
-// degrades to "no results" instead of yanking the page to /sign-in.
-export async function searchLinkableDocs(query: string): Promise<ReadableDoc[]> {
+// The editor toolbar's link-popover doc picker (LinkControls.tsx). With a
+// query: title matches among the docs this viewer may read, prefix matches
+// first. Without one: the most recently edited. Both capped at
+// LINK_PICKER_LIMIT. Returns [] rather than redirecting when signed out:
+// every surface carrying the toolbar is already gated, so an expired session
+// mid-keystroke degrades to "no results" instead of yanking the page to
+// /sign-in.
+export async function searchLinkableDocs(query: string): Promise<LinkableDocJson[]> {
   const session = await auth();
   if (!session?.user) return [];
   const trimmed = query.trim().slice(0, 200);
-  if (!trimmed) return [];
-  return searchReadableDocsFor(session.user.id, session.user.role, trimmed);
+  const rows = trimmed
+    ? await searchReadableDocsFor(session.user.id, session.user.role, trimmed)
+    : await recentReadableDocsFor(session.user.id, session.user.role);
+  return rows.map(({ updatedAt, ...doc }) => ({ ...doc, updatedAt: updatedAt.toISOString() }));
 }
