@@ -142,7 +142,6 @@
 /* Split button: .quoteGroup has no gap of its own, so the two buttons sit
    pixel-adjacent instead of getting .toolbar's normal 4px inter-button gap. */
 .quoteGroup {
-  position: relative;
   display: inline-flex;
 }
 
@@ -154,11 +153,12 @@
   cursor: pointer;
 }
 
+/* position: fixed and portaled to <body>, placed by placePopover — see
+   QuoteControls.tsx for why an absolute menu inside the toolbar no longer
+   works. z-index matches the other fixed popovers (AnnotationPopover). */
 .quoteMenu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 2px;
+  position: fixed;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   min-width: 190px;
@@ -294,6 +294,39 @@
 }
 
 @media (max-width: 480px) {
+  /* One row that scrolls sideways instead of wrapping: at this size the
+     full toolbar runs ~450px, wider than any phone in portrait, and the
+     second row it wrapped onto is what the phone-landscape floor rule
+     above is fighting for space with. The scrollbar is hidden — touch
+     devices overlay theirs anyway — and a mask fades the right edge in its
+     place, so a button cut off there reads as "more this way" rather than
+     as the end. padding-right keeps the last button clear of the fade once
+     scrolled all the way over (trailing padding counts toward a flex
+     scroller's overflow). Any opaque color works in a mask; the token just
+     keeps the color-literal grep clean.
+
+     The mask applies to every descendant, fixed ones included, which is
+     why QuoteControls' menu and LinkControls' popover are portaled to
+     <body> rather than hanging inside the toolbar. */
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    padding-right: 32px;
+    mask-image: linear-gradient(to right, var(--foreground) calc(100% - 24px), transparent);
+  }
+
+  .toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Flex items shrink before they overflow; without this the buttons would
+     squash to fit rather than scroll. */
+  .toolbar > * {
+    flex-shrink: 0;
+  }
+
   .toolbarButton {
     min-height: 44px;
     padding: 6px 12px;

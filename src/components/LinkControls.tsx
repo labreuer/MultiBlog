@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { IconLink } from "@tabler/icons-react";
@@ -20,6 +21,12 @@ import styles from "./EditorChrome.module.css";
 // URL (saved as typed) or a search over readable docs' titles (picking a
 // result links to /doc/<slug>). Anything starting with http:// or https://
 // is taken as a URL and never searched.
+//
+// The popover is portaled to <body>: on phones the toolbar is a sideways
+// scroller with an edge-fade mask (EditorChrome.module.css), and a mask
+// applies to every descendant — position: fixed included — so left in the
+// toolbar's subtree the popover would be faded out wherever it hangs past
+// the toolbar's box. Same reason QuoteControls' menu is portaled.
 const URL_LIKE = /^https?:\/\//i;
 
 // A search fires SEARCH_DEBOUNCE_MS after the last keystroke, or on every
@@ -168,9 +175,9 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        close();
-      }
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      close();
     };
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
@@ -306,65 +313,68 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
       >
         <IconLink size={18} />
       </button>
-      {open && placement && (
-        <div ref={popoverRef} className={styles.linkPopover} style={placement}>
-          <div className={styles.linkInputWrap}>
-            <input
-              className={styles.linkInput}
-              value={value}
-              autoFocus
-              placeholder="Paste a URL or search docs by title"
-              aria-label="Link URL or doc search"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={docs.length > 0}
-              aria-controls={listId}
-              aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
-              onChange={(e) => handleChange(e.target.value)}
-              onKeyDown={handleInputKey}
-            />
-            {docs.length > 0 && (
-              <div
-                ref={listRef}
-                id={listId}
-                role="listbox"
-                className={styles.linkResults}
-                onMouseLeave={() => setActiveIndex(-1)}
-              >
-                {docs.map((doc, index) => (
-                  <button
-                    key={doc.id}
-                    id={`${listId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    tabIndex={-1}
-                    className={index === activeIndex ? `${styles.linkResult} ${styles.linkResultActive}` : styles.linkResult}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => selectDoc(doc)}
-                  >
-                    {emphasizeMatch(docTitleOrFallback(doc.title), results.query)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className={styles.linkButtons}>
-            <button type="button" className={styles.toolbarButton} disabled={!value.trim()} onClick={saveTyped}>
-              Save
-            </button>
-            {hadLink ? (
-              <button type="button" className={styles.toolbarButton} onClick={removeLink}>
-                Remove
+      {open &&
+        placement &&
+        createPortal(
+          <div ref={popoverRef} className={styles.linkPopover} style={placement}>
+            <div className={styles.linkInputWrap}>
+              <input
+                className={styles.linkInput}
+                value={value}
+                autoFocus
+                placeholder="Paste a URL or search docs by title"
+                aria-label="Link URL or doc search"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={docs.length > 0}
+                aria-controls={listId}
+                aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
+                onChange={(e) => handleChange(e.target.value)}
+                onKeyDown={handleInputKey}
+              />
+              {docs.length > 0 && (
+                <div
+                  ref={listRef}
+                  id={listId}
+                  role="listbox"
+                  className={styles.linkResults}
+                  onMouseLeave={() => setActiveIndex(-1)}
+                >
+                  {docs.map((doc, index) => (
+                    <button
+                      key={doc.id}
+                      id={`${listId}-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeIndex}
+                      tabIndex={-1}
+                      className={index === activeIndex ? `${styles.linkResult} ${styles.linkResultActive}` : styles.linkResult}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => selectDoc(doc)}
+                    >
+                      {emphasizeMatch(docTitleOrFallback(doc.title), results.query)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className={styles.linkButtons}>
+              <button type="button" className={styles.toolbarButton} disabled={!value.trim()} onClick={saveTyped}>
+                Save
               </button>
-            ) : (
-              <button type="button" className={styles.toolbarButton} onClick={close}>
-                Cancel
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+              {hadLink ? (
+                <button type="button" className={styles.toolbarButton} onClick={removeLink}>
+                  Remove
+                </button>
+              ) : (
+                <button type="button" className={styles.toolbarButton} onClick={close}>
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
