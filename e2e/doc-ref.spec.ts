@@ -62,6 +62,12 @@ test.describe("[[ drops a doc reference at the caret (DocRefMenu.tsx)", () => {
       await expect(list).toContainText("Recently edited");
 
       await page.keyboard.type(title);
+      // Still up straight after the keystrokes, before any answer for them
+      // can have landed (150ms debounce): the previous rows stand in while
+      // the next answer is fetched, rather than the menu blinking out on
+      // every keystroke. A one-shot count, not a retrying expect, since a
+      // retry would wait the blink out.
+      expect(await list.count()).toBe(1);
       const option = list.getByRole("option", { name: title });
       await expect(option).toBeVisible();
       await expect(list).not.toContainText("Recently edited");

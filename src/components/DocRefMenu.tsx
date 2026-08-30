@@ -128,6 +128,8 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
   const keyRef = useRef<(props: SuggestionKeyDownProps) => boolean>(() => false);
 
   const { items = [], query = "", loading = false } = session ?? {};
+  // "No docs match" only for a query whose own answer is in — never while
+  // an earlier answer is standing in — so the line doesn't flash mid-word.
   const noMatch = !loading && items.length === 0 && query !== "";
   const visible = session !== null && focused && (items.length > 0 || noMatch);
 
@@ -208,9 +210,17 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
             setSession(toSession(props));
             setActiveIndex(0);
           },
+          // Suggestion reports every keystroke twice: at once with no
+          // items and `loading`, then with the answer once the debounce
+          // and the fetch are through. Showing the interim would blank
+          // the menu for that whole gap on every keystroke, so the rows
+          // shown are the last real answer until the next one lands —
+          // and the highlight only resets then.
           onUpdate: (props) => {
-            setSession(toSession(props));
-            setActiveIndex(0);
+            setSession((prev) =>
+              props.loading && prev ? { ...toSession(props), items: prev.items, receivedAt: prev.receivedAt } : toSession(props),
+            );
+            if (!props.loading) setActiveIndex(0);
           },
           onExit: () => setSession(null),
           onKeyDown: (props) => keyRef.current(props),
