@@ -50,10 +50,10 @@
 }
 
 /* The link button + its popover (LinkControls.tsx). The popover is
-   position: fixed like AnnotationPopover — placed by placePopover in
-   viewport coordinates — so it escapes any overflow-clipping ancestor (an
-   annotation card's editor, /side-by-side's scroller) instead of being cut
-   off at its edge. */
+   position: fixed like AnnotationPopover — placed in viewport coordinates
+   by floating-ui's computePosition — so it escapes any overflow-clipping
+   ancestor (an annotation card's editor, /side-by-side's scroller)
+   instead of being cut off at its edge. */
 .linkGroup {
   display: inline-flex;
 }
@@ -81,8 +81,10 @@
    above the selection is pinned by its bottom edge and grows upward, so
    there the list goes to the top, above the whole form: whatever is above
    the list is what moves when it comes and goes, and that should be
-   nothing the author is typing into. */
-.linkPopoverAbove .linkResults {
+   nothing the author is typing into. The side lives on the popover as
+   data-placement, written from computePosition's answer
+   (LinkControls.tsx), rather than as a class of ours. */
+[data-placement^="top"] .linkResults {
   order: -1;
 }
 

@@ -70,16 +70,24 @@ edit a link is to swap its URL. Save marks the range in place when the title sti
 text (so inner marks survive) and replaces the text otherwise; on a bare caret it inserts the
 title, or the URL itself, as the link's text.
 
-**The popover is placed once, for the tallest it can be** — the form plus the result list at
-its max height (`LIST_MAX_HEIGHT_REM`, applied inline so the arithmetic and the CSS are one
-number) — and re-placed only on scroll/resize. Fitted to its live height it flipped above the
-selection when the recent docs landed and back below on a pick: a box the author was typing into
-walked. Placed for its tallest it never needs to flip later, and the side decides which edge is
-pinned: below the selection the top (`top:`), so the box grows downward; above it the bottom
-(`bottom:`), so it grows upward and collapses back down toward the text — the corner nearest the
-selection never leaves it. Whatever is above the list moves when the list grows, so the flipped
-popover (`.linkPopoverAbove`) lifts the list to the top, above the whole form, and title, URL and
-buttons hold still on either side.
+**Placement is `@floating-ui/dom`'s — except the side, which is chosen for the tallest the
+popover can be** (the form plus the result list at its max height, `LIST_MAX_HEIGHT_REM`,
+applied inline so the arithmetic and the CSS are one number), never for its live height. Live
+height is what the stock `flip()` middleware reads, and that bug has already been paid for here:
+fitted live, the box flipped above the selection when the recent docs landed and back below on a
+pick — a box the author was typing into walked. So `flip()` is left out and a small custom
+middleware, `sideForTallest`, makes the call. The rest is the library's: `computePosition` lays
+a bottom-placed box out from the anchor down and a top-placed one from the anchor up, so the
+edge nearest the text holds still and growth lands on the far edge (flipped above, the box grows
+upward and collapses back toward the selection); `shift()` is the horizontal slide; `autoUpdate`
+re-places on ancestor scroll/resize and, via ResizeObserver, on the box's own size changes — no
+listeners of ours, and no reflow bookkeeping. Its answer lands in a microtask, before the newly
+portaled box first paints, so nothing provisional is ever shown. The side is stamped on the
+popover as `data-placement`, which is what lifts the list to the top of a flipped popover
+(`[data-placement^="top"]`, EditorChrome.module.css): whatever sits above the list moves when it
+grows, and above the selection that should be nothing the author is typing into. The hand-rolled
+`placePopover` version and a tippy.js attempt live in git history; TODO.md tracks moving the
+other popovers (still on `src/lib/popover-placement.ts`) to floating-ui.
 
 The selection stays visible under the open popover. A document has one DOM selection, and the
 URL box taking focus takes it — ProseMirror's `state.selection` is untouched (Save resolves the
@@ -126,9 +134,10 @@ does. Ours on top: `allow`, which keeps a closed `[[a]]` (Suggestion's match run
 and would carry the `]]` in its query) and a code block from being a context; the list, rendered
 from what its `render` callbacks hand over; ArrowUp/Down/Enter in `onKeyDown`, which also
 stands down mid-composition; and placement, which takes Suggestion's `clientRect` as the anchor
-but runs it through the repo's `placePopover` rather than Suggestion's floating-ui `mount`, so
-the menu follows the same bounds, flip and pinned-edge rules as every other popover here (once
-per `[[`, for the tallest it can be). Suggestion's plugin is *prepended*, ahead of the keymaps,
+but still runs it through `placePopover` rather than Suggestion's floating-ui `mount` (once per
+`[[`, for the tallest the menu can be) — the link popover has since moved to `@floating-ui/dom`
+directly, and TODO.md's migration item brings this menu along, sharing `sideForTallest` rather
+than adopting `mount`'s own update loop. Suggestion's plugin is *prepended*, ahead of the keymaps,
 for the same reason `LinkControls`' Ctrl-K is: Enter must reach the menu before the base keymap
 splits the paragraph.
 

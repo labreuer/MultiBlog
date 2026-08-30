@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import { getMarkRange } from "@tiptap/core";
@@ -10,12 +10,8 @@ import { searchLinkableDocs } from "@/app/actions/docs";
 import type { LinkableDocJson } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { relativeTime } from "@/lib/relative-time";
-import {
-  placePopover,
-  popoverBoundsFor,
-  provisionalPlacement,
-  type PopoverAnchor,
-} from "@/lib/popover-placement";
+import { autoUpdate, computePosition, offset, shift, type Middleware } from "@floating-ui/dom";
+import { POPOVER_GAP, type PopoverAnchor } from "@/lib/popover-placement";
 import LinkBubble from "./LinkBubble";
 import styles from "./EditorChrome.module.css";
 
@@ -56,21 +52,35 @@ const KEYS_PER_FORCED_SEARCH = 3;
 // scrollbar is an overlay that only appears once you scroll, so a clean cut
 // would read as the end. In rem so it scales with the root font size, and
 // one constant applied inline rather than a CSS max-height, because the
-// placement arithmetic needs the same number: the popover is placed for
-// the tallest it can be (the layout effect below).
+// placement arithmetic needs the same number: the popover's side is
+// chosen for the tallest it can be (sideForTallest below).
 const LIST_MAX_HEIGHT_REM = 17;
 // .linkPopover's gap (EditorChrome.module.css), between the list and its
 // neighbours — part of that tallest height.
 const LIST_GAP_PX = 8;
 
-// Where the popover is pinned: by its top edge when it hangs below the
-// anchor, by its bottom edge when it has flipped above — so the edge
-// nearest the selected text is the one that holds still as the result list
-// changes the box's height, and the far edge is the one that moves.
-type PopoverStyle = { left: number; top: number } | { left: number; bottom: number };
-
-function samePlacement(a: PopoverStyle, b: PopoverStyle): boolean {
-  return a.left === b.left && ("top" in a ? "top" in b && a.top === b.top : "bottom" in b && a.bottom === b.bottom);
+// The side decision: made for the *tallest* the popover can be — the form
+// plus the list at LIST_MAX_HEIGHT_REM — never for its live height, which
+// is what the stock flip() reads and exactly the walking-box bug this
+// popover fixed once already (the box flipped above the selection when
+// the recent docs landed, back below on a pick, while being typed into).
+// Which edge then holds still is computePosition's own arithmetic: a
+// bottom-placed box is laid out from the anchor down, a top-placed one
+// from the anchor up, so growth always lands on the far edge.
+function sideForTallest(list: RefObject<HTMLDivElement | null>): Middleware {
+  return {
+    name: "sideForTallest",
+    fn({ rects, placement }) {
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const listHeight = list.current ? list.current.getBoundingClientRect().height + LIST_GAP_PX : 0;
+      const formHeight = rects.floating.height - listHeight;
+      const tallest = formHeight + LIST_GAP_PX + LIST_MAX_HEIGHT_REM * rem;
+      const fitsBelow = rects.reference.y + rects.reference.height + POPOVER_GAP + tallest <= window.innerHeight;
+      const fitsAbove = rects.reference.y - POPOVER_GAP - tallest >= 0;
+      const desired = fitsBelow || !fitsAbove ? "bottom-start" : "top-start";
+      return placement === desired ? {} : { reset: { placement: desired } };
+    },
+  };
 }
 
 type LinkRange = { from: number; to: number; text: string };
@@ -158,7 +168,6 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
   // typed URL instead of picking a doc).
   const [activeIndex, setActiveIndex] = useState(-1);
   const [anchorPos, setAnchorPos] = useState<number | null>(null);
-  const [placement, setPlacement] = useState<PopoverStyle | null>(null);
   const listId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -205,7 +214,6 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
     cancelPendingSearch();
     searchSeqRef.current += 1;
     setOpen(false);
-    setPlacement(null);
     setAnchorPos(null);
   }, [cancelPendingSearch]);
 
@@ -216,7 +224,6 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
     if (!anchor) return;
     const initialUrl = (editor.getAttributes("link").href as string | undefined) ?? "";
     setAnchorPos(pos);
-    setPlacement(provisionalPlacement(anchor));
     setTitle(targetRange(editor)?.text ?? "");
     setUrl(initialUrl);
     setUrlFocused(false);
@@ -317,52 +324,48 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
     }
   };
 
-  // Two-phase placement, the popover-placement.ts bootstrap: openPopover
-  // paints the unclamped provisional spot, this measures the rendered box
-  // and placePopover slides/flips it inside bounds.
-  //
-  // Placed once, for the *tallest* the popover can be — the form plus the
-  // result list at LIST_MAX_HEIGHT_REM — rather than re-measured as results
-  // come and go. Fitted to its live height, the box flipped above the
-  // selection when the recent docs landed and back below on a pick: the
-  // author was typing into a box that walked. Placed for its tallest, it
-  // never needs to flip later, and the side decides which edge is pinned
-  // (PopoverStyle): below the anchor, the top, so the box grows downward;
-  // above it, the bottom — the tallest box's bottom, which is the gap above
-  // the selection — so the box grows *upward* and collapses back down
-  // toward the text, its near corner never leaving it. And since whatever
-  // sits above the list moves when it grows, the flipped popover puts the
-  // list at its top (.linkPopoverAbove), above the whole form, so title,
-  // URL and buttons hold still on either side. The width is fixed, so the
-  // horizontal slide never changes either. Re-runs only on scroll/resize,
-  // which move the anchor, not the box. Capture phase for scroll: the
-  // editor's own scroller is what scrolls, not the window, and an inner
-  // element's scroll doesn't bubble.
+  // The list shows only while the URL box has focus (the CSS comment on
+  // .linkResults says why).
   const listShown = urlFocused && results.docs.length > 0;
+
+  // floating-ui owns placement. autoUpdate decides when: scroll/resize
+  // listeners on the contextElement's ancestors (a virtual reference has
+  // none of its own; the editor's scroller is the one that matters) plus
+  // a ResizeObserver on the box, so the list growing in re-places without
+  // bookkeeping. computePosition decides where — shift() is the
+  // horizontal slide — and its answer lands on the element in a
+  // microtask, before the newly portaled box ever paints, so there is no
+  // provisional spot. The side is data-placement (the CSS lifts the list
+  // above the form when it reads "top") and the one call kept ours:
+  // sideForTallest, with the stock flip() left out.
   useLayoutEffect(() => {
     if (!open) return;
-    function reposition() {
-      const popover = popoverRef.current;
-      const anchor = anchorFor(editor, anchorPos, buttonRef.current);
-      if (!popover || !anchor) return;
-      const box = popover.getBoundingClientRect();
-      const list = listRef.current?.getBoundingClientRect();
-      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      const formHeight = box.height - (list ? list.height + LIST_GAP_PX : 0);
-      const tallest = formHeight + LIST_GAP_PX + LIST_MAX_HEIGHT_REM * rem;
-      const spot = placePopover(anchor, { width: box.width, height: tallest }, popoverBoundsFor(buttonRef.current));
-      const bottom = spot.top + tallest;
-      const next: PopoverStyle =
-        bottom <= anchor.top ? { left: spot.left, bottom: window.innerHeight - bottom } : { left: spot.left, top: spot.top };
-      setPlacement((prev) => (prev && samePlacement(prev, next) ? prev : next));
-    }
-    reposition();
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
+    const popover = popoverRef.current;
+    if (!popover) return;
+    const reference = {
+      // Live coordinates each call — the selection scrolls with the
+      // editor's own text box. A width-0 rect at anchorFor's point.
+      getBoundingClientRect: () => {
+        const anchor = anchorFor(editor, anchorPos, buttonRef.current) ?? { top: 0, bottom: 0, left: 0 };
+        return new DOMRect(anchor.left, anchor.top, 0, anchor.bottom - anchor.top);
+      },
+      contextElement: editor.view.dom,
     };
+    const update = () => {
+      void computePosition(reference, popover, {
+        strategy: "fixed",
+        placement: "bottom-start",
+        middleware: [
+          offset({ mainAxis: POPOVER_GAP, crossAxis: POPOVER_GAP }),
+          sideForTallest(listRef),
+          shift({ padding: POPOVER_GAP }),
+        ],
+      }).then(({ x, y, placement }) => {
+        popover.dataset.placement = placement;
+        Object.assign(popover.style, { left: `${x}px`, top: `${y}px` });
+      });
+    };
+    return autoUpdate(reference, popover, update);
   }, [open, editor, anchorPos]);
 
   // Save: with a bare caret there is nothing to mark, so insert the title
@@ -451,14 +454,8 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
           selection. */}
       <LinkBubble editor={editor} disabled={disabled} suppressed={open} onEdit={() => openPopover(true)} />
       {open &&
-        placement &&
         createPortal(
-          <div
-            ref={popoverRef}
-            className={"bottom" in placement ? `${styles.linkPopover} ${styles.linkPopoverAbove}` : styles.linkPopover}
-            style={placement}
-            data-testid="link-popover"
-          >
+          <div ref={popoverRef} className={styles.linkPopover} data-testid="link-popover">
             <div className={styles.linkField}>
               <span className={styles.linkFieldIcon} aria-hidden="true">
                 <IconLetterCase size={16} />
@@ -494,8 +491,8 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
               />
             </div>
             {/* A direct child of the popover, not of the URL field's wrap, so
-                the flipped popover can lift it to the top (.linkPopoverAbove)
-                with a single `order`. */}
+                the flipped popover can lift it to the top with a single
+                `order` ([data-placement^="top"], EditorChrome.module.css). */}
             {listShown && (
               <div
                 ref={listRef}
