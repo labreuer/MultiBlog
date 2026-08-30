@@ -104,6 +104,42 @@ sets a DOM range *before* focusing an editable editor has it replaced by the sta
 why `e2e/fixtures.ts`' `selectTextIn` focuses the editor before selecting (the
 `margin-rail-widths.spec.ts` annotate-marker case broke when it didn't).
 
+### `[[` drops a doc reference at the caret
+
+The other half of linking, the Obsidian / Roam / Notion gesture: Ctrl-K is for linking text
+you already have, `[[` is for a reference you have no text for yet. `DocRefMenu.tsx` (mounted
+beside both live editors' `EditorContent`, not in the toolbar — the annotation editor's toolbar
+is hidden by default) opens a menu of readable docs under the `[[` — recent docs at first,
+filtering as you keep typing — and Enter or a click replaces `[[` and the query with the doc's
+title, linked to `/doc/<slug>`. The query is transient by construction, which is exactly what
+the popover's title box could never assume (its section above on why the search moved to the
+URL box).
+
+It is built on `@tiptap/suggestion` (pinned exactly, like every `@tiptap/*` — the peer dep is
+the exact core version), the utility under TipTap's own Mention. Suggestion owns the trigger —
+a `[[` in the text node before the caret, `allowSpaces` so titles with spaces stay one query,
+`allowedPrefixes: null` so `word[[` counts as well as ` [[` — the query and its range, a
+decoration around them (`doc-ref-query`, unstyled), Escape, the debounced and abortable `items`
+fetch, and the composition state an IME puts the view in. Its Escape is an *exit that remembers
+the dismissed range*: typing on in the same `[[` doesn't reopen the menu, and a later `[[`
+does. Ours on top: `allow`, which keeps a closed `[[a]]` (Suggestion's match runs to the caret
+and would carry the `]]` in its query) and a code block from being a context; the list, rendered
+from what its `render` callbacks hand over; ArrowUp/Down/Enter in `onKeyDown`, which also
+stands down mid-composition; and placement, which takes Suggestion's `clientRect` as the anchor
+but runs it through the repo's `placePopover` rather than Suggestion's floating-ui `mount`, so
+the menu follows the same bounds, flip and pinned-edge rules as every other popover here (once
+per `[[`, for the tallest it can be). Suggestion's plugin is *prepended*, ahead of the keymaps,
+for the same reason `LinkControls`' Ctrl-K is: Enter must reach the menu before the base keymap
+splits the paragraph.
+
+What is typed right after a pick is kept out of the link: Link is inclusive while autolink is
+on, and the sentence the reference was dropped into continues right after it, so the next
+character would otherwise join the link. Clearing the stored marks on the pick is **not** enough
+here — ProseMirror drops stored marks on any step, and `AuthorHighlight`'s `appendTransaction`
+adds its steps in the same dispatch — so a second, tiny plugin remembers where the link ends
+(`plainAt`) and its own `appendTransaction` strips the link mark from whatever lands there next,
+then forgets.
+
 ### Why `@tiptap/extension-document`/`-paragraph`/`-text` are still declared deps
 
 They are for schemas built **without** StarterKit at all, so nothing is double-registered:

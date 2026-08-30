@@ -22,6 +22,7 @@ import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import EditorToolbar from "./EditorToolbar";
+import DocRefMenu from "./DocRefMenu";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import styles from "./EditorChrome.module.css";
 import proseStyles from "@/styles/prose.module.css";
@@ -290,6 +291,10 @@ export default function CollabEditorBody({
         {...{ [EDITOR_SCROLL_ATTRIBUTE]: "" }}
         className={`${styles.editorContent} ${proseStyles.prose} ${suppressAnnotations ? proseStyles.noAnnotations : ""}`}
       />
+      {/* "[[" at the caret — a doc reference dropped into running text.
+          Beside the editor rather than in the toolbar, since the annotation
+          editor's toolbar is hidden by default and this shouldn't be. */}
+      <DocRefMenu editor={editor} disabled={!editable} />
     </div>
   );
 }

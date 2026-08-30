@@ -173,6 +173,21 @@
   justify-content: flex-end;
 }
 
+/* The "[[" doc-reference menu (DocRefMenu.tsx): the link popover's result
+   list on its own, fixed and portaled for .linkPopover's reasons, under
+   the "[[" in the text. Carries .linkResults for the box itself. */
+.docRefMenu {
+  position: fixed;
+  z-index: 20;
+  width: 300px;
+}
+
+.docRefEmpty {
+  padding: 6px 12px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
 /* The link bubble (LinkBubble.tsx): one row under the link the caret is
    in, and for a link into this site's docs a preview block beneath it.
    Fixed and portaled for .linkPopover's reasons. In the row, the href is

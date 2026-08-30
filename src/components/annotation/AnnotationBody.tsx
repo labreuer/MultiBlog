@@ -11,6 +11,7 @@ import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
+import DocRefMenu from "../DocRefMenu";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./AnnotationBody.module.css";
 
@@ -102,6 +103,7 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
     <div className={styles.frame}>
       {toolbarVisible && <EditorToolbar editor={editor} disabled={!editable} tools={ANNOTATION_TOOLS} />}
       <EditorContent editor={editor} className={`${styles.content} ${proseStyles.prose}`} />
+      <DocRefMenu editor={editor} disabled={!editable} />
       {editable && (
         <button type="button" onClick={toggleToolbar} className={styles.toolbarToggle}>
           {toolbarVisible ? "Hide formatting" : "Aa Formatting"}
