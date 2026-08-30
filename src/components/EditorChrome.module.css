@@ -73,21 +73,39 @@
   box-shadow: 0 2px 8px var(--shadow-color);
 }
 
-/* The input and its dropdown. position: relative so the result list can
-   hang off the input's bottom edge, over the Save/Cancel row, the way a
-   combobox's menu does, instead of pushing that row down and back up as
-   results come and go. Being absolute it adds nothing to the popover's own
-   height, which is why LinkControls measures the list separately when
-   placing the popover. */
-.linkInputWrap {
+/* The result list sits in the popover's flow — between the URL box and
+   the button row — rather than floating over that row: floated, it would
+   cover Save and Cancel, which a mouse could then never reach. It shows
+   only while the URL box has focus (LinkControls), so the form is compact
+   again the moment the title box is picked. A popover that has flipped
+   above the selection is pinned by its bottom edge and grows upward, so
+   there the list goes to the top, above the whole form: whatever is above
+   the list is what moves when it comes and goes, and that should be
+   nothing the author is typing into. */
+.linkPopoverAbove .linkResults {
+  order: -1;
+}
+
+/* A field: the icon saying which box this is, inside the box's left edge
+   (the input's padding leaves it room), then the input. */
+.linkField {
   position: relative;
   display: flex;
+  align-items: center;
+}
+
+.linkFieldIcon {
+  position: absolute;
+  left: 8px;
+  display: inline-flex;
+  color: var(--text-muted);
+  pointer-events: none;
 }
 
 .linkInput {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 6px 8px 6px 30px;
   font: inherit;
   color: inherit;
   background: var(--background);
@@ -98,25 +116,18 @@
 /* Same box as .quoteMenu, so the toolbar's two dropdowns read as one kind
    of thing. */
 .linkResults {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  margin-top: 2px;
   display: flex;
   flex-direction: column;
   padding: 4px 0;
-  /* About five and a half two-line rows. The half row is what says there's
-     more below — on a touch device the scrollbar is an overlay that only
-     appears once you scroll, so a clean cut would read as the end. */
-  max-height: 17rem;
+  /* max-height is set inline by LinkControls (LIST_MAX_HEIGHT_REM): the
+     popover is placed for the tallest it can be, so the component owns the
+     number. */
   overflow-y: auto;
   background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
   border-radius: 4px;
   box-shadow: 0 2px 6px var(--shadow-color);
-  z-index: 1;
 }
 
 .linkResultsHeading {

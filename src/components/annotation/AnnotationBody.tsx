@@ -9,6 +9,7 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
+import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./AnnotationBody.module.css";
@@ -68,6 +69,9 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
       CollaborationCaret.configure({ provider, user: { id: userId, name: userName, color: userColor } }),
       // eslint-disable-next-line react-hooks/refs -- getAuthorId is only ever invoked from the AuthorHighlight plugin's appendTransaction, on a real ProseMirror transaction dispatch, never during React's render
       AuthorHighlight.configure({ getAuthorId: () => (coAuthoringRef.current ? userId : null) }),
+      // Selection stays painted while the link popover holds focus —
+      // CollabEditorBody's comment on the same line.
+      BlurredSelection,
     ],
     editorProps: { attributes: { "aria-label": "Annotation body", role: "textbox" } },
     immediatelyRender: false,

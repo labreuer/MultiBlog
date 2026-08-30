@@ -51,6 +51,59 @@ viewer may not read shows "You don't have permission to read this doc." in the b
 (the route renders Forbidden there rather than a 404, so the bubble reveals nothing following
 the link wouldn't), and a doc that doesn't exist adds nothing.
 
+### The link popover is a form: title over URL
+
+`LinkControls.tsx`'s popover is two boxes, each prefixed by an icon saying which is which (Aa,
+link). The title is the link's text and nothing else. **The URL box is the one that searches** —
+paste a URL or type a doc title, recent docs on empty — the Google Docs / Confluence
+arrangement, chosen over a title-that-also-searches because the two jobs collide exactly when
+text is selected: a search typed into the title box would overwrite the selection's text, and
+that text is the one thing the author has already decided. A pick fills the URL box, and the
+title box only if it is empty; **a pick fills, Save applies**, so either box can still be
+adjusted (the old one-box picker saved on pick and offered no way to change the text). The result
+list sits *between* the URL box and the button row in flow, shown only while the URL box has
+focus, rather than floating over the buttons where a mouse could never reach Save; the list and
+the button row both `preventDefault` their mousedown so a click on either doesn't blur the box
+and pull the list — or the button — out from under the click. The URL box opens focused with
+its contents selected, since both the search and the paste happen there and the usual reason to
+edit a link is to swap its URL. Save marks the range in place when the title still matches its
+text (so inner marks survive) and replaces the text otherwise; on a bare caret it inserts the
+title, or the URL itself, as the link's text.
+
+**The popover is placed once, for the tallest it can be** — the form plus the result list at
+its max height (`LIST_MAX_HEIGHT_REM`, applied inline so the arithmetic and the CSS are one
+number) — and re-placed only on scroll/resize. Fitted to its live height it flipped above the
+selection when the recent docs landed and back below on a pick: a box the author was typing into
+walked. Placed for its tallest it never needs to flip later, and the side decides which edge is
+pinned: below the selection the top (`top:`), so the box grows downward; above it the bottom
+(`bottom:`), so it grows upward and collapses back down toward the text — the corner nearest the
+selection never leaves it. Whatever is above the list moves when the list grows, so the flipped
+popover (`.linkPopoverAbove`) lifts the list to the top, above the whole form, and title, URL and
+buttons hold still on either side.
+
+The selection stays visible under the open popover. A document has one DOM selection, and the
+URL box taking focus takes it — ProseMirror's `state.selection` is untouched (Save resolves the
+range from it live), only the paint goes. `BlurredSelection`
+(`src/lib/blurred-selection-extension.ts`), registered in both live editors, decorates
+`state.selection` with class `selection` while the editor is blurred; `prose.module.css` paints
+it as a selection-blue wash off `--link`. It fires on *every* blur, not only this popover's, and
+that includes composing an annotation — where the same range already carries
+`.pending-annotation`. ProseMirror merges same-range inline decorations onto one span with both
+classes, so a `.selection.pending-annotation` rule hands that span the pending look alone; the two
+never stack. The extension is inert on a non-editable editor, so the reading views and
+`AnnotationBodyReader` are untouched.
+
+**Not `@tiptap/extensions`' stock `Selection`**, which paints the same decoration but also clears
+the DOM selection on blur and re-applies the state selection to the DOM a frame after focus —
+neither is needed for the paint, and DOM-selection writes from a plugin are one more thing to
+reason about under the editor's selection-driven annotate widget. The dependency stays transitive
+(StarterKit's); nothing imports it directly. **What any such decoration does change**: the focus
+transaction re-renders the decorated text, and ProseMirror then re-asserts its state selection
+over the DOM's. Real gestures focus first and select second, so users never see it; a script that
+sets a DOM range *before* focusing an editable editor has it replaced by the stale one — which is
+why `e2e/fixtures.ts`' `selectTextIn` focuses the editor before selecting (the
+`margin-rail-widths.spec.ts` annotate-marker case broke when it didn't).
+
 ### Why `@tiptap/extension-document`/`-paragraph`/`-text` are still declared deps
 
 They are for schemas built **without** StarterKit at all, so nothing is double-registered:

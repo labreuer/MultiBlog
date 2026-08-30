@@ -1,6 +1,6 @@
 // The link bubble (src/components/LinkBubble.tsx; docs/TIPTAP.md, "A link
-// opens from its bubble, not from a click") and the link popover's
-// select-on-open. Driven through the doc editor: the annotation editor
+// opens from its bubble, not from a click") and the link popover's two
+// boxes (LinkControls.tsx; TIPTAP.md, "The link popover is a form"). Driven through the doc editor: the annotation editor
 // builds its StarterKit from the same EDITOR_LINK_OPTIONS and mounts the
 // same LinkControls, so what is pinned here is the shared behaviour.
 //
@@ -18,8 +18,9 @@
 //
 // Links are created the way an author would — caret in place, Ctrl/⌘-K,
 // type, Enter — rather than seeded as marks, so the popover's own paths are
-// under test too. With nothing selected, LinkControls inserts the href as
-// the link's text, which is what makes each link addressable by name below.
+// under test too. With nothing selected and no title typed, LinkControls
+// inserts the href as the link's text, which is what makes each link
+// addressable by name below.
 import type { Page } from "@playwright/test";
 import { test as base, expect, bodyEditor, waitForDocCollabReady } from "./fixtures";
 import {
@@ -65,8 +66,13 @@ function bubble(page: Page) {
   return page.getByRole("group", { name: "Link", exact: true });
 }
 
-/** The link popover's one text box. */
-function linkInput(page: Page) {
+/** The link popover's title box: the link's text, and nothing else. */
+function titleInput(page: Page) {
+  return page.getByRole("textbox", { name: "Link title" });
+}
+
+/** The link popover's URL box — a URL, or the doc search. */
+function urlInput(page: Page) {
   return page.getByRole("combobox", { name: "Link URL or doc search" });
 }
 
@@ -76,45 +82,63 @@ function bodyLink(page: Page, name: string) {
 }
 
 /**
- * Collapses the caret to the end of the paragraph holding `needle` — a DOM
- * Range plus a `selectionchange` dispatch, collapseToBodyStart's recipe,
- * rather than a click and an End keypress that the next keystroke could
- * race (fixtures.ts on why). focus() rather than a click to get the editor
- * focused: a bubble hangs *under* its link's line, over whatever paragraph
- * comes next, and a click landing there would hit the bubble instead.
+ * Puts the selection on the text node holding `needle` — collapsed to its
+ * end, or covering the whole node — as a DOM Range plus a `selectionchange`
+ * dispatch, collapseToBodyStart's recipe, rather than a click and keypresses
+ * that the next keystroke could race (fixtures.ts on why). focus() rather
+ * than a click to get the editor focused: a bubble hangs *under* its link's
+ * line, over whatever paragraph comes next, and a click landing there would
+ * hit the bubble instead.
  */
-async function caretAtEndOf(page: Page, needle: string): Promise<void> {
+async function selectIn(page: Page, needle: string, how: "caret-at-end" | "whole-node"): Promise<void> {
   await bodyEditor(page).focus();
-  await page.evaluate((text) => {
-    const root = document.querySelector('[aria-label="Post body"]');
-    if (!root) throw new Error("Body editor not found.");
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      if (!node.textContent?.includes(text)) continue;
-      const range = document.createRange();
-      range.setStart(node, node.textContent.length);
-      range.collapse(true);
-      const selection = window.getSelection();
-      if (!selection) throw new Error("No selection available.");
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new Event("selectionchange"));
-      return;
-    }
-    throw new Error(`"${text}" not found in the body editor.`);
-  }, needle);
+  await page.evaluate(
+    ({ text, how }) => {
+      const root = document.querySelector('[aria-label="Post body"]');
+      if (!root) throw new Error("Body editor not found.");
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        if (!node.textContent?.includes(text)) continue;
+        const range = document.createRange();
+        if (how === "whole-node") {
+          range.setStart(node, 0);
+          range.setEnd(node, node.textContent.length);
+        } else {
+          range.setStart(node, node.textContent.length);
+          range.collapse(true);
+        }
+        const selection = window.getSelection();
+        if (!selection) throw new Error("No selection available.");
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+        return;
+      }
+      throw new Error(`"${text}" not found in the body editor.`);
+    },
+    { text: needle, how },
+  );
 }
 
-/** Appends " " + a link whose text is `href` to the paragraph holding `paragraph`, through the popover. */
+/** Collapses the caret to the end of the paragraph holding `needle`. */
+function caretAtEndOf(page: Page, needle: string): Promise<void> {
+  return selectIn(page, needle, "caret-at-end");
+}
+
+/**
+ * Appends " " + a link whose text is `href` to the paragraph holding
+ * `paragraph`, through the popover, which opens on the URL box. The title
+ * left empty, the href is the text.
+ */
 async function appendLink(page: Page, paragraph: string, href: string): Promise<void> {
   await caretAtEndOf(page, paragraph);
   await page.keyboard.type(" ");
   await page.keyboard.press("ControlOrMeta+k");
-  await expect(linkInput(page)).toBeFocused();
+  await expect(urlInput(page)).toBeFocused();
   await page.keyboard.type(href);
   await page.keyboard.press("Enter");
-  await expect(linkInput(page)).toHaveCount(0);
+  await expect(urlInput(page)).toHaveCount(0);
   await expect(bodyLink(page, href)).toBeVisible();
 }
 
@@ -220,7 +244,10 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
     await expect(b).toBeVisible();
   });
 
-  test("Edit opens the popover with the href selected, so typing replaces it", async ({ page, linkDoc }) => {
+  test("Edit opens the popover on the URL box with the href selected, so typing replaces it", async ({
+    page,
+    linkDoc,
+  }) => {
     void linkDoc;
     const oldHref = `${ICON_HOST}/before`;
     const newHref = `${ICON_HOST}/after`;
@@ -228,9 +255,12 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
     await bodyLink(page, oldHref).click();
 
     await bubble(page).getByRole("button", { name: "Edit link" }).click();
-    const input = linkInput(page);
+    // The title box shows the link's text (here, the href); the URL box is
+    // the one that opens focused.
+    const input = urlInput(page);
     await expect(input).toBeFocused();
     await expect(input).toHaveValue(oldHref);
+    await expect(titleInput(page)).toHaveValue(oldHref);
     // Selected in full — the whole point of select-on-open. (selectionStart/
     // End, not a toHaveValue, since the value is the same either way.)
     expect(await input.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([
@@ -368,5 +398,223 @@ test.describe("a link into this site's docs previews the doc", () => {
       await deleteTestDoc(privateDoc.id);
       await deleteTestUser(other);
     }
+  });
+});
+
+test.describe("the link popover: a title box over a URL box (LinkControls.tsx)", () => {
+  test("the URL box searches docs; a pick fills it and an empty title, and Save links the doc", async ({
+    page,
+    linkDoc,
+  }) => {
+    void linkDoc;
+    const title = uniqueTitle("picked target");
+    const target = await createTestDoc({ authorEmail: ADMIN_EMAIL, title, visibility: "SHARED" });
+    try {
+      await caretAtEndOf(page, "Paragraph one.");
+      await page.keyboard.type(" ");
+      await page.keyboard.press("ControlOrMeta+k");
+      const urlBox = urlInput(page);
+      await expect(urlBox).toBeFocused();
+      // Where the popover opened is where it stays: it is placed for the
+      // tallest it can be, so the list arriving, changing and going below
+      // never moves the boxes being typed into.
+      const popover = page.getByTestId("link-popover");
+      const opened = await popover.boundingBox();
+      expect(opened).not.toBeNull();
+      // An empty URL box offers the recent docs at once, beneath it.
+      const list = page.getByRole("listbox");
+      await expect(list).toBeVisible();
+      await expect(list).toContainText("Recently edited");
+      expect(await popover.boundingBox()).toMatchObject({ x: opened!.x, y: opened!.y });
+
+      await page.keyboard.type(title);
+      const option = page.getByRole("option", { name: title });
+      await expect(option).toBeVisible();
+      await expect(list).not.toContainText("Recently edited");
+      await page.keyboard.press("ArrowDown");
+      await expect(option).toHaveAttribute("aria-selected", "true");
+      await page.keyboard.press("Enter");
+      expect(await popover.boundingBox()).toMatchObject({ x: opened!.x, y: opened!.y });
+
+      // A pick fills rather than saves: the URL box holds the doc's path,
+      // the empty title box its title, the list is gone, the URL box keeps
+      // focus, and nothing is in the body yet.
+      await expect(urlBox).toHaveValue(`/doc/${target.slug}`);
+      await expect(titleInput(page)).toHaveValue(title);
+      await expect(urlBox).toBeFocused();
+      await expect(list).toHaveCount(0);
+      await expect(bodyLink(page, title)).toHaveCount(0);
+
+      await page.keyboard.press("Enter");
+      await expect(urlBox).toHaveCount(0);
+      await expect(bodyLink(page, title)).toHaveAttribute("href", `/doc/${target.slug}`);
+    } finally {
+      await deleteTestDoc(target.id);
+    }
+  });
+
+  test("flipped above the selection, it grows upward and keeps its bottom on the text", async ({ page }) => {
+    // Its own, longer doc, so a paragraph can be scrolled to the bottom of
+    // the viewport: with no room for the tallest popover below it, the
+    // popover opens above — pinned by its bottom edge, the list at its top.
+    const body = Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1}.`).join("\n\n");
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle("flip"), bodyText: body });
+    try {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`/doc/${doc.id}/edit`);
+      await waitForDocCollabReady(page);
+      const target = bodyEditor(page).getByText("Paragraph 25.", { exact: true });
+      await target.evaluate((el) => el.scrollIntoView({ block: "end" }));
+      await selectIn(page, "Paragraph 25.", "whole-node");
+      const textBox = await target.boundingBox();
+      expect(textBox).not.toBeNull();
+
+      await page.keyboard.press("ControlOrMeta+k");
+      const popover = page.getByTestId("link-popover");
+      await expect(urlInput(page)).toBeFocused();
+      // The recent docs arrive above the form: the list is over the URL box,
+      // and the whole box sits above the text. (Measured once the list is
+      // there — on a fast build it lands before the popover can be read
+      // without it, so the list-shown box is the baseline.)
+      const list = page.getByRole("listbox");
+      await expect(list).toBeVisible();
+      const grown = await popover.boundingBox();
+      expect(grown).not.toBeNull();
+      const bottom = grown!.y + grown!.height;
+      expect(bottom).toBeLessThanOrEqual(textBox!.y);
+      const listBox = await list.boundingBox();
+      const urlBox = await urlInput(page).boundingBox();
+      expect(listBox!.y + listBox!.height).toBeLessThanOrEqual(urlBox!.y);
+
+      // A URL empties the list: the box collapses back down onto the text —
+      // same bottom, higher top — and the URL box itself hasn't moved.
+      await page.keyboard.type("https://example.test/flipped");
+      await expect(list).toHaveCount(0);
+      const collapsed = await popover.boundingBox();
+      expect(collapsed!.y + collapsed!.height).toBeCloseTo(bottom, 0);
+      expect(collapsed!.y).toBeGreaterThan(grown!.y);
+      expect(collapsed!.x).toBe(grown!.x);
+      expect((await urlInput(page).boundingBox())!.y).toBeCloseTo(urlBox!.y, 0);
+
+      // Emptied again, the list comes back up top and the box regrows upward
+      // to exactly where it was.
+      await page.keyboard.press("ControlOrMeta+a");
+      await page.keyboard.press("Backspace");
+      await expect(list).toBeVisible();
+      const regrown = await popover.boundingBox();
+      expect(regrown!.y).toBeCloseTo(grown!.y, 0);
+      expect(regrown!.y + regrown!.height).toBeCloseTo(bottom, 0);
+      await page.keyboard.press("Escape");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("the toolbar button opens the same popover under itself, and toggles it", async ({ page, linkDoc }) => {
+    void linkDoc;
+    await caretAtEndOf(page, "Paragraph one.");
+    const button = page.getByRole("button", { name: "Link", exact: true });
+    await button.click();
+    await expect(urlInput(page)).toBeFocused();
+    await expect(titleInput(page)).toHaveValue("");
+    const buttonBox = await button.boundingBox();
+    const popover = await page.getByTestId("link-popover").boundingBox();
+    expect(popover!.y).toBeGreaterThanOrEqual(buttonBox!.y + buttonBox!.height);
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    await button.click();
+    await expect(urlInput(page)).toHaveCount(0);
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("selected text is the title, and a pick leaves it alone", async ({ page, linkDoc }) => {
+    void linkDoc;
+    const title = uniqueTitle("kept-text target");
+    const target = await createTestDoc({ authorEmail: ADMIN_EMAIL, title, visibility: "SHARED" });
+    try {
+      await selectIn(page, "Paragraph two.", "whole-node");
+      await page.keyboard.press("ControlOrMeta+k");
+      await expect(urlInput(page)).toBeFocused();
+      await expect(titleInput(page)).toHaveValue("Paragraph two.");
+
+      // The search is in the URL box, so it can run without touching the
+      // selection's text — the whole reason the boxes are the way round
+      // they are.
+      await page.keyboard.type(title);
+      await page.getByRole("option", { name: title }).click();
+      await expect(urlInput(page)).toHaveValue(`/doc/${target.slug}`);
+      await expect(titleInput(page)).toHaveValue("Paragraph two.");
+      await expect(urlInput(page)).toBeFocused();
+
+      await page.keyboard.press("Enter");
+      await expect(urlInput(page)).toHaveCount(0);
+      await expect(bodyLink(page, "Paragraph two.")).toHaveAttribute("href", `/doc/${target.slug}`);
+      await expect(bodyEditor(page)).not.toContainText(title);
+    } finally {
+      await deleteTestDoc(target.id);
+    }
+  });
+
+  test("the selection stays painted while the popover holds focus", async ({ page, linkDoc }) => {
+    void linkDoc;
+    // With the URL box focused the browser's own selection highlight is
+    // gone from the editor; TipTap's Selection extension paints the range
+    // instead (class "selection"), and lets go once focus returns.
+    const painted = bodyEditor(page).locator(".selection");
+    await selectIn(page, "Paragraph two.", "whole-node");
+    await expect(painted).toHaveCount(0);
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(urlInput(page)).toBeFocused();
+    await expect(painted).toHaveText("Paragraph two.");
+    await page.keyboard.press("Escape");
+    await expect(urlInput(page)).toHaveCount(0);
+    // Escape closes without refocusing the editor, so the paint stays until
+    // focus comes back — at which point the browser's own highlight takes
+    // over again.
+    await bodyEditor(page).focus();
+    await expect(painted).toHaveCount(0);
+  });
+
+  test("editing the title rewrites the link's text in place", async ({ page, linkDoc }) => {
+    void linkDoc;
+    const href = `${ICON_HOST}/retitled`;
+    await appendLink(page, "Paragraph one.", href);
+    await bodyLink(page, href).click();
+    await bubble(page).getByRole("button", { name: "Edit link" }).click();
+
+    const titleBox = titleInput(page);
+    await expect(titleBox).toHaveValue(href);
+    await titleBox.fill("A better name");
+    // Enter in the title box saves — the URL box is already filled.
+    await page.keyboard.press("Enter");
+    await expect(titleBox).toHaveCount(0);
+    await expect(bodyLink(page, "A better name")).toHaveAttribute("href", href);
+    await expect(bodyLink(page, href)).toHaveCount(0);
+    await expect(bodyEditor(page)).not.toContainText(href);
+    await expect(bodyEditor(page)).toContainText("Paragraph one. A better name");
+  });
+
+  test("Enter in the title box with no URL moves on to the URL box; Save waits for one", async ({
+    page,
+    linkDoc,
+  }) => {
+    void linkDoc;
+    await caretAtEndOf(page, "Paragraph three.");
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(urlInput(page)).toBeFocused();
+    await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    // The list stands down with the URL box's focus, and is back with it.
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await titleInput(page).click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await page.keyboard.type("Just a title");
+    await page.keyboard.press("Enter");
+    await expect(urlInput(page)).toBeFocused();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await expect(titleInput(page)).toHaveValue("Just a title");
+    await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(urlInput(page)).toHaveCount(0);
+    await expect(bodyEditor(page)).not.toContainText("Just a title");
   });
 });

@@ -372,6 +372,15 @@ async function selectTextIn(page: Page, rootSelector: string, needle: string, nt
     ({ text, selector, index: rootIndex }) => {
       const root = document.querySelectorAll(selector)[rootIndex];
       if (!root) throw new Error(`No element matching ${selector} at index ${rootIndex}.`);
+      // Focus first, then select — the order every real gesture has, and
+      // one that matters on an *editable* editor: focus dispatches a
+      // transaction (TipTap's FocusEvents), and if that re-renders any text
+      // — the blurred-selection decoration coming off is one such change —
+      // ProseMirror re-asserts its own state selection over whatever the DOM
+      // held, so a range set *before* the focus is silently replaced by the
+      // stale one and no selection change is ever seen. A read-only view
+      // isn't focusable and is unaffected either way.
+      if (root instanceof HTMLElement && root.isContentEditable) root.focus({ preventScroll: true });
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       let node: Node | null;
       while ((node = walker.nextNode())) {

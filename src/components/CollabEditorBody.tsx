@@ -10,6 +10,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { Annotation } from "@/lib/annotation-extension";
 import { PendingAnnotation } from "@/lib/pending-annotation-extension";
+import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import {
   AnnotationHighlight,
   setAnnotationAnchors,
@@ -127,6 +128,15 @@ export default function CollabEditorBody({
         render: renderCaret,
       }),
       AuthorHighlight.configure({ getAuthorId: () => userId }),
+      // Keeps a non-empty selection painted (class "selection", styled in
+      // prose.module.css) while the editor is blurred — the link popover's
+      // URL box takes focus, and with it the browser's one DOM selection,
+      // so without this the text Ctrl-K is about to link goes unmarked the
+      // moment the popover opens. A decoration on state.selection, which
+      // survives the blur regardless (LinkControls reads it at Save). Ours,
+      // not @tiptap/extensions' Selection — that file says why.
+      // docs/TIPTAP.md, "The link popover is a form".
+      BlurredSelection,
       // Registers the mark type so a doc's annotation marks sync/render
       // correctly here too (PLAN.md §12i) — posts never get one applied,
       // and an unused mark type in the schema costs nothing.

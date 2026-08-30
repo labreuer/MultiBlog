@@ -6048,7 +6048,12 @@ unrelated ~1200s in one document is how one of them gets "corrected" into the ot
 - `CollabEditorBody` gained `onSelectionUpdate`/`onContentUpdate` passthroughs (it had
   neither — only the reading view's `useLiveDocContent` did) and registers
   `PendingAnnotation`, the same view-only decoration the reading view uses, unconditionally
-  — harmless on every other embedder.
+  — harmless on every other embedder. **Applied at stage two only** (2026-08-30; it was
+  originally on every selection): with the editor focused the native selection already shows
+  the range, and a dashed author-colour underline on every selection made while editing is the
+  same noise the marker exists to avoid. So on every surface `.pending-annotation` means "a
+  composer is open on this range" — which is what lets TipTap's `Selection` paint
+  (docs/TIPTAP.md, "The link popover is a form") defer to it by class alone.
 - `AnnotationPopover`/`LiveAnnotationComposer` gained three optional props rather than a
   parallel composer: `allowMoveToBottom` (false here — no bottom composer on this page),
   `autoOpen` (see the two-stage note above), and `resolveAnchor`.
