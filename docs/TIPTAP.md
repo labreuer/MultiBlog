@@ -166,6 +166,48 @@ marks, nothing else".
 > `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0` exactly, and npm
 > fails the install.
 
+## Enter is two keys, decided by whether the virtual keyboard is docked
+
+`VirtualKeyboardEnter` (`src/lib/virtual-keyboard-enter-extension.ts`), registered in both live
+body editors, remaps the block keys to a phone messenger's while the on-screen keyboard is up —
+because a virtual keyboard has no Shift-Enter, so the soft break is otherwise unreachable there.
+While it is docked: **Enter inserts a hard break; Enter with a hard break already right before
+the caret deletes it and splits the paragraph for real** (the Slack/WhatsApp double-Enter,
+deliberately *loose* — any break counts, whoever typed it, which keeps the rule stateless at the
+cost that two adjacent breaks cannot be typed with Enter in this mode; Enter-space-Enter is the
+nearest approximation); **Backspace at the start of a non-empty textblock joins into the
+previous non-empty textblock and leaves a hard break at the seam**, so a second Backspace
+finishes the merge — two Backspaces undo two Enters, and either mode's text edits naturally in
+the other. Inside a list item the extension stands down entirely (Enter stays `splitListItem`,
+Backspace its lift/join — remapped, list structure would be unreachable from a phone), and in a
+code block `setHardBreak` fails and falls through to the stock chain. The title and blurb
+editors are left out: their schemas have no `hardBreak` node and no HardBreak extension, so
+there is no `setHardBreak` command to call and both keys are already no-ops.
+
+Visibility is `src/lib/virtual-keyboard.ts`: `innerHeight − visualViewport.height × scale ≥
+100px` (the `× scale` cancels pinch-zoom; URL-bar movement moves both heights together). Not
+pointer-modality tracking — that failed structurally on an iPad with a hardware keyboard, where
+every tap said "touch" and no keystroke could say otherwise — and not
+`navigator.virtualKeyboard`, which is Chromium-on-Android only and reports geometry only under
+an `overlaysContent` opt-in that changes page layout. The blind spots all degrade to stock
+Enter, never to a stuck remap: iPadOS's floating/split keyboard docks nothing, Android
+Chrome < 108 resized both viewports together, and a browser without `visualViewport` never
+installs the listener. The file has the full comparison; verified on a real iPad 2026-08-30.
+
+Two traps this arrangement depends on:
+
+- **Same-priority keymaps run in reverse registration order** — `ExtensionManager` *reverses*
+  the extension list before its stable priority sort — so an extension's place in the Enter
+  chain at the default 100 depends on where the `useEditor` array happens to list it. The
+  extension pins `priority: 101` to sit ahead of core `Keymap`'s `splitBlock` and `ListItem`'s
+  `splitListItem` by number instead of by position. `DocRefMenu`'s Enter still wins over it,
+  by being a *prepended plugin* rather than a keymap (its section above).
+- **Playwright cannot shrink `visualViewport`**, so a spec can never reach the docked-keyboard
+  state through real geometry. `window.__multiblogSetVirtualKeyboard(true | false | null)`
+  forces the verdict (null returns to measurement), and is exposed unconditionally *because*
+  `npm run e2e` runs the production build — a `NODE_ENV` gate would hide the hook from the one
+  consumer it exists for.
+
 ## `setContent` takes an options object in v3, where v2 took a boolean
 
 ```ts

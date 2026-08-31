@@ -10,6 +10,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
+import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import DocRefMenu from "../DocRefMenu";
 import proseStyles from "@/styles/prose.module.css";
@@ -73,6 +74,9 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
       // Selection stays painted while the link popover holds focus —
       // CollabEditorBody's comment on the same line.
       BlurredSelection,
+      // Enter inserts the hard break Shift-Enter does while the virtual
+      // keyboard is up — the extension file says why, and how it is detected.
+      VirtualKeyboardEnter,
     ],
     editorProps: { attributes: { "aria-label": "Annotation body", role: "textbox" } },
     immediatelyRender: false,
