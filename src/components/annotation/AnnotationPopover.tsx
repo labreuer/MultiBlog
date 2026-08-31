@@ -9,11 +9,10 @@ import composerStyles from "./AnnotationComposer.module.css";
 
 type Props = {
   docId: string;
-  top: number;
-  left: number;
-  // So the caller can measure this popover's rendered size — placement needs
-  // it to clamp/flip (src/lib/popover-placement.ts), and only the caller
-  // knows the bounds to clamp into.
+  // The caller positions this popover through it — floating-ui writes
+  // left/top straight onto the element (useSelectionPopover /
+  // useEditorAnnotationWidget), and only the caller knows the anchor and
+  // the bounds to clamp into.
   elementRef?: React.Ref<HTMLDivElement>;
   from: number;
   to: number;
@@ -62,8 +61,6 @@ type Props = {
 // too — is actually clicked.
 export default function AnnotationPopover({
   docId,
-  top,
-  left,
   elementRef,
   from,
   to,
@@ -119,11 +116,12 @@ export default function AnnotationPopover({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by construction; ensureDraft closes over state this deliberately doesn't re-run for
   }, [autoOpen]);
 
-  // `top`/`left` are used exactly as given: the gap below the selection is
-  // POPOVER_GAP, applied once by placePopover, not an extra +6 stacked on it
-  // here — placement is the caller's job now (src/lib/popover-placement.ts).
+  // No coordinates of its own: placement is the caller's job, written onto
+  // this element through `elementRef` (the gap below the selection is
+  // POPOVER_GAP in the caller's offset() middleware, not an extra offset
+  // stacked here).
   return (
-    <div ref={elementRef} data-testid="annotation-popup" className={styles.popover} style={{ top, left }}>
+    <div ref={elementRef} data-testid="annotation-popup" className={styles.popover}>
       <p className={styles.quotedText}>
         Annotating: “{quotedText.length > 80 ? `${quotedText.slice(0, 80)}…` : quotedText}”
       </p>

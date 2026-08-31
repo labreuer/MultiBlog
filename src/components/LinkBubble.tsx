@@ -9,7 +9,8 @@ import { previewLinkedDoc } from "@/app/actions/docs";
 import type { LinkedDocPreview } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { relativeTime } from "@/lib/relative-time";
-import { placePopover, popoverBoundsFor, type PopoverAnchor, type PopoverPlacement } from "@/lib/popover-placement";
+import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { popoverBoundsElement, type PopoverAnchor } from "@/lib/popover-placement";
 import styles from "./EditorChrome.module.css";
 
 // The bubble under whichever link the caret is in — one line: the target
@@ -38,8 +39,9 @@ import styles from "./EditorChrome.module.css";
 // doc that doesn't exist adds nothing.
 //
 // position: fixed and portaled to <body> for the same reasons as
-// LinkControls' popover — placed in viewport coordinates by placePopover,
-// clear of every clipping ancestor and of the phone toolbar's edge mask.
+// LinkControls' popover — placed in viewport coordinates by floating-ui
+// (strategy: "fixed"), clear of every clipping ancestor and of the phone
+// toolbar's edge mask.
 
 const BUBBLE_GAP = 4;
 const COPIED_MS = 1500;
@@ -189,7 +191,6 @@ export default function LinkBubble({
     editor,
     selector: ({ editor: e }) => ({ link: linkAtCaret(e), focused: e.isFocused }),
   });
-  const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
   // The href whose copy most recently succeeded, for the check mark: keyed
   // by href rather than a boolean so moving to another link clears it.
   const [copiedHref, setCopiedHref] = useState<string | null>(null);
@@ -242,43 +243,60 @@ export default function LinkBubble({
       });
   }, [docParam, previews]);
 
-  // Measure-then-place, as LinkControls does, except that there is no open
-  // handler to paint a provisional spot from: until the first measurement
-  // lands the bubble renders hidden at the origin, and since a layout
-  // effect's state update is flushed before paint, the hidden frame is
-  // never seen. Re-runs whenever the link's range moves (typing inside it,
-  // a collaborator's edit above it), when a doc preview lands (the bubble
-  // just got taller, and may now need to flip above the line) and on
-  // scroll/resize; `link` is identity-stable across transactions that
-  // don't change it, because useEditorState hands back the previous
-  // selection when it compares equal.
+  // floating-ui owns placement, as on LinkControls' popover. The bubble
+  // hangs under the link's line (offset: BUBBLE_GAP on both axes), and the
+  // stock flip() moves it above when the room below runs out — here
+  // flip-on-growth is *intended*, unlike the link popover's walking-box
+  // bug: nothing in the bubble has focus, so a doc preview landing and
+  // flipping the bubble above the line pulls it out from under nobody.
+  // shift() slides it back inside its bounds on both axes — crossAxis
+  // because an anchor whose line scrolls out of view would otherwise drag
+  // the bubble off-screen with it. autoUpdate re-places on ancestor
+  // scroll/resize and, via ResizeObserver, when a doc preview lands and the
+  // bubble grows — no hand-listed `preview` dep, no listeners of ours, and
+  // no hidden-first-frame trick: computePosition's answer lands in a
+  // microtask, before the newly mounted bubble first paints. `link` is
+  // identity-stable across transactions that don't change it, because
+  // useEditorState hands back the previous selection when it compares
+  // equal.
   useLayoutEffect(() => {
     if (!visible || !link) return;
-    function reposition() {
-      const bubble = bubbleRef.current;
-      const anchor = link && anchorFor(editor, link);
-      if (!bubble) return;
-      if (!anchor) {
-        setPlacement(null);
+    const bubble = bubbleRef.current;
+    if (!bubble) return;
+    let lastRect = new DOMRect(0, 0, 0, 0);
+    const reference = {
+      // Live coordinates each call — the link scrolls with the editor's own
+      // text box. A width-0 rect on the anchor line; anchorFor answering
+      // null (a collaborator's edit mid-render) holds the last rect rather
+      // than jumping somewhere wrong.
+      getBoundingClientRect: () => {
+        const anchor = anchorFor(editor, link);
+        if (anchor) lastRect = new DOMRect(anchor.left, anchor.top, 0, anchor.bottom - anchor.top);
+        return lastRect;
+      },
+      contextElement: editor.view.dom,
+    };
+    const boundary = popoverBoundsElement(editor.view.dom);
+    const update = () => {
+      if (!anchorFor(editor, link)) {
+        // Nothing resolvable to hang from: hide rather than point at air.
+        bubble.style.visibility = "hidden";
         return;
       }
-      const box = bubble.getBoundingClientRect();
-      const next = placePopover(
-        anchor,
-        { width: box.width, height: box.height },
-        popoverBoundsFor(editor.view.dom),
-        BUBBLE_GAP,
-      );
-      setPlacement((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
-    }
-    reposition();
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
+      void computePosition(reference, bubble, {
+        strategy: "fixed",
+        placement: "bottom-start",
+        middleware: [
+          offset({ mainAxis: BUBBLE_GAP, crossAxis: BUBBLE_GAP }),
+          flip({ crossAxis: false, boundary, fallbackStrategy: "initialPlacement" }),
+          shift({ crossAxis: true, boundary }),
+        ],
+      }).then(({ x, y }) => {
+        Object.assign(bubble.style, { left: `${x}px`, top: `${y}px`, visibility: "" });
+      });
     };
-  }, [visible, editor, link, preview]);
+    return autoUpdate(reference, bubble, update);
+  }, [visible, editor, link]);
 
   if (!visible || !link) return null;
 
@@ -307,7 +325,6 @@ export default function LinkBubble({
     <div
       ref={bubbleRef}
       className={styles.linkBubble}
-      style={placement ?? { top: 0, left: 0, visibility: "hidden" }}
       role="group"
       aria-label="Link"
       onMouseDown={(e) => e.preventDefault()}

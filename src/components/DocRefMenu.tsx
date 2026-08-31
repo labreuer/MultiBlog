@@ -9,7 +9,8 @@ import { searchLinkableDocs } from "@/app/actions/docs";
 import type { LinkableDocJson } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { relativeTime } from "@/lib/relative-time";
-import { placePopover, popoverBoundsFor, type PopoverAnchor } from "@/lib/popover-placement";
+import { autoUpdate, computePosition, offset, shift } from "@floating-ui/dom";
+import { POPOVER_GAP, popoverBoundsElement, sideForTallest } from "@/lib/popover-placement";
 import styles from "./EditorChrome.module.css";
 
 // "[[" at the caret opens a menu of readable docs that filters as you keep
@@ -30,9 +31,10 @@ import styles from "./EditorChrome.module.css";
 // the view in. What's ours: `allow`, which keeps a closed "[[a]]" and a
 // code block from being a context; the list itself, rendered from the
 // props its render callbacks hand over; and placement, which uses its
-// `clientRect` as the anchor but the repo's placePopover rather than its
-// floating-ui `mount`, so the menu follows the same bounds, flip and
-// pinned-edge rules as every other popover here.
+// `clientRect` as the anchor but our own computePosition/autoUpdate pass
+// rather than its floating-ui `mount`, sharing sideForTallest
+// (src/lib/popover-placement.ts) so the menu follows the same
+// tallest-height, pinned-edge rules as the link popover.
 //
 // What's typed right after a pick is kept out of the link. TipTap's Link is
 // inclusive while autolink is on, and a reference dropped mid-sentence is
@@ -47,14 +49,14 @@ const TRIGGER = "[[";
 const CLOSE = "]]";
 const SEARCH_DEBOUNCE_MS = 150;
 // The same tallest as the link popover's list, and placed for it the same
-// way: the side is decided once per "[[" from the tallest the menu can be,
-// so results arriving and going never flip it (LinkControls on why).
+// way: the side is decided from the tallest the menu can be (the shared
+// sideForTallest), so results arriving and going never flip it
+// (LinkControls on why).
 const LIST_MAX_HEIGHT_REM = 17;
 
 const suggestionKey = new PluginKey("docRefSuggestion");
 const plainAfterKey = new PluginKey<number | null>("docRefPlainAfter");
 
-type PopoverStyle = { left: number; top: number } | { left: number; bottom: number };
 type Session = {
   range: { from: number; to: number };
   query: string;
@@ -67,10 +69,6 @@ type Session = {
   command: (doc: LinkableDocJson) => void;
   clientRect: (() => DOMRect | null) | null | undefined;
 };
-
-function samePlacement(a: PopoverStyle, b: PopoverStyle): boolean {
-  return a.left === b.left && ("top" in a ? "top" in b && a.top === b.top : "bottom" in b && a.bottom === b.bottom);
-}
 
 // Where a just-picked link ends, until something is typed there.
 function plainAfterPlugin(): Plugin<number | null> {
@@ -111,7 +109,6 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
   // between "[["s.
   const [session, setSession] = useState<Session | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [placement, setPlacement] = useState<PopoverStyle | null>(null);
   // The suggestion stays active across a blur (its match is still in the
   // text); the menu shouldn't. TipTap's FocusEvents dispatches on focus and
   // blur, which is what makes this a selector rather than a listener.
@@ -242,44 +239,57 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
   }, [visible, activeIndex, listId]);
 
   // Under the "[[" — Suggestion's clientRect is the decoration it keeps on
-  // the query — placed for the tallest the menu can be and pinned by the
-  // edge nearest the text (LinkControls' placement, in brief). Re-placed
-  // when the "[[" moves and on scroll/resize; measured before first paint,
-  // so nothing is painted at the provisional spot.
+  // the query. floating-ui places the menu: offset is the standard gap,
+  // sideForTallest decides the side for the tallest the menu can be, and
+  // shift slides it back inside its bounds on both axes. A top-placed menu
+  // is laid out from the anchor up, so its bottom edge stays pinned to the
+  // text while growth lands above — autoUpdate re-places on ancestor
+  // scroll/resize and, via ResizeObserver, as rows arrive and go.
+  // computePosition's answer lands in a microtask, before the newly
+  // portaled menu first paints, so nothing provisional is ever shown.
   const from = session?.range.from ?? null;
   const clientRect = session?.clientRect;
   useLayoutEffect(() => {
     if (!visible || from === null) return;
-    function reposition() {
-      const menu = menuRef.current;
-      if (!menu || from === null) return;
-      let anchor: PopoverAnchor;
-      const rect = clientRect?.();
-      if (rect) {
-        anchor = { top: rect.top, bottom: rect.bottom, left: rect.left };
-      } else {
-        try {
-          anchor = editor.view.coordsAtPos(from);
-        } catch {
-          return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    let lastRect = new DOMRect(0, 0, 0, 0);
+    const reference = {
+      getBoundingClientRect: () => {
+        const rect = clientRect?.();
+        if (rect) {
+          lastRect = rect;
+        } else {
+          try {
+            const coords = editor.view.coordsAtPos(from);
+            lastRect = new DOMRect(coords.left, coords.top, 0, coords.bottom - coords.top);
+          } catch {
+            // A position the current document can't resolve: hold the last
+            // spot rather than jumping somewhere wrong.
+          }
         }
-      }
-      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      const tallest = LIST_MAX_HEIGHT_REM * rem;
-      const width = menu.getBoundingClientRect().width;
-      const spot = placePopover(anchor, { width, height: tallest }, popoverBoundsFor(editor.view.dom));
-      const bottom = spot.top + tallest;
-      const next: PopoverStyle =
-        bottom <= anchor.top ? { left: spot.left, bottom: window.innerHeight - bottom } : { left: spot.left, top: spot.top };
-      setPlacement((prev) => (prev && samePlacement(prev, next) ? prev : next));
-    }
-    reposition();
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
+        return lastRect;
+      },
+      contextElement: editor.view.dom,
     };
+    const boundary = popoverBoundsElement(editor.view.dom);
+    const update = () => {
+      void computePosition(reference, menu, {
+        strategy: "fixed",
+        placement: "bottom-start",
+        middleware: [
+          offset({ mainAxis: POPOVER_GAP, crossAxis: POPOVER_GAP }),
+          sideForTallest(() => {
+            const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+            return LIST_MAX_HEIGHT_REM * rem;
+          }),
+          shift({ crossAxis: true, boundary }),
+        ],
+      }).then(({ x, y }) => {
+        Object.assign(menu.style, { left: `${x}px`, top: `${y}px` });
+      });
+    };
+    return autoUpdate(reference, menu, update);
   }, [visible, from, clientRect, editor]);
 
   if (!visible || !session) return null;
@@ -291,7 +301,7 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
       role="listbox"
       aria-label="Docs"
       className={`${styles.docRefMenu} ${styles.linkResults}`}
-      style={{ ...(placement ?? { top: 0, left: 0, visibility: "hidden" }), maxHeight: `${LIST_MAX_HEIGHT_REM}rem` }}
+      style={{ maxHeight: `${LIST_MAX_HEIGHT_REM}rem` }}
       // The editor keeps focus through a click on a row: its blur would take
       // the menu away before the click landed.
       onMouseDown={(e) => e.preventDefault()}

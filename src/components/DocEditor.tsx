@@ -307,13 +307,11 @@ export default function DocEditor({
             request to annotate — it's how you bold a word or move a
             sentence — so this says only that annotating is possible, and
             costs nothing until clicked. */}
-        {wideEnoughForWidget && widget.pending && !widget.expanded && widget.markerStyle && (
+        {wideEnoughForWidget && widget.pending && !widget.expanded && widget.marker && (
           <button
             type="button"
             className={styles.annotateMarker}
-            /* markerStyle, not marker — marker is where it appears (what the
-               composer anchors to), this is what makes it land there. */
-            style={{ top: widget.markerStyle.top, left: widget.markerStyle.left }}
+            style={{ top: widget.marker.top, left: widget.marker.left }}
             onClick={widget.expand}
             title="Annotate this selection"
             aria-label="Annotate this selection"
@@ -336,12 +334,10 @@ export default function DocEditor({
         {/* Stage two: the composer, opened where the marker was. `autoOpen`
             because the marker already asked the question its "Annotate"
             button would ask again. */}
-        {wideEnoughForWidget && widget.pending && widget.expanded && widget.popoverPlacement && widgetAnchor && (
+        {wideEnoughForWidget && widget.pending && widget.expanded && widgetAnchor && (
           <AnnotationPopover
             elementRef={widget.popoverRef}
             docId={docId}
-            top={widget.popoverPlacement.top}
-            left={widget.popoverPlacement.left}
             from={widgetAnchor.from}
             to={widgetAnchor.to}
             quotedText={widget.pending.quotedText}

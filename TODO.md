@@ -561,36 +561,3 @@ giving up; or have `onMoved` keep the previous range when one end returns null w
 still resolves. The first is more honest about what is being shown; the second is one line.
 
 Not urgent — the strip's annotation ticks still render, only the thumb goes.
-
----
-
-## Other popovers still hand-roll placement (switch them to @floating-ui)
-
-**Context:** 2026-08-30 — the link popover (`LinkControls.tsx`, branch `popover-floating-ui`)
-moved from `src/lib/popover-placement.ts` to `@floating-ui/dom`: `computePosition` +
-`autoUpdate` replaced the provisional-then-measure bootstrap, the pinned-edge arithmetic and
-the scroll/resize listeners, with the side-for-tallest rule kept as a small custom middleware.
-A tippy.js version of the same swap (branch `docref-suggestion`) lost the comparison: tippy is
-maintenance-mode on popper v2, TipTap v3's own UI utilities are floating-ui-based, and popper's
-modifier dialect is less legible than a middleware function.
-
-**Remaining consumers of `popover-placement.ts`, in migration order:**
-
-1. `LinkBubble.tsx` — best win. Its flip-on-growth is *intended* (nothing in the bubble has
-   focus), so stock `flip()` is right with no custom middleware; `autoUpdate`'s ResizeObserver
-   replaces both the hand-listed `preview` dep that re-places when a doc preview lands and the
-   hidden-first-frame trick.
-2. `QuoteControls.tsx` — real button anchor, small menu, gap 2; the most conventional case.
-3. `DocRefMenu.tsx` — same tallest/pinned shape as the link popover, so first move
-   `sideForTallest` somewhere shared (beside `POPOVER_GAP`) rather than copying it.
-4. `use-selection-popover.ts` — last, and carefully: it is what `[data-popover-bounds]` exists
-   for. On /side-by-side the popover clamps into its column pair, and one whose column scrolled
-   away pins to the edge it left through — reproducing that means `shift` with an explicit
-   boundary element (and probably `limiter`/`altBoundary` tuning) verified on /side-by-side,
-   not the default viewport behavior.
-
-**Not** `use-editor-annotation-widget.ts`'s marker: a gutter widget with domain rules (hide
-when the anchor leaves the editor's visible band, clamp into the gutter), not a popover —
-floating-ui buys nothing there. `popover-placement.ts` shrinks rather than dies: `POPOVER_GAP`,
-the shared middleware and a bounds-element helper stay, and its header comment should say so
-when the migration starts.

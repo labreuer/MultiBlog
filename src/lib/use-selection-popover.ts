@@ -2,16 +2,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
+import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { setPendingAnnotation } from "./pending-annotation-extension";
 import { findQuoteOccurrences } from "./quote-occurrences";
-import {
-  fixedPlacementStyle,
-  onViewportChange,
-  placePopover,
-  popoverBoundsFor,
-  provisionalPlacement,
-  type PopoverPlacement,
-} from "./popover-placement";
+import { POPOVER_GAP, popoverBoundsElement } from "./popover-placement";
 
 export type PendingSelection = {
   from: number;
@@ -27,23 +21,22 @@ export type PendingSelection = {
 };
 
 export type SelectionPopover = {
-  // No top/left on the selection itself — where its popover sits is derived
-  // below, from `to`, rather than frozen when the selection was made.
   pending: PendingSelection | null;
   /** Wire to the editor's selection updates; captures or clears accordingly. */
   capture: (liveEditor: Editor) => void;
   clear: (liveEditor?: Editor | null) => void;
   /** Wire to the content-push choke point — see the note on the function. */
   reresolve: (liveEditor: Editor) => void;
-  // Read alongside the caller's own popover state (`pending && placement`),
-  // never on its own — see the note on not clearing it, below.
-  placement: PopoverPlacement | null;
-  /** Attach to the open popover's root element so it can be measured. */
-  popoverRef: RefObject<HTMLDivElement | null>;
-  // Call in the same handler that opens a popover *other than* the pending
-  // selection's own, so the provisional placement and that popover's state
-  // land in one React batch.
-  openAt: (liveEditor: Editor, pos: number) => void;
+  /**
+   * Attach to the open popover's root element — floating-ui positions the
+   * popover through it (left/top written before its first paint, so nothing
+   * provisional is ever shown). A callback ref rather than a RefObject:
+   * swapping one popover for another at the same anchor (the chooser
+   * handing over to the edit popover, PLAN.md §14j) must re-bind autoUpdate
+   * to the new element, and only a callback ref makes that mount
+   * observable.
+   */
+  popoverRef: (el: HTMLDivElement | null) => void;
 };
 
 /**
@@ -53,9 +46,9 @@ export type SelectionPopover = {
  *
  * Selection and placement are one hook rather than two because they are
  * genuinely mutually dependent: placement needs the anchor the selection
- * provides, and capturing a selection needs to seed a provisional placement in
- * the same React batch, so that a popover never renders without a position.
- * Splitting them produces a cycle rather than a layering.
+ * provides, and a popover must never paint without a position — which is why
+ * placement is written straight onto the popover element (floating-ui,
+ * below) rather than handed back as state for the caller to thread through.
  *
  * Shared by both reading surfaces: the gesture is identical whether the
  * selection is about to become an annotation (/doc/[slug]) or a doc link
@@ -82,7 +75,7 @@ export function useSelectionPopover({
   // most one popover is ever open at a time.
   externalAnchorPos?: number | null;
   // An extra value whose change can reflow the page under the anchor, beyond
-  // the scroll/resize this already listens for.
+  // what autoUpdate's own scroll/resize/ResizeObserver coverage sees.
   reflowKey?: unknown;
   // PLAN.md §13q — reads the live document's current version. A ref rather
   // than a value for the same reason `editorRef` is one: the surface that
@@ -92,8 +85,10 @@ export function useSelectionPopover({
   versionRef?: RefObject<(() => string) | null>;
 }): SelectionPopover {
   const [pending, setPending] = useState<PendingSelection | null>(null);
-  const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
+  // The open popover's root element — state rather than a ref, so the
+  // placement effect below re-binds when one popover unmounts and another
+  // mounts at the same anchor (see SelectionPopover.popoverRef).
+  const [popoverEl, setPopoverEl] = useState<HTMLDivElement | null>(null);
 
   // Read inside the content-push handlers, which run outside React's render
   // cycle and would otherwise close over a stale `pending`.
@@ -101,10 +96,6 @@ export function useSelectionPopover({
   useEffect(() => {
     pendingRef.current = pending;
   }, [pending]);
-
-  function openAt(liveEditor: Editor, pos: number) {
-    setPlacement(fixedPlacementStyle(provisionalPlacement(liveEditor.view.coordsAtPos(pos))));
-  }
 
   function clear(liveEditor?: Editor | null) {
     setPending(null);
@@ -128,7 +119,6 @@ export function useSelectionPopover({
     // condition), so the Y.Doc keeps advancing while the render is withheld
     // and any later capture would name a state the reader never saw.
     setPending({ from, to, quotedText, atVersion: versionRef?.current?.() ?? null });
-    openAt(liveEditor, to);
     setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
   }
 
@@ -157,7 +147,6 @@ export function useSelectionPopover({
       // version captured against the old one would be the one combination
       // guaranteed to be wrong.
       setPending({ from, to, quotedText: current.quotedText, atVersion: versionRef?.current?.() ?? null });
-      openAt(liveEditor, to);
       setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
     } else {
       // No unique match any more — the selected text changed underneath the
@@ -185,41 +174,80 @@ export function useSelectionPopover({
   // Whichever popover is open is anchored to exactly one document position.
   const anchorPos = externalAnchorPos ?? pending?.to ?? null;
 
-  // The one place a popover's final position is decided, against the anchor's
-  // *live* coordinates rather than coordinates frozen when it opened. Deriving
-  // instead of freezing is the point: a stored top/left goes stale the moment
-  // anything reflows under it, and each such reflow used to be patched one at
-  // a time. Recomputing covers them uniformly —
+  // The one place a popover's position is decided — floating-ui's
+  // computePosition against the anchor's *live* coordinates, re-run by
+  // autoUpdate rather than frozen when the popover opened. Deriving instead
+  // of freezing is the point: a stored top/left goes stale the moment
+  // anything reflows under it, and each such reflow used to be patched one
+  // at a time —
   //
   // - a reflow caused by opening the popover itself (the side-by-side group
-  //   panel appearing above the columns when a click also switches the active
-  //   group), which the provisional placement was computed before
+  //   panel appearing above the columns when a click also switches the
+  //   active group) — `reflowKey` in the deps is what covers this, since no
+  //   scroll or resize fires for it
   // - a column scrolling, which a `position: fixed` popover does not follow
+  //   (autoUpdate's ancestor-scroll listeners, hung off `contextElement`)
   // - the window resizing, which moves the bounds it is clamped into
+  // - the popover itself growing (autoUpdate's ResizeObserver)
   //
-  // useLayoutEffect so the refinement lands before the browser paints the
-  // provisional spot. No need to clear `placement` when nothing is open: every
-  // render site reads it only alongside its own popover state, and whichever
-  // handler opens a popover sets the provisional placement in the same batch —
-  // so a leftover value is never the one painted.
+  // The middleware reproduces the old hand-rolled rules (placePopover, in
+  // git history). Horizontal is a *slide* — shift's main axis: the popover
+  // is a large fraction of a column's width, so a flip to the anchor's
+  // other side would overshoot the left edge about as readily as the
+  // preferred spot overshoots the right, and sliding keeps it on the
+  // anchor's own line without ever covering the anchor (a point on a line,
+  // while the popover sits above or below that whole line). Vertical is a
+  // *flip* — the opposite choice for the opposite reason: sliding up would
+  // drag the popover over the very text it describes. When neither side
+  // fits, flip falls back to the initial below-the-anchor placement and
+  // shift's crossAxis clamps it into bounds, accepting the unavoidable
+  // overlap — the same clamp that pins a popover whose column scrolled away
+  // to the edge it left through, instead of leaving it thousands of pixels
+  // off-screen. The bounds are the nearest [data-popover-bounds] ancestor —
+  // on /side-by-side, the column pair — intersected with the viewport
+  // (popoverBoundsElement), or the viewport alone.
+  //
+  // useLayoutEffect plus computePosition's microtask lands the position
+  // before the newly mounted popover first paints.
   useLayoutEffect(() => {
-    if (anchorPos === null) return;
-    function reposition() {
-      const liveEditor = editorRef.current;
-      const el = popoverRef.current;
-      if (!liveEditor || !el || anchorPos === null) return;
-      const anchor = liveEditor.view.coordsAtPos(anchorPos);
-      const { width, height } = el.getBoundingClientRect();
-      // fixedPlacementStyle last — only the value about to become a `top`/`left`
-      // is converted, never the placement math upstream of it.
-      const next = fixedPlacementStyle(placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current)));
-      setPlacement((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
-    }
-    reposition();
-    // Inner-element scroll and the software keyboard both — see onViewportChange.
-    return onViewportChange(reposition);
+    if (anchorPos === null || popoverEl === null) return;
+    const liveEditor = editorRef.current;
+    if (!liveEditor) return;
+    let lastRect = new DOMRect(0, 0, 0, 0);
+    const reference = {
+      getBoundingClientRect: () => {
+        const editorNow = editorRef.current;
+        if (editorNow) {
+          try {
+            const coords = editorNow.view.coordsAtPos(anchorPos);
+            lastRect = new DOMRect(coords.left, coords.top, 0, coords.bottom - coords.top);
+          } catch {
+            // A position the current document can't resolve (a
+            // collaborator's edit mid-render): hold the last spot rather
+            // than jumping somewhere wrong.
+          }
+        }
+        return lastRect;
+      },
+      contextElement: liveEditor.view.dom,
+    };
+    const boundary = popoverBoundsElement(containerRef.current);
+    const update = () => {
+      void computePosition(reference, popoverEl, {
+        strategy: "fixed",
+        placement: "bottom-start",
+        middleware: [
+          offset({ mainAxis: POPOVER_GAP, crossAxis: POPOVER_GAP }),
+          flip({ crossAxis: false, boundary, fallbackStrategy: "initialPlacement" }),
+          shift({ crossAxis: true, boundary }),
+        ],
+      }).then(({ x, y }) => {
+        Object.assign(popoverEl.style, { left: `${x}px`, top: `${y}px` });
+      });
+    };
+    return autoUpdate(reference, popoverEl, update);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- editorRef/containerRef are stable refs; reflowKey is an opaque "something moved" signal, not read here
-  }, [anchorPos, reflowKey]);
+  }, [anchorPos, popoverEl, reflowKey]);
 
-  return { pending, capture, clear, reresolve, placement, popoverRef, openAt };
+  return { pending, capture, clear, reresolve, popoverRef: setPopoverEl };
 }

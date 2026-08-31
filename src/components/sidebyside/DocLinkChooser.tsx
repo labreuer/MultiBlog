@@ -4,11 +4,9 @@ import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import styles from "./DocLinkChooser.module.css";
 
 type Props = {
-  top: number;
-  left: number;
-  // So the caller can measure this popover's rendered size — placement needs
-  // it to clamp/flip (src/lib/popover-placement.ts), and only the caller
-  // knows the bounds to clamp into.
+  // The caller positions this popover through it — floating-ui writes
+  // left/top straight onto the element (useSelectionPopover), and only the
+  // caller knows the anchor and the bounds to clamp into.
   elementRef?: React.Ref<HTMLDivElement>;
   candidates: DocLinkInput[];
   onSelect: (link: DocLinkInput) => void;
@@ -27,9 +25,9 @@ function elideMiddle(text: string): string {
   return `${text.slice(0, 50)}…${text.slice(-50)}`;
 }
 
-export default function DocLinkChooser({ top, left, elementRef, candidates, onSelect, onCancel }: Props) {
+export default function DocLinkChooser({ elementRef, candidates, onSelect, onCancel }: Props) {
   return (
-    <div ref={elementRef} data-testid="doc-link-chooser" className={styles.chooser} style={{ top, left }}>
+    <div ref={elementRef} data-testid="doc-link-chooser" className={styles.chooser}>
       <p className={styles.heading}>Which doc link?</p>
       {candidates.map((link) => (
         <button key={link.id} type="button" className={styles.candidate} onClick={() => onSelect(link)}>

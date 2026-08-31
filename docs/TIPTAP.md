@@ -107,8 +107,11 @@ portaled box first paints, so nothing provisional is ever shown. The side is sta
 popover as `data-placement`, which is what lifts the list to the top of a flipped popover
 (`[data-placement^="top"]`, EditorChrome.module.css): whatever sits above the list moves when it
 grows, and above the selection that should be nothing the author is typing into. The hand-rolled
-`placePopover` version and a tippy.js attempt live in git history; TODO.md tracks moving the
-other popovers (still on `src/lib/popover-placement.ts`) to floating-ui.
+`placePopover` version lives in merged history; the tippy.js attempt is kept on the local
+`archive/link-popover-tippy` branch (its `docref-suggestion` working branch is deleted, so
+commit fc26a8e is reachable only through that archive ref). The other popovers have since
+moved to floating-ui too, sharing `sideForTallest` and the `[data-popover-bounds]` boundary
+helper from `src/lib/popover-placement.ts`.
 
 The selection stays visible under the open popover. A document has one DOM selection, and the
 URL box taking focus takes it — ProseMirror's `state.selection` is untouched (Save resolves the
@@ -155,10 +158,10 @@ does. Ours on top: `allow`, which keeps a closed `[[a]]` (Suggestion's match run
 and would carry the `]]` in its query) and a code block from being a context; the list, rendered
 from what its `render` callbacks hand over; ArrowUp/Down/Enter in `onKeyDown`, which also
 stands down mid-composition; and placement, which takes Suggestion's `clientRect` as the anchor
-but still runs it through `placePopover` rather than Suggestion's floating-ui `mount` (once per
-`[[`, for the tallest the menu can be) — the link popover has since moved to `@floating-ui/dom`
-directly, and TODO.md's migration item brings this menu along, sharing `sideForTallest` rather
-than adopting `mount`'s own update loop. Suggestion's plugin is *prepended*, ahead of the keymaps,
+but runs its own `computePosition`/`autoUpdate` pass rather than Suggestion's floating-ui
+`mount`, sharing the link popover's `sideForTallest` (`src/lib/popover-placement.ts`) so the
+side is chosen for the tallest the menu can be and results arriving and going never flip
+it. Suggestion's plugin is *prepended*, ahead of the keymaps,
 for the same reason `LinkControls`' Ctrl-K is: Enter must reach the menu before the base keymap
 splits the paragraph.
 

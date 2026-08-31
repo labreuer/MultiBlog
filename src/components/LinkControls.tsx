@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import { getMarkRange } from "@tiptap/core";
@@ -10,8 +10,8 @@ import { searchLinkableDocs } from "@/app/actions/docs";
 import type { LinkableDocJson } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { relativeTime } from "@/lib/relative-time";
-import { autoUpdate, computePosition, offset, shift, type Middleware } from "@floating-ui/dom";
-import { POPOVER_GAP, type PopoverAnchor } from "@/lib/popover-placement";
+import { autoUpdate, computePosition, offset, shift } from "@floating-ui/dom";
+import { POPOVER_GAP, sideForTallest, type PopoverAnchor } from "@/lib/popover-placement";
 import LinkBubble from "./LinkBubble";
 import styles from "./EditorChrome.module.css";
 
@@ -53,35 +53,11 @@ const KEYS_PER_FORCED_SEARCH = 3;
 // would read as the end. In rem so it scales with the root font size, and
 // one constant applied inline rather than a CSS max-height, because the
 // placement arithmetic needs the same number: the popover's side is
-// chosen for the tallest it can be (sideForTallest below).
+// chosen for the tallest it can be (the sideForTallest callback below).
 const LIST_MAX_HEIGHT_REM = 17;
 // .linkPopover's gap (EditorChrome.module.css), between the list and its
 // neighbours — part of that tallest height.
 const LIST_GAP_PX = 8;
-
-// The side decision: made for the *tallest* the popover can be — the form
-// plus the list at LIST_MAX_HEIGHT_REM — never for its live height, which
-// is what the stock flip() reads and exactly the walking-box bug this
-// popover fixed once already (the box flipped above the selection when
-// the recent docs landed, back below on a pick, while being typed into).
-// Which edge then holds still is computePosition's own arithmetic: a
-// bottom-placed box is laid out from the anchor down, a top-placed one
-// from the anchor up, so growth always lands on the far edge.
-function sideForTallest(list: RefObject<HTMLDivElement | null>): Middleware {
-  return {
-    name: "sideForTallest",
-    fn({ rects, placement }) {
-      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      const listHeight = list.current ? list.current.getBoundingClientRect().height + LIST_GAP_PX : 0;
-      const formHeight = rects.floating.height - listHeight;
-      const tallest = formHeight + LIST_GAP_PX + LIST_MAX_HEIGHT_REM * rem;
-      const fitsBelow = rects.reference.y + rects.reference.height + POPOVER_GAP + tallest <= window.innerHeight;
-      const fitsAbove = rects.reference.y - POPOVER_GAP - tallest >= 0;
-      const desired = fitsBelow || !fitsAbove ? "bottom-start" : "top-start";
-      return placement === desired ? {} : { reset: { placement: desired } };
-    },
-  };
-}
 
 type LinkRange = { from: number; to: number; text: string };
 
@@ -337,7 +313,8 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
   // microtask, before the newly portaled box ever paints, so there is no
   // provisional spot. The side is data-placement (the CSS lifts the list
   // above the form when it reads "top") and the one call kept ours:
-  // sideForTallest, with the stock flip() left out.
+  // the shared sideForTallest (src/lib/popover-placement.ts), with the
+  // stock flip() left out.
   useLayoutEffect(() => {
     if (!open) return;
     const popover = popoverRef.current;
@@ -357,7 +334,14 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
         placement: "bottom-start",
         middleware: [
           offset({ mainAxis: POPOVER_GAP, crossAxis: POPOVER_GAP }),
-          sideForTallest(listRef),
+          // The tallest this popover can be: the form as it stands (the
+          // live box minus the list and its own flex gap) plus the list at
+          // its max height. Shared middleware: src/lib/popover-placement.ts.
+          sideForTallest((floatingHeight) => {
+            const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+            const listHeight = listRef.current ? listRef.current.getBoundingClientRect().height + LIST_GAP_PX : 0;
+            return floatingHeight - listHeight + LIST_GAP_PX + LIST_MAX_HEIGHT_REM * rem;
+          }),
           shift({ padding: POPOVER_GAP }),
         ],
       }).then(({ x, y, placement }) => {

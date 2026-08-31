@@ -9,11 +9,9 @@ const DEBOUNCE_MS = 600;
 
 type Props = {
   docId: string;
-  top: number;
-  left: number;
-  // So the caller can measure this popover's rendered size — placement needs
-  // it to clamp/flip (src/lib/popover-placement.ts), and only the caller
-  // knows the bounds to clamp into.
+  // The caller positions this popover through it — floating-ui writes
+  // left/top straight onto the element (useSelectionPopover), and only the
+  // caller knows the anchor and the bounds to clamp into.
   elementRef?: React.Ref<HTMLDivElement>;
   mark: DocLinkMark;
   userColor: string;
@@ -53,8 +51,6 @@ type Props = {
 // the selection's own end coordinates (the module's .popover transform).
 export default function DocLinkPopover({
   docId,
-  top,
-  left,
   elementRef,
   mark,
   userColor,
@@ -202,7 +198,7 @@ export default function DocLinkPopover({
   const quoted = mark.text.length > 80 ? `${mark.text.slice(0, 80)}…` : mark.text;
 
   return (
-    <div ref={elementRef} data-testid="doc-link-popup" className={styles.popover} style={{ top, left }}>
+    <div ref={elementRef} data-testid="doc-link-popup" className={styles.popover}>
       <p className={styles.quotedText}>{isEditing ? "Editing link over" : "Linking"}: “{quoted}”</p>
       {!isEditing && (
         <p className={styles.groupNote}>
