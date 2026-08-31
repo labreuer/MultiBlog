@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
+import { signInPath } from "@/lib/sign-in-redirect";
 
 export const metadata: Metadata = { title: "History" };
 
@@ -14,7 +15,7 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
   const { id } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(`/posts/${id}/history`));
   }
 
   const post = await prisma.post.findUnique({

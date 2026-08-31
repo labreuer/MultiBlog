@@ -227,6 +227,10 @@ running `prisma migrate dev` on anything unusual.
 
 - Typecheck `npx tsc --noEmit`; lint `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
   `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
+- `npm run check:sign-in` — fails if anything redirects to a bare `"/sign-in"` instead of
+  `signInPath(<where the viewer was heading>)`. The failure it exists for is silent: a new
+  gated route that skips the callbackUrl still compiles, lints, gates and passes its tests —
+  only the person who followed the link notices, by landing on /dashboard. src/app/sign-in/NOTES.md.
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
   and the right home for exactly one kind of thing — pure functions whose *rejection surface*

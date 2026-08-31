@@ -6,6 +6,7 @@ import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { canUserEditDoc } from "@/lib/doc-authz";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { docTitleOrFallback } from "@/lib/doc-title";
+import { signInPath } from "@/lib/sign-in-redirect";
 import SlugManager from "@/components/SlugManager";
 
 export const metadata: Metadata = { title: "Doc url" };
@@ -14,7 +15,7 @@ export default async function DocSlugPage({ params }: { params: Promise<{ slug: 
   const { slug } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(`/doc/${slug}/slug`));
   }
 
   const doc = await resolveDocParam(slug, {

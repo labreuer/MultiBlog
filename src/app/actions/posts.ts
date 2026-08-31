@@ -16,6 +16,7 @@ import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
+import { signInPath } from "@/lib/sign-in-redirect";
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
 // the home page, author pages, and the post's own page are built from — all
@@ -35,7 +36,9 @@ async function revalidatePublicPaths(postId: string, slug: string) {
 async function requireEditableSession(postId: string) {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    // No callbackUrl: this guards a mutation, and a POST can't be replayed by
+    // arriving at a URL, so there is no destination worth naming.
+    redirect(signInPath());
   }
 
   const post = await prisma.post.findUnique({ where: { id: postId } });
@@ -58,7 +61,9 @@ async function requireEditableSession(postId: string) {
 export async function createPostFromDoc(docId: string): Promise<void> {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    // No callbackUrl: this guards a mutation, and a POST can't be replayed by
+    // arriving at a URL, so there is no destination worth naming.
+    redirect(signInPath());
   }
   if (!(await canUserEditDoc(session.user.id, session.user.role, docId))) {
     throw new Error("You don't have permission to create a post from this doc.");

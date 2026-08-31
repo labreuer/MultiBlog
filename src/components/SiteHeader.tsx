@@ -2,11 +2,13 @@
 
 import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { canManagePosts, canManageDocs, canManageFiles, isAdmin } from "@/lib/role-checks";
 import { SITE_TITLE } from "@/lib/site-config";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import { fixedPlacementStyle, onViewportChange } from "@/lib/popover-placement";
+import { signInPath } from "@/lib/sign-in-redirect";
 import styles from "./SiteHeader.module.css";
 
 // The dropdown panels are position: fixed (SiteHeader.module.css), so their
@@ -56,6 +58,14 @@ function placePanel(details: HTMLDetailsElement | null) {
 
 export default function SiteHeader() {
   const { data: session } = useSession();
+  // Sends "Log in" back to whatever page the reader is on, so the header agrees
+  // with the gates (which supply their own callbackUrl via signInPath). Pathname
+  // only: `useSearchParams` would opt every page mounting this header out of
+  // static rendering unless wrapped in Suspense, which is precisely the cost
+  // this header exists to avoid (src/app/sign-in/NOTES.md, CACHING.md).
+  // `usePathname` carries no such bailout. `signInPath` drops /sign-in itself
+  // and the other account pages, so the link never loops back to where it is.
+  const pathname = usePathname();
   const postsMenuRef = useRef<HTMLDetailsElement>(null);
   const docsMenuRef = useRef<HTMLDetailsElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -247,7 +257,8 @@ export default function SiteHeader() {
               </>
             ) : (
               <>
-                <Link href="/sign-in">Log in</Link> / <Link href="/sign-up">Sign up</Link>
+                <Link href={signInPath(pathname)}>Log in</Link> /{" "}
+                <Link href="/sign-up">Sign up</Link>
               </>
             )}
           </nav>

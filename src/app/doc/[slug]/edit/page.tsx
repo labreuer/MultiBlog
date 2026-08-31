@@ -12,6 +12,7 @@ import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import DocEditor from "@/components/DocEditor";
 import { docTitleOrFallback } from "@/lib/doc-title";
+import { signInPath } from "@/lib/sign-in-redirect";
 
 // resolveDocParam rather than a direct query — the id-or-slug ambiguity this
 // route shares with /doc/[slug] and /doc/[slug]/slug (PLAN.md §12f). No
@@ -58,7 +59,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
   // Free — generateMetadata already ran this for the same request.
   const access = await loadDocForEdit(slug);
   if (access.status === "signed-out") {
-    redirect("/sign-in");
+    redirect(signInPath(`/doc/${slug}/edit`));
   }
   if (access.status === "redirect") {
     redirect(access.to);

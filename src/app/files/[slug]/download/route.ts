@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
+import { signInPath } from "@/lib/sign-in-redirect";
 
 // PLAN.md §19 — the human-readable download URL, /files/<slug>/download.
 //
@@ -33,7 +34,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   if (!session?.user) {
     // A URL meant to be pasted and clicked by a person, so it answers like a
     // page rather than like an API: sign in and come back, not a bare 401.
-    return redirectTo("/sign-in");
+    // "Come back" literally — the callbackUrl returns them to this same URL,
+    // which then answers with the bytes. Taken from `request.url` rather than
+    // rebuilt from `slug`, since the raw path is right here and needs no
+    // assumption about what a slug may contain.
+    return redirectTo(signInPath(new URL(request.url).pathname));
   }
 
   const resolved = await resolveFileParam(slug, {

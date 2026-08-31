@@ -12,6 +12,7 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import { parseDocsFilters, type DocsFilters, type DocsSortKey } from "@/lib/docs-query";
 import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import DocsTable from "@/components/DocsTable";
 import DocImportButton from "@/components/DocImportButton";
 import styles from "./page.module.css";
@@ -77,9 +78,13 @@ export default async function DocsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Hoisted above the gate so an anonymous visitor's callbackUrl keeps the
+  // filters, sort and page they arrived with — this table's whole state lives
+  // in the querystring (CLAUDE.md, "Admin tables are one kit").
+  const urlSearchParams = toURLSearchParams(await searchParams);
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(pathWithQuery("/docs", urlSearchParams)));
   }
   if (!canManageDocs(session.user.role)) {
     return (
@@ -90,7 +95,6 @@ export default async function DocsPage({
     );
   }
 
-  const urlSearchParams = toURLSearchParams(await searchParams);
   // Run concurrently — the option list is independent of prefs/filters, so
   // fetching it costs no extra latency in series.
   const [prefs, authorOptions] = await Promise.all([

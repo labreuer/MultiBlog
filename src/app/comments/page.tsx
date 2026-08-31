@@ -8,6 +8,7 @@ import { parseCommentsFilters, type CommentsSortKey } from "@/lib/comments-query
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import CommentsTable from "@/components/CommentsTable";
 import styles from "./page.module.css";
 
@@ -91,9 +92,13 @@ export default async function CommentsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Hoisted above the gate so an anonymous visitor's callbackUrl keeps the
+  // filters, sort and page they arrived with — this table's whole state lives
+  // in the querystring (CLAUDE.md, "Admin tables are one kit").
+  const urlSearchParams = toURLSearchParams(await searchParams);
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(pathWithQuery("/comments", urlSearchParams)));
   }
   if (!canManagePosts(session.user.role)) {
     return (
@@ -104,7 +109,6 @@ export default async function CommentsPage({
     );
   }
 
-  const urlSearchParams = toURLSearchParams(await searchParams);
   const prefs = await getTablePrefs(session.user.id, "comments");
   const filters = parseCommentsFilters(urlSearchParams, prefs);
 

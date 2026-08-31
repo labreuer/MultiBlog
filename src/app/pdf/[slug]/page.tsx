@@ -5,6 +5,7 @@ import { resolveFileParam } from "@/lib/file-slug";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
+import { signInPath } from "@/lib/sign-in-redirect";
 import TagChips from "@/components/tags/TagChips";
 import styles from "./page.module.css";
 
@@ -64,7 +65,7 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
   // Free — generateMetadata already ran this for the same request.
   const access = await loadFileForRead(slug);
   if (access.status === "signed-out") {
-    redirect("/sign-in");
+    redirect(signInPath(`/pdf/${slug}`));
   }
   if (access.status === "redirect") {
     redirect(access.to);

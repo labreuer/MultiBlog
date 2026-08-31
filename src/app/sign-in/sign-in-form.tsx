@@ -5,9 +5,17 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { signInAction } from "@/app/actions/sign-in";
+import { DEFAULT_SIGN_IN_DESTINATION } from "@/lib/sign-in-redirect";
 import styles from "@/styles/account.module.css";
 
-export default function SignInForm({ initialError }: { initialError: string | null }) {
+export default function SignInForm({
+  initialError,
+  callbackUrl,
+}: {
+  initialError: string | null;
+  /** Already through `safeCallbackUrl` in page.tsx; null means "no stated destination". */
+  callbackUrl: string | null;
+}) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(initialError);
   const [pending, setPending] = useState(false);
@@ -45,7 +53,10 @@ export default function SignInForm({ initialError }: { initialError: string | nu
     }
 
     // Leave `pending` set: the button stays disabled through the navigation.
-    router.push("/dashboard");
+    // `callbackUrl` is already through safeCallbackUrl in page.tsx — it has to
+    // be, since `redirect: false` above means Auth.js's own same-origin
+    // `redirect` callback never runs on this path.
+    router.push(callbackUrl ?? DEFAULT_SIGN_IN_DESTINATION);
   }
 
   return (
@@ -55,6 +66,10 @@ export default function SignInForm({ initialError }: { initialError: string | nu
         {/* No `method`/`encType` here on purpose: React derives both from the
             function `action` and warns if they're also passed by hand. */}
         <form action={signInAction} onSubmit={handleSubmit} className={styles.form}>
+          {/* Only the no-JS path reads this — `handleSubmit` uses the prop. It
+              carries the destination across the POST so `signInAction` can hand
+              it to `redirectTo`, and re-attach it if the sign-in fails. */}
+          {callbackUrl && <input type="hidden" name="callbackUrl" value={callbackUrl} />}
           <label className={styles.field}>
             Email
             <input name="email" type="email" required autoComplete="email" />
