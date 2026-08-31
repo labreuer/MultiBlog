@@ -34,6 +34,14 @@ function parseRgb(css: string): [number, number, number, number] | null {
  * non-transparent background — the exact failure mode of a missed `#fff`/
  * `white`/light-gray literal under a dark theme. The cheapest possible
  * detector for the class of bug this migration is prone to.
+ *
+ * An *inline* background is exempt. In this codebase that is never a theme
+ * literal (CLAUDE.md's no-literal rule and STYLE.md's grep guard see to
+ * that): it is a per-user author colour — an avatar fallback, a presence
+ * dot, a swatch — which is data, chosen by the user, and legitimately as
+ * light as they like. The first offender this found was the slot's own
+ * account wearing #6bffe6 on the landing page's contributor card, and it
+ * read exactly like a regression.
  */
 async function assertNoNearWhiteBackgrounds(page: Page, path: string): Promise<void> {
   const offenders = await page.evaluate(() => {
@@ -46,6 +54,7 @@ async function assertNoNearWhiteBackgrounds(page: Page, path: string): Promise<v
     }
     const found: string[] = [];
     document.querySelectorAll<HTMLElement>("*").forEach((el) => {
+      if (el.style.backgroundColor || el.style.background) return;
       const bg = getComputedStyle(el).backgroundColor;
       const m = bg.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
       if (!m) return;

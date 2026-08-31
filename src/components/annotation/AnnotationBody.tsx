@@ -8,7 +8,12 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
+import { EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
+import { BlurredSelection } from "@/lib/blurred-selection-extension";
+import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
+import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
+import DocRefMenu from "../DocRefMenu";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./AnnotationBody.module.css";
 
@@ -62,11 +67,20 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ undoRedo: false }),
+      StarterKit.configure({ undoRedo: false, link: EDITOR_LINK_OPTIONS }),
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({ provider, user: { id: userId, name: userName, color: userColor } }),
       // eslint-disable-next-line react-hooks/refs -- getAuthorId is only ever invoked from the AuthorHighlight plugin's appendTransaction, on a real ProseMirror transaction dispatch, never during React's render
       AuthorHighlight.configure({ getAuthorId: () => (coAuthoringRef.current ? userId : null) }),
+      // Selection stays painted while the link popover holds focus —
+      // CollabEditorBody's comment on the same line.
+      BlurredSelection,
+      // Enter inserts the hard break Shift-Enter does while the virtual
+      // keyboard is up — the extension file says why, and how it is detected.
+      VirtualKeyboardEnter,
+      // Ctrl/⌘+Shift+. and , — quote depth in and out; the extension file
+      // says why those keys and what they share with QuoteControls.
+      QuoteDepthShortcuts,
     ],
     editorProps: { attributes: { "aria-label": "Annotation body", role: "textbox" } },
     immediatelyRender: false,
@@ -97,6 +111,7 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
     <div className={styles.frame}>
       {toolbarVisible && <EditorToolbar editor={editor} disabled={!editable} tools={ANNOTATION_TOOLS} />}
       <EditorContent editor={editor} className={`${styles.content} ${proseStyles.prose}`} />
+      <DocRefMenu editor={editor} disabled={!editable} />
       {editable && (
         <button type="button" onClick={toggleToolbar} className={styles.toolbarToggle}>
           {toolbarVisible ? "Hide formatting" : "Aa Formatting"}

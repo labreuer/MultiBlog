@@ -111,10 +111,16 @@ test.describe("text selection offers somewhere to respond", () => {
     expect(frameBox).not.toBeNull();
     expect(markerBox).not.toBeNull();
     expect(markerBox!.x).toBeGreaterThanOrEqual(frameBox!.x + frameBox!.width);
-    // ...and level with the selection rather than parked at a corner.
-    const highlight = await page.locator(".pending-annotation").first().boundingBox();
-    expect(highlight).not.toBeNull();
-    expect(Math.abs(markerBox!.y - highlight!.y)).toBeLessThan(40);
+    // ...and level with the selection rather than parked at a corner. The
+    // selection's own rect: stage one paints no decoration of its own to
+    // measure (the native highlight is the only one, by design).
+    const selectionTop = await page.evaluate(() => {
+      const selection = window.getSelection();
+      return selection && selection.rangeCount > 0 ? selection.getRangeAt(0).getBoundingClientRect().top : null;
+    });
+    expect(selectionTop).not.toBeNull();
+    expect(Math.abs(markerBox!.y - selectionTop!)).toBeLessThan(40);
+    await expect(page.locator(".pending-annotation")).toHaveCount(0);
 
     // Stage two: clicking expands it into the composer. No second
     // "Annotate" button — the marker already was that question, so this
@@ -125,6 +131,9 @@ test.describe("text selection offers somewhere to respond", () => {
     await expect(popup).toBeVisible();
     await expect(popup).toContainText("Annotating:");
     await expect(popup).toContainText(QUOTED_TEXT);
+    // Now the range is decorated — the composer has the focus, the native
+    // highlight is gone, and this is what keeps the passage marked.
+    await expect(page.locator('[aria-label="Post body"] .pending-annotation')).toContainText(QUOTED_TEXT);
     await expect(annotationEditor(page)).toBeVisible({ timeout: 15_000 });
     await expect(popup.getByRole("button", { name: "Annotate", exact: true })).toHaveCount(0);
     // The other half of the read-view assertion above: no bottom composer
@@ -172,10 +181,9 @@ test.describe("text selection offers somewhere to respond", () => {
     await waitForDocCollabReady(page);
     await selectTextInBody(page, QUOTED_TEXT);
 
-    // The selection is still decorated — the anchor was captured, only the
-    // marker is withheld — so this asserts the absence of a widget rather
-    // than the absence of a working selection.
-    await expect(page.locator(".pending-annotation")).toHaveCount(1);
+    // No decoration either: it is stage two's, and there is no stage two
+    // to reach from here.
+    await expect(page.locator(".pending-annotation")).toHaveCount(0);
     await expect(page.getByTestId("annotate-marker")).toHaveCount(0);
     await expect(page.getByTestId("annotation-popup")).toHaveCount(0);
   });

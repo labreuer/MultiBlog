@@ -174,7 +174,17 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
                       // reason docs/page.tsx's own create-doc form isn't wrapped in
                       // one. .byline's styling (page.module.css) is purely visual,
                       // so the tag swap changes nothing about how this renders.
-                      <div className={styles.byline}>
+                      //
+                      // The `key` is load-bearing, like TagChips' below, for a
+                      // second reason: this element is a *prop* that DocView
+                      // renders among siblings. While TagChips is still awaiting
+                      // (a doc that has tags), the RSC stream hands the whole div
+                      // to the client as a lazy chunk, and the reconciler checks
+                      // the resolved element for a key at DocView's level —
+                      // "Check the top-level render call using <DocView>" — which
+                      // the static-JSX validation that normally exempts it never
+                      // ran on. CLAUDE.md's Gotchas has the fuller story.
+                      <div key="byline" className={styles.byline}>
                         <AuthorByline
                           authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
                           showPrefix={false}

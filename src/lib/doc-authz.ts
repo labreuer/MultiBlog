@@ -91,16 +91,104 @@ export type ReadableDoc = { id: string; slug: string; title: string };
 // only thing keeping the two honest with each other, since Prisma has no way
 // to share a boolean predicate between a per-row check and a query filter.
 export async function readableDocsFor(userId: string, role: Role): Promise<ReadableDoc[]> {
-  const or: Prisma.DocWhereInput[] = [];
-  if (canViewDocs(role)) or.push({ visibility: "SHARED" });
-  if (canManageDocs(role)) or.push({ visibility: "PRIVATE", authors: { some: { userId } } });
-  if (or.length === 0) return [];
+  const where = readableDocsWhere(userId, role);
+  if (!where) return [];
 
   return prisma.doc.findMany({
-    where: { deletedByUserId: null, OR: or },
+    where,
     select: { id: true, slug: true, title: true },
     orderBy: { title: "asc" },
   });
+}
+
+// readableDocsFor's where clause on its own, shared with searchReadableDocsFor
+// below so the two can't drift; null means this viewer can read no docs at
+// all, which both callers turn into [] without touching the database.
+function readableDocsWhere(userId: string, role: Role): Prisma.DocWhereInput | null {
+  const or: Prisma.DocWhereInput[] = [];
+  if (canViewDocs(role)) or.push({ visibility: "SHARED" });
+  if (canManageDocs(role)) or.push({ visibility: "PRIVATE", authors: { some: { userId } } });
+  if (or.length === 0) return null;
+  return { deletedByUserId: null, OR: or };
+}
+
+// The link picker's row (LinkControls.tsx): a readable doc plus when it was
+// last edited, which is what tells a dozen near-identical titles apart.
+// `updatedAt` is a Date from these queries and an ISO string on the wire
+// (LinkableDocJson) — the server action converts, so the client never
+// depends on a Date surviving the action boundary.
+export type LinkableDoc = ReadableDoc & { updatedAt: Date };
+export type LinkableDocJson = ReadableDoc & { updatedAt: string };
+
+// The link bubble's preview of a linked doc (LinkBubble.tsx, fetched through
+// previewLinkedDoc in src/app/actions/docs.ts): what the reading route's
+// byline shows — the title, the authors in byline order, the last edit — as
+// a block under the bubble's row, or "forbidden" for a doc that exists and
+// isn't this viewer's to read, the same answer the route itself gives.
+// Authors in the shape AuthorByline takes; updatedAt an ISO string on the
+// wire, as LinkableDocJson's is.
+export type LinkedDocPreview =
+  | {
+      status: "ok";
+      title: string;
+      authors: { userId: string; slug: string; name: string | null }[];
+      updatedAt: string;
+    }
+  | { status: "forbidden" };
+
+// How many rows the picker fetches. Inside the 5–10 band every mainstream
+// link picker lands in; the dropdown shows about five and scrolls for the
+// rest, so the cut is visible rather than a silent cap.
+export const LINK_PICKER_LIMIT = 8;
+
+const linkableSelect = { id: true, slug: true, title: true, updatedAt: true } as const;
+
+// readableDocsFor's most recently edited rows — what the picker offers before
+// anything is typed, since the doc someone wants to link is usually one they
+// were just working on.
+export async function recentReadableDocsFor(
+  userId: string,
+  role: Role,
+  limit = LINK_PICKER_LIMIT,
+): Promise<LinkableDoc[]> {
+  const where = readableDocsWhere(userId, role);
+  if (!where) return [];
+  return prisma.doc.findMany({ where, select: linkableSelect, orderBy: { updatedAt: "desc" }, take: limit });
+}
+
+// readableDocsFor filtered by title: the top `limit` matches, title-prefix
+// matches first. Two queries wearing the same predicate rather than one with
+// a computed orderBy, because Prisma has no way to sort by "does the title
+// start with the query" — the second query only runs when the first comes
+// back short, and excludes the rows the first already returned.
+export async function searchReadableDocsFor(
+  userId: string,
+  role: Role,
+  query: string,
+  limit = LINK_PICKER_LIMIT,
+): Promise<LinkableDoc[]> {
+  const where = readableDocsWhere(userId, role);
+  if (!where) return [];
+
+  const prefix = await prisma.doc.findMany({
+    where: { ...where, title: { startsWith: query, mode: "insensitive" } },
+    select: linkableSelect,
+    orderBy: { title: "asc" },
+    take: limit,
+  });
+  if (prefix.length >= limit) return prefix;
+
+  const contains = await prisma.doc.findMany({
+    where: {
+      ...where,
+      title: { contains: query, mode: "insensitive" },
+      id: { notIn: prefix.map((doc) => doc.id) },
+    },
+    select: linkableSelect,
+    orderBy: { title: "asc" },
+    take: limit - prefix.length,
+  });
+  return [...prefix, ...contains];
 }
 
 // canUserEditDoc expressed as a `where` clause — the same relationship

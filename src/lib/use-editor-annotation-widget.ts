@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import { captureRelativeRange, resolveRelativeRange, type RelativeRange } from "./yjs-relative-anchor";
-import { setPendingAnnotation } from "./pending-annotation-extension";
+import { pendingAnnotationKey, setPendingAnnotation } from "./pending-annotation-extension";
 import {
   fixedPlacementStyle,
   onViewportChange,
@@ -79,6 +79,15 @@ export type EditorAnnotationWidget = {
  * has the ySyncPlugin binding to convert against. That buys what a
  * text-search re-resolve cannot: no fallback search, and a range that
  * survives an edit made *inside* it.
+ *
+ * **The `.pending-annotation` decoration is stage two's, not stage one's.**
+ * While the editor is focused the native selection already shows the range
+ * the marker is levelled against, and a dashed author-colour underline on
+ * every selection made while editing is the same noise the marker exists to
+ * avoid. It is applied by `expand` — when focus moves into the composer and
+ * the native highlight goes — and removed with the composer, so on every
+ * surface the class means "a composer is open on this range". Nothing else
+ * reads it: the marker positions off `anchorPos`, the anchor is `relRange`.
  */
 export function useEditorAnnotationWidget({
   editorRef,
@@ -157,7 +166,7 @@ export function useEditorAnnotationWidget({
       setMarkerStyle(null);
       setExpanded(false);
       const target = liveEditor ?? editorRef.current;
-      if (target) setPendingAnnotation(target.view, null);
+      if (target && pendingAnnotationKey.getState(target.state)) setPendingAnnotation(target.view, null);
     },
     [editorRef],
   );
@@ -184,13 +193,14 @@ export function useEditorAnnotationWidget({
       }
       // Re-selecting collapses any open composer back to a marker: the
       // expanded panel described the *previous* range, and silently
-      // re-pointing it at a new one would be worse than closing it.
+      // re-pointing it at a new one would be worse than closing it. Its
+      // decoration goes with it — stage one paints nothing of its own.
       setPending({ relRange, quotedText });
       setAnchorPos(from);
       setExpanded(false);
-      setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
+      if (pendingAnnotationKey.getState(liveEditor.state)) setPendingAnnotation(liveEditor.view, null);
     },
-    [clear, containerRef, userColor],
+    [clear, containerRef],
   );
 
   const reresolve = useCallback(
@@ -203,7 +213,11 @@ export function useEditorAnnotationWidget({
         return;
       }
       setAnchorPos(resolved.from);
-      setPendingAnnotation(liveEditor.view, { from: resolved.from, to: resolved.to, color: userColor });
+      // Only a decoration already showing (an open composer) follows the
+      // text; a marker-stage range has none to move.
+      if (pendingAnnotationKey.getState(liveEditor.state)) {
+        setPendingAnnotation(liveEditor.view, { from: resolved.from, to: resolved.to, color: userColor });
+      }
     },
     [clear, userColor],
   );
@@ -226,7 +240,15 @@ export function useEditorAnnotationWidget({
       );
     }
     setExpanded(true);
-  }, []);
+    // Stage two is where the range gets its decoration (the header comment):
+    // resolved now, against the document as it is at the click.
+    const editor = editorRef.current;
+    const range = pendingRef.current;
+    if (editor && range) {
+      const resolved = resolveRelativeRange(editor, range.relRange);
+      if (resolved) setPendingAnnotation(editor.view, { from: resolved.from, to: resolved.to, color: userColor });
+    }
+  }, [editorRef, userColor]);
 
   // Dismiss on a click outside the editor column — same convention as
   // useSelectionPopover. The expanded composer lives outside `containerRef`

@@ -124,6 +124,19 @@ standard as `next.config.ts`'s `allowedDevOrigins`, for the same LAN, and no fur
 Nothing is written to disk and no state outlives the process. Don't leave it running, and
 take the `.env` line back out when the session ends.
 
+**Safari on the phone keeps a stale stylesheet across Reload.** Next's dev server sends a
+`Link: …; rel=preload; as="style"` response header for every stylesheet, and Safari reuses
+a *preloaded* resource without revalidating it — `Cache-Control: no-cache` and a fresh ETag
+notwithstanding ([WebKit bug 193533](https://bugs.webkit.org/show_bug.cgi?id=193533), open
+since 2019). Dev chunk URLs don't change with their content, so after a CSS edit the phone
+rendered new elements with no styling at all, through every Reload, until a private window
+loaded with an empty cache. `next.config.ts` sets `reactMaxHeadersLength: 1` in the
+development phase — React's header budget in bytes, and the only switch for that header
+(1 rather than 0 because React logs an error on every render for zero, and nothing fits in
+one byte either way); production keeps the default, since its chunk URLs are
+content-hashed. The tell, should it come back: markup carrying class names that style
+nothing.
+
 ## File storage
 
 | variable | default | notes |

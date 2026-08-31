@@ -7,8 +7,17 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { changeDocSlug, revertDocSlug as revertDocSlugInDb, uniqueDocSlug } from "@/lib/doc-slug";
+import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { slugify } from "@/lib/slug";
-import { canManageDocs, canUserEditDoc } from "@/lib/doc-authz";
+import {
+  canManageDocs,
+  canUserEditDoc,
+  canUserReadDoc,
+  recentReadableDocsFor,
+  searchReadableDocsFor,
+  type LinkableDocJson,
+  type LinkedDocPreview,
+} from "@/lib/doc-authz";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { contentExtensions, titleExtensions } from "@/lib/tiptap-schema";
 import { docContentFromYdoc } from "@/lib/doc-content";
@@ -428,4 +437,59 @@ export async function bulkRestoreDocs(docIds: string[]): Promise<BulkResult> {
 
 export async function bulkSetDocVisibility(docIds: string[], visibility: DocVisibility): Promise<BulkResult> {
   return settleBulk(docIds, (id) => updateDocVisibility(id, visibility));
+}
+
+
+// The editor toolbar's link-popover doc picker (LinkControls.tsx). With a
+// query: title matches among the docs this viewer may read, prefix matches
+// first. Without one: the most recently edited. Both capped at
+// LINK_PICKER_LIMIT. Returns [] rather than redirecting when signed out:
+// every surface carrying the toolbar is already gated, so an expired session
+// mid-keystroke degrades to "no results" instead of yanking the page to
+// /sign-in.
+export async function searchLinkableDocs(query: string): Promise<LinkableDocJson[]> {
+  const session = await auth();
+  if (!session?.user) return [];
+  const trimmed = query.trim().slice(0, 200);
+  const rows = trimmed
+    ? await searchReadableDocsFor(session.user.id, session.user.role, trimmed)
+    : await recentReadableDocsFor(session.user.id, session.user.role);
+  return rows.map(({ updatedAt, ...doc }) => ({ ...doc, updatedAt: updatedAt.toISOString() }));
+}
+
+// The link bubble's second block (LinkBubble.tsx) for a link into this
+// site's docs: the doc's title, byline and last edit, given the param the
+// link's /doc/<param> path carries. Resolved as /doc/[slug] resolves it
+// (resolveDocParam: id first, then slug) and gated as that route gates —
+// not soft-deleted, then canUserReadDoc — with the route's own three
+// answers: the doc, "forbidden" for one that exists but isn't this viewer's
+// to read (the route renders a Forbidden page there, not a 404, so saying
+// so here reveals nothing following the link wouldn't), and null for no
+// such doc, deleted, or signed out.
+const PREVIEW_SELECT = {
+  id: true,
+  title: true,
+  visibility: true,
+  updatedAt: true,
+  deletedByUserId: true,
+  authors: {
+    orderBy: { bylineOrder: "asc" },
+    select: { userId: true, user: { select: { slug: true, name: true } } },
+  },
+} as const;
+
+export async function previewLinkedDoc(param: string): Promise<LinkedDocPreview | null> {
+  const session = await auth();
+  if (!session?.user) return null;
+  const trimmed = param.trim();
+  if (!trimmed || trimmed.length > 200) return null;
+  const doc = await resolveDocParam(trimmed, PREVIEW_SELECT);
+  if (!doc || doc.deletedByUserId !== null) return null;
+  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) return { status: "forbidden" };
+  return {
+    status: "ok",
+    title: doc.title,
+    authors: doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name })),
+    updatedAt: doc.updatedAt.toISOString(),
+  };
 }

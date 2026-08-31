@@ -340,7 +340,13 @@ working on.
   one child that warns is the one that looks least like a list item. The symptom is "Each
   child in a list should have a unique key prop" pointing at a `<div>` whose children are
   plainly static — `/doc/[slug]`'s byline is the live example, and `/pdf/[slug]`'s chips
-  escape it only by being a whole prop value with no siblings. **Invisible to every automated
+  escaped it only by being a whole prop value with no siblings (they carry a key now
+  regardless, since `PdfMetadataPanel` is expected to grow siblings). **The prop element itself
+  needs a key too** when the client component renders it among siblings: if an async Server
+  Component inside it is still pending, the RSC stream hands the whole element over as a lazy
+  chunk, and the client reconciler then checks the *resolved* element keyless — that variant
+  reads `Check the top-level render call using <DocView>`, and only appears on docs whose
+  `TagChips` had rows to await, i.e. docs with tags. **Invisible to every automated
   check here**: `tsc` and `eslint` can't see it, and `npm run e2e` asserts on the DOM, not the
   console. Dev-only, since the production Flight build runs no such validation.
 - **A doc link's anchor is a plain JSON blob in Postgres, not a mark in the doc's ydoc** — the

@@ -103,13 +103,20 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
   // Component but may receive one already rendered (its header has the whole
   // reason). Gated by this page's canUserReadFile above, exactly as the doc
   // page's chips are gated by canUserReadDoc.
+  //
+  // The `key` is pre-emptive. An async Server Component handed across a
+  // client boundary as a prop needs one the moment its client renders it
+  // among siblings (CLAUDE.md's Gotchas; /doc/[slug]'s byline is the live
+  // case). PdfMetadataPanel renders this as its sole child today, which is
+  // the only reason it escapes — and that panel is expected to grow the
+  // file's own facts beside it.
   return (
     <PdfSurfaceClient
       fileId={file.id}
       fileUrl={fileUrl}
       title={file.title}
       entries={entries}
-      metadata={<TagChips target={{ kind: "file", id: file.id }} />}
+      metadata={<TagChips key="tags" target={{ kind: "file", id: file.id }} />}
     />
   );
 }
