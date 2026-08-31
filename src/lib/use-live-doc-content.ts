@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useEditor, type Editor, type JSONContent } from "@tiptap/react";
@@ -232,8 +232,20 @@ export function useLiveDocContent({
 
 
   // Only constructed when nothing was hoisted in — see the options comment.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const ownYdoc = useMemo(() => (hoistedYdoc ? null : new Y.Doc()), [docId, hoistedYdoc]);
+  //
+  // useState, not useMemo, deliberately: this Y.Doc anchors a websocket's
+  // worth of lifecycle, and a memo cache is droppable — React legally
+  // recomputes one when a transition render is replayed, which a suspending
+  // async sibling (a doc byline's TagChips) makes routine during client-side
+  // navigation. The replay handed the connection effect a *second* Y.Doc
+  // mid-navigation: two token fetches, two providers, and a handshake update
+  // event on the still-empty second doc that setContent'd an empty body over
+  // the editor — permanently detaching every column anchor (the
+  // anchored-links ?sel= nav bug; see also applyUpdate's pre-sync guard).
+  // State survives replays. The docId keying the memo used to carry is now
+  // the mount boundary itself — /doc/[slug] keys DocView by doc.id — and the
+  // hoisted callers never create a doc here.
+  const [ownYdoc] = useState(() => (hoistedYdoc ? null : new Y.Doc()));
   const ydoc = hoistedYdoc ?? ownYdoc!;
 
   // PLAN.md §13q. Assigned once against `ydoc` rather than recreated per
@@ -291,7 +303,18 @@ export function useLiveDocContent({
   }, [editor, overrideBodyJSON]);
 
   useEffect(() => {
+    // Owned mode only: until the provider's first sync completes, the Y.Doc
+    // is a handshake in progress — rendering it can push a half-caught-up or
+    // outright *empty* body over the initialBodyJSON the editor is already
+    // showing, and an empty push is what permanently detached every column
+    // anchor on client-side navigation (AnnotationHighlight re-resolves on
+    // the pushed doc, finds nothing, and detachment is deliberately not
+    // retried per keystroke). Nothing before the first sync is worth
+    // rendering anyway. Hoisted mode starts trusted: its doc outlives this
+    // mount and already holds real content.
+    let contentSynced = !!hoistedProvider;
     function applyUpdate() {
+      if (!contentSynced) return;
       // Frozen: the Y.Doc above this listener already has the update (Yjs
       // applies it regardless of whether anything is listening) — only the
       // render is withheld, and counted so FROZEN can say "(+N)" for it.
@@ -365,7 +388,14 @@ export function useLiveDocContent({
           name: documentName,
           document: ydoc,
           token: fetchToken,
-          onSynced: () => setSynced(true),
+          onSynced: () => {
+            // The catch-up push the pre-sync guard withheld — and after a
+            // reconnect, the same call is the catch-up for whatever arrived
+            // while offline.
+            contentSynced = true;
+            applyUpdate();
+            setSynced(true);
+          },
         });
         setAwareness(instance.awareness);
       } catch {
