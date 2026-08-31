@@ -5,7 +5,9 @@ import { resolveFileParam } from "@/lib/file-slug";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
+import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
 import TagChips from "@/components/tags/TagChips";
+import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import styles from "./page.module.css";
 
 // PLAN.md §19 — the PDF reading view.
@@ -59,15 +61,25 @@ export async function generateMetadata({
   return titleWhenOk(await loadFileForRead(slug), (file) => file.title);
 }
 
-export default async function PdfPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function PdfPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ sel?: string }>;
+}) {
   const { slug } = await params;
+  const { sel } = await searchParams;
   // Free — generateMetadata already ran this for the same request.
   const access = await loadFileForRead(slug);
   if (access.status === "signed-out") {
     redirect("/sign-in");
   }
   if (access.status === "redirect") {
-    redirect(access.to);
+    // The slug-history redirect names only the path — re-append ?sel= or a
+    // shared link minted against a slug that later changed would land on the
+    // right file with its passages silently gone (docs/ANCHORED_LINKS.md).
+    redirect(sel ? `${access.to}?sel=${encodeURIComponent(sel)}` : access.to);
   }
   if (access.status === "not-found") {
     notFound();
@@ -80,11 +92,17 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
       </main>
     );
   }
-  const file = access.value;
+  const { value: file, user } = access;
 
   // The hash is in the path, which is what makes this URL immutable and lets
   // the download route answer `immutable` — see the route's own header.
   const fileUrl = `/api/files/${file.id}/${file.sha256}`;
+
+  // docs/ANCHORED_LINKS.md — the link ?sel= names, as this viewer may see
+  // it, delivered as an initial prop. Initial props are the one delivery
+  // that safely crosses the ssr:false boundary below (CLAUDE.md's
+  // router.refresh() trap is about refresh-based delivery, not this).
+  const anchoredLink = sel ? await anchoredLinkForViewer(sel, user) : null;
 
   // Fetched here rather than inside the panel for the same reason
   // /doc/[slug] fetches its threads at the page level (PLAN.md §13o): the
@@ -111,12 +129,26 @@ export default async function PdfPage({ params }: { params: Promise<{ slug: stri
   // the only reason it escapes — and that panel is expected to grow the
   // file's own facts beside it.
   return (
-    <PdfSurfaceClient
-      fileId={file.id}
-      fileUrl={fileUrl}
-      title={file.title}
-      entries={entries}
-      metadata={<TagChips key="tags" target={{ kind: "file", id: file.id }} />}
-    />
+    <>
+      {/* The key makes file identity a mount boundary, the doc page's
+          reasoning exactly: an anchored-link banner can client-navigate
+          between two PDFs of one link, and a reused surface would carry the
+          old file's viewer, ready flag and once-only link jump into the new
+          file's page. */}
+      <PdfSurfaceClient
+        key={file.id}
+        fileId={file.id}
+        fileUrl={fileUrl}
+        title={file.title}
+        entries={entries}
+        anchoredLink={anchoredLink}
+        metadata={<TagChips key="tags" target={{ kind: "file", id: file.id }} />}
+      />
+      {/* docs/ANCHORED_LINKS.md — the draft-link tray, a self-fetching
+          sibling of the viewer island rather than a child of it: it must
+          not wait out the ssr:false boundary, and fixed positioning keeps
+          it out of the viewer's own chrome. */}
+      <AnchoredLinkTray />
+    </>
   );
 }

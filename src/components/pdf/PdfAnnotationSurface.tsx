@@ -8,6 +8,8 @@ import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } f
 import PdfMetadataPanel from "./PdfMetadataPanel";
 import PdfCollabPanel from "./PdfCollabPanel";
 import { loadPdfAnnotationEntries } from "@/app/actions/annotations";
+import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
+import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
 import { AnnotationReloadProvider } from "@/components/annotation/annotation-reload-context";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
@@ -21,6 +23,8 @@ import {
 import { captureTextTarget, type CapturePage } from "@/lib/pdf-anchor-capture";
 import { resolveTargetRects } from "@/lib/pdf-anchor-resolve";
 import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
+import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
+import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
@@ -60,13 +64,21 @@ type Props = {
   title: string;
   entries: PdfAnnotationEntry[];
   /**
+   * The link a ?sel= visit resolved for this viewer, delivered as an initial
+   * prop — the one delivery that safely crosses this island's ssr:false
+   * boundary (docs/ANCHORED_LINKS.md). Its PDF_TEXT parts for this file are
+   * drawn in the anno-layer as outline regions; the banner overlays the
+   * viewer and jumps by target.
+   */
+  anchoredLink: AnchoredLinkView | null;
+  /**
    * The Metadata pane's contents, rendered on the *server* and handed in as a
    * prop — see PdfSurfaceClient's header for why it can't be imported here.
    */
   metadata: ReactNode;
 };
 
-export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, metadata }: Props) {
+export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, anchoredLink, metadata }: Props) {
   const handleRef = useRef<PdfViewerHandle | null>(null);
   const [ready, setReady] = useState(false);
   // Two separate questions, and the UI asks them in two places: the toolbar's
@@ -83,6 +95,12 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   // same one re-rendered".
   const [pending, setPending] = useState<{ target: PdfTarget; key: number } | null>(null);
   const [popover, setPopover] = useState<{ left: number; top: number; target: PdfTarget } | null>(null);
+  // "Add to link" failing (docs/ANCHORED_LINKS.md) — shown inside the
+  // selection popover. Remembers *which* popover it was raised against
+  // (the `refetched` identity pattern below): a new selection makes a new
+  // popover object, the identities stop matching, and the stale error
+  // simply isn't rendered — no effect resetting state.
+  const [linkError, setLinkError] = useState<{ owner: object; message: string } | null>(null);
 
   // Subscribers that want to hear "the rendering moved" — the panel's layout
   // hook, today. A plain listener set rather than React state: this fires on
@@ -163,6 +181,24 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     entriesRef.current = liveEntries;
   }, [liveEntries]);
 
+  // docs/ANCHORED_LINKS.md — this file's PDF_TEXT parts, with their targets
+  // parsed out of the selector blob (already through parseSelector on the
+  // server; a part that didn't parse has selector null and simply isn't
+  // drawn — it still lists in the banner). Static for the life of the page
+  // (initial prop, never refetched), but mirrored into a ref like the
+  // entries so the layer's callbacks read it without re-attaching.
+  const linkParts = useMemo((): { part: AnchoredLinkPart; target: PdfTarget }[] => {
+    const group =
+      anchoredLink?.groups.find((g) => g.target.kind === "file" && g.target.id === fileId) ?? null;
+    return (group?.parts ?? []).flatMap((part) =>
+      part.selector?.kind === "PDF_TEXT" ? [{ part, target: part.selector.selector }] : [],
+    );
+  }, [anchoredLink, fileId]);
+  const linkPartsRef = useRef(linkParts);
+  useEffect(() => {
+    linkPartsRef.current = linkParts;
+  }, [linkParts]);
+
   // Set by the layer effect below; called when the annotation set changes so
   // the highlights follow a post or a delete without waiting for a scroll.
   const layerRedrawRef = useRef<(() => void) | null>(null);
@@ -206,12 +242,20 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     if (!ready || !handle) return;
 
     const layers = attachAnnoLayers(handle.viewer, handle.eventBus, {
-      entriesForPage: (pageIndex) =>
-        entriesRef.current
+      entriesForPage: (pageIndex) => [
+        // Link regions first: append order is stacking order in this layer,
+        // and wayfinding yields to discussion — every annotation fill draws
+        // over the outline, and with no data-anno-id the outline never
+        // intercepts a click either (anno-layer.ts).
+        ...linkPartsRef.current
+          .filter(({ target }) => target.pageIndex === pageIndex)
+          .map(({ part, target }): AnnoLayerEntry => ({ id: part.anchorId, target, color: "", variant: "link" })),
+        ...entriesRef.current
           // entryHasVisibleContent, not just a page match: a soft-deleted
           // thread must take its highlight with it.
           .filter((entry) => entry.target?.pageIndex === pageIndex && entryHasVisibleContent(entry))
           .map((entry): AnnoLayerEntry => ({ id: entry.root.id, target: entry.target!, color: entry.color })),
+      ],
       // PLAN.md §19 — other readers' live selections, drawn in the same layer
       // and with the same filled highlight an annotation gets, in that
       // reader's own colour. They appear for whichever pages are rendered,
@@ -277,7 +321,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   useEffect(() => {
     layerRedrawRef.current?.();
     notify();
-  }, [liveEntries, notify]);
+  }, [liveEntries, linkParts, notify]);
 
   // ---- selection capture --------------------------------------------------
   const capturePageFor = useCallback(async (pageIndex: number): Promise<CapturePage | null> => {
@@ -534,12 +578,12 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
    * mode both want the offset, while "Show all" has no positioned card to keep
    * clear of and passes 0.
    */
-  const jumpTo = useCallback((entry: PdfAnnotationEntry, fraction: number = JUMP_VIEWPORT_FRACTION) => {
+  const jumpToTarget = useCallback((target: PdfTarget, fraction: number = JUMP_VIEWPORT_FRACTION) => {
     const handle = handleRef.current;
-    if (!handle || !entry.target) return;
-    const top = quadsTopY(entry.target.quads) ?? 0;
+    if (!handle) return;
+    const top = quadsTopY(target.quads) ?? 0;
     handle.viewer.scrollPageIntoView({
-      pageNumber: entry.target.pageIndex + 1,
+      pageNumber: target.pageIndex + 1,
       // A PDF destination array — the same shape PDF.js consumes for a link,
       // and the same one presence uses to follow a reader (docs/PDF.md §9).
       // `null` for zoom preserves the local reader's own zoom.
@@ -548,7 +592,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
       // have zoomed since. `currentScale * PDF_TO_CSS_UNITS`, never the bare
       // zoom level — docs/PDF.md §5.
       destArray: [
-        entry.target.pageIndex,
+        target.pageIndex,
         { name: "XYZ" },
         0,
         jumpDestinationY(
@@ -561,6 +605,26 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
       ],
     });
   }, []);
+
+  const jumpTo = useCallback(
+    (entry: PdfAnnotationEntry, fraction: number = JUMP_VIEWPORT_FRACTION) => {
+      if (entry.target) jumpToTarget(entry.target, fraction);
+    },
+    [jumpToTarget],
+  );
+
+  // docs/ANCHORED_LINKS.md — the follow path's on-load jump, once, when the
+  // viewer says it's ready: the banner can't do this itself here (the doc
+  // side's DOM-query retry has nothing to query — quads live in a
+  // canvas-positioned layer), so the surface, which knows `ready`, owns it.
+  const linkJumpedRef = useRef(false);
+  useEffect(() => {
+    if (!ready || linkJumpedRef.current) return;
+    const first = linkPartsRef.current[0];
+    if (!first) return;
+    linkJumpedRef.current = true;
+    jumpToTarget(first.target);
+  }, [ready, jumpToTarget]);
 
   // One tick per anchored annotation, at its own document fraction.
   const ticks = useMemo((): AnnotationTick[] => {
@@ -679,6 +743,17 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           }
         />
 
+        {anchoredLink && (
+          <AnchoredLinkBanner
+            link={anchoredLink}
+            currentTarget={{ kind: "file", id: fileId }}
+            className={styles.anchoredLinkOverlay}
+            onJumpToPart={(part) => {
+              if (part.selector?.kind === "PDF_TEXT") jumpToTarget(part.selector.selector);
+            }}
+          />
+        )}
+
         {popover && (
           <div className={styles.selectionPopover} style={{ left: popover.left, top: popover.top }}>
             <button
@@ -699,6 +774,33 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
             >
               Annotate
             </button>
+            <button
+              type="button"
+              onClick={async () => {
+                // docs/ANCHORED_LINKS.md — the part posts now, verified
+                // server-side against this file's page text; the tray
+                // re-fetches on the notify. A capture failure keeps the
+                // popover open with the message beside the buttons.
+                const result = await addAnchoredLinkPart("file", fileId, {
+                  kind: "pdf-text",
+                  target: popover.target,
+                });
+                if (result.error) {
+                  setLinkError({ owner: popover, message: result.error });
+                  return;
+                }
+                setPopover(null);
+                window.getSelection()?.removeAllRanges();
+                notifyAnchoredLinkChanged();
+              }}
+            >
+              Add to link
+            </button>
+            {linkError?.owner === popover && (
+              <span style={{ color: "var(--error)", fontSize: "0.75rem", alignSelf: "center" }}>
+                {linkError.message}
+              </span>
+            )}
           </div>
         )}
       </AnnotationMoveProvider>

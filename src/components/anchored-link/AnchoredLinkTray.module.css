@@ -1,0 +1,144 @@
+/* docs/ANCHORED_LINKS.md — the draft-link tray: a fixed bottom-right island
+   on both reading surfaces. Fixed positioning is the point — it stays out
+   of both pages' layout math (the doc page's margin-notes grid, the PDF
+   viewer's own chrome) and reads as "your working set follows you". */
+
+.tray {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 40;
+  width: min(320px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--shadow-color);
+  font-size: 0.85rem;
+}
+
+.headerRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.title {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.count {
+  color: var(--text-muted);
+}
+
+.partList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.partRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.partText {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.partLabel {
+  color: var(--text-muted);
+}
+
+.removePart {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 0.2rem;
+  line-height: 1;
+}
+
+.removePart:hover {
+  color: var(--danger);
+}
+
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.copy {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 3px 8px;
+  border: 1px solid var(--foreground);
+  border-radius: 4px;
+  background: var(--foreground);
+  color: var(--background);
+  cursor: pointer;
+}
+
+.copy:disabled {
+  background: var(--surface-hover);
+  border-color: var(--border);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.discard {
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.85rem;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 3px 0;
+}
+
+.error {
+  color: var(--error);
+  margin: 0;
+}
+
+.copiedNote {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.copiedUrl {
+  word-break: break-all;
+  color: var(--link);
+  margin: 0;
+}
+
+.dismiss {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.1rem 0.2rem;
+}
+
+.dismiss:hover {
+  color: var(--foreground);
+}

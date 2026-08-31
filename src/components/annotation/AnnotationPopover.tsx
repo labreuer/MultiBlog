@@ -47,6 +47,13 @@ type Props = {
   // LiveAnnotationComposer, which is where it actually matters (submit
   // time, not composer-open time).
   resolveAnchor?: () => { from: number; to: number } | null;
+  // docs/ANCHORED_LINKS.md — posts the current selection as a draft-link
+  // part; resolves to an error message, or null on success (the caller
+  // clears the selection itself, which unmounts this popover). Supplied by
+  // the reading view only — the doc editor's widget leaves it undefined and
+  // gets no button, the same way autoOpen keys that surface's other
+  // differences.
+  onAddToLink?: () => Promise<string | null>;
   onPosted: () => void;
   onCancel: () => void;
 };
@@ -71,6 +78,7 @@ export default function AnnotationPopover({
   allowMoveToBottom = true,
   autoOpen = false,
   resolveAnchor,
+  onAddToLink,
   onPosted,
   onCancel,
 }: Props) {
@@ -101,6 +109,17 @@ export default function AnnotationPopover({
     ensureDraft((id) => {
       setMovedDraft({ id, anchorFrom: from, anchorTo: to, quotedText });
       onCancel();
+    });
+  }
+
+  function handleAddToLink() {
+    if (!onAddToLink) return;
+    setError(null);
+    startTransition(async () => {
+      // Success clears the selection upstream, which unmounts this popover;
+      // an error keeps it open with the message in the shared error slot.
+      const message = await onAddToLink();
+      if (message) setError(message);
     });
   }
 
@@ -166,6 +185,11 @@ export default function AnnotationPopover({
           >
             {pending ? "Opening…" : "Annotate"}
           </button>
+          {onAddToLink && (
+            <button type="button" onClick={handleAddToLink} disabled={pending} className={composerStyles.moveToBottom}>
+              Add to link
+            </button>
+          )}
           {allowMoveToBottom && (
             <button type="button" onClick={handleMoveToBottom} disabled={pending} className={composerStyles.moveToBottom}>
               Move to bottom ⤓

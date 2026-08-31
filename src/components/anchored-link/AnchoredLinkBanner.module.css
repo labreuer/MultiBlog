@@ -1,0 +1,88 @@
+/* docs/ANCHORED_LINKS.md — the "Linked passages" banner a ?sel= page shows.
+   A quiet card off the --link accent: wayfinding, not content, so it sits
+   above the article without shouting over it. On the PDF surface the same
+   component is positioned absolutely by its caller (className prop); nothing
+   here assumes either layout. */
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1rem;
+  background: color-mix(in srgb, var(--link) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--link) 35%, transparent);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.headerRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.title {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.dismiss {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.1rem 0.2rem;
+}
+
+.dismiss:hover {
+  color: var(--foreground);
+}
+
+.partList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One quote per row, clamped — the passage itself is on the page; this is
+   only the handle for jumping to it. */
+.partButton {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border: none;
+  background: none;
+  padding: 0.1rem 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.partButton:hover {
+  color: var(--link);
+}
+
+.partQuote {
+  border-left: 2px solid color-mix(in srgb, var(--link) 55%, transparent);
+  padding-left: 0.5rem;
+  font-style: italic;
+}
+
+.alsoReferenced {
+  color: var(--text-muted);
+}
+
+.alsoReferenced a {
+  color: var(--link);
+}

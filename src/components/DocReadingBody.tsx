@@ -13,6 +13,8 @@ import {
 import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
 import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
+import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
+import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
@@ -216,6 +218,24 @@ export default function DocReadingBody({
           quotedText={selection.pending.quotedText}
           atVersion={selection.pending.atVersion}
           ydocUpdateId={scrubUpdateId}
+          onAddToLink={async () => {
+            // docs/ANCHORED_LINKS.md — the part posts to the server *now*,
+            // verified against the version this selection was read at; the
+            // tray re-fetches on the notify. Reading views only — the doc
+            // editor's widget never supplies this prop.
+            const pending = selection.pending;
+            if (!pending) return null;
+            const result = await addAnchoredLinkPart(
+              "doc",
+              docId,
+              { kind: "doc-range", from: pending.from, to: pending.to, quotedText: pending.quotedText },
+              pending.atVersion ?? undefined,
+            );
+            if (result.error) return result.error;
+            selection.clear();
+            notifyAnchoredLinkChanged();
+            return null;
+          }}
           onPosted={() => selection.clear()}
           onCancel={() => selection.clear()}
         />
