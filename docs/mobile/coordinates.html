@@ -743,22 +743,22 @@
       <div>
         <dt>On device</dt>
         <dd class="good">0 / 7 off-screen</dd>
-        <small>Settled-state frames across the full gesture on iPadOS 18.6, plus visual confirmation.</small>
+        <small>Settled-state frames across the full gesture on iPadOS 18.6, plus visual confirmation &mdash; measured against the hand-rolled placement this page was written about.</small>
+      </div>
+      <div>
+        <dt>Since the rewrite</dt>
+        <dd class="warn">not re-measured</dd>
+        <small>The popovers are <code>@floating-ui/dom</code>'s now. The surfaces still hand-placed &mdash; the marker, the header panels &mdash; keep the conversion, but no device reading has been taken since the migration.</small>
       </div>
       <div>
         <dt>Desktop suite</dt>
-        <dd class="good">182 passed</dd>
-        <small>Includes the three side-by-side placement tests and the editor marker at three widths.</small>
-      </div>
-      <div>
-        <dt>Suite target</dt>
-        <dd class="good">production build</dd>
-        <small>11.1&nbsp;min against <code>next start</code> on the e2e port &mdash; the target CLAUDE.md prefers, since two historical flake classes are dev-only.</small>
+        <dd class="good">204 passed</dd>
+        <small>Production build on the e2e port &mdash; the target CLAUDE.md prefers, since two historical flake classes are dev-only.</small>
       </div>
       <div>
         <dt>Follow-up surfaces</dt>
         <dd class="warn">defensive only</dd>
-        <small>The PDF control and nav dropdown are opened by a tap, and that tap dismisses the keyboard first.</small>
+        <small>The header dropdown is opened by a tap, and that tap dismisses the keyboard first.</small>
       </div>
     </dl>
 
@@ -767,25 +767,51 @@
       <ul class="files">
         <li>
           <span class="path">src/lib/popover-placement.ts</span>
-          <span class="what">Gained <code>viewportBounds</code>, <code>fixedAnchorShift</code>, <code>fixedPlacementStyle</code>, <code>onViewportChange</code>. <code>placePopover</code> stays pure.</span>
+          <span class="what">Holds <code>viewportSize</code>, <code>fixedAnchorShift</code>, <code>fixedPlacementStyle</code>, <code>onViewportChange</code>, for the surfaces floating-ui does not drive. <code>sideForTallest</code> decides its fit against <code>viewportSize().height</code>.</span>
         </li>
         <li>
           <span class="path">src/lib/use-editor-annotation-widget.ts</span>
-          <span class="what">Split <code>marker</code> (anchoring space) from <code>markerStyle</code> (render space), so the composer doesn't inherit the shift twice.</span>
-        </li>
-        <li>
-          <span class="path">src/lib/use-selection-popover.ts</span>
-          <span class="what">Same conversion and subscription; this is what carries the fix to both reading views and side-by-side.</span>
+          <span class="what">Splits <code>marker</code> (visual-viewport space, what floating-ui reads) from <code>markerStyle</code> (render space), so the composer doesn't inherit the shift twice. Clamps to <code>viewportSize().width</code> and subscribes via <code>onViewportChange</code>.</span>
         </li>
         <li>
           <span class="path">src/components/DocEditor.tsx</span>
           <span class="what">Renders the marker from <code>markerStyle</code>.</span>
         </li>
         <li>
-          <span class="path">src/components/pdf/PdfAnnotationSurface.tsx &#183; SiteHeader.tsx</span>
-          <span class="what">Routed through the same helper for consistency. Marked defensive in-source rather than claiming a fix.</span>
+          <span class="path">src/components/SiteHeader.tsx</span>
+          <span class="what">Its dropdown panels are still hand-placed, so they go through the helper and subscribe through it. Marked defensive in-source rather than claiming a fix.</span>
         </li>
       </ul>
+    </div>
+
+    <div class="col">
+      <h3>What @floating-ui/dom already does</h3>
+      <p>
+        The popovers moved to <code>@floating-ui/dom</code> after this was written
+        (<span class="m">computePosition</span> + <span class="m">autoUpdate</span> per call
+        site), and the library turns out to own both halves of the problem on its own
+        surfaces &mdash; so most of what is described above is no longer ours to do:
+      </p>
+      <ul class="files">
+        <li>
+          <span class="path">getViewportRect</span>
+          <span class="what">Reads <code>visualViewport.width</code>/<code>height</code> for the default <code>'viewport'</code> boundary, so <code>flip()</code> and <code>shift()</code> already clamp to the visual viewport. It even branches on WebKit explicitly: <code>layoutRelativeClientCoords = !isWebKit() || strategy === 'fixed'</code>.</span>
+        </li>
+        <li>
+          <span class="path">autoUpdate</span>
+          <span class="what">Binds <code>scroll</code> and <code>resize</code> to every entry <code>getOverflowAncestors</code> returns &mdash; and that list includes <code>win.visualViewport</code>. That is exactly what <code>onViewportChange</code> exists to do, so a floating-ui surface needs none of it.</span>
+        </li>
+      </ul>
+      <div class="note">
+        <p class="eyebrow">The rule that survives</p>
+        <p>
+          Never wrap a <code>computePosition</code> result in
+          <code>fixedPlacementStyle</code>. Its <code>x</code>/<code>y</code> come back
+          already in the floating element's own positioning space; converting again applies
+          the shift twice. The helper is for coordinates <em>we</em> compute and write &mdash;
+          the marker, and the header panels.
+        </p>
+      </div>
     </div>
 
     <div class="col">

@@ -5,7 +5,14 @@ import type { Editor } from "@tiptap/react";
 import { captureRelativeRange, resolveRelativeRange, type RelativeRange } from "./yjs-relative-anchor";
 import { pendingAnnotationKey, setPendingAnnotation } from "./pending-annotation-extension";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
-import { POPOVER_GAP, popoverBoundsElement, type PopoverPlacement } from "./popover-placement";
+import {
+  POPOVER_GAP,
+  fixedPlacementStyle,
+  onViewportChange,
+  popoverBoundsElement,
+  viewportSize,
+  type PopoverPlacement,
+} from "./popover-placement";
 
 export type PendingEditorSelection = { relRange: RelativeRange; quotedText: string };
 
@@ -22,8 +29,21 @@ export type EditorAnnotationWidget = {
    * scrolled out of the editor's own frame, which hides the marker rather
    * than stranding it at an edge (same rule EditorAnnotationRail's bounded
    * cards follow).
+   *
+   * **Visual-viewport coordinates, not style values** — the composer anchors
+   * to this, and floating-ui reads a `getBoundingClientRect` that speaks
+   * exactly that space. Render from `markerStyle` instead.
+   * docs/mobile/coordinates.html.
    */
   marker: PopoverPlacement | null;
+  /**
+   * `marker`, converted to the `top`/`left` that make a `position: fixed`
+   * element *land* there. Identical to `marker` everywhere the spec is
+   * honoured, and off by `scrollY` on iOS with the keyboard up. Collapsing
+   * the two applies the shift twice: once to the marker, then again to the
+   * composer that anchors to it.
+   */
+  markerStyle: PopoverPlacement | null;
   /** True once the marker has been clicked and the composer is open. */
   expanded: boolean;
   expand: () => void;
@@ -264,19 +284,17 @@ export function useEditorAnnotationWidget({
       // in — body's `overflow-x: hidden` would otherwise clip the marker
       // away entirely (globals.css).
       const preferred = frameRect.right + MARKER_GAP;
-      const maxLeft = window.innerWidth - ANNOTATE_MARKER_SIZE - MARKER_GAP;
+      const maxLeft = viewportSize().width - ANNOTATE_MARKER_SIZE - MARKER_GAP;
       const next = { top: coords.top, left: Math.max(MARKER_GAP, Math.min(preferred, maxLeft)) };
       setMarker((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
     }
     reposition();
-    // Capture phase: the editor's text box scrolls, not the window, and a
-    // scroll event from a nested element doesn't bubble.
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
-    };
+    // Window scroll (capture phase — the editor's text box scrolls, not the
+    // window, and a nested element's scroll doesn't bubble) plus the
+    // visualViewport events a keyboard fires instead of a window resize.
+    // The composer beside this is floating-ui's and needs no such help:
+    // autoUpdate already binds both.
+    return onViewportChange(reposition);
   }, [anchorPos, editorRef]);
 
   // The expanded composer, anchored to the marker rather than to the text —
@@ -315,9 +333,13 @@ export function useEditorAnnotationWidget({
     return autoUpdate(reference, el, update);
   }, [expanded, marker, containerRef]);
 
+  // Converted only here, at the point of rendering — see fixedPlacementStyle.
+  const markerStyle = marker ? fixedPlacementStyle(marker) : null;
+
   return {
     pending,
     marker,
+    markerStyle,
     expanded,
     expand,
     popoverRef,

@@ -335,12 +335,21 @@ working on.
   handle emits 76 `pointermove`s with live coordinates. `pointercancel` is real but belongs to
   *scrolling*, which cancels pointers on every touch platform. Keep the `pointerup` path:
   it is live on both devices, not dead code. docs/PDF.md §10.
-- **A `position: fixed` popover is written in a different coordinate space than it is
-  measured in.** Clamp to `visualViewport`, never `window.inner*`, and run the value
-  through `fixedPlacementStyle` before it becomes a `top` — iOS anchors `fixed` to the
-  *document* while a keyboard is up, and fires no window event when one appears. Every
-  popover goes through `src/lib/popover-placement.ts`; don't re-derive the math at a call
-  site. docs/mobile/coordinates.html.
+- **A *hand-positioned* `position: fixed` element is written in a different coordinate space
+  than it is measured in.** Clamp to `visualViewport`, never `window.inner*`, and run the
+  value through `fixedPlacementStyle` before it becomes a `top` — iOS anchors `fixed` to the
+  *document* while a keyboard is up, and fires no window event when one appears. **This is
+  not most surfaces:** the popovers are `@floating-ui/dom`'s, and it already covers both
+  halves — `getViewportRect` reads `visualViewport` for the default boundary, and
+  `autoUpdate` binds `scroll`/`resize` to it because `getOverflowAncestors` returns it. So
+  don't wrap a `computePosition` result in the helper; `x`/`y` come back already in the
+  floating element's own space. What is left over is the two surfaces floating-ui doesn't
+  drive — the editor annotation *marker* (a gutter widget with domain rules, deliberately
+  hand-rolled) and `SiteHeader`'s dropdown panels — plus `sideForTallest`, which decides a
+  fit outside floating-ui's middleware. Those go through `src/lib/popover-placement.ts`.
+  Where a value is kept in visual-viewport space *and* rendered, the two are separate fields
+  (`marker` vs `markerStyle`); collapsing them applies the shift twice.
+  docs/mobile/coordinates.html.
 - **A Next dynamic-route `params` value arrives percent-encoded, not literal.** `getParamValue`
   runs `encodeURIComponent` on every string param before handing it to user code (verified
   against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see
