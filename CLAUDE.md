@@ -252,6 +252,22 @@ running `prisma migrate dev` on anything unusual.
   - **The worker count is derived from the machine**; `E2E_WORKERS` overrides it (docs/ENV.md).
     Too many workers looks like scattered failures across unrelated specs that all pass
     single-worker and read exactly like real regressions.
+  - **Capture a run by redirecting to a file; never pipe it through a truncating cmdlet.**
+    `| Select-Object -Last N` / `| tail` hides exactly the lines that would have mattered and
+    leaves the pipeline, not playwright, answering for the exit code (`-First N` is worse: it
+    can kill the process mid-run). Redirect, and read slices of the log in *separate* commands
+    afterwards:
+    - Windows (PowerShell): `npm run e2e > e2e.log 2>&1`
+    - Linux/macOS (bash): `E2E_TARGET=prod npx playwright test > e2e.log 2>&1` — `npm run e2e`
+      isn't available there (pwsh prestep, macOS note above; same on Linux).
+
+    Either form reports playwright's exit code *because the run is the last statement* — don't
+    clobber it by appending anything, in the pipeline or after the semicolon.
+
+    For pass/fail detail, skip the log archaeology: run with `--reporter=list,json` and
+    `PLAYWRIGHT_JSON_OUTPUT_NAME=e2e-results.json` in the environment (the env var routes the
+    JSON to a file so it doesn't collide with `list` on stdout; the CLI flag replaces the
+    config's reporter list), then read counts and failures from the JSON.
 - **A killed `next dev` can poison `.next/dev` so the *next* start hangs mid-compile.** Symptom:
   the server logs `✓ Ready`, serves `/` fine, then prints
   `○ Compiling /api/auth/[...nextauth] ...` and never finishes — so `/sign-in` hangs and every

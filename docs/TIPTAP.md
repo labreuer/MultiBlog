@@ -28,8 +28,11 @@ Never add any of those **alongside StarterKit** in the same schema, and pass
 `undoRedo: false` when combining StarterKit with the `Collaboration` extension —
 `Collaboration` owns the history stack instead.
 
-`undoRedo` stays *on* wherever there is no `Collaboration`. `blurbExtensions` is the one
-schema in this codebase where that inversion applies.
+`blurbExtensions` has no undo at all — not the inversion of the rule above, but a schema
+outside it: it is hand-assembled precisely because StarterKit can't be cut down that far
+(see its comment in `tiptap-schema.ts`), so nothing in it registers an `undo` command.
+(This paragraph used to claim it kept `undoRedo` on; it never did, and the claim helped a
+crash get written — next paragraph.)
 
 The toolbar's undo/redo buttons (`EditorToolbar.tsx`, first pair in both tool lists) call
 `Collaboration`'s commands, and that decides what a press *means*: the Yjs `UndoManager`
@@ -38,6 +41,16 @@ never a collaborator's. Enabled-ness is `editor.can().undo()` inside a `useEdito
 object selector — the dry run is a stack-length check, cheap enough per transaction, and
 `useEditorState` deep-equals a selected object, so the toolbar re-renders only when a
 boolean flips, not per keystroke.
+
+**`can()` offers only the commands the editor registered** — on an editor with no undo
+extension, `can().undo` is not a disabled command but `undefined`, and calling it is a
+TypeError. Thrown inside a `useEditorState` selector that runs in render, it takes down the
+whole page, not one button: the contributor dashboard crashed to Next's error screen for
+every listed contributor, because `ContributorPanel` mounts the shared toolbar on the blurb
+editor (`tools={["bold", "italic"]}`) and the selector probed undo/redo anyway. The toolbar
+now gates each dry run on its `tools` list — a probe belongs to a button that will render,
+never to the editor at large. Caught by `landing.spec.ts` / `avatar-crop.spec.ts`, the only
+specs that open `/dashboard` as a contributor.
 
 ### A link opens from its bubble, not from a click
 
