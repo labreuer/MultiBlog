@@ -165,6 +165,8 @@ model User {
   tagDeletions           Tag[]                  @relation("TagDeletedBy")
   tagAssignments         TagAssignment[]        @relation("TagAssignedBy")
   tagAssignmentDeletions TagAssignment[]        @relation("TagAssignmentDeletedBy")
+  anchoredLinksCreated   AnchoredLink[]         @relation("AnchoredLinkCreatedBy")
+  anchoredLinkDeletions  AnchoredLink[]         @relation("AnchoredLinkDeletedBy")
 
   @@map("user")
 }
@@ -345,16 +347,17 @@ model Post {
   // query-time condition (src/lib/post-status.ts's publishedPostWhere), not
   // a stored status or a background sweep that flips something at the
   // scheduled instant. See PLAN.md §4/§10/§15.
-  doc               Doc                    @relation(fields: [docId], references: [id])
-  publishEvent      PostPublicationEvent?  @relation("PublishEvent", fields: [publishEventId], references: [id])
-  authors           PostAuthor[]
-  threads           CommentThread[]
-  publicationEvents PostPublicationEvent[] @relation("PostEvents")
-  deletedBy         User?                  @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
-  slugHistory       PostSlugHistory[]
-  tagAnchors        TagAnchor[]            @relation("TagAnchorPost")
-  activity          PostActivity?
-  metrics           PostMetrics?
+  doc                 Doc                    @relation(fields: [docId], references: [id])
+  publishEvent        PostPublicationEvent?  @relation("PublishEvent", fields: [publishEventId], references: [id])
+  authors             PostAuthor[]
+  threads             CommentThread[]
+  publicationEvents   PostPublicationEvent[] @relation("PostEvents")
+  deletedBy           User?                  @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
+  slugHistory         PostSlugHistory[]
+  tagAnchors          TagAnchor[]            @relation("TagAnchorPost")
+  anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorPost")
+  activity            PostActivity?
+  metrics             PostMetrics?
 
   @@index([docId])
   @@map("post")
@@ -479,18 +482,19 @@ model PostPublicationEvent {
   actorId        String?              @map("actor_id") // null = system
   createdAt      DateTime             @default(now()) @map("created_at")
 
-  post         Post            @relation("PostEvents", fields: [postId], references: [id], onDelete: Cascade)
-  doc          Doc?            @relation(fields: [docId], references: [id], onDelete: SetNull)
-  ydocSnapshot YdocSnapshot?   @relation(fields: [ydocSnapshotId], references: [id], onDelete: SetNull)
-  actor        User?           @relation("PublicationEventActor", fields: [actorId], references: [id])
-  livePostOf   Post?           @relation("PublishEvent")
-  threads      CommentThread[]
+  post                Post                 @relation("PostEvents", fields: [postId], references: [id], onDelete: Cascade)
+  doc                 Doc?                 @relation(fields: [docId], references: [id], onDelete: SetNull)
+  ydocSnapshot        YdocSnapshot?        @relation(fields: [ydocSnapshotId], references: [id], onDelete: SetNull)
+  actor               User?                @relation("PublicationEventActor", fields: [actorId], references: [id])
+  livePostOf          Post?                @relation("PublishEvent")
+  threads             CommentThread[]
   // PLAN.md §20b — the post-side coordinate axis, and inert in PR 1: nothing
   // writes tag_anchor.anchored_event_id until POST_RANGE exists (§20i).
   // SetNull rather than Cascade, matching how every other pointer *into* this
   // log is treated: an event is provenance, and losing the pointer costs the
   // ability to re-derive, not the row that pointed at it.
-  tagAnchors   TagAnchor[]     @relation("TagAnchorEvent")
+  tagAnchors          TagAnchor[]          @relation("TagAnchorEvent")
+  anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorEvent")
 
   @@index([postId, createdAt])
   @@map("post_publication_event")
@@ -619,16 +623,17 @@ model Doc {
   deletedByUserId   String?       @map("deleted_by_user_id")
   deletedAt         DateTime?     @map("deleted_at")
 
-  authors           DocAuthor[]
-  updatedBy         User?                  @relation("DocUpdatedBy", fields: [updatedByUserId], references: [id])
-  deletedBy         User?                  @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
-  slugHistory       DocSlugHistory[]
-  annotations       Annotation[]
-  docLinks          DocLink[]
-  posts             Post[]
-  publicationEvents PostPublicationEvent[]
-  metrics           DocMetrics?
-  tagAnchors        TagAnchor[]            @relation("TagAnchorDoc")
+  authors             DocAuthor[]
+  updatedBy           User?                  @relation("DocUpdatedBy", fields: [updatedByUserId], references: [id])
+  deletedBy           User?                  @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
+  slugHistory         DocSlugHistory[]
+  annotations         Annotation[]
+  docLinks            DocLink[]
+  posts               Post[]
+  publicationEvents   PostPublicationEvent[]
+  metrics             DocMetrics?
+  tagAnchors          TagAnchor[]            @relation("TagAnchorDoc")
+  anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorDoc")
 
   @@map("doc")
 }
@@ -831,16 +836,17 @@ model Annotation {
   // column is the display copy, this blob is the anchor.
   pdfTarget          Json?            @map("pdf_target")
 
-  doc        Doc?         @relation(fields: [docId], references: [id], onDelete: Cascade)
-  file       StoredFile?  @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  parent     Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
-  replies    Annotation[] @relation("AnnotationReplies")
-  user       User         @relation("AnnotationAuthor", fields: [userId], references: [id])
-  deletedBy  User?        @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
+  doc                 Doc?                 @relation(fields: [docId], references: [id], onDelete: Cascade)
+  file                StoredFile?          @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  parent              Annotation?          @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
+  replies             Annotation[]         @relation("AnnotationReplies")
+  user                User                 @relation("AnnotationAuthor", fields: [userId], references: [id])
+  deletedBy           User?                @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
   // PLAN.md §20b — anchors *pointing at* this annotation's body, not anchors
   // belonging to it. The annotation's own anchor columns stay where they are
   // until PR 2 moves them onto `annotation_anchor` (§20e).
-  tagAnchors TagAnchor[]  @relation("TagAnchorAnnotation")
+  tagAnchors          TagAnchor[]          @relation("TagAnchorAnnotation")
+  anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorAnnotation")
 
   @@index([docId])
   @@index([fileId])
@@ -966,14 +972,15 @@ model StoredFile {
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")
 
-  owners      FileOwner[]
-  slugHistory FileSlugHistory[]
-  pageTexts   FilePageText[]
-  annotations Annotation[]
-  metrics     FileMetrics?
-  tagAnchors  TagAnchor[]       @relation("TagAnchorFile")
-  updatedBy   User?             @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
-  deletedBy   User?             @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
+  owners              FileOwner[]
+  slugHistory         FileSlugHistory[]
+  pageTexts           FilePageText[]
+  annotations         Annotation[]
+  metrics             FileMetrics?
+  tagAnchors          TagAnchor[]          @relation("TagAnchorFile")
+  anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorFile")
+  updatedBy           User?                @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
+  deletedBy           User?                @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
 
   @@index([sha256])
   @@map("file")
@@ -1282,6 +1289,88 @@ view TagMetrics {
   tag Tag @relation(fields: [tagId], references: [id])
 
   @@map("tag_metrics")
+}
+
+// docs/ANCHORED_LINKS.md — **one shareable URL over 1..n text selections**
+// across docs and PDFs. The `TagAssignment` analogue on the §20a envelope:
+// one act owning anchor rows ordered by `part_order`, soft-deleted as one.
+// The row's cuid *is* the URL id (`?sel=<id>`); no separate token column.
+//
+// `minted_at` null means **the creator's open draft** — the tray's working
+// set, visible to no one else. A partial unique index in the migration
+// (`anchored_link_one_draft_per_user`: one row per creator with
+// `minted_at IS NULL AND deleted_at IS NULL`) is what makes
+// `loadMyDraftLink` a definite article and the get-or-create race a
+// catchable P2002. Prisma has no partial-index DSL, so it lives in SQL only.
+//
+// Like `TagAssignment`, deliberately **not** in the $extends soft-delete
+// filter (read through anchor includes, which the filter cannot reach);
+// `deletedAt` is filtered by hand.
+model AnchoredLink {
+  id          String   @id @default(cuid())
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  /// Null = the creator's open draft; set once, when the URL is handed out.
+  mintedAt DateTime? @map("minted_at")
+
+  deletedByUserId String?   @map("deleted_by_user_id")
+  deletedAt       DateTime? @map("deleted_at")
+
+  createdBy User                 @relation("AnchoredLinkCreatedBy", fields: [createdById], references: [id])
+  deletedBy User?                @relation("AnchoredLinkDeletedBy", fields: [deletedByUserId], references: [id])
+  anchors   AnchoredLinkAnchor[]
+
+  @@index([createdById])
+  @@map("anchored_link")
+}
+
+// The §20b anchor row shape, verbatim from `TagAnchor` above under a new
+// owner FK — read that model's comments for the arc, the CHECKs, the trust
+// rule on `quoted_text`, and the stamp semantics; none of it differs here.
+// Same two hand-written CHECKs in the migration (exactly-one-target,
+// selector-columns-null-together). Hard-delete only, like every anchor row:
+// a part is a part of a record, not a record.
+//
+// The v1 writer produces only `doc_id` + DOC_RANGE and `file_id` + PDF_TEXT
+// rows; `post_id`/`target_annotation_id`/`anchored_event_id` ship inert on
+// the same one-column-now-vs-migration-later reasoning as `TagAnchor`'s.
+model AnchoredLinkAnchor {
+  id     String @id @default(cuid())
+  linkId String @map("link_id")
+
+  // The object arc — exactly one non-null (CHECK in the migration).
+  docId              String? @map("doc_id")
+  postId             String? @map("post_id")
+  fileId             String? @map("file_id")
+  targetAnnotationId String? @map("target_annotation_id")
+
+  selectorKind SelectorKind? @map("selector_kind")
+  anchorFrom   Int?          @map("anchor_from")
+  anchorTo     Int?          @map("anchor_to")
+  quotedText   String        @default("") @map("quoted_text")
+  selector     Json?
+
+  ydocUpdateId    BigInt? @map("ydoc_update_id")
+  anchoredEventId String? @map("anchored_event_id")
+
+  /// Position within the link. Assigned as current-count at add time and
+  /// never renumbered on removal; readers order by [partOrder, id].
+  partOrder Int @default(0) @map("part_order")
+
+  link             AnchoredLink          @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  doc              Doc?                  @relation("AnchoredLinkAnchorDoc", fields: [docId], references: [id], onDelete: Cascade)
+  post             Post?                 @relation("AnchoredLinkAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
+  file             StoredFile?           @relation("AnchoredLinkAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
+  targetAnnotation Annotation?           @relation("AnchoredLinkAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
+  anchoredEvent    PostPublicationEvent? @relation("AnchoredLinkAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
+
+  @@index([linkId])
+  @@index([docId])
+  @@index([postId])
+  @@index([fileId])
+  @@index([targetAnnotationId])
+  @@map("anchored_link_anchor")
 }
 
 // A generic, standalone Yjs document store — PLAN.md §11. Keyed purely by the
