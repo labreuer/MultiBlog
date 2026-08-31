@@ -173,6 +173,12 @@ export async function deleteTestUser(email: string): Promise<void> {
     // a group this user created).
     await prisma.docLink.deleteMany({ where: { userId: user.id } });
     await prisma.docLinkGroup.deleteMany({ where: { userId: user.id } });
+    // anchored_link.created_by_id is the same shape of required RESTRICT FK
+    // (docs/ANCHORED_LINKS.md) — a link minted or drafted during a test
+    // would otherwise block its creator's teardown. Hard delete; the FK
+    // cascade takes the anchor rows. deleted_by_user_id is SET NULL and
+    // needs nothing.
+    await prisma.anchoredLink.deleteMany({ where: { createdById: user.id } });
   }
   await prisma.user.deleteMany({ where: { email } });
 }
