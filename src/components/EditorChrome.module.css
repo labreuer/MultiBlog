@@ -39,31 +39,303 @@
   flex: 0 0 auto;
 }
 
+/* inline-flex centering because the buttons' content is a Tabler SVG, which
+   as a plain inline element would sit on the text baseline and hang low. */
 .toolbarButton {
   min-height: 36px;
   padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The link button + its popover (LinkControls.tsx). The popover is
+   position: fixed like AnnotationPopover — placed in viewport coordinates
+   by floating-ui's computePosition — so it escapes any overflow-clipping
+   ancestor (an annotation card's editor, /side-by-side's scroller)
+   instead of being cut off at its edge. */
+.linkGroup {
+  display: inline-flex;
+}
+
+.linkPopover {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 10px;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+/* The result list sits in the popover's flow — between the URL box and
+   the button row — rather than floating over that row: floated, it would
+   cover Save and Cancel, which a mouse could then never reach. It shows
+   only while the URL box has focus (LinkControls), so the form is compact
+   again the moment the title box is picked. A popover that has flipped
+   above the selection is pinned by its bottom edge and grows upward, so
+   there the list goes to the top, above the whole form: whatever is above
+   the list is what moves when it comes and goes, and that should be
+   nothing the author is typing into. The side lives on the popover as
+   data-placement, written from computePosition's answer
+   (LinkControls.tsx), rather than as a class of ours. */
+[data-placement^="top"] .linkResults {
+  order: -1;
+}
+
+/* A field: the icon saying which box this is, inside the box's left edge
+   (the input's padding leaves it room), then the input. */
+.linkField {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.linkFieldIcon {
+  position: absolute;
+  left: 8px;
+  display: inline-flex;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.linkInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px 6px 30px;
+  font: inherit;
+  color: inherit;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* Same box as .quoteMenu, so the toolbar's two dropdowns read as one kind
+   of thing. */
+.linkResults {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  /* max-height is set inline by LinkControls (LIST_MAX_HEIGHT_REM): the
+     popover is placed for the tallest it can be, so the component owns the
+     number. */
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 6px var(--shadow-color);
+}
+
+.linkResultsHeading {
+  padding: 4px 12px 2px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.linkResult {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.linkResultTitle,
+.linkResultMeta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.linkResultMeta {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+/* Hover and the keyboard highlight look the same, and the list keeps them
+   from disagreeing: mouseenter moves the highlight, mouseleave clears it. */
+.linkResult:hover,
+.linkResultActive {
+  background: var(--surface-hover);
+}
+
+.linkButtons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* The "[[" doc-reference menu (DocRefMenu.tsx): the link popover's result
+   list on its own, fixed and portaled for .linkPopover's reasons, under
+   the "[[" in the text. Carries .linkResults for the box itself. */
+.docRefMenu {
+  position: fixed;
+  z-index: 20;
+  width: 300px;
+}
+
+.docRefEmpty {
+  padding: 6px 12px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+/* The link bubble (LinkBubble.tsx): one row under the link the caret is
+   in, and for a link into this site's docs a preview block beneath it.
+   Fixed and portaled for .linkPopover's reasons. In the row, the href is
+   the part that gives — the icon and the three buttons are flex: none — so
+   a long URL ends in an ellipsis instead of pushing the buttons off the
+   edge, and the bubble as a whole never outgrows the viewport. */
+.linkBubble {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: calc(100vw - 16px);
+  padding: 4px 4px 4px 8px;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+.linkBubbleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The doc preview: the title, then authors with the last edit at the right.
+   The row above is what sizes the bubble — this block has inline-size
+   containment, so its content contributes nothing to the bubble's width
+   and a long title ellipsizes to the row's width rather than stretching the
+   bubble to the viewport's. Right padding to match the row's 8px left, since
+   the row's own right edge is a button with air of its own. */
+.linkBubblePreview {
+  contain: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 4px 2px 0;
+  border-top: 1px solid var(--border);
+}
+
+.linkBubbleTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.linkBubbleMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.linkBubbleAuthors {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* margin-left: auto rather than space-between on the parent, so the time
+   stays at the right when there is no authors span to push against. */
+.linkBubbleEdited {
+  flex: none;
+  margin-left: auto;
+}
+
+/* In the preview's place for a doc the viewer may not read. */
+.linkBubbleForbidden {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.linkBubbleIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-secondary);
+}
+
+.linkBubbleIcon img {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.linkBubbleHref {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* appearance: none so the OS control theme has no say — an unstyled
+   <button> on a phone is drawn by the OS, capsule-on-press and all. */
+.linkBubbleButton {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.linkBubbleButton:hover {
+  background: var(--surface-hover);
 }
 
 /* Split button: .quoteGroup has no gap of its own, so the two buttons sit
    pixel-adjacent instead of getting .toolbar's normal 4px inter-button gap. */
 .quoteGroup {
-  position: relative;
   display: inline-flex;
 }
 
 .quoteDropdownTrigger {
   min-height: 36px;
   padding: 4px 6px;
-  line-height: 1;
-  font-size: 0.6rem;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
 }
 
+/* position: fixed and portaled to <body>, placed by placePopover — see
+   QuoteControls.tsx for why an absolute menu inside the toolbar no longer
+   works. z-index matches the other fixed popovers (AnnotationPopover). */
 .quoteMenu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 2px;
+  position: fixed;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   min-width: 190px;
@@ -199,6 +471,39 @@
 }
 
 @media (max-width: 480px) {
+  /* One row that scrolls sideways instead of wrapping: at this size the
+     full toolbar runs ~450px, wider than any phone in portrait, and the
+     second row it wrapped onto is what the phone-landscape floor rule
+     above is fighting for space with. The scrollbar is hidden — touch
+     devices overlay theirs anyway — and a mask fades the right edge in its
+     place, so a button cut off there reads as "more this way" rather than
+     as the end. padding-right keeps the last button clear of the fade once
+     scrolled all the way over (trailing padding counts toward a flex
+     scroller's overflow). Any opaque color works in a mask; the token just
+     keeps the color-literal grep clean.
+
+     The mask applies to every descendant, fixed ones included, which is
+     why QuoteControls' menu and LinkControls' popover are portaled to
+     <body> rather than hanging inside the toolbar. */
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    padding-right: 32px;
+    mask-image: linear-gradient(to right, var(--foreground) calc(100% - 24px), transparent);
+  }
+
+  .toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Flex items shrink before they overflow; without this the buttons would
+     squash to fit rather than scroll. */
+  .toolbar > * {
+    flex-shrink: 0;
+  }
+
   .toolbarButton {
     min-height: 44px;
     padding: 6px 12px;
@@ -207,6 +512,17 @@
   .quoteDropdownTrigger {
     min-height: 44px;
     padding: 6px 8px;
+  }
+
+  /* Touch targets, as for the toolbar's own buttons; the href gives up its
+     desktop ceiling and takes whatever is left of the bubble's width. */
+  .linkBubbleButton {
+    width: 40px;
+    height: 40px;
+  }
+
+  .linkBubbleHref {
+    max-width: none;
   }
 
   .editorContent {

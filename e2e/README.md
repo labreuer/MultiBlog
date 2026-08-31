@@ -171,6 +171,14 @@ the admin account.
   DETACHED from its query entirely on its own, so this never happens no matter
   what a later publish says *unless* something actually republishes from the
   matching point — there is no automatic reattachment.
+- **Playwright aborts every request whose URL ends in `/favicon.ico`** — in every
+  browser, before `page.route` or the request events see it (playwright-core's
+  `requestStarted`, `_isFavicon`). An `<img src="https://any.host/favicon.ico">`
+  fires `error` with no request ever made and nothing to intercept, and it reads
+  exactly like a CSP or an app bug; it is neither. `link-bubble.spec.ts` covers
+  the link bubble's icon through its own-site `<link rel="icon">` branch for that
+  reason, and the globe it shows for a third-party site there is what *every*
+  third-party site yields under Playwright, routed or not.
 - **Use `gotoOk(page, path)` rather than asserting on `response.status()`.** A
   bare status assertion reports only the number, and when Playwright reuses an
   already-running dev server that server's console output isn't captured

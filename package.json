@@ -29,6 +29,7 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
     "@fellow/prosemirror-recreate-transform": "^1.2.3",
+    "@floating-ui/dom": "^1.8.0",
     "@hocuspocus/provider": "^4.3.0",
     "@hocuspocus/server": "^4.3.0",
     "@hocuspocus/transformer": "^4.3.0",
@@ -48,6 +49,7 @@
     "@tiptap/react": "^3.29.0",
     "@tiptap/starter-kit": "^3.29.0",
     "@tiptap/static-renderer": "^3.29.0",
+    "@tiptap/suggestion": "3.29.0",
     "@tiptap/y-tiptap": "^3.0.7",
     "bcryptjs": "^3.0.3",
     "entities": "^8.0.0",

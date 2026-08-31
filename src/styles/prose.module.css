@@ -124,6 +124,24 @@
   }
 }
 
+/* A live editor's selection while the editor is blurred —
+   blurred-selection-extension.ts (CollabEditorBody, AnnotationBody), which
+   decorates state.selection once focus has left for the link popover's URL
+   box and the browser's own highlight has gone with it. A selection-blue wash off
+   --link, so it reads as the selection it is rather than as an annotation
+   or a link. */
+.prose :global(.selection) {
+  background: color-mix(in srgb, var(--link) 28%, transparent);
+}
+
+/* Not on top of a pending annotation: composing one blurs the editor too,
+   and the same range would carry both classes — ProseMirror merges
+   same-range inline decorations onto one span, class names concatenated —
+   so the two washes would stack. The pending look wins; it says more. */
+.prose :global(.selection.pending-annotation) {
+  background: color-mix(in srgb, var(--thread-color, var(--text-muted)) var(--anchor-tint-weak), transparent);
+}
+
 /* The selection currently being composed into an inline annotation popover
    (PLAN.md §13f) — a decoration (pending-annotation-extension.ts), not a
    mark, so it never touches the document and disappears the moment the
