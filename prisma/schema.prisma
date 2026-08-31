@@ -134,37 +134,37 @@ model User {
   orcid               String? @map("orcid")
   website             String? @map("website")
 
-  avatar                     UserAvatar?
-  accounts                   Account[]
-  sessions                   Session[]
-  postAuthors                PostAuthor[]           @relation("PostAuthorUser")
-  postAuthorGrants           PostAuthor[]           @relation("PostAuthorCreatedBy")
-  commenter                  Commenter?
-  passwordResetTokens        PasswordResetToken[]
-  commentStatusChanges       Comment[]              @relation("CommentStatusChangedBy")
-  commentDeletions           Comment[]              @relation("CommentDeletedBy")
-  publicationEvents          PostPublicationEvent[] @relation("PublicationEventActor")
-  deletedBy                  User?                  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
-  deletedUsers               User[]                 @relation("UserDeletedBy")
-  postDeletions              Post[]                 @relation("PostDeletedBy")
-  slugHistory                UserSlugHistory[]
-  ydocSnapshots              YdocSnapshot[]         @relation("YdocSnapshotUser")
-  docAuthors                 DocAuthor[]
-  docUpdates                 Doc[]                  @relation("DocUpdatedBy")
-  docDeletions               Doc[]                  @relation("DocDeletedBy")
-  fileOwners                 FileOwner[]
-  fileUpdates                StoredFile[]           @relation("FileUpdatedBy")
-  fileDeletions              StoredFile[]           @relation("FileDeletedBy")
-  annotations                Annotation[]           @relation("AnnotationAuthor")
-  annotationDeletions        Annotation[]           @relation("AnnotationDeletedBy")
-  docLinks                   DocLink[]
-  docLinkGroups              DocLinkGroup[]
-  invites                    UserInvite[]           @relation("UserInviteRecipient")
-  invitesSent                UserInvite[]           @relation("UserInviteSender")
-  tagsCreated            Tag[]              @relation("TagCreatedBy")
-  tagDeletions           Tag[]              @relation("TagDeletedBy")
-  tagAssignments         TagAssignment[]    @relation("TagAssignedBy")
-  tagAssignmentDeletions TagAssignment[]    @relation("TagAssignmentDeletedBy")
+  avatar                 UserAvatar?
+  accounts               Account[]
+  sessions               Session[]
+  postAuthors            PostAuthor[]           @relation("PostAuthorUser")
+  postAuthorGrants       PostAuthor[]           @relation("PostAuthorCreatedBy")
+  commenter              Commenter?
+  passwordResetTokens    PasswordResetToken[]
+  commentStatusChanges   Comment[]              @relation("CommentStatusChangedBy")
+  commentDeletions       Comment[]              @relation("CommentDeletedBy")
+  publicationEvents      PostPublicationEvent[] @relation("PublicationEventActor")
+  deletedBy              User?                  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
+  deletedUsers           User[]                 @relation("UserDeletedBy")
+  postDeletions          Post[]                 @relation("PostDeletedBy")
+  slugHistory            UserSlugHistory[]
+  ydocSnapshots          YdocSnapshot[]         @relation("YdocSnapshotUser")
+  docAuthors             DocAuthor[]
+  docUpdates             Doc[]                  @relation("DocUpdatedBy")
+  docDeletions           Doc[]                  @relation("DocDeletedBy")
+  fileOwners             FileOwner[]
+  fileUpdates            StoredFile[]           @relation("FileUpdatedBy")
+  fileDeletions          StoredFile[]           @relation("FileDeletedBy")
+  annotations            Annotation[]           @relation("AnnotationAuthor")
+  annotationDeletions    Annotation[]           @relation("AnnotationDeletedBy")
+  docLinks               DocLink[]
+  docLinkGroups          DocLinkGroup[]
+  invites                UserInvite[]           @relation("UserInviteRecipient")
+  invitesSent            UserInvite[]           @relation("UserInviteSender")
+  tagsCreated            Tag[]                  @relation("TagCreatedBy")
+  tagDeletions           Tag[]                  @relation("TagDeletedBy")
+  tagAssignments         TagAssignment[]        @relation("TagAssignedBy")
+  tagAssignmentDeletions TagAssignment[]        @relation("TagAssignmentDeletedBy")
 
   @@map("user")
 }
@@ -352,7 +352,7 @@ model Post {
   publicationEvents PostPublicationEvent[] @relation("PostEvents")
   deletedBy         User?                  @relation("PostDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory       PostSlugHistory[]
-  tagAnchors    TagAnchor[]        @relation("TagAnchorPost")
+  tagAnchors        TagAnchor[]            @relation("TagAnchorPost")
   activity          PostActivity?
   metrics           PostMetrics?
 
@@ -479,18 +479,18 @@ model PostPublicationEvent {
   actorId        String?              @map("actor_id") // null = system
   createdAt      DateTime             @default(now()) @map("created_at")
 
-  post           Post            @relation("PostEvents", fields: [postId], references: [id], onDelete: Cascade)
-  doc            Doc?            @relation(fields: [docId], references: [id], onDelete: SetNull)
-  ydocSnapshot   YdocSnapshot?   @relation(fields: [ydocSnapshotId], references: [id], onDelete: SetNull)
-  actor          User?           @relation("PublicationEventActor", fields: [actorId], references: [id])
-  livePostOf     Post?           @relation("PublishEvent")
-  threads        CommentThread[]
+  post         Post            @relation("PostEvents", fields: [postId], references: [id], onDelete: Cascade)
+  doc          Doc?            @relation(fields: [docId], references: [id], onDelete: SetNull)
+  ydocSnapshot YdocSnapshot?   @relation(fields: [ydocSnapshotId], references: [id], onDelete: SetNull)
+  actor        User?           @relation("PublicationEventActor", fields: [actorId], references: [id])
+  livePostOf   Post?           @relation("PublishEvent")
+  threads      CommentThread[]
   // PLAN.md §20b — the post-side coordinate axis, and inert in PR 1: nothing
   // writes tag_anchor.anchored_event_id until POST_RANGE exists (§20i).
   // SetNull rather than Cascade, matching how every other pointer *into* this
   // log is treated: an event is provenance, and losing the pointer costs the
   // ability to re-derive, not the row that pointed at it.
-  tagAnchors TagAnchor[] @relation("TagAnchorEvent")
+  tagAnchors   TagAnchor[]     @relation("TagAnchorEvent")
 
   @@index([postId, createdAt])
   @@map("post_publication_event")
@@ -628,7 +628,7 @@ model Doc {
   posts             Post[]
   publicationEvents PostPublicationEvent[]
   metrics           DocMetrics?
-  tagAnchors    TagAnchor[]        @relation("TagAnchorDoc")
+  tagAnchors        TagAnchor[]            @relation("TagAnchorDoc")
 
   @@map("doc")
 }
@@ -831,16 +831,16 @@ model Annotation {
   // column is the display copy, this blob is the anchor.
   pdfTarget          Json?            @map("pdf_target")
 
-  doc            Doc?            @relation(fields: [docId], references: [id], onDelete: Cascade)
-  file           StoredFile?     @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  parent         Annotation?     @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
-  replies        Annotation[]    @relation("AnnotationReplies")
-  user           User            @relation("AnnotationAuthor", fields: [userId], references: [id])
-  deletedBy      User?           @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
+  doc        Doc?         @relation(fields: [docId], references: [id], onDelete: Cascade)
+  file       StoredFile?  @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  parent     Annotation?  @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
+  replies    Annotation[] @relation("AnnotationReplies")
+  user       User         @relation("AnnotationAuthor", fields: [userId], references: [id])
+  deletedBy  User?        @relation("AnnotationDeletedBy", fields: [deletedByUserId], references: [id])
   // PLAN.md §20b — anchors *pointing at* this annotation's body, not anchors
   // belonging to it. The annotation's own anchor columns stay where they are
   // until PR 2 moves them onto `annotation_anchor` (§20e).
-  tagAnchors TagAnchor[] @relation("TagAnchorAnnotation")
+  tagAnchors TagAnchor[]  @relation("TagAnchorAnnotation")
 
   @@index([docId])
   @@index([fileId])
@@ -966,14 +966,14 @@ model StoredFile {
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")
 
-  owners         FileOwner[]
-  slugHistory    FileSlugHistory[]
-  pageTexts      FilePageText[]
-  annotations    Annotation[]
-  metrics        FileMetrics?
-  tagAnchors TagAnchor[]   @relation("TagAnchorFile")
-  updatedBy      User?             @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
-  deletedBy      User?             @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
+  owners      FileOwner[]
+  slugHistory FileSlugHistory[]
+  pageTexts   FilePageText[]
+  annotations Annotation[]
+  metrics     FileMetrics?
+  tagAnchors  TagAnchor[]       @relation("TagAnchorFile")
+  updatedBy   User?             @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
+  deletedBy   User?             @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
 
   @@index([sha256])
   @@map("file")
@@ -1101,8 +1101,8 @@ model Tag {
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")
 
-  createdBy   User                @relation("TagCreatedBy", fields: [createdById], references: [id])
-  deletedBy   User?               @relation("TagDeletedBy", fields: [deletedByUserId], references: [id])
+  createdBy   User            @relation("TagCreatedBy", fields: [createdById], references: [id])
+  deletedBy   User?           @relation("TagDeletedBy", fields: [deletedByUserId], references: [id])
   assignments TagAssignment[]
   metrics     TagMetrics?
 
@@ -1126,16 +1126,16 @@ model Tag {
 // joined the filter and was then read nested would look protected and not be.
 model TagAssignment {
   id        String   @id @default(cuid())
-  tagId String   @map("tag_id")
+  tagId     String   @map("tag_id")
   userId    String   @map("user_id")
   createdAt DateTime @default(now()) @map("created_at")
 
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")
 
-  tag   Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  user      User            @relation("TagAssignedBy", fields: [userId], references: [id])
-  deletedBy User?           @relation("TagAssignmentDeletedBy", fields: [deletedByUserId], references: [id])
+  tag       Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  user      User        @relation("TagAssignedBy", fields: [userId], references: [id])
+  deletedBy User?       @relation("TagAssignmentDeletedBy", fields: [deletedByUserId], references: [id])
   anchors   TagAnchor[]
 
   @@index([tagId])
@@ -1225,7 +1225,7 @@ model TagAnchor {
   /// Position within a multi-part act. Every PR 1 row is 0.
   partOrder Int @default(0) @map("part_order")
 
-  assignment       TagAssignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  assignment       TagAssignment         @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   doc              Doc?                  @relation("TagAnchorDoc", fields: [docId], references: [id], onDelete: Cascade)
   post             Post?                 @relation("TagAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
   file             StoredFile?           @relation("TagAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
@@ -1260,7 +1260,7 @@ model TagAnchor {
 // §16l view-vs-column rule decides that, not taste, and it decides "view"
 // until sorting by usage measures badly at real scale.
 view TagMetrics {
-  tagId       String    @unique @map("tag_id")
+  tagId           String    @unique @map("tag_id")
   // **Every count is nullable, and that is load-bearing rather than pedantic.**
   // A view's columns carry no NOT NULL (DocMetrics says the same), but the
   // NULLs that actually arrive here come from the LEFT JOIN rather than from
