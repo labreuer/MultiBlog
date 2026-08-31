@@ -208,6 +208,35 @@ Two traps this arrangement depends on:
   `npm run e2e` runs the production build — a `NODE_ENV` gate would hide the hook from the one
   consumer it exists for.
 
+## The tighten button rewrites blocks, and two systems are watching
+
+`tightenLines` (`src/lib/tighten-lines.ts`, EditorToolbar's "tighten" tool, both live body
+editors) is the reduce-space-between-lines pass: one press, judged against a snapshot of the
+selection, merges each run of adjacent non-empty paragraphs into one joined by hard breaks
+and shrinks each run of N empty paragraphs to N−1 — never cascading, so a pair made adjacent
+by an empty's removal merges on the *next* press, which is why the affected blocks stay
+selected afterwards. Whitespace-only counts as empty; any non-paragraph node is a barrier; a
+half-selected paragraph participates fully; a caret alone leaves the button disabled. The
+rules are pinned as a table in `tighten-lines.test.ts`. Two constraints shaped the
+implementation, and both outlive it — they apply to any future block operation dispatched
+from a button:
+
+- **AuthorHighlight attributes whatever a step inserts.** Its `appendTransaction` marks every
+  inserted range with the local user's id, so a block operation that deletes paragraphs and
+  reinserts rebuilt copies silently re-attributes their entire text to whoever pressed the
+  button. Merging therefore replaces only the two structure tokens between adjacent
+  paragraphs (close-p, open-p) with a hard break — paragraph content is never rebuilt, the
+  presser is credited with the break alone, and Yjs carries the smallest possible change.
+- **One transaction is not one undo item under `Collaboration`.** y-tiptap's `UndoManager`
+  merges items landed within its capture timeout (~500ms), so a toolbar operation dispatched
+  mid-typing glues onto the keystrokes before it — and the keystrokes after glue onto the
+  operation — breaking "one press, one undo" in both directions. `tightenLines` calls
+  `undoManager.stopCapturing()` on both sides of the dispatch, reaching the manager via
+  `yUndoPluginKey.getState(...)` — with the key imported from `@tiptap/y-tiptap`, or the
+  lookup silently returns `undefined` and the fence does nothing (the section below).
+  Editors without `Collaboration` have no such plugin state and need no fence: there a
+  single transaction already is a single undo step.
+
 ## `setContent` takes an options object in v3, where v2 took a boolean
 
 ```ts
@@ -217,8 +246,9 @@ editor.commands.setContent(json, false)                  // v2 — type error
 
 The v2 form is a type error (`Type 'false' has no properties in common with type
 'SetContentOptions'`) but reads as obviously-correct against any pre-v3 example or answer, so
-it is worth recognizing rather than re-deriving. `LiveDocBody.tsx` uses the v3 form to push
-live Yjs updates into a non-`Collaboration` editor without re-emitting them.
+it is worth recognizing rather than re-deriving. `use-live-doc-content.ts` uses the v3 form to
+push live Yjs updates into the reading views' non-`Collaboration` editors without re-emitting
+them.
 
 ## `Collaboration` binds through `@tiptap/y-tiptap`, not `y-prosemirror`
 
@@ -238,6 +268,11 @@ binding at all."
 §18f). Every selection on `/doc/[slug]/edit` silently failed to capture, caught only by
 manual testing — not by `npx tsc`, `eslint`, or the e2e suite, since nothing exercises that
 page's *selecting* text, only typing into it.
+
+`tightenLines`' undo fence (its section above) leans on the same rule from the other
+direction: `yUndoPluginKey` from the wrong package would make `getState` return `undefined`
+and the fence a silent no-op — undo would still *work*, it would just merge with adjacent
+typing, which no check here would ever catch.
 
 `y-prosemirror` itself stays a real dependency: `server/ydoc-hooks.ts` uses it correctly for
 stateless Yjs↔ProseMirror conversion server-side, which never touches a `PluginKey`. The trap
@@ -268,7 +303,7 @@ carets.
 
 `CollaborationCaret`'s default `render` shows an always-visible name label. `renderCaret` in
 `CollabEditorBody.tsx` draws just a colored bar instead, with the name in a CSS `:hover`-only
-tooltip (`.collabCaret`/`.collabCaretLabel` in `DocEditor.module.css`, shared by every
+tooltip (`.collabCaret`/`.collabCaretLabel` in `EditorChrome.module.css`, shared by every
 `CollabEditorBody` consumer).
 
 The local user's own cursor was never affected either way — y-prosemirror's cursor plugin
@@ -303,6 +338,26 @@ the copy a post publishes are different JSON from that point on.
 ---
 
 # ProseMirror
+
+## `toJSON()`'s attrs objects have a null prototype
+
+ProseMirror builds every non-empty node/mark `attrs` object via `Object.create(null)`
+(`computeAttrs`, prosemirror-model), and `Node#toJSON()` passes it through unchanged. Two
+consumers have now tripped over the prototype:
+
+- **React Server Action arguments.** The encoder treats any object whose prototype isn't
+  `Object.prototype` as opaque and silently substitutes an inert placeholder that throws on
+  first read server-side ("Cannot access toStringTag on the server…", usually from Prisma's
+  jsonb serialization). `toPlainJSON` (`src/lib/tiptap-schema.ts`) is the JSON round-trip
+  every `getJSON()` result must pass through before crossing the client/server boundary.
+- **`assert.deepStrictEqual` in unit tests.** Strict deep equality distinguishes prototypes,
+  so a `doc.toJSON()` containing any attrs-bearing node — a heading's `level`, an ordered
+  list's `start` — never equals a plain-literal expectation, and the diff's only visible
+  difference is an easy-to-skim `[Object: null prototype]` tag on one side.
+  `tighten-lines.test.ts`' `press` helper does the same round-trip before comparing.
+
+Docs whose nodes and marks all lack attrs manifest neither symptom, which is what lets both
+bugs hide until the first heading or ordered list shows up.
 
 ## Object-spread with a conditional override silently keeps stale array data
 
