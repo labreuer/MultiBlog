@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anchored Links UI</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* ============================================================
+     Spec-sheet frame vs. product mockups.
+     Product mocks use MultiBlog's actual globals.css token values
+     so the sketch previews truthfully in either theme.
+     Spec chrome (callouts, figure labels) uses a violet that is
+     deliberately NOT any product token, so annotation never reads
+     as proposed UI.
+     ============================================================ */
+  :root {
+    /* MultiBlog product tokens — light values from globals.css */
+    --background: #ffffff;
+    --surface: #ffffff;
+    --surface-muted: #f6f6f6;
+    --surface-hover: #f0f0f0;
+    --foreground: #171717;
+    --text-secondary: #666666;
+    --text-muted: #999999;
+    --border-subtle: #eeeeee;
+    --border: #d4d4d4;
+    --border-strong: #999999;
+    --link: #3366cc;
+    --accent-wash: #eaf1ff;
+    --shadow-color: rgba(0, 0, 0, 0.15);
+    /* proposed: selection-link highlight = color-mix(var(--link) ~20%, transparent) */
+    --sel-wash: rgba(51, 102, 204, 0.16);
+    --sel-wash-pulse: rgba(51, 102, 204, 0.42);
+    /* an author-colored annotation wash, for contrast in fig. 4 */
+    --anno-wash: rgba(212, 160, 23, 0.28);
+    /* a user color for the pending-selection decoration */
+    --pending-wash: rgba(0, 170, 85, 0.22);
+
+    /* spec-sheet chrome */
+    --spec-bg: #faf9fb;
+    --spec-ink: #2a2733;
+    --spec-dim: #6f6a7c;
+    --spec-accent: #8a3d9e;
+    --spec-accent-wash: rgba(138, 61, 158, 0.10);
+    --spec-rule: #e3dfe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: #0a0a0a;
+      --surface: #1e1e1e;
+      --surface-muted: #161616;
+      --surface-hover: #2b2b2b;
+      --foreground: #ededed;
+      --text-secondary: #a0a0a0;
+      --text-muted: #8a8a8a;
+      --border-subtle: #242424;
+      --border: #3d3d3d;
+      --border-strong: #6a6a6a;
+      --link: #7aa7ff;
+      --accent-wash: #16233d;
+      --shadow-color: rgba(0, 0, 0, 0.6);
+      --sel-wash: rgba(122, 167, 255, 0.26);
+      --sel-wash-pulse: rgba(122, 167, 255, 0.55);
+      --anno-wash: rgba(224, 177, 58, 0.32);
+      --pending-wash: rgba(61, 220, 132, 0.25);
+
+      --spec-bg: #131118;
+      --spec-ink: #e8e4f0;
+      --spec-dim: #9a93aa;
+      --spec-accent: #c77edb;
+      --spec-accent-wash: rgba(199, 126, 219, 0.14);
+      --spec-rule: #2c2836;
+    }
+  }
+  :root[data-theme="dark"] {
+    --background: #0a0a0a;
+    --surface: #1e1e1e;
+    --surface-muted: #161616;
+    --surface-hover: #2b2b2b;
+    --foreground: #ededed;
+    --text-secondary: #a0a0a0;
+    --text-muted: #8a8a8a;
+    --border-subtle: #242424;
+    --border: #3d3d3d;
+    --border-strong: #6a6a6a;
+    --link: #7aa7ff;
+    --accent-wash: #16233d;
+    --shadow-color: rgba(0, 0, 0, 0.6);
+    --sel-wash: rgba(122, 167, 255, 0.26);
+    --sel-wash-pulse: rgba(122, 167, 255, 0.55);
+    --anno-wash: rgba(224, 177, 58, 0.32);
+    --pending-wash: rgba(61, 220, 132, 0.25);
+
+    --spec-bg: #131118;
+    --spec-ink: #e8e4f0;
+    --spec-dim: #9a93aa;
+    --spec-accent: #c77edb;
+    --spec-accent-wash: rgba(199, 126, 219, 0.14);
+    --spec-rule: #2c2836;
+  }
+
+  body {
+    margin: 0;
+    background: var(--spec-bg);
+    color: var(--spec-ink);
+    font-family: Arial, Helvetica, sans-serif;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
+
+  /* ---------- header ---------- */
+  .masthead { border-bottom: 2px solid var(--spec-ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--spec-accent); font-weight: 600; margin-bottom: 10px;
+  }
+  h1 {
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: clamp(26px, 5vw, 40px); font-weight: 600; letter-spacing: -0.01em;
+    text-wrap: balance; margin-bottom: 12px;
+  }
+  .lede { max-width: 64ch; color: var(--spec-dim); font-size: 15px; }
+  .lede strong { color: var(--spec-ink); font-weight: 600; }
+
+  /* ---------- flow strip ---------- */
+  .flow {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 12px; margin: 22px 0 8px;
+  }
+  .flow .step {
+    border: 1px solid var(--spec-rule); background: var(--spec-accent-wash);
+    border-radius: 999px; padding: 5px 12px; white-space: nowrap;
+  }
+  .flow .arr { color: var(--spec-dim); }
+
+  /* ---------- figures ---------- */
+  .figure { margin-top: 56px; }
+  .figlabel {
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 12px; letter-spacing: 0.10em; text-transform: uppercase;
+    font-weight: 600; color: var(--spec-accent);
+    display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px;
+  }
+  .figlabel .where { color: var(--spec-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .figcaption { max-width: 70ch; font-size: 14px; color: var(--spec-dim); margin-bottom: 14px; }
+  .figcaption strong { color: var(--spec-ink); font-weight: 600; }
+
+  .mockscroll { overflow-x: auto; border-radius: 12px; }
+
+  /* browser chrome */
+  .browser {
+    min-width: 680px; border: 1px solid var(--spec-rule); border-radius: 12px;
+    background: var(--background); box-shadow: 0 8px 28px var(--shadow-color);
+    overflow: hidden;
+  }
+  .browser-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
+    padding: 8px 12px;
+  }
+  .dots { display: flex; gap: 5px; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--border); display: block; }
+  .urlpill {
+    flex: 1; font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 12px; color: var(--text-secondary);
+    background: var(--background); border: 1px solid var(--border-subtle);
+    border-radius: 6px; padding: 4px 10px; white-space: nowrap; overflow: hidden;
+  }
+  .urlpill b { color: var(--foreground); font-weight: 500; }
+  .urlpill .selparam { color: var(--link); font-weight: 600; }
+
+  .viewport { position: relative; padding: 26px 34px 30px; min-height: 300px; }
+
+  /* the doc reading surface */
+  .doc { max-width: 620px; }
+  .doc h2 { font-size: 24px; font-weight: 700; color: var(--foreground); margin-bottom: 6px; }
+  .doc .byline { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 18px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .doc .byline a { color: var(--link); text-decoration: none; }
+  .tagchip {
+    font-size: 11px; border: 1px solid var(--border); border-radius: 999px;
+    padding: 1px 8px; color: var(--text-secondary);
+  }
+  .doc p { font-size: 14.5px; line-height: 1.65; color: var(--foreground); margin-bottom: 13px; }
+
+  .pendingsel { background: var(--pending-wash); border-radius: 2px; }
+  .selhl { background: var(--sel-wash); border-radius: 2px; }
+  .selhl.pulse { animation: selpulse 1.2s ease-in-out 2; }
+  .annohl { background: var(--anno-wash); border-radius: 2px; }
+  @keyframes selpulse {
+    0%, 100% { background: var(--sel-wash); }
+    50% { background: var(--sel-wash-pulse); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .selhl.pulse { animation: none; background: var(--sel-wash-pulse); }
+  }
+
+  /* selection popover */
+  .popover {
+    position: absolute; z-index: 3;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 4px 16px var(--shadow-color);
+    display: flex; align-items: stretch; overflow: hidden;
+  }
+  .popover button {
+    font: inherit; font-size: 13px; color: var(--foreground);
+    background: none; border: none; padding: 8px 14px; cursor: pointer; white-space: nowrap;
+  }
+  .popover button:hover, .popover button:focus-visible { background: var(--surface-hover); outline: none; }
+  .popover .divider { width: 1px; background: var(--border-subtle); }
+  .popover .newbtn { color: var(--link); font-weight: 600; }
+
+  /* the tray */
+  .tray {
+    position: absolute; right: 18px; bottom: 16px; z-index: 4; width: 300px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: 0 6px 22px var(--shadow-color);
+    font-size: 13px; color: var(--foreground);
+  }
+  .tray-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 10px 12px 8px; border-bottom: 1px solid var(--border-subtle);
+  }
+  .tray-head .t { font-weight: 700; font-size: 13px; }
+  .tray-head .n { font-size: 11.5px; color: var(--text-secondary); }
+  .tray ul { list-style: none; margin: 0; padding: 4px 0; }
+  .tray li { display: flex; gap: 8px; align-items: flex-start; padding: 7px 12px; }
+  .tray li + li { border-top: 1px solid var(--border-subtle); }
+  .kindchip {
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em;
+    border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+    color: var(--text-secondary); flex: none; margin-top: 2px;
+  }
+  .tray .part { min-width: 0; }
+  .tray .src { font-size: 11.5px; color: var(--text-secondary); margin-bottom: 1px; }
+  .tray .q {
+    font-style: italic; color: var(--foreground);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+  }
+  .tray .rm {
+    margin-left: auto; flex: none; border: none; background: none; cursor: pointer;
+    color: var(--text-muted); font-size: 14px; line-height: 1; padding: 2px 4px;
+  }
+  .tray .rm:hover { color: var(--foreground); }
+  .tray-foot {
+    display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border-subtle);
+  }
+  .btn {
+    font: inherit; font-size: 13px; border-radius: 6px; cursor: pointer;
+    padding: 6px 12px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--foreground);
+  }
+  .btn.primary { background: var(--accent-wash); border-color: var(--link); color: var(--link); font-weight: 600; }
+  .btn.quiet { border-color: transparent; color: var(--text-secondary); }
+  .btn:hover { background: var(--surface-hover); }
+  .btn.primary:hover { background: var(--accent-wash); filter: brightness(0.97); }
+
+  /* banner (follow mode) */
+  .banner {
+    max-width: 620px; background: var(--surface-muted);
+    border: 1px solid var(--border-subtle); border-left: 3px solid var(--link);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 20px;
+    font-size: 13px; color: var(--foreground); position: relative;
+  }
+  .banner .bt { font-weight: 700; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 7px; }
+  .banner .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .qchip {
+    font-size: 12.5px; font-style: italic; cursor: pointer;
+    background: var(--sel-wash); border: 1px solid var(--border-subtle);
+    border-radius: 6px; padding: 3px 9px; color: var(--foreground);
+    max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .qchip:hover { border-color: var(--link); }
+  .banner .others { font-size: 12.5px; color: var(--text-secondary); border-top: 1px dashed var(--border-subtle); padding-top: 7px; }
+  .banner .others a { color: var(--link); text-decoration: none; }
+  .banner .dismiss {
+    position: absolute; top: 6px; right: 8px; border: none; background: none;
+    color: var(--text-muted); cursor: pointer; font-size: 14px;
+  }
+
+  /* PDF surface */
+  .pdfstage { background: var(--surface-muted); padding: 22px 0 26px; }
+  .pdfpage {
+    width: 470px; margin: 0 auto; background: #ffffff; color: #1a1a1a;
+    border: 1px solid var(--border); box-shadow: 0 3px 14px var(--shadow-color);
+    padding: 34px 40px; font-family: Georgia, "Times New Roman", serif;
+    font-size: 12.5px; line-height: 1.7; position: relative;
+  }
+  .pdfpage .pgnum { text-align: center; color: #8a8a8a; font-size: 10px; margin-top: 16px; }
+  .pdfpage p { margin-bottom: 10px; text-align: justify; }
+  .pdf-selection { background: rgba(51, 102, 204, 0.22); }
+  .annorect-link { outline: 2px solid var(--link); outline-offset: 1px; border-radius: 1px; }
+
+  /* callout badges + legends */
+  .callout {
+    position: absolute; z-index: 6; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--spec-accent); color: #ffffff;
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 3px var(--spec-accent-wash);
+  }
+  .legend { list-style: none; margin: 14px 0 0; padding: 0; max-width: 76ch; }
+  .legend li { display: flex; gap: 10px; font-size: 13.5px; color: var(--spec-ink); padding: 5px 0; }
+  .legend .b {
+    flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+    background: var(--spec-accent); color: #fff; display: flex; align-items: center; justify-content: center;
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-size: 10.5px; font-weight: 600;
+  }
+  .legend .ref {
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 11px; color: var(--spec-dim); white-space: nowrap;
+  }
+  .legend em { color: var(--spec-dim); }
+
+  /* fig 6 gate pair */
+  .gatepair { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 720px) { .gatepair { grid-template-columns: 1fr; } }
+  .gatecard {
+    border: 1px solid var(--spec-rule); border-radius: 10px; overflow: hidden;
+    background: var(--background);
+  }
+  .gatecard .who {
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 8px 12px; background: var(--surface-muted); color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .gatecard .mini { padding: 16px 18px; min-height: 150px; }
+  .minibanner {
+    border-radius: 6px; background: var(--surface-muted); border-left: 3px solid var(--link);
+    margin-bottom: 12px; padding: 7px 9px; display: flex; flex-direction: column; gap: 5px;
+  }
+  .mb-chip { width: 55%; height: 9px; border-radius: 5px; background: var(--sel-wash); outline: 1px solid var(--border-subtle); }
+  .mb-others { width: 75%; height: 6px; border-radius: 3px; background: var(--border-subtle); }
+  .miniline { height: 8px; border-radius: 4px; background: var(--border-subtle); margin-bottom: 8px; }
+  .miniline.hl { background: var(--sel-wash); outline: 1px solid var(--sel-wash-pulse); }
+  .miniline.w80 { width: 80%; } .miniline.w60 { width: 60%; } .miniline.w90 { width: 90%; }
+  .gatecard .verdict { font-size: 12.5px; color: var(--spec-dim); padding: 0 18px 14px; }
+
+  .endnote {
+    margin-top: 56px; border-top: 1px solid var(--spec-rule); padding-top: 18px;
+    max-width: 76ch; font-size: 13.5px; color: var(--spec-dim);
+  }
+  .endnote h3 {
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    font-size: 12px; letter-spacing: 0.10em; text-transform: uppercase;
+    color: var(--spec-accent); margin-bottom: 8px;
+  }
+  .endnote ul { margin: 0; padding-left: 18px; }
+  .endnote li { margin-bottom: 5px; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">MultiBlog · UI sketch · accompanies docs/ANCHORED_LINKS.md</div>
+    <h1>Anchored Links</h1>
+    <p class="lede">
+      An <strong>anchored link</strong> is a URL for a set of passages — one or more selections
+      gathered across docs and PDFs, collected in a cross-page tray and minted as a single
+      <span class="mono">?sel=</span> hyperlink. Every mock below is drawn in the app's own
+      <span class="mono">globals.css</span> tokens, so this page previews correctly in light and dark.
+      Violet badges are spec annotations, not proposed chrome.
+    </p>
+    <div class="flow" aria-label="feature flow">
+      <span class="step">select a passage</span><span class="arr">→</span>
+      <span class="step">Add to link</span><span class="arr">→</span>
+      <span class="step">repeat, any doc or PDF</span><span class="arr">→</span>
+      <span class="step">Copy link</span><span class="arr">→</span>
+      <span class="step">share URL</span><span class="arr">→</span>
+      <span class="step">follow: highlights + banner</span>
+    </div>
+  </header>
+
+  <!-- ================= FIG 1 ================= -->
+  <section class="figure">
+    <div class="figlabel">Fig. 1 — Creating: first passage <span class="where">/doc/[slug], reading view</span></div>
+    <p class="figcaption">
+      The existing selection popover grows one button. Clicking <strong>Add to link</strong> posts the part
+      to the server immediately (captured against its own version stamp) and clears the selection;
+      the tray appears with the first passage.
+    </p>
+    <div class="mockscroll"><div class="browser">
+      <div class="browser-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="urlpill">multiblog.example<b>/doc/quotation-and-context</b></div>
+      </div>
+      <div class="viewport">
+        <div class="doc">
+          <h2>Quotation and Context</h2>
+          <div class="byline"><a href="#" onclick="return false">Luke Breuer</a> · 8/29/2026 <span class="tagchip">hermeneutics</span></div>
+          <p>A quotation is a promise that the words appeared, and an implicit claim about what they
+          meant where they appeared. The first half is cheap to verify; the second is where nearly
+          every dispute about quotation actually lives.</p>
+          <p>To cite a passage honestly, then, is to cite its surroundings — <span class="pendingsel">the sentence
+          that a quotation was lifted from remains the best commentary on the quotation itself</span>,
+          and any apparatus that carries the one without the other invites the reader to supply
+          context from imagination.</p>
+          <p>The practical question is mechanical: how does a reference keep pointing at a passage
+          while the passage's document continues to change around it?</p>
+        </div>
+        <div class="popover" style="left: 250px; top: 208px;">
+          <button>Annotate</button>
+          <span class="divider"></span>
+          <button class="newbtn">Add to link</button>
+          <span class="callout" style="right: -10px; top: -10px; position: absolute;">1</span>
+        </div>
+        <div class="tray">
+          <div class="tray-head"><span class="t">Link in progress</span><span class="n">1 passage</span></div>
+          <ul>
+            <li>
+              <span class="kindchip">DOC</span>
+              <span class="part">
+                <span class="src">Quotation and Context</span>
+                <span class="q">“the sentence that a quotation was lifted from remains…”</span>
+              </span>
+              <button class="rm" aria-label="Remove passage">✕</button>
+            </li>
+          </ul>
+          <div class="tray-foot">
+            <button class="btn primary">Copy link</button>
+            <button class="btn quiet">Discard</button>
+          </div>
+          <span class="callout" style="left: -10px; top: -10px;">2</span>
+        </div>
+      </div>
+    </div></div>
+    <ul class="legend">
+      <li><span class="b">1</span><span>New button beside Annotate in the existing popover; shown on reading views only, never in the doc editor. Errors (“that passage couldn't be anchored”) surface through the popover's existing error slot. <span class="ref">AnnotationPopover.tsx · onAddToLink</span></span></li>
+      <li><span class="b">2</span><span>The tray: a fixed bottom-right island. It self-fetches the viewer's open draft, so it renders nothing when there is no draft and needs no props across the page tree. Draft parts are listed as text only — <em>nothing paints on the surface while drafting</em>. <span class="ref">AnchoredLinkTray.tsx · loadMyDraftLink()</span></span></li>
+    </ul>
+  </section>
+
+  <!-- ================= FIG 2 ================= -->
+  <section class="figure">
+    <div class="figlabel">Fig. 2 — Creating: a PDF passage joins <span class="where">/pdf/[slug], same draft</span></div>
+    <p class="figcaption">
+      The user navigates to a PDF and selects a passage there. Same two-button popover; the tray —
+      backed by the server-side draft row, not client state — has followed them and now shows both
+      passages. One link can span any number of docs and PDFs.
+    </p>
+    <div class="mockscroll"><div class="browser">
+      <div class="browser-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="urlpill">multiblog.example<b>/pdf/studies-in-words</b></div>
+      </div>
+      <div class="viewport pdfstage">
+        <div class="pdfpage">
+          <p>It is precisely here that the history of a word becomes indispensable. The senses do not
+          replace one another cleanly, like sentries changing guard; <span class="pdf-selection">the old sense
+          lives on beside the new, and colours it, and is coloured by it in turn</span>. A reader who
+          knows only the newest sense will not exactly misread the older authors — he will read them
+          smoothly, confidently, and wrongly.</p>
+          <p>The dictionary can warn us of this, but only the habit of attending to whole passages
+          can cure it. Words, like men, are known by the company they keep.</p>
+          <div class="pgnum">— 2 —</div>
+        </div>
+        <div class="popover" style="left: 50%; transform: translateX(-40px); top: 128px;">
+          <button>Annotate</button>
+          <span class="divider"></span>
+          <button class="newbtn">Add to link</button>
+          <span class="callout" style="right: -10px; top: -10px; position: absolute;">1</span>
+        </div>
+        <div class="tray">
+          <div class="tray-head"><span class="t">Link in progress</span><span class="n">2 passages</span></div>
+          <ul>
+            <li>
+              <span class="kindchip">DOC</span>
+              <span class="part">
+                <span class="src">Quotation and Context</span>
+                <span class="q">“the sentence that a quotation was lifted from remains…”</span>
+              </span>
+              <button class="rm" aria-label="Remove passage">✕</button>
+            </li>
+            <li>
+              <span class="kindchip">PDF</span>
+              <span class="part">
+                <span class="src">Studies in Words · p. 2</span>
+                <span class="q">“the old sense lives on beside the new, and colours it…”</span>
+              </span>
+              <button class="rm" aria-label="Remove passage">✕</button>
+            </li>
+          </ul>
+          <div class="tray-foot">
+            <button class="btn primary">Copy link</button>
+            <button class="btn quiet">Discard</button>
+          </div>
+          <span class="callout" style="left: -10px; top: -10px;">2</span>
+        </div>
+      </div>
+    </div></div>
+    <ul class="legend">
+      <li><span class="b">1</span><span>Second button in the PDF selection popover, in the slot the part-anchors branch used for “Tag”. Posts the captured quads/quote target; the server re-derives the quote from stored page text — the client's reading is a hint, never the record. <span class="ref">PdfAnnotationSurface.tsx · capturePdfTextAnchor</span></span></li>
+      <li><span class="b">2</span><span>Cross-page persistence is the draft row itself: each “Add to link” is an immediate server write with its own version stamp, so no client-side bank and no frozen-view constraint. Part rows are labeled by source (doc title / file title + page). <span class="ref">anchored_link · minted_at IS NULL</span></span></li>
+    </ul>
+  </section>
+
+  <!-- ================= FIG 3 ================= -->
+  <section class="figure">
+    <div class="figlabel">Fig. 3 — Minting <span class="where">the tray, after “Copy link”</span></div>
+    <p class="figcaption">
+      <strong>Copy link</strong> mints the draft (sets <span class="mono">minted_at</span>), writes the URL to the
+      clipboard, confirms, and the tray clears. A minted link is immutable in v1 — a mistake is
+      answered by making a fresh link, not editing.
+    </p>
+    <div style="position: relative; display: inline-block;">
+      <div class="tray" style="position: relative; right: auto; bottom: auto; width: 340px;">
+        <div class="tray-head"><span class="t">Link copied</span><span class="n" style="color: var(--success, #00aa55);">✓</span></div>
+        <ul>
+          <li>
+            <span class="kindchip">URL</span>
+            <span class="part">
+              <span class="q mono" style="font-style: normal; font-size: 11.5px; max-width: 250px;">…/doc/cl9xkq2m40001?sel=cla02hw8f0003</span>
+            </span>
+          </li>
+        </ul>
+        <div class="tray-foot"><span style="font-size: 12px; color: var(--text-secondary);">Recipients see only the passages they have permission to read.</span></div>
+        <span class="callout" style="right: -10px; top: -10px;">1</span>
+        <span class="callout" style="right: -10px; bottom: -10px; top: auto;">2</span>
+      </div>
+    </div>
+    <ul class="legend">
+      <li><span class="b">1</span><span>The minted href targets the <em>first part's</em> surface. Doc hrefs are minted by <strong>id</strong>, not slug — docs have no slug history, so an id link survives renames; PDF hrefs use the slug, whose history redirect will carry <span class="mono">?sel=</span> along. <span class="ref">mintAnchoredLink()</span></span></li>
+      <li><span class="b">2</span><span>One line of honest permission copy at mint time: visibility is filtered per target — each recipient sees the passages whose documents they may read, and nothing hints at the rest (fig. 6). <span class="ref">ANCHORED_LINKS.md · visibility</span></span></li>
+    </ul>
+  </section>
+
+  <!-- ================= FIG 4 ================= -->
+  <section class="figure">
+    <div class="figlabel">Fig. 4 — Following <span class="where">/doc/[slug]?sel=…</span></div>
+    <p class="figcaption">
+      A recipient opens the link. The doc renders with the link's passages washed in the accent
+      (distinct from the amber author-colored annotation wash beside it), scrolls to the first one
+      and pulses it. A <strong>Linked passages</strong> banner above the doc lists this page's passages —
+      clicking one jumps to it — and links onward to the passages on other surfaces.
+    </p>
+    <div class="mockscroll"><div class="browser">
+      <div class="browser-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="urlpill">multiblog.example<b>/doc/cl9xkq2m40001</b><span class="selparam">?sel=cla02hw8f0003</span></div>
+      </div>
+      <div class="viewport">
+        <div class="banner">
+          <button class="dismiss" aria-label="Dismiss">✕</button>
+          <div class="bt">Linked passages</div>
+          <div class="chips">
+            <span class="qchip">“the sentence that a quotation was lifted from…”</span>
+            <span class="qchip">“how does a reference keep pointing at a passage…”</span>
+          </div>
+          <div class="others">Also referenced: <a href="#" onclick="return false">Studies in Words (PDF) — 1 passage →</a></div>
+          <span class="callout" style="left: -10px; top: -10px;">1</span>
+        </div>
+        <div class="doc">
+          <h2>Quotation and Context</h2>
+          <div class="byline"><a href="#" onclick="return false">Luke Breuer</a> · 8/29/2026 <span class="tagchip">hermeneutics</span></div>
+          <p>A quotation is a promise that the words appeared, and an implicit claim about what they
+          meant where they appeared. The first half is <span class="annohl">cheap to verify</span>; the second is where nearly
+          every dispute about quotation actually lives.</p>
+          <p>To cite a passage honestly, then, is to cite its surroundings — <span class="selhl pulse">the sentence
+          that a quotation was lifted from remains the best commentary on the quotation itself</span>,
+          and any apparatus that carries the one without the other invites the reader to supply
+          context from imagination.<span class="callout" style="margin-left: 6px; display: inline-flex; position: static; vertical-align: middle;">2</span></p>
+          <p>The practical question is mechanical: <span class="selhl">how does a reference keep pointing at a
+          passage while the passage's document continues to change around it?</span><span class="callout" style="margin-left: 6px; display: inline-flex; position: static; vertical-align: middle;">3</span></p>
+        </div>
+      </div>
+    </div></div>
+    <ul class="legend">
+      <li><span class="b">1</span><span>The banner is the link's affordance: per-passage chips jump (scroll + pulse, the jumpToQuote pattern — clicking through them cycles the parts); the “Also referenced” row carries <span class="mono">?sel=</span> to the other surfaces. A passage that no longer resolves stays listed here but paints nothing. Dismissible. <span class="ref">AnchoredLinkBanner.tsx</span></span></li>
+      <li><span class="b">2</span><span>Anchored-link wash: <span class="mono">color-mix(var(--link) 20%, transparent)</span> — cooler and lighter than an annotation's author-colored wash (amber, above), and excluded from the thread-color vote where they overlap. First passage pulses on load. <span class="ref">.anchored-link-highlight · data-anchored-link-ids</span></span></li>
+      <li><span class="b">3</span><span>Link highlights ride the same live three-tier re-resolution as reading-view annotations, so they track edits while anyone is typing; drift is re-derived, never written back. <span class="ref">annotation-highlight-extension · kind: "link"</span></span></li>
+    </ul>
+  </section>
+
+  <!-- ================= FIG 5 ================= -->
+  <section class="figure">
+    <div class="figlabel">Fig. 5 — Following <span class="where">/pdf/[slug]?sel=…</span></div>
+    <p class="figcaption">
+      On the PDF surface the same banner rides as an overlay, the viewer scrolls to the first
+      passage's page, and each passage is drawn as an <strong>outline</strong> in the accent — an outline
+      rather than a fill so it composes over annotation fills, and it takes no clicks, so
+      annotations underneath stay clickable.
+    </p>
+    <div class="mockscroll"><div class="browser">
+      <div class="browser-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="urlpill">multiblog.example<b>/pdf/studies-in-words</b><span class="selparam">?sel=cla02hw8f0003</span></div>
+      </div>
+      <div class="viewport pdfstage">
+        <div class="banner" style="position: absolute; top: 12px; left: 16px; width: 300px; z-index: 5;">
+          <button class="dismiss" aria-label="Dismiss">✕</button>
+          <div class="bt">Linked passages</div>
+          <div class="chips"><span class="qchip">“the old sense lives on beside the new…”</span></div>
+          <div class="others">Also referenced: <a href="#" onclick="return false">Quotation and Context — 2 passages →</a></div>
+          <span class="callout" style="left: -10px; top: -10px;">1</span>
+        </div>
+        <div class="pdfpage" style="margin-top: 46px;">
+          <p>It is precisely here that the history of a word becomes indispensable. The senses do not
+          replace one another cleanly, like sentries changing guard; <span class="annorect-link">the old sense
+          lives on beside the new, and colours it, and is coloured by it in turn</span>. A reader who
+          knows only the newest sense will not exactly misread the older authors — he will read them
+          smoothly, confidently, and wrongly.<span class="callout" style="margin-left: 6px; display: inline-flex; position: static; vertical-align: middle;">2</span></p>
+          <p>The dictionary can warn us of this, but only the habit of attending to whole passages
+          can cure it. Words, like men, are known by the company they keep.</p>
+          <div class="pgnum">— 2 —</div>
+        </div>
+      </div>
+    </div></div>
+    <ul class="legend">
+      <li><span class="b">1</span><span>Same shared banner component, positioned as an overlay because the PDF layout gives the whole viewport to the document; its passage chips drive the viewer's own scroll (destination-array jump), not a DOM query. <span class="ref">onJumpToTarget · scrollPageIntoView</span></span></li>
+      <li><span class="b">2</span><span>Link passages render in the annotation layer with a dedicated variant: accent outline, no fill, no <span class="mono">data-anno-id</span> — invisible to the click hit-test. Viewer arrives scrolled to the first passage's page. <span class="ref">anno-layer.ts · variant: "link"</span></span></li>
+    </ul>
+  </section>
+
+  <!-- ================= FIG 6 ================= -->
+  <section class="figure">
+    <div class="figlabel">Fig. 6 — Visibility <span class="where">filtered per target</span></div>
+    <p class="figcaption">
+      A link referencing a passage in a <strong>private</strong> doc plus one in a shared PDF, viewed on
+      the PDF's page. The banner and this page's highlights render for <em>every</em> viewer who can
+      read this page — but each target group appears only for viewers who may read that target.
+      An unreadable group is <strong>silently omitted</strong>: no “N hidden passages”, no placeholder,
+      nothing to distinguish “there's more I can't see” from “there's nothing else.”
+    </p>
+    <div class="gatepair">
+      <div class="gatecard">
+        <div class="who">Viewer who can read both targets</div>
+        <div class="mini">
+          <div class="minibanner"><div class="mb-chip"></div><div class="mb-others"></div></div>
+          <div class="miniline w90"></div>
+          <div class="miniline hl w80"></div>
+          <div class="miniline w60"></div>
+          <div class="miniline w90"></div>
+        </div>
+        <div class="verdict">Banner shows this page's passage <em>and</em> the “Also referenced” row pointing into the private doc.</div>
+      </div>
+      <div class="gatecard">
+        <div class="who">Viewer denied the private doc</div>
+        <div class="mini">
+          <div class="minibanner"><div class="mb-chip"></div></div>
+          <div class="miniline w90"></div>
+          <div class="miniline hl w80"></div>
+          <div class="miniline w60"></div>
+          <div class="miniline w90"></div>
+        </div>
+        <div class="verdict">Same banner, same highlights — the private doc's group is simply absent. Its own page still forbids them as it always did.</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="endnote">
+    <h3>Deliberately not in this sketch</h3>
+    <ul>
+      <li>No painting of draft parts while collecting — the tray's text list is the only feedback until the link is followed.</li>
+      <li>No editing after mint, no management surface (<span class="mono">/links</span> table is a follow-up), no link labels.</li>
+      <li>Multi-page PDF selections anchor to their start page (existing capture limitation, kept).</li>
+      <li>Post pages and annotation bodies are not linkable targets in v1.</li>
+    </ul>
+  </div>
+</div>
+
+</html>

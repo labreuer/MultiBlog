@@ -14,6 +14,7 @@ to re-derive the decision from.
 | [PLAN.md](PLAN.md) | Architecture and build order. §10 tracks what's actually built vs. planned. |
 | [TODO.md](TODO.md) | Open items carrying enough context to act on directly. |
 | [docs/COLLAB.md](docs/COLLAB.md) | How a remark stays attached to a passage while the passage moves — every strategy used, the ones rejected, and how to pick. |
+| [docs/MULTI_ANCHORING.md](docs/MULTI_ANCHORING.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
