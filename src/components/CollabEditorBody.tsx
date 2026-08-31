@@ -12,6 +12,7 @@ import { Annotation } from "@/lib/annotation-extension";
 import { PendingAnnotation } from "@/lib/pending-annotation-extension";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
+import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
 import {
   AnnotationHighlight,
   setAnnotationAnchors,
@@ -142,6 +143,9 @@ export default function CollabEditorBody({
       // Enter inserts the hard break Shift-Enter does while the virtual
       // keyboard is up — the extension file says why, and how it is detected.
       VirtualKeyboardEnter,
+      // Ctrl/⌘+Shift+. and , — quote depth in and out; the extension file
+      // says why those keys and what they share with QuoteControls.
+      QuoteDepthShortcuts,
       // Registers the mark type so a doc's annotation marks sync/render
       // correctly here too (PLAN.md §12i) — posts never get one applied,
       // and an unused mark type in the schema costs nothing.

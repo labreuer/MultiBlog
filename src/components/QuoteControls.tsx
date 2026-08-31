@@ -98,7 +98,7 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
         className={styles.toolbarButton}
         disabled={disabled}
         aria-label="Quote"
-        title="Quote"
+        title="Quote (Ctrl+Shift+B / ⌘⇧B)"
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
       >
         <IconBlockquote size={18} />
@@ -123,6 +123,7 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
               type="button"
               role="menuitem"
               className={styles.quoteMenuItem}
+              title="Increase quote depth (Ctrl+Shift+. / ⌘⇧.)"
               onClick={() => {
                 editor.chain().focus().wrapIn("blockquote").run();
                 close();
@@ -134,6 +135,7 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
               type="button"
               role="menuitem"
               className={styles.quoteMenuItem}
+              title="Decrease quote depth (Ctrl+Shift+, / ⌘⇧,)"
               onClick={() => {
                 editor.chain().focus().lift("blockquote").run();
                 close();

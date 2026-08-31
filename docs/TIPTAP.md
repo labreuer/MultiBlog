@@ -216,6 +216,28 @@ Two traps this arrangement depends on:
   `npm run e2e` runs the production build — a `NODE_ENV` gate would hide the hook from the one
   consumer it exists for.
 
+## Quote depth is `wrapIn`/`lift` — `toggleBlockquote` only toggles
+
+Inside a blockquote, `toggleBlockquote` *unwraps* rather than nesting deeper, so a control
+that means "one level in / one level out" must use `wrapIn("blockquote")` and `lift`.
+`QuoteControls`' dropdown and `QuoteDepthShortcuts`
+(`src/lib/quote-depth-shortcuts-extension.ts`, Ctrl/⌘+Shift+. and ,) share that pair;
+StarterKit's own Mod-Shift-b keeps the plain toggle.
+
+Two keymap notes ride along:
+
+- The keys were picked because **no browser binds Ctrl/⌘+Shift+period or comma**, where the
+  Google Docs pair (Mod-]/[) is Back/Forward in every macOS browser — an unhandled
+  fall-through there risks navigating away from the editor. Nothing to outrun is also why this
+  is a plain keymap at the default priority, unlike `LinkControls`' Ctrl-K (a prepended
+  plugin) or `VirtualKeyboardEnter` (`priority: 101`): that escalation ladder exists to
+  beat something specific, and picking keys with no competitor beats it for free.
+- **prosemirror-keymap resolves `Shift-.` through the physical key** — exact on US layouts,
+  able to miss on layouts whose `<`/`>` live elsewhere (e.g. German's dedicated `<>`
+  key). TipTap's own shifted-punctuation defaults (Superscript's `Mod-.`) carry the same
+  trade. The dropdown stays the layout-independent path — a reason it doesn't retire in favor
+  of the shortcut.
+
 ## The tighten button rewrites blocks, and two systems are watching
 
 `tightenLines` (`src/lib/tighten-lines.ts`, EditorToolbar's "tighten" tool, both live body

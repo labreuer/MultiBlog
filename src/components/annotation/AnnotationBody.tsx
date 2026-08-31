@@ -11,6 +11,7 @@ import { AuthorHighlight } from "@/lib/author-highlight-extension";
 import { EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
+import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import DocRefMenu from "../DocRefMenu";
 import proseStyles from "@/styles/prose.module.css";
@@ -77,6 +78,9 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
       // Enter inserts the hard break Shift-Enter does while the virtual
       // keyboard is up — the extension file says why, and how it is detected.
       VirtualKeyboardEnter,
+      // Ctrl/⌘+Shift+. and , — quote depth in and out; the extension file
+      // says why those keys and what they share with QuoteControls.
+      QuoteDepthShortcuts,
     ],
     editorProps: { attributes: { "aria-label": "Annotation body", role: "textbox" } },
     immediatelyRender: false,
