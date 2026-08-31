@@ -153,7 +153,7 @@ export default function FilesTable({
     },
     {
       key: "title",
-      header: "Title",
+      header: "Title (view)",
       sortKey: "title",
       // Links by slug, not id — unlike /docs, whose /doc/[slug] route resolves
       // an id too (resolveDocParam). /pdf/[slug] takes a slug only, so the id
@@ -168,10 +168,10 @@ export default function FilesTable({
     },
     {
       key: "filename",
-      header: "Filename",
+      header: "Filename (download)",
       sortKey: "filename",
       cellProps: () => ({ className: styles.filenameCell }),
-      cell: (row) => row.filename,
+      cell: (row) => <a href={`/files/${row.slug}/download`}>{row.filename}</a>,
     },
     { key: "owners", header: "Owner(s)", sortKey: "owners", cell: (row) => row.owners },
     {
