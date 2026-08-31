@@ -76,12 +76,19 @@ export default function EditorToolbar({
   // which is a stack-length check — cheap enough for a per-transaction
   // selector). useEditorState deep-equals the selected object, so this
   // component re-renders only when a boolean flips, not per keystroke.
+  //
+  // The dry runs are gated on the tools list: on an editor that registers no
+  // undo command at all — the contributor blurb's (blurbExtensions) — there
+  // is no `can().undo` to call, and the resulting TypeError throws in render,
+  // taking down the whole page rather than one button (docs/TIPTAP.md).
+  const showUndo = tools.includes("undo");
+  const showRedo = tools.includes("redo");
   const { selectionEmpty, canUndo, canRedo } = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
       selectionEmpty: e.state.selection.empty,
-      canUndo: e.can().undo(),
-      canRedo: e.can().redo(),
+      canUndo: showUndo && e.can().undo(),
+      canRedo: showRedo && e.can().redo(),
     }),
   });
 
