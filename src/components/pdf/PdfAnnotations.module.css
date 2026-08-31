@@ -182,6 +182,20 @@
   border-color: var(--link);
 }
 
+/* docs/ANCHORED_LINKS.md — the shared "Linked passages" banner, floated
+   over the viewer rather than participating in its layout: the viewer's
+   grid is pdfjs's own, and the banner is page furniture, not viewer chrome.
+   Below the selection popover's 30 — a live selection outranks wayfinding. */
+.anchoredLinkOverlay {
+  position: fixed;
+  top: 4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: min(480px, calc(100vw - 2rem));
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
+
 /* The floating "Annotate this" control that appears over a live selection. */
 .selectionPopover {
   position: fixed;
@@ -261,4 +275,18 @@
    toward the scheme's extreme instead: darker on light, lighter on dark. */
 :global(.annoRect[data-anno-active="true"]) {
   background: color-mix(in srgb, var(--anno-color, #999999) 70%, var(--shade-target));
+}
+
+/* docs/ANCHORED_LINKS.md — an anchored-link part's region: an outline in
+   the link color rather than a fill. No background — the wash stays the
+   annotation family's look, and inside the group's shared opacity a second
+   fill would also shift every annotation it overlaps; an outline composes
+   over the fills instead. These rects are appended before the annotation
+   entries (PdfAnnotationSurface), so every fill stacks over them —
+   wayfinding yields to discussion — and they carry no data-anno-id, so
+   clicks pass straight through to whatever annotation shares the spot. */
+:global(.annoRect.annoRectLink) {
+  background: none;
+  outline: 2px solid var(--link);
+  outline-offset: -1px;
 }

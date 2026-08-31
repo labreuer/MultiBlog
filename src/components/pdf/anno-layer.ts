@@ -36,6 +36,13 @@ export type AnnoLayerEntry = {
   color: string;
   /** Drawn more strongly; set for the annotation whose card is focused. */
   active?: boolean;
+  // docs/ANCHORED_LINKS.md — an anchored-link part's region. Drawn as an
+  // outline rather than a fill (the doc side's exact split: the wash is the
+  // annotation family's look), and it carries **no data-anno-id**, so the
+  // delegated click handler never sees it — an annotation stays clickable
+  // straight through a link region above it, and a link-only region does
+  // nothing on click; the ?sel= banner is its affordance.
+  variant?: "link";
 };
 
 export type AnnoLayerSource = {
@@ -176,13 +183,15 @@ function appendRects(
     // marker for what this rect *is*: e2e/pdf-presence.spec.ts asserts on it,
     // and it is the only thing distinguishing an ephemeral selection from a
     // saved annotation in the DOM.
-    element.className = remote ? "annoRect annoRectRemote" : "annoRect";
+    element.className =
+      entry.variant === "link" ? "annoRect annoRectLink" : remote ? "annoRect annoRectRemote" : "annoRect";
     // Singular, unlike the doc side's `data-annotation-ids`: overlapping
     // *decorations* have to be pre-split because ProseMirror drops attributes
     // where inline decorations overlap, but these are absolutely positioned
     // siblings that simply stack. `elementsFromPoint` returns all of them,
-    // which is what docs/PDF.md §7 wants for overlap disambiguation.
-    element.dataset.annoId = entry.id;
+    // which is what docs/PDF.md §7 wants for overlap disambiguation. A link
+    // region gets none — see AnnoLayerEntry.variant.
+    if (entry.variant !== "link") element.dataset.annoId = entry.id;
     if (entry.active) element.dataset.annoActive = "true";
     element.style.left = `${rect.left}px`;
     element.style.top = `${rect.top}px`;

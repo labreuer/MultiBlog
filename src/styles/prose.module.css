@@ -199,3 +199,39 @@
     background-color: color-mix(in srgb, var(--doc-link-color, var(--text-muted)) var(--anchor-tint-pulse), transparent);
   }
 }
+
+/* docs/ANCHORED_LINKS.md — the passages a followed anchored link names
+   (?sel=). Painted off --link rather than any author color: this is
+   wayfinding, not discussion, and it must stay distinguishable from the
+   author-tinted annotation wash above. A wash plus underline, and no
+   cursor — a link-only span isn't clickable; the ?sel= banner is its
+   affordance (annotation-click-extension.ts). .pulse is the banner's
+   jump flash, the QuoteThreadHeader.jumpToQuote pattern. */
+.prose :global(.anchored-link-highlight) {
+  background: color-mix(in srgb, var(--link) var(--anchor-tint), transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--link) 55%, transparent);
+  border-radius: 2px;
+}
+
+/* Overlap: one span carries both classes (one buildSegments pass —
+   annotation-highlight-extension.ts), and one span has one background, so
+   the annotation's author tint wins it and the link keeps only its
+   underline. Specificity (0,3,0) beats both base rules' (0,2,0), so source
+   order doesn't matter — the .noAnnotations convention. */
+.prose :global(.annotation-highlight.anchored-link-highlight) {
+  background: color-mix(in srgb, var(--thread-color, var(--text-muted)) var(--anchor-tint), transparent);
+}
+
+.prose :global(.anchored-link-highlight.pulse) {
+  animation: anchoredLinkPulse 0.6s ease-in-out 2;
+}
+
+@keyframes anchoredLinkPulse {
+  0%,
+  100% {
+    background-color: color-mix(in srgb, var(--link) var(--anchor-tint), transparent);
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--link) var(--anchor-tint-pulse), transparent);
+  }
+}
