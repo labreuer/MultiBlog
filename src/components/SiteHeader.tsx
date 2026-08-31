@@ -6,6 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 import { canManagePosts, canManageDocs, canManageFiles, isAdmin } from "@/lib/role-checks";
 import { SITE_TITLE } from "@/lib/site-config";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
+import { fixedPlacementStyle, onViewportChange } from "@/lib/popover-placement";
 import styles from "./SiteHeader.module.css";
 
 export default function SiteHeader() {
@@ -26,8 +27,13 @@ export default function SiteHeader() {
     const panel = details.querySelector<HTMLElement>(`.${styles.dropdownPanel}`);
     if (!group || !panel) return;
     const rect = group.getBoundingClientRect();
-    panel.style.top = `${rect.bottom + 4}px`;
-    panel.style.left = `${rect.left}px`;
+    // .dropdownPanel is `position: fixed`, so it goes through the same helper
+    // as every other one (docs/mobile/coordinates.html). **Defensive here, not an observed bug**: the tap
+    // that opens this panel is the tap that dismisses the keyboard, so the
+    // shift measures 0 in every case reachable today.
+    const placed = fixedPlacementStyle({ top: rect.bottom + 4, left: rect.left });
+    panel.style.top = `${placed.top}px`;
+    panel.style.left = `${placed.left}px`;
   }
 
   // Picking an entry closes the menu, which nothing else here would do: a
@@ -54,12 +60,12 @@ export default function SiteHeader() {
       placePanel(docsMenuRef.current);
     }
     scroller?.addEventListener("scroll", placeOpen, { passive: true });
-    window.addEventListener("scroll", placeOpen, { passive: true });
-    window.addEventListener("resize", placeOpen);
+    // window scroll/resize plus the visualViewport events a keyboard fires
+    // instead; the scroller above is separate and keeps its own listener.
+    const stop = onViewportChange(placeOpen);
     return () => {
       scroller?.removeEventListener("scroll", placeOpen);
-      window.removeEventListener("scroll", placeOpen);
-      window.removeEventListener("resize", placeOpen);
+      stop();
     };
   }, []);
 

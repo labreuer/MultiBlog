@@ -307,11 +307,13 @@ export default function DocEditor({
             request to annotate — it's how you bold a word or move a
             sentence — so this says only that annotating is possible, and
             costs nothing until clicked. */}
-        {wideEnoughForWidget && widget.pending && !widget.expanded && widget.marker && (
+        {wideEnoughForWidget && widget.pending && !widget.expanded && widget.markerStyle && (
           <button
             type="button"
             className={styles.annotateMarker}
-            style={{ top: widget.marker.top, left: widget.marker.left }}
+            /* markerStyle, not marker — marker is where it appears (what the
+               composer anchors to), this is what makes it land there. */
+            style={{ top: widget.markerStyle.top, left: widget.markerStyle.left }}
             onClick={widget.expand}
             title="Annotate this selection"
             aria-label="Annotate this selection"

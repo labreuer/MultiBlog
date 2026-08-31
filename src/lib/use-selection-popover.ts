@@ -4,7 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "re
 import type { Editor } from "@tiptap/react";
 import { setPendingAnnotation } from "./pending-annotation-extension";
 import { findQuoteOccurrences } from "./quote-occurrences";
-import { placePopover, popoverBoundsFor, provisionalPlacement, type PopoverPlacement } from "./popover-placement";
+import {
+  fixedPlacementStyle,
+  onViewportChange,
+  placePopover,
+  popoverBoundsFor,
+  provisionalPlacement,
+  type PopoverPlacement,
+} from "./popover-placement";
 
 export type PendingSelection = {
   from: number;
@@ -96,7 +103,7 @@ export function useSelectionPopover({
   }, [pending]);
 
   function openAt(liveEditor: Editor, pos: number) {
-    setPlacement(provisionalPlacement(liveEditor.view.coordsAtPos(pos)));
+    setPlacement(fixedPlacementStyle(provisionalPlacement(liveEditor.view.coordsAtPos(pos))));
   }
 
   function clear(liveEditor?: Editor | null) {
@@ -203,18 +210,14 @@ export function useSelectionPopover({
       if (!liveEditor || !el || anchorPos === null) return;
       const anchor = liveEditor.view.coordsAtPos(anchorPos);
       const { width, height } = el.getBoundingClientRect();
-      const next = placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current));
+      // fixedPlacementStyle last — only the value about to become a `top`/`left`
+      // is converted, never the placement math upstream of it.
+      const next = fixedPlacementStyle(placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current)));
       setPlacement((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
     }
     reposition();
-    // Capture phase: a column's own `.scroller` scrolls, not the window, and a
-    // scroll event from an inner element doesn't bubble.
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
-    };
+    // Inner-element scroll and the software keyboard both — see onViewportChange.
+    return onViewportChange(reposition);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- editorRef/containerRef are stable refs; reflowKey is an opaque "something moved" signal, not read here
   }, [anchorPos, reflowKey]);
 

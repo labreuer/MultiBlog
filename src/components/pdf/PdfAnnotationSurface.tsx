@@ -21,6 +21,7 @@ import {
 import { captureTextTarget, type CapturePage } from "@/lib/pdf-anchor-capture";
 import { resolveTargetRects } from "@/lib/pdf-anchor-resolve";
 import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
+import { fixedPlacementStyle } from "@/lib/popover-placement";
 import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
@@ -388,7 +389,12 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
       const rects = Array.from(range.getClientRects());
       const last = rects[rects.length - 1];
       if (!last) return;
-      setPopover({ left: last.right, top: last.bottom + 6, target });
+      // This control is `position: fixed`, so it goes through the same helper
+      // as every other one (docs/mobile/coordinates.html) — in the handler, not at render, since the
+      // probe touches the DOM. **Defensive here**, same reason as SiteHeader's
+      // placePanel: the selecting tap has already dismissed any keyboard.
+      const anchored = fixedPlacementStyle({ top: last.bottom + 6, left: last.right });
+      setPopover({ left: anchored.left, top: anchored.top, target });
     };
 
     // Two triggers into one handler, because neither covers every way a

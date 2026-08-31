@@ -17,6 +17,7 @@ to re-derive the decision from.
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
+| [docs/mobile/coordinates.html](docs/mobile/coordinates.html) | Fixed popovers vs. the iOS keyboard: the two coordinate spaces, and what changed on desktop. |
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | /dashboard: the section cards, Recent docs, the Settings tiers, and where an author color is cached. |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Tags have their own section: minting vs. applying vs. curating. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
@@ -318,6 +319,12 @@ working on.
   handle emits 76 `pointermove`s with live coordinates. `pointercancel` is real but belongs to
   *scrolling*, which cancels pointers on every touch platform. Keep the `pointerup` path:
   it is live on both devices, not dead code. docs/PDF.md §10.
+- **A `position: fixed` popover is written in a different coordinate space than it is
+  measured in.** Clamp to `visualViewport`, never `window.inner*`, and run the value
+  through `fixedPlacementStyle` before it becomes a `top` — iOS anchors `fixed` to the
+  *document* while a keyboard is up, and fires no window event when one appears. Every
+  popover goes through `src/lib/popover-placement.ts`; don't re-derive the math at a call
+  site. docs/mobile/coordinates.html.
 - **A Next dynamic-route `params` value arrives percent-encoded, not literal.** `getParamValue`
   runs `encodeURIComponent` on every string param before handing it to user code (verified
   against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see

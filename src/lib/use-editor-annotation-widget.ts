@@ -4,7 +4,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import type { Editor } from "@tiptap/react";
 import { captureRelativeRange, resolveRelativeRange, type RelativeRange } from "./yjs-relative-anchor";
 import { setPendingAnnotation } from "./pending-annotation-extension";
-import { placePopover, popoverBoundsFor, provisionalPlacement, type PopoverPlacement } from "./popover-placement";
+import {
+  fixedPlacementStyle,
+  onViewportChange,
+  placePopover,
+  popoverBoundsFor,
+  provisionalPlacement,
+  viewportBounds,
+  type PopoverPlacement,
+} from "./popover-placement";
 
 export type PendingEditorSelection = { relRange: RelativeRange; quotedText: string };
 
@@ -21,8 +29,14 @@ export type EditorAnnotationWidget = {
    * scrolled out of the editor's own frame, which hides the marker rather
    * than stranding it at an edge (same rule EditorAnnotationRail's bounded
    * cards follow).
+   *
+   * **Visual-viewport coordinates, not style values** — the composer anchors
+   * to this, so it stays in the space `coordsAtPos` speaks. Render from
+   * `markerStyle`. docs/mobile/coordinates.html.
    */
   marker: PopoverPlacement | null;
+  /** `marker`, converted for a `position: fixed` element to land there. */
+  markerStyle: PopoverPlacement | null;
   /** True once the marker has been clicked and the composer is open. */
   expanded: boolean;
   expand: () => void;
@@ -92,6 +106,7 @@ export function useEditorAnnotationWidget({
   // rather than trailing off its end.
   const [anchorPos, setAnchorPos] = useState<number | null>(null);
   const [marker, setMarker] = useState<PopoverPlacement | null>(null);
+  const [markerStyle, setMarkerStyle] = useState<PopoverPlacement | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [popoverPlacement, setPopoverPlacement] = useState<PopoverPlacement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -139,6 +154,7 @@ export function useEditorAnnotationWidget({
       setPending(null);
       setAnchorPos(null);
       setMarker(null);
+      setMarkerStyle(null);
       setExpanded(false);
       const target = liveEditor ?? editorRef.current;
       if (target) setPendingAnnotation(target.view, null);
@@ -205,7 +221,9 @@ export function useEditorAnnotationWidget({
   const expand = useCallback(() => {
     const current = markerRef.current;
     if (current) {
-      setPopoverPlacement(provisionalPlacement({ ...current, bottom: current.top + ANNOTATE_MARKER_SIZE }));
+      setPopoverPlacement(
+        fixedPlacementStyle(provisionalPlacement({ ...current, bottom: current.top + ANNOTATE_MARKER_SIZE })),
+      );
     }
     setExpanded(true);
   }, []);
@@ -243,6 +261,7 @@ export function useEditorAnnotationWidget({
         // A position the current document can't resolve — treated the same
         // as scrolled-out-of-frame rather than thrown.
         setMarker(null);
+        setMarkerStyle(null);
         return;
       }
       const frameRect = frame.getBoundingClientRect();
@@ -250,6 +269,7 @@ export function useEditorAnnotationWidget({
       // pinned to an edge pointing at text nobody can see.
       if (coords.top < frameRect.top || coords.top > frameRect.bottom) {
         setMarker(null);
+        setMarkerStyle(null);
         return;
       }
       // Preferred spot is genuinely outside the text column. Clamped into
@@ -258,19 +278,17 @@ export function useEditorAnnotationWidget({
       // in — body's `overflow-x: hidden` would otherwise clip the marker
       // away entirely (globals.css).
       const preferred = frameRect.right + MARKER_GAP;
-      const maxLeft = window.innerWidth - ANNOTATE_MARKER_SIZE - MARKER_GAP;
+      const maxLeft = viewportBounds().right - ANNOTATE_MARKER_SIZE - MARKER_GAP;
       const next = { top: coords.top, left: Math.max(MARKER_GAP, Math.min(preferred, maxLeft)) };
       setMarker((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
+      // Own state, not derived at render: a viewport change can leave `next`
+      // identical while the shift moves, and that still has to repaint.
+      const style = fixedPlacementStyle(next);
+      setMarkerStyle((prev) => (prev && prev.top === style.top && prev.left === style.left ? prev : style));
     }
     reposition();
-    // Capture phase: the editor's text box scrolls, not the window, and a
-    // scroll event from a nested element doesn't bubble.
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
-    };
+    // Inner-element scroll and the software keyboard both — see onViewportChange.
+    return onViewportChange(reposition);
   }, [anchorPos, editorRef]);
 
   // The expanded composer, anchored to the marker rather than to the text —
@@ -286,21 +304,19 @@ export function useEditorAnnotationWidget({
       if (!el || !marker) return;
       const { width, height } = el.getBoundingClientRect();
       const anchor = { top: marker.top, bottom: marker.top + ANNOTATE_MARKER_SIZE, left: marker.left };
-      const next = placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current));
+      // `marker` is in visual-viewport space, so `anchor` is; only the final
+      // value, about to become a `top`/`left`, is converted.
+      const next = fixedPlacementStyle(placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current)));
       setPopoverPlacement((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
     }
     reposition();
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
-    };
+    return onViewportChange(reposition);
   }, [expanded, marker, containerRef]);
 
   return {
     pending,
     marker,
+    markerStyle,
     expanded,
     expand,
     popoverPlacement,
