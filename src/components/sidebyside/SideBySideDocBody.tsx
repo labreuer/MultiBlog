@@ -177,7 +177,6 @@ export default function SideBySideDocBody({
       const candidates = narrowed.map((h) => docLinks.find((l) => l.id === h.id)).filter((l): l is DocLinkInput => Boolean(l));
       if (candidates.length === 0) return;
 
-      selection.openAt(liveEditor, pos);
       if (candidates.length === 1) {
         setEditingLink({ link: candidates[0], pos });
         setChooser(null);
@@ -215,7 +214,7 @@ export default function SideBySideDocBody({
     return <p style={{ color: "var(--error)" }}>{error}</p>;
   }
 
-  const { pending, placement, popoverRef } = selection;
+  const { pending, popoverRef } = selection;
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
@@ -230,12 +229,10 @@ export default function SideBySideDocBody({
       >
         <EditorContent editor={editor} />
       </div>
-      {pending && placement && editor && (
+      {pending && editor && (
         <DocLinkPopover
           elementRef={popoverRef}
           docId={docId}
-          top={placement.top}
-          left={placement.left}
           // Recomputed from the live doc rather than carried on the pending
           // selection — before/after/blocks are only ever needed here, at the
           // moment of creation (§14i), and captureAnchor is the single place
@@ -250,7 +247,7 @@ export default function SideBySideDocBody({
           onCancel={() => selection.clear()}
         />
       )}
-      {editingLink && placement && (
+      {editingLink && (
         <DocLinkPopover
           elementRef={popoverRef}
           // Forces a remount when the click-routing target changes — without
@@ -261,8 +258,6 @@ export default function SideBySideDocBody({
           // fix, as DocLinkGroupPanel's `key` (SideBySideView.tsx).
           key={editingLink.link.id}
           docId={docId}
-          top={placement.top}
-          left={placement.left}
           // Only ever reached from an anchored hit (§14j's handleClick filters
           // to anchored links), so mark is never actually null here — asserted
           // rather than fabricated, since a fallback empty mark would render a
@@ -293,11 +288,9 @@ export default function SideBySideDocBody({
           onColorPreview={(overrideColor) => onDocLinkColorPreview?.(editingLink.link.id, overrideColor)}
         />
       )}
-      {chooser && placement && (
+      {chooser && (
         <DocLinkChooser
           elementRef={popoverRef}
-          top={placement.top}
-          left={placement.left}
           candidates={chooser.candidates}
           onSelect={(link) => {
             const { pos } = chooser;

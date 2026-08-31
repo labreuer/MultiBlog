@@ -207,12 +207,10 @@ export default function DocReadingBody({
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
       </div>
-      {selection.pending && selection.placement && (
+      {selection.pending && (
         <AnnotationPopover
           elementRef={selection.popoverRef}
           docId={docId}
-          top={selection.placement.top}
-          left={selection.placement.left}
           from={selection.pending.from}
           to={selection.pending.to}
           quotedText={selection.pending.quotedText}

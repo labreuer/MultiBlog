@@ -4,7 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import type { Editor } from "@tiptap/react";
 import { captureRelativeRange, resolveRelativeRange, type RelativeRange } from "./yjs-relative-anchor";
 import { pendingAnnotationKey, setPendingAnnotation } from "./pending-annotation-extension";
-import { placePopover, popoverBoundsFor, provisionalPlacement, type PopoverPlacement } from "./popover-placement";
+import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { POPOVER_GAP, popoverBoundsElement, type PopoverPlacement } from "./popover-placement";
 
 export type PendingEditorSelection = { relRange: RelativeRange; quotedText: string };
 
@@ -26,8 +27,7 @@ export type EditorAnnotationWidget = {
   /** True once the marker has been clicked and the composer is open. */
   expanded: boolean;
   expand: () => void;
-  /** Where the expanded composer sits — measured, anchored to the marker. */
-  popoverPlacement: PopoverPlacement | null;
+  /** Attach to the expanded composer's root — floating-ui positions it through this. */
   popoverRef: RefObject<HTMLDivElement | null>;
   capture: (editor: Editor) => void;
   clear: (editor?: Editor | null) => void;
@@ -102,7 +102,6 @@ export function useEditorAnnotationWidget({
   const [anchorPos, setAnchorPos] = useState<number | null>(null);
   const [marker, setMarker] = useState<PopoverPlacement | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [popoverPlacement, setPopoverPlacement] = useState<PopoverPlacement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
 
   // Read inside reresolve/clear, which run off editor events and would
@@ -116,15 +115,6 @@ export function useEditorAnnotationWidget({
   useEffect(() => {
     getFrameRef.current = getFrame;
   });
-
-  // `expand` needs the marker's current position to seed the panel's
-  // provisional placement, and runs from a click handler rather than a
-  // render — a ref, not the state value, keeps it out of `expand`'s
-  // dependency list and so keeps that callback stable.
-  const markerRef = useRef<PopoverPlacement | null>(null);
-  useEffect(() => {
-    markerRef.current = marker;
-  }, [marker]);
 
   const clear = useCallback(
     (liveEditor?: Editor | null) => {
@@ -211,16 +201,10 @@ export function useEditorAnnotationWidget({
     return current ? resolveRelativeRange(liveEditor, current.relRange) : null;
   }, []);
 
-  // Seeds a provisional placement in the same batch as `expanded`, which is
-  // what makes the measured one below possible at all: the panel has to be
-  // in the DOM before its size can be read, and it only renders once it has
-  // *a* placement. Same two-phase bootstrap useSelectionPopover uses, keyed
-  // off the marker rather than a text position.
+  // Opens the composer. Its placement is floating-ui's (the effect below),
+  // whose answer lands before the newly mounted panel first paints — no
+  // provisional placement to seed, so this only flips the stage.
   const expand = useCallback(() => {
-    const current = markerRef.current;
-    if (current) {
-      setPopoverPlacement(provisionalPlacement({ ...current, bottom: current.top + ANNOTATE_MARKER_SIZE }));
-    }
     setExpanded(true);
     // Stage two is where the range gets its decoration (the header comment):
     // resolved now, against the document as it is at the click.
@@ -297,27 +281,38 @@ export function useEditorAnnotationWidget({
 
   // The expanded composer, anchored to the marker rather than to the text —
   // it opens *where the marker was*, so the click and its result are in the
-  // same place. `placePopover` still slides it left to fit, which at the
-  // narrow end of the range is what puts it back over the document; there
-  // is no room to do otherwise, and by then it's a panel the reader
-  // deliberately opened rather than one that appeared over their work.
+  // same place. floating-ui places it hanging under the marker; shift()
+  // still slides it left to fit, which at the narrow end of the range is
+  // what puts it back over the document — there is no room to do otherwise,
+  // and by then it's a panel the reader deliberately opened rather than one
+  // that appeared over their work. Re-bound whenever the marker moves (the
+  // marker's own effect above tracks scroll), autoUpdate's ResizeObserver
+  // re-places as the composer grows, and computePosition's answer lands in
+  // a microtask, before the newly mounted panel first paints.
   useLayoutEffect(() => {
     if (!expanded || !marker) return;
-    function reposition() {
-      const el = popoverRef.current;
-      if (!el || !marker) return;
-      const { width, height } = el.getBoundingClientRect();
-      const anchor = { top: marker.top, bottom: marker.top + ANNOTATE_MARKER_SIZE, left: marker.left };
-      const next = placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current));
-      setPopoverPlacement((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
-    }
-    reposition();
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
+    const el = popoverRef.current;
+    if (!el) return;
+    const frame = getFrameRef.current();
+    const reference = {
+      getBoundingClientRect: () => new DOMRect(marker.left, marker.top, ANNOTATE_MARKER_SIZE, ANNOTATE_MARKER_SIZE),
+      ...(frame ? { contextElement: frame } : {}),
     };
+    const boundary = popoverBoundsElement(containerRef.current);
+    const update = () => {
+      void computePosition(reference, el, {
+        strategy: "fixed",
+        placement: "bottom-start",
+        middleware: [
+          offset({ mainAxis: POPOVER_GAP, crossAxis: POPOVER_GAP }),
+          flip({ crossAxis: false, boundary, fallbackStrategy: "initialPlacement" }),
+          shift({ crossAxis: true, boundary }),
+        ],
+      }).then(({ x, y }) => {
+        Object.assign(el.style, { left: `${x}px`, top: `${y}px` });
+      });
+    };
+    return autoUpdate(reference, el, update);
   }, [expanded, marker, containerRef]);
 
   return {
@@ -325,7 +320,6 @@ export function useEditorAnnotationWidget({
     marker,
     expanded,
     expand,
-    popoverPlacement,
     popoverRef,
     capture,
     clear,
