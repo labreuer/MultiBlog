@@ -1,352 +1,296 @@
 # Anchored links — a URL for a set of passages across docs and PDFs
 
-**Status: designed, not built** (2026-08-31). This is the implementation plan; when the
-feature lands, rewrite this doc to describe what was built (and record deviations), per the
-house convention. UI sketch (six annotated figures, drawn in `globals.css`'s own tokens):
-[docs/Anchored_Links.html](Anchored_Links.html).
+**Status: built** (2026-08-31). This file began as the implementation plan and is
+rewritten as-built per the house convention — "Deviations from the plan" below records
+where the build differs from what was designed; the plan text itself lives in this file's
+git history (first commit of the `anchored-links` branch). UI sketch, drawn in
+`globals.css`'s own tokens: [docs/Anchored_Links.html](Anchored_Links.html).
 
-## Context
+## What an anchored link is
 
 An **anchored link** is a hyperlink that refers to one or more text selections of a doc
-and/or a PDF — e.g. "these two paragraphs of doc X plus this passage on page 2 of PDF Y" as
-a single shareable URL. Decisions already made:
+and/or a PDF — "these two paragraphs of doc X plus this passage on page 2 of PDF Y" as a
+single shareable URL. The load-bearing decisions:
 
-1. **DB-backed**: a link is a database object; the URL carries its id (not a stateless
-   self-describing URL).
+1. **DB-backed**: a link is a database object; the URL carries its id (`?sel=<cuid>`), not
+   a stateless self-describing blob. No separate token column, no `/sel/[id]` route — the
+   landing surface is computed at mint time, and a redirect route stays a cheap later
+   addition if minted hrefs ever go stale.
 2. **Cross-surface**: one link may gather selections across several docs/PDFs. Creation
-   happens from the reading views `/doc/[slug]` and `/pdf/[slug]` via a draft-link tray that
-   persists across navigation; minted hrefs land on one of those two routes with a `?sel=`
-   param.
+   happens from the reading views `/doc/[slug]` and `/pdf/[slug]` via a draft-link tray
+   that persists across navigation; minted hrefs land on one of those two routes with a
+   `?sel=` param.
 3. **No inline doc marks** — docs use the offsets+version-stamp mechanism (PLAN.md §13o
    reading-view style), PDFs the quads blob. Nothing writes into any ydoc.
-4. **Cherry-pick from `part-anchors`** (13 local commits, unmerged): take the small mark-free
-   pieces; do NOT depend on its `annotation_anchor` migration/backfill landing.
-5. **Per-target visibility** (see "Following a link" below): the banner shows on `?sel=`
-   pages even when the viewer cannot read every referenced object — unreadable targets are
+4. **Per-target visibility** ("Following a link" below): the banner shows on `?sel=` pages
+   even when the viewer cannot read every referenced object — unreadable targets are
    simply omitted, silently.
 
-Architecturally this is a **new consumer family on the §20a/§20b anchor envelope**
-(`AnchoredLink` ≈ `TagAssignment` ≈ one act owning 1..n anchor rows ordered by
-`part_order`) — exactly what `docs/MULTI_ANCHORING.md` (on the branch) prescribes for a link
-between selections. It is also the **first writer of `selector`/`selector_kind`** on main.
-
-Verified facts the design leans on:
-
-- Both reading routes are `gated` — signed-out viewers redirect to `/sign-in` — so every
-  viewer has a session (`user.id`, `user.role`); no anonymous-viewer path exists.
-- Neither route reads `searchParams` today; both are inherently dynamic, so adding it is
-  free (no §12f static-generation hazard).
-- `/pdf/[slug]`'s slug-history redirect (`resolveFileParam` → `redirectTo`) drops the
-  querystring; the page's redirect arm must re-append `?sel=`.
-- `resolveDocParam` is id-first and docs have **no slug history** → mint doc hrefs by id.
-- CLAUDE.md's `ssr:false` + `router.refresh()` trap: initial-props delivery is safe; only
-  refresh-based delivery is not. This plan uses initial props + self-fetching islands only.
-
-## Two shaping design decisions
+Architecturally this is a **consumer family on the §20a/§20b anchor envelope** —
+`AnchoredLink` ≈ `TagAssignment`, one act owning 1..n anchor rows ordered by `part_order`
+— and the **first writer of `selector`/`selector_kind` on main**. Two shaping decisions
+govern everything else:
 
 - **Each "Add to link" posts its part to the server immediately**, captured and verified
-  against its own `atVersion` stamp at that instant. No client-side part bank, so §20l's
-  "multi-part capture leans on the freeze" constraint (which cannot hold across pages) never
-  applies — each anchor row carries its own `ydocUpdateId`.
-- **Draft parts appear only in the tray (as text), never painted on the surfaces.** Painting
-  is exclusively the `?sel=` follow path, delivered as initial server props.
+  against its own `atVersion` stamp at that instant. There is no client-side part bank, so
+  the part-anchors branch's §20l constraint ("multi-part capture leans on the freeze" —
+  which cannot hold across pages) never applies; each anchor row carries its own
+  `ydocUpdateId`, and the server row *is* the tray's cross-page persistence.
+- **Draft parts appear only in the tray (as text), never painted on the surfaces.**
+  Painting is exclusively the `?sel=` follow path, delivered as initial server props.
 
-## Increment 0 — Cherry-picks from `part-anchors`
+Origins: `b5fa049` was cherry-picked clean from the `part-anchors` branch (the
+one-writer-per-anchor-field refactor: `deriveDocRangeSelector`, `captureAnchorInYdoc`
+returning the selector, `capturePdfTextAnchor`); `docs/MULTI_ANCHORING.md` came over
+verbatim. The highlight-extension and anno-layer generalizations were **re-expressed from
+that branch's commits as templates** (`kind: "link"` where it says `"tag"`), not picked —
+its `annotation_anchor` migration/backfill was deliberately not depended on, and
+`resolveCaptureStamp` is duplicated into the actions file until that branch lands.
 
-- `git cherry-pick b5fa049` ("Give each anchor field one writer…") — **verified clean**: its
-  five files have zero drift on main since merge-base `4f92fe6`. Brings
-  `deriveDocRangeSelector` (+4 unit tests), `captureAnchorInYdoc` returning
-  `{from,to,quotedText,selector}`, new `capturePdfTextAnchor({fileId,rawTarget})`, and
-  `postFileAnnotation` refactored onto it (non-breaking). Run `npm run test:unit` after.
-- `git checkout part-anchors -- docs/MULTI_ANCHORING.md` + re-add its CLAUDE.md pointer line
-  by hand (CLAUDE.md itself conflicts trivially).
-- **Reimplement using branch files as templates** (not clean picks):
-  - `annotation-highlight-extension.ts` generalization from `e6f1fed`, adapted with
-    `kind: "annotation" | "link"` (NOT `e4e1da8`'s array-valued successor — our parts are
-    separate rows each keyed by anchor id, singular ranges suffice).
-  - `anno-layer.ts` `variant` from `d0a03f5`, adapted as `"link"`.
-  - `resolveCaptureStamp(ydocId, atVersion)` (~15 lines from `6a06a2d`'s tags.ts) copied into
-    the new actions file; unify if the branch lands.
-- **Do not take**: `annotation_anchor` migrations/backfill, multi-part annotation commits,
-  pending-extension pluralization, tag part UI.
+## Schema
 
-## Increment 1 — Schema (`prisma/schema.prisma`)
+Two models after the tag block in `prisma/schema.prisma`, migration
+`20260831200826_add_anchored_links`:
 
-Two models after the tag block; names avoid the existing `DocLink`/`DocLinkGroup` (which
-stay untouched, §20i):
+- **`anchored_link`** — id (cuid, the URL id), `created_by_id`, `created_at`,
+  `minted_at` (null = the creator's open draft), soft-delete pair. Like
+  `TagAssignment`, deliberately outside `prisma.ts`'s soft-delete `$extends` (read
+  through anchor includes, which the extension cannot reach); `deletedAt` filters by hand.
+- **`anchored_link_anchor`** — the §20b row shape verbatim under `link_id`
+  (`onDelete: Cascade`): the four-FK object arc, `selector_kind`/`anchor_from`/
+  `anchor_to`/`quoted_text`/`selector`, the `ydoc_update_id`/`anchored_event_id` stamps,
+  `part_order`. Hard-delete only — an anchor is a part of a record, not a record.
 
-```prisma
-model AnchoredLink {
-  id          String    @id @default(cuid())
-  createdById String    @map("created_by_id")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  mintedAt    DateTime? @map("minted_at")   // null = the creator's open draft
-  deletedByUserId String?   @map("deleted_by_user_id")
-  deletedAt       DateTime? @map("deleted_at")
-  // relations: createdBy, deletedBy, anchors; @@index([createdById])
-  @@map("anchored_link")
-}
+Hand-appended DDL (the `add_tags` convention — Prisma has no CHECK or partial-index DSL):
 
-model AnchoredLinkAnchor {
-  id     String @id @default(cuid())
-  linkId String @map("link_id")
-  // target arc + selector columns + stamps + partOrder: VERBATIM from
-  // TagAnchor (schema.prisma:1174-1241) under the new owner FK; relations
-  // and the five indexes mirror TagAnchor one-for-one (link onDelete: Cascade).
-  @@map("anchored_link_anchor")
-}
-```
+- `anchored_link_anchor_one_target_check` — `num_nonnulls(doc_id, post_id, file_id,
+  target_annotation_id) = 1`.
+- `anchored_link_anchor_selector_columns_check` — the group-wide null-together equality.
+  Unlike `tag_anchor`, every row this table's writer produces has the group non-null: a
+  selector-less anchored-link anchor would be a link to a whole object, which is what an
+  ordinary href already is.
+- **`anchored_link_one_draft_per_user`** — a partial unique index on `(created_by_id)
+  WHERE minted_at IS NULL AND deleted_at IS NULL`. This is what makes `loadMyDraftLink` a
+  definite article and the get-or-create race a catchable P2002; minting frees the slot,
+  which is the whole lifecycle. `scripts/integrity/check-tag-constraints.ts` probes all
+  three, in both directions for the index (a second open draft must be refused; a second
+  link for a user whose first is *minted* must go in — the WHERE clause is the feature).
 
-Plus back-relations on `User` (×2), `Doc`, `Post`, `StoredFile`, `Annotation`,
-`PostPublicationEvent`. Owner gets soft delete (the TagAssignment convention); anchor rows
-are hard-delete only (§20b). URL id = the row cuid (no separate token column).
+The v1 writer produces only `doc_id`+`DOC_RANGE` and `file_id`+`PDF_TEXT` rows;
+`post_id`/`target_annotation_id`/`anchored_event_id` ship inert on `tag_anchor`'s
+one-column-now reasoning.
 
-**Migration** (docs/DATABASE.md recipe): `npm run check-ports` → stop dev if up (say so) →
-edit schema → `npx prisma format` (read the diff; outside-edit changes are drift, own
-commit) → `npx prisma migrate dev --name add_anchored_links --create-only` → hand-append to
-the SQL (the add_tags convention, before first apply):
+## Read path — `src/lib/anchored-link-data.ts`
 
-```sql
-ALTER TABLE "anchored_link_anchor"
-  ADD CONSTRAINT "anchored_link_anchor_one_target_check"
-  CHECK (num_nonnulls("doc_id", "post_id", "file_id", "target_annotation_id") = 1);
-
-ALTER TABLE "anchored_link_anchor"
-  ADD CONSTRAINT "anchored_link_anchor_selector_columns_check"
-  CHECK (("selector_kind" IS NULL)
-    = ("anchor_from" IS NULL AND "anchor_to" IS NULL AND "selector" IS NULL));
-
--- One open draft per user: makes loadMyDraftLink a definite article and the
--- get-or-create race a catchable P2002. (Prisma has no partial-index DSL.)
-CREATE UNIQUE INDEX "anchored_link_one_draft_per_user"
-  ON "anchored_link" ("created_by_id")
-  WHERE "minted_at" IS NULL AND "deleted_at" IS NULL;
-```
-
-→ apply → `npx prisma generate` yourself + **restart web and say so** (new-model-in-running-
-server gotcha: `prisma.anchoredLink` is `undefined` until restart; typecheck stays green).
-
-## Increment 2 — Read path: `src/lib/anchored-link-data.ts` (new, server-only)
-
-```ts
-export type AnchoredLinkPart = { anchorId: string; partOrder: number; quotedText: string;
-  from: number | null; to: number | null; selector: AnchorSelector | null };
-export type AnchoredLinkTargetGroup = { target: AnchorTarget; label: string; href: string;
-  parts: AnchoredLinkPart[] };
-export type AnchoredLinkView = { id: string; groups: AnchoredLinkTargetGroup[] };
-export async function anchoredLinkForViewer(linkId, viewer: {id; role}): Promise<AnchoredLinkView | null>
-```
-
-- Load link (`deletedAt: null`), anchors ordered `[partOrder, id]`. Draft visible to creator
-  only. Every jsonb `selector` goes through `parseSelector` — never a cast.
-- **Per-target visibility filter** ("Following a link" below has the rule and rationale):
-  rebuild each distinct target via `targetFromColumns`; `doc` → `canUserReadDoc`, `file` →
-  `canUserReadFile` (soft-delete-filtered lookups; PRIVATE docs keep their no-admin-bypass by
-  inheritance). Groups whose target is unreadable, deleted, or of a kind the v1 writer never
-  produces (`post`/`annotation`) are **silently omitted** — no placeholder, no count. If no
-  group survives, return `null` and callers behave as if `?sel=` were absent.
-- `href` per group: doc → `/doc/<docId>?sel=<id>` (**by id** — rename-proof), file →
-  `/pdf/<slug>?sel=<id>`. Returned view is BigInt-free (stamps omitted) so it can cross into
-  client props.
+`anchoredLinkForViewer(linkId, viewer)` is the follow path's one read (server-only, the
+`tag-browse.ts` of this feature): load the link (`deletedAt` null; an unminted draft is
+visible to its creator alone), anchors ordered `[partOrder, id]` — removals leave gaps and
+nothing renumbers — every jsonb `selector` through `parseSelector`, never a cast. Each
+distinct target is rebuilt via `targetFromColumns` and gated by its own existing read
+predicate (`canUserReadDoc` / `canUserReadFile`; the doc/file lookups ride the soft-delete
+`$extends`, so a deleted target simply comes back null). Groups keep the order their first
+part appears in; hrefs carry `?sel=` — **doc by id** (docs have no slug history;
+rename-proof beats pretty), file by slug. No group surviving returns null and callers
+behave as if `?sel=` were absent. The returned view is BigInt-free by design (stamps
+omitted): it crosses into client props on both surfaces.
 
 ## Following a link — the visibility rule
 
-**Per-target filtering, not a conjunctive gate.** The banner ("Linked passages") renders on
-a `?sel=` page whenever the link resolves at all for this viewer; each target group shows
-only if the viewer may read that target, and an unreadable group is omitted with **no
-acknowledgment that it exists** — no "N hidden passages", no placeholder row.
+**Per-target filtering, not a conjunctive gate.** The banner ("Linked passages") renders
+on a `?sel=` page whenever the link resolves at all for this viewer; each target group
+shows only if the viewer may read that target, and an unreadable group is omitted with
+**no acknowledgment that it exists** — no "N hidden passages", no placeholder row.
 
 This deviates from §20i's pre-declared conjunctive default ("visible only if every target
-is"), deliberately. §14c's precedent (side-by-side forbids the whole page if either doc is
-unreadable) protects a surface that *jointly renders* two documents; an anchored link's
-groups are independent — each is a pointer wearing its own target's existing read predicate,
-like `/tag/[slug]`'s three per-type queries. Silent omission leaks nothing: the viewer
-cannot distinguish "this link references something I can't see" from "this link references
-nothing else." The page's own passages are readable by construction (the route gate already
-ran before the banner renders).
+is"), deliberately, and docs/PERMISSIONS.md records it. §14c's precedent (side-by-side
+forbids the whole page if either doc is unreadable) protects a surface that *jointly
+renders* two documents; an anchored link's groups are independent pointers, each wearing
+its own target's existing read predicate, like `/tag/[slug]`'s three per-type queries.
+Silent omission leaks nothing: the viewer cannot distinguish "this link references
+something I can't see" from "this link references nothing else." The page's own passages
+are readable by construction — the route gate already ran before the banner renders, and
+`?sel=` grants nothing (a link naming a PRIVATE doc still meets that doc's own Forbidden).
 
-Consequences:
+Consequences, all covered by `e2e/anchored-links.spec.ts`'s second test: a viewer who can
+read only the PDF target of a doc+PDF link still gets the PDF page's banner, outline
+regions and jump, with no "Also referenced" row naming the doc; the mint-time tray copy
+says what's true ("Recipients see only the passages they have permission to read").
 
-- A viewer who can read only the PDF target of a doc+PDF link still gets the PDF page's
-  banner, highlights and jump — with no "Also referenced" row.
-- The current page's group is always present when the link references it; a `?sel=` naming a
-  link that doesn't reference the current page at all still shows the banner with whatever
-  readable groups it has (all of them "Also referenced").
-- Mint-time copy in the tray says what's true: "Recipients see only the passages they have
-  permission to read."
+## Highlight machinery
 
-## Increment 3 — Highlight machinery
+- **Doc side** (`src/lib/annotation-highlight-extension.ts`): link parts ride the
+  existing `AnnotationHighlight` plugin under `kind: "link"` — one list, one plugin state,
+  one per-transaction 3-tier re-resolve, so twenty link ranges cost what twenty more
+  annotations would. State keeps a separate `linkRanges` map (`getAnchoredLinkRanges`)
+  keyed by anchor row id, so a rail card and a thread jump can't mistake one id family for
+  the other. One `buildSegments` pass over both kinds: an overlap becomes one segment
+  carrying both classes (`annotation-highlight anchored-link-highlight`) and both plural
+  data attributes (`data-anchored-link-ids`); link sources are excluded from the
+  `--thread-color` vote. No drift persistence — re-derive only, like doc-links.
+  `decoration-segments.ts` unchanged; `anchoredLinkAnchorInputs(parts)` filters to
+  DOC_RANGE parts (PDF parts have null offsets and fall out).
+- **Paint** (`src/styles/prose.module.css`): a wash off `--link` **plus an underline**,
+  with an explicit overlap rule at (0,3,0) specificity handing the background to the
+  annotation's author tint — one span has one background, and wayfinding yields to
+  discussion; the underline is what keeps the link's extent visible underneath. `.pulse`
+  is the banner's jump flash (the `QuoteThreadHeader.jumpToQuote` pattern).
+- **Clicks**: link-only spans are deliberately **not** in `AnnotationClick`'s union —
+  structurally free, since the union never consults `linkRanges` — and the absence is
+  recorded as a comment there so a future `part-anchors` merge doesn't sweep them in. The
+  banner is the affordance.
+- **PDF side** (`src/components/pdf/anno-layer.ts`): `AnnoLayerEntry.variant: "link"`
+  draws `annoRect annoRectLink` — an **outline** in `var(--link)`, no fill (inside the
+  layer's shared group opacity a second fill would shift every annotation it overlaps) —
+  and carries **no `data-anno-id`**, so the delegated click handler never sees it:
+  annotations stay clickable straight through a link region. The surface appends link
+  regions *before* annotation entries; append order is stacking order in that layer.
 
-- `src/lib/annotation-highlight-extension.ts`: `AnnotationAnchorInput` gains
-  `kind?: "annotation" | "link"`; state gains `linkRanges: Map<string, AnchorRange>` (keyed
-  by anchor row id); new `anchoredLinkAnchorInputs(parts)` + `getAnchoredLinkRanges(state)`.
-  One `buildSegments` pass over both kinds (overlap = one segment carrying both classes);
-  emits `data-anchored-link-ids` + class `anchored-link-highlight`; link sources excluded
-  from the `--thread-color` vote. Link parts ride the existing per-transaction 3-tier
-  re-resolve; no drift persistence (re-derive only, like doc-links).
-  `decoration-segments.ts` unchanged.
-- `src/lib/annotation-click-extension.ts`: mirror `e6f1fed`'s small hunk so link-only spans
-  aren't clickable (the banner is the affordance).
-- `src/styles/prose.module.css`: `.anchored-link-highlight` + `.pulse` variant using
-  `var(--link)` via `color-mix` — tokens only (STYLE.md), distinguishable from the
-  author-colored annotation wash.
-- `src/components/pdf/anno-layer.ts`: `AnnoLayerEntry.variant?: "link"`; in `appendRects`
-  class `annoRect annoRectLink`, **no `dataset.annoId`** (stays out of the click hit-test).
-  `PdfAnnotations.module.css`: `.annoRectLink` as an outline in `var(--link)` (composes over
-  annotation fills).
+## Server actions — `src/app/actions/anchored-links.ts`
 
-## Increment 4 — Server actions: `src/app/actions/anchored-links.ts` (new)
+`loadMyDraftLink` / `addAnchoredLinkPart` / `removeAnchoredLinkPart` / `discardDraftLink`
+/ `mintAnchoredLink`. The load-bearing rules:
 
-```ts
-export type AnchoredLinkPartInput =
-  | { kind: "doc-range"; from: number; to: number; quotedText: string }
-  | { kind: "pdf-text"; target: unknown };
-export async function loadMyDraftLink(): Promise<DraftLinkView | null>
-export async function addAnchoredLinkPart(targetKind, targetId, part, atVersion?): Promise<{error?}>
-export async function removeAnchoredLinkPart(anchorId): Promise<{error?}>
-export async function discardDraftLink(): Promise<void>
-export async function mintAnchoredLink(): Promise<{url: string} | {error: string}>
-```
-
-- **Create-permission**: signed-in + may read the target (the annotate precedent, not the
-  tag one; no extra role floor). Kind parsed via `parseAnchorTargetKind`; `post`/
-  `annotation` rejected as deferred.
-- Get-or-create draft: find `mintedAt: null, deletedAt: null`; on create, catch P2002 from
-  the partial index and re-find.
-- Doc part: `ydocIdForDoc` → `resolveCaptureStamp` → `captureAnchorInYdoc` (with
-  `docContentExtensions`) → row `{docId, DOC_RANGE, anchorFrom/To, server's quotedText,
-  selector, ydocUpdateId}`. Capture failure → error, nothing stored (a link part IS the
-  content; never degrade to whole-object — `tagObject`'s stance).
-- PDF part: `capturePdfTextAnchor` → row `{fileId, PDF_TEXT, selector: target, quotedText,
-  null offsets/stamp}` (the `KNOWN_RESIDUALS` shape check-tag-constraints names as
+- **Create-permission is read-the-target** — signed in plus `canUserReadDoc`/
+  `canUserReadFile`, the annotate precedent, no role floor of its own (docs/PERMISSIONS.md
+  records why that differs from tags). `post`/`annotation` targets are rejected as
+  deferred; kinds parse via `parseAnchorTargetKind`, never a cast.
+- Doc part: `ydocIdForDoc` → `resolveCaptureStamp` (client's `atVersion` first, log tail
+  as fallback — `postAnnotation`'s §13q order; duplicated from the branch, unify if it
+  lands) → `captureAnchorInYdoc` with `docContentExtensions`. What lands in `quoted_text`
+  is this server's own reading of the stamped state, never the client's. **Capture failure
+  is an error and nothing is stored** — a link part IS the content; degrading to
+  whole-object would mint what an ordinary href already is (`tagObject`'s stance).
+- PDF part: `capturePdfTextAnchor` → `{fileId, PDF_TEXT, selector: target, quotedText}`,
+  null offsets/stamp (the `KNOWN_RESIDUALS` shape `check-tag-constraints` names as
   intended).
-- `partOrder` = current count; remove = draft-owner only, hard delete, no renumbering
-  (`orderBy [partOrder, id]` absorbs gaps); discard = hard delete own draft (cascade).
-- `mintAnchoredLink`: own draft, ≥1 part → set `mintedAt`; return `appUrl(<part-0 group
-  href>)`.
-- **No revalidation, deliberately** — both routes are per-request dynamic and the tray
-  self-fetches; state this in the file header (contrast `untagObject`).
+- `partOrder` = current count at add time; remove is draft-owner-only hard delete with no
+  renumbering; discard hard-deletes the draft (cascade). `mintAnchoredLink` requires ≥1
+  part, stamps `mintedAt`, and returns `appUrl(<part-0 group href>)` — later parts stand
+  in only if part 0's target vanished between add and mint.
+- **No `revalidatePath` anywhere, deliberately** (contrast `untagObject`): both routes are
+  per-request dynamic, and the tray self-fetches on `src/lib/anchored-link-tray-events.ts`
+  — a module-scope listener set (`onAnchoredLinkChanged`/`notifyAnchoredLinkChanged`),
+  because on the PDF page the popover and the tray live in different trees with an
+  `ssr:false` boundary between them.
 
-## Increment 5 — Doc surface follow (`?sel=`)
+## Surfaces
 
-`src/app/doc/[slug]/page.tsx`: add `searchParams: Promise<{sel?: string}>`; after the gate,
-`const link = sel ? await anchoredLinkForViewer(sel, user) : null` (outside the `gated`
-memo). This-doc `DOC_RANGE` parts → `anchoredLinkAnchorInputs(...)` **merged into the
-existing `annotationAnchors` array** passed to `DocView` (one list, one plugin state, one
-resolve pass — no DocView/DocReadingBody prop changes for paint). All surviving groups → the
-banner.
+**Doc follow** (`src/app/doc/[slug]/page.tsx`): reads `searchParams.sel` after the gate,
+outside the `gated` memo (it keys on arguments and `generateMetadata` already ran it).
+This doc's DOC_RANGE parts merge into the **same `annotationAnchors` array** the
+annotations ride — no DocView/DocReadingBody prop changes for paint. All surviving groups
+feed `AnchoredLinkBanner` above `DocView`.
 
-`src/components/anchored-link/AnchoredLinkBanner.tsx` (new, client, + module CSS): rendered
-above `DocView` in `mainColumn`. Lists this surface's part quotes + links to the other
-groups (hrefs carry `?sel=`); dismissible. Per-part click:
-`querySelectorAll('[data-anchored-link-ids~="<anchorId>"]')` → scroll+pulse (the
-`QuoteThreadHeader.jumpToQuote` pattern verbatim) — doubles as cycle-through-parts. On-load
-scroll-to-first: retry the same query ~10×300ms until the read-only editor mounts, then
-once. Parts that fail to resolve: listed in the banner, painted nowhere, silently (doc-link
-behavior).
+**The banner** (`src/components/anchored-link/AnchoredLinkBanner.tsx`, client, shared by
+both surfaces, `data-testid="anchored-link-banner"`): this surface's part quotes as jump
+handles (DOM query on `data-anchored-link-ids`, scroll+pulse; doubles as
+cycle-through-parts), every *other* readable group as a link carrying `?sel=` onward;
+dismissible. On-load scroll-to-first retries ~10×300ms until the read-only editor mounts —
+doc mode only; supplying `onJumpToPart` (the PDF surface does) hands over both the click
+jump and the on-load jump. Parts that fail to resolve are listed, painted nowhere,
+silently (doc-link behavior). It renders what it is handed and adds no second permission
+check — `TagChips`' stance; the type import from `anchored-link-data` is type-only, so the
+server module never reaches the client bundle.
 
-**No `/sel/[id]` route** (no RESERVED_SLUGS change): the landing surface is computed at mint
-time; a redirect route stays a cheap later addition if minted hrefs ever go stale.
+**PDF follow** (`src/app/pdf/[slug]/page.tsx` → `PdfSurfaceClient` →
+`PdfAnnotationSurface`): the link view is delivered as an **initial prop through the
+`ssr:false` boundary** — the one delivery CLAUDE.md's `router.refresh()` trap permits. The
+slug-history redirect re-appends `?sel=` (it used to drop the querystring — a shared link
+minted against a renamed slug would have landed with its passages silently gone). The
+surface prepends this file's PDF_TEXT parts into `entriesForPage` as outline regions,
+jumps to part 0 once on `ready` via `jumpToTarget` (the target-based core extracted from
+`jumpTo`), and positions the banner as a fixed overlay (`.anchoredLinkOverlay`, z-index
+below the selection popover — a live selection outranks wayfinding).
 
-## Increment 6 — PDF surface follow
+**Creation**: `AnnotationPopover` takes an optional `onAddToLink?: () => Promise<string |
+null>` (error message or null; success clears the selection upstream, which unmounts the
+popover; errors land in the shared error slot). `DocReadingBody` supplies it on reading
+views only — the doc editor's widget leaves it undefined and gets no button. The PDF
+surface's `selectionPopover` gets a second button beside Annotate; its error is
+identity-keyed to the popover object (the `refetched` pattern), so a new selection simply
+stops rendering the stale message. Both paths post immediately, clear the selection, and
+`notifyAnchoredLinkChanged()`.
 
-`src/app/pdf/[slug]/page.tsx`: read `sel`; **fix the redirect arm** to re-append
-`?sel=<encodeURIComponent(sel)>` to `access.to` (the slug-history redirect currently drops
-the querystring); fetch `anchoredLinkForViewer`; pass the view into `PdfSurfaceClient` →
-`PdfAnnotationSurface` (initial-props through `ssr:false` is the safe delivery).
+**The tray** (`src/components/anchored-link/AnchoredLinkTray.tsx`,
+`data-testid="anchored-link-tray"`): a fixed bottom-right island both pages mount as a
+**self-fetching sibling** (doc: end of `<main>`; pdf: sibling of `PdfSurfaceClient`,
+outside the `ssr:false` boundary). Fetches `loadMyDraftLink()` on mount and on every
+notify; renders nothing without a draft or with an empty one. Part list (label +
+~60-char snippet, per-part ✕), **Copy link** (mint → clipboard → "Link copied" note with
+the recipients-see-only-what-they-may-read sentence → tray clears; a clipboard-permission
+failure still mints and shows the URL as text), **Discard**. Fixed positioning keeps it
+out of both pages' layout math.
 
-`src/components/pdf/PdfAnnotationSurface.tsx`: new `anchoredLink` prop; this file's
-`PDF_TEXT` parts prepended into `entriesForPage` as `{id: anchorId, target, color: "",
-variant: "link"}` (before annotation fills — wayfinding yields to discussion). On-load jump
-on `ready`: extract the target-based core of `jumpTo` (~line 537, `quadsTopY` +
-`jumpDestinationY` destArray) so a bare `PdfTarget` can drive it. Render the shared banner
-as an absolutely-positioned overlay in the surface container, with an `onJumpToTarget` prop
-replacing the DOM-query jump.
+## Navigation is a mount boundary
 
-## Increment 7 — Creation UX
+The banner's group links are the **first client-side doc→doc navigation in the app**
+(body hyperlinks are plain `<a>`s), and following one initially painted nothing until a
+hard refresh. Two stacked defects, both fixed, both load-bearing:
 
-- `src/lib/anchored-link-tray-events.ts` (new, tiny): module-scope listener set —
-  `onAnchoredLinkChanged(fn)` / `notifyAnchoredLinkChanged()` (the render-listener pattern
-  already used in PdfAnnotationSurface).
-- **Doc popover**: `AnnotationPopover.tsx` gains optional
-  `onAddToLink?: () => Promise<string | null>` (error message or null); when present, an
-  "Add to link" button joins the Annotate row, errors through the existing error slot.
-  `DocReadingBody` supplies it on reading views only: post `selection.pending`
-  {from,to,quotedText,atVersion} via `addAnchoredLinkPart("doc", docId, …)`, then
-  `selection.clear()` + `notifyAnchoredLinkChanged()`.
-- **PDF popover**: second button beside Annotate in `PdfAnnotationSurface`'s
-  `selectionPopover` (the placement `1cf6e51` used for Tag):
-  `addAnchoredLinkPart("file", fileId, {kind:"pdf-text", target: popover.target})`, then
-  clear popover + selection, notify.
-- `src/components/anchored-link/AnchoredLinkTray.tsx` (new, client,
-  `data-testid="anchored-link-tray"`): fixed bottom-right island mounted by **both pages as
-  a self-fetching sibling** (doc: end of `<main>`; pdf: sibling of `PdfSurfaceClient`).
-  Fetches `loadMyDraftLink()` on mount + on every notify — the server row IS the cross-page
-  persistence; renders nothing when no draft. Contents: part list (label + ~60-char snippet,
-  per-part ✕ → `removeAnchoredLinkPart`), **Copy link** (`mintAnchoredLink()` →
-  `navigator.clipboard.writeText` → "Copied" → tray clears; the copied state notes
-  "Recipients see only the passages they have permission to read"), **Discard**. Tokens
-  only; fixed positioning stays out of both pages' layout math (margin-notes grid, PDF
-  viewport).
+1. `/doc/[slug]` didn't key `DocView` by doc identity, so the nav *reused* the reading
+   editor and pushed the new doc's anchors against the old doc's text — every anchor
+   detached, permanently (detachment is deliberately re-evaluated only on the next anchor
+   push). Now `key={doc.id}`, and `/pdf/[slug]` keys `PdfSurfaceClient` by `file.id` for
+   the same class (stale viewer, stale `ready`, a once-only link jump that never re-fires).
+2. `use-live-doc-content.ts` owned its Y.Doc in a `useMemo`, and a transition render
+   replay (the byline's async `TagChips` suspending is enough) legally drops the memo
+   cache: a second Y.Doc, a second provider, and a handshake update event on the
+   still-empty second doc that `setContent`'d an empty body over the editor — same
+   permanent detachment, and it would have taken **annotation** highlights with it on any
+   such nav. Now a `useState`-owned Y.Doc plus a pre-sync guard in `applyUpdate`
+   (`onSynced` does the one catch-up push, which also covers reconnects). Invisible to
+   hard loads by construction, which is why `e2e/anchored-links.spec.ts`'s third test
+   asserts paint only after *clicks*.
 
-## Increment 8 — Verification
+## Verification
 
-- `npm run test:unit` (the 4 `deriveDocRangeSelector` cases arrive with the cherry-pick);
-  `npx tsc --noEmit`; `npx eslint .`; STYLE.md color-literal grep.
-- New `e2e/anchored-links.spec.ts` (fixtures create/delete own rows):
-  1. *Create cross-surface + follow*: shared doc + shared test PDF; add a doc part
-     ("Add to link" from the selection popover; tray shows 1), navigate to the PDF, add a
-     part (tray shows 2 — cross-page persistence proven), Copy link (grant clipboard-read),
-     visit the URL: assert an `.anchored-link-highlight` span + banner listing the PDF
-     group; click through to `/pdf/…?sel=`: assert `.annoRectLink` + viewer scrolled.
-  2. *Per-target filter*: link spanning a PRIVATE doc + shared PDF; `secondUser()` visits
-     the PDF URL with `?sel=` — banner and `.annoRectLink` **do** render for the PDF
-     passages, but nothing names or counts the private doc's group; visiting the private
-     doc's own URL still forbids the page itself (route gate, unchanged).
-  - `e2e/db-worker.ts`: cleanup sweep deletes `anchored_link` rows for e2e users.
-- Integrity (`scripts/integrity/`): `check-annotation-anchors.ts` gains an
-  `anchored_link_anchor` DOC_RANGE replay pass (quote matches at stamp);
-  `check-pdf-anchors.ts` gains a PDF_TEXT pass; `check-tag-constraints.ts` gains rolled-back
-  probes for both new CHECKs + the partial unique index; README one-liners.
-- **Per CLAUDE.md**: stop at typecheck/lint for UI increments, report UI testing deferred;
-  ask before committing untested UI. Commit only when asked.
+- `npm run test:unit` (the `deriveDocRangeSelector` cases arrived with the cherry-pick);
+  `npx tsc --noEmit`; `npx eslint .`; STYLE.md's color-literal grep.
+- `e2e/anchored-links.spec.ts`, three tests: cross-surface create + follow (UI-driven:
+  popover → tray across a doc→PDF nav → Copy link → follow the minted URL both ways);
+  the per-target filter (a PRIVATE-doc+shared-PDF link read by a viewer who may see only
+  the PDF — banner and outline render, nothing acknowledges the doc group, and the doc's
+  own URL still forbids); the banner-nav regression above. The third runs on
+  **fixture-minted links**: `e2e/db-worker.ts`'s `createTestAnchoredLink` writes rows the
+  way the real writer does — quotes derived server-side from the seeded body (offsets that
+  hold no text fail at creation, not as a later integrity finding), stamps from the target
+  doc's own log tail — and mints them, so nothing collides with the one-draft partial
+  index. `deleteTestUser` sweeps `anchored_link` rows (RESTRICT FK, the doc-link shape).
+- Integrity, by the one-walk-per-invariant rule: `check-annotation-anchors.ts`'s
+  part-anchor walk is now parameterised over both tables (`tag_anchor`,
+  `anchored_link_anchor`) and replays DOC_RANGE parts at their stamps;
+  `check-pdf-anchors.ts` gains the PDF_TEXT pass (the first selector blob it checks beyond
+  annotations); `check-tag-constraints.ts` probes the DDL as above.
+  `scripts/integrity/README.md` records the arrangement.
 
-## Increment 9 — Docs
+## Deviations from the plan
 
-- Rewrite this file as-built; PLAN.md gains a new top-level **§21 "Anchored links"** (opens
-  by citing §20a/§20b) or a pointer here, plus a §10 progress item.
-- docs/PERMISSIONS.md: create = read-every-target-you-add (annotate precedent); follow =
-  per-target read filter with silent omission (recorded as a deliberate deviation from
-  §20i's conjunctive default, with the rationale above); draft creator-only.
-- CLAUDE.md: extend the "One anchor row shape, per-consumer tables" bullet with
-  `anchored_link_anchor` as the third table (one clause, pointer here).
+Everything unmentioned went in as written. Where the build differs:
 
-## Suggested commit sequence
-
-1. Cherry-pick `b5fa049` + MULTI_ANCHORING.md → 2. schema/migration/probes → 3. lib
-(highlight kind, CSS, anno-layer, data file) → 4. actions → 5. doc follow (testable via
-DB-seeded rows before any creation UI exists) → 6. PDF follow + redirect fix → 7. popovers +
-tray → 8. e2e + integrity → 9. docs.
+- **The doc-side paint grew an underline and an overlap rule.** The plan named only a
+  `color-mix` wash off `--link`; two overlapping inline decorations fight over one
+  background, so the annotation's author tint wins it explicitly (a (0,3,0) rule, the
+  `.noAnnotations` order-independence convention) and the link keeps its underline. The
+  part-anchors branch's compose-don't-fight precedent, applied.
+- **`annotation-click-extension.ts` needed no code, only a comment.** The plan said to
+  mirror the branch's hunk; link ranges live in a map the click union never consults, so
+  exclusion is structural — the comment records it as chosen so a future merge doesn't
+  sweep them in.
+- **The first e2e test asserts the outline region, not "viewer scrolled".** The PDF part
+  sits on page 1, where the on-load jump is a no-op scroll; the region's existence and the
+  banner are the observable claims.
+- **Removing a draft's last part keeps the empty draft row** (the tray renders nothing at
+  zero parts) rather than retracting the act the way `untagPart` does — one row per user,
+  bounded by the partial index, and the next add reuses it.
+- **The navigation section above is entirely unplanned** — both bugs were found by
+  following the feature's own banner, one of them pre-existing with reach beyond links.
+- **The fixture-minting e2e machinery is beyond plan** (the plan's fixtures created rows
+  only through the UI), as is the tray's clipboard-failure fallback.
 
 ## Explicitly deferred
 
-Post targets (`POST_RANGE` has no selector kind), annotation-body targets (arc ready, writer
-refuses), multi-page PDF selections (capture is start-page-only today), part roles
+Post targets (`POST_RANGE` has no selector kind), annotation-body targets (arc ready,
+writer refuses), multi-page PDF selections (capture is start-page-only today), part roles
 (MULTI_ANCHORING: these parts are homogeneous), drift persistence, a `/links` management
-table + minted-link deletion UI, editing a link after mint, link labels, a `/sel/[id]`
+table and minted-link deletion UI, editing a link after mint, link labels, a `/sel/[id]`
 canonical route.
-
-## Judgment calls flagged
-
-- Feature and table names follow this doc: `anchored_link` / `anchored_link_anchor` (the
-  double "anchor" is the envelope's naming convention showing; rename before Increment 1 if
-  it grates).
-- `mintedAt` timestamp over a status enum; DB-enforced one-open-draft-per-user.
-- Parts post immediately (no client bank); draft parts tray-text only, never painted.
-- Doc hrefs minted **by id** (docs have no slug history; rename-proof beats pretty).
-- URL id = row cuid; param spelled `?sel=`; no short-token column; no `/sel/[id]` route.
-- Create-permission = read-the-target, no extra floor.
-- Follow-visibility = per-target filter with silent omission — a deliberate deviation from
-  §20i's conjunctive default (rationale under "Following a link").
-- `resolveCaptureStamp` duplicated locally until `part-anchors` lands; highlight kind named
-  `"link"` now, `"tag"` joins mechanically if the branch merges.

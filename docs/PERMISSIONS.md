@@ -295,6 +295,52 @@ while the record of who applied it to what survives for a restore to bring back.
 *object* instead cascades its anchors away outright — an anchor pointing at a deleted doc is
 unreachable, not merely stale.
 
+## Anchored links (docs/ANCHORED_LINKS.md)
+
+**A link is one person's act of pointing, and pointing claims nothing about the target.**
+That is what separates its rules from tags: a tag is curatorial (it changes what a term
+denotes, for everyone) and takes a role floor; a link is a pointer that only its recipients
+ever see, so its create rule is the annotate precedent — signed in, plus the target's own
+read gate, and nothing else.
+
+| Permission | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER | signed out |
+|---|---|---|---|---|---|---|
+| Add a passage you may read to your draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| See / edit / mint / discard **your own** draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| See **someone else's** unminted draft | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Follow a minted link (per readable target) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+
+\* By inheritance, not by a link rule: `addAnchoredLinkPart` has **no role floor of its
+own** — the target's read predicate is the whole gate — but both reading routes gate on
+`canViewDocs`/`canViewFiles` (AUTHORIZED+), so a COMMENTER can reach no surface that
+creates or follows a link today. If those floors ever move, links move with them for free;
+that is the design, not an accident.
+
+**Following is a per-target read filter with silent omission — a recorded deviation from
+§20i's conjunctive default.** §20i pre-declared that a cross-container reference is
+"visible only if every target is"; anchored links deliberately decline that.
+`anchoredLinkForViewer` rebuilds each target from the arc and wears its existing predicate
+(`canUserReadDoc`, `canUserReadFile` — so a PRIVATE doc keeps its no-admin-bypass by
+inheritance), and a group whose target is unreadable, deleted, or of a kind the writer
+never produces is omitted with **no acknowledgment**: no placeholder, no count. The
+rationale (docs/ANCHORED_LINKS.md, "Following a link"): §14c's conjunctive precedent
+protects a surface that *jointly renders* two documents, while a link's groups are
+independent pointers like `/tag/[slug]`'s three sections — and silent omission leaks
+nothing, since "references something I can't see" and "references nothing else" are
+indistinguishable. `?sel=` grants nothing: a link naming a PRIVATE doc still meets that
+doc's own Forbidden page.
+
+**An unminted draft is its creator's alone** — `anchoredLinkForViewer` returns null for
+anyone else, whatever their role, and every mutation (`add`/`remove`/`discard`/`mint`)
+scopes to `createdById` server-side. One open draft per user is DB-enforced
+(`anchored_link_one_draft_per_user`, a partial unique index), so there is no draft-picker
+surface to gate.
+
+**The banner and tray add no second check.** `AnchoredLinkBanner` renders only what the
+server's filtered view handed it, from inside a page whose gate already ran — `TagChips`'
+stance. The tray shows only `loadMyDraftLink()`'s answer, which is creator-scoped by the
+query itself.
+
 ## Where each rule lives
 
 Re-derive from these rather than trusting the tables after an authz change:
@@ -322,12 +368,19 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts` |
 | `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
 | `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |
+| Anchored-link follow filter (per-target, silent omission) | `src/lib/anchored-link-data.ts` |
+| Anchored-link create/draft/mint (read-the-target, creator-scoped) | `src/app/actions/anchored-links.ts` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader
 seeing a public post's chip but no tagger, and the EDITOR who cannot see a PRIVATE doc under
 a term they can otherwise browse.
+
+`e2e/anchored-links.spec.ts`'s second test pins the link rules' load-bearing row — the
+reader who may see only the PDF half of a PRIVATE-doc+shared-PDF link gets that page's
+banner and regions with nothing acknowledging the doc group, while the doc's own URL still
+forbids the page.
 
 `e2e/doc-visibility.spec.ts` pins these tables' load-bearing rows — the PRIVATE denials for
 ADMIN and EDITOR, the byline author's access, the `SHARED` carve-out, the `/docs` override's
