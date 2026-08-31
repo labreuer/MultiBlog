@@ -2,6 +2,8 @@
 
 import { useEditorState, type Editor } from "@tiptap/react";
 import {
+  IconArrowBackUp,
+  IconArrowForwardUp,
   IconBold,
   IconClearFormatting,
   IconH2,
@@ -14,18 +16,22 @@ import LinkControls from "./LinkControls";
 import QuoteControls from "./QuoteControls";
 import styles from "./EditorChrome.module.css";
 
-export type ToolbarTool = "bold" | "italic" | "link" | "h2" | "bullets" | "numbered" | "quote" | "tighten" | "clear";
+export type ToolbarTool = "undo" | "redo" | "bold" | "italic" | "link" | "h2" | "bullets" | "numbered" | "quote" | "tighten" | "clear";
 
 // Every tool CollabEditorBody's own toolbar has always offered — its default
 // so extracting this component changes nothing about the doc/post body
 // editor. "tighten" (reduce space between lines, tighten-lines.ts) joined
 // later, in both lists.
-export const FULL_TOOLS: ToolbarTool[] = ["bold", "italic", "link", "h2", "bullets", "numbered", "quote", "tighten", "clear"];
+//
+// Both editors disable StarterKit's undoRedo and get these commands from
+// `Collaboration` instead — its Yjs UndoManager undoes local changes only,
+// which is exactly what a button press should mean under co-editing.
+export const FULL_TOOLS: ToolbarTool[] = ["undo", "redo", "bold", "italic", "link", "h2", "bullets", "numbered", "quote", "tighten", "clear"];
 
 // PLAN.md §13e — the reduced set an annotation's editor offers: no headings,
 // no numbered lists, both heavier than a margin note needs. "tighten" stays:
 // cramped margin cards are where tight spacing matters most.
-export const ANNOTATION_TOOLS: ToolbarTool[] = ["bold", "italic", "link", "bullets", "quote", "tighten", "clear"];
+export const ANNOTATION_TOOLS: ToolbarTool[] = ["undo", "redo", "bold", "italic", "link", "bullets", "quote", "tighten", "clear"];
 
 // match Tabler style
 function IconTightenLines({ size }: { size: number }) {
@@ -63,14 +69,48 @@ export default function EditorToolbar({
   disabled?: boolean;
   tools?: ToolbarTool[];
 }) {
-  // The one button whose enabled-ness depends on editor state: tightening
+  // The buttons whose enabled-ness depends on editor state: tightening
   // acts on the selection, so a caret alone leaves it inert (its chosen
-  // no-selection behavior — tighten-lines.ts). useEditorState re-renders
-  // this component only when the boolean flips, not per keystroke.
-  const selectionEmpty = useEditorState({ editor, selector: ({ editor: e }) => e.state.selection.empty });
+  // no-selection behavior — tighten-lines.ts), and undo/redo follow their
+  // stacks (`can().undo()` is a dry run of Collaboration's undo command,
+  // which is a stack-length check — cheap enough for a per-transaction
+  // selector). useEditorState deep-equals the selected object, so this
+  // component re-renders only when a boolean flips, not per keystroke.
+  const { selectionEmpty, canUndo, canRedo } = useEditorState({
+    editor,
+    selector: ({ editor: e }) => ({
+      selectionEmpty: e.state.selection.empty,
+      canUndo: e.can().undo(),
+      canRedo: e.can().redo(),
+    }),
+  });
 
   return (
     <div className={styles.toolbar}>
+      {tools.includes("undo") && (
+        <button
+          type="button"
+          className={styles.toolbarButton}
+          disabled={disabled || !canUndo}
+          aria-label="Undo"
+          title="Undo"
+          onClick={() => editor.chain().focus().undo().run()}
+        >
+          <IconArrowBackUp size={18} />
+        </button>
+      )}
+      {tools.includes("redo") && (
+        <button
+          type="button"
+          className={styles.toolbarButton}
+          disabled={disabled || !canRedo}
+          aria-label="Redo"
+          title="Redo"
+          onClick={() => editor.chain().focus().redo().run()}
+        >
+          <IconArrowForwardUp size={18} />
+        </button>
+      )}
       {tools.includes("bold") && (
         <button
           type="button"

@@ -31,6 +31,14 @@ Never add any of those **alongside StarterKit** in the same schema, and pass
 `undoRedo` stays *on* wherever there is no `Collaboration`. `blurbExtensions` is the one
 schema in this codebase where that inversion applies.
 
+The toolbar's undo/redo buttons (`EditorToolbar.tsx`, first pair in both tool lists) call
+`Collaboration`'s commands, and that decides what a press *means*: the Yjs `UndoManager`
+tracks local origins only, so under co-editing a press undoes the presser's own changes and
+never a collaborator's. Enabled-ness is `editor.can().undo()` inside a `useEditorState`
+object selector — the dry run is a stack-length check, cheap enough per transaction, and
+`useEditorState` deep-equals a selected object, so the toolbar re-renders only when a
+boolean flips, not per keystroke.
+
 ### A link opens from its bubble, not from a click
 
 `EDITOR_LINK_OPTIONS` (`src/lib/tiptap-schema.ts`) turns Link's `openOnClick` off in both
