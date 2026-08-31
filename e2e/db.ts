@@ -31,6 +31,7 @@ import type {
   UserIdentityFields,
   AvatarFacts,
   TestInvite,
+  TestAnchoredLink,
 } from "./db-worker";
 
 export type {
@@ -53,6 +54,7 @@ export type {
   UserIdentityFields,
   AvatarFacts,
   TestInvite,
+  TestAnchoredLink,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
@@ -183,6 +185,13 @@ export const getFileAnnotationFacts = (
 
 export const clearColumnOrder = (...args: Parameters<DbHandlers["clearColumnOrder"]>): Promise<void> =>
   call("clearColumnOrder", ...args);
+
+export const createTestAnchoredLink = (
+  ...args: Parameters<DbHandlers["createTestAnchoredLink"]>
+): Promise<TestAnchoredLink> => call("createTestAnchoredLink", ...args);
+
+export const deleteTestAnchoredLink = (...args: Parameters<DbHandlers["deleteTestAnchoredLink"]>): Promise<void> =>
+  call("deleteTestAnchoredLink", ...args);
 
 export const getInvites = (...args: Parameters<DbHandlers["getInvites"]>): Promise<TestInvite[]> =>
   call("getInvites", ...args);

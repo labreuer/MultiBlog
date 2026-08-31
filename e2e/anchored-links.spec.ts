@@ -1,5 +1,14 @@
-import { test, expect, signIn, gotoOk, selectTextInBody, bodyEditor, QUOTED_TEXT } from "./fixtures";
-import { ADMIN_EMAIL, createTestDoc, createTestFile, deleteTestDoc, deleteTestFile, type TestFile } from "./db";
+import { test, expect, signIn, gotoOk, selectTextInBody, bodyEditor, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
+import {
+  ADMIN_EMAIL,
+  createTestAnchoredLink,
+  createTestDoc,
+  createTestFile,
+  deleteTestAnchoredLink,
+  deleteTestDoc,
+  deleteTestFile,
+  type TestFile,
+} from "./db";
 
 // docs/ANCHORED_LINKS.md Increment 8 — anchored links: one shareable URL
 // over selections gathered across a doc and a PDF.
@@ -18,6 +27,14 @@ import { ADMIN_EMAIL, createTestDoc, createTestFile, deleteTestDoc, deleteTestFi
 const PAGE_ONE = "The quick brown fox jumps over the lazy dog on page one.";
 const PAGE_TWO = "A distinctive phrase for page two: xylophone marmalade.";
 const PDF_PHRASE = "brown fox jumps";
+
+// The nav test's second doc — a single paragraph, so character index `i`
+// sits at ProseMirror position `i + 1` (the QUOTED_BODY convention,
+// e2e/fixtures.ts).
+const NAV_DOC_B_BODY = "Filters, sort and pagination live in the querystring and are applied in Postgres.";
+const NAV_B_QUOTE = "applied in Postgres";
+const NAV_B_FROM = NAV_DOC_B_BODY.indexOf(NAV_B_QUOTE) + 1;
+const NAV_B_TO = NAV_B_FROM + NAV_B_QUOTE.length;
 
 async function makeFile(): Promise<TestFile> {
   return createTestFile({
@@ -192,6 +209,54 @@ test.describe("anchored links", () => {
     } finally {
       await deleteTestFile(file.id);
       await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("banner group links paint the destination doc's highlights without a reload", async ({ page, sharedDoc }) => {
+    // Following, not creating (the first test covers creation), so the link
+    // is minted straight to the database. This pins the regression where a
+    // banner group link — the app's first client-side doc→doc navigation —
+    // painted nothing until a hard refresh: a reused reading editor resolved
+    // the new doc's anchors against the old doc's text, and separately a
+    // transition render replay recreated the reading view's Y.Doc and
+    // setContent'd an empty handshake state over the editor; either way the
+    // anchors detached permanently. The fixes are /doc/[slug]'s
+    // key={doc.id} mount boundary and use-live-doc-content's
+    // useState-owned Y.Doc plus pre-sync push guard — hard loads never hit
+    // either path, which is why every assertion here follows a *click*.
+    const docB = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: NAV_DOC_B_BODY });
+    const link = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [
+        { docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO },
+        { docId: docB.id, from: NAV_B_FROM, to: NAV_B_TO },
+      ],
+    });
+    const [partA, partB] = link.anchors;
+    expect(partA.quotedText).toBe(QUOTED_TEXT);
+    expect(partB.quotedText).toBe(NAV_B_QUOTE);
+    try {
+      await signIn(page, ADMIN_EMAIL);
+
+      // Direct load paints doc A's part.
+      await gotoOk(page, `/doc/${sharedDoc.id}?sel=${link.id}`);
+      const banner = page.getByTestId("anchored-link-banner");
+      await expect(banner).toBeVisible();
+      await expect(page.locator(`[data-anchored-link-ids~="${partA.id}"]`).first()).toBeVisible({ timeout: 15_000 });
+
+      // Client-side nav to the other doc's group.
+      await banner.getByRole("link", { name: docB.title }).click();
+      await expect(page).toHaveURL(new RegExp(`/doc/${docB.id}\\?sel=${link.id}`));
+      await expect(page.getByTestId("anchored-link-banner")).toBeVisible();
+      await expect(page.locator(`[data-anchored-link-ids~="${partB.id}"]`).first()).toBeVisible({ timeout: 15_000 });
+
+      // And back again.
+      await page.getByTestId("anchored-link-banner").getByRole("link", { name: sharedDoc.title }).click();
+      await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.id}\\?sel=${link.id}`));
+      await expect(page.locator(`[data-anchored-link-ids~="${partA.id}"]`).first()).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await deleteTestAnchoredLink(link.id);
+      await deleteTestDoc(docB.id);
     }
   });
 });
