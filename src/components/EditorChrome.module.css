@@ -330,7 +330,7 @@
   cursor: pointer;
 }
 
-/* position: fixed and portaled to <body>, placed by placePopover — see
+/* position: fixed and portaled to <body>, placed by floating-ui — see
    QuoteControls.tsx for why an absolute menu inside the toolbar no longer
    works. z-index matches the other fixed popovers (AnnotationPopover). */
 .quoteMenu {

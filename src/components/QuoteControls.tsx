@@ -4,13 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import { IconBlockquote, IconChevronDown } from "@tabler/icons-react";
-import {
-  placePopover,
-  popoverBoundsFor,
-  provisionalPlacement,
-  type PopoverAnchor,
-  type PopoverPlacement,
-} from "@/lib/popover-placement";
+import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { popoverBoundsElement } from "@/lib/popover-placement";
 import styles from "./EditorChrome.module.css";
 
 // Split button: "Quote" keeps its existing toggle behavior (wrap/unwrap one
@@ -19,7 +14,7 @@ import styles from "./EditorChrome.module.css";
 // can't do that, since toggling while already inside a quote unwraps it
 // rather than nesting deeper.
 //
-// The menu is position: fixed, placed by placePopover and portaled to
+// The menu is position: fixed, placed by floating-ui and portaled to
 // <body>, the same shape as LinkControls' popover. On phones the toolbar
 // is a sideways scroller (EditorChrome.module.css), and a scroll container
 // clips absolutely positioned children on *both* axes — CSS can't scroll x
@@ -28,28 +23,12 @@ import styles from "./EditorChrome.module.css";
 // mask, which applies to every descendant, fixed or not.
 const MENU_GAP = 2;
 
-function anchorOf(el: HTMLElement | null): PopoverAnchor | null {
-  const rect = el?.getBoundingClientRect();
-  return rect ? { top: rect.top, bottom: rect.bottom, left: rect.left } : null;
-}
-
 export default function QuoteControls({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
-  const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const close = useCallback(() => {
-    setOpen(false);
-    setPlacement(null);
-  }, []);
-
-  const openMenu = () => {
-    const anchor = anchorOf(containerRef.current);
-    if (!anchor) return;
-    setPlacement(provisionalPlacement(anchor, MENU_GAP));
-    setOpen(true);
-  };
+  const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
     if (!open) return;
@@ -69,26 +48,33 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
     };
   }, [open, close]);
 
-  // Measure-then-place, and follow the button on scroll/resize — the
-  // toolbar itself scrolls on phones, so the anchor moves under an open
-  // menu. Capture phase: an inner scroller's scroll event doesn't bubble.
+  // floating-ui owns placement: the menu hangs under the split button's
+  // group (offset: MENU_GAP on both axes), stock flip() moves it above when
+  // the room below runs out, and shift() slides it back inside its bounds
+  // on both axes. autoUpdate's ancestor-scroll listeners follow the button —
+  // the toolbar itself scrolls on phones, so the anchor moves under an open
+  // menu — and computePosition's answer lands in a microtask, before the
+  // newly portaled menu first paints.
   useLayoutEffect(() => {
     if (!open) return;
-    function reposition() {
-      const menu = menuRef.current;
-      const anchor = anchorOf(containerRef.current);
-      if (!menu || !anchor) return;
-      const { width, height } = menu.getBoundingClientRect();
-      const next = placePopover(anchor, { width, height }, popoverBoundsFor(containerRef.current), MENU_GAP);
-      setPlacement((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
-    }
-    reposition();
-    window.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
-    return () => {
-      window.removeEventListener("scroll", reposition, true);
-      window.removeEventListener("resize", reposition);
+    const menu = menuRef.current;
+    const reference = containerRef.current;
+    if (!menu || !reference) return;
+    const boundary = popoverBoundsElement(reference);
+    const update = () => {
+      void computePosition(reference, menu, {
+        strategy: "fixed",
+        placement: "bottom-start",
+        middleware: [
+          offset({ mainAxis: MENU_GAP, crossAxis: MENU_GAP }),
+          flip({ crossAxis: false, boundary, fallbackStrategy: "initialPlacement" }),
+          shift({ crossAxis: true, boundary }),
+        ],
+      }).then(({ x, y }) => {
+        Object.assign(menu.style, { left: `${x}px`, top: `${y}px` });
+      });
     };
+    return autoUpdate(reference, menu, update);
   }, [open]);
 
   return (
@@ -110,15 +96,14 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
-        onClick={() => (open ? close() : openMenu())}
+        onClick={() => (open ? close() : setOpen(true))}
       >
         <IconChevronDown size={14} />
       </button>
       {open &&
         !disabled &&
-        placement &&
         createPortal(
-          <div ref={menuRef} className={styles.quoteMenu} role="menu" style={placement}>
+          <div ref={menuRef} className={styles.quoteMenu} role="menu">
             <button
               type="button"
               role="menuitem"

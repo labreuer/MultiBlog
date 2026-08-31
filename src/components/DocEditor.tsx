@@ -334,12 +334,10 @@ export default function DocEditor({
         {/* Stage two: the composer, opened where the marker was. `autoOpen`
             because the marker already asked the question its "Annotate"
             button would ask again. */}
-        {wideEnoughForWidget && widget.pending && widget.expanded && widget.popoverPlacement && widgetAnchor && (
+        {wideEnoughForWidget && widget.pending && widget.expanded && widgetAnchor && (
           <AnnotationPopover
             elementRef={widget.popoverRef}
             docId={docId}
-            top={widget.popoverPlacement.top}
-            left={widget.popoverPlacement.left}
             from={widgetAnchor.from}
             to={widgetAnchor.to}
             quotedText={widget.pending.quotedText}

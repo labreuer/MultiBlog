@@ -181,7 +181,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
         />
       )}
       {/* data-popover-bounds — the rect a doc-link popover is kept inside
-          (popoverBoundsFor, src/lib/popover-placement.ts). Marked with an
+          (popoverBoundsElement, src/lib/popover-placement.ts). Marked with an
           attribute rather than threaded down as a prop through DocColumn:
           SideBySideDocBody has no business knowing this page's layout, only that
           *some* ancestor may constrain it, and /doc/[slug] marks nothing at

@@ -1,11 +1,12 @@
 /* Extracted from the doc reading view's inline style object (PLAN.md §13c) — the
    fixed properties belong in a module per STYLE.md's CSS-Modules-by-default
-   rule; top/left stay inline in the component since they're genuinely
-   per-instance computed values (placePopover's output).
+   rule; top/left are genuinely per-instance computed values, written straight
+   onto the element by floating-ui (useSelectionPopover /
+   useEditorAnnotationWidget).
 
-   position:fixed, matching DocLinkPopover/DocLinkChooser: all three take
-   their top/left from placePopover (src/lib/popover-placement.ts), which
-   works in viewport coordinates. One shared `pending` state used to feed this
+   position:fixed, matching DocLinkPopover/DocLinkChooser: all three are
+   placed by floating-ui's `strategy: "fixed"` (src/lib/popover-placement.ts
+   on why), which works in viewport coordinates. One shared `pending` state used to feed this
    popover *and* DocLinkPopover, and when only the latter moved to fixed,
    annotations on /doc/[slug] silently mispositioned. The two surfaces are
    separate components now (PLAN.md §14p) and no longer share that state, but

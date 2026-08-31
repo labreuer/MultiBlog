@@ -1,8 +1,9 @@
 /* Same shape as annotation/AnnotationPopover.module.css.
 
    §14i's 0.5em offset from the selection is no longer a `transform` here — it
-   is POPOVER_GAP inside placePopover (src/lib/popover-placement.ts), along
-   with the clamping and flipping that keep this inside the column pair. A
+   is POPOVER_GAP in useSelectionPopover's offset() middleware
+   (src/lib/popover-placement.ts), alongside the flip and shift that keep this
+   inside the column pair. A
    transform would double-count it, and worse, it shifts the *painted* box out
    from under the clamped `left` that placement just computed: the measured
    rect placement clamps against would include the shift while the `left` it

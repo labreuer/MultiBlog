@@ -8,27 +8,51 @@ import { SITE_TITLE } from "@/lib/site-config";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import styles from "./SiteHeader.module.css";
 
+// The dropdown panels are position: fixed (SiteHeader.module.css), so their
+// coordinates have to be set by hand. Measured off .navGroup rather than the
+// caret's <summary> so the panel's left edge lines up with the group's own
+// link — the alignment the panel's containing block used to give for free,
+// back when it was absolutely positioned.
+//
+// Written even while the menu is still closed (each summary's onClick
+// below), not only from onToggle: <details> renders its panel the instant
+// the click's default action flips `open`, but the toggle event arrives in a
+// queued *task*, and the browser may paint a frame in between — and a fixed
+// panel with no top/left yet paints that frame at its static position inside
+// the nav row. Only the first open of a page load can show it (the inline
+// coordinates persist across closes, and a reopened panel's stale ones are
+// almost always still right), and mostly when the main thread is busy enough
+// for a paint to win the race — which is why it surfaced as a first-click
+// flash right after a hard reload. The click handler runs before the default
+// action, so the first open's first paint already has real coordinates. The
+// rect is the navGroup's, which the hidden panel doesn't affect, so
+// measuring while closed is sound.
+//
+// Module scope, not component closures: both read nothing but the DOM at
+// call time (same pattern as DocReadingBody's jumpToAnnotationEntry), which
+// also keeps them out of the scroll/resize effect's dependency story.
+function setPanelCoords(details: HTMLDetailsElement | null) {
+  const group = details?.parentElement;
+  const panel = details?.querySelector<HTMLElement>(`.${styles.dropdownPanel}`);
+  if (!group || !panel) return;
+  const rect = group.getBoundingClientRect();
+  panel.style.top = `${rect.bottom + 4}px`;
+  panel.style.left = `${rect.left}px`;
+}
+
+// The open-only variant for the paths where a closed menu has nothing to
+// keep in place: toggle (which also fires on close), scroll and resize.
+function placePanel(details: HTMLDetailsElement | null) {
+  if (!details?.open) return;
+  setPanelCoords(details);
+}
+
 export default function SiteHeader() {
   const { data: session } = useSession();
   const postsMenuRef = useRef<HTMLDetailsElement>(null);
   const docsMenuRef = useRef<HTMLDetailsElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   useCloseOnOutsideClick(postsMenuRef, docsMenuRef);
-
-  // The dropdown panels are position: fixed (SiteHeader.module.css), so their
-  // coordinates have to be set by hand. Measured off .navGroup rather than the
-  // caret's <summary> so the panel's left edge lines up with the group's own
-  // link — the alignment the panel's containing block used to give for free,
-  // back when it was absolutely positioned.
-  function placePanel(details: HTMLDetailsElement | null) {
-    if (!details?.open) return;
-    const group = details.parentElement;
-    const panel = details.querySelector<HTMLElement>(`.${styles.dropdownPanel}`);
-    if (!group || !panel) return;
-    const rect = group.getBoundingClientRect();
-    panel.style.top = `${rect.bottom + 4}px`;
-    panel.style.left = `${rect.left}px`;
-  }
 
   // Picking an entry closes the menu, which nothing else here would do: a
   // <details> toggles only from its own <summary>, useCloseOnOutsideClick
@@ -78,7 +102,11 @@ export default function SiteHeader() {
             className={styles.dropdownWrapper}
             onToggle={() => placePanel(postsMenuRef.current)}
           >
-            <summary className={styles.dropdownSummary} aria-label="Post tools">
+            <summary
+              className={styles.dropdownSummary}
+              aria-label="Post tools"
+              onClick={() => setPanelCoords(postsMenuRef.current)}
+            >
               ▾
             </summary>
             <div className={styles.dropdownPanel}>
@@ -106,7 +134,11 @@ export default function SiteHeader() {
             className={styles.dropdownWrapper}
             onToggle={() => placePanel(docsMenuRef.current)}
           >
-            <summary className={styles.dropdownSummary} aria-label="Doc tools">
+            <summary
+              className={styles.dropdownSummary}
+              aria-label="Doc tools"
+              onClick={() => setPanelCoords(docsMenuRef.current)}
+            >
               ▾
             </summary>
             <div className={styles.dropdownPanel}>
