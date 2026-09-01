@@ -290,3 +290,10 @@
   outline: 2px solid var(--link);
   outline-offset: -1px;
 }
+
+/* A part of the viewer's own *draft* link — the same outline, dashed, the
+   doc side's dashed underline in this surface's vocabulary. Painted only
+   for its creator: the draft is session-scoped (draft-link-store.ts). */
+:global(.annoRect.annoRectLink.annoRectDraftLink) {
+  outline-style: dashed;
+}

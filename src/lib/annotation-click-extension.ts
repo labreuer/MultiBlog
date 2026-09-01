@@ -54,11 +54,13 @@ export const AnnotationClick = Extension.create<AnnotationClickOptions>({
             for (const [id, range] of getAnnotationAnchorRanges(view.state)) {
               if (pos >= range.from && pos <= range.to) hits.push(id);
             }
-            // Anchored-link parts (getAnchoredLinkRanges) are deliberately
-            // NOT in this union: a link-only span isn't clickable, because
-            // its affordance is the ?sel= banner, not a rail card — there is
-            // nothing on the page a click could jump to that the banner
-            // doesn't already list (docs/ANCHORED_LINKS.md).
+            // Anchored-link parts (getAnchoredLinkRanges — both a followed
+            // link's and the viewer's own draft's) are deliberately NOT in
+            // this union: a link-only span isn't clickable, because its
+            // affordance is elsewhere — the ?sel= banner for a followed
+            // part, the tray for a draft one — and there is nothing on the
+            // page a click could jump to that they don't already list
+            // (docs/ANCHORED_LINKS.md).
 
             const ids = Array.from(new Set(hits));
             if (ids.length === 0) return false;

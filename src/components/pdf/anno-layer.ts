@@ -42,7 +42,11 @@ export type AnnoLayerEntry = {
   // delegated click handler never sees it — an annotation stays clickable
   // straight through a link region above it, and a link-only region does
   // nothing on click; the ?sel= banner is its affordance.
-  variant?: "link";
+  //
+  // `draft-link` is the same region for a part of the viewer's own unminted
+  // link: the same outline, dashed, mirroring the doc side's dashed
+  // underline. Both are link regions in every other respect.
+  variant?: "link" | "draft-link";
 };
 
 export type AnnoLayerSource = {
@@ -176,6 +180,10 @@ function appendRects(
   remote: boolean,
 ): void {
   const color = SAFE_COLOR.test(entry.color) ? entry.color : null;
+  // Both link variants are outlines, click-transparent, and un-idded; only
+  // the dash pattern differs. Asking "is this a link region" once is what
+  // keeps a third variant from having to be remembered in three places.
+  const linkRegion = entry.variant === "link" || entry.variant === "draft-link";
   for (const rect of resolveTargetRects(entry.target, viewport)) {
     const element = document.createElement("div");
     // `annoRectRemote` no longer restyles anything — a remote selection is
@@ -183,15 +191,18 @@ function appendRects(
     // marker for what this rect *is*: e2e/pdf-presence.spec.ts asserts on it,
     // and it is the only thing distinguishing an ephemeral selection from a
     // saved annotation in the DOM.
-    element.className =
-      entry.variant === "link" ? "annoRect annoRectLink" : remote ? "annoRect annoRectRemote" : "annoRect";
+    element.className = linkRegion
+      ? `annoRect annoRectLink${entry.variant === "draft-link" ? " annoRectDraftLink" : ""}`
+      : remote
+        ? "annoRect annoRectRemote"
+        : "annoRect";
     // Singular, unlike the doc side's `data-annotation-ids`: overlapping
     // *decorations* have to be pre-split because ProseMirror drops attributes
     // where inline decorations overlap, but these are absolutely positioned
     // siblings that simply stack. `elementsFromPoint` returns all of them,
     // which is what docs/PDF.md §7 wants for overlap disambiguation. A link
     // region gets none — see AnnoLayerEntry.variant.
-    if (entry.variant !== "link") element.dataset.annoId = entry.id;
+    if (!linkRegion) element.dataset.annoId = entry.id;
     if (entry.active) element.dataset.annoActive = "true";
     element.style.left = `${rect.left}px`;
     element.style.top = `${rect.top}px`;

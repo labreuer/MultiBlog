@@ -35,17 +35,20 @@ type Props = {
   className?: string;
 };
 
-function jumpViaDom(anchorId: string): boolean {
-  // The QuoteThreadHeader.jumpToQuote pattern verbatim, keyed on the segment
+function jumpViaDom(anchorId: string, flash: boolean): boolean {
+  // The QuoteThreadHeader.jumpToQuote pattern, keyed on the segment
   // attribute the highlight plugin emits. ~= because overlapping parts share
-  // pre-split segments carrying every id that applies.
+  // pre-split segments carrying every id that applies. The pulse belongs to
+  // a deliberate click only — the on-load ?sel= jump scrolls without it.
   const targets = document.querySelectorAll<HTMLElement>(`[data-anchored-link-ids~="${anchorId}"]`);
   if (targets.length === 0) return false;
   targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
-  targets.forEach((el) => {
-    el.classList.add("pulse");
-    window.setTimeout(() => el.classList.remove("pulse"), 1200);
-  });
+  if (flash) {
+    targets.forEach((el) => {
+      el.classList.add("pulse");
+      window.setTimeout(() => el.classList.remove("pulse"), 1200);
+    });
+  }
   return true;
 }
 
@@ -66,7 +69,7 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
     let tries = 0;
     const timer = window.setInterval(() => {
       tries += 1;
-      if (jumpViaDom(firstAnchorId) || tries >= 10) {
+      if (jumpViaDom(firstAnchorId, false) || tries >= 10) {
         window.clearInterval(timer);
       }
     }, 300);
@@ -97,7 +100,7 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
               <button
                 type="button"
                 className={styles.partButton}
-                onClick={() => (onJumpToPart ? onJumpToPart(part) : void jumpViaDom(part.anchorId))}
+                onClick={() => (onJumpToPart ? onJumpToPart(part) : void jumpViaDom(part.anchorId, true))}
                 title="Jump to this passage"
               >
                 <span className={styles.partQuote}>{part.quotedText}</span>

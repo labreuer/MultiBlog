@@ -7,6 +7,7 @@ import { useSelectionPopover } from "@/lib/use-selection-popover";
 import { AnnotationClick } from "@/lib/annotation-click-extension";
 import {
   AnnotationHighlight,
+  anchoredLinkAnchorInputs,
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
@@ -15,6 +16,7 @@ import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
 import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
+import { useDraftLinkParts } from "./anchored-link/draft-link-store";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
@@ -166,6 +168,20 @@ export default function DocReadingBody({
   // editor is display:none behind the SSR'd static body.
   useRegisterMarginNotesEditor(editor, ready);
 
+  // docs/ANCHORED_LINKS.md — the viewer's own in-progress link parts for
+  // this doc, painted with a dashed underline beside the annotations and any
+  // followed `?sel=` parts. Client-side rather than a page prop because
+  // adding a part deliberately revalidates nothing (the actions file's "no
+  // revalidatePath anywhere") — the store's notify is the whole delivery.
+  const draftParts = useDraftLinkParts("doc", docId);
+  const allAnchors = useMemo(
+    () =>
+      draftParts.length === 0
+        ? annotationAnchors
+        : [...annotationAnchors, ...anchoredLinkAnchorInputs(draftParts, "draft-link")],
+    [annotationAnchors, draftParts],
+  );
+
   // Posting, deleting or replying re-renders this tree with a new anchor list
   // (router.refresh()); this is what gets it into the already-built editor.
   // Also the only thing that gives a detached anchor another look — see
@@ -173,8 +189,8 @@ export default function DocReadingBody({
   // keystroke.
   useEffect(() => {
     if (!editor) return;
-    setAnnotationAnchors(editor.view, annotationAnchors);
-  }, [editor, annotationAnchors]);
+    setAnnotationAnchors(editor.view, allAnchors);
+  }, [editor, allAnchors]);
 
   function handleUnfreeze() {
     selection.clear();

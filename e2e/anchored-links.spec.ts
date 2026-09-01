@@ -120,6 +120,14 @@ test.describe("anchored links", () => {
       await expect(tray).toContainText("1 passage");
       await expect(tray).toContainText(QUOTED_TEXT);
 
+      // The passage is painted in place as well as listed — the draft's own
+      // dashed-underline highlight, delivered through the shared store's
+      // notify rather than any refresh (docs/ANCHORED_LINKS.md, "Painting a
+      // draft"). Asserting it here is also what covers the store: the tray
+      // and this highlight read one fetch, so a stale one shows up as a
+      // disagreement between the two.
+      await expect(page.locator(".anchored-link-draft-highlight").first()).toBeVisible({ timeout: 15_000 });
+
       // Part 2: a PDF passage — and the tray still holds part 1, which is
       // the cross-page persistence claim (the server row IS the draft).
       await gotoOk(page, `/pdf/${file.slug}`);
@@ -127,6 +135,10 @@ test.describe("anchored links", () => {
       await selectPhrase(page, 1, PDF_PHRASE);
       await page.getByRole("button", { name: "Add to link" }).click();
       await expect(tray).toContainText("2 passages", { timeout: 15_000 });
+      // Same statement on the PDF surface: the draft part's region, dashed.
+      await expect(page.locator(".pdfViewer .page[data-page-number='1'] .annoRectDraftLink")).not.toHaveCount(0, {
+        timeout: 20_000,
+      });
 
       const url = await copyMintedLink(page);
       // Part 0 is the doc part, and doc hrefs are minted by id (docs have no
@@ -143,6 +155,9 @@ test.describe("anchored links", () => {
       // The highlight arrives when the read-only editor mounts over the SSR
       // body — the same wait the banner's own on-load scroll retries out.
       await expect(page.locator(".anchored-link-highlight").first()).toBeVisible({ timeout: 15_000 });
+      // And it is the *followed* look, not the draft one: minting cleared the
+      // draft, so nothing on this page still claims to be in progress.
+      await expect(page.locator(".anchored-link-draft-highlight")).toHaveCount(0);
 
       // Click through to the PDF group; its href carries ?sel= onward.
       await banner.getByRole("link", { name: file.title }).click();

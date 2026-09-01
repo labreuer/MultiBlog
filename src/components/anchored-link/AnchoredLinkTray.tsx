@@ -1,55 +1,41 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
-import {
-  discardDraftLink,
-  loadMyDraftLink,
-  mintAnchoredLink,
-  removeAnchoredLinkPart,
-  type DraftLinkView,
-} from "@/app/actions/anchored-links";
-import { onAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
+import { useState, useTransition } from "react";
+import { discardDraftLink, mintAnchoredLink, removeAnchoredLinkPart } from "@/app/actions/anchored-links";
+import { clearDraftLink, refreshDraftLink, useDraftLink } from "./draft-link-store";
 import styles from "./AnchoredLinkTray.module.css";
 
 // docs/ANCHORED_LINKS.md — the draft-link tray. Mounted by both reading
-// pages as a self-fetching sibling: it asks the server for the viewer's
-// draft on mount and again on every tray-events notify, and the server row
-// IS the cross-page persistence — navigate from a doc to a PDF and the
-// tray re-fetches the same draft there. Renders nothing when there is no
-// draft (or an empty one), so mounting it unconditionally costs one action
-// round trip and no pixels.
+// pages as a self-fetching sibling: the draft store asks the server on
+// mount and again on every tray-events notify, and the server row IS the
+// cross-page persistence — navigate from a doc to a PDF and the same draft
+// is there. Renders nothing when there is no draft (or an empty one), so
+// mounting it unconditionally costs one action round trip and no pixels.
 //
 // Deliberately not fed by props or router.refresh(): on the PDF page the
 // part-adding popover lives inside an ssr:false island (CLAUDE.md's
 // refresh trap), and this island fetching its own state is the same answer
 // loadPdfAnnotationEntries already gives that problem.
+//
+// The fetch itself moved to draft-link-store.ts once the surfaces began
+// painting the draft too — same row, same notify, one round trip.
 
 const SNIPPET_CHARS = 60;
 
 export default function AnchoredLinkTray() {
-  const [draft, setDraft] = useState<DraftLinkView | null>(null);
+  const draft = useDraftLink();
   const [copied, setCopied] = useState<{ url: string; clipboardFailed: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, startTransition] = useTransition();
-
-  const refresh = useCallback(() => {
-    loadMyDraftLink()
-      .then(setDraft)
-      // Quiet: the tray simply keeps what it shows; the next notify retries.
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    return onAnchoredLinkChanged(refresh);
-  }, [refresh]);
 
   function handleRemove(anchorId: string) {
     setError(null);
     startTransition(async () => {
       const result = await removeAnchoredLinkPart(anchorId);
       if (result.error) setError(result.error);
-      refresh();
+      // Re-read rather than splice locally: this also unpaints the passage on
+      // whichever surface is showing it.
+      refreshDraftLink();
     });
   }
 
@@ -57,7 +43,7 @@ export default function AnchoredLinkTray() {
     setError(null);
     startTransition(async () => {
       await discardDraftLink();
-      setDraft(null);
+      clearDraftLink();
     });
   }
 
@@ -67,7 +53,7 @@ export default function AnchoredLinkTray() {
       const result = await mintAnchoredLink();
       if ("error" in result) {
         setError(result.error);
-        refresh();
+        refreshDraftLink();
         return;
       }
       // Minted before the clipboard is touched, so a clipboard-permission
@@ -79,7 +65,9 @@ export default function AnchoredLinkTray() {
         clipboardFailed = true;
       }
       setCopied({ url: result.url, clipboardFailed });
-      setDraft(null);
+      // Minted, so it is no longer a draft anywhere — the surfaces drop their
+      // in-progress highlights with it.
+      clearDraftLink();
     });
   }
 

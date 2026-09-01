@@ -36,8 +36,12 @@ govern everything else:
   the part-anchors branch's §20l constraint ("multi-part capture leans on the freeze" —
   which cannot hold across pages) never applies; each anchor row carries its own
   `ydocUpdateId`, and the server row *is* the tray's cross-page persistence.
-- **Draft parts appear only in the tray (as text), never painted on the surfaces.**
-  Painting is exclusively the `?sel=` follow path, delivered as initial server props.
+- **Both links a page can be showing are painted**: the one being *followed* (`?sel=`,
+  delivered as initial server props) and the one being *assembled* (the viewer's own
+  draft, fetched client-side). They share the highlight and differ in the underline —
+  solid vs. dashed; "Painting a draft" below. The draft started tray-only, as text; the
+  reason it isn't is that adding a part to a passage you are looking at and seeing
+  nothing happen to it reads as a failure.
 
 Origins: `b5fa049` was cherry-picked clean from the `part-anchors` branch (the
 one-writer-per-anchor-field refactor: `deriveDocRangeSelector`, `captureAnchorInYdoc`
@@ -119,31 +123,72 @@ says what's true ("Recipients see only the passages they have permission to read
 ## Highlight machinery
 
 - **Doc side** (`src/lib/annotation-highlight-extension.ts`): link parts ride the
-  existing `AnnotationHighlight` plugin under `kind: "link"` — one list, one plugin state,
-  one per-transaction 3-tier re-resolve, so twenty link ranges cost what twenty more
-  annotations would. State keeps a separate `linkRanges` map (`getAnchoredLinkRanges`)
-  keyed by anchor row id, so a rail card and a thread jump can't mistake one id family for
-  the other. One `buildSegments` pass over both kinds: an overlap becomes one segment
-  carrying both classes (`annotation-highlight anchored-link-highlight`) and both plural
-  data attributes (`data-anchored-link-ids`); link sources are excluded from the
-  `--thread-color` vote. No drift persistence — re-derive only, like doc-links.
-  `decoration-segments.ts` unchanged; `anchoredLinkAnchorInputs(parts)` filters to
-  DOC_RANGE parts (PDF parts have null offsets and fall out).
+  existing `AnnotationHighlight` plugin under `kind: "link"` (or `"draft-link"`) — one
+  list, one plugin state, one per-transaction 3-tier re-resolve, so twenty link ranges
+  cost what twenty more annotations would. State keeps a separate `linkRanges` map
+  (`getAnchoredLinkRanges`) keyed by anchor row id — one family, minted or draft — so a
+  rail card and a thread jump can't mistake it for an annotation id. One `buildSegments`
+  pass over every kind: an overlap becomes one segment carrying both classes
+  (`annotation-highlight anchored-link-highlight`) and both plural data attributes;
+  link sources are excluded from the `--thread-color` vote. No drift persistence —
+  re-derive only, like doc-links. `decoration-segments.ts` unchanged;
+  `anchoredLinkAnchorInputs(parts, kind)` filters to DOC_RANGE parts (PDF parts have null
+  offsets and fall out).
 - **Paint** (`src/styles/prose.module.css`): a wash off `--link` **plus an underline**,
   with an explicit overlap rule at (0,3,0) specificity handing the background to the
   annotation's author tint — one span has one background, and wayfinding yields to
   discussion; the underline is what keeps the link's extent visible underneath. `.pulse`
-  is the banner's jump flash (the `QuoteThreadHeader.jumpToQuote` pattern).
+  is the banner's *click*-jump flash (the `QuoteThreadHeader.jumpToQuote` pattern) — the
+  on-load `?sel=` jump scrolls without it.
 - **Clicks**: link-only spans are deliberately **not** in `AnnotationClick`'s union —
   structurally free, since the union never consults `linkRanges` — and the absence is
   recorded as a comment there so a future `part-anchors` merge doesn't sweep them in. The
-  banner is the affordance.
+  banner (or, for a draft part, the tray) is the affordance.
 - **PDF side** (`src/components/pdf/anno-layer.ts`): `AnnoLayerEntry.variant: "link"`
   draws `annoRect annoRectLink` — an **outline** in `var(--link)`, no fill (inside the
   layer's shared group opacity a second fill would shift every annotation it overlaps) —
   and carries **no `data-anno-id`**, so the delegated click handler never sees it:
-  annotations stay clickable straight through a link region. The surface appends link
-  regions *before* annotation entries; append order is stacking order in that layer.
+  annotations stay clickable straight through a link region. `"draft-link"` adds
+  `annoRectDraftLink` (`outline-style: dashed`) and is a link region in every other
+  respect — the layer asks "is this a link region" once rather than testing the variant
+  in three places. The surface appends link regions *before* annotation entries; append
+  order is stacking order in that layer.
+
+## Painting a draft
+
+The passages already in the viewer's draft are drawn on whichever surface they belong
+to, so "Add to link" visibly does something to the passage it was invoked on. **Same
+highlight as a followed link's, dashed underline instead of solid** (doc:
+`anchored-link-draft-highlight` over the base class, `border-bottom-style: dashed`; PDF:
+`annoRectDraftLink`, `outline-style: dashed`). Both facts are deliberate: it *is* a link
+part, so it gets the link wash rather than a colour of its own, and what marks it as
+in-progress is the **same dashed underline `.pending-annotation` already uses** for a
+composing annotation — one vocabulary for "not committed yet" across the surface, not a
+second dash pattern to be learned separately. The two stay distinguishable by colour (the
+composing author's own vs. `--link`) and by wash, which is what they already differ in.
+
+- **Only its creator ever sees it.** `loadMyDraftLink` is session-scoped, so there is no
+  other viewer's draft to leak and nothing here re-checks anything (`TagChips`' stance).
+- **Delivery is client-side, and had to be.** Adding a part revalidates nothing on
+  purpose (above), so a server prop would paint one navigation late.
+  `src/components/anchored-link/draft-link-store.ts` is **one** module-scope copy of the
+  draft shared by every consumer: it subscribes to the tray-events channel on the first
+  mount, re-reads on each notify, and hands the same answer to the tray's text list and
+  to each surface's highlights — a store rather than a hook per consumer because the
+  consumers have no common React ancestor to hang a context off (the PDF page's surface
+  is inside the `ssr:false` island, the tray is the page's own sibling), and because two
+  self-fetching consumers would be two round trips per notify. A notify arriving
+  mid-flight queues one more read rather than reusing the answer in progress, which may
+  have been taken before the mutation that prompted it committed.
+- **Minted and draft ids stay in separate DOM attributes** (`data-anchored-link-ids` vs.
+  `data-anchored-link-draft-ids`): the banner's jump queries the first, and a draft part
+  is not a jump target — nothing links to a link that doesn't exist yet.
+- **The PDF surface keeps draft regions in a second list**, not merged into `linkParts`:
+  that list also decides the on-load `?sel=` jump, and a draft part must never hijack
+  where a followed link lands.
+- `loadMyDraftLink` therefore returns each part's target, offsets and selector, not just
+  its label and quote — still BigInt-free (no `ydocUpdateId`), the same rule
+  `anchoredLinkForViewer` follows for the same reason.
 
 ## Server actions — `src/app/actions/anchored-links.ts`
 
@@ -168,10 +213,11 @@ says what's true ("Recipients see only the passages they have permission to read
   part, stamps `mintedAt`, and returns `appUrl(<part-0 group href>)` — later parts stand
   in only if part 0's target vanished between add and mint.
 - **No `revalidatePath` anywhere, deliberately** (contrast `untagObject`): both routes are
-  per-request dynamic, and the tray self-fetches on `src/lib/anchored-link-tray-events.ts`
-  — a module-scope listener set (`onAnchoredLinkChanged`/`notifyAnchoredLinkChanged`),
-  because on the PDF page the popover and the tray live in different trees with an
-  `ssr:false` boundary between them.
+  per-request dynamic, and everything showing the draft self-fetches on
+  `src/lib/anchored-link-tray-events.ts` — a module-scope listener set
+  (`onAnchoredLinkChanged`/`notifyAnchoredLinkChanged`), because on the PDF page the
+  popover, the tray and the surface live in different trees with an `ssr:false` boundary
+  between them. "Painting a draft" above is the reader side of that channel.
 
 ## Surfaces
 
@@ -186,7 +232,8 @@ both surfaces, `data-testid="anchored-link-banner"`): this surface's part quotes
 handles (DOM query on `data-anchored-link-ids`, scroll+pulse; doubles as
 cycle-through-parts), every *other* readable group as a link carrying `?sel=` onward;
 dismissible. On-load scroll-to-first retries ~10×300ms until the read-only editor mounts —
-doc mode only; supplying `onJumpToPart` (the PDF surface does) hands over both the click
+doc mode only, and it scrolls without the pulse (the flash marks a deliberate click, not
+arrival); supplying `onJumpToPart` (the PDF surface does) hands over both the click
 jump and the on-load jump. Parts that fail to resolve are listed, painted nowhere,
 silently (doc-link behavior). It renders what it is handed and adds no second permission
 check — `TagChips`' stance; the type import from `anchored-link-data` is type-only, so the
@@ -214,8 +261,10 @@ stops rendering the stale message. Both paths post immediately, clear the select
 **The tray** (`src/components/anchored-link/AnchoredLinkTray.tsx`,
 `data-testid="anchored-link-tray"`): a fixed bottom-right island both pages mount as a
 **self-fetching sibling** (doc: end of `<main>`; pdf: sibling of `PdfSurfaceClient`,
-outside the `ssr:false` boundary). Fetches `loadMyDraftLink()` on mount and on every
-notify; renders nothing without a draft or with an empty one. Part list (label +
+outside the `ssr:false` boundary). Reads the shared draft store — which fetches on the
+first consumer's mount and on every notify — rather than owning the fetch itself, so the
+list and the surface's highlights can never disagree about what is in the draft; renders
+nothing without a draft or with an empty one. Part list (label +
 ~60-char snippet, per-part ✕), **Copy link** (mint → clipboard → "Link copied" note with
 the recipients-see-only-what-they-may-read sentence → tray clears; a clipboard-permission
 failure still mints and shows the URL as text), **Discard**. Fixed positioning keeps it
@@ -286,6 +335,11 @@ Everything unmentioned went in as written. Where the build differs:
   following the feature's own banner, one of them pre-existing with reach beyond links.
 - **The fixture-minting e2e machinery is beyond plan** (the plan's fixtures created rows
   only through the UI), as is the tray's clipboard-failure fallback.
+- **Draft parts are painted after all** (added 2026-08-31, after the rest shipped). The
+  plan's "tray only, as text" is reversed — "Painting a draft" above — which is what
+  turned `loadMyDraftLink` into a positional read and gave the tray's fetch a home in a
+  shared store. It borrows `.pending-annotation`'s dashed underline outright rather than
+  taking a pattern of its own: dashed means in-progress here, whatever is in progress.
 
 ## Explicitly deferred
 

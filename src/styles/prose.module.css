@@ -213,6 +213,24 @@
   border-radius: 2px;
 }
 
+/* docs/ANCHORED_LINKS.md — a passage of the *draft* link the viewer is
+   assembling, painted only for its creator (the draft is session-scoped).
+   It carries .anchored-link-highlight too and so inherits the wash: it is a
+   link part, and saying which link is the underline's job, not a second
+   colour. Dashed is **the** in-progress underline on this surface, the same
+   one .pending-annotation uses above for a composing annotation — one
+   vocabulary for "not committed yet", rather than a second dash pattern
+   each reader would have to learn separately. Colour still tells them
+   apart: the composing author's own vs. --link. Full-strength --link rather
+   than the base rule's 55%, since a dashed line is half gaps and the softer
+   colour thins out at this size. Specificity (0,3,0) beats the base border
+   regardless of source order, and equally against the overlap rule below
+   (which sets only a background). */
+.prose :global(.anchored-link-highlight.anchored-link-draft-highlight) {
+  border-bottom-style: dashed;
+  border-bottom-color: var(--link);
+}
+
 /* Overlap: one span carries both classes (one buildSegments pass —
    annotation-highlight-extension.ts), and one span has one background, so
    the annotation's author tint wins it and the link keeps only its

@@ -36,7 +36,14 @@ export type AnnotationAnchorInput = {
   // "one pass for every id" rule). What differs is only presentation and
   // routing, which is what this field keys: the decoration class, and which
   // of the two range maps the id lands in.
-  kind?: "annotation" | "link";
+  //
+  // `draft-link` is a part of the viewer's own unminted link — same table,
+  // same resolve, drawn with a dashed underline instead of a solid one
+  // (prose.module.css). It is kept a separate kind rather than a flag
+  // because the two are painted differently and queried differently: only a
+  // *minted* part is a banner jump target, so only it gets
+  // `data-anchored-link-ids`.
+  kind?: "annotation" | "link" | "draft-link";
 };
 
 type TrackedAnchor = AnnotationAnchorInput & {
@@ -48,7 +55,11 @@ export type AnnotationHighlightState = {
   anchors: TrackedAnchor[];
   /** Annotation ids only — the map every §13o consumer already reads. */
   ranges: Map<string, AnchorRange>;
-  /** Anchored-link part row ids, kept apart so a rail card and a thread jump can't mistake one for the other. */
+  /**
+   * `anchored_link_anchor` row ids — one id family, whether the link is
+   * minted or still the viewer's draft — kept apart from `ranges` so a rail
+   * card and a thread jump can't mistake one family for the other.
+   */
   linkRanges: Map<string, AnchorRange>;
 };
 
@@ -103,12 +114,18 @@ export function annotationAnchorInputs(
 /**
  * An anchored link's DOC_RANGE parts in the shape this plugin tracks
  * (docs/ANCHORED_LINKS.md). Structural parameter for the same reason as
- * above — `AnchoredLinkPart` (anchored-link-data.ts) satisfies it without
- * this browser-safe file importing a Prisma-touching one. PDF_TEXT parts
- * (null offsets) fall out here; theirs is the anno-layer's job.
+ * above — `AnchoredLinkPart` (anchored-link-data.ts) and `DraftLinkPart`
+ * (the actions file) both satisfy it without this browser-safe file
+ * importing a Prisma-touching one. PDF_TEXT parts (null offsets) fall out
+ * here; theirs is the anno-layer's job.
+ *
+ * `kind` picks which link the parts belong to: a followed one from `?sel=`
+ * (server props, the default) or the viewer's own draft (fetched client-side
+ * — see draft-link-store.ts).
  */
 export function anchoredLinkAnchorInputs(
   parts: { anchorId: string; from: number | null; to: number | null; quotedText: string }[],
+  kind: "link" | "draft-link" = "link",
 ): AnnotationAnchorInput[] {
   return parts
     .filter((part) => part.from !== null && part.to !== null && part.quotedText !== "")
@@ -117,7 +134,7 @@ export function anchoredLinkAnchorInputs(
       from: part.from!,
       to: part.to!,
       quotedText: part.quotedText,
-      kind: "link" as const,
+      kind,
     }));
 }
 
@@ -174,7 +191,7 @@ function rangeMaps(anchors: TrackedAnchor[]): Pick<AnnotationHighlightState, "ra
   const linkRanges = new Map<string, AnchorRange>();
   for (const anchor of anchors) {
     if (!anchor.resolved) continue;
-    (anchor.kind === "link" ? linkRanges : ranges).set(anchor.id, anchor.resolved);
+    (anchor.kind === "link" || anchor.kind === "draft-link" ? linkRanges : ranges).set(anchor.id, anchor.resolved);
   }
   return { ranges, linkRanges };
 }
@@ -234,26 +251,38 @@ export const AnnotationHighlight = Extension.create<{ anchors: AnnotationAnchorI
                   id: a.id,
                   from: a.resolved!.from,
                   to: a.resolved!.to,
-                  color: a.kind === "link" ? null : (a.color ?? null),
+                  color: a.kind === "link" || a.kind === "draft-link" ? null : (a.color ?? null),
                   kind: a.kind ?? ("annotation" as const),
                 })),
               state.doc.content.size,
             ).map((segment) => {
-              const annotationSources = segment.sources.filter((s) => s.kind !== "link");
+              const annotationSources = segment.sources.filter((s) => s.kind === "annotation");
               const linkSources = segment.sources.filter((s) => s.kind === "link");
+              const draftSources = segment.sources.filter((s) => s.kind === "draft-link");
               const annotationColors = new Set(annotationSources.map((s) => s.color));
               return Decoration.inline(segment.from, segment.to, {
+                // A draft part carries the link class *as well*: the wash is
+                // the same "a link names this passage" statement, and the
+                // draft class only restyles the underline (dashed, the
+                // in-progress convention .pending-annotation set).
                 class: [
                   annotationSources.length > 0 ? "annotation-highlight" : null,
-                  linkSources.length > 0 ? "anchored-link-highlight" : null,
+                  linkSources.length > 0 || draftSources.length > 0 ? "anchored-link-highlight" : null,
+                  draftSources.length > 0 ? "anchored-link-draft-highlight" : null,
                 ]
                   .filter(Boolean)
                   .join(" "),
                 ...(annotationSources.length > 0
                   ? { "data-annotation-ids": annotationSources.map((s) => s.id).join(" ") }
                   : {}),
+                // Minted and draft ids stay in separate attributes: the
+                // banner's jump queries the first, and a draft part is not a
+                // jump target — nothing links to a link that doesn't exist yet.
                 ...(linkSources.length > 0
                   ? { "data-anchored-link-ids": linkSources.map((s) => s.id).join(" ") }
+                  : {}),
+                ...(draftSources.length > 0
+                  ? { "data-anchored-link-draft-ids": draftSources.map((s) => s.id).join(" ") }
                   : {}),
                 // Null exactly when annotations by different authors overlap
                 // here: one span, one background, so it goes to the neutral

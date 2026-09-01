@@ -429,7 +429,7 @@
     </div></div>
     <ul class="legend">
       <li><span class="b">1</span><span>New button beside Annotate in the existing popover; shown on reading views only, never in the doc editor. Errors (“that passage couldn't be anchored”) surface through the popover's existing error slot. <span class="ref">AnnotationPopover.tsx · onAddToLink</span></span></li>
-      <li><span class="b">2</span><span>The tray: a fixed bottom-right island. It self-fetches the viewer's open draft, so it renders nothing when there is no draft and needs no props across the page tree. Draft parts are listed as text only — <em>nothing paints on the surface while drafting</em>. <span class="ref">AnchoredLinkTray.tsx · loadMyDraftLink()</span></span></li>
+      <li><span class="b">2</span><span>The tray: a fixed bottom-right island. It self-fetches the viewer's open draft, so it renders nothing when there is no draft and needs no props across the page tree. Once a part is added, the passage it names is <em>also highlighted in place</em>, with a dashed underline — a link part, marked as one still being assembled. <span class="ref">AnchoredLinkTray.tsx · draft-link-store.ts</span></span></li>
     </ul>
   </section>
 
@@ -653,7 +653,7 @@
   <div class="endnote">
     <h3>Deliberately not in this sketch</h3>
     <ul>
-      <li>No painting of draft parts while collecting — the tray's text list is the only feedback until the link is followed.</li>
+      <li>The drafted-passage highlight itself. It arrived after these figures were drawn, so no figure shows one: a settled draft part wears the followed-link wash with a <em>dashed</em> underline instead of a solid one, on both surfaces. See “Painting a draft” in docs/ANCHORED_LINKS.md.</li>
       <li>No editing after mint, no management surface (<span class="mono">/links</span> table is a follow-up), no link labels.</li>
       <li>Multi-page PDF selections anchor to their start page (existing capture limitation, kept).</li>
       <li>Post pages and annotation bodies are not linkable targets in v1.</li>

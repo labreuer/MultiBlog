@@ -6,7 +6,14 @@ import { Prisma } from "@/generated/prisma/client";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
 import { appUrl } from "@/lib/app-url";
-import { parseAnchorTargetKind, targetToColumns, type AnchorTarget } from "@/lib/anchors";
+import {
+  parseAnchorTargetKind,
+  parseSelector,
+  targetFromColumns,
+  targetToColumns,
+  type AnchorSelector,
+  type AnchorTarget,
+} from "@/lib/anchors";
 import { captureAnchorInYdoc, capturePdfTextAnchor } from "@/lib/anchors/capture";
 import { docContentExtensions, pmDocContentSchema } from "@/lib/tiptap-schema";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
@@ -42,6 +49,17 @@ export type DraftLinkPart = {
   /** The target's title — "(no longer available)" if it vanished since the add. */
   label: string;
   quotedText: string;
+  /**
+   * Which object the part points into, so a surface can filter the draft to
+   * its own passages and paint them (docs/ANCHORED_LINKS.md, "Painting a
+   * draft"). Null only for a malformed arc, which the CHECK makes
+   * unreachable.
+   */
+  target: AnchorTarget | null;
+  /** DOC_RANGE offsets; null on a PDF_TEXT part, whose quads live in `selector`. */
+  from: number | null;
+  to: number | null;
+  selector: AnchorSelector | null;
 };
 
 export type DraftLinkView = {
@@ -133,7 +151,16 @@ async function resolveCaptureStamp(ydocId: string, atVersion: string | undefined
   return ydocStore.maxUpdateId(ydocId);
 }
 
-/** The creator's current draft for the tray, or null when there is none. */
+/**
+ * The creator's current draft — the tray's list *and* what each reading
+ * surface paints its own in-progress passages from. One read for both: the
+ * two consumers share a client-side store (`draft-link-store.ts`), so a
+ * second query would be a second round trip for the same row.
+ *
+ * BigInt-free for the same reason `anchoredLinkForViewer` is: this crosses
+ * into client props, and `ydocUpdateId` would throw in serialization long
+ * after this function looked done.
+ */
 export async function loadMyDraftLink(): Promise<DraftLinkView | null> {
   const session = await requireSignedIn();
 
@@ -143,7 +170,18 @@ export async function loadMyDraftLink(): Promise<DraftLinkView | null> {
       id: true,
       anchors: {
         orderBy: [{ partOrder: "asc" }, { id: "asc" }],
-        select: { id: true, docId: true, fileId: true, quotedText: true },
+        select: {
+          id: true,
+          docId: true,
+          postId: true,
+          fileId: true,
+          targetAnnotationId: true,
+          quotedText: true,
+          anchorFrom: true,
+          anchorTo: true,
+          selectorKind: true,
+          selector: true,
+        },
       },
     },
   });
@@ -167,6 +205,13 @@ export async function loadMyDraftLink(): Promise<DraftLinkView | null> {
       anchorId: anchor.id,
       label: titles.get(anchor.docId ?? anchor.fileId ?? "") ?? "(no longer available)",
       quotedText: anchor.quotedText,
+      target: targetFromColumns(anchor),
+      from: anchor.anchorFrom,
+      to: anchor.anchorTo,
+      // Never a cast — a blob this server wrote is parsed on the way back out
+      // exactly as `anchoredLinkForViewer` parses one. An unparseable selector
+      // degrades to null: the part still lists in the tray, painted nowhere.
+      selector: parseSelector(anchor.selectorKind, anchor.selector),
     })),
   };
 }

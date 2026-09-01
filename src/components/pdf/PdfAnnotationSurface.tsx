@@ -10,6 +10,7 @@ import PdfCollabPanel from "./PdfCollabPanel";
 import { loadPdfAnnotationEntries } from "@/app/actions/annotations";
 import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
 import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
+import { useDraftLinkParts } from "@/components/anchored-link/draft-link-store";
 import { AnnotationReloadProvider } from "@/components/annotation/annotation-reload-context";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
@@ -199,6 +200,26 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     linkPartsRef.current = linkParts;
   }, [linkParts]);
 
+  // The viewer's own in-progress link parts for this file — the same regions
+  // dashed (anno-layer.ts), arriving from the client-side draft store rather
+  // than a prop, since adding one revalidates nothing by design.
+  //
+  // **Deliberately a second list, not merged into `linkParts`**: that one
+  // also decides the on-load `?sel=` jump, and a draft part must never
+  // hijack where a followed link lands.
+  const draftParts = useDraftLinkParts("file", fileId);
+  const draftRegions = useMemo(
+    (): { anchorId: string; target: PdfTarget }[] =>
+      draftParts.flatMap((part) =>
+        part.selector?.kind === "PDF_TEXT" ? [{ anchorId: part.anchorId, target: part.selector.selector }] : [],
+      ),
+    [draftParts],
+  );
+  const draftRegionsRef = useRef(draftRegions);
+  useEffect(() => {
+    draftRegionsRef.current = draftRegions;
+  }, [draftRegions]);
+
   // Set by the layer effect below; called when the annotation set changes so
   // the highlights follow a post or a delete without waiting for a scroll.
   const layerRedrawRef = useRef<(() => void) | null>(null);
@@ -250,6 +271,9 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
         ...linkPartsRef.current
           .filter(({ target }) => target.pageIndex === pageIndex)
           .map(({ part, target }): AnnoLayerEntry => ({ id: part.anchorId, target, color: "", variant: "link" })),
+        ...draftRegionsRef.current
+          .filter(({ target }) => target.pageIndex === pageIndex)
+          .map(({ anchorId, target }): AnnoLayerEntry => ({ id: anchorId, target, color: "", variant: "draft-link" })),
         ...entriesRef.current
           // entryHasVisibleContent, not just a page match: a soft-deleted
           // thread must take its highlight with it.
@@ -321,7 +345,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   useEffect(() => {
     layerRedrawRef.current?.();
     notify();
-  }, [liveEntries, linkParts, notify]);
+  }, [liveEntries, linkParts, draftRegions, notify]);
 
   // ---- selection capture --------------------------------------------------
   const capturePageFor = useCallback(async (pageIndex: number): Promise<CapturePage | null> => {
