@@ -561,3 +561,68 @@ giving up; or have `onMoved` keep the previous range when one end returns null w
 still resolves. The first is more honest about what is being shown; the second is one line.
 
 Not urgent — the strip's annotation ticks still render, only the thumb goes.
+
+---
+
+## A cross-paragraph reading-view anchor loses its highlight on the first live sync
+
+**Status:** open, diagnosed 2026-08-31 against a real dev-database row. Pre-existing and not
+anchored-link-specific — anchored links are just the first feature that made it easy to see.
+
+**Symptom.** Load a `/doc/[slug]` reading view whose anchor's quote spans a paragraph break.
+The highlight paints, then vanishes about one to two seconds later and never comes back until
+a reload, which repeats the cycle. Reported against a `?sel=` link; a **reading-view
+annotation** with a cross-paragraph quote behaves identically, since both ride
+`AnnotationHighlight` and the same three resolve tiers.
+
+**What was measured** (one minted link, one `DOC_RANGE` part, offsets 1563→1905, against both
+`prose_json` and the persisted ydoc row — which are textually identical, so the document has
+not changed):
+
+- `textBetween(1563, 1905, " ") === quotedText` → **true**. The stored offsets are correct.
+- The range covers two textblocks (`paragraph@1562`, `paragraph@1734`).
+- Offset span `to - from` = **342**, `quotedText.length` = **341**.
+- `findQuoteOccurrences(node, quotedText)` over the whole document → **0 matches**.
+
+That one-position gap is the whole thing. A paragraph break costs two positions but
+`textBetween(…, " ")` renders it as one space, so **no `from + len` window can ever reproduce
+the range** — and both fallbacks are exactly that window: `findQuoteOccurrences` (the global
+scan) and `findQuoteOccurrencesNear` (the radius search) share the same line. For such an
+anchor, tier 1 — the *exact stored offsets* — is the only thing that can ever resolve it.
+COLLAB.md §3 documents the block-boundary limitation as "can't be re-found once its offsets
+stop matching"; what was not anticipated is the trigger below, where offsets stop matching
+with no edit at all.
+
+**Mechanism.** On mount, `resolveAll` uses the stored offsets, tier 1 verifies, the highlight
+paints. Then the read-only Hocuspocus tap finishes its handshake, `onSynced` calls
+`applyUpdate`, and that runs `setContent` with the whole body — identical content, but a
+wholesale document replace. That fires `reresolve`, which works from **mapped** positions
+rather than the stored ones; a replace covering the entire document cannot carry interior
+positions through, so tier 1's check fails and tiers 2 and 3 are structurally blind. The
+anchor is marked detached, detachment is deliberately not retried per transaction, and nothing
+pushes the anchor list again on this surface. (The measurements above are direct; that the
+mapping is what degenerates is inference — but if it survived, tier 1 would verify and nothing
+would break.)
+
+**Why nothing caught it.** `e2e/anchored-links.spec.ts` asserts `toBeVisible()`, which polls
+until true — it passes at the first paint and never looks again. The fixture quotes are
+single-paragraph regardless, so even a later assertion would need a new fixture.
+
+**Fix, in preference order.**
+
+1. **Give a failed re-resolve one more try at the anchor's original stored offsets** before
+   declaring it detached (`reresolve`, `annotation-highlight-extension.ts`).
+   `resolveAnchorInDoc` verifies the text before accepting, so it can only re-attach where the
+   quote genuinely is — exactly as trustworthy as the mount-time `resolveAll` that got it right
+   to begin with. One `textBetween` on a path that has just done a full-document scan, and it
+   fixes every "the document came back to a shape the offsets describe" case, this one
+   included.
+2. **Skip the no-op push.** `applyUpdate`'s first call after `onSynced` usually pushes a body
+   identical to what the editor already shows; that replace is what destroys the anchors, and
+   it is also a pointless full-document reflow on every page load. Removes the trigger, but not
+   the fragility — a real remote edit still goes through `setContent`.
+3. **Teach the window search about block breaks** — COLLAB.md §4 records that rewrite as tried
+   and reverted for brittleness. Don't reopen it for this.
+
+Whichever lands, the missing guard is an e2e assertion that a **cross-paragraph** anchor is
+still painted *after* `live-doc-synced` appears, not merely at first paint.
