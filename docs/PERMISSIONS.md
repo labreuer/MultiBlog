@@ -201,15 +201,19 @@ structural difference:
 
 | Doc rule | File equivalent |
 |---|---|
-| Read `/doc/[slug]` | Read `/pdf/[slug]`, and fetch its bytes from `/api/files/…` |
+| Read `/doc/[slug]` | Read `/pdf/[slug]` and `/files/[slug]`, download via `/files/[slug]/download`, fetch bytes from `/api/files/…` |
 | Edit `/doc/[slug]/edit` | **No equivalent** — a file has no editable content |
 | Visibility / owners / slug / delete | `canUserManageFile` (`src/app/actions/files.ts`) |
 | Listed in `/docs` (+ ADMIN "Show all docs") | Listed in `/files` (+ ADMIN "Show all files") |
 | Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same `requireOwnOrAdmin` |
 | Collab connection | Presence only, and **always read-only** (`/api/file/[id]/token`) |
 
-Two consequences worth stating plainly, because they are what the user-facing rule asked for:
+Three consequences worth stating plainly, because they are what the user-facing rule asked for:
 
+- **A file is readable by more people than `/files` is.** Reading one is `canViewFiles`
+  (which includes AUTHORIZED); the *table* is `canManageFiles` (which does not). So a
+  download link has to land somewhere gated on the file, never on `/files` — hence
+  `/files/[slug]` (PLAN.md §19).
 - **An AUTHOR sees only their own files**, PRIVATE *and* SHARED, because
   `canManageAnySharedFile` is ADMIN/EDITOR — exactly as `/docs` behaves.
 - **The bytes route answers 404, not 403**, to someone who may not read a PRIVATE file.

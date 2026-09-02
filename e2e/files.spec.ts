@@ -1,5 +1,14 @@
 import { test, expect, signIn, gotoOk } from "./fixtures";
-import { ADMIN_EMAIL, createTestFile, createTestUser, deleteTestFile, deleteTestUser, uniqueEmail } from "./db";
+import {
+  ADMIN_EMAIL,
+  TEST_PASSWORD,
+  createTestFile,
+  createTestUser,
+  deleteTestFile,
+  deleteTestUser,
+  uniqueEmail,
+} from "./db";
+import { formatBytes } from "@/lib/file-format";
 import { buildTestPdf } from "../scripts/make-test-pdf";
 import { buildTestDocx, SAMPLE_DOCX_PARAGRAPHS } from "../scripts/make-test-docx";
 
@@ -334,6 +343,93 @@ test.describe("files", () => {
       await deleteTestFile(file.id);
       await deleteTestUser(ownerEmail);
       await deleteTestUser(otherEmail);
+    }
+  });
+});
+
+// PLAN.md §19 — /files/[slug], the landing a download sends someone who had to
+// sign in first.
+//
+// The regression these pin is one that hid behind a *working* download. The
+// callbackUrl used to be the download URL itself, so signing in ran
+// `router.push("/files/<slug>/download")`; the client router fetched a route
+// handler that answers with bytes, the browser downloaded them, and — because
+// a download never navigates — the app stayed on the sign-in form. The file
+// arrived and the screen looked like a failed login, which is not a state any
+// assertion about the *bytes* would have caught.
+test.describe("the post-sign-in download landing", () => {
+  test("signs you in, lands you on the file, and still delivers the bytes", async ({ page }) => {
+    // AUTHORIZED specifically: this role may read a SHARED file but may not
+    // reach /files at all (canViewFiles vs canManageFiles), so it is the role
+    // that a "land them on a filtered /files" fix would have answered
+    // "you don't have permission to manage files" — for a file it had just
+    // legitimately downloaded.
+    const readerEmail = uniqueEmail("authorized");
+    await createTestUser({ email: readerEmail, role: "AUTHORIZED" });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+
+    try {
+      await page.context().clearCookies();
+      await page.goto(`/files/${file.slug}/download`);
+
+      await page.waitForURL("**/sign-in?callbackUrl=*");
+      expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe(`/files/${file.slug}`);
+
+      const download = page.waitForEvent("download");
+      await page.getByLabel("Email").fill(readerEmail);
+      await page.getByLabel("Password").fill(TEST_PASSWORD);
+      await page.getByRole("button", { name: "Sign in" }).click();
+
+      // The landing page — not the sign-in form this used to strand people on.
+      await page.waitForURL(`**/files/${file.slug}`);
+      await expect(page.getByRole("heading", { name: file.title })).toBeVisible();
+      await expect(page.getByText(formatBytes(file.byteSize))).toBeVisible();
+      await expect(page.getByRole("link", { name: "download it here" })).toBeVisible();
+
+      // And the file itself still arrives, without a click.
+      expect((await download).suggestedFilename()).toContain(".pdf");
+    } finally {
+      await deleteTestFile(file.id);
+      await deleteTestUser(readerEmail);
+    }
+  });
+
+  test("an AUTHORIZED reader still can't reach /files itself", async ({ page }) => {
+    // The other half of the choice above: the landing page is deliberately not
+    // a way into the file *table*, whose gate stays stricter than the file's.
+    const readerEmail = uniqueEmail("authorized");
+    await createTestUser({ email: readerEmail, role: "AUTHORIZED" });
+
+    try {
+      await page.context().clearCookies();
+      await signIn(page, readerEmail);
+      await gotoOk(page, "/files");
+      await expect(page.getByText(/doesn't have permission to manage files/)).toBeVisible();
+    } finally {
+      await deleteTestUser(readerEmail);
+    }
+  });
+
+  test("refuses the landing to someone who may not read the file", async ({ page }) => {
+    const ownerEmail = uniqueEmail("owner");
+    const strangerEmail = uniqueEmail("stranger");
+    await createTestUser({ email: ownerEmail, role: "AUTHOR" });
+    await createTestUser({ email: strangerEmail, role: "AUTHOR" });
+    const file = await createTestFile({ ownerEmail, visibility: "PRIVATE" });
+
+    try {
+      await page.context().clearCookies();
+      await signIn(page, strangerEmail);
+      await gotoOk(page, `/files/${file.slug}`);
+
+      await expect(page.getByRole("heading", { name: "Forbidden" })).toBeVisible();
+      // The filename is a fact about a file they may not read, so it must not
+      // be on the page even though the slug resolved.
+      await expect(page.getByText(file.title)).toHaveCount(0);
+    } finally {
+      await deleteTestFile(file.id);
+      await deleteTestUser(strangerEmail);
+      await deleteTestUser(ownerEmail);
     }
   });
 });

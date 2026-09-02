@@ -265,6 +265,13 @@ page mounting the header out of static rendering unless wrapped in Suspense,
 which is exactly the cost the next section explains the header exists to avoid.
 `usePathname` carries no such bailout.
 
+**A callbackUrl must name a page.** `signIn` finishes with `router.push`, which fetches
+an RSC payload — so a route handler as the destination is silently wrong. It shipped that
+way on `/files/[slug]/download`: the router got bytes, the browser downloaded them, and
+because a download never navigates the app sat on the sign-in form looking like the login
+had failed, with the file already on disk. A gate whose own URL isn't a page needs a
+landing page to point at (`/files/[slug]`, PLAN.md §19).
+
 **The drift this leaves is guarded.** Choosing per-gate over a matcher trades a
 path list that can go stale for 23 call sites that can be written wrong — a new
 gated route can carry a plain `redirect("/sign-in")` and be correct in every

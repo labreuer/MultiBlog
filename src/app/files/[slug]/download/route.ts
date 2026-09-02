@@ -27,18 +27,18 @@ import { signInPath } from "@/lib/sign-in-redirect";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
+// `_request` is unused but cannot be dropped: `params` is the second argument.
+export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const session = await auth();
   const { slug } = await params;
 
   if (!session?.user) {
     // A URL meant to be pasted and clicked by a person, so it answers like a
     // page rather than like an API: sign in and come back, not a bare 401.
-    // "Come back" literally — the callbackUrl returns them to this same URL,
-    // which then answers with the bytes. Taken from `request.url` rather than
-    // rebuilt from `slug`, since the raw path is right here and needs no
-    // assumption about what a slug may contain.
-    return redirectTo(signInPath(new URL(request.url).pathname));
+    //
+    // Since this isn't actually a page, we don't want to redirect just-signed-in
+    // users here. A landing page was made instead to handle that situation.
+    return redirectTo(signInPath(`/files/${slug}`));
   }
 
   const resolved = await resolveFileParam(slug, {
