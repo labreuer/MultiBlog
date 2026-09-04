@@ -73,7 +73,25 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   // icon says whether there is a panel at all, the tabs inside it say which
   // pane. Keeping them apart is what lets closing and reopening the panel come
   // back to the tab you were on.
-  const [panelOpen, setPanelOpen] = useState(true);
+  // Open by default where the panel is a *column* beside the viewer, closed
+  // where it is an overlay *over* it. Below 768px PdfViewer.module.css makes
+  // the open panel `position: absolute; inset: 0` over the whole viewer row,
+  // so defaulting it open there means every phone arrival hides the document
+  // behind the annotations — reported as "I'm not seeing PDFs on my phone".
+  //
+  // Reading matchMedia in a lazy initializer is safe here specifically because
+  // this island is behind `next/dynamic({ ssr: false })` (PdfSurfaceClient), so
+  // it never renders on the server and there is no HTML for a width-dependent
+  // first render to mismatch against. Don't copy the pattern into a component
+  // that *is* server-rendered.
+  //
+  // The initial value only, deliberately not kept in sync with the query below:
+  // once a reader has opened or closed the panel, a rotation must not overrule
+  // them. `positioned` tracks the same query for layout and is a separate
+  // question.
+  const [panelOpen, setPanelOpen] = useState(
+    () => window.matchMedia(POSITIONED_MEDIA_QUERY).matches,
+  );
   const [activePane, setActivePane] = useState(ANNOTATIONS_PANE);
   const [positioned, setPositioned] = useState(false);
   // The captured selection waiting to become an annotation, plus a token that
