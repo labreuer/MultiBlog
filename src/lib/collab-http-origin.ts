@@ -38,6 +38,10 @@
 // NEXT_PUBLIC_, since it's read server-side only: changing it needs a restart,
 // not a rebuild.
 export function collabHttpOrigin(): string {
-  const url = process.env.COLLAB_INTERNAL_URL ?? `http://127.0.0.1:${process.env.COLLAB_PORT ?? 1234}`;
+  // `||`, not `??`: a blank `COLLAB_PORT=` line is "" and would otherwise
+  // become port 0 (scripts/dev-ports.ts's readPort, which this can't import
+  // from inside the Next bundle).
+  const port = Number(process.env.COLLAB_PORT) || 1234;
+  const url = process.env.COLLAB_INTERNAL_URL ?? `http://127.0.0.1:${port}`;
   return url.replace(/\/$/, "");
 }

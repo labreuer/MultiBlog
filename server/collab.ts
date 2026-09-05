@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Server } from "@hocuspocus/server";
+import { COLLAB_PORT } from "../scripts/dev-ports";
 import { isYdocDocument, YDOC_SNAPSHOT_PATH, ANNOTATION_MARK_PATH, ANNOTATION_UNMARK_PATH, ANNOTATION_FLUSH_PATH } from "../src/lib/ydoc-names";
 import {
   ydocOnAuthenticate,
@@ -14,10 +15,12 @@ import {
   send,
 } from "./ydoc-hooks";
 
-const PORT = Number(process.env.COLLAB_PORT ?? 1234);
-
 const server = new Server({
-  port: PORT,
+  // From scripts/dev-ports.ts, the same module every other reader of the slot
+  // uses — not `Number(process.env.COLLAB_PORT ?? 1234)`: a blank
+  // `COLLAB_PORT=` line is "", which `??` lets through and Number turns into
+  // 0, and Hocuspocus on port 0 binds a random port.
+  port: COLLAB_PORT,
 
   // Explicit rather than inherited from Hocuspocus's own default — see
   // PLAN.md §11's context section for what this forecloses (relative-position

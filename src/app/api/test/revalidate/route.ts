@@ -10,7 +10,7 @@ import { revalidatePath } from "next/cache";
 // `freshGoto()` posts here before navigating.
 //
 // Guarded by E2E_REVALIDATE (bare env var — a restart, not a rebuild, same
-// convention as SITE_BANNER et al.), which only scripts/e2e-web.ps1 sets: a
+// convention as SITE_BANNER et al.), which only scripts/prod-web.ts's e2e role sets: a
 // real deployment never does, and without it this route answers 404,
 // indistinguishable from not existing. `next dev` doesn't set it either — the
 // dev server serves ISR pages fresh anyway, so the dev lane never needs it.

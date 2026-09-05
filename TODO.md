@@ -332,7 +332,7 @@ The other dev-only 500 class — `next dev`'s non-atomic read-modify-write of
 released Next (including canary) contains a fix. Two consequences:
 
 - A Next upgrade taken in hope of fixing dev flakiness would be wasted motion until one of
-  those merges — check the PRs first, and drop `scripts/check-ports.ps1`'s manifest
+  those merges — check the PRs first, and drop `scripts/dev-servers.ts`'s manifest
   `JSON.parse` tripwire only once a fixed version is actually installed.
 - The error string it emits, `Unexpected end of JSON input`, is the same one the old
   `playwright.config.ts` comment misattributed to "server actions arriving with truncated
@@ -369,7 +369,7 @@ nothing at all covers a worktree created by `claude -w`.
 
 Supersedes "The e2e port configuration ignores this checkout's own `.env`", which this day's
 work closed: `npm run dev` is `scripts/dev-web.ts` and passes `-p` explicitly, `BASE_URL` and
-`check-ports.ps1`'s `$ports` both derive from `scripts/dev-ports.ts`, and the two slots hold
+`check-ports`'s `SLOT_PORTS` both derive from `scripts/dev-ports.ts`, and the two slots hold
 separate databases and separate `.file-storage` directories — so Playwright adopting the other
 checkout's server, and the PDF-download 503s that followed from a shared `file` table, are both
 structurally impossible now rather than merely detected. The arrangement itself is a durable

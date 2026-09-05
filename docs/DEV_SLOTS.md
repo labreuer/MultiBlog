@@ -15,9 +15,9 @@ its own Postgres database and its own `.file-storage`.
 | database | `multiblog` | `multiblog_b` |
 
 Three values in `.env` define a slot — `DEV_HOST`, `WEB_PORT`, `COLLAB_PORT` — read through
-`scripts/dev-ports.ts` and its hand-kept PowerShell mirror `scripts/dev-ports.ps1`. Every
-port literal that used to be spread across `package.json`, `playwright.config.ts`,
-`check-ports.ps1`, `stop-all.ps1` and `e2e-web.ps1` now comes from that one module.
+`scripts/dev-ports.ts`. Every port literal that used to be spread across `package.json`,
+`playwright.config.ts` and the check-ports/stop-all/e2e-web scripts (`scripts/dev-servers.ts`,
+`scripts/prod-web.ts`) comes from that one module.
 
 ## Why only two web ports are configured
 
@@ -75,11 +75,14 @@ preview tool reads static JSON and cannot compute `WEB_PORT + 1`, so its numbers
 A's. In slot B the `web`/`web-prod` entries point at ports nothing is listening on — drive
 that slot from `npm run dev:all` and open the pane on `http://b.localhost:3005` directly.
 
-`web-prod` runs `next start` on :3001 (so it can coexist with a `dev:all` on :3000) against
-whatever `npm run build` last produced. Use it for anything caching-related, since `next dev`
-doesn't enforce the static/dynamic split or the Full Route Cache. It shells through `pwsh` to
-set `AUTH_TRUST_HOST`/`AUTH_URL`, without which NextAuth rejects `localhost:3001` as an
-`UntrustedHost` under `next start` — see CACHING.md's 2026-07-24 entry.
+`web-prod` is `npm run web-prod` (`scripts/prod-web.ts preview`): `next start` on
+`WEB_PORT + 1` (so it can coexist with a `dev:all` on `WEB_PORT`) against whatever
+`npm run build` last produced. Use it for anything caching-related, since `next dev` doesn't
+enforce the static/dynamic split or the Full Route Cache. The script sets
+`AUTH_TRUST_HOST`/`AUTH_URL`, without which NextAuth rejects `localhost:3001` as an
+`UntrustedHost` under `next start` — see CACHING.md's 2026-07-24 entry. Because the script
+reads the slot, only launch.json's *port* number is slot A's; the server itself binds
+correctly in either slot.
 
 ## Adding a third slot
 
