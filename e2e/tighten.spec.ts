@@ -142,6 +142,16 @@ test("one press is one undo step, and typing done just before it survives the un
 
     // Exactly one undo reverts the whole operation — not one boundary of it —
     // and leaves the typing alone.
+    //
+    // Wait for focus first. The toolbar click moves focus to the button, and
+    // tightenLines' chain().focus() hands it back on the *next animation
+    // frame* (@tiptap/core's focus command defers through
+    // requestAnimationFrame). On a fast machine the two toHaveCount()s above
+    // settle within ~30 ms of the click, so without this wait Ctrl+Z reaches
+    // the button, undoes nothing, and the test fails deterministically —
+    // every repeat, on a 32-thread box — while passing on slower hardware
+    // where the same gap happened to be wider than a frame.
+    await expect(body).toBeFocused();
     await page.keyboard.press("ControlOrMeta+z");
     await expect(body.locator("p")).toHaveCount(2);
     await expect(body.locator("p br")).toHaveCount(0);

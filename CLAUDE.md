@@ -225,7 +225,12 @@ running `prisma migrate dev` on anything unusual.
 
 ### Automated
 
-- Typecheck `npx tsc --noEmit`; lint `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
+- **`npm run check`** — schema format, unit tests, typecheck and lint in one command, in that
+  order (cheapest first). **This is the bar before reporting any change as done**, not
+  `tsc` and `eslint` alone: neither of those sees a `schema.prisma` edit, and one drifted
+  through that gap within days of the rule being written (TODO.md, "No CI"). Nothing runs
+  it automatically yet.
+  Individually: `npx tsc --noEmit`, `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
   `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
@@ -245,24 +250,26 @@ running `prisma migrate dev` on anything unusual.
   a spec can do the setup *and* the `boundingBox()`/`getComputedStyle` measurement in one
   process. Fixtures create and delete their own throwaway rows. Details and the gotchas that
   bite when writing new specs: [e2e/README.md](e2e/README.md).
-  - **On macOS `npm run e2e` doesn't run at all**: its `check-ports` prestep shells through
-    `pwsh`, which isn't installed. Use `npx playwright test` directly there. `npm run stop:all`
-    is unavailable for the same reason — use `pkill -f "next dev"` and
-    `pkill -f "server/collab.ts"`.
+  - `npm run e2e`, `check-ports`, `stop:all` and `e2e:web` are tsx scripts and run the same on
+    Windows, macOS and Linux (`scripts/dev-servers.ts` has the per-OS port-owner lookup). They
+    used to be PowerShell, and the docs said "use `pkill` on a Mac" — nothing needs `pwsh` now.
+    `npm run e2e -- <playwright args>` forwards arguments.
   - **The worker count is derived from the machine**; `E2E_WORKERS` overrides it (docs/ENV.md).
     Too many workers looks like scattered failures across unrelated specs that all pass
-    single-worker and read exactly like real regressions.
+    single-worker and read exactly like real regressions. **A red that *repeats* on a fast
+    machine is not that** — it is a timing assumption in the test (a keystroke inside TipTap's
+    `requestAnimationFrame`-deferred `focus()`, a `postData()` Playwright no longer had), and a
+    red that appears only with neighbours can be shared state (a "recent" list, a fixture's
+    sentence in an admin table) rather than load. docs/playwright-flakiness.html, 2026-09-01.
   - **Capture a run by redirecting to a file; never pipe it through a truncating cmdlet.**
     `| Select-Object -Last N` / `| tail` hides exactly the lines that would have mattered and
     leaves the pipeline, not playwright, answering for the exit code (`-First N` is worse: it
     can kill the process mid-run). Redirect, and read slices of the log in *separate* commands
-    afterwards:
-    - Windows (PowerShell): `npm run e2e > e2e.log 2>&1`
-    - Linux/macOS (bash): `E2E_TARGET=prod npx playwright test > e2e.log 2>&1` — `npm run e2e`
-      isn't available there (pwsh prestep, macOS note above; same on Linux).
+    afterwards: `npm run e2e > e2e.log 2>&1`, the same in PowerShell and bash.
 
-    Either form reports playwright's exit code *because the run is the last statement* — don't
-    clobber it by appending anything, in the pipeline or after the semicolon.
+    That reports playwright's exit code *because the run is the last statement* (`scripts/e2e.ts`
+    exits with the child's status) — don't clobber it by appending anything, in the pipeline or
+    after the semicolon.
 
     For pass/fail detail, skip the log archaeology: run with `--reporter=list,json` and
     `PLAYWRIGHT_JSON_OUTPUT_NAME=e2e-results.json` in the environment (the env var routes the
@@ -388,8 +395,7 @@ working on.
 
 - Commit only when the user explicitly asks. Commit messages explain *why*, not just what.
 - **Don't test UI changes unprompted** — no browser pane, no e2e run. Stop at
-  `npx tsc --noEmit` and `npx eslint .`, report the change as done, and say that UI testing
-  was deferred.
+  `npm run check`, report the change as done, and say that UI testing was deferred.
 - **But before committing a change that touched the UI, ask whether to test it first** — if
   it hasn't been tested already. The commit is the moment the question is worth asking, and
   the answer is the user's; don't quietly commit untested UI, and don't quietly go test it

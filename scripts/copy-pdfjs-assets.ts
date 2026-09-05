@@ -41,15 +41,13 @@
 // pdfjs upgrade can't leave a stale font behind.
 
 import { cp, mkdir, rm } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-
-const nodeRequire = createRequire(join(process.cwd(), "package.json"));
+import { resolveFromRoot } from "./resolve-from-root";
 
 async function main(): Promise<void> {
   // Resolved through the package's own manifest so this follows the installed
   // copy rather than assuming a node_modules layout.
-  const pdfjsRoot = dirname(nodeRequire.resolve("pdfjs-dist/package.json"));
+  const pdfjsRoot = dirname(resolveFromRoot("pdfjs-dist/package.json"));
   const target = join(process.cwd(), "public", "pdfjs");
 
   await rm(target, { recursive: true, force: true });
