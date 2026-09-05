@@ -93,7 +93,17 @@ Slots are hand-configured; there is no setup script (TODO.md tracks that gap). T
    and a `DATABASE_URL` naming its own database. The `multiblog` role has CREATEDB, so no
    superuser is needed:
    `psql -U multiblog -h 127.0.0.1 -d postgres -c "CREATE DATABASE multiblog_c OWNER multiblog"`.
-3. `npx prisma migrate deploy` and `npx tsx scripts/seed-sample-data.ts` from that tree.
+3. `npm ci`, then `npx prisma generate` — the client is emitted to `src/generated/`, which is
+   gitignored, so a fresh worktree has no client until this runs and `scripts/seed-sample-data.ts`
+   fails with `Cannot find module '@/generated/prisma/client'`.
+4. `npx prisma migrate deploy` from that tree.
+5. Start the collab server **before** seeding: `npm run collab` (or `npm run dev:all`) from that
+   tree, so it binds this slot's `COLLAB_PORT`. Then `npx tsx scripts/seed-sample-data.ts`. The
+   seed applies each anchored annotation's mark through the collab server, exactly as
+   `postAnnotation` does (PLAN.md §12i); with no server up it does not fail, it degrades — every
+   anchored annotation is written as a document-level one and the log says
+   `mark not applied (is the collab server running?)`. Seeding first and starting collab later
+   leaves those annotations unanchored for good.
 
 The separate database is not optional — see [DATABASE.md](DATABASE.md) for the drift-reset
 failure it exists to prevent.

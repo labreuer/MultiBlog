@@ -378,7 +378,12 @@ const ANCESTOR_MARKERS = [
  * real parent and the walk now ends below it — `tsx watch`, the one supervisor
  * that restarts its child, is always beneath that shell and still gets
  * stopped, and the npm/concurrently layers above exit on their own once their
- * scripts have. (Reasoned from npm's spawn shape, not measured on Windows.)
+ * scripts have. Measured on Windows 10 (2026-09-04) against a live `dev:all`
+ * tree: the walk stopped at npm's cmd.exe and the kill list went from 15
+ * processes to 6 (the two tsx wrappers, their loader children, next's bin
+ * and its start-server leaf); within 3 s every layer above — both cmd.exe
+ * wrappers, both `npm run`s, concurrently, its cmd.exe, and `npm run dev:all`
+ * itself — had exited on its own, and all three ports were clear.
  */
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "ksh", "tcsh", "csh", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"]);
 
