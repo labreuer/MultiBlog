@@ -244,7 +244,7 @@ await page.keyboard.type(prefix);</code></pre>
     <ul>
       <li><strong>Run the suite against the prod build</strong> — <code>web-prod</code> already exists; Next's own Playwright guide recommends exactly this. Kills classes 3 and 4 outright and removes compile-latency noise. Cost: a build per session, and :3001 wiring.</li>
       <li>Staying on dev: use <code>gotoOk</code> for <em>every</em> public-page navigation (13 plain <code>goto</code>s today) so a tear at least names itself instead of masquerading as a missing element.</li>
-      <li>Cheap tripwire: <code>JSON.parse</code> the manifest in <code>check-ports.ps1</code> — the sticky variant of this bug 500s every route until restart and is otherwise indistinguishable from "the suite broke".</li>
+      <li>Cheap tripwire: <code>JSON.parse</code> the manifest in check-ports (<code>devManifestIsTorn</code>, scripts/dev-servers.ts) — the sticky variant of this bug 500s every route until restart and is otherwise indistinguishable from "the suite broke".</li>
     </ul></div>
   </div>
 

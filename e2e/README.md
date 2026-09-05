@@ -26,9 +26,18 @@ red test whose 500 matches a known dev-only class so it doesn't read as an app
 regression.
 
 Other entry points: `npm run e2e:ui` (watch mode with a time-travel debugger),
-`npm run e2e:report` (last run's HTML report), and the usual Playwright flags —
-`npx playwright test e2e/doc.spec.ts -g "title"`, `--headed`, `--debug` (all
-dev-target; set `E2E_TARGET=prod` yourself to point one at :3002).
+`npm run e2e:report` (last run's HTML report), and the usual Playwright flags,
+forwarded after `--`: `npm run e2e -- e2e/doc.spec.ts -g "title"`,
+`--repeat-each=3`, `--headed`, `--debug` (`npm run e2e:dev -- …` for the dev
+target; a bare `npx playwright test …` is dev-target too, unless you set
+`E2E_TARGET=prod` yourself to point it at :3002).
+
+A subset run is a whole run at the edges: a file or `-g` filter selects spec
+tests, and Playwright adds `auth.setup.ts` and `cleanup.teardown.ts` because
+they are the selected project's `dependencies` and its `teardown` — `--list`
+on a single spec shows all three files. So a one-spec run signs in fresh and
+sweeps up after itself, and `e2e/.auth/admin.json` need not exist beforehand.
+`--no-deps` skips both, and then it must.
 
 ## How a run is wired
 
