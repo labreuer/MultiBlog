@@ -50,3 +50,37 @@ test("shows the error after a failed no-JavaScript sign-in", async ({ page }) =>
   await expect(page.getByText("Invalid email or password.")).toBeVisible();
   expect(page.url()).not.toContain("definitely-not-the-password");
 });
+
+test("carries the callbackUrl across the no-JavaScript POST", async ({ page }) => {
+  // The destination can't ride in the URL here — this submit is a POST — so it
+  // travels as a hidden field that `signInAction` re-validates and hands to
+  // `redirectTo`. Nothing about that path can be exercised with JS on, where
+  // the client `signIn` uses the prop and ignores the field entirely.
+  await page.goto("/sign-in?callbackUrl=%2Fdocs");
+  await expect(page.locator('main form input[name="callbackUrl"]')).toHaveAttribute("value", "/docs");
+
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
+  await page.getByLabel("Password").fill(TEST_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await page.waitForURL("**/docs");
+  await expect(page.getByRole("heading", { name: "Docs", level: 1 })).toBeVisible();
+});
+
+test("a failed no-JavaScript sign-in keeps the destination for the retry", async ({ page }) => {
+  await page.goto("/sign-in?callbackUrl=%2Fdocs");
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
+  await page.getByLabel("Password").fill("definitely-not-the-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page.getByText("Invalid email or password.")).toBeVisible();
+  // Without this the retry silently lands on /dashboard instead.
+  expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe("/docs");
+});
+
+test("renders no callbackUrl field when there is no destination to carry", async ({ page }) => {
+  // A defaulted "/dashboard" here would echo back into the URL on every failed
+  // sign-in, which is noise in the overwhelmingly common case.
+  await page.goto("/sign-in");
+  await expect(page.locator('main form input[name="callbackUrl"]')).toHaveCount(0);
+});

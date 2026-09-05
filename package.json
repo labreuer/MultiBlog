@@ -12,8 +12,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "npm run check:schema && npm run test:unit && tsc --noEmit && eslint .",
+    "check": "npm run check:schema && npm run check:sign-in && npm run test:unit && tsc --noEmit && eslint .",
     "check:schema": "tsx scripts/check-schema-format.ts",
+    "check:sign-in": "tsx scripts/check-sign-in-redirects.ts",
     "collab": "tsx watch server/collab.ts",
     "collab:prod": "tsx server/collab.ts",
     "dev:all": "concurrently -n web,collab -c blue,magenta \"npm:dev\" \"npm:collab\"",
@@ -68,7 +69,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",

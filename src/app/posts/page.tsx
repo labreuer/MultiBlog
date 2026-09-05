@@ -11,6 +11,7 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import { parsePostsFilters, type PostsFilters, type PostsSortKey } from "@/lib/posts-query";
 import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import PostsTable from "@/components/PostsTable";
 
 export const metadata: Metadata = { title: "Posts" };
@@ -82,9 +83,13 @@ export default async function PostsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Hoisted above the gate so an anonymous visitor's callbackUrl keeps the
+  // filters, sort and page they arrived with — this table's whole state lives
+  // in the querystring (CLAUDE.md, "Admin tables are one kit").
+  const urlSearchParams = toURLSearchParams(await searchParams);
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(pathWithQuery("/posts", urlSearchParams)));
   }
   if (!canManagePosts(session.user.role)) {
     return (
@@ -95,7 +100,6 @@ export default async function PostsPage({
     );
   }
 
-  const urlSearchParams = toURLSearchParams(await searchParams);
   // Run concurrently — the option list is independent of prefs/filters, so
   // fetching it costs no extra latency in series.
   const [prefs, authorOptions] = await Promise.all([

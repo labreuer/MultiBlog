@@ -26,11 +26,14 @@ import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
 import { DocVisibility } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
+import { signInPath } from "@/lib/sign-in-redirect";
 
 async function requireEditableDocSession(docId: string) {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    // No callbackUrl: this guards a mutation, and a POST can't be replayed by
+    // arriving at a URL, so there is no destination worth naming.
+    redirect(signInPath());
   }
 
   const doc = await prisma.doc.findUnique({ where: { id: docId } });
@@ -126,7 +129,9 @@ async function insertDocRow(userId: string, title: string) {
 export async function createDoc(): Promise<void> {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    // No callbackUrl: this guards a mutation, and a POST can't be replayed by
+    // arriving at a URL, so there is no destination worth naming.
+    redirect(signInPath());
   }
   if (!canManageDocs(session.user.role)) {
     throw new Error("You don't have permission to create docs.");
@@ -189,7 +194,9 @@ export async function importMarkdownDocAction(
 ): Promise<ImportMarkdownState> {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    // No callbackUrl: this guards a mutation, and a POST can't be replayed by
+    // arriving at a URL, so there is no destination worth naming.
+    redirect(signInPath());
   }
   // Unlike createDoc's equivalent throw, this one is reachable-ish and so is
   // reported rather than thrown: /docs gates the control on the same check

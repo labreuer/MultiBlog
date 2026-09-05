@@ -9,6 +9,7 @@ import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import { parseTagsFilters, type TagsFilters, type TagsSortKey } from "@/lib/tags-query";
 import type { SortColumn } from "@/lib/table-sort";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import TagsTable from "@/components/TagsTable";
 
 export const metadata: Metadata = { title: "Tags" };
@@ -96,9 +97,13 @@ export default async function TagsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Hoisted above the gate so an anonymous visitor's callbackUrl keeps the
+  // filters, sort and page they arrived with — this table's whole state lives
+  // in the querystring (CLAUDE.md, "Admin tables are one kit").
+  const urlSearchParams = toURLSearchParams(await searchParams);
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(pathWithQuery("/tags", urlSearchParams)));
   }
   if (!canManageDocs(session.user.role)) {
     return (
@@ -109,7 +114,6 @@ export default async function TagsPage({
     );
   }
 
-  const urlSearchParams = toURLSearchParams(await searchParams);
   const prefs = await getTablePrefs(session.user.id, "tags");
   const filters = parseTagsFilters(urlSearchParams, prefs);
   const where = buildFilterWhere(filters);

@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 import { extractText, diffText } from "@/lib/diff";
+import { signInPath } from "@/lib/sign-in-redirect";
 import { Prisma } from "@/generated/prisma/client";
 
 export const metadata: Metadata = { title: "Diff" };
@@ -23,7 +24,7 @@ export default async function EventDiffPage({
 
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(`/posts/${id}/history/${eventId}`));
   }
 
   const post = await prisma.post.findUnique({

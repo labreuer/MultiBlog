@@ -10,6 +10,7 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import { parseFilesFilters, type FilesFilters, type FilesSortKey } from "@/lib/files-query";
 import { ownerFilterWhere, listOwnerFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import FilesTable from "@/components/FilesTable";
 import FileUploader from "@/components/FileUploader";
 
@@ -81,9 +82,13 @@ export default async function FilesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Hoisted above the gate so an anonymous visitor's callbackUrl keeps the
+  // filters, sort and page they arrived with — this table's whole state lives
+  // in the querystring (CLAUDE.md, "Admin tables are one kit").
+  const urlSearchParams = toURLSearchParams(await searchParams);
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(pathWithQuery("/files", urlSearchParams)));
   }
   if (!canManageFiles(session.user.role)) {
     return (
@@ -94,7 +99,6 @@ export default async function FilesPage({
     );
   }
 
-  const urlSearchParams = toURLSearchParams(await searchParams);
   const [prefs, ownerOptions] = await Promise.all([
     getTablePrefs(session.user.id, "files"),
     listOwnerFilterOptions(session.user.id),

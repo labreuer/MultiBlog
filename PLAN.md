@@ -6366,6 +6366,11 @@ component) needs `canManageFiles` for the nav link.
   the `users`/`site-settings` entries and will simply appear left of nothing for a
   non-ADMIN. Flagging rather than deciding silently.
 - `scripts/test-file.ts` following the `test-doc.ts` containment convention.
+- `/files/[slug]/download` — the pasteable download URL, resolving to the bytes route.
+  `/files/[slug]` is its **post-sign-in landing**: shows title/filename/size and starts
+  the download itself. Both gate on `canUserReadFile`, not `canManageFiles`, so an
+  AUTHORIZED reader can use a download link without being able to reach `/files`.
+  Nothing links to the landing — `FilesTable` still points straight at `/download`.
 
 ---
 

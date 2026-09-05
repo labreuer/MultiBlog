@@ -65,8 +65,9 @@ is the cheaper path to it.
 
 ## No CI: nothing runs the checks except the committer
 
-**Status:** open as of 2026-09-04. `npm run check` (schema format, unit tests, typecheck, lint)
-exists and is the thing to run; what's missing is the machine that runs it on every PR.
+**Status:** open as of 2026-09-04. `npm run check` (schema format, sign-in redirects, unit
+tests, typecheck, lint) exists and is the thing to run; what's missing is the machine that
+runs it on every PR.
 
 Why this is an item rather than a pre-commit hook: the schema drifted out of format three days
 after CLAUDE.md told every session to run `prisma format`, and was found only because a review

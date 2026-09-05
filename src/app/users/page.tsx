@@ -11,6 +11,7 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import { parseUsersFilters, type UsersFilters, type UsersSortKey } from "@/lib/users-query";
 import type { SortColumn } from "@/lib/table-sort";
 import { appUrl } from "@/lib/app-url";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import UsersTable from "@/components/UsersTable";
 
 export const metadata: Metadata = { title: "Users" };
@@ -76,9 +77,13 @@ export default async function UsersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Hoisted above the gate so an anonymous visitor's callbackUrl keeps the
+  // filters, sort and page they arrived with — this table's whole state lives
+  // in the querystring (CLAUDE.md, "Admin tables are one kit").
+  const urlSearchParams = toURLSearchParams(await searchParams);
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(pathWithQuery("/users", urlSearchParams)));
   }
   if (!isAdmin(session.user.role)) {
     return (
@@ -89,7 +94,6 @@ export default async function UsersPage({
     );
   }
 
-  const urlSearchParams = toURLSearchParams(await searchParams);
   const prefs = await getTablePrefs(session.user.id, "users");
   const filters = parseUsersFilters(urlSearchParams, prefs);
   const where = buildFilterWhere(filters);

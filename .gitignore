@@ -31,6 +31,14 @@
 .DS_Store
 *.pem
 
+# dev/test run logs. `npm run dev:all` and `npm run e2e` are both captured by
+# redirecting to a file rather than piping (CLAUDE.md: a truncating cmdlet hides
+# the lines that matter and eats the exit code), so these accumulate in the
+# working tree and are never repository content.
+/dev-all.log
+/e2e.log
+/e2e-results.json
+
 # debug
 npm-debug.log*
 yarn-debug.log*

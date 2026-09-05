@@ -225,13 +225,18 @@ running `prisma migrate dev` on anything unusual.
 
 ### Automated
 
-- **`npm run check`** — schema format, unit tests, typecheck and lint in one command, in that
-  order (cheapest first). **This is the bar before reporting any change as done**, not
-  `tsc` and `eslint` alone: neither of those sees a `schema.prisma` edit, and one drifted
-  through that gap within days of the rule being written (TODO.md, "No CI"). Nothing runs
-  it automatically yet.
+- **`npm run check`** — schema format, sign-in redirects, unit tests, typecheck and lint in
+  one command, in that order (cheapest first). **This is the bar before reporting any change
+  as done**, not `tsc` and `eslint` alone: neither of those sees a `schema.prisma` edit, and
+  one drifted through that gap within days of the rule being written (TODO.md, "No CI").
+  Nothing runs it automatically yet.
   Individually: `npx tsc --noEmit`, `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
   `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
+- `npm run check:sign-in` (part of `check`) — fails if anything redirects to a bare
+  `"/sign-in"` instead of `signInPath(<where the viewer was heading>)`. The failure it exists
+  for is silent: a new gated route that skips the callbackUrl still compiles, lints, gates and
+  passes its tests — only the person who followed the link notices, by landing on /dashboard.
+  src/app/sign-in/NOTES.md.
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
   and the right home for exactly one kind of thing — pure functions whose *rejection surface*

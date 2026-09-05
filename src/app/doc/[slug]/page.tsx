@@ -19,6 +19,7 @@ import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
 import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
+import { signInPath } from "@/lib/sign-in-redirect";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { DocScrubProvider } from "@/components/DocScrubContext";
@@ -80,7 +81,7 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
   // Free — generateMetadata already ran this for the same request.
   const access = await loadDocForRead(slug);
   if (access.status === "signed-out") {
-    redirect("/sign-in");
+    redirect(signInPath(`/doc/${slug}`));
   }
   if (access.status === "redirect") {
     redirect(access.to);

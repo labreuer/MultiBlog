@@ -13,6 +13,7 @@ import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-query";
+import { signInPath } from "@/lib/sign-in-redirect";
 import SideBySideView from "@/components/sidebyside/SideBySideView";
 import styles from "./page.module.css";
 
@@ -114,7 +115,7 @@ export default async function SideBySidePage({
   // Free — generateMetadata already ran this for the same request.
   const access = await loadPairForRead(left, right);
   if (access.status === "signed-out") {
-    redirect("/sign-in");
+    redirect(signInPath(`/side-by-side/${left}/${right}`));
   }
   if (access.status === "redirect") {
     redirect(access.to);

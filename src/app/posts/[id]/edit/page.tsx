@@ -5,6 +5,7 @@ import { canEditAnyPost } from "@/lib/authz";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import { derivePostStatus } from "@/lib/post-status";
 import { editableDocsFor } from "@/lib/doc-authz";
+import { signInPath } from "@/lib/sign-in-redirect";
 import PostPublisher from "@/components/PostPublisher";
 
 // prismaIncludingDeleted rather than the soft-delete-filtered prisma — a
@@ -43,7 +44,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   // Free — generateMetadata already ran this for the same request.
   const access = await loadPostForEdit(id);
   if (access.status === "signed-out") {
-    redirect("/sign-in");
+    redirect(signInPath(`/posts/${id}/edit`));
   }
   if (access.status === "redirect") {
     redirect(access.to);

@@ -15,13 +15,14 @@ import AccountSettings from "@/components/AccountSettings";
 import styles from "./page.module.css";
 import account from "@/styles/account.module.css";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
+import { signInPath } from "@/lib/sign-in-redirect";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath("/dashboard"));
   }
 
   // isListedContributor gates ContributorPanel below. Read from the
