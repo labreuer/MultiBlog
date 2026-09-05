@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
 import { uniquePostSlug } from "@/lib/post-slug";
+import { signInPath } from "@/lib/sign-in-redirect";
 import SlugManager from "@/components/SlugManager";
 
 export const metadata: Metadata = { title: "Post url" };
@@ -13,7 +14,7 @@ export default async function PostSlugPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(`/posts/${id}/slug`));
   }
 
   const post = await prisma.post.findUnique({

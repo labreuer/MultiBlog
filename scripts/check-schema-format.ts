@@ -23,6 +23,7 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { resolveFromRoot } from "./resolve-from-root";
 
 const SCHEMA = path.resolve(process.cwd(), "prisma/schema.prisma");
 const BACKUP = `${SCHEMA}.check-backup`;
@@ -31,13 +32,12 @@ const write = process.argv.includes("--write");
 /**
  * Line endings are git's business, not prisma's.
  *
- * `prisma format` always writes LF; this working tree is CRLF (git's
- * autocrlf, which is why every `git add` of the schema prints "LF will be
- * replaced by CRLF"). Comparing raw bytes therefore reports a difference on
- * every single run, on content that is identical line for line — a check that
- * can only ever fail is worse than no check. Both sides normalise to LF, so
- * this answers the question actually being asked: would prisma format change
- * anything a reviewer would see?
+ * `prisma format` always writes LF. `.gitattributes` pins the schema to LF
+ * too, but a Windows editor can still save it CRLF between commits, and
+ * comparing raw bytes then reports a difference on content identical line for
+ * line — a check that fails on line endings alone is worse than no check.
+ * Both sides normalise to LF, so this answers the question actually being
+ * asked: would prisma format change anything a reviewer would see?
  */
 function toLf(text: string): string {
   return text.replace(/\r\n/g, "\n");
@@ -57,9 +57,12 @@ copyFileSync(SCHEMA, BACKUP);
 
 let formatted: string;
 try {
-  // `prisma` resolves through node_modules/.bin, which npm puts on PATH for a
-  // script and tsx inherits. shell: true so the .cmd shim works on Windows.
-  execFileSync("prisma", ["format", "--schema", SCHEMA], { stdio: "pipe", shell: true });
+  // Prisma's CLI entry under node, not the `prisma` shim through a shell —
+  // scripts/resolve-from-root.ts says why (the shim is a .cmd on Windows, and a
+  // shell leaves the schema path unquoted).
+  execFileSync(process.execPath, [resolveFromRoot("prisma/build/index.js"), "format", "--schema", SCHEMA], {
+    stdio: "pipe",
+  });
   formatted = readFileSync(SCHEMA, "utf8");
 } finally {
   // Always restore first; `write` re-applies below. If prisma format threw

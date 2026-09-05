@@ -13,7 +13,7 @@
 //
 // The other two web ports stay derived: WEB_PORT + 1 is the preview tool's
 // `web-prod` (.claude/launch.json) and WEB_PORT + 2 is the e2e prod target
-// (scripts/e2e-web.ps1). So a slot owns three consecutive web ports —
+// (scripts/prod-web.ts). So a slot owns three consecutive web ports —
 // {3000, 3001, 3002} and {3005, 3006, 3007} — and slots sit five apart, which
 // leaves 3003/3004 as slack rather than packing them edge to edge. A third
 // slot belongs at 3010.
@@ -50,10 +50,6 @@
 //     prod-mode servers still do, and already set them.
 // An invented TLD (`multiblog-b.test`) fails the first two: it needs the hosts
 // file *and* an allowedDevOrigins entry.
-//
-// scripts/dev-ports.ps1 is a hand-kept mirror of this file. PowerShell cannot
-// import TS, and shelling out to `tsx` would put a cold node start in front of
-// every `npm run e2e` via check-ports. Change one, change the other.
 import "dotenv/config";
 
 /**

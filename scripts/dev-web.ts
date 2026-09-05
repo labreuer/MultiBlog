@@ -12,22 +12,16 @@
 // Spawned straight onto next's bin with node — no `npx`, no `shell: true` — so
 // the tree stays one layer deep and every process in it still carries this
 // repo's absolute path in its command line. That is exactly what
-// scripts/stop-all.ps1 and scripts/check-ports.ps1 match on to decide whether a
-// process listening on one of our ports is ours to stop, so an extra cmd.exe
-// wrapper would be a real cost, not a style question.
-//
-// `createRequire(join(process.cwd(), "package.json"))` anchors resolution at
-// the project root, matching scripts/copy-pdfjs-assets.ts and
-// src/lib/pdf-extract.ts rather than at this file's own URL — npm scripts
-// always run from the root, and it sidesteps the CJS/ESM `import.meta`
-// question tsx would otherwise raise here.
+// scripts/dev-servers.ts (behind `npm run stop:all` and `check-ports`) matches
+// on to decide whether a process listening on one of our ports is ours to
+// stop, so an extra shell wrapper would be a real cost, not a style question.
+// scripts/resolve-from-root.ts is where the bin path comes from, and says why
+// it resolves from cwd.
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
-import { join } from "node:path";
 import { DEV_HOST, WEB_PORT, webUrl } from "./dev-ports";
+import { resolveFromRoot } from "./resolve-from-root";
 
-const nodeRequire = createRequire(join(process.cwd(), "package.json"));
-const nextBin = nodeRequire.resolve("next/dist/bin/next");
+const nextBin = resolveFromRoot("next/dist/bin/next");
 
 // Printed because the port is no longer a constant anyone can assume: Next's
 // own banner reports the port but not which slot's .env chose it.

@@ -3,6 +3,7 @@
 import { AuthError } from "next-auth";
 import { redirect } from "next/navigation";
 import { signIn } from "@/lib/auth";
+import { destinationAfterSignIn, safeCallbackUrl, signInErrorPath } from "@/lib/sign-in-redirect";
 
 /**
  * The no-JavaScript path for the sign-in form.
@@ -21,19 +22,21 @@ import { signIn } from "@/lib/auth";
  * Errors come back as a redirect the server-rendered page reads instead.
  */
 export async function signInAction(formData: FormData): Promise<void> {
+  // The hidden field `SignInForm` renders. Re-validated rather than trusted:
+  // this is a POST body, so it is no more ours than the query string was.
+  const callbackUrl = safeCallbackUrl(formData.get("callbackUrl"));
+
   try {
     await signIn("credentials", {
       email: formData.get("email"),
       password: formData.get("password"),
-      redirectTo: "/dashboard",
+      redirectTo: destinationAfterSignIn(callbackUrl),
     });
   } catch (err) {
     // `signIn`'s own success path redirects by throwing NEXT_REDIRECT, which is
     // not an AuthError — falling through to the rethrow is what lets it happen.
     if (err instanceof AuthError) {
-      // Deliberately just a flag: echoing the submitted email back into the URL
-      // would re-introduce a smaller version of the leak this action exists to fix.
-      redirect("/sign-in?error=1");
+      redirect(signInErrorPath(callbackUrl));
     }
     throw err;
   }

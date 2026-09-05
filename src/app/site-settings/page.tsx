@@ -6,6 +6,7 @@ import { getSiteSettings } from "@/lib/site-settings";
 import { SITE_TITLE } from "@/lib/site-config";
 import { columnOrderFor, type AdminTableName } from "@/lib/column-order";
 import { ADMIN_TABLE_COLUMNS, codeDefaultColumns } from "@/lib/admin-table-columns";
+import { signInPath } from "@/lib/sign-in-redirect";
 import SiteSettingsTable, { type ConfigRow, type DefaultColumnsRow } from "@/components/SiteSettingsTable";
 
 export const metadata: Metadata = { title: "Site settings" };
@@ -35,7 +36,7 @@ const CONFIG_ROWS: ConfigRow[] = [{ name: "SITE_TITLE", value: SITE_TITLE }];
 export default async function SiteSettingsPage() {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath("/site-settings"));
   }
   if (!isAdmin(session.user.role)) {
     return (

@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { editableDocsFor } from "@/lib/doc-authz";
+import { signInPath } from "@/lib/sign-in-redirect";
 import NewPostDocPicker from "@/components/NewPostDocPicker";
 
 export const metadata: Metadata = { title: "New post" };
@@ -14,7 +15,7 @@ export const metadata: Metadata = { title: "New post" };
 export default async function NewPostPage() {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath("/posts/new"));
   }
 
   const docs = await editableDocsFor(session.user.id, session.user.role);

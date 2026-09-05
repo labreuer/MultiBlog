@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
+import { signInPath } from "@/lib/sign-in-redirect";
 import YdocDebug from "@/components/YdocDebug";
 
 export const metadata: Metadata = { title: "Ydoc debug" };
@@ -14,7 +15,7 @@ export const metadata: Metadata = { title: "Ydoc debug" };
 export default async function YdocDebugPage() {
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath("/ydoc-debug"));
   }
   if (!isAdmin(session.user.role)) {
     return (

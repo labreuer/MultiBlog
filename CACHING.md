@@ -157,12 +157,12 @@ npm run build
 ```
 
 then run the `web-prod` entry in `.claude/launch.json` (port 3001, so it doesn't collide with
-`dev:all` on 3000). That entry shells through `pwsh` to set `AUTH_TRUST_HOST`/`AUTH_URL`,
+`dev:all` on 3000). That entry is `npm run web-prod` (`scripts/prod-web.ts`), which sets `AUTH_TRUST_HOST`/`AUTH_URL`,
 because NextAuth rejects `localhost:3001` with `UntrustedHost` under `next start` — the same
 enforcement DEPLOY.md §5 warns about.
 
 **Don't leave web-prod serving while anything rebuilds.** A cold `npm run e2e` runs its own
-`npm run build` (its prod server, `scripts/e2e-web.ps1`, lives on :3002 — `WEB_PORT + 2` — precisely
+`npm run build` (its prod server, `scripts/prod-web.ts`'s e2e role, lives on :3002 — `WEB_PORT + 2` — precisely
 so the two `next start`s can coexist as *processes*), but both serve the same `.next`, and
 `next start` reads chunks and manifests from it after boot: a rebuild underneath a running
 server leaves it answering with a mix of old and new assets, observed misbehaving during the

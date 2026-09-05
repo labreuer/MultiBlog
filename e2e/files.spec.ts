@@ -1,5 +1,14 @@
 import { test, expect, signIn, gotoOk } from "./fixtures";
-import { ADMIN_EMAIL, createTestFile, createTestUser, deleteTestFile, deleteTestUser, uniqueEmail } from "./db";
+import {
+  ADMIN_EMAIL,
+  TEST_PASSWORD,
+  createTestFile,
+  createTestUser,
+  deleteTestFile,
+  deleteTestUser,
+  uniqueEmail,
+} from "./db";
+import { formatBytes } from "@/lib/file-format";
 import { buildTestPdf } from "../scripts/make-test-pdf";
 import { buildTestDocx, SAMPLE_DOCX_PARAGRAPHS } from "../scripts/make-test-docx";
 
@@ -58,7 +67,12 @@ test.describe("files", () => {
       // row is immediately listed — which also exercises the file_metrics view
       // (the Owner(s) cell) and the uploader's revalidation path.
       await gotoOk(page, "/files");
-      await expect(page.getByRole("link", { name: title })).toBeVisible();
+      // `exact` because the Filename column is a link too, and this uploader
+      // names the file `<title>.pdf` — so a substring match (the default) finds
+      // the Title link *and* the Filename one. The scoping tests below need no
+      // such guard: createTestFile hyphenates the spaces out of its filename,
+      // so their titles never appear verbatim in a filename link.
+      await expect(page.getByRole("link", { name: title, exact: true })).toBeVisible();
     } finally {
       await deleteTestFile(created.id);
     }
@@ -248,6 +262,7 @@ test.describe("files", () => {
     const result = await uploadFile(page, `${title}.docx`, buildTestDocx(["Anything."]), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     expect(result.status, result.body).toBe(200);
     const created = JSON.parse(result.body) as { id: string; sha256: string };
+    const pdf = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
 
     try {
       // A browser asked to render a .docx inline either downloads it anyway or
@@ -262,8 +277,159 @@ test.describe("files", () => {
 
       expect(headers.disposition).toContain("attachment");
       expect(headers.type).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+      // The other half of this test's name, which it used to promise and not
+      // check. Now load-bearing rather than merely tidy: /pdf/[slug] hands the
+      // bare hash URL to pdfjs and depends on `inline`, so the `?download=1`
+      // override next door has to leave the default alone. Without this, that
+      // override could swallow the inline case and the suite would stay green.
+      const inlineRes = await page.request.get(`/api/files/${pdf.id}/${pdf.sha256}`);
+      expect(inlineRes.headers()["content-disposition"]).toContain("inline");
     } finally {
       await deleteTestFile(created.id);
+      await deleteTestFile(pdf.id);
+    }
+  });
+
+  // The slug download URL (/files/<slug>/download) — a resolver in front of the
+  // byte route, not a second way to serve bytes.
+  test("downloads through the slug URL, forcing the attachment disposition", async ({ page }) => {
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, "/files");
+
+      // `maxRedirects: 0` rather than a page.evaluate fetch: a same-origin
+      // `redirect: "manual"` fetch answers an opaqueredirect with status 0 and
+      // no readable headers, so the one thing worth asserting here — where the
+      // hop points — would be invisible.
+      const hop = await page.request.get(`/files/${file.slug}/download`, { maxRedirects: 0 });
+      expect(hop.status()).toBe(307);
+      expect(hop.headers()["location"]).toBe(`/api/files/${file.id}/${file.sha256}?download=1`);
+
+      const served = await page.request.get(`/files/${file.slug}/download`);
+      expect(served.status()).toBe(200);
+      // Why `?download=1` exists at all. This is a PDF, which the byte route
+      // answers `inline` by default (asserted above); a URL ending in
+      // /download that opened the viewer instead would still *look* correct
+      // from the table, because the anchor there would save it either way —
+      // and would quietly fail for anyone who pasted the URL.
+      expect(served.headers()["content-disposition"]).toContain("attachment");
+      expect(served.headers()["content-type"]).toBe("application/pdf");
+      expect((await served.body()).byteLength).toBe(file.byteSize);
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+
+  test("refuses a PRIVATE file's slug download to a non-owner", async ({ page }) => {
+    const ownerEmail = uniqueEmail("file-owner");
+    const otherEmail = uniqueEmail("file-other");
+    await createTestUser({ email: ownerEmail, name: `File Owner ${ownerEmail.split("@")[0]}`, role: "AUTHOR" });
+    await createTestUser({ email: otherEmail, name: `File Other ${otherEmail.split("@")[0]}`, role: "AUTHOR" });
+    const file = await createTestFile({ ownerEmail: ownerEmail, visibility: "PRIVATE" });
+
+    try {
+      await signIn(page, otherEmail);
+      await gotoOk(page, "/files");
+      const res = await page.request.get(`/files/${file.slug}/download`, { maxRedirects: 0 });
+      // 403 here, against the byte route's 404 next door, and the difference is
+      // deliberate: this route shares /pdf/[slug]'s key space, which already
+      // discloses that a slug resolves at all. The 404 there guards *id*
+      // guessing, which a slug URL gives no way to do.
+      expect(res.status()).toBe(403);
+    } finally {
+      await deleteTestFile(file.id);
+      await deleteTestUser(ownerEmail);
+      await deleteTestUser(otherEmail);
+    }
+  });
+});
+
+// PLAN.md §19 — /files/[slug], the landing a download sends someone who had to
+// sign in first.
+//
+// The regression these pin is one that hid behind a *working* download. The
+// callbackUrl used to be the download URL itself, so signing in ran
+// `router.push("/files/<slug>/download")`; the client router fetched a route
+// handler that answers with bytes, the browser downloaded them, and — because
+// a download never navigates — the app stayed on the sign-in form. The file
+// arrived and the screen looked like a failed login, which is not a state any
+// assertion about the *bytes* would have caught.
+test.describe("the post-sign-in download landing", () => {
+  test("signs you in, lands you on the file, and still delivers the bytes", async ({ page }) => {
+    // AUTHORIZED specifically: this role may read a SHARED file but may not
+    // reach /files at all (canViewFiles vs canManageFiles), so it is the role
+    // that a "land them on a filtered /files" fix would have answered
+    // "you don't have permission to manage files" — for a file it had just
+    // legitimately downloaded.
+    const readerEmail = uniqueEmail("authorized");
+    await createTestUser({ email: readerEmail, role: "AUTHORIZED" });
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+
+    try {
+      await page.context().clearCookies();
+      await page.goto(`/files/${file.slug}/download`);
+
+      await page.waitForURL("**/sign-in?callbackUrl=*");
+      expect(new URL(page.url()).searchParams.get("callbackUrl")).toBe(`/files/${file.slug}`);
+
+      const download = page.waitForEvent("download");
+      await page.getByLabel("Email").fill(readerEmail);
+      await page.getByLabel("Password").fill(TEST_PASSWORD);
+      await page.getByRole("button", { name: "Sign in" }).click();
+
+      // The landing page — not the sign-in form this used to strand people on.
+      await page.waitForURL(`**/files/${file.slug}`);
+      await expect(page.getByRole("heading", { name: file.title })).toBeVisible();
+      await expect(page.getByText(formatBytes(file.byteSize))).toBeVisible();
+      await expect(page.getByRole("link", { name: "download it here" })).toBeVisible();
+
+      // And the file itself still arrives, without a click.
+      expect((await download).suggestedFilename()).toContain(".pdf");
+    } finally {
+      await deleteTestFile(file.id);
+      await deleteTestUser(readerEmail);
+    }
+  });
+
+  test("an AUTHORIZED reader still can't reach /files itself", async ({ page }) => {
+    // The other half of the choice above: the landing page is deliberately not
+    // a way into the file *table*, whose gate stays stricter than the file's.
+    const readerEmail = uniqueEmail("authorized");
+    await createTestUser({ email: readerEmail, role: "AUTHORIZED" });
+
+    try {
+      await page.context().clearCookies();
+      await signIn(page, readerEmail);
+      await gotoOk(page, "/files");
+      await expect(page.getByText(/doesn't have permission to manage files/)).toBeVisible();
+    } finally {
+      await deleteTestUser(readerEmail);
+    }
+  });
+
+  test("refuses the landing to someone who may not read the file", async ({ page }) => {
+    const ownerEmail = uniqueEmail("owner");
+    const strangerEmail = uniqueEmail("stranger");
+    await createTestUser({ email: ownerEmail, role: "AUTHOR" });
+    await createTestUser({ email: strangerEmail, role: "AUTHOR" });
+    const file = await createTestFile({ ownerEmail, visibility: "PRIVATE" });
+
+    try {
+      await page.context().clearCookies();
+      await signIn(page, strangerEmail);
+      await gotoOk(page, `/files/${file.slug}`);
+
+      await expect(page.getByRole("heading", { name: "Forbidden" })).toBeVisible();
+      // The filename is a fact about a file they may not read, so it must not
+      // be on the page even though the slug resolved.
+      await expect(page.getByText(file.title)).toHaveCount(0);
+    } finally {
+      await deleteTestFile(file.id);
+      await deleteTestUser(strangerEmail);
+      await deleteTestUser(ownerEmail);
     }
   });
 });

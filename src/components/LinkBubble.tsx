@@ -327,6 +327,13 @@ export default function LinkBubble({
       className={styles.linkBubble}
       role="group"
       aria-label="Link"
+      // True from the first paint of a doc link's bubble until its preview
+      // lookup has answered (an answer of "no such doc" included). A live
+      // region's honest state, and the one signal e2e can wait on: the
+      // alternative — matching the server action's POST by body — depends on
+      // Playwright having captured the body, which it hasn't once the request
+      // finished before it looked, i.e. exactly under load (link-bubble.spec).
+      aria-busy={docParam !== null && preview === undefined}
       onMouseDown={(e) => e.preventDefault()}
     >
       <div className={styles.linkBubbleRow}>

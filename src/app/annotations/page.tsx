@@ -11,6 +11,7 @@ import { parseAnnotationsFilters, type AnnotationsSortKey } from "@/lib/annotati
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import AnnotationsTable, { type AnnotationRow } from "@/components/AnnotationsTable";
 
 export const metadata: Metadata = { title: "Annotations" };
@@ -99,9 +100,13 @@ export default async function AnnotationsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Hoisted above the gate so an anonymous visitor's callbackUrl keeps the
+  // filters, sort and page they arrived with — this table's whole state lives
+  // in the querystring (CLAUDE.md, "Admin tables are one kit").
+  const urlSearchParams = toURLSearchParams(await searchParams);
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(pathWithQuery("/annotations", urlSearchParams)));
   }
   if (!canManageDocs(session.user.role)) {
     return (
@@ -112,7 +117,6 @@ export default async function AnnotationsPage({
     );
   }
 
-  const urlSearchParams = toURLSearchParams(await searchParams);
   const prefs = await getTablePrefs(session.user.id, "annotations");
   const filters = parseAnnotationsFilters(urlSearchParams, prefs);
 

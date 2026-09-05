@@ -267,7 +267,7 @@ export async function gotoOk(page: Page, path: string): Promise<void> {
  * (the server actions that would have called revalidatePath were bypassed),
  * so a copy cached by an earlier test's visit gets served — up to the
  * revalidate window stale. The POST hits the E2E_REVALIDATE-guarded
- * /api/test/revalidate route (scripts/e2e-web.ps1 sets the var); against the
+ * /api/test/revalidate route (scripts/prod-web.ts sets the var); against the
  * dev target the route 404s and the plain goto is already fresh, so the
  * failure is deliberately swallowed. Content written through a real server
  * action doesn't need this — the action's own revalidatePath is the thing

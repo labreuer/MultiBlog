@@ -22,6 +22,7 @@ import { annotationAnchorInputs, anchoredLinkAnchorInputs } from "@/lib/annotati
 import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
 import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
+import { signInPath } from "@/lib/sign-in-redirect";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { DocScrubProvider } from "@/components/DocScrubContext";
@@ -89,7 +90,7 @@ export default async function PublicDocPage({
   // Free — generateMetadata already ran this for the same request.
   const access = await loadDocForRead(slug);
   if (access.status === "signed-out") {
-    redirect("/sign-in");
+    redirect(signInPath(`/doc/${slug}`));
   }
   if (access.status === "redirect") {
     redirect(access.to);

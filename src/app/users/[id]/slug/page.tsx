@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
 import { uniqueUserSlug } from "@/lib/user-slug";
+import { signInPath } from "@/lib/sign-in-redirect";
 import SlugManager from "@/components/SlugManager";
 
 export const metadata: Metadata = { title: "User url" };
@@ -13,7 +14,7 @@ export default async function UserSlugPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(`/users/${id}/slug`));
   }
   if (!isAdmin(session.user.role)) {
     return (

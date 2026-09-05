@@ -14,7 +14,7 @@ import { COLLAB_PORT, E2E_WEB_PORT, WEB_PORT, webUrl } from "./scripts/dev-ports
 //
 // - **prod** (`npm run e2e`, via E2E_TARGET=prod): the full suite runs against
 //   `next build` + `next start` on WEB_PORT + 2 — :3002 in slot A
-//   (scripts/e2e-web.ps1). Two of the suite's historical failure classes are
+//   (scripts/prod-web.ts). Two of the suite's historical failure classes are
 //   dev-only and compiled out of a production build — the prerender-manifest
 //   RMW tear (vercel/next.js#96664, ~1 tear per suite run, occasionally a 500
 //   on an unrelated route) and next-auth's dev-only SessionProvider invariant,
@@ -33,15 +33,40 @@ import { COLLAB_PORT, E2E_WEB_PORT, WEB_PORT, webUrl } from "./scripts/dev-ports
 const PROD = process.env.E2E_TARGET === "prod";
 
 /**
- * The worker count measured to be right, on 12 logical cores. Measured twice:
- * the 30-run dev matrix (2026-08-22/23) and a 6-run prod matrix (2026-08-24)
- * that exists because the first one's conclusion did not transfer. Raise only
- * with a fresh matrix behind it; see the block on `workers` below.
+ * The prod worker count measured to be right, per machine it was measured on.
+ * Ascending by core count. Each row is a matrix, not a guess — see the block
+ * on `workers` below and docs/playwright-flakiness.html — and a new row needs
+ * a fresh one: interleaved rounds against warm servers, reds and the latency
+ * tail recorded, not just wall clock.
+ *
+ *   12 threads  i7-8700K, Windows      30-run dev matrix (2026-08-22/23), 6-run prod
+ *                                      matrix (2026-08-24): 2.
+ *   32 threads  Ryzen 9 9950X, Fedora 44  16-run prod matrix (2026-09-01) over
+ *                                      {4, 6, 8, 12, 16}: 8. Every red above 4 was a
+ *                                      test-design fault load merely exposed, fixed in
+ *                                      that pass; after the fixes 4/8/16 ran 7 of 7
+ *                                      green. 8 is ~24% quicker than 4 (39 s vs 51 s
+ *                                      wall) with the slowest test at 6.7 s; 16 is no
+ *                                      quicker and its tail (p95 5.3 s, slowest 8.9 s)
+ *                                      closes on the 10 s expect budget.
  */
-const MEASURED_WORKERS = 2;
+const MEASURED: ReadonlyArray<{ cores: number; workers: number }> = [
+  { cores: 12, workers: 2 },
+  { cores: 32, workers: 8 },
+];
 
-/** Never above what was measured; below it when the machine is visibly smaller. */
-const PROD_WORKERS = Math.max(1, Math.min(MEASURED_WORKERS, Math.floor(os.cpus().length / 4)));
+/**
+ * Never above what was measured on a box no bigger than this one: the largest
+ * measured row this machine matches or exceeds decides. Below the smallest
+ * measured box, scale down from its count with the cores (12 → 2, 8 → 2,
+ * 4 → 1, 2 → 1).
+ */
+function prodWorkersFor(cores: number): number {
+  const fit = [...MEASURED].reverse().find((m) => cores >= m.cores);
+  if (fit) return fit.workers;
+  return Math.max(1, Math.min(MEASURED[0].workers, Math.floor(cores / 4)));
+}
+const PROD_WORKERS = prodWorkersFor(os.cpus().length);
 
 export const BASE_URL = PROD ? webUrl(E2E_WEB_PORT) : webUrl(WEB_PORT);
 export const ADMIN_STORAGE_STATE = "e2e/.auth/admin.json";
@@ -104,14 +129,31 @@ export default defineConfig({
   // attributed to truncated server-action bodies was actually the manifest tear
   // above (same error string, Next parsing its own manifest).
   //
-  // The divisor is deliberately coarse and the clamp deliberately one-sided.
-  // Worker counts have been measured, but only ever on one *machine*, so the
-  // honest shape is "never exceed what was measured, and back off below it when
-  // there is visibly less machine": 12 logical cores → 2 (the measured box),
-  // 8 → 2, 4 → 1, 2 → 1. It errs toward 1 because the failure mode of too many
-  // workers is scattered red across unrelated specs that reads exactly like a
-  // real regression — far more expensive than a slower run. Note this is well
-  // under Playwright's own default of half the cores, which would be 6 here.
+  // The clamp is deliberately one-sided: "never exceed what was measured on a
+  // box no bigger than this, and back off below the smallest measured box when
+  // there is visibly less machine". It errs low because the failure mode of
+  // too many workers is scattered red across unrelated specs that reads
+  // exactly like a real regression — far more expensive than a slower run.
+  // Both measured counts sit well under Playwright's own default of half the
+  // cores (6 and 16 respectively).
+  //
+  // **The second machine (32 threads, 2026-09-01) changed what "contention
+  // red" looks like, and it is worth knowing before the next matrix.** Its
+  // first pass produced reds at every count including 4 — and not one was
+  // contention. All four were test-design faults that a faster box or more
+  // neighbours expose *deterministically*: a Ctrl+Z pressed 34 ms after a
+  // toolbar click, before TipTap's requestAnimationFrame-deferred focus() had
+  // handed focus back (tighten.spec, failed 6 of 6 repeats); a test asserting
+  // on the `[[` menu's *recent* list, which every other worker's throwaway
+  // SHARED doc lands in (doc-ref.spec); a wait keyed on a server action's
+  // POST body, which Playwright doesn't have once the request finished before
+  // it looked (link-bubble.spec — the bubble is aria-busy now instead); and
+  // a /comments "no row" check on a sentence the quotedPost fixture also uses
+  // as a comment body (doc.spec). So a red that *repeats* on a fast machine
+  // is a timing assumption in the test, and a red that appears only with
+  // neighbours may still be shared-state, not load. Genuine load showed up
+  // only as the tail: p50 0.57 → 0.9 → 1.6 s and p95 2.3 → 3.0 → 5.3 s at
+  // 4 → 8 → 16 workers, with the slowest test at 6.2 / 6.7 / 8.9 s.
   //
   // Dev target: one, and *not* derived. The dev lane exists for iterating on a
   // single spec, where parallelism buys nothing, and its ceiling is the dev
@@ -231,7 +273,7 @@ export default defineConfig({
   webServer: [
     PROD
       ? {
-          // Build + serve the production bundle (scripts/e2e-web.ps1). The
+          // Build + serve the production bundle (scripts/prod-web.ts). The
           // timeout covers a full `next build` on a cold :3005; a server left
           // running from a previous run skips it entirely via
           // reuseExistingServer.

@@ -141,15 +141,25 @@ test.describe("[[ drops a doc reference at the caret (DocRefMenu.tsx)", () => {
 
   test("ArrowDown moves the highlight; Enter then picks the highlighted row", async ({ page, refDoc }) => {
     void refDoc;
-    const first = uniqueTitle("ref newer");
-    const second = uniqueTitle("ref older");
-    // Created older-first, so the recent list leads with `first`.
+    // One unique stem shared by both titles, typed as the query, so the list
+    // holds exactly these two rows — title-sorted by searchReadableDocsFor,
+    // hence the "a"/"b" suffixes deciding which is first. The earlier form
+    // relied on the *recent* list (no query) leading with the doc created
+    // last, which is only true when nothing else is being edited: the store
+    // debounce bumps Doc.updatedAt on every doc under edit, and with several
+    // workers each test's throwaway SHARED docs land in this admin's recent
+    // eight constantly. On a 32-thread box at 4+ workers that put another
+    // worker's doc at index 0 in nearly every run.
+    const stem = uniqueTitle("ref");
+    const first = `${stem} a`;
+    const second = `${stem} b`;
     const older = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: second, visibility: "SHARED" });
     const newer = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: first, visibility: "SHARED" });
     try {
       await caretAtEndOf(page, "Paragraph two.");
-      await page.keyboard.type(" [[");
+      await page.keyboard.type(` [[${stem}`);
       const list = menu(page);
+      await expect(list.getByRole("option")).toHaveCount(2);
       await expect(list.getByRole("option", { name: first })).toHaveAttribute("aria-selected", "true");
       await page.keyboard.press("ArrowDown");
       await expect(list.getByRole("option", { name: second })).toHaveAttribute("aria-selected", "true");

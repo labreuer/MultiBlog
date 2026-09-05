@@ -34,8 +34,7 @@ computed. `src/lib/collab-url.ts` depends on this.
 | `WEB_PORT` | 3000 | The dev server's port. `WEB_PORT + 1` (preview tool's `web-prod`) and `WEB_PORT + 2` (e2e prod target) are derived, never configured. |
 
 Both default sensibly when absent, so an unedited `.env` behaves exactly as it did before
-slots existed. Read through `scripts/dev-ports.ts` and its hand-kept PowerShell mirror
-`scripts/dev-ports.ps1`. Full rationale: [DEV_SLOTS.md](DEV_SLOTS.md).
+slots existed. Read through `scripts/dev-ports.ts`. Full rationale: [DEV_SLOTS.md](DEV_SLOTS.md).
 
 ## Collab: three variables answering three different questions
 

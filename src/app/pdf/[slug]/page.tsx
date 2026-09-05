@@ -6,6 +6,7 @@ import { gated, titleWhenOk } from "@/lib/route-access";
 import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
 import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
+import { signInPath } from "@/lib/sign-in-redirect";
 import TagChips from "@/components/tags/TagChips";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import styles from "./page.module.css";
@@ -73,7 +74,7 @@ export default async function PdfPage({
   // Free — generateMetadata already ran this for the same request.
   const access = await loadFileForRead(slug);
   if (access.status === "signed-out") {
-    redirect("/sign-in");
+    redirect(signInPath(`/pdf/${slug}`));
   }
   if (access.status === "redirect") {
     // The slug-history redirect names only the path — re-append ?sel= or a

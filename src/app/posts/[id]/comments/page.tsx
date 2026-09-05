@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
+import { signInPath } from "@/lib/sign-in-redirect";
 import ModerateCommentButtons from "@/components/ModerateCommentButtons";
 
 export const metadata: Metadata = { title: "Moderate comments" };
@@ -12,7 +13,7 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
   const { id } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect("/sign-in");
+    redirect(signInPath(`/posts/${id}/comments`));
   }
 
   const post = await prisma.post.findUnique({

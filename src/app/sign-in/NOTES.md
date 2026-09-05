@@ -89,7 +89,8 @@ visited.
 ## Why the form uses client `signIn` — and still keeps a server action
 
 `sign-in-form.tsx` calls `signIn` from `next-auth/react` with `redirect: false` and then
-`router.push("/dashboard")`. It previously used a `"use server"` action wrapping the
+`router.push()`s to the validated `callbackUrl` (or /dashboard — see *Coming back to where
+you were* above). It previously used a `"use server"` action wrapping the
 server-side `signIn` with `useActionState` — which is the Auth.js v5 / Next.js docs pattern,
 and which broke in production on 2026-07-31.
 
@@ -166,6 +167,127 @@ Regression coverage: `e2e/sign-in-nojs.spec.ts` runs with `javaScriptEnabled: fa
 asserts the form's `method`, a working sign-in, and that neither the password nor the string
 `password` reaches the URL. `e2e/auth.setup.ts` covers the JavaScript-on path and so is what
 would catch the server action firing when it shouldn't.
+
+## Coming back to where you were
+
+Every gated surface sends anonymous visitors to `/sign-in`, and until 2026-08-31
+that was the end of the trail: sign-in always finished on /dashboard, so a link to
+a doc, a PDF or a filtered admin table lost the thing the reader had clicked.
+The destination now travels as `?callbackUrl=`, the Auth.js convention.
+
+`src/lib/sign-in-redirect.ts` owns both ends — `signInPath(returnTo)` for the
+gates, `safeCallbackUrl`/`destinationAfterSignIn` for the sign-in page.
+
+**Why each gate builds its own, rather than a middleware doing it once.** The
+idiomatic v5 answer is `middleware.ts` with a matcher: NextAuth's own wrapper
+then supplies `callbackUrl` for free, and no page changes at all.
+
+Be accurate about what that would have cost, because the tempting wrong answer
+is that these gates are too varied for a matcher. **They aren't. All 23 are
+"is the viewer signed in", with nothing else in them.** That is not obvious from
+reading the five routes that go through `gated()` (`/doc/[slug]`,
+`/doc/[slug]/edit`, `/pdf/[slug]`, `/posts/[id]/edit`,
+`/side-by-side/[left]/[right]`), which redirect on `access.status ===
+"signed-out"` and look like they are consulting the database — but
+`src/lib/route-access.ts` returns that status **before** it calls the route's
+own `load`. The database only ever decides `forbidden`/`not-found`/`redirect`,
+all of which happen after this gate. So `signed-out` is precisely
+`!session?.user`, and a matcher could express every one of them.
+
+What middleware genuinely cannot do is *replace* these checks — only precede
+them. `gated()` hands the page `access.user`, and the other eighteen read
+`session.user.role` on the very next line; the body needs the session object,
+not the knowledge that one exists. So the page-level branch survives either way,
+and the choice is only about where the *destination* is named:
+
+- Middleware **and** the path literals below: both diffs for one behavior.
+  Strictly worse.
+- Middleware, with every gate left as a bare `redirect("/sign-in")`: the
+  smallest diff. Its cost is that the matcher is a second statement of the route
+  tree that nothing typechecks, and drift shows up as a route quietly losing its
+  callbackUrl — a degradation rather than a breakage, so nothing surfaces it.
+- What's here: the destination is named by the code that decided to redirect,
+  and there is nothing to keep in sync. Its cost is 23 call sites.
+
+The last was chosen on drift, not on capability, and it is a preference rather
+than a constraint. (The edge-runtime problem — `auth()` pulling in Prisma and
+bcryptjs — is real but secondary; Next 16's Node middleware runtime or the
+Auth.js split config would answer it.)
+
+So the param is built where the decision is made, from the `params` each page
+already holds. The admin tables
+additionally carry their querystring (`pathWithQuery`), because filters, sort
+and page all live there and dropping it returns the reader to an unfiltered
+page 1 of the table they were looking at.
+
+**The `Referer` header is not a shortcut past any of this**, though it looks like
+one that would touch a single file. Measured against this app on 2026-08-31, with
+a browser observing the `/sign-in` document request:
+
+| how the gate was reached | `Referer` on `/sign-in` |
+|---|---|
+| direct navigation to `/docs` (pasted, emailed, bookmarked) | *(none)* |
+| clicked through from the landing page | `http://…/` — the landing page, not `/docs` |
+
+Following a redirect does not reset the referrer; it inherits the one from the
+navigation that caused it. So `Referer` names the page the reader *left*, never
+the page they were *going to* — and for the case that motivated this work, a
+link that requires login, it is absent entirely. It would also still need
+`safeCallbackUrl`, since an inbound header is no more ours than a query param.
+
+The five `redirect("/sign-in")` calls in `src/app/actions/` are deliberately
+left bare: they guard *mutations*, and a POST can't be replayed by arriving at
+a URL, so there is no destination worth naming.
+
+**The same-origin check is ours, not Auth.js's.** This is the part to not
+un-learn. Auth.js validates `redirectTo` in its `redirect` callback — but the
+form calls `signIn(..., { redirect: false })` and navigates itself, for the
+SessionProvider reason above, so that callback never runs on the path essentially
+every user takes. A bare `router.push(callbackUrl)` would therefore make
+`/sign-in?callbackUrl=https://evil.example` an open redirect wearing our own
+login page. `safeCallbackUrl` rejects anything that doesn't parse to a
+same-origin path and returns the *parsed* path, so a caller is never handed a
+string the parser disagreed with — which is what disposes of `/\evil.example`,
+where WHATWG URL normalises the backslash to a slash and yields a foreign origin
+that a `startsWith("//")` test would have missed. It also refuses `/sign-in`
+itself and the sibling account pages, so nothing can loop.
+
+The no-JS path carries the destination as a hidden field, since its submit is a
+POST; `signInAction` re-validates it (a request body is no more ours than a query
+string) and re-attaches it to `?error=1` so a mistyped password doesn't quietly
+drop the retry back to /dashboard. The field is rendered only when there *is* a
+destination — a defaulted `/dashboard` would otherwise show up in the URL after
+every failed sign-in.
+
+`SiteHeader`'s "Log in" link uses the same helper against `usePathname()`, so the
+header agrees with the gates. Pathname only: `useSearchParams` would opt every
+page mounting the header out of static rendering unless wrapped in Suspense,
+which is exactly the cost the next section explains the header exists to avoid.
+`usePathname` carries no such bailout.
+
+**A callbackUrl must name a page.** `signIn` finishes with `router.push`, which fetches
+an RSC payload — so a route handler as the destination is silently wrong. It shipped that
+way on `/files/[slug]/download`: the router got bytes, the browser downloaded them, and
+because a download never navigates the app sat on the sign-in form looking like the login
+had failed, with the file already on disk. A gate whose own URL isn't a page needs a
+landing page to point at (`/files/[slug]`, PLAN.md §19).
+
+**The drift this leaves is guarded.** Choosing per-gate over a matcher trades a
+path list that can go stale for 23 call sites that can be written wrong — a new
+gated route can carry a plain `redirect("/sign-in")` and be correct in every
+visible way: it compiles, it lints, it gates, its tests pass, and the only
+symptom is that whoever followed the link lands on /dashboard instead of what
+they clicked. `npm run check:sign-in`
+(`scripts/check-sign-in-redirects.ts`) fails on the bare literal anywhere
+outside `src/lib/sign-in-redirect.ts`, which is why that module also owns the
+`?error=1` and `?registered=1` URLs — one owner is what lets the guard run with
+no allowlist. A gate with genuinely no destination (a mutation guard) calls
+`signInPath()` with no argument and says so.
+
+Regression coverage: `e2e/sign-in-callback.spec.ts` (the round trip, the
+querystring, and both refused offsite forms), three added cases in
+`e2e/sign-in-nojs.spec.ts` (the hidden field, the failed retry, and its absence),
+and `src/lib/sign-in-redirect.test.ts` for the input table.
 
 ## Why the header isn't server-rendered instead
 

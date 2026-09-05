@@ -9,12 +9,8 @@
     },
     {
       "name": "web-prod",
-      "runtimeExecutable": "pwsh",
-      "runtimeArgs": [
-        "-NoProfile",
-        "-Command",
-        "$env:AUTH_TRUST_HOST='true'; $env:AUTH_URL='http://localhost:3001'; npx next start -p 3001"
-      ],
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "web-prod"],
       "port": 3001
     },
     {

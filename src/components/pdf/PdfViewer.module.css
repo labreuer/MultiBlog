@@ -90,6 +90,20 @@
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  /* **The containing block for the phone overlay**, and the only reason this is
+     positioned. Below 768px `.panelColumnOpen` becomes `position: absolute;
+     inset: 0` — which resolves against the nearest *positioned* ancestor, and
+     without this there isn't one: `.viewerWrap` is a sibling, and `.shell` and
+     everything above it are static. So the overlay sized itself to the initial
+     containing block and covered the whole viewport, toolbar included — taking
+     the side-panel toggle with it, which is the one control that dismisses it.
+     Measured on an iPhone 13 Pro (iOS 18.6.2, 390x663): the panel's rect was
+     [0, 0, 390, 663] and `elementFromPoint` returned a card at every sample
+     point, the toggle's own coordinates among them. The document rendered
+     perfectly underneath the whole time — 31 pages, canvases painted, no
+     console error — which is why this reads as "the PDF doesn't load on my
+     phone" rather than as a stacking bug. */
+  position: relative;
 }
 
 /* Wrapper exists solely to be the containing block for .viewerContainer:

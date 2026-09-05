@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
+import { signInAfterSignUpPath } from "@/lib/sign-in-redirect";
 
 export type SignUpState = { error?: string };
 
@@ -49,5 +50,5 @@ export async function signUp(_prevState: SignUpState, formData: FormData): Promi
     },
   });
 
-  redirect("/sign-in?registered=1");
+  redirect(signInAfterSignUpPath());
 }

@@ -70,6 +70,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return new Response("File contents are missing", { status: 503 });
   }
 
+  // `?download=1` forces the attachment form, which is how /files/<slug>/download
+  // (a URL whose whole promise is that it saves the file) gets that promise out
+  // of a route that would otherwise answer a PDF `inline`.
+  const forceAttachment = new URL(request.url).searchParams.get("download") === "1";
+
   const baseHeaders: Record<string, string> = {
     "Content-Type": file.contentType,
     ETag: etag,
@@ -78,10 +83,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // inline for a PDF, so a click opens it in a viewer rather than downloading;
     // attachment for anything else, because a browser asked to render a .docx
     // inline either downloads it anyway or shows a page of binary, and the
-    // second is worse than being asked where to save it. Both forms of the
-    // filename parameter: the ASCII fallback for old clients and the RFC 5987
-    // encoded one that survives non-ASCII names.
-    "Content-Disposition": `${file.contentType === "application/pdf" ? "inline" : "attachment"}; filename="${file.filename.replace(/["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+    // second is worse than being asked where to save it — and attachment
+    // whenever the caller asked for one outright, which is what /files/<slug>/download
+    // does to keep the promise its name makes. Both forms of the filename
+    // parameter: the ASCII fallback for old clients and the RFC 5987 encoded
+    // one that survives non-ASCII names.
+    "Content-Disposition": `${!forceAttachment && file.contentType === "application/pdf" ? "inline" : "attachment"}; filename="${file.filename.replace(/["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
   };
 
   const range = parseRange(request.headers.get("range"), size);
