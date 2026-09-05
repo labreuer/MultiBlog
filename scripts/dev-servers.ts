@@ -26,15 +26,23 @@
 // ports and both count as ours, and reuseExistingServer lets them sabotage
 // each other's runs. That is a known gap, not one this file closes.
 //
-// **The ownership rule**: a process listening on one of our ports
-// is ours if its command line mentions this repo's absolute path. The real
-// leaf processes always do — scripts/dev-web.ts spawns next's bin by absolute
-// path, `tsx watch` runs its child with absolute `--import` paths into
-// node_modules, and npm's `.bin` shims are invoked by full path — which is what
-// keeps an unrelated project squatting on :3000 from being adopted (check-ports)
-// or killed (stop-all). On Linux the process's cwd (readable from /proc) is
-// accepted as well: it is the stronger signal, and one a command line built
-// from relative paths can't lose.
+// **The ownership rule**: a process listening on one of our ports is ours if
+// its command line mentions this repo's absolute path, or its working
+// directory is inside the repo. The command line is the first test because
+// the processes this repo spawns carry the path — scripts/dev-web.ts spawns
+// next's bin by absolute path, `tsx watch` runs its child with absolute
+// `--import` paths into node_modules, and npm's `.bin` shims are invoked by
+// full path — which is what keeps an unrelated project squatting on :3000
+// from being adopted (check-ports) or killed (stop-all). The working directory
+// is the fallback, and it is not optional: the one leaf that matters most,
+// Next's server, rewrites its own `process.title` to `next-server (v16.2.11)`,
+// and libuv implements that on macOS and Linux by overwriting the argv that
+// `ps` and /proc/<pid>/cmdline read — so the listener on WEB_PORT names
+// neither this repo nor next. Measured on macOS (2026-09-04): with only the
+// command-line test, check-ports called this repo's own dev server foreign and
+// stop:all refused to touch it. Windows is unaffected, since Win32_Process
+// CommandLine is the original; Linux reads the cwd from /proc, macOS asks
+// `lsof`.
 //
 // Per-OS plumbing, kept behind three functions so nothing above them cares:
 //
@@ -42,7 +50,7 @@
 //                     macOS: `lsof -iTCP:<port> -sTCP:LISTEN`
 //                     Windows: `netstat -ano`, last column is the PID
 //   processInfo(pid)  Linux: /proc/<pid>/cmdline, /proc/<pid>/stat, /proc/<pid>/cwd
-//                     macOS: `ps -o ppid=,command=`
+//                     macOS: `ps -o ppid=,command=`, plus `lsof -a -p <pid> -d cwd`
 //                     Windows: Win32_Process via powershell.exe — Windows
 //                     PowerShell 5.1, which every Windows install has, not a
 //                     pwsh to install.
@@ -80,7 +88,7 @@ export interface ProcessInfo {
   pid: number;
   ppid: number | undefined;
   commandLine: string;
-  /** Linux only; undefined elsewhere. */
+  /** Linux and macOS; undefined on Windows, and where the OS won't say. */
   cwd?: string;
 }
 
@@ -192,7 +200,15 @@ export function processInfo(pid: number): ProcessInfo | undefined {
       if (!out) return undefined;
       const m = out.match(/^(\d+)\s+([\s\S]*)$/);
       if (!m) return undefined;
-      return { pid, ppid: Number(m[1]) || undefined, commandLine: m[2] };
+      // `-F n` prints one field per line — `p<pid>`, `fcwd`, `n<path>` — and
+      // `-w` keeps a warning about some unrelated mount from turning into a
+      // non-zero exit and an empty answer. Same tool listeners() already
+      // depends on, so nothing new to be missing. ~0.1 s a call.
+      const cwd = run("lsof", ["-w", "-a", "-p", String(pid), "-d", "cwd", "-Fn"])
+        .split(/\r?\n/)
+        .find((line) => line.startsWith("n"))
+        ?.slice(1);
+      return { pid, ppid: Number(m[1]) || undefined, commandLine: m[2], cwd };
     }
     case "win32":
       return windowsProcessTable().get(pid);
@@ -229,6 +245,12 @@ function windowsProcessTable(): Map<number, ProcessInfo> {
   }
   windowsProcesses = table;
   return table;
+}
+
+/** One line for a warning: the command line, and the cwd when the OS gave one. */
+function describe(info: ProcessInfo | undefined): string {
+  if (!info) return "(process gone or unreadable)";
+  return info.cwd ? `${info.commandLine}  (cwd ${info.cwd})` : info.commandLine;
 }
 
 /** The ownership test: does this process belong to this checkout? */
@@ -294,8 +316,8 @@ export function checkPorts(log: (line: string) => void = console.log): boolean {
       if (info && isOurs(info)) {
         log(`Port ${port} -- owned by this repo (PID ${pid}), Playwright will reuse it.`);
       } else {
-        log(`WARNING: Port ${port} is held by PID ${pid}, whose command line doesn't mention this repo:`);
-        log(`  ${info?.commandLine ?? "(process gone or unreadable)"}`);
+        log(`WARNING: Port ${port} is held by PID ${pid}, which neither names this repo on its command line nor runs inside it:`);
+        log(`  ${describe(info)}`);
         foreign = true;
       }
     }
@@ -313,11 +335,11 @@ export function checkPorts(log: (line: string) => void = console.log): boolean {
 /**
  * Patterns an *ancestor* must match to be included in the kill list. The leaf
  * (the process actually listening) must pass `isOurs`; each parent added above
- * it must match one of these, and the walk stops at the first that doesn't —
- * so it can never climb past this project's process tree into an unrelated
- * parent shell. `npm run dev` is a tsx wrapper (scripts/dev-web.ts) that
- * spawns next's bin by absolute path, so its leaf carries the repo path and
- * 'dev-web.ts' rather than a literal `next dev`.
+ * it must match one of these and must not be a shell (`isShell`), and the walk
+ * stops at the first that fails either test — so it can never climb past this
+ * project's process tree into an unrelated parent. `npm run dev` is a tsx
+ * wrapper (scripts/dev-web.ts) that spawns next's bin by absolute path, so its
+ * leaf carries the repo path and 'dev-web.ts' rather than a literal `next dev`.
  */
 const ANCESTOR_MARKERS = [
   REPO_ROOT,
@@ -336,6 +358,40 @@ const ANCESTOR_MARKERS = [
   "prod-web.ts",
   "next start",
 ];
+
+/**
+ * Executables the ancestor walk treats as a boundary: a shell is never a kill
+ * target, and the walk ends below it. The markers alone can't tell a shell
+ * apart, because a shell's command line *quotes the command it was given* —
+ * the `zsh -c '… npm run dev:all > dev.log …'` that a tool or a script wraps
+ * around the real command matches "npm run dev:all" character for character,
+ * and it was in the kill list on 2026-09-04 (harmless that time: it was a
+ * throwaway wrapper, but the same match on an interactive shell would close
+ * the user's terminal, and one step above that sits the IDE or the agent
+ * harness, whose command line can name this repo too). The shell that
+ * launched `npm run dev:all` is not part of what dev:all runs.
+ *
+ * On macOS and Linux this changes nothing else: npm and concurrently run each
+ * script through `sh -c`, and sh execs a lone simple command in place, so the
+ * measured tree has no shell between `npm run collab` and `tsx watch`. On
+ * Windows cmd.exe does not exec, so npm's `cmd.exe /d /s /c "tsx …"` stays a
+ * real parent and the walk now ends below it — `tsx watch`, the one supervisor
+ * that restarts its child, is always beneath that shell and still gets
+ * stopped, and the npm/concurrently layers above exit on their own once their
+ * scripts have. (Reasoned from npm's spawn shape, not measured on Windows.)
+ */
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "ksh", "tcsh", "csh", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"]);
+
+/** Whether `commandLine` is a shell's, by the basename of its first token. */
+export function isShell(commandLine: string): boolean {
+  // The first token: a quoted path (`"C:\Program Files\…\cmd.exe" /c …`) or a
+  // bare one. A login shell announces itself as `-zsh`, hence the dash strip.
+  const m = commandLine.trimStart().match(/^"([^"]*)"|^(\S+)/);
+  if (!m) return false;
+  const exe = m[1] ?? m[2];
+  const base = exe.slice(Math.max(exe.lastIndexOf("/"), exe.lastIndexOf("\\")) + 1).replace(/^-/, "");
+  return SHELLS.has(base.toLowerCase());
+}
 
 /**
  * `npm run stop:all`: stops every server this repo runs locally — the
@@ -359,19 +415,20 @@ export async function stopAll(log: (line: string) => void = console.log): Promis
     for (const leaf of pids) {
       const info = processInfo(leaf);
       if (!info || !isOurs(info)) {
-        log(`WARNING: Port ${port} is owned by PID ${leaf}, but its command line doesn't mention this repo:`);
-        log(`  ${info?.commandLine ?? "(process gone or unreadable)"}`);
+        log(`WARNING: Port ${port} is owned by PID ${leaf}, which neither names this repo on its command line nor runs inside it:`);
+        log(`  ${describe(info)}`);
         log("Refusing to touch it -- looks like a different process.");
         aborted = true;
         continue;
       }
       toKill.set(leaf, info.commandLine);
 
-      // Walk up the parent chain, only including ancestors that match.
+      // Walk up the parent chain, only including ancestors that match, and
+      // never a shell (see SHELLS).
       let current = info;
       while (current.ppid && current.ppid > 1) {
         const parent = processInfo(current.ppid);
-        if (!parent || !ANCESTOR_MARKERS.some((m) => parent.commandLine.includes(m))) break;
+        if (!parent || isShell(parent.commandLine) || !ANCESTOR_MARKERS.some((m) => parent.commandLine.includes(m))) break;
         toKill.set(parent.pid, parent.commandLine);
         current = parent;
       }
