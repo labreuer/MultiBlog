@@ -63,6 +63,47 @@ is the cheaper path to it.
 
 ---
 
+## No CI: nothing runs the checks except the committer
+
+**Status:** open as of 2026-09-04. `npm run check` (schema format, unit tests, typecheck, lint)
+exists and is the thing to run; what's missing is the machine that runs it on every PR.
+
+Why this is an item rather than a pre-commit hook: the schema drifted out of format three days
+after CLAUDE.md told every session to run `prisma format`, and was found only because a review
+happened to run `check:schema` by hand (the tags commit, f9a7d46). A written rule is not a gate.
+A git hook is a gate per *clone* — unversioned, needs a setup step on each of the three machines
+and every agent harness, and `--no-verify` walks past it. A required status check on `main` is
+the one place "a drifted schema never merges" is literally true, and the workflow already goes
+through pull requests.
+
+**What to build** — one workflow, `.github/workflows/check.yml`, on `pull_request` and on
+`push` to `main`:
+
+1. `actions/checkout`, then `actions/setup-node` with `node-version-file: .nvmrc` and
+   `cache: npm`.
+2. `npm ci`.
+3. `npx prisma generate`. Required before the typecheck: the client is emitted into gitignored
+   `src/generated/` and `tsc` fails without it. Generate reads only `schema.prisma` — no
+   database, no `DATABASE_URL`, no secrets.
+4. `npm run check`.
+
+About three minutes on a free runner; no services, no secrets. Then, in the repo's branch
+protection for `main`, require that job. Until it's required it is advisory, which is the
+hook's problem again.
+
+**What to leave out, for now:** the e2e suite. It needs a Postgres service container, the
+Playwright browsers (`npx playwright install --with-deps chromium`), a `.env` built from
+secrets, and `next build` — a separate, ~8-minute job. Worth doing second, and it gives
+`playwright.config.ts`'s worker table a third row: a GitHub runner has 4 cores, which the
+current fallback clamps to one worker. TODO's first item (server/client divergence) also wants
+a CI-only variant of that job with a UTC server and a non-en-US browser locale.
+
+**Also invisible to CI, and staying that way:** the hydration/locale class in the first item,
+and anything that needs a real phone (docs/PDF.md §10). CI answers "did the checks run", not
+"do the checks cover it".
+
+---
+
 ## Mobile layout: nav tap targets, and the PDF side panel covering the document
 
 **Status:** both measured 2026-08-25 on an iPhone 13 Pro (390×663 viewport) via

@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check": "npm run check:schema && npm run test:unit && tsc --noEmit && eslint .",
     "check:schema": "tsx scripts/check-schema-format.ts",
     "collab": "tsx watch server/collab.ts",
     "collab:prod": "tsx server/collab.ts",

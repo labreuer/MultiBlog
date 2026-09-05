@@ -225,7 +225,12 @@ running `prisma migrate dev` on anything unusual.
 
 ### Automated
 
-- Typecheck `npx tsc --noEmit`; lint `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
+- **`npm run check`** — schema format, unit tests, typecheck and lint in one command, in that
+  order (cheapest first). **This is the bar before reporting any change as done**, not
+  `tsc` and `eslint` alone: neither of those sees a `schema.prisma` edit, and one drifted
+  through that gap within days of the rule being written (TODO.md, "No CI"). Nothing runs
+  it automatically yet.
+  Individually: `npx tsc --noEmit`, `npx eslint .`. (ESLint 9 and TypeScript 5 are pinned by
   `eslint-config-next` — TODO.md says why, and why not to try the upgrade yet.)
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
@@ -390,8 +395,7 @@ working on.
 
 - Commit only when the user explicitly asks. Commit messages explain *why*, not just what.
 - **Don't test UI changes unprompted** — no browser pane, no e2e run. Stop at
-  `npx tsc --noEmit` and `npx eslint .`, report the change as done, and say that UI testing
-  was deferred.
+  `npm run check`, report the change as done, and say that UI testing was deferred.
 - **But before committing a change that touched the UI, ask whether to test it first** — if
   it hasn't been tested already. The commit is the moment the question is worth asking, and
   the answer is the user's; don't quietly commit untested UI, and don't quietly go test it
