@@ -26,15 +26,24 @@ red test whose 500 matches a known dev-only class so it doesn't read as an app
 regression.
 
 Other entry points: `npm run e2e:ui` (watch mode with a time-travel debugger),
-`npm run e2e:report` (last run's HTML report), and the usual Playwright flags —
-`npx playwright test e2e/doc.spec.ts -g "title"`, `--headed`, `--debug` (all
-dev-target; set `E2E_TARGET=prod` yourself to point one at :3002).
+`npm run e2e:report` (last run's HTML report), and the usual Playwright flags,
+forwarded after `--`: `npm run e2e -- e2e/doc.spec.ts -g "title"`,
+`--repeat-each=3`, `--headed`, `--debug` (`npm run e2e:dev -- …` for the dev
+target; a bare `npx playwright test …` is dev-target too, unless you set
+`E2E_TARGET=prod` yourself to point it at :3002).
+
+A subset run is a whole run at the edges: a file or `-g` filter selects spec
+tests, and Playwright adds `auth.setup.ts` and `cleanup.teardown.ts` because
+they are the selected project's `dependencies` and its `teardown` — `--list`
+on a single spec shows all three files. So a one-spec run signs in fresh and
+sweeps up after itself, and `e2e/.auth/admin.json` need not exist beforehand.
+`--no-deps` skips both, and then it must.
 
 ## How a run is wired
 
 1. `playwright.config.ts`'s `webServer` brings up the web server — for the
    prod target `npm run e2e:web` (a `next build`, then `next start` on :3002
-   with `AUTH_URL`/`APP_URL`/`E2E_REVALIDATE` set — see `scripts/e2e-web.ps1`),
+   with `AUTH_URL`/`APP_URL`/`E2E_REVALIDATE` set — see `scripts/prod-web.ts`),
    for the dev target `npm run dev` (:3000) — plus `npm run collab` (:1234),
    **unless something is already listening**, in which case it reuses them. A
    `dev:all` you started yourself is never killed, and an `npm run e2e:web`
@@ -54,17 +63,21 @@ dev-target; set `E2E_TARGET=prod` yourself to point one at :3002).
 4. The `cleanup` teardown project sweeps any leftover `e2e-*@example.com` users,
    `E2E …` posts/docs and orphaned commenters.
 
-The suite proper runs in about 2 minutes against the prod target at 2 workers
-(160 tests, measured 2026-08-24 with the servers already warm). A cold
-`npm run e2e` adds the `next build` on top.
+The suite proper, against the prod target with the servers already warm (a
+cold `npm run e2e` adds the `next build` on top):
 
-**Every timing in this file was measured on one machine** — an Intel i7-8700K,
-6 cores / 12 threads, Windows, with Postgres and the collab server on the same
-box — and that is worth stating rather than assuming, because a wall-clock
-figure with no rig attached cannot be checked by the next person to read it.
-This one has already been wrong twice: "just under 3 minutes" was itself a
-correction of an older "~50 seconds". Treat every number here as dated, scale
-it by your own core count, and re-measure rather than infer. See the
+| machine | OS | workers | tests | wall | measured |
+|---|---|---|---|---|---|
+| Intel i7-8700K, 6 cores / 12 threads, 32 GB | Windows | 2 | 160 | ~2 min | 2026-08-24 |
+| AMD Ryzen 9 9950X, 16 cores / 32 threads, 96 GB | Fedora 44 | 8 | 206 | ~40 s | 2026-09-01 |
+
+Postgres and the collab server ran on the same machine in both cases.
+
+**Every timing in this file names the machine it was measured on**, because a
+wall-clock figure with no rig attached cannot be checked by the next person to
+read it. The figure had already been wrong twice before that was made a rule:
+"just under 3 minutes" was itself a correction of an older "~50 seconds".
+Treat every number here as dated, and re-measure rather than infer. See the
 worker-count note below before raising the parallelism.
 
 ## Fixtures
@@ -185,21 +198,30 @@ the admin account.
   either — so a 500 tells you nothing. `gotoOk` puts the response body in the
   failure message, which is how the flake below was finally identified.
 - **The defaults are derived, not typed in, and raising the ceiling needs a
-  fresh matrix.** `playwright.config.ts` scales the prod default with
-  `os.cpus().length` up to `MEASURED_WORKERS`, so a smaller machine gets fewer
-  workers with nothing to edit; the dev lane is a hard 1 because its limit is
-  the dev server serializing SSR rather than the CPU. `E2E_WORKERS` in `.env`
-  overrides either (never committed, so it stays per-machine). Two matrices sit
-  behind that (docs/playwright-flakiness.html). On **dev**, request p50/p99
-  roughly doubled per added worker for the same ~200s wall clock — extra workers
-  bought tail latency, not speed. On **prod** the speed is real (3 workers ~13%
-  quicker, 4 ~18%) but so is the price: p50 climbed 30-55%, and above 2 workers
-  a run's slowest test began crossing the 10s expect budget, with one contention
-  red in each of the 3- and 4-worker rounds and none at 2. Faster runs are not
-  worth a red that reads like a regression. The tell for contention is still that
-  red tests scatter across unrelated specs and don't repeat between runs; but
-  note it's no longer a *sufficient* tell in reverse — a genuine keystroke
-  race (class 1 in that doc) failed at every worker count including 1. Two
+  fresh matrix.** `playwright.config.ts` holds a table of *measured* machines
+  (12 threads → 2 workers, 32 threads → 8) and picks the largest row this
+  machine matches, scaling down below the smallest; the dev lane is a hard 1
+  because its limit is the dev server serializing SSR rather than the CPU.
+  `E2E_WORKERS` in `.env` overrides either (never committed, so it stays
+  per-machine). Three matrices sit behind that (docs/playwright-flakiness.html).
+  On **dev**, request p50/p99 roughly doubled per added worker for the same
+  ~200s wall clock — extra workers bought tail latency, not speed. On **prod**
+  the speed is real (3 workers ~13% quicker, 4 ~18% on the 12-thread box) but
+  so is the price: p50 climbed 30-55%, and above 2 workers a run's slowest test
+  began crossing the 10s expect budget, with one contention red in each of the
+  3- and 4-worker rounds and none at 2. On the 32-thread box, 8 workers is ~24%
+  quicker than 4 and 16 is no quicker than 8 while its slowest test closes on
+  the budget. Faster runs are not worth a red that reads like a regression. The
+  tell for contention is still that red tests scatter across unrelated specs and
+  don't repeat between runs; but note it's no longer a *sufficient* tell in
+  reverse — a genuine keystroke race (class 1 in that doc) failed at every
+  worker count including 1, and the 32-thread matrix's first pass had **four
+  reds, none of them contention**: each was a test-design fault that a faster
+  box or more neighbours exposes (a keystroke inside TipTap's
+  requestAnimationFrame-deferred `focus()`, a test relying on the `[[` menu's
+  *recent* list, a wait keyed on a POST body Playwright no longer had, and a
+  `/comments` "no row" check on a sentence another fixture also uses). A red
+  that *repeats* on a fast machine is a timing assumption in the test. Two
   historical attributions from this bullet's earlier text were corrected by
   the matrix: the `useSession must be wrapped in a <SessionProvider />` 500s
   are next-auth's dev-only invariant amplified by rebuild windows (impossible

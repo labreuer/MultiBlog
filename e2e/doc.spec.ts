@@ -296,10 +296,14 @@ test.describe("annotations", () => {
     const popup = readerPage.getByTestId("annotation-popup");
     await popup.getByRole("button", { name: "Annotate" }).click();
     await annotationEditor(readerPage).click();
-    await readerPage.keyboard.type("Why this bit specifically?");
+    // Unique per run: the `quotedPost` fixture's comment body is this same
+    // sentence, and /comments lists every worker's rows — at 12 workers the
+    // "no comment row" check below found another test's comment instead.
+    const annotationText = `Why this bit specifically? ${Date.now()}`;
+    await readerPage.keyboard.type(annotationText);
     await popup.getByRole("button", { name: "Post annotation" }).click();
 
-    await expect(readerPage.getByText("Why this bit specifically?")).toBeVisible();
+    await expect(readerPage.getByText(annotationText)).toBeVisible();
     // "Annotate" already created the row as a DRAFT (PLAN.md §13j Phase 2) —
     // a row existing isn't "posted" any more, so this polls for the fully-
     // posted state directly rather than a length check that would pass the
@@ -317,7 +321,7 @@ test.describe("annotations", () => {
         anchored: true,
         marked: false,
         quotedText: QUOTED_TEXT,
-        bodyText: "Why this bit specifically?",
+        bodyText: annotationText,
       });
 
     // The stored offsets are real positions, not a placeholder pair.
@@ -336,7 +340,7 @@ test.describe("annotations", () => {
     // Never reachable from the blog's own moderation surface — a completely
     // separate table (§12i).
     await page.goto("/comments");
-    await expect(page.getByText("Why this bit specifically?")).toHaveCount(0);
+    await expect(page.getByText(annotationText)).toHaveCount(0);
   });
 
   test("deleting the annotated text unanchors the annotation but leaves it able to say what it quoted", async ({

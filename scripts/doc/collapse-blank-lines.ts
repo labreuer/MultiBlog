@@ -104,6 +104,7 @@
 
 import "dotenv/config";
 import { readFileSync } from "node:fs";
+import { COLLAB_PORT } from "../dev-ports";
 import { createConnection } from "node:net";
 import * as Y from "yjs";
 import { docContentFromYdoc } from "../../src/lib/doc-content";
@@ -226,7 +227,7 @@ async function main() {
   // Only the writing path can be clobbered by a live Hocuspocus, so --dry-run
   // is exempt — otherwise checking what a run would do would mean stopping the
   // dev server first, which is the opposite of what a dry run is for.
-  const collabPort = Number(process.env.COLLAB_PORT ?? 1234);
+  const collabPort = COLLAB_PORT;
   if (!dryRun && (await collabPortInUse(collabPort))) {
     if (!force) {
       console.error(

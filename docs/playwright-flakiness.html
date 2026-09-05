@@ -244,7 +244,7 @@ await page.keyboard.type(prefix);</code></pre>
     <ul>
       <li><strong>Run the suite against the prod build</strong> — <code>web-prod</code> already exists; Next's own Playwright guide recommends exactly this. Kills classes 3 and 4 outright and removes compile-latency noise. Cost: a build per session, and :3001 wiring.</li>
       <li>Staying on dev: use <code>gotoOk</code> for <em>every</em> public-page navigation (13 plain <code>goto</code>s today) so a tear at least names itself instead of masquerading as a missing element.</li>
-      <li>Cheap tripwire: <code>JSON.parse</code> the manifest in <code>check-ports.ps1</code> — the sticky variant of this bug 500s every route until restart and is otherwise indistinguishable from "the suite broke".</li>
+      <li>Cheap tripwire: <code>JSON.parse</code> the manifest in check-ports (<code>devManifestIsTorn</code>, scripts/dev-servers.ts) — the sticky variant of this bug 500s every route until restart and is otherwise indistinguishable from "the suite broke".</li>
     </ul></div>
   </div>
 
@@ -297,6 +297,47 @@ await page.keyboard.type(prefix);</code></pre>
     <p><strong>Verdict: 2 stands, now for a prod reason rather than an extrapolated one.</strong> It is no longer typed in either &mdash; <code>playwright.config.ts</code> derives the prod default from <code>os.cpus().length</code>, clamped never to exceed this measurement, so a smaller machine scales down without anyone having to describe it in prose.</p></div>
   </div>
 
+
+    <div class="fixline"><span class="lbl">Follow-up 2026-09-01 &mdash; a second machine, 32 threads</span>
+    <p>The whole matrix above ran on one 12-thread box, and the config carried its answer (2) with a clamp saying "never more than measured". The suite then moved to a 32-thread Fedora 44 machine, which is exactly the case the clamp was written to be conservative about, so it was measured: one warm <code>next start</code> on the e2e port plus one warm collab, a warm-up pass, then 2 rounds &times; {4, 6, 8, 12, 16} workers interleaved &mdash; 206 tests.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>workers</th><th>wall clock</th><th>red runs</th><th>test p50</th><th>test p95</th><th>slowest test</th></tr></thead>
+      <tbody>
+        <tr><td>4</td><td>54 / 53 s</td><td>2 of 2</td><td>0.58 / 0.59 s</td><td>2.4 / 2.7 s</td><td>10.3 / 10.4 s</td></tr>
+        <tr><td>6</td><td>79 / 78 s</td><td>2 of 2</td><td>0.63 / 0.63 s</td><td>2.7 / 2.5 s</td><td>60 / 60 s</td></tr>
+        <tr><td>8</td><td>78 / 77 s</td><td>2 of 2</td><td>0.80 / 0.79 s</td><td>3.0 / 3.2 s</td><td>60 / 60 s</td></tr>
+        <tr><td>12</td><td>76 / 46 s</td><td>2 of 2</td><td>1.14 / 1.20 s</td><td>4.0 / 4.2 s</td><td>60 / 13.7 s</td></tr>
+        <tr><td>16</td><td>80 / 80 s</td><td>2 of 2</td><td>1.47 / 1.49 s</td><td>5.3 / 5.7 s</td><td>60 / 60 s</td></tr>
+      </tbody>
+    </table></div>
+    <p><strong>Every run was red, and not one red was contention.</strong> That is the finding worth keeping. The reds were four <em>deterministic</em> test-design faults that a faster box, or more neighbours, exposes &mdash; which is why they read nothing like the scatter the earlier matrices taught us to expect, and why the wall clock above at 6+ workers is a 60 s timeout rather than the suite:</p>
+    <ul>
+      <li><strong>tighten.spec &mdash; a keystroke inside a deferred focus().</strong> The test clicks a toolbar button and presses Ctrl+Z; on this box the two <code>toHaveCount()</code>s between them settle in ~30 ms. The click moved focus to the button, and <code>tightenLines</code>' <code>chain().focus()</code> hands it back on the <em>next animation frame</em> (<code>@tiptap/core</code>'s focus command defers through <code>requestAnimationFrame</code>). Ctrl+Z reached the button and undid nothing &mdash; 6 of 6 repeats, at any worker count. Fix: <code>await expect(body).toBeFocused()</code> before the keystroke. The same class as the select-all wipe above, seen from the other side: there a slower machine widened a gap, here a faster one closed it.</li>
+      <li><strong>doc-ref.spec &mdash; asserting on a shared "recent" list.</strong> The <code>[[</code> menu opens on the admin's eight most recently updated readable docs. Every worker is creating SHARED throwaway docs, and the store debounce bumps <code>Doc.updatedAt</code> on every doc under edit, so index 0 was another test's doc in 4 of 5 runs even at 4 workers. Fix: type a unique stem shared by the test's own two titles, so the <em>search</em> path returns exactly those two rows.</li>
+      <li><strong>link-bubble.spec &mdash; a wait keyed on a POST body.</strong> The "no such doc" test waited for the preview lookup by matching the server action's <code>postData()</code> for the slug. Playwright only has a request's body if it read it before the request completed; from 6 workers up the lookup regularly finished first, <code>postData()</code> was null, and the wait timed out at 60 s <em>while the screenshot showed the bubble sitting there correct</em> &mdash; 7 of 8 runs at 6+, 0 of 2 at 4. Fix: the bubble is <code>aria-busy</code> from its first paint until the lookup answers, and the test waits on that. The one app change in the set, and a legitimate one.</li>
+      <li><strong>doc.spec &mdash; a shared sentence.</strong> The reading-view annotation test checks <code>/comments</code> shows no row for its annotation text; the <code>quotedPost</code> fixture uses the same sentence as a <em>comment</em> body, and at 12 workers a neighbour's comment was on the page. Fix: a per-run unique body.</li>
+      <li>A fifth, <strong>link-bubble.spec's popover flip test</strong>, read a <code>boundingBox()</code> in the frame between the doc list emptying and floating-ui's ResizeObserver-driven re-placement (2 of 10 runs at 6&ndash;8 workers). Now an <code>expect.poll</code>.</li>
+    </ul>
+    <p>With those in, the confirmation matrix &mdash; same method, 2 rounds &times; {4, 8, 16} plus the warm-up &mdash; was 7 of 7 green:</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>workers</th><th>wall clock</th><th>red runs</th><th>test p50</th><th>test p95</th><th>slowest test</th></tr></thead>
+      <tbody>
+        <tr><td>4</td><td>51 / 51 s</td><td>0 of 2</td><td>0.57 / 0.58 s</td><td>2.3 / 2.3 s</td><td>6.2 / 6.2 s</td></tr>
+        <tr><td>8</td><td>39 / 39 s</td><td>0 of 2</td><td>0.94 / 0.86 s</td><td>3.0 / 3.0 s</td><td>6.7 / 6.7 s</td></tr>
+        <tr><td>16</td><td>39 / 39 s</td><td>0 of 2</td><td>1.66 / 1.59 s</td><td>5.3 / 5.1 s</td><td>7.9 / 8.9 s</td></tr>
+      </tbody>
+    </table></div>
+    <p><strong>Verdict: 8 on this box.</strong> It is ~24% quicker than 4, its slowest test sits at 6.7 s against a 10 s expect budget, and 16 buys nothing over it &mdash; the same 39 s, because fixed costs (setup, cleanup, the longest single spec file) now dominate &mdash; while its tail (p95 5.3 s, slowest 8.9 s) closes on the budget. <code>playwright.config.ts</code> now carries a table of measured machines rather than one constant, and picks the largest row this host matches or exceeds, so the 12-thread box keeps its 2 and anything in between inherits the smaller measurement.</p>
+    <p><strong>Where the time goes at 12 clients: the one <code>next start</code>, this time.</strong> The 12-thread follow-up concluded the browsers saturate and the server is a couple of percent of a test. With 32 threads the browsers are no longer short of cores, so the question was re-asked directly: two <code>next start</code>s on the same build (:3002 and :3003) sharing one collab and one database, and two Playwright runs of 6 workers each, one per server, against one run of 12 workers on a single server. Two rounds, warm, all green.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>arrangement</th><th>wall clock</th><th>test p50</th><th>test p95</th><th>slowest test</th><th>throughput</th></tr></thead>
+      <tbody>
+        <tr><td>1 server, 12 workers</td><td>38 / 38 s</td><td>1.33 / 1.30 s</td><td>4.2 / 4.0 s</td><td>7.1 / 7.0 s</td><td>5.4 tests/s</td></tr>
+        <tr><td>2 servers, 6 + 6 workers</td><td>48 + 46 s (55 s end to end)</td><td>0.85 / 0.84 s</td><td>3.0 / 3.1 s</td><td>6.5 / 6.6 s</td><td>7.5 tests/s</td></tr>
+      </tbody>
+    </table></div>
+    <p>Per test, the second server is worth a lot: p50 drops ~35% and p95 ~25%, to almost exactly the single-server figures at 8 workers (0.9 / 3.0 s) &mdash; so on this box one <code>next start</code> is what 8 concurrent browsers fill, and the earlier "the server is single-digit percent" holds only where the browsers run out of CPU first. Per <em>suite</em> it is worth nothing: each run still pays setup, cleanup and its longest spec file with only 6 workers, so the two 46&ndash;48 s runs finish later than one 38 s run despite moving 40% more tests per second. Turning that throughput into wall clock would mean one Playwright run spreading its workers over two base URLs (a per-worker <code>baseURL</code> keyed on the worker index), which nothing here needs yet; the 8-worker default already leaves the tail well inside the budget.</p>
+    <p class="note">What the load actually did is visible only in the tail: p50 0.57 &rarr; 0.9 &rarr; 1.6 s and p95 2.3 &rarr; 3.0 &rarr; 5.3 s at 4 &rarr; 8 &rarr; 16 workers. So the two tells now read: a red that <em>repeats</em> on a fast machine is a timing assumption in the test; a red that appears only with neighbours may still be shared state (a recent list, a fixture's sentence, the admin tables) rather than load. Contention proper has yet to produce a red on this machine at any count tried.</p></div>
 
   <h2 id="class6">A sixth class, found after the matrix</h2>
   <p class="note">Not from the 30-run experiment above. This one surfaced on 2026-08-25 while chasing a single intermittent <code>pdf-annotations.spec.ts</code> failure in the prod lane at one worker &mdash; the lane adopted specifically to kill classes 3 and 4. It gets its own section rather than a sixth card because it differs in kind from all five: <strong>it is a bug in the application, not in the dev stack and not in the suite.</strong> Every reader posting an annotation on a PDF was hitting it; the suite was merely the only thing complaining.</p>

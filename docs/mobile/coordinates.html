@@ -839,12 +839,9 @@
     scripts/remote-console.ts against a real iPad; scrollbar readings via headless
     Chromium. The mechanism lives in popover-placement.ts's header comment.
     <br><br>
-    Suite run on macOS, where <code>npm run e2e</code> cannot run &mdash; its prestep and
-    its webServer both shell through pwsh. Only the webServer needs it, and
-    reuseExistingServer is unconditional, so the prod target is reachable by standing the
-    server up first: <code>npm run build</code>, then <code>next start -p 3002</code> with
-    AUTH_TRUST_HOST / AUTH_URL / APP_URL / E2E_REVALIDATE set as scripts/e2e-web.ps1 sets
-    them, then <code>E2E_TARGET=prod npx playwright test</code>.
+    Suite run on macOS with <code>npm run e2e</code>: scripts/e2e.ts guards the ports, and
+    scripts/prod-web.ts builds and starts the prod target on :3002 with
+    AUTH_TRUST_HOST / AUTH_URL / APP_URL / E2E_REVALIDATE set.
   </footer>
 
 </div>

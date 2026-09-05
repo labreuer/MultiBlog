@@ -374,23 +374,19 @@ test.describe("a link into this site's docs previews the doc", () => {
       await expect(b).not.toContainText("Other Author");
 
       // No such doc: the bubble stays its one line. Absence can't be waited
-      // for, so wait for the lookup itself — the server action's POST, told
-      // apart from the popover's own search by the slug in its body (the
-      // action takes the bare route param, not the path) — and only then
-      // assert nothing was added. Registered before the link exists,
-      // because the bubble is already up (and fetching) the moment the
-      // popover inserts it.
-      const missingSlug = `no-such-doc-${Date.now()}`;
-      const missing = `/doc/${missingSlug}`;
-      const lookup = page.waitForResponse(
-        (r) => r.request().method() === "POST" && (r.request().postData() ?? "").includes(missingSlug),
-      );
+      // for, so wait for the lookup itself: the bubble is aria-busy from its
+      // first paint until the preview answers, "no such doc" included, and
+      // only then assert nothing was added. This used to wait for the server
+      // action's POST, told apart from the popover's own search by the slug
+      // in its body — but Playwright only has a request's body if it read it
+      // before the request completed, and at 6+ workers the lookup regularly
+      // finished first, leaving postData() null and the wait to time out
+      // while the screenshot showed the bubble sitting there correct.
+      const missing = `/doc/no-such-doc-${Date.now()}`;
       await appendLink(page, "Paragraph two.", missing);
       await bodyLink(page, missing).click();
-      await (await lookup).finished();
-      // Two frames for React to commit the answer.
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
       await expect(b).toBeVisible();
+      await expect(b).toHaveAttribute("aria-busy", "false");
       await expect(b.getByRole("link", { name: missing })).toBeVisible();
       await expect(b).not.toContainText("Edited");
       await expect(b).not.toContainText("permission");
@@ -490,8 +486,17 @@ test.describe("the link popover: a title box over a URL box (LinkControls.tsx)",
       // same bottom, higher top — and the URL box itself hasn't moved.
       await page.keyboard.type("https://example.test/flipped");
       await expect(list).toHaveCount(0);
+      // Polled: the list leaving and floating-ui re-placing the box are two
+      // steps (autoUpdate hears the shrink through a ResizeObserver), and
+      // under load a boundingBox() read can land between them, seeing the
+      // box shortened from the bottom before it has been moved back down.
+      await expect
+        .poll(async () => {
+          const b = await popover.boundingBox();
+          return b ? b.y + b.height : NaN;
+        })
+        .toBeCloseTo(bottom, 0);
       const collapsed = await popover.boundingBox();
-      expect(collapsed!.y + collapsed!.height).toBeCloseTo(bottom, 0);
       expect(collapsed!.y).toBeGreaterThan(grown!.y);
       expect(collapsed!.x).toBe(grown!.x);
       expect((await urlInput(page).boundingBox())!.y).toBeCloseTo(urlBox!.y, 0);
