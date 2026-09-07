@@ -1,6 +1,7 @@
 import { test, expect, signIn, gotoOk, selectTextInBody, bodyEditor, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   ADMIN_EMAIL,
+  TEST_PASSWORD,
   createTestAnchoredLink,
   createTestDoc,
   createTestFile,
@@ -272,6 +273,47 @@ test.describe("anchored links", () => {
     } finally {
       await deleteTestAnchoredLink(link.id);
       await deleteTestDoc(docB.id);
+    }
+  });
+
+  test("a signed-out reader keeps the link's passages through sign-in", async ({ browser, sharedDoc }) => {
+    // The one URL a signed-out reader is likeliest to arrive by is a shared
+    // anchored link, and the gate's sign-in redirect used to carry only the
+    // pathname — so they signed in onto the right doc with its passages
+    // silently gone, indistinguishable from a link that never resolved.
+    // The claim here is the querystring's round trip: the callbackUrl the
+    // gate writes still names ?sel=, and the page the form lands on paints
+    // the part. Fixture-minted, like the nav test: creation is the first
+    // test's business.
+    const link = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [{ docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO }],
+    });
+    const [part] = link.anchors;
+    // A fresh, empty context rather than the signed-in `page`: the gate only
+    // answers "signed-out" to a visitor with no session at all.
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const reader = await context.newPage();
+    try {
+      const target = `/doc/${sharedDoc.id}?sel=${link.id}`;
+      await reader.goto(target);
+      await reader.waitForURL("**/sign-in?callbackUrl=*");
+      expect(new URL(reader.url()).searchParams.get("callbackUrl")).toBe(target);
+
+      // In place, not fixtures' signIn(): that helper navigates to /sign-in
+      // first, which is exactly the trip that loses the callbackUrl.
+      await reader.getByLabel("Email").fill(ADMIN_EMAIL);
+      await reader.getByLabel("Password").fill(TEST_PASSWORD);
+      await reader.getByRole("button", { name: "Sign in" }).click();
+
+      await reader.waitForURL(`**/doc/${sharedDoc.id}?sel=${link.id}`);
+      const banner = reader.getByTestId("anchored-link-banner");
+      await expect(banner).toBeVisible();
+      await expect(banner).toContainText(QUOTED_TEXT);
+      await expect(reader.locator(`[data-anchored-link-ids~="${part.id}"]`).first()).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await context.close();
+      await deleteTestAnchoredLink(link.id);
     }
   });
 });

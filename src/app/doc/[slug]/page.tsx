@@ -22,7 +22,7 @@ import { annotationAnchorInputs, anchoredLinkAnchorInputs } from "@/lib/annotati
 import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
 import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
-import { signInPath } from "@/lib/sign-in-redirect";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { DocScrubProvider } from "@/components/DocScrubContext";
@@ -87,10 +87,15 @@ export default async function PublicDocPage({
   searchParams: Promise<{ sel?: string }>;
 }) {
   const { slug } = await params;
+  const { sel } = await searchParams;
   // Free — generateMetadata already ran this for the same request.
   const access = await loadDocForRead(slug);
   if (access.status === "signed-out") {
-    redirect(signInPath(`/doc/${slug}`));
+    // The return path keeps ?sel=: a shared anchored link is the one URL a
+    // signed-out reader is likeliest to arrive by, and a callbackUrl that
+    // kept only the pathname would sign them in onto the doc with its
+    // passages silently gone (docs/ANCHORED_LINKS.md).
+    redirect(signInPath(pathWithQuery(`/doc/${slug}`, new URLSearchParams(sel ? { sel } : {}))));
   }
   if (access.status === "redirect") {
     redirect(access.to);
@@ -124,7 +129,6 @@ export default async function PublicDocPage({
   // so folding `sel` in would just split the doc load into two queries. Null
   // (no such link, or nothing this viewer may see) renders as if ?sel= were
   // absent.
-  const { sel } = await searchParams;
   const link = sel ? await anchoredLinkForViewer(sel, user) : null;
   const linkGroupHere = link?.groups.find((g) => g.target.kind === "doc" && g.target.id === doc.id) ?? null;
 
