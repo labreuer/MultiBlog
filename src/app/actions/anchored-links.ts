@@ -5,7 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
+import { canUserDeleteAnchoredLink } from "@/lib/anchored-link-authz";
 import { appUrl } from "@/lib/app-url";
+import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import {
   parseAnchorTargetKind,
   parseSelector,
@@ -20,8 +22,9 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { ydocStore } from "../../../server/ydoc-store";
 
-// docs/ANCHORED_LINKS.md — mutations on **the viewer's one draft link** and
-// the mint that turns it into a shareable URL. The tag-actions shape
+// docs/ANCHORED_LINKS.md — mutations on **the viewer's one draft link**, the
+// mint that turns it into a shareable URL, and (at the bottom) the /links
+// table's soft delete of a minted one. The tag-actions shape
 // (src/app/actions/tags.ts on the part-anchors branch) with one owner row
 // per act; what differs is that the act accumulates across pages — each
 // "Add to link" posts its part immediately, captured and verified against
@@ -32,7 +35,9 @@ import { ydocStore } from "../../../server/ydoc-store";
 // untagObject): both reading routes are per-request dynamic — nothing is
 // cached to invalidate — and the tray self-fetches on its own notify
 // events, so a revalidation would only force full-page work to update a
-// fixed-position island that already knows how to update itself.
+// fixed-position island that already knows how to update itself. The same
+// holds for /links below: it reads the session and is dynamic, and its table
+// calls router.refresh() after every action, as the kit's tables do.
 //
 // **Create-permission is read-the-target** — the annotate precedent, not
 // the tag one: no role floor beyond being signed in, because pointing at a
@@ -392,4 +397,64 @@ export async function mintAnchoredLink(): Promise<{ url: string } | { error: str
     data: { mintedAt: new Date() },
   });
   return { url: appUrl(`/link/${draft.id}`) };
+}
+
+// docs/ANCHORED_LINKS.md, "The management table" — the /links table's one
+// action. A **soft** delete, unlike everything above it: a minted URL has
+// been handed out, so its row is a record that a restore may need to bring
+// back exactly, where a draft is a working set nobody else has seen and
+// `discardDraftLink` hard-deletes it. The anchors stay put either way (an
+// anchor is a part of a record); what hides a deleted link is that
+// `anchoredLinkForViewer` reads its `deletedAt`, so following it 404s until
+// it is restored.
+//
+// Who may: the creator or ADMIN/EDITOR, and never for a draft
+// (`canUserDeleteAnchoredLink`, src/lib/anchored-link-authz.ts). Plain
+// `prisma.anchoredLink` rather than prismaIncludingDeleted, because this
+// model is outside the soft-delete $extends and the ordinary client already
+// finds a deleted row to restore — the TagAssignment arrangement.
+async function setAnchoredLinkDeleted(linkId: string, deleted: boolean): Promise<void> {
+  const session = await requireSignedIn();
+  if (typeof linkId !== "string" || linkId === "") {
+    throw new Error("Malformed link id.");
+  }
+  const link = await prisma.anchoredLink.findUnique({
+    where: { id: linkId },
+    select: { createdById: true, mintedAt: true },
+  });
+  if (!link) {
+    throw new Error("Link not found.");
+  }
+  if (!canUserDeleteAnchoredLink(session.user.id, session.user.role, link)) {
+    // Two refusals with two remedies, so the message names the right one.
+    throw new Error(
+      link.mintedAt === null
+        ? "A draft link is discarded from its tray, not deleted here."
+        : "You don't have permission to delete this link.",
+    );
+  }
+  await prisma.anchoredLink.update({
+    where: { id: linkId },
+    data: deleted
+      ? { deletedByUserId: session.user.id, deletedAt: new Date() }
+      : { deletedByUserId: null, deletedAt: null },
+  });
+}
+
+export async function deleteAnchoredLink(linkId: string): Promise<void> {
+  await setAnchoredLinkDeleted(linkId, true);
+}
+
+export async function restoreAnchoredLink(linkId: string): Promise<void> {
+  await setAnchoredLinkDeleted(linkId, false);
+}
+
+// Per-row rather than one transaction — see bulkDeletePosts for the
+// rationale: the per-row guard above is what a bulk path must not sidestep.
+export async function bulkDeleteAnchoredLinks(linkIds: string[]): Promise<BulkResult> {
+  return settleBulk(linkIds, (id) => setAnchoredLinkDeleted(id, true));
+}
+
+export async function bulkRestoreAnchoredLinks(linkIds: string[]): Promise<BulkResult> {
+  return settleBulk(linkIds, (id) => setAnchoredLinkDeleted(id, false));
 }

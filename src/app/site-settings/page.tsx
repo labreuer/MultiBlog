@@ -19,6 +19,7 @@ const TABLE_LABELS: Record<AdminTableName, string> = {
   comments: "/comments",
   annotations: "/annotations",
   tags: "/tags",
+  links: "/links",
 };
 
 // One entry per exported constant in site-config.ts (see PLAN.md §6 for how

@@ -41,7 +41,8 @@ to re-derive the decision from.
 Each of these has been decided once and is easy to undo by accident. Read the linked section
 before changing the behavior it describes.
 
-- **Admin tables are one kit.** `/posts`, `/docs`, `/users`, `/comments`, `/annotations` all
+- **Admin tables are one kit.** `/posts`, `/docs`, `/files`, `/users`, `/comments`,
+  `/annotations`, `/tags` and `/links` all
   render through `src/components/table/` plus a per-table `*-query.ts` over
   `src/lib/table-query.ts`. Filters, sort, pagination and the show-deleted toggle live in the
   querystring and are applied in Postgres, never client-side; a new admin table means a

@@ -188,16 +188,26 @@ export default function SiteHeader() {
       ),
     });
   }
-  if (session?.user && isAdmin(session.user.role)) {
-    leftNav.push({ key: "users", node: <Link href="/users">Users</Link> });
-  }
-  // PLAN.md §19 — asked for as "to the right of Users", and placed here so it
-  // is, *for an ADMIN*. Users is ADMIN-only while Files is AUTHOR-and-up, so
-  // for an EDITOR or AUTHOR there is no Users entry for it to sit right of and
-  // it simply follows Docs. The literal position can't hold for every role;
-  // the order can.
+  // Content first, people last: Posts, Docs and Files are the three things
+  // the site *holds*, Links is a cross-cutting view over two of them, and
+  // Users (ADMIN-only) closes the run beside Site Settings. Files used to sit
+  // right of Users (PLAN.md §19 asked for it there); the swap puts the
+  // AUTHOR-and-up entries together so the row reads the same for every role
+  // and only *ends* earlier for a non-admin.
   if (session?.user && canManageFiles(session.user.role)) {
     leftNav.push({ key: "files", node: <Link href="/files">Files</Link> });
+  }
+  // docs/ANCHORED_LINKS.md — the /links management table. Top level rather
+  // than inside the Docs dropdown with Annotations and Tags, because a link
+  // spans docs *and* PDFs (Files is its other parent) and neither dropdown is
+  // the right home. Gated on canManageDocs, the bar every admin listing sets
+  // — the same role set as canManageFiles, restated by name so the two can
+  // diverge without dragging this entry along.
+  if (session?.user && canManageDocs(session.user.role)) {
+    leftNav.push({ key: "links", node: <Link href="/links">Links</Link> });
+  }
+  if (session?.user && isAdmin(session.user.role)) {
+    leftNav.push({ key: "users", node: <Link href="/users">Users</Link> });
   }
   if (session?.user && isAdmin(session.user.role)) {
     leftNav.push({ key: "site-settings", node: <Link href="/site-settings">Site Settings</Link> });

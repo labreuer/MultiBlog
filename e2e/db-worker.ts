@@ -1452,20 +1452,24 @@ export type TestAnchoredLink = {
  * own log tail, so the rows satisfy the same quote-at-stamp invariant
  * check-annotation-anchors.ts replays. The selector blob stays null (the
  * §20e backfill shape the constraint probes pin); nothing a spec asserts on
- * reads it. Minted rather than draft, deliberately, so however many links
- * one spec creates none collides with the one-open-draft-per-user partial
- * index.
+ * reads it. Minted by default, deliberately, so however many links one spec
+ * creates none collides with the one-open-draft-per-user partial index;
+ * `minted: false` leaves the creator's open draft, and is for a *throwaway*
+ * creator only — the shared admin's draft slot belongs to the tray test
+ * (anchored-links.spec.ts), and a fixture draft there would be the row its
+ * "Add to link" lands parts in.
  */
 export async function createTestAnchoredLink(opts: {
   creatorEmail: string;
   parts: { docId: string; from: number; to: number }[];
+  minted?: boolean;
 }): Promise<TestAnchoredLink> {
-  const { creatorEmail, parts } = opts;
+  const { creatorEmail, parts, minted = true } = opts;
   assertSafe(creatorEmail);
   const creator = await prisma.user.findUniqueOrThrow({ where: { email: creatorEmail } });
 
   const link = await prisma.anchoredLink.create({
-    data: { createdById: creator.id, mintedAt: new Date() },
+    data: { createdById: creator.id, mintedAt: minted ? new Date() : null },
     select: { id: true },
   });
 

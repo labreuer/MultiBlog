@@ -313,12 +313,32 @@ read gate, and nothing else.
 | See / edit / mint / discard **your own** draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
 | See **someone else's** unminted draft | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Follow a minted link (per readable target) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Browse `/links` (your own links, plus minted links with a target you may read) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Delete / restore **your own** minted link | ✅ | ✅ | ✅ | ✅† | ❌* | ❌ |
+| Delete / restore **someone else's** minted link | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Delete a draft from `/links` (rather than discarding it from the tray) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 \* By inheritance, not by a link rule: `addAnchoredLinkPart` has **no role floor of its
 own** — the target's read predicate is the whole gate — but both reading routes gate on
 `canViewDocs`/`canViewFiles` (AUTHORIZED+), so a COMMENTER can reach no surface that
 creates or follows a link today. If those floors ever move, links move with them for free;
 that is the design, not an accident.
+
+† The action permits it (`canUserDeleteAnchoredLink` has no role floor for the creator,
+matching `addAnchoredLinkPart`), but `/links` is `canManageDocs`-gated like every admin
+listing, so an AUTHORIZED user has no surface from which to invoke it today.
+
+**`/links` lists by readability, and its cells filter per target.** A row is a link the
+viewer created (their own draft included) or a minted link *some* anchor of which points
+into a doc or file they may read — the follow filter as a `where`, restated in
+`src/app/links/page.tsx` the way `/annotations` restates the doc and file read rules.
+Readability rather than manage-ability bounds the listing because the cells show
+`quoted_text`, and so does the free-text search, or `?q=` would probe quotes the viewer
+cannot see. Within a listed row an unreadable target is omitted without acknowledgment,
+exactly as the banner omits it. There is no ADMIN "Show all" override. Deleting is a soft
+delete by the creator or ADMIN/EDITOR (`LINK_MODERATOR_ROLES`, the same two roles as
+`canCurateTags`, stated independently); a deleted link 404s for everyone until restored.
+A draft is never deleted from the table — the tray's Discard is its one exit.
 
 **Following is a per-target read filter with silent omission — a recorded deviation from
 §20i's conjunctive default.** §20i pre-declared that a cross-container reference is
@@ -384,6 +404,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Anchored-link follow filter (per-target, silent omission) | `src/lib/anchored-link-data.ts` |
 | Anchored-link landing (per-viewer redirect; existence vs. empty page) | `src/app/link/[id]/page.tsx`, `anchoredLinkLandingFor` in `src/lib/anchored-link-data.ts` |
 | Anchored-link create/draft/mint (read-the-target, creator-scoped) | `src/app/actions/anchored-links.ts` |
+| Anchored-link delete/restore (creator or ADMIN/EDITOR; never a draft) | `src/lib/anchored-link-authz.ts`, applied in `src/app/actions/anchored-links.ts` |
+| `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 

@@ -129,6 +129,19 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "resolvedAt", label: "Resolved at", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
+  // docs/ANCHORED_LINKS.md — /links. Passages and Targets are per-viewer
+  // (unreadable targets omitted, like the follow path) and so carry no
+  // sortKey; Id is the raw cuid, hidden by default since Passages already
+  // links to the landing route.
+  links: [
+    { key: "passages", label: "Passages" },
+    { key: "targets", label: "Targets" },
+    { key: "createdBy", label: "Created by" },
+    { key: "created", label: "Created at" },
+    { key: "minted", label: "Minted at" },
+    { key: "id", label: "Id", defaultHidden: true },
+    { key: "deletedAt", label: "Deleted at", defaultHidden: true },
+  ],
 };
 
 /**

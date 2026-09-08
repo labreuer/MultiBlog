@@ -315,6 +315,37 @@ the recipients-see-only-what-they-may-read sentence → tray clears; a clipboard
 failure still mints and shows the URL as text), **Discard**. Fixed positioning keeps it
 out of both pages' layout math.
 
+**The management table** (`src/app/links/page.tsx`, `src/components/LinksTable.tsx`,
+`src/lib/links-query.ts`; `"links"` in `AdminTableName`, `RESERVED_SLUGS` and the
+site-settings column defaults; the header's **Links** entry sits after Files, top level
+rather than in the Docs dropdown because a link spans docs *and* PDFs): the §16 admin-table
+kit over `anchored_link`, added 2026-09-08. Gated on `canManageDocs` like every other
+listing. **Row scoping is the follow rule as a `where`**: a link lists for its creator
+(their own draft included — nobody else's, ever) or when it is minted and *some* anchor
+points into a doc or file the viewer may read, with `canUserReadDoc`/`canUserReadFile`
+restated as relation filters the way `/annotations` restates them. Within a row the cells
+re-apply the filter **per target**, once per page rather than per group (two `findMany`s
+over the page's distinct doc and file ids, both wearing the read clause and riding the
+soft-delete `$extends`), so a readable-PDF-plus-unreadable-doc link lists and shows the
+PDF's passages alone — no count, no placeholder, the banner's rule. The free-text search is
+bounded by the same clause, or `?q=` would be a probe into quotes the viewer cannot see.
+Columns: Passages (readable parts' count, linking to `/link/<id>?noredirect=1`, with each
+quote as a snippet beneath), Targets (kind + title, each carrying `?sel=`), Created by,
+Created at, Minted at (*draft* for the viewer's own open one), Id and Deleted at (both
+default-hidden), and the delete/restore control. **Passages and Targets carry no sort
+key** — they are per-viewer values, and nothing Postgres could `ORDER BY` (a view has no
+viewer) matches what the cell shows; `/annotations`' Quote is the precedent. Deep links
+`?user=`, `?doc=`, `?file=`. No ADMIN "Show all": an override here would widen which
+excerpts are shown, not just which rows.
+
+Its one action is a **soft delete of a minted link** — `deleteAnchoredLink` /
+`restoreAnchoredLink` and their bulk pair in `src/app/actions/anchored-links.ts`, gated by
+`canUserDeleteAnchoredLink` (`src/lib/anchored-link-authz.ts`): the creator or
+ADMIN/EDITOR, never a draft (a draft is discarded from its tray, and a restorable
+soft-deleted draft could later collide with the one-open-draft partial index). The anchors
+stay; `anchoredLinkForViewer` reads `deletedAt`, so a deleted link 404s for everyone until
+restored. docs/PERMISSIONS.md carries the rows.
+
 ## Navigation is a mount boundary
 
 The banner's group links are the **first client-side doc→doc navigation in the app**
@@ -357,6 +388,17 @@ hard refresh. Two stacked defects, both fixed, both load-bearing:
   hold no text fail at creation, not as a later integrity finding), stamps from the target
   doc's own log tail — and mints them, so nothing collides with the one-draft partial
   index. `deleteTestUser` sweeps `anchored_link` rows (RESTRICT FK, the doc-link shape).
+- `e2e/links.spec.ts`, five tests, all on fixture-minted links (`createTestAnchoredLink`
+  gained `minted: false` for the draft case, throwaway creators only): the header order
+  (Files, Links, Users for an admin; Files, Links and no Users for an AUTHOR); the table's
+  two scoping rules at once — a mixed PRIVATE+SHARED link lists for an AUTHOR with the
+  shared passage alone while a private-only link is no row, and `?q=` on a token found
+  only in the private quote returns two rows for the doc's author and none for the AUTHOR;
+  the soft delete (an EDITOR deletes the admin's link, following it 404s, it shows under
+  show-deleted, the creator restores it and the landing page renders again); a throwaway
+  AUTHOR's draft listing as *draft* with the control off and invisible to the admin; and the
+  querystring surviving the sign-in redirect. `e2e/admin-table.spec.ts`'s two every-table
+  loops include `/links`.
 - Integrity, by the one-walk-per-invariant rule: `check-annotation-anchors.ts`'s
   part-anchor walk is now parameterised over both tables (`tag_anchor`,
   `anchored_link_anchor`) and replays DOC_RANGE parts at their stamps;
@@ -392,6 +434,12 @@ Everything unmentioned went in as written. Where the build differs:
   turned `loadMyDraftLink` into a positional read and gave the tray's fetch a home in a
   shared store. It borrows `.pending-annotation`'s dashed underline outright rather than
   taking a pattern of its own: dashed means in-progress here, whatever is in progress.
+- **`/links` (2026-09-08) is the deferred management table**, and its one design choice
+  the plan never took: rows are scoped by *readability of some target* rather than listing
+  every minted link — the landing route's empty page proves a link's existence to someone
+  who already holds its id, which is not the same as listing that id for everyone who can
+  open an admin table. Drafts cannot be deleted from it; only the tray's Discard touches
+  a draft.
 - **The landing route (2026-09-07) reverses decision 1's "no `/sel/[id]` route".** The
   minted href was part 0's page, chosen once at mint time — but readability is per viewer,
   so a recipient who could not read part 0's target met that page's Forbidden and never
@@ -413,8 +461,9 @@ Everything unmentioned went in as written. Where the build differs:
 
 Post targets (`POST_RANGE` has no selector kind), annotation-body targets (arc ready,
 writer refuses), multi-page PDF selections (capture is start-page-only today), part roles
-(MULTI_ANCHORING: these parts are homogeneous), drift persistence, a `/links` management
-table and minted-link deletion UI, editing a link after mint, link labels.
+(MULTI_ANCHORING: these parts are homogeneous), drift persistence, editing a link after
+mint, link labels. (The `/links` table and minted-link deletion, deferred here until
+2026-09-08, are built — "The management table" above.)
 
 Deferred by the landing route specifically:
 
