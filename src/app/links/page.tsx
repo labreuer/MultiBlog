@@ -11,6 +11,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
 import { parseLinksFilters, type LinksFilters, type LinksSortKey } from "@/lib/links-query";
+import { toAuthorOptions, type AuthorOption } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import LinksTable, { type LinkRow, type LinkRowTarget } from "@/components/LinksTable";
@@ -47,6 +48,15 @@ export const metadata: Metadata = { title: "Links" };
 //
 // No ADMIN "Show all" override, again as /annotations: an override widens
 // which rows are listed, and here that would widen which excerpts are shown.
+//
+// **The Owners dropdown lists creators, not eligible users.** /files offers
+// every ADMIN/EDITOR/AUTHOR (listOwnerFilterOptions) because that role set is
+// who may be listed on a file; a link's creator has no role floor at all
+// (addAnchoredLinkPart — an AUTHORIZED reader mints links too), so the same
+// list would miss exactly the people it is most useful for finding, and "every
+// account" would hand an AUTHOR the site's whole user list. So the options are
+// the distinct creators of the rows this viewer may list — every name already
+// visible in this table's Created by column, and nothing more.
 
 /**
  * canUserReadDoc as a `where` on Doc, for this viewer — readableDocsWhere's
@@ -111,6 +121,27 @@ function parseDeepLinkWhere(searchParams: URLSearchParams): Prisma.AnchoredLinkW
   return clauses.length > 0 ? { AND: clauses } : {};
 }
 
+/**
+ * The Owners dropdown's option list — see the file comment. A GROUP BY over
+ * the viewer's scope rather than Prisma's `distinct`, which dedupes in memory
+ * after fetching every row; then the users by id through `prisma`, whose
+ * soft-delete $extends drops a deleted account the way listAuthorFilterOptions
+ * does (that account's rows still list, with its name in the cell — the same
+ * arrangement as a deleted co-author on /docs).
+ */
+async function listCreatorFilterOptions(
+  viewerScope: Prisma.AnchoredLinkWhereInput,
+  viewerId: string,
+): Promise<AuthorOption[]> {
+  const creators = await prisma.anchoredLink.groupBy({ by: ["createdById"], where: viewerScope });
+  if (creators.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: creators.map((c) => c.createdById) } },
+    select: { id: true, slug: true, name: true, email: true },
+  });
+  return toAuthorOptions(users, viewerId);
+}
+
 function buildFilterWhere(
   filters: LinksFilters,
   readableAnchor: Prisma.AnchoredLinkAnchorWhereInput,
@@ -120,6 +151,10 @@ function buildFilterWhere(
   // anchor includes elsewhere, which the extension cannot reach), so the
   // plain client already sees deleted rows and this is the whole toggle.
   if (!filters.deleted) where.deletedByUserId = null;
+  // A to-one `in`, not authorFilterWhere's some/every/none: a link has one
+  // creator, so "any of the checked" is the only combination there is
+  // (src/lib/links-query.ts on why there is no ownerMode).
+  if (filters.owners.length > 0) where.createdBy = { slug: { in: filters.owners } };
   if (filters.q) {
     const contains = { contains: filters.q, mode: "insensitive" as const };
     where.OR = [
@@ -185,9 +220,6 @@ export default async function LinksPage({
   }
   const viewer = { id: session.user.id, role: session.user.role };
 
-  const prefs = await getTablePrefs(viewer.id, "links");
-  const filters = parseLinksFilters(urlSearchParams, prefs);
-
   const docWhere = readableDocWhere(viewer.id, viewer.role);
   const fileWhere = readableFileWhere(viewer.id, viewer.role);
   const readableAnchor = readableAnchorWhere(docWhere, fileWhere);
@@ -199,6 +231,20 @@ export default async function LinksPage({
       { mintedAt: { not: null }, anchors: { some: readableAnchor } },
     ],
   };
+
+  // The creator list is drawn from the scope alone — not the deep links, the
+  // search or the deleted toggle — so narrowing the table never empties the
+  // dropdown of the person it was narrowed to.
+  const [prefs, ownerOptions] = await Promise.all([
+    getTablePrefs(viewer.id, "links"),
+    listCreatorFilterOptions(viewerScope, viewer.id),
+  ]);
+  const filters = parseLinksFilters(
+    urlSearchParams,
+    prefs,
+    ownerOptions.map((o) => o.slug),
+  );
+
   const where: Prisma.AnchoredLinkWhereInput = {
     AND: [viewerScope, parseDeepLinkWhere(urlSearchParams), buildFilterWhere(filters, readableAnchor)],
   };
@@ -294,7 +340,7 @@ export default async function LinksPage({
   return (
     <main style={{ maxWidth: 1100, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Links</h1>
-      <LinksTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
+      <LinksTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} ownerOptions={ownerOptions} />
     </main>
   );
 }

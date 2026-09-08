@@ -25,6 +25,10 @@ import {
 } from "@/components/table/BulkToolbar";
 import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
+// Aliased as FilesTable aliases it: the kit's panel takes its wording from
+// props, and the only thing that reads in this table's vocabulary is the name
+// it is used under here.
+import { AuthorFilterPanel as OwnerFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
 import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
 import { saveTableColumns } from "@/app/actions/table-preferences";
@@ -94,11 +98,14 @@ export default function LinksTable({
   totalCount,
   filters,
   prefs,
+  ownerOptions,
 }: {
   rows: LinkRow[];
   totalCount: number;
   filters: LinksFilters;
   prefs: TablePrefs;
+  /** Everyone who created a link this viewer may list — not every eligible user, as /files has (page.tsx). */
+  ownerOptions: AuthorOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -262,6 +269,16 @@ export default function LinksTable({
           placeholder="Search passages, titles or creator…"
           label="Search links"
         />
+        <OwnerFilterPanel
+          options={ownerOptions}
+          selected={filters.owners}
+          // No `mode`: a link has one creator, so there is nothing for a Match
+          // select to combine (src/lib/links-query.ts). The panel reports
+          // /docs' key names; this table's is `owners`, renamed on the way in.
+          onChange={({ authors }) => updateFilters({ owners: authors })}
+          label="Owners"
+          noun="owner"
+        />
         <ColumnPicker
           columns={columns}
           resolved={visibleColumns}
@@ -325,8 +342,21 @@ export default function LinksTable({
         sortKeys={SORTABLE_KEYS}
         defaultPageSize={prefs.pageSize}
         searchDescription="Free-text search over the quoted passages and target titles you may read, and the creator's name/email."
+        filters={[
+          {
+            param: "owners",
+            meaning: (
+              <>
+                Comma-separated user slugs; shows links created by any of them. The list offers only people who
+                created a link you may see here, and a slug outside it is dropped rather than honoured. No{" "}
+                <code>ownerMode</code>, unlike /files: a link has one creator, so there is nothing to combine.
+              </>
+            ),
+            control: "Owners dropdown",
+          },
+        ]}
         deepLinks={[
-          deepLinkEntry("user", "A user id; shows only links that person created."),
+          deepLinkEntry("user", "A user id; shows only links that person created — the id-keyed twin of owners."),
           deepLinkEntry("doc", "A doc id; shows only links with a passage in that doc."),
           deepLinkEntry("file", "A file id; shows only links with a passage in that PDF."),
         ]}

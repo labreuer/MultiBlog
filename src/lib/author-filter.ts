@@ -33,7 +33,18 @@ export async function listAuthorFilterOptions(viewerId: string): Promise<AuthorO
     where: { role: { in: BYLINE_ELIGIBLE_ROLES } },
     select: { id: true, slug: true, name: true, email: true },
   });
+  return toAuthorOptions(users, viewerId);
+}
 
+/** The shape every person-filter option list is built from — what `listAuthorFilterOptions` selects. */
+export type AuthorOptionUser = { id: string; slug: string; name: string | null; email: string };
+
+// Labels and orders a fetched user list the one way every person filter
+// shows it. Split from listAuthorFilterOptions so a table whose people are
+// not "every eligible user" — /links, whose creators have no role floor and
+// so are listed from its own rows (src/app/links/page.tsx) — still reads the
+// same as /docs' and /files' panels without a second copy of this.
+export function toAuthorOptions(users: readonly AuthorOptionUser[], viewerId: string): AuthorOption[] {
   return users
     .map((u) => ({
       slug: u.slug,

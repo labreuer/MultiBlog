@@ -219,6 +219,69 @@ test.describe("/links", () => {
     }
   });
 
+  test("the Owners dropdown offers only creators the viewer may list, filters by them, and has no Match select", async ({
+    page,
+    sharedDoc,
+    secondUser,
+  }) => {
+    // docs/PERMISSIONS.md, "Review later — the Owners dropdown's disclosure":
+    // the option list is the distinct creators of the rows this viewer may
+    // list, not /files' every-eligible-user set. Two creators on the shared
+    // doc make the admin's list; a third, whose only link points into their
+    // own PRIVATE doc, must not appear — and naming their slug by hand in
+    // ?owners= is dropped rather than honoured.
+    const { user: author } = await secondUser({ role: "AUTHOR" });
+    const { user: outsider } = await secondUser({ role: "AUTHOR" });
+    const privateDoc = await createTestDoc({ authorEmail: outsider.email, bodyText: QUOTED_BODY });
+    const byAdmin = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [{ docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO }],
+    });
+    const byAuthor = await createTestAnchoredLink({
+      creatorEmail: author.email,
+      parts: [{ docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO }],
+    });
+    const hidden = await createTestAnchoredLink({
+      creatorEmail: outsider.email,
+      parts: [{ docId: privateDoc.id, from: QUOTE_FROM, to: QUOTE_TO }],
+    });
+    try {
+      await gotoOk(page, `/links?doc=${sharedDoc.id}`);
+      await expect(linkRows(page)).toHaveCount(2);
+
+      await page.getByText(/^Owners: /).click();
+      // Exact role queries: the row's own select box is labelled "Select link
+      // by <name>", which a substring label match would also resolve to.
+      const authorOption = page.getByRole("checkbox", { name: author.name, exact: true });
+      await expect(authorOption).toBeVisible();
+      await expect(page.getByText("E2E Admin (me)")).toBeVisible();
+      await expect(page.getByRole("checkbox", { name: outsider.name, exact: true })).toHaveCount(0);
+      // A link has one creator, so the panel renders no combining mode.
+      await expect(page.getByLabel("Owner match mode")).toHaveCount(0);
+
+      await authorOption.click();
+      await expect(page).toHaveURL(new RegExp(`owners=${author.slug}`));
+      await expect(linkRows(page)).toHaveCount(1);
+      await expect(linkRows(page)).toContainText(author.name);
+      // The summary names the person with no mode prefix ("ANY …" on /files).
+      await expect(page.getByText(/^Owners: /)).toHaveText(`Owners: ${author.name}`);
+
+      await page.getByRole("button", { name: "Clear owner filter" }).click();
+      await expect(page).not.toHaveURL(/owners=/);
+      await expect(linkRows(page)).toHaveCount(2);
+
+      // Off the allowlist: the same two rows, not an empty table and not a
+      // widened one.
+      await gotoOk(page, `/links?doc=${sharedDoc.id}&owners=${outsider.slug}`);
+      await expect(linkRows(page)).toHaveCount(2);
+    } finally {
+      await deleteTestAnchoredLink(hidden.id);
+      await deleteTestAnchoredLink(byAuthor.id);
+      await deleteTestAnchoredLink(byAdmin.id);
+      await deleteTestDoc(privateDoc.id);
+    }
+  });
+
   test("a signed-out visitor's filters survive the sign-in redirect", async ({ browser }) => {
     // The kit's rule: the table's whole state is the querystring, so the
     // callbackUrl the gate writes has to carry it (CLAUDE.md, "Admin tables

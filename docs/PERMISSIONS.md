@@ -340,6 +340,20 @@ delete by the creator or ADMIN/EDITOR (`LINK_MODERATOR_ROLES`, the same two role
 `canCurateTags`, stated independently); a deleted link 404s for everyone until restored.
 A draft is never deleted from the table — the tray's Discard is its one exit.
 
+**Review later — the Owners dropdown's disclosure (added 2026-09-08).** `/links`' Owners
+filter lists the **distinct creators of the rows the viewer may list** rather than `/files`'
+byline-eligible set, on two arguments made quickly and not yet re-examined: a link's creator
+has no role floor, so the eligible set would omit AUTHORIZED creators; and offering every
+account would hand an AUTHOR the site's whole user list. The claim to check is that the
+scoped list shows no name the Created by column doesn't already — it is drawn from the
+viewer scope alone (own links plus minted-and-readable), *including soft-deleted links*, so
+a creator whose every listed link is deleted appears in the dropdown while "Show deleted" is
+off, one toggle before the column would show them. Also worth a second look: the filter
+carries user **slugs** in the querystring (as `/docs` and `/files` already do), and the
+`?user=<id>` deep link narrows by creator *id* with no slug allowlist. Neither widens the
+scope — both are ANDed under it — but this section's rows were written before the control
+existed, and none of them names it.
+
 **Following is a per-target read filter with silent omission — a recorded deviation from
 §20i's conjunctive default.** §20i pre-declared that a cross-container reference is
 "visible only if every target is"; anchored links deliberately decline that.

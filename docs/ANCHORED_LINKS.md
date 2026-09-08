@@ -338,6 +338,18 @@ viewer) matches what the cell shows; `/annotations`' Quote is the precedent. Dee
 `?user=`, `?doc=`, `?file=`. No ADMIN "Show all": an override here would widen which
 excerpts are shown, not just which rows.
 
+An **Owners** dropdown (`?owners=<slugs>`, `/files`' control under `/files`' name) filters
+by creator, with two departures from `/files`. **Its list is the distinct creators of the
+rows this viewer may list**, not every ADMIN/EDITOR/AUTHOR: a link's creator has no role
+floor (an AUTHORIZED reader mints links), so the byline-eligible set would omit exactly the
+people worth finding, and "every account" would hand an AUTHOR the whole user list — the
+scoped list shows no name the Created by column doesn't already. It is drawn from the scope
+alone, never the deep links, the search or the deleted toggle, so narrowing the table never
+empties the dropdown of the person it was narrowed to. And **there is no `ownerMode`**: a
+link has one creator, so ALL and EXACTLY collapse into ANY and the Match select is not
+rendered (`AuthorFilterPanel` takes `mode` as optional for this). If links ever gain
+co-owners, the mode comes back with the relation.
+
 Its one action is a **soft delete of a minted link** — `deleteAnchoredLink` /
 `restoreAnchoredLink` and their bulk pair in `src/app/actions/anchored-links.ts`, gated by
 `canUserDeleteAnchoredLink` (`src/lib/anchored-link-authz.ts`): the creator or

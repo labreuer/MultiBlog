@@ -2,16 +2,18 @@ import type { SortColumn } from "@/lib/table-sort";
 import {
   buildBaseQueryString,
   parseBaseFilters,
+  parseSlugListParam,
   type BaseFilterSpec,
   type BaseFilters,
   type TablePrefs,
 } from "@/lib/table-query";
 
 // /links' querystring vocabulary (docs/ANCHORED_LINKS.md, "The management
-// table") — the admin-table kit's eighth `*-query.ts`, and like /tags' the
-// plainest kind: a link has no visibility axis of its own and no byline, so
-// the six base params are the whole vocabulary. Row scoping is not a param
-// here at all; src/app/links/page.tsx derives it from the viewer.
+// table") — the admin-table kit's eighth `*-query.ts`. A link has no
+// visibility axis of its own, so the six base params plus one of its own are
+// the whole vocabulary: `owners`, who created it, under /files' name for the
+// same control. Row scoping is not a param here at all; src/app/links/page.tsx
+// derives it from the viewer.
 //
 // **Fewer sort keys than columns, deliberately.** Passages and Targets are
 // per-viewer values: a target the viewer may not read is omitted from the
@@ -31,18 +33,39 @@ const SORT_KEYS: readonly LinksSortKey[] = ["createdBy", "created", "minted", "i
 // for — there is no updatedAt for a link's life to be measured in.
 export const DEFAULT_SORT: SortColumn<LinksSortKey>[] = [{ key: "created", dir: "desc" }];
 
-export type LinksFilters = BaseFilters<LinksSortKey>;
+// `owners` — creator slugs, /files' `?owners=` over `anchored_link.created_by`
+// instead of a to-many owner table. **No `ownerMode` beside it, deliberately**:
+// a link has exactly one creator today, so ALL and EXACTLY collapse into ANY
+// and the Match select would be a control with one live setting. If links ever
+// gain co-owners, the mode comes back with the relation, the /files way.
+export type LinksFilters = BaseFilters<LinksSortKey> & {
+  owners: string[];
+};
 
 function spec(prefs: TablePrefs): BaseFilterSpec<LinksSortKey> {
   return { sortKeys: SORT_KEYS, defaultSort: DEFAULT_SORT, prefs };
 }
 
-export function parseLinksFilters(searchParams: URLSearchParams, prefs: TablePrefs): LinksFilters {
-  return parseBaseFilters(searchParams, spec(prefs));
+// `knownOwnerSlugs` is the server-fetched allowlist (the page's creator
+// list); a slug outside it is dropped rather than honoured, as /files does.
+export function parseLinksFilters(
+  searchParams: URLSearchParams,
+  prefs: TablePrefs,
+  knownOwnerSlugs: readonly string[],
+): LinksFilters {
+  return {
+    ...parseBaseFilters(searchParams, spec(prefs)),
+    owners: parseSlugListParam(searchParams.get("owners"), knownOwnerSlugs),
+  };
 }
 
 // Deep-link-only filters (?user=, ?doc=, ?file=) round-trip through `extra`
-// unchanged, the same convention as annotations-query.ts.
+// unchanged, the same convention as annotations-query.ts. `?user=` is the
+// id-keyed twin of `owners` and stays: a deep link carries an id it already
+// has, where the dropdown carries slugs a person can read.
 export function buildLinksQueryString(filters: LinksFilters, extra: URLSearchParams, prefs: TablePrefs): string {
-  return buildBaseQueryString(filters, extra, spec(prefs)).toString();
+  const params = buildBaseQueryString(filters, extra, spec(prefs));
+  params.delete("owners");
+  if (filters.owners.length > 0) params.set("owners", filters.owners.join(","));
+  return params.toString();
 }
