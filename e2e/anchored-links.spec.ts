@@ -89,8 +89,10 @@ async function addDocSelectionToLink(page: import("@playwright/test").Page, need
 }
 
 /**
- * Mints the draft and returns the copied URL. Clipboard read needs the
- * permission granted on the context before this runs.
+ * Mints the draft and returns the copied URL — the landing route's, which
+ * routes per viewer at follow time (docs/ANCHORED_LINKS.md, "The landing
+ * route"). Clipboard read needs the permission granted on the context
+ * before this runs.
  */
 async function copyMintedLink(page: import("@playwright/test").Page): Promise<URL> {
   const tray = page.getByTestId("anchored-link-tray");
@@ -99,7 +101,7 @@ async function copyMintedLink(page: import("@playwright/test").Page): Promise<UR
     timeout: 15_000,
   });
   const url = await page.evaluate(() => navigator.clipboard.readText());
-  expect(url, "the minted URL landed on the clipboard").toContain("?sel=");
+  expect(url, "the minted URL landed on the clipboard").toContain("/link/");
   return new URL(url);
 }
 
@@ -142,13 +144,31 @@ test.describe("anchored links", () => {
       });
 
       const url = await copyMintedLink(page);
-      // Part 0 is the doc part, and doc hrefs are minted by id (docs have no
-      // slug history), so the landing page is /doc/<id>.
-      expect(url.pathname).toBe(`/doc/${sharedDoc.id}`);
+      const linkId = url.pathname.split("/").pop()!;
+      expect(url.pathname).toBe(`/link/${linkId}`);
+      expect(url.search).toBe("");
 
-      // Follow the link. The doc surface paints the passage as a
-      // decoration segment and lists the PDF group in the banner.
-      await gotoOk(page, url.pathname + url.search);
+      // Follow the link. Two readable groups means there is no one place to
+      // send this viewer, so the landing route renders the excerpt page:
+      // both targets named, both stored quotes shown, each group with a way
+      // into its surface.
+      await gotoOk(page, url.pathname);
+      const landing = page.getByTestId("anchored-link-landing");
+      await expect(landing).toBeVisible();
+      await expect(landing).toContainText(sharedDoc.title);
+      await expect(landing).toContainText(QUOTED_TEXT);
+      await expect(landing).toContainText(file.title);
+      await expect(landing).toContainText(PDF_PHRASE);
+
+      // Into the doc's context: the group's href carries ?sel=, and the doc
+      // surface paints the passage as a decoration segment and lists the
+      // PDF group in the banner.
+      await landing
+        .getByTestId("anchored-link-group")
+        .filter({ hasText: sharedDoc.title })
+        .getByRole("link", { name: "Open in context" })
+        .click();
+      await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.id}\\?sel=${linkId}`));
       const banner = page.getByTestId("anchored-link-banner");
       await expect(banner).toBeVisible();
       await expect(banner).toContainText(QUOTED_TEXT);
@@ -170,6 +190,12 @@ test.describe("anchored links", () => {
         timeout: 20_000,
       });
       await expect(page.getByTestId("anchored-link-banner")).toBeVisible();
+
+      // And back out to the excerpts, explicitly: ?noredirect=1 is what
+      // makes the landing route a page rather than a router.
+      await page.getByTestId("anchored-link-banner").getByRole("link", { name: "View as excerpts" }).click();
+      await expect(page).toHaveURL(new RegExp(`/link/${linkId}\\?noredirect=1`));
+      await expect(page.getByTestId("anchored-link-landing")).toBeVisible();
     } finally {
       await deleteTestFile(file.id);
     }
@@ -197,7 +223,7 @@ test.describe("anchored links", () => {
       await expect(tray).toContainText("2 passages", { timeout: 15_000 });
 
       const url = await copyMintedLink(page);
-      const sel = url.searchParams.get("sel")!;
+      const sel = url.pathname.split("/").pop()!;
 
       // A reader who may see the file but not the PRIVATE doc.
       const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
@@ -209,7 +235,13 @@ test.describe("anchored links", () => {
       // the private doc's group. "No acknowledgment" is the property: a
       // viewer cannot distinguish this link from one that referenced
       // nothing else.
-      await gotoOk(readerPage, `/pdf/${file.slug}?sel=${sel}`);
+      // The minted URL itself routes per viewer: with the file the only
+      // target this reader may see, the landing route sends them straight
+      // to the PDF's ?sel= page. Minted against part 0 — the private doc —
+      // this reader would once have met a Forbidden and never learned the
+      // link held anything for them.
+      await readerPage.goto(`/link/${sel}`);
+      await readerPage.waitForURL(new RegExp(`/pdf/${file.slug}\\?sel=${sel}`));
       await waitForViewer(readerPage);
       const banner = readerPage.getByTestId("anchored-link-banner");
       await expect(banner).toBeVisible();
@@ -217,6 +249,16 @@ test.describe("anchored links", () => {
       await expect(readerPage.locator(".pdfViewer .page .annoRectLink")).not.toHaveCount(0, { timeout: 20_000 });
       await expect(banner).not.toContainText(doc.title);
       await expect(banner).not.toContainText("Also referenced");
+
+      // Asked for explicitly, the excerpt page shows the same filtered
+      // view: the file's group and its quote, and nothing naming the doc.
+      await gotoOk(readerPage, `/link/${sel}?noredirect=1`);
+      const landing = readerPage.getByTestId("anchored-link-landing");
+      await expect(landing).toBeVisible();
+      await expect(landing).toContainText(file.title);
+      await expect(landing).toContainText(PDF_PHRASE);
+      await expect(landing).not.toContainText(doc.title);
+      await expect(landing.getByTestId("anchored-link-group")).toHaveCount(1);
 
       // And the private doc's own URL still forbids the page itself — the
       // route gate is untouched by any of this; ?sel= grants nothing.
@@ -311,6 +353,145 @@ test.describe("anchored links", () => {
       await expect(banner).toBeVisible();
       await expect(banner).toContainText(QUOTED_TEXT);
       await expect(reader.locator(`[data-anchored-link-ids~="${part.id}"]`).first()).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await context.close();
+      await deleteTestAnchoredLink(link.id);
+    }
+  });
+  test("the landing route redirects only when there is one place to go", async ({ page, sharedDoc }) => {
+    // Fixture-minted, docs only. The claims are the routing rule's arms
+    // (docs/ANCHORED_LINKS.md, "The landing route"): one readable group
+    // redirects into it, ?noredirect=1 declines that, two readable groups
+    // render the excerpt page — which offers side-by-side for a doc pair,
+    // since that surface fits exactly two docs — and an unknown id is a 404
+    // rather than an empty page.
+    const docB = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: NAV_DOC_B_BODY });
+    const single = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [{ docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO }],
+    });
+    const pair = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [
+        { docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO },
+        { docId: docB.id, from: NAV_B_FROM, to: NAV_B_TO },
+      ],
+    });
+    try {
+      await signIn(page, ADMIN_EMAIL);
+
+      // One readable group: straight into the doc, ?sel= and all.
+      await page.goto(`/link/${single.id}`);
+      await page.waitForURL(new RegExp(`/doc/${sharedDoc.id}\\?sel=${single.id}$`));
+      await expect(page.getByTestId("anchored-link-banner")).toBeVisible();
+
+      // The same link asked for as excerpts: no redirect, the quote shown,
+      // the group's "Open in context" carrying ?sel= onward, and no
+      // side-by-side offer for a single doc.
+      await gotoOk(page, `/link/${single.id}?noredirect=1`);
+      const landing = page.getByTestId("anchored-link-landing");
+      await expect(landing).toBeVisible();
+      await expect(landing).toContainText(QUOTED_TEXT);
+      await expect(landing.getByRole("link", { name: "Open in context" })).toHaveAttribute(
+        "href",
+        `/doc/${sharedDoc.id}?sel=${single.id}`,
+      );
+      await expect(landing.getByRole("link", { name: "Open side by side" })).toHaveCount(0);
+
+      // Two readable groups: the excerpt page, both quotes in part order,
+      // and the doc-pair offer.
+      await gotoOk(page, `/link/${pair.id}`);
+      await expect(page).toHaveURL(new RegExp(`/link/${pair.id}$`));
+      await expect(landing).toContainText(sharedDoc.title);
+      await expect(landing).toContainText(docB.title);
+      const quotes = landing.locator("blockquote");
+      await expect(quotes).toHaveCount(2);
+      await expect(quotes.nth(0)).toHaveText(QUOTED_TEXT);
+      await expect(quotes.nth(1)).toHaveText(NAV_B_QUOTE);
+      await expect(landing.getByRole("link", { name: "Open side by side" })).toHaveAttribute(
+        "href",
+        `/side-by-side/${sharedDoc.id}/${docB.id}`,
+      );
+
+      // Into doc B's context, then back out through the banner's own link.
+      await landing
+        .getByTestId("anchored-link-group")
+        .filter({ hasText: docB.title })
+        .getByRole("link", { name: "Open in context" })
+        .click();
+      await expect(page).toHaveURL(new RegExp(`/doc/${docB.id}\\?sel=${pair.id}`));
+      const banner = page.getByTestId("anchored-link-banner");
+      await expect(banner).toBeVisible();
+      await expect(page.locator(`[data-anchored-link-ids~="${pair.anchors[1].id}"]`).first()).toBeVisible({
+        timeout: 15_000,
+      });
+      await banner.getByRole("link", { name: "View as excerpts" }).click();
+      await expect(page).toHaveURL(new RegExp(`/link/${pair.id}\\?noredirect=1`));
+      await expect(page.getByTestId("anchored-link-landing")).toContainText(NAV_B_QUOTE);
+
+      const missing = await page.goto("/link/no-such-link");
+      expect(missing?.status()).toBe(404);
+    } finally {
+      await deleteTestAnchoredLink(pair.id);
+      await deleteTestAnchoredLink(single.id);
+      await deleteTestDoc(docB.id);
+    }
+  });
+
+  test("a link with nothing the viewer may read says so and names nothing", async ({ page, secondUser }) => {
+    // A PRIVATE doc (the admin's alone) as a link's only target. The
+    // creator is routed into it; a reader who may not see the doc gets a
+    // page that acknowledges the link — they hold its id already — and
+    // nothing about what it points at: the per-target rule's silent
+    // omission on the one surface that has to render *something* when every
+    // group is filtered out.
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, bodyText: QUOTED_TEXT });
+    const link = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [{ docId: doc.id, from: 1, to: 1 + QUOTED_TEXT.length }],
+    });
+    try {
+      const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
+      await gotoOk(readerPage, `/link/${link.id}`);
+      const landing = readerPage.getByTestId("anchored-link-landing");
+      await expect(landing).toBeVisible();
+      await expect(landing).toContainText("no passages you have permission to read");
+      await expect(landing).not.toContainText(doc.title);
+      await expect(landing).not.toContainText(QUOTED_TEXT);
+      await expect(landing.getByTestId("anchored-link-group")).toHaveCount(0);
+
+      await signIn(page, ADMIN_EMAIL);
+      await page.goto(`/link/${link.id}`);
+      await page.waitForURL(new RegExp(`/doc/${doc.id}\\?sel=${link.id}$`));
+    } finally {
+      await deleteTestAnchoredLink(link.id);
+      await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("a signed-out reader keeps ?noredirect= through sign-in on the landing route", async ({ browser, sharedDoc }) => {
+    // The landing route is now the URL every shared link *is*, so it is the
+    // gate a signed-out recipient meets first. The callbackUrl must carry
+    // the querystring: signing in onto `/link/<id>` without it would run
+    // the redirect the reader had declined.
+    const link = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [{ docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO }],
+    });
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const reader = await context.newPage();
+    try {
+      const target = `/link/${link.id}?noredirect=1`;
+      await reader.goto(target);
+      await reader.waitForURL("**/sign-in?callbackUrl=*");
+      expect(new URL(reader.url()).searchParams.get("callbackUrl")).toBe(target);
+
+      await reader.getByLabel("Email").fill(ADMIN_EMAIL);
+      await reader.getByLabel("Password").fill(TEST_PASSWORD);
+      await reader.getByRole("button", { name: "Sign in" }).click();
+
+      await reader.waitForURL(new RegExp(`/link/${link.id}\\?noredirect=1$`));
+      await expect(reader.getByTestId("anchored-link-landing")).toContainText(QUOTED_TEXT);
     } finally {
       await context.close();
       await deleteTestAnchoredLink(link.id);

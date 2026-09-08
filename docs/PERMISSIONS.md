@@ -345,6 +345,15 @@ server's filtered view handed it, from inside a page whose gate already ran — 
 stance. The tray shows only `loadMyDraftLink()`'s answer, which is creator-scoped by the
 query itself.
 
+**The landing route routes per viewer, and its empty page names nothing.** `/link/[id]`
+(docs/ANCHORED_LINKS.md, "The landing route") applies the same filter to decide the
+*page*: one readable group redirects into it, several render as excerpts of the readable
+groups only, none renders a page that acknowledges the link — the viewer holds its id
+already — and nothing about what it points at, not a count, not a kind. An id that names
+no link, a deleted link, or someone else's unminted draft is a 404, the existence rule
+`anchoredLinkForViewer` already applies. `?noredirect=1` changes only whether the route
+redirects; like `?sel=`, it grants nothing.
+
 ## Where each rule lives
 
 Re-derive from these rather than trusting the tables after an authz change:
@@ -373,6 +382,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
 | `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |
 | Anchored-link follow filter (per-target, silent omission) | `src/lib/anchored-link-data.ts` |
+| Anchored-link landing (per-viewer redirect; existence vs. empty page) | `src/app/link/[id]/page.tsx`, `anchoredLinkLandingFor` in `src/lib/anchored-link-data.ts` |
 | Anchored-link create/draft/mint (read-the-target, creator-scoped) | `src/app/actions/anchored-links.ts` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |

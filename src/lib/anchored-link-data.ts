@@ -145,3 +145,43 @@ export async function anchoredLinkForViewer(
 
   return groups.length > 0 ? { id: link.id, groups } : null;
 }
+
+// docs/ANCHORED_LINKS.md, "The landing route" — what /link/[id] needs beyond
+// the follow view: whether the link *exists* for this viewer at all, so the
+// route can tell "no such link" (404) from "a link none of whose passages
+// you may read" (a page that names the link and nothing else), plus the
+// creator and mint date the excerpt page shows. The existence rule is the
+// follow view's own — deleted reads as absent, and someone else's unminted
+// draft reads as absent — restated here rather than widened, so the two
+// can never disagree about which links a viewer may know of.
+export type AnchoredLinkLanding =
+  | { status: "not-found" }
+  /** The link exists for this viewer, but no group survived the per-target filter. */
+  | { status: "nothing-readable" }
+  | {
+      status: "ok";
+      link: AnchoredLinkView;
+      createdBy: { name: string | null };
+      /** Null only for the creator's own draft, which the landing route also serves. */
+      mintedAt: Date | null;
+    };
+
+export async function anchoredLinkLandingFor(
+  linkId: string,
+  viewer: { id: string; role: Role },
+): Promise<AnchoredLinkLanding> {
+  const row = await prisma.anchoredLink.findUnique({
+    where: { id: linkId },
+    select: {
+      createdById: true,
+      mintedAt: true,
+      deletedAt: true,
+      createdBy: { select: { name: true } },
+    },
+  });
+  if (!row || row.deletedAt) return { status: "not-found" };
+  if (!row.mintedAt && row.createdById !== viewer.id) return { status: "not-found" };
+  const link = await anchoredLinkForViewer(linkId, viewer);
+  if (!link) return { status: "nothing-readable" };
+  return { status: "ok", link, createdBy: row.createdBy, mintedAt: row.mintedAt };
+}

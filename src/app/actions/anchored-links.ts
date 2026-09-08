@@ -340,9 +340,12 @@ export async function discardDraftLink(): Promise<void> {
 }
 
 /**
- * Stamps the draft minted and hands back the URL to share — the landing
- * surface is part 0's, computed now rather than stored (no /sel/[id] route;
- * a redirect route stays a cheap later addition if minted hrefs go stale).
+ * Stamps the draft minted and hands back the URL to share: the landing
+ * route, /link/[id], which decides *per viewer at follow time* where the
+ * link goes (docs/ANCHORED_LINKS.md, "The landing route"). It used to be
+ * part 0's own page, chosen here once for everyone — and a recipient who
+ * could not read that target met its Forbidden with no way to the parts
+ * they could read.
  */
 export async function mintAnchoredLink(): Promise<{ url: string } | { error: string }> {
   const session = await requireSignedIn();
@@ -364,25 +367,23 @@ export async function mintAnchoredLink(): Promise<{ url: string } | { error: str
     return { error: "Add at least one passage first." };
   }
 
-  // Part 0 decides the landing page; later parts stand in only if its
-  // target vanished between add and mint (the doc/file lookups are
-  // soft-delete-filtered, so a deleted target yields no href here even
-  // though its row survives).
-  const sel = `?sel=${encodeURIComponent(draft.id)}`;
-  let href: string | null = null;
+  // Minting still checks that some part's target exists, so a link that
+  // would land nowhere is refused here rather than minted dead (the doc/file
+  // lookups are soft-delete-filtered, so a deleted target counts as gone
+  // even though its anchor row survives). Which target the *recipient* lands
+  // on is no longer this function's question.
+  let anyTargetExists = false;
   for (const anchor of draft.anchors) {
     if (anchor.docId !== null) {
-      const doc = await prisma.doc.findUnique({ where: { id: anchor.docId }, select: { id: true } });
-      // By id, not slug — docs have no slug history, so the id is the only
-      // rename-proof address (resolveDocParam is id-first).
-      if (doc) href = `/doc/${doc.id}${sel}`;
+      anyTargetExists =
+        (await prisma.doc.findUnique({ where: { id: anchor.docId }, select: { id: true } })) !== null;
     } else if (anchor.fileId !== null) {
-      const file = await prisma.storedFile.findUnique({ where: { id: anchor.fileId }, select: { slug: true } });
-      if (file) href = `/pdf/${file.slug}${sel}`;
+      anyTargetExists =
+        (await prisma.storedFile.findUnique({ where: { id: anchor.fileId }, select: { id: true } })) !== null;
     }
-    if (href) break;
+    if (anyTargetExists) break;
   }
-  if (!href) {
+  if (!anyTargetExists) {
     return { error: "None of the linked passages still exist." };
   }
 
@@ -390,5 +391,5 @@ export async function mintAnchoredLink(): Promise<{ url: string } | { error: str
     where: { id: draft.id },
     data: { mintedAt: new Date() },
   });
-  return { url: appUrl(href) };
+  return { url: appUrl(`/link/${draft.id}`) };
 }

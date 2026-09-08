@@ -7,9 +7,11 @@ import styles from "./AnchoredLinkBanner.module.css";
 
 // docs/ANCHORED_LINKS.md — what a ?sel= page shows about the link it landed
 // on: this surface's passages as jump handles, every *other* readable group
-// as a link that carries ?sel= onward. Shared by both reading surfaces; the
-// import from anchored-link-data is type-only, so the server module behind
-// it never reaches the client bundle.
+// as a link that carries ?sel= onward, and a way to the landing route's
+// excerpt page (?noredirect=1 — "The landing route"), which is also where a
+// part that no longer resolves here still reads. Shared by both reading
+// surfaces; the import from anchored-link-data is type-only, so the server
+// module behind it never reaches the client bundle.
 //
 // The per-target visibility filter already ran on the server
 // (anchoredLinkForViewer): whatever `link.groups` holds is what this viewer
@@ -84,6 +86,9 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
     <aside className={`${styles.banner} ${className ?? ""}`} data-testid="anchored-link-banner">
       <div className={styles.headerRow}>
         <span className={styles.title}>Linked passages</span>
+        <Link className={styles.excerptsLink} href={`/link/${link.id}?noredirect=1`}>
+          View as excerpts
+        </Link>
         <button
           type="button"
           className={styles.dismiss}

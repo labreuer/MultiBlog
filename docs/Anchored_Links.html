@@ -522,7 +522,7 @@
       </div>
     </div>
     <ul class="legend">
-      <li><span class="b">1</span><span>The minted href targets the <em>first part's</em> surface. Doc hrefs are minted by <strong>id</strong>, not slug — docs have no slug history, so an id link survives renames; PDF hrefs use the slug, whose history redirect will carry <span class="mono">?sel=</span> along. <span class="ref">mintAnchoredLink()</span></span></li>
+      <li><span class="b">1</span><span>The minted href is the landing route, <span class="mono">/link/&lt;id&gt;</span>, which routes <em>per viewer</em> at follow time: one readable target redirects into it (doc by <strong>id</strong>, not slug — docs have no slug history, so an id link survives renames; PDF by slug, whose history redirect carries <span class="mono">?sel=</span> along), several render the passages as excerpts, and <span class="mono">?noredirect=1</span> always shows the excerpts. <span class="ref">mintAnchoredLink() · /link/[id]</span></span></li>
       <li><span class="b">2</span><span>One line of honest permission copy at mint time: visibility is filtered per target — each recipient sees the passages whose documents they may read, and nothing hints at the rest (fig. 6). <span class="ref">ANCHORED_LINKS.md · visibility</span></span></li>
     </ul>
   </section>

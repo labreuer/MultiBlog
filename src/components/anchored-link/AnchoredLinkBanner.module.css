@@ -27,6 +27,14 @@
   color: var(--foreground);
 }
 
+/* The landing route's excerpt page, asked for explicitly. Sits between the
+   title and the dismiss control; quiet, since the passages are on the page
+   already and this is the way to see them without it. */
+.excerptsLink {
+  color: var(--link);
+  font-size: 0.8rem;
+}
+
 .dismiss {
   margin-left: auto;
   border: none;

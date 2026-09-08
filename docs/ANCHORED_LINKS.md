@@ -12,14 +12,17 @@ An **anchored link** is a hyperlink that refers to one or more text selections o
 and/or a PDF — "these two paragraphs of doc X plus this passage on page 2 of PDF Y" as a
 single shareable URL. The load-bearing decisions:
 
-1. **DB-backed**: a link is a database object; the URL carries its id (`?sel=<cuid>`), not
-   a stateless self-describing blob. No separate token column, no `/sel/[id]` route — the
-   landing surface is computed at mint time, and a redirect route stays a cheap later
-   addition if minted hrefs ever go stale.
+1. **DB-backed**: a link is a database object, and the URL carries its id — `/link/<cuid>`,
+   the landing route ("The landing route" below), which forwards onto the reading routes
+   as `?sel=<cuid>`. No separate token column, no stateless self-describing blob. Shipped
+   without the route (the minted href was part 0's own page, and "a redirect route stays a
+   cheap later addition"); it exists since 2026-09-07 because where a link should land
+   turned out to be a per-*viewer* question, not a mint-time one.
 2. **Cross-surface**: one link may gather selections across several docs/PDFs. Creation
    happens from the reading views `/doc/[slug]` and `/pdf/[slug]` via a draft-link tray
-   that persists across navigation; minted hrefs land on one of those two routes with a
-   `?sel=` param.
+   that persists across navigation; the minted href routes each recipient onto one of
+   those two routes with a `?sel=` param, or renders the passages itself when there is no
+   one page to send them to.
 3. **No inline doc marks** — docs use the offsets+version-stamp mechanism (PLAN.md §13o
    reading-view style), PDFs the quads blob. Nothing writes into any ydoc.
 4. **Per-target visibility** ("Following a link" below): the banner shows on `?sel=` pages
@@ -98,6 +101,14 @@ rename-proof beats pretty), file by slug. No group surviving returns null and ca
 behave as if `?sel=` were absent. The returned view is BigInt-free by design (stamps
 omitted): it crosses into client props on both surfaces.
 
+`anchoredLinkLandingFor(linkId, viewer)` is the landing route's read on top of it: the
+same existence rule (deleted, and someone else's draft, read as absent) answered
+*separately* from the per-target filter, so the route can tell "no such link" (404) from
+"a link none of whose passages you may read" (a page), plus the creator's name and mint
+date the excerpt page shows. The two share one rule by restating it, not by widening
+`anchoredLinkForViewer`'s null — both reading pages still treat that null as "`?sel=`
+absent".
+
 ## Following a link — the visibility rule
 
 **Per-target filtering, not a conjunctive gate.** The banner ("Linked passages") renders
@@ -118,7 +129,11 @@ are readable by construction — the route gate already ran before the banner re
 Consequences, all covered by `e2e/anchored-links.spec.ts`'s second test: a viewer who can
 read only the PDF target of a doc+PDF link still gets the PDF page's banner, outline
 regions and jump, with no "Also referenced" row naming the doc; the mint-time tray copy
-says what's true ("Recipients see only the passages they have permission to read").
+says what's true ("Recipients see only the passages they have permission to read"). On
+the landing route the same filter decides the *page*: one readable group redirects into
+it, several render as excerpts, none renders a page that acknowledges the link — the
+viewer holds its id already — and nothing about what it points at: not a count, not a
+kind.
 
 ## Highlight machinery
 
@@ -210,8 +225,10 @@ composing author's own vs. `--link`) and by wash, which is what they already dif
   intended).
 - `partOrder` = current count at add time; remove is draft-owner-only hard delete with no
   renumbering; discard hard-deletes the draft (cascade). `mintAnchoredLink` requires ≥1
-  part, stamps `mintedAt`, and returns `appUrl(<part-0 group href>)` — later parts stand
-  in only if part 0's target vanished between add and mint.
+  part, refuses to mint when no part's target still exists (a link that would land
+  nowhere), stamps `mintedAt`, and returns `appUrl(/link/<id>)`. Which target a recipient
+  lands on is the landing route's question, answered per viewer at follow time — it used
+  to be answered here, once, as part 0's page.
 - **No `revalidatePath` anywhere, deliberately** (contrast `untagObject`): both routes are
   per-request dynamic, and everything showing the draft self-fetches on
   `src/lib/anchored-link-tray-events.ts` — a module-scope listener set
@@ -220,6 +237,33 @@ composing author's own vs. `--link`) and by wash, which is what they already dif
   between them. "Painting a draft" above is the reader side of that channel.
 
 ## Surfaces
+
+**The landing route** (`src/app/link/[id]/page.tsx`; `"link"` in `RESERVED_SLUGS`; the
+same `gated` envelope as the reading routes): the URL a minted link *is*. A router before
+it is a page —
+
+| For this viewer | `/link/<id>` |
+|---|---|
+| exactly one readable group | redirects to that group's href — `?sel=` and all; the surface scrolls, highlights and lists |
+| two or more readable groups | renders the excerpt page |
+| a readable link, no readable group | renders a page that says so and names nothing |
+| no such link, deleted, someone else's draft | 404 |
+| any of the above with `?noredirect=1` | never redirects — the excerpt page, or the empty one |
+
+The excerpt page (`data-testid="anchored-link-landing"`): "Linked passages", who shared
+it and when, then one `<section data-testid="anchored-link-group">` per readable group in
+first-part order — kind, title, each part's stored `quoted_text` as a `<blockquote>` in
+part order, and an "Open in context" link carrying `?sel=` onward. Quotes are shown
+**plain and labelled as captured**: the doc side's `textBetween(…, " ")` flattens a
+paragraph break to a space and drops headings, lists and images, and the PDF side is
+normalised text — thinner than the passage, and exactly what the anchor holds, which is
+what makes the page cheap (no ydoc tap, no editor, no pdfjs, no file download) and keeps
+it honest after the target changes. When the readable groups are exactly two docs it also
+offers **"Open side by side"** (`/side-by-side/<a>/<b>` — both passed the predicate that
+route gates on), hidden by CSS below the 900px width where §14f's layout stacks; that
+surface does not yet paint link parts ("Explicitly deferred"). The signed-out redirect
+carries `?noredirect=` through `signInPath`, so signing in returns to the page asked for
+rather than the redirect it declined; `check:sign-in` covers the gate like any other.
 
 **Doc follow** (`src/app/doc/[slug]/page.tsx`): reads `searchParams.sel` after the gate,
 outside the `gated` memo (it keys on arguments and `generateMetadata` already ran it).
@@ -230,8 +274,9 @@ feed `AnchoredLinkBanner` above `DocView`.
 **The banner** (`src/components/anchored-link/AnchoredLinkBanner.tsx`, client, shared by
 both surfaces, `data-testid="anchored-link-banner"`): this surface's part quotes as jump
 handles (DOM query on `data-anchored-link-ids`, scroll+pulse; doubles as
-cycle-through-parts), every *other* readable group as a link carrying `?sel=` onward;
-dismissible. On-load scroll-to-first retries ~10×300ms until the read-only editor mounts —
+cycle-through-parts), every *other* readable group as a link carrying `?sel=` onward; a
+**"View as excerpts"** link to `/link/<id>?noredirect=1` (also where a part that resolves
+nowhere on this surface still reads); dismissible. On-load scroll-to-first retries ~10×300ms until the read-only editor mounts —
 doc mode only, and it scrolls without the pulse (the flash marks a deliberate click, not
 arrival); supplying `onJumpToPart` (the PDF surface does) hands over both the click
 jump and the on-load jump. Parts that fail to resolve are listed, painted nowhere,
@@ -295,11 +340,18 @@ hard refresh. Two stacked defects, both fixed, both load-bearing:
 
 - `npm run test:unit` (the `deriveDocRangeSelector` cases arrived with the cherry-pick);
   `npx tsc --noEmit`; `npx eslint .`; STYLE.md's color-literal grep.
-- `e2e/anchored-links.spec.ts`, three tests: cross-surface create + follow (UI-driven:
-  popover → tray across a doc→PDF nav → Copy link → follow the minted URL both ways);
-  the per-target filter (a PRIVATE-doc+shared-PDF link read by a viewer who may see only
-  the PDF — banner and outline render, nothing acknowledges the doc group, and the doc's
-  own URL still forbids); the banner-nav regression above. The third runs on
+- `e2e/anchored-links.spec.ts`, seven tests: cross-surface create + follow (UI-driven:
+  popover → tray across a doc→PDF nav → Copy link → the minted `/link/` URL renders the
+  excerpt page for a viewer who may read both groups → "Open in context" into the doc →
+  the banner into the PDF → "View as excerpts" back out); the per-target filter (a
+  PRIVATE-doc+shared-PDF link read by a viewer who may see only the PDF — the landing
+  route redirects them straight to the PDF, its banner and outline render, nothing on the
+  banner or on the `?noredirect=1` page acknowledges the doc group, and the doc's own URL
+  still forbids); the banner-nav regression above; the sign-in round trip of `?sel=` on a
+  reading route and of `?noredirect=` on the landing route; the landing route's arms (one
+  group redirects, `?noredirect=1` declines, a doc pair renders with the side-by-side
+  offer, an unknown id 404s); and the empty page for a link whose only target is a
+  PRIVATE doc the viewer may not read. All but the first two run on
   **fixture-minted links**: `e2e/db-worker.ts`'s `createTestAnchoredLink` writes rows the
   way the real writer does — quotes derived server-side from the seeded body (offsets that
   hold no text fail at creation, not as a later integrity finding), stamps from the target
@@ -340,11 +392,45 @@ Everything unmentioned went in as written. Where the build differs:
   turned `loadMyDraftLink` into a positional read and gave the tray's fetch a home in a
   shared store. It borrows `.pending-annotation`'s dashed underline outright rather than
   taking a pattern of its own: dashed means in-progress here, whatever is in progress.
+- **The landing route (2026-09-07) reverses decision 1's "no `/sel/[id]` route".** The
+  minted href was part 0's page, chosen once at mint time — but readability is per viewer,
+  so a recipient who could not read part 0's target met that page's Forbidden and never
+  learned the link held a part they could read (the second e2e test covered a viewer
+  *handed the PDF href*, not one handed the doc's). `/link/[id]` routes at follow time
+  instead: it redirects when that is honest for this viewer and renders the stored quotes
+  otherwise. Neither reading route changed — `?sel=` on them is exactly as built, and the
+  landing page's links carry it the way the banner does. The prior art that settled the
+  shape, for the record: Hypothes.is (in-context direct links, a standalone page as the
+  fallback), Chrome's text fragments (several ranges, scroll to the first, highlight all —
+  the several-parts-one-target behaviour the reading routes keep), Xanadu (an excerpt
+  page is a xanadoc of the link's spans, and a transclusion must stay visibly connected to
+  its source — hence "Open in context" on every group), Intermedia and Microcosm (a
+  multi-destination link opened a chooser rather than landing on the first), and
+  Engelbart's Augment viewspecs (a link may carry its own arrival mode — `?noredirect=1`
+  is the one such flag here).
 
 ## Explicitly deferred
 
 Post targets (`POST_RANGE` has no selector kind), annotation-body targets (arc ready,
 writer refuses), multi-page PDF selections (capture is start-page-only today), part roles
 (MULTI_ANCHORING: these parts are homogeneous), drift persistence, a `/links` management
-table and minted-link deletion UI, editing a link after mint, link labels, a `/sel/[id]`
-canonical route.
+table and minted-link deletion UI, editing a link after mint, link labels.
+
+Deferred by the landing route specifically:
+
+- **Painting link parts on `/side-by-side`.** The excerpt page offers that layout for a
+  doc pair, but `SideBySideDocBody` mounts only the doc-link extension (§14p: a sibling
+  of `DocReadingBody`, not a mode of it), so following the offer shows both docs and no
+  passages. Trigger: the first person who follows it and asks where the passages went —
+  then a `?sel=` read on that route and an anchors prop down `SideBySideView` →
+  `DocColumn` → `SideBySideDocBody` onto the same `AnnotationHighlight` plugin.
+- **Rich excerpts.** The page shows `quoted_text`. A paragraph-preserving doc excerpt
+  means slicing the prose snapshot through `resolveAnchorInDoc` (display only — the "never
+  position off `Doc.proseJson`" rule is about *positioning*) or replaying the ydoc to the
+  part's stamp per request; a PDF image excerpt means server-side pdfjs rendering of the
+  quads' region, cached by `sha256`. Plain text first, on purpose.
+- **A `part=` parameter**, so an excerpt's own link could land on *that* part rather than
+  its group's first; today "Open in context" is per group.
+- **A landing mode stored on the link** (Augment's viewspec): `?noredirect=1` is a
+  per-visit flag, not a per-link one. If a minter ever wants "always the excerpt page",
+  that is one nullable column, not a new route.
