@@ -39,11 +39,17 @@
 
 /* Where the reader is. When the entry itself is inside a collapsed subtree
    this lands on the outermost closed ancestor instead — same styling, because
-   to the reader it is the same claim: "you are in here". */
+   to the reader it is the same claim: "you are in here".
+
+   **Nothing here changes the row's metrics, and nothing added later may.** The
+   mark moves on its own as the document scrolls, so any property that affects
+   layout — a weight, a size, a border width, padding — relays out the row it
+   lands on, and a long title that gains or loses a line shoves every row below
+   it while the reader is looking somewhere else entirely. A background and the
+   left edge every row already reserves are enough to find, and cost nothing. */
 .current {
   background: var(--accent-wash);
   border-left-color: var(--link);
-  font-weight: 600;
 }
 
 /* An *open* ancestor of the current entry. Deliberately much quieter than
