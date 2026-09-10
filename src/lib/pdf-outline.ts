@@ -44,8 +44,8 @@ export type OutlinePosition = {
  * Flat, with parent links, rather than nested: every question the pane asks —
  * which row is active, which of its ancestors is visible, what the next row
  * down is for the arrow keys — is a scan or a lookup, and none of them is
- * naturally a walk. The nesting is recoverable from `id` alone (see below) and
- * is re-formed for rendering by `childrenOf`.
+ * naturally a walk. The nesting is recoverable from `id` alone (see below), and
+ * the pane renders it flat — `levelPositions` says what that costs in ARIA.
  */
 export type OutlineNode = {
   /**
@@ -135,24 +135,57 @@ export function flattenOutline(
   return out;
 }
 
-/** The rows whose parent is `parentId` — the nesting, re-formed for rendering. */
-export function childrenOf(nodes: readonly OutlineNode[], parentId: string | null): OutlineNode[] {
-  return nodes.filter((node) => node.parentId === parentId);
+/**
+ * Each row's place among its siblings, as ARIA's 1-based `aria-posinset` and
+ * `aria-setsize`.
+ *
+ * The pane renders the tree **flat** — every visible row a sibling in the DOM,
+ * nesting expressed by `aria-level` and indentation rather than by nested
+ * `role="group"` elements. ARIA allows either, and flat is what keeps a focus
+ * ring around one row instead of around a row *and* everything under it. The
+ * cost is that set position stops being implicit in the DOM and has to be
+ * stated, which is what this computes.
+ */
+export function levelPositions(nodes: readonly OutlineNode[]): Map<string, { posInSet: number; setSize: number }> {
+  const counts = new Map<string, number>();
+  const key = (parentId: string | null) => parentId ?? "";
+  for (const node of nodes) counts.set(key(node.parentId), (counts.get(key(node.parentId)) ?? 0) + 1);
+
+  const seen = new Map<string, number>();
+  const out = new Map<string, { posInSet: number; setSize: number }>();
+  for (const node of nodes) {
+    const posInSet = (seen.get(key(node.parentId)) ?? 0) + 1;
+    seen.set(key(node.parentId), posInSet);
+    out.set(node.id, { posInSet, setSize: counts.get(key(node.parentId)) ?? 1 });
+  }
+  return out;
 }
 
 /**
  * The set of ids expanded when the pane first opens.
  *
- * Honours the PDF's own `/Count` sign — an author who shipped a 400-entry
- * outline collapsed to its parts meant it — with one override: **the top level
- * is always expanded**, because a Contents pane whose every row is closed looks
- * broken rather than tidy, and there is nothing above it to open.
+ * Honours the PDF's own `/Count` sign throughout — an author who shipped a
+ * 400-entry outline collapsed to its parts meant it, and a top-level chapter
+ * that ships closed is the ordinary way a long document keeps its contents
+ * readable.
+ *
+ * The one override is for the document that ships **everything** closed, where
+ * honouring it literally gives a pane of rows with nothing under any of them
+ * and no clue that there is more: then the top level opens. Not a general
+ * "always expand the first level", which would overrule the far more common
+ * deliberate case above.
  */
 export function defaultExpanded(nodes: readonly OutlineNode[]): Set<string> {
   const expanded = new Set<string>();
+  let anyParents = false;
   for (const node of nodes) {
     if (!node.hasChildren) continue;
-    if (node.depth === 0 || (node.count ?? 0) > 0) expanded.add(node.id);
+    anyParents = true;
+    if ((node.count ?? 0) > 0) expanded.add(node.id);
+  }
+  if (expanded.size > 0 || !anyParents) return expanded;
+  for (const node of nodes) {
+    if (node.depth === 0 && node.hasChildren) expanded.add(node.id);
   }
   return expanded;
 }

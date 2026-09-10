@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   activeNodeAt,
   ancestorIdsOf,
-  childrenOf,
+  levelPositions,
   defaultExpanded,
   destPageTarget,
   destinationYFromTop,
@@ -148,17 +148,19 @@ test("titles are trimmed, and an unresolvable entry keeps its row with no positi
   assert.equal(elsewhere.url, "https://example.invalid/");
 });
 
-test("hasChildren follows the tree, and childrenOf re-forms it", () => {
+test("hasChildren follows the tree", () => {
   const nodes = flattenSample();
-  assert.deepEqual(
-    childrenOf(nodes, "1").map((node) => node.title),
-    ["Section 1.1", "Section 1.2"],
-  );
-  assert.deepEqual(
-    childrenOf(nodes, null).map((node) => node.title),
-    ["Front matter", "Chapter one", "Elsewhere"],
-  );
+  assert.equal(nodes.find((node) => node.id === "1")?.hasChildren, true);
   assert.equal(nodes.find((node) => node.id === "1.1")?.hasChildren, false);
+});
+
+test("levelPositions counts each row among its own siblings, not among all rows", () => {
+  const positions = levelPositions(flattenSample());
+  assert.deepEqual(positions.get("0"), { posInSet: 1, setSize: 3 });
+  assert.deepEqual(positions.get("2"), { posInSet: 3, setSize: 3 });
+  assert.deepEqual(positions.get("1.0"), { posInSet: 1, setSize: 2 });
+  assert.deepEqual(positions.get("1.1"), { posInSet: 2, setSize: 2 });
+  assert.deepEqual(positions.get("1.0.0"), { posInSet: 1, setSize: 1 });
 });
 
 // ---- expansion --------------------------------------------------------------
@@ -168,15 +170,39 @@ test("ancestorIdsOf walks outward from the root, excluding the node itself", () 
   assert.deepEqual(ancestorIdsOf("3"), []);
 });
 
-test("a negative /Count is honoured — except at the top level, which always opens", () => {
+test("a negative /Count is honoured, at the top level too", () => {
   const expanded = defaultExpanded(flattenSample());
-  // "Chapter one" carries count -2 but is top level, so it opens anyway.
-  assert.ok(expanded.has("1"));
+  // "Chapter one" carries count -2: it ships closed, top level or not.
+  assert.ok(!expanded.has("1"));
   // Its section carries a positive count and opens on the document's say-so.
   assert.ok(expanded.has("1.0"));
   // Leaves are never in the set — there is nothing to open.
   assert.ok(!expanded.has("1.0.0"));
   assert.ok(!expanded.has("0"));
+});
+
+test("a document that ships everything closed opens its top level anyway", () => {
+  const nodes = flattenOutline(
+    [
+      { title: "One", dest: null, url: null, count: -1, items: [{ title: "1.1", dest: null, url: null }] },
+      { title: "Two", dest: null, url: null, count: -1, items: [{ title: "2.1", dest: null, url: null }] },
+    ],
+    () => null,
+    () => 0,
+  );
+  assert.deepEqual([...defaultExpanded(nodes)].sort(), ["0", "1"]);
+});
+
+test("an outline with no children at all expands nothing", () => {
+  const nodes = flattenOutline(
+    [
+      { title: "One", dest: null, url: null },
+      { title: "Two", dest: null, url: null },
+    ],
+    () => null,
+    () => 0,
+  );
+  assert.equal(defaultExpanded(nodes).size, 0);
 });
 
 test("a nested negative /Count stays closed", () => {
@@ -202,6 +228,8 @@ test("a nested negative /Count stays closed", () => {
     () => 0,
   );
   const expanded = defaultExpanded(nodes);
+  // The chapter's own count is positive, so it opens; the section inside it
+  // ships closed, so its part is not rendered.
   assert.ok(expanded.has("0"));
   assert.ok(!expanded.has("0.0"));
   assert.ok(isVisible("0.0", expanded));

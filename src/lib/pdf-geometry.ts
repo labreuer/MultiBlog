@@ -132,6 +132,22 @@ export function thumbIsWorthDrawing(range: { start: number; end: number }, railH
 export const JUMP_VIEWPORT_FRACTION = 0.25;
 
 /**
+ * Where down the viewport the "you are here" line sits, as a fraction of the
+ * viewer's height — what the Contents pane asks about (PLAN.md §19b).
+ *
+ * Not the top edge, for two reasons. A line flush against the top flickers
+ * between two entries as a heading crosses it by a pixel, and — more usefully —
+ * a heading a reader has *just* scrolled past should stay current for the
+ * screenful it introduces rather than handing over the moment it leaves.
+ *
+ * It matches JUMP_VIEWPORT_FRACTION on purpose but is a separate constant: this
+ * is where the reader is deemed to be, that is where a jump puts a passage, and
+ * a change to one is not a reason to change the other. Keeping them equal does
+ * mean an anchored jump lands its passage exactly on the line.
+ */
+export const READING_LINE_FRACTION = 0.25;
+
+/**
  * The PDF-space y to hand an `XYZ` destination so a passage lands `fraction`
  * down the viewport instead of against its top edge.
  *

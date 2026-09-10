@@ -1,0 +1,91 @@
+/* PLAN.md §19b — the Contents pane's tree.
+
+   Its own module rather than a share of PdfPanes.module.css: those panes hold
+   "a little content in a narrow scroller", and this is a full-height list of
+   rows with hover, focus and two highlight states. The scroller itself is
+   still PdfViewer's `.panel` — nothing here scrolls. */
+
+.tree {
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+/* One entry. `padding-left` is set inline from the row's depth, since the tree
+   is rendered flat (PdfOutlinePanel says why) and the indent is therefore the
+   only thing carrying the nesting visually. */
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  padding-right: 0.5rem;
+  color: var(--foreground);
+  cursor: pointer;
+  /* A left edge every row owns, so the current row's marker below doesn't
+     shift the text by 2px when it appears. */
+  border-left: 2px solid transparent;
+}
+
+.item:hover {
+  background: var(--surface-hover);
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+
+/* Where the reader is. When the entry itself is inside a collapsed subtree
+   this lands on the outermost closed ancestor instead — same styling, because
+   to the reader it is the same claim: "you are in here". */
+.current {
+  background: var(--accent-wash);
+  border-left-color: var(--link);
+  font-weight: 600;
+}
+
+/* An *open* ancestor of the current entry. Deliberately much quieter than
+   `.current`: it marks the path, and two rows claiming to be the position
+   would be worse than one. */
+.onChain {
+  border-left-color: var(--border-strong);
+}
+
+.twisty {
+  flex: 0 0 auto;
+  width: 0.9rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  /* The hit target for opening a subtree — kept clear of the title so a
+     pointer aiming at one never lands on the other. */
+  cursor: pointer;
+  user-select: none;
+}
+
+.twistyEmpty {
+  cursor: inherit;
+}
+
+.title {
+  flex: 1 1 auto;
+  /* Wraps rather than truncating: an outline entry is a sentence often enough
+     that an ellipsis would hide the part that distinguishes it from its
+     siblings, and vertical room is the thing this pane has most of. */
+  overflow-wrap: anywhere;
+}
+
+.page {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+}
+
+.notice {
+  padding: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
