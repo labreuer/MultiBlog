@@ -9,6 +9,7 @@ import {
   visibleOrder,
   type OutlineNode,
 } from "@/lib/pdf-outline";
+import { pageLabelFor } from "@/lib/pdf-page-labels";
 import type { PdfOutlineState } from "./use-pdf-outline";
 import styles from "./PdfOutline.module.css";
 
@@ -47,6 +48,12 @@ type Props = {
   /** Jump the viewer to an entry's destination. */
   onJumpTo: (node: OutlineNode) => void;
   /**
+   * What the document calls its pages (PLAN.md §19c), or null for the ordinary
+   * 1…N. A contents list showing "4" against a sheet the book itself calls "iv"
+   * is the exact thing a table of contents exists not to make the reader do.
+   */
+  pageLabels: string[] | null;
+  /**
    * Whether this pane is the selected tab. Auto-scrolling a hidden pane is
    * wasted work, and worse, `scrollIntoView` inside a `display: none` subtree
    * silently does nothing — so a highlight change that happened while the tab
@@ -72,7 +79,7 @@ type TreeState = {
   focusedId: string | null;
 };
 
-export default function PdfOutlinePanel({ state, activeId, onJumpTo, visible }: Props) {
+export default function PdfOutlinePanel({ state, activeId, onJumpTo, pageLabels, visible }: Props) {
   const { status, nodes } = state;
   const [tree, setTree] = useState<TreeState | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
@@ -258,7 +265,9 @@ export default function PdfOutlinePanel({ state, activeId, onJumpTo, visible }: 
                 whether a jump is worth making, and how they find the same spot
                 in a printed copy. Absent when the destination didn't resolve —
                 which is also exactly when the row can't be highlighted. */}
-            {node.position && <span className={styles.page}>{node.position.pageIndex + 1}</span>}
+            {node.position && (
+              <span className={styles.page}>{pageLabelFor(pageLabels, node.position.pageIndex)}</span>
+            )}
           </div>
         );
       })}

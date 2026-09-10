@@ -26,6 +26,7 @@ import {
   visibleFractionRange,
 } from "@/lib/pdf-geometry";
 import { activeNodeAt, type OutlineNode } from "@/lib/pdf-outline";
+import { pageLabelFor } from "@/lib/pdf-page-labels";
 import { captureTextTarget, type CapturePage } from "@/lib/pdf-anchor-capture";
 import { resolveTargetRects } from "@/lib/pdf-anchor-resolve";
 import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
@@ -768,7 +769,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           id: entry.root.id,
           fraction: documentFraction(handle.offsets, target.pageIndex, Math.max(0, pageHeight - top)),
           color: entry.color,
-          label: entry.quotedText || `Annotation on page ${target.pageIndex + 1}`,
+          label: entry.quotedText || `Annotation on page ${pageLabelFor(handle.pageLabels, target.pageIndex)}`,
         },
       ];
     });
@@ -808,10 +809,11 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           pendingTarget={pending?.target ?? null}
           pendingKey={pending?.key ?? 0}
           onClearPending={() => setPending(null)}
+          pageLabels={handle?.pageLabels ?? null}
         />
       </AnnotationReloadProvider>
     ),
-    [fileId, liveEntries, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries],
+    [fileId, liveEntries, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries, handle],
   );
 
   const panes = useMemo<PdfPane[]>(
@@ -824,6 +826,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
             state={outline}
             activeId={activeOutlineId}
             onJumpTo={jumpToOutlineNode}
+            pageLabels={handle?.pageLabels ?? null}
             visible={panelOpen && activePane === CONTENTS_PANE}
           />
         ),
@@ -832,7 +835,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
       { value: METADATA_PANE, label: "Metadata", content: <PdfMetadataPanel>{metadata}</PdfMetadataPanel> },
       { value: COLLAB_PANE, label: "Collab", content: <PdfCollabPanel /> },
     ],
-    [panel, metadata, outline, activeOutlineId, jumpToOutlineNode, panelOpen, activePane],
+    [panel, metadata, outline, activeOutlineId, jumpToOutlineNode, panelOpen, activePane, handle],
   );
 
   return (
