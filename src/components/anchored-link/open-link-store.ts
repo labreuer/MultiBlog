@@ -118,3 +118,15 @@ export function useOpenLinkParts(targetKind: AnchorTarget["kind"], targetId: str
     return parts.length === 0 ? NO_PARTS : parts;
   }, [current, targetKind, targetId]);
 }
+
+/**
+ * The name a surface shows for link `linkId` (docs/ANCHORED_LINKS.md,
+ * "Naming a link"): the store's copy while that link is the open one — a
+ * rename in the tray is then visible on the same page with no refresh, the
+ * reason draft parts are painted — and the server's otherwise. Server
+ * render has no store, so it shows the server's name and nothing flashes.
+ */
+export function useLinkName(linkId: string, serverName: string | null): string | null {
+  const open = useOpenLink();
+  return open && open.id === linkId ? open.name : serverName;
+}

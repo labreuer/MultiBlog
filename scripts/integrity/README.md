@@ -143,4 +143,5 @@ probes its two CHECKs plus, on `anchored_link` itself, the `anchored_link_one_op
 partial unique index and the reopened-only-when-minted CHECK (both directions: a second open
 draft must be refused, as must a reopened link beside a draft and `reopened_at` on a draft; a
 second link for a user whose first is *minted* must go in, as must a reopened link once the
-slot is free).
+slot is free), and the not-blank CHECK on `name` (a whitespace-only name must be refused; a
+real one must go in — docs/ANCHORED_LINKS.md, "Naming a link").

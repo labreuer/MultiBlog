@@ -1,11 +1,12 @@
 # Anchored links — a URL for a set of passages across docs and PDFs
 
-**Status: built** (2026-08-31; editing a minted link since 2026-09-08). This file began as
-the implementation plan and is rewritten as-built per the house convention — "Deviations
-from the plan" below records where the build differs from what was designed; the plan text
-itself lives in this file's git history (first commit of the `anchored-links` branch). UI
-sketch, drawn in `globals.css`'s own tokens: [docs/Anchored_Links.html](Anchored_Links.html)
-— its "immutable in v1" note predates editing.
+**Status: built** (2026-08-31; editing a minted link since 2026-09-08; names since
+2026-09-09). This file began as the implementation plan and is rewritten as-built per the
+house convention — "Deviations from the plan" below records where the build differs from
+what was designed; the plan text itself lives in this file's git history (first commit of
+the `anchored-links` branch). UI sketch, drawn in `globals.css`'s own tokens:
+[docs/Anchored_Links.html](Anchored_Links.html) — its "immutable in v1" note predates
+editing.
 
 ## What an anchored link is
 
@@ -63,8 +64,9 @@ Two models after the tag block in `prisma/schema.prisma`, migration
 - **`anchored_link`** — id (cuid, the URL id), `created_by_id`, `created_at`,
   `minted_at` (null = the creator's open draft), `reopened_at` (a minted link back in its
   creator's tray — "Editing a minted link" below; migration
-  `20260908210830_reopen_anchored_links`), `edited_at` (when a minted link's parts last
-  changed; null until its first edit), soft-delete pair. Like
+  `20260908210830_reopen_anchored_links`), `edited_at` (when a minted link's parts or name
+  last changed; null until its first edit), `name` (optional, creator-given — "Naming a
+  link" below; migration `20260910012608_name_anchored_links`), soft-delete pair. Like
   `TagAssignment`, deliberately outside `prisma.ts`'s soft-delete `$extends` (read
   through anchor includes, which the extension cannot reach); `deletedAt` filters by hand.
 - **`anchored_link_anchor`** — the §20b row shape verbatim under `link_id`
@@ -93,6 +95,10 @@ Hand-appended DDL (the `add_tags` convention — Prisma has no CHECK or partial-
   index (a second open draft must be refused, and so must a reopened link beside a draft; a
   second link for a user whose first is *minted* must go in, and so must a reopened link
   once the slot is free — the WHERE clause is the feature).
+- **`anchored_link_name_not_blank_check`** — `name IS NULL OR btrim(name) <> ''`. A name
+  is null or a name, never a blank: the writer already stores whitespace-only input as
+  null (`normalizeLinkName`), and this keeps any other writer honest, so every reader's
+  `?? "Linked passages"` is the whole fallback. Probed both ways beside the four above.
 
 The v1 writer produces only `doc_id`+`DOC_RANGE` and `file_id`+`PDF_TEXT` rows;
 `post_id`/`target_annotation_id`/`anchored_event_id` ship inert on `tag_anchor`'s
@@ -223,7 +229,8 @@ composing author's own vs. `--link`) and by wash, which is what they already dif
 
 `loadMyOpenLink` / `addAnchoredLinkPart` / `removeAnchoredLinkPart` /
 `reorderAnchoredLinkParts` / `discardDraftLink` / `mintAnchoredLink` /
-`openAnchoredLinkForEditing` / `closeAnchoredLinkEdit`. The load-bearing rules:
+`openAnchoredLinkForEditing` / `closeAnchoredLinkEdit` / `renameAnchoredLink`. The
+load-bearing rules:
 
 - **Create-permission is read-the-target** — signed in plus `canUserReadDoc`/
   `canUserReadFile`, the annotate precedent, no role floor of its own (docs/PERMISSIONS.md
@@ -267,8 +274,9 @@ it is a page —
 | no such link, deleted, someone else's draft | 404 |
 | any of the above with `?noredirect=1` | never redirects — the excerpt page, or the empty one |
 
-The excerpt page (`data-testid="anchored-link-landing"`): "Linked passages", who shared
-it and when, then one `<section data-testid="anchored-link-group">` per readable group in
+The excerpt page (`data-testid="anchored-link-landing"`): the link's name, or "Linked
+passages" for an unnamed one ("Naming a link" below), as heading and tab title; who shared
+it and when; then one `<section data-testid="anchored-link-group">` per readable group in
 first-part order — kind, title, each part's stored `quoted_text` as a `<blockquote>` in
 part order, and an "Open in context" link carrying `?sel=` onward. Quotes are shown
 **plain and labelled as captured**: the doc side's `textBetween(…, " ")` flattens a
@@ -292,7 +300,8 @@ annotations ride — no DocView/DocReadingBody prop changes for paint. All survi
 feed `AnchoredLinkBanner` above `DocView`.
 
 **The banner** (`src/components/anchored-link/AnchoredLinkBanner.tsx`, client, shared by
-both surfaces, `data-testid="anchored-link-banner"`): this surface's part quotes as jump
+both surfaces, `data-testid="anchored-link-banner"`): titled with the link's name, or
+"Linked passages" ("Naming a link" below); this surface's part quotes as jump
 handles (DOM query on `data-anchored-link-ids`, scroll+pulse; doubles as
 cycle-through-parts), every *other* readable group as a link carrying `?sel=` onward; a
 **"View as excerpts"** link to `/link/<id>?noredirect=1` (also where a part that resolves
@@ -330,42 +339,46 @@ end of `<main>`; pdf: sibling of `PdfSurfaceClient`, outside the `ssr:false` bou
 Reads the shared open-link store — which fetches on the first consumer's mount and on
 every notify — rather than owning the fetch itself, so the list and the surface's
 highlights can never disagree about what is open; renders nothing without an open link or
-with an empty draft. Part list (a grip, label + ~60-char snippet, per-part ✕), then the
-mode's buttons. **Reorder is a drag** by the grip or the text — both show the hand, and a
-rule between rows marks the slot the held row would drop into; pointer events rather than
-HTML5 drag-and-drop, which iOS never delivers for touch, and no library for a handful of
-rows. The grip takes the arrow keys, so the keyboard kept what the up/down buttons gave it.
-A draft: **Copy link** (mint →
-clipboard → "Link copied" note with the recipients-see-only-what-they-may-read sentence →
-tray clears; a clipboard-permission failure still mints and shows the URL as text) and
-**Discard**. A reopened link: **Copy link** (the URL it has had all along — no mint; an
-inline "Link copied." note), **View** (the excerpt page) and **Done**. Fixed positioning
-keeps it out of every page's layout math.
+with an empty draft. A name field ("Naming a link" below), the part list (a grip, label +
+~60-char snippet, per-part ✕), then the mode's buttons. **Reorder is a drag** by the grip
+or the text — both show the hand, and a rule between rows marks the slot the held row
+would drop into; pointer events rather than HTML5 drag-and-drop, which iOS never delivers
+for touch, and no library for a handful of rows. The grip takes the arrow keys, so the
+keyboard kept what the up/down buttons gave it. A draft: **Copy link** (mint → clipboard →
+"Link copied" note with the recipients-see-only-what-they-may-read sentence → tray clears;
+a clipboard-permission failure still mints and shows the URL as text) and **Discard**. A
+reopened link: **Copy link** (the URL it has had all along — no mint; an inline "Link
+copied." note), **View** (the excerpt page) and **Done**. Fixed positioning keeps it out
+of every page's layout math.
 
 **The management table** (`src/app/links/page.tsx`, `src/components/LinksTable.tsx`,
 `src/lib/links-query.ts`; `"links"` in `AdminTableName`, `RESERVED_SLUGS` and the
 site-settings column defaults; the header's **Links** entry sits after Files, top level
-rather than in the Docs dropdown because a link spans docs *and* PDFs): the §16 admin-table
-kit over `anchored_link`, added 2026-09-08. Gated on `canManageDocs` like every other
-listing. **Row scoping is the follow rule as a `where`**: a link lists for its creator
-(their own draft included — nobody else's, ever) or when it is minted and *some* anchor
-points into a doc or file the viewer may read, with `canUserReadDoc`/`canUserReadFile`
-restated as relation filters the way `/annotations` restates them. Within a row the cells
-re-apply the filter **per target**, once per page rather than per group (two `findMany`s
-over the page's distinct doc and file ids, both wearing the read clause and riding the
-soft-delete `$extends`), so a readable-PDF-plus-unreadable-doc link lists and shows the
-PDF's passages alone — no count, no placeholder, the banner's rule. The free-text search is
-bounded by the same clause, or `?q=` would be a probe into quotes the viewer cannot see.
-Columns: Passages (readable parts' count, linking to `/link/<id>?noredirect=1`, with each
-quote as a snippet beneath), Targets (kind + title, each carrying `?sel=`), Created by,
-Created at, Minted at (*draft* for the viewer's own open one; *· editing* beside the date
-for their own reopened one), Edited at (default-hidden; null until a minted link's first
-edit), Id and Deleted at (both default-hidden), Edit (the creator's own minted rows only —
-"Editing a minted link" below), and the delete/restore control. **Passages and Targets carry no sort
-key** — they are per-viewer values, and nothing Postgres could `ORDER BY` (a view has no
-viewer) matches what the cell shows; `/annotations`' Quote is the precedent. Deep links
-`?user=`, `?doc=`, `?file=`. No ADMIN "Show all": an override here would widen which
-excerpts are shown, not just which rows.
+rather than in the Docs dropdown because a link spans docs *and* PDFs): the §16
+admin-table kit over `anchored_link`, added 2026-09-08. Gated on `canManageDocs` like
+every other listing. **Row scoping is the follow rule as a `where`**: a link lists for its
+creator (their own draft included — nobody else's, ever) or when it is minted and *some*
+anchor points into a doc or file the viewer may read, with
+`canUserReadDoc`/`canUserReadFile` restated as relation filters the way `/annotations`
+restates them. Within a row the cells re-apply the filter **per target**, once per page
+rather than per group (two `findMany`s over the page's distinct doc and file ids, both
+wearing the read clause and riding the soft-delete `$extends`), so a
+readable-PDF-plus-unreadable-doc link lists and shows the PDF's passages alone — no count,
+no placeholder, the banner's rule. The free-text search is bounded by the same clause, or
+`?q=` would be a probe into quotes the viewer cannot see (the link's *name* is searched
+unbounded: it is the creator's text, not an excerpt, and the row is already in scope).
+Columns: Name (the creator-given name, sortable, edited in place where the viewer may
+rename — "Naming a link" below), Passages (readable parts' count, linking to
+`/link/<id>?noredirect=1`, with each quote as a snippet beneath), Targets (kind + title,
+each carrying `?sel=`), Created by, Created at, Minted at (*draft* for the viewer's own
+open one; *· editing* beside the date for their own reopened one), Edited at
+(default-hidden; null until a minted link's first edit), Id and Deleted at (both
+default-hidden), Edit (the creator's own minted rows only — "Editing a minted link"
+below), and the delete/restore control. **Passages and Targets carry no sort key** — they
+are per-viewer values, and nothing Postgres could `ORDER BY` (a view has no viewer)
+matches what the cell shows; `/annotations`' Quote is the precedent. Deep links `?user=`,
+`?doc=`, `?file=`. No ADMIN "Show all": an override here would widen which excerpts are
+shown, not just which rows.
 
 An **Owners** dropdown (`?owners=<slugs>`, `/files`' control under `/files`' name) filters
 by creator, with two departures from `/files`. **Its list is the distinct creators of the
@@ -461,6 +474,57 @@ and the next page that mounts the tray shows it again. Nothing on the dashboard 
 exists; the disabled Edit button's hint is the one place a forgotten draft announces itself
 away from a reading page.
 
+## Naming a link
+
+Since 2026-09-09 a link may carry an optional, creator-given **name** — one nullable
+column, `anchored_link.name` — shown wherever the link resolves for the viewer, in place of
+"Linked passages": the excerpt page's heading and tab title, the banner's title on a
+`?sel=` page, and `/links`' Name column. An unnamed link reads exactly as before, and
+nothing requires a name at any stage.
+
+- **One pure module, `src/lib/anchored-link-name.ts`** (the `doc-title.ts` of this
+  feature): `normalizeLinkName` — trim, collapse internal whitespace, cap at 80 (the
+  tag-name limit), and **null for nothing, never an empty string** — and
+  `anchoredLinkTitle`, the `?? "Linked passages"` every surface renders through. The
+  column's CHECK (`anchored_link_name_not_blank_check`) refuses a blank, so that fallback
+  is the whole story and no reader carries a second "or blank" test. Unit-tested, since the
+  rejection surface is the point.
+- **One write path, `renameAnchoredLink(linkId, name)`**, shared by both surfaces. Who may
+  is `canUserRenameAnchoredLink` (`src/lib/anchored-link-authz.ts`): **the creator at any
+  stage, a moderator (ADMIN/EDITOR) once the link is minted, nobody on a deleted row.**
+  That is the delete rule's shape, not editing's — a name is presentation, not a passage,
+  and the "creator's alone" reasoning for editing (a passage added by someone else would
+  put *their* reading into the creator's link) does not reach a retitle. A draft's name is
+  its creator's alone by inheritance: nobody else can list or follow one. An unchanged
+  name writes nothing; a changed name on a *minted* link stamps `edited_at`, whose meaning
+  widens to "parts or name last changed" — recipients see the name in the banner and on
+  the landing page, so a rename is a change they can notice.
+- **The tray's field**, in both modes: a draft can be named before Copy link, and the mint
+  carries the name across; a reopened link is renamed in place. The `UsersTable` NameCell
+  shape — committed on blur or Enter, never per keystroke — then the store re-reads. The
+  field is mounted under a key of the store's current name, so a save ends with it
+  remounting on what the server stored rather than reconciling two copies. It appears with
+  the tray, which renders nothing at zero parts, so a name cannot be typed before the first
+  passage; and an empty draft with a name still gives way to Edit (a name alone is not
+  something to finish).
+- **`/links`' Name cell**, first after Select, sortable (unnamed rows last in both
+  directions, the Created by rule) and searchable *unbounded* by the readability clause
+  that bounds the quotes. The cell is the same NameCell shape where `canRename` holds,
+  wired to the row's status border like `/users`' name and calling `router.refresh()` after
+  its save as every cell in the kit does; every other row shows the name as text — a
+  disabled field would read as a control withheld, where for most rows there is simply no
+  name. Clearing it leaves the link unnamed.
+- **The name follows the per-target rule structurally.** It rides `AnchoredLinkView`, which
+  is null when no group survives the filter, so the landing route's "nothing readable"
+  page and its 404 cannot show it — a creator can name a link after the very targets a
+  viewer may not read, and a page that names nothing about the link names that neither.
+- **Same-page freshness without a refresh.** `useLinkName(linkId, serverName)` on the
+  open-link store prefers the store's copy while that link is the open one; the banner's
+  title and the excerpt page's heading (`AnchoredLinkHeading`, a client island for this one
+  reason) both read through it, so a rename in the tray shows on the page at once — the
+  "did something and saw nothing" failure that got draft parts painted. The tab title
+  waits for the next navigation.
+
 ## Navigation is a mount boundary
 
 The banner's group links are the **first client-side doc→doc navigation in the app**
@@ -534,6 +598,14 @@ hard refresh. Two stacked defects, both fixed, both load-bearing:
   `check-pdf-anchors.ts` gains the PDF_TEXT pass (the first selector blob it checks beyond
   annotations); `check-tag-constraints.ts` probes the DDL as above.
   `scripts/integrity/README.md` records the arrangement.
+- Naming (2026-09-09): `src/lib/anchored-link-name.test.ts` pins `normalizeLinkName`'s
+  rejection surface. The editing spec's round trip names the link from the tray on the
+  excerpt page and checks the heading there, the banner in context, and the recipient's
+  heading and tab title; `anchored-links.spec.ts` names the draft before Copy link and
+  asserts the "nothing readable" page shows no name while the creator's banner does;
+  `links.spec.ts`'s Name test covers the moderator's field (normalised on the way in, held
+  across a reload), the AUTHOR's plain text, `?q=` on the name, and the creator clearing
+  it. `check-tag-constraints.ts` probes the not-blank CHECK both ways.
 
 ## Deviations from the plan
 
@@ -590,15 +662,19 @@ Everything unmentioned went in as written. Where the build differs:
   mint" and the sketch's "a mistake is answered by making a fresh link". "Editing a minted
   link" above has the shape; one column (`reopened_at`, plus `edited_at` for the record)
   is the whole schema cost, and the one-draft index became the one-open index.
+- **A link can be named (2026-09-09)** — "Naming a link" above. The deferred list called
+  this a *label* and put it in the editing tray alone; it went in as a *name*, in the tray
+  and as an in-place cell on `/links` with the delete rule's moderator arm, one nullable
+  column plus a not-blank CHECK.
 
 ## Explicitly deferred
 
 Post targets (`POST_RANGE` has no selector kind), annotation-body targets (arc ready,
 writer refuses), multi-page PDF selections (capture is start-page-only today), part roles
-(MULTI_ANCHORING: these parts are homogeneous), drift persistence, link labels (the
-editing tray is where a label field would live — one nullable column). (The `/links`
-table, minted-link deletion and editing after mint, all deferred here until 2026-09-08,
-are built — "The management table" and "Editing a minted link" above.)
+(MULTI_ANCHORING: these parts are homogeneous), drift persistence. (The `/links` table,
+minted-link deletion and editing after mint, all deferred here until 2026-09-08, and link
+names, deferred until 2026-09-09, are built — "The management table", "Editing a minted
+link" and "Naming a link" above.)
 
 Deferred by the landing route specifically:
 

@@ -208,3 +208,20 @@
 .dismiss:hover {
   color: var(--foreground);
 }
+
+/* The link's optional name (docs/ANCHORED_LINKS.md, "Naming a link") — the
+   tray's one text field, between the header and the part list. Inherits the
+   tray's type size; tokens only, like every control here. */
+.nameInput {
+  font: inherit;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.nameInput::placeholder {
+  color: var(--text-muted);
+}

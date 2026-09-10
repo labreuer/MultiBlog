@@ -34,6 +34,11 @@ async function headerLinkNames(page: import("@playwright/test").Page): Promise<s
 
 const NO_ROWS = "No links matching the criteria.";
 
+/** The name the Name test settles on — what "  Retry   rule, both readings " normalises to. */
+const NAME = "Retry rule, both readings";
+/** The row-status border once a cell's save lands — admin-table.spec.ts's SAVED, --success in light mode. */
+const SAVED = "rgb(0, 170, 85)";
+
 /** The table's data rows — every one carries a passage count; the header row says "Passages", the empty row neither. */
 function linkRows(page: import("@playwright/test").Page) {
   return page.locator("tbody tr").filter({ hasText: /\d+ passages?/ });
@@ -216,6 +221,70 @@ test.describe("/links", () => {
     } finally {
       await deleteTestAnchoredLink(draft.id);
       await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("Name edits in place for the creator and a moderator, reads as text for anyone else, and is searchable", async ({
+    page,
+    sharedDoc,
+    secondUser,
+  }) => {
+    // docs/ANCHORED_LINKS.md, "Naming a link" — the in-place cell, the
+    // UsersTable shape. Who gets the field is the delete rule's arm
+    // (docs/PERMISSIONS.md): the creator, or a moderator once minted.
+    const link = await createTestAnchoredLink({
+      creatorEmail: ADMIN_EMAIL,
+      parts: [{ docId: sharedDoc.id, from: QUOTE_FROM, to: QUOTE_TO }],
+    });
+    try {
+      // An EDITOR is not the creator but is a moderator, so the cell is a
+      // field. The value it settles on is what the server stored — trimmed,
+      // runs of whitespace collapsed — and a reload proves it landed.
+      const { page: editorPage } = await secondUser({ role: "EDITOR" });
+      await gotoOk(editorPage, `/links?doc=${sharedDoc.id}`);
+      const editorRow = () => linkRows(editorPage).filter({ hasText: sharedDoc.title });
+      await expect(editorRow()).toHaveCount(1);
+      const editorField = () => editorRow().getByRole("textbox", { name: "Link name" });
+      await editorField().fill("  Retry   rule, both readings ");
+      await editorField().press("Enter");
+      await expect(editorField()).toHaveValue(NAME);
+      await editorPage.reload();
+      await expect(editorField()).toHaveValue(NAME);
+
+      // ?q= finds it by name — the creator's text, searched unbounded by the
+      // readability clause that bounds the quotes.
+      await gotoOk(editorPage, `/links?doc=${sharedDoc.id}&q=${encodeURIComponent("both readings")}`);
+      await expect(linkRows(editorPage)).toHaveCount(1);
+      await gotoOk(editorPage, `/links?doc=${sharedDoc.id}&q=${encodeURIComponent("no such name")}`);
+      await expect(editorPage.getByText(NO_ROWS)).toBeVisible();
+
+      // An AUTHOR is neither creator nor moderator: the name reads as text,
+      // with no field to edit it.
+      const { page: authorPage } = await secondUser({ role: "AUTHOR" });
+      await gotoOk(authorPage, `/links?doc=${sharedDoc.id}`);
+      const authorRow = linkRows(authorPage).filter({ hasText: sharedDoc.title });
+      await expect(authorRow).toContainText(NAME);
+      await expect(authorRow.getByRole("textbox", { name: "Link name" })).toHaveCount(0);
+
+      // Recipients see the name as the excerpt page's heading. The creator
+      // clears it from here — the field's value is the empty string before
+      // and after, so the save is waited on through the row's status border,
+      // as admin-table.spec.ts reads it — and the heading goes back to the
+      // generic one.
+      const heading = () => page.getByTestId("anchored-link-landing").getByRole("heading", { level: 1 });
+      await gotoOk(page, `/link/${link.id}?noredirect=1`);
+      await expect(heading()).toHaveText(NAME);
+      await gotoOk(page, `/links?doc=${sharedDoc.id}`);
+      const creatorRow = linkRows(page).filter({ hasText: sharedDoc.title });
+      const creatorField = creatorRow.getByRole("textbox", { name: "Link name" });
+      await expect(creatorField).toHaveValue(NAME);
+      await creatorField.fill("");
+      await creatorField.press("Enter");
+      await expect(creatorRow.locator("td").first()).toHaveCSS("border-left-color", SAVED);
+      await gotoOk(page, `/link/${link.id}?noredirect=1`);
+      await expect(heading()).toHaveText("Linked passages");
+    } finally {
+      await deleteTestAnchoredLink(link.id);
     }
   });
 

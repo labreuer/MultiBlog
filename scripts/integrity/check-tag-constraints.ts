@@ -124,8 +124,20 @@ const MUST_REJECT: Probe[] = [
   },
   // docs/ANCHORED_LINKS.md — the third table on the §20a envelope carries its
   // own copies of both CHECKs; anchored_link itself carries the partial unique
-  // index that makes "the viewer's open link" a definite article, and the
-  // CHECK that keeps reopened_at off drafts.
+  // index that makes "the viewer's open link" a definite article, the CHECK
+  // that keeps reopened_at off drafts, and the one that keeps a name from
+  // being blank.
+  {
+    name: "a blank link name",
+    constraint: "anchored_link_name_not_blank_check",
+    why:
+      "a name is null or a name — the writer stores whitespace-only input as null, and every reader's " +
+      'fallback is `?? "Linked passages"` with no second "or blank" check (docs/ANCHORED_LINKS.md, "Naming a link")',
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, name)
+        VALUES ('probe-link-blank-name', ${f.linkUser2Id}, now(), now(), '   ')`,
+  },
   {
     name: "link anchor with no target",
     constraint: "anchored_link_anchor_one_target_check",
@@ -255,6 +267,15 @@ const MUST_ACCEPT: Probe[] = [
       tx.$executeRaw`
         INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, reopened_at)
         VALUES ('probe-link-reopened', ${f.linkUser2Id}, now(), now(), now())`,
+  },
+  {
+    name: "a named minted link",
+    constraint: "",
+    why: 'the row renameAnchoredLink writes — a name that survived normalisation (docs/ANCHORED_LINKS.md, "Naming a link")',
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, name)
+        VALUES ('probe-link-named', ${f.linkUser2Id}, now(), now(), 'Probe: a named link')`,
   },
 ];
 

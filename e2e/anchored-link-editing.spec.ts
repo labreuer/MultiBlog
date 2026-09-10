@@ -24,6 +24,8 @@ import {
 // anchored-links.spec.ts assembles drafts as the shared admin in parallel.
 
 const BODY = "Editing keeps the URL: the first passage stays put while a second passage arrives later.";
+/** A name given from the tray (docs/ANCHORED_LINKS.md, "Naming a link") — regex-safe, since a title assertion uses it. */
+const LINK_NAME = "Both readings of the retry rule";
 const QUOTE_A = "first passage stays put";
 const QUOTE_B = "second passage arrives later";
 // A single paragraph, so character index `i` sits at ProseMirror position
@@ -110,6 +112,15 @@ test.describe("editing an anchored link", () => {
       await expect(tray).toContainText("1 passage");
       await expect(landing.getByTestId("edit-link-open-here")).toBeVisible();
 
+      // Name it from the tray's field (docs/ANCHORED_LINKS.md, "Naming a
+      // link"): committed on Enter, and the page's own heading follows from
+      // the store the tray re-read — no refresh, no navigation.
+      const nameField = tray.getByRole("textbox", { name: "Link name" });
+      await expect(nameField).toHaveValue("");
+      await nameField.fill(LINK_NAME);
+      await nameField.press("Enter");
+      await expect(landing.getByRole("heading", { level: 1 })).toHaveText(LINK_NAME);
+
       // Into context to add a passage. The tray follows (the server row is
       // the persistence), the banner shows the same open-here state, and
       // the followed part wears the in-progress look while it is open.
@@ -118,6 +129,8 @@ test.describe("editing an anchored link", () => {
       await expect(bodyEditor(creatorPage)).toBeVisible();
       await expect(creatorPage.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
       await expect(creatorPage.getByTestId("anchored-link-banner").getByTestId("edit-link-open-here")).toBeVisible();
+      // The banner's title is the name too, on the reading surface.
+      await expect(creatorPage.getByTestId("anchored-link-banner")).toContainText(LINK_NAME);
       await expect(creatorPage.locator(".anchored-link-draft-highlight").first()).toBeVisible({ timeout: 15_000 });
       await addDocSelectionToLink(creatorPage, QUOTE_B);
       await expect(tray).toContainText("2 passages", { timeout: 15_000 });
@@ -150,6 +163,7 @@ test.describe("editing an anchored link", () => {
       await gotoOk(page, `/link/${link.id}`);
       await expect(page).toHaveURL(new RegExp(`/doc/${doc.id}\\?sel=${link.id}`));
       const banner = page.getByTestId("anchored-link-banner");
+      await expect(banner).toContainText(LINK_NAME);
       await expect(banner).toContainText(QUOTE_B);
       await expect(banner).not.toContainText(QUOTE_A);
       // Editing is the creator's alone: an admin is a moderator for delete
@@ -157,6 +171,8 @@ test.describe("editing an anchored link", () => {
       await expect(banner.getByTestId("edit-link")).toHaveCount(0);
       await gotoOk(page, `/link/${link.id}?noredirect=1`);
       const recipientLanding = page.getByTestId("anchored-link-landing");
+      await expect(recipientLanding.getByRole("heading", { level: 1 })).toHaveText(LINK_NAME);
+      await expect(page).toHaveTitle(new RegExp(LINK_NAME));
       await expect(recipientLanding).toContainText("edited");
       await expect(recipientLanding.getByTestId("edit-link")).toHaveCount(0);
     } finally {

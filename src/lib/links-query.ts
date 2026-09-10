@@ -23,10 +23,20 @@ import {
 // what the cell displays, and §16e's rule is that displayed and sorted never
 // drift. /annotations' Quote column is the precedent for a display-only column
 // on the kit. Everything that *is* sortable here is a plain column or a
-// to-one relation: createdBy, createdAt, mintedAt, id, the soft-delete pair.
-export type LinksSortKey = "createdBy" | "created" | "minted" | "edited" | "id" | "deletedAt" | "deleted";
+// to-one relation: name, createdBy, createdAt, mintedAt, editedAt, id, the
+// soft-delete pair.
+export type LinksSortKey = "name" | "createdBy" | "created" | "minted" | "edited" | "id" | "deletedAt" | "deleted";
 
-const SORT_KEYS: readonly LinksSortKey[] = ["createdBy", "created", "minted", "edited", "id", "deletedAt", "deleted"];
+const SORT_KEYS: readonly LinksSortKey[] = [
+  "name",
+  "createdBy",
+  "created",
+  "minted",
+  "edited",
+  "id",
+  "deletedAt",
+  "deleted",
+];
 
 // Newest first, like /files: "what was shared recently" is the landing view
 // anyone comes here for. A minted link's parts can change since 2026-09-08

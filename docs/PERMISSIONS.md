@@ -313,6 +313,8 @@ read gate, and nothing else.
 | See / edit / mint / discard **your own** draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
 | Reopen, add to, remove from, reorder **your own** minted link (live; never to zero passages) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
 | Edit **someone else's** minted link, whatever the role | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Name, rename or un-name **your own** link, draft or minted (the tray; `/links` too where you may browse it) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Rename **someone else's** minted link (`/links`) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | See **someone else's** unminted draft | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Follow a minted link (per readable target) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
 | Browse `/links` (your own links, plus minted links with a target you may read) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
@@ -329,6 +331,14 @@ that is the design, not an accident.
 † The action permits it (`canUserDeleteAnchoredLink` has no role floor for the creator,
 matching `addAnchoredLinkPart`), but `/links` is `canManageDocs`-gated like every admin
 listing, so an AUTHORIZED user has no surface from which to invoke it today.
+
+**A name is presentation, not a passage.** Renaming takes the delete rule's shape —
+the creator at any stage, or a moderator once the link is minted, never on a deleted row
+(`canUserRenameAnchoredLink`) — rather than editing's creator-only one, because the reason
+editing is the creator's alone (a passage added by someone else would put *their* reading
+into the creator's link) does not reach a retitle. The name rides the filtered follow
+view, so a viewer who may read none of the link's targets never sees it, on any surface
+(docs/ANCHORED_LINKS.md, "Naming a link").
 
 **Editing a minted link is the creator's alone, and live** (docs/ANCHORED_LINKS.md, "Editing
 a minted link"). Reopening puts the link back in its creator's tray — one open link per

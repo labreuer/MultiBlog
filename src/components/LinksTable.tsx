@@ -7,14 +7,16 @@ import {
   bulkDeleteAnchoredLinks,
   bulkRestoreAnchoredLinks,
   deleteAnchoredLink,
+  renameAnchoredLink,
   restoreAnchoredLink,
 } from "@/app/actions/anchored-links";
+import { LINK_NAME_MAX_LENGTH, normalizeLinkName } from "@/lib/anchored-link-name";
 import { formatDate } from "@/lib/format-date";
 import { type LinksFilters, buildLinksQueryString } from "@/lib/links-query";
 import { sameCols, type TablePrefs } from "@/lib/table-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
-import { useRowStatus } from "@/components/table/use-row-status";
+import { useRowStatus, type RowStatus } from "@/components/table/use-row-status";
 import { useRowSelection } from "@/components/table/use-row-selection";
 import {
   BulkToolbar,
@@ -56,7 +58,11 @@ import styles from "./LinksTable.module.css";
 // the banner and the landing page omit it. That is also why Passages and
 // Targets carry no sortKey (src/lib/links-query.ts).
 //
-// Two actions. Delete/Restore is a soft delete: a deleted link 404s for
+// Three actions. Name is edited in place, the UsersTable NameCell shape
+// (commit on blur or Enter, the row's left border reporting the save), for
+// rows this viewer may rename — the creator, or a moderator once the link is
+// minted (`canRename`, docs/ANCHORED_LINKS.md, "Naming a link"); every other
+// row shows the name as text. Delete/Restore is a soft delete: a deleted link 404s for
 // everyone who follows it until restored. Who may do it is decided per row on
 // the server (`canManage`, the /files shape) — its creator or ADMIN/EDITOR,
 // and never a draft, which is discarded from its tray instead. Edit puts one
@@ -76,6 +82,8 @@ export type LinkRowTarget = {
 
 export type LinkRow = {
   id: string;
+  /** The creator-given name; null for the unnamed majority. */
+  name: string | null;
   createdByName: string;
   createdAt: Date;
   /** Null for the viewer's own open draft — the only draft this table ever lists. */
@@ -91,9 +99,11 @@ export type LinkRow = {
   canManage: boolean;
   /** The viewer created it, it is minted, and it is not deleted. */
   canEdit: boolean;
+  /** The viewer may rename it in place: its creator, or a moderator once minted; never a deleted row. */
+  canRename: boolean;
 };
 
-const SORTABLE_KEYS = ["createdBy", "created", "minted", "edited", "id", "deletedAt", "deleted"] as const;
+const SORTABLE_KEYS = ["name", "createdBy", "created", "minted", "edited", "id", "deletedAt", "deleted"] as const;
 
 // The tray shows ~60 characters of a part; a table cell has a little more
 // room but not a paragraph's worth.
@@ -102,6 +112,68 @@ const QUOTE_SNIPPET_LENGTH = 90;
 function snippet(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > QUOTE_SNIPPET_LENGTH ? `${flat.slice(0, QUOTE_SNIPPET_LENGTH - 1)}…` : flat;
+}
+
+// UsersTable's NameCell, for a link: the row's left border reports the edit
+// and the save (PLAN.md §16f), the error text under the field says what
+// failed. Empty clears the name — the action stores null, never a blank.
+function NameCell({
+  linkId,
+  name,
+  onEdit,
+  run,
+}: {
+  linkId: string;
+  name: string | null;
+  onEdit: () => void;
+  run: (action: () => Promise<void>) => Promise<void>;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [value, setValue] = useState(name ?? "");
+
+  function commit() {
+    if (normalizeLinkName(value) === name) {
+      setValue(name ?? "");
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      try {
+        await run(async () => {
+          await renameAnchoredLink(linkId, value);
+        });
+        setValue(normalizeLinkName(value) ?? "");
+        router.refresh();
+      } catch (err) {
+        setValue(name ?? "");
+        setError(err instanceof Error ? err.message : "Failed to rename link.");
+      }
+    });
+  }
+
+  return (
+    <>
+      <input
+        type="text"
+        value={value}
+        aria-label="Link name"
+        maxLength={LINK_NAME_MAX_LENGTH}
+        disabled={pending}
+        onChange={(e) => {
+          setValue(e.target.value);
+          if (normalizeLinkName(e.target.value) !== name) onEdit();
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        style={{ width: "100%", padding: "2px 4px" }}
+      />
+      <CellError message={error} />
+    </>
+  );
 }
 
 export default function LinksTable({
@@ -127,7 +199,7 @@ export default function LinksTable({
     build: (next, extra) => buildLinksQueryString(next, extra, prefs),
   });
   const { displayRows, revealRow, revealRows } = useRevealedRows(rows, searchParams);
-  const { rowStatusClass, rowStatusTitle, runWithStatus, runWithStatusMany } = useRowStatus();
+  const { rowStatusClass, rowStatusTitle, setStatus, runWithStatus, runWithStatusMany } = useRowStatus();
   const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
     useRowSelection(displayRows);
 
@@ -156,6 +228,26 @@ export default function LinksTable({
           label={`link by ${row.createdByName}`}
         />
       ),
+    },
+    {
+      key: "name",
+      header: "Name",
+      sortKey: "name",
+      headerClassName: adminStyles.nameColumn,
+      // In place where the viewer may rename; plain text (usually nothing)
+      // everywhere else — a disabled field would read as a control withheld,
+      // where for most rows and most viewers there is simply no name.
+      cell: (row) =>
+        row.canRename ? (
+          <NameCell
+            linkId={row.id}
+            name={row.name}
+            onEdit={() => setStatus(row.id, "edited" as RowStatus)}
+            run={(action) => runWithStatus(row.id, action)}
+          />
+        ) : (
+          row.name
+        ),
     },
     {
       key: "passages",
@@ -304,7 +396,7 @@ export default function LinksTable({
         <SearchBox
           value={searchDraft}
           onChange={onSearchChange}
-          placeholder="Search passages, titles or creator…"
+          placeholder="Search names, passages, titles or creator…"
           label="Search links"
         />
         <OwnerFilterPanel
@@ -379,7 +471,7 @@ export default function LinksTable({
       <FilterHelp
         sortKeys={SORTABLE_KEYS}
         defaultPageSize={prefs.pageSize}
-        searchDescription="Free-text search over the quoted passages and target titles you may read, and the creator's name/email."
+        searchDescription="Free-text search over the link's name, the quoted passages and target titles you may read, and the creator's name/email."
         filters={[
           {
             param: "owners",
@@ -401,6 +493,9 @@ export default function LinksTable({
         notes={
           <p style={{ marginTop: 8 }}>
             A row lists a link you created, or a minted link at least one of whose passages you may read.{" "}
+            <strong>Name</strong> is the link&apos;s optional, creator-given name — its heading on the excerpt page
+            and the banner&apos;s title wherever it is followed. It is edited in place on your own links, and on
+            anyone&apos;s minted link if you are an ADMIN or EDITOR; clearing it leaves the link unnamed.{" "}
             <strong>Passages</strong> and <strong>Targets</strong> show only the parts you could follow — a passage in
             a doc or PDF you can&apos;t read is left out without a trace, exactly as it is when following the link —
             so neither column sorts: what they show depends on who is looking, and nothing in the database could

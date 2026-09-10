@@ -8,8 +8,10 @@ import {
   discardDraftLink,
   mintAnchoredLink,
   removeAnchoredLinkPart,
+  renameAnchoredLink,
   reorderAnchoredLinkParts,
 } from "@/app/actions/anchored-links";
+import { LINK_NAME_MAX_LENGTH, normalizeLinkName } from "@/lib/anchored-link-name";
 import { clearOpenLink, refreshOpenLink, useOpenLink } from "./open-link-store";
 import styles from "./AnchoredLinkTray.module.css";
 
@@ -56,6 +58,59 @@ async function copyToClipboard(url: string): Promise<Copied> {
   } catch {
     return { url, clipboardFailed: true };
   }
+}
+
+/**
+ * The link's optional name (docs/ANCHORED_LINKS.md, "Naming a link") — the
+ * one text field in the tray, in both modes. The UsersTable NameCell shape:
+ * a local value, committed on blur or Enter, never per keystroke. Mounted
+ * under a key of the store's current name, so a save's round trip ends with
+ * the field remounting on what the server stored (the store re-reads, the
+ * key changes) rather than the field having to reconcile two copies; a
+ * failed save falls back to the store's copy and says why.
+ */
+function LinkNameField({ linkId, name }: { linkId: string; name: string | null }) {
+  const [value, setValue] = useState(name ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function commit() {
+    if (normalizeLinkName(value) === name) {
+      // Nothing to save — but drop stray whitespace the way a save would.
+      setValue(name ?? "");
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      try {
+        await renameAnchoredLink(linkId, value);
+        refreshOpenLink();
+      } catch (err) {
+        setValue(name ?? "");
+        setError(err instanceof Error ? err.message : "Couldn't rename the link.");
+      }
+    });
+  }
+
+  return (
+    <>
+      <input
+        type="text"
+        className={styles.nameInput}
+        value={value}
+        placeholder="Name this link (optional)"
+        aria-label="Link name"
+        maxLength={LINK_NAME_MAX_LENGTH}
+        disabled={pending}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+      />
+      {error && <p className={styles.error}>{error}</p>}
+    </>
+  );
 }
 
 export default function AnchoredLinkTray() {
@@ -221,6 +276,7 @@ export default function AnchoredLinkTray() {
           {open.parts.length} passage{open.parts.length === 1 ? "" : "s"}
         </span>
       </div>
+      <LinkNameField key={`${open.id}:${open.name ?? ""}`} linkId={open.id} name={open.name} />
       <ul
         ref={listRef}
         className={styles.partList}

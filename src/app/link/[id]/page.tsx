@@ -3,7 +3,9 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import { anchoredLinkLandingFor } from "@/lib/anchored-link-data";
+import { UNNAMED_LINK_TITLE, anchoredLinkTitle } from "@/lib/anchored-link-name";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
+import AnchoredLinkHeading from "@/components/anchored-link/AnchoredLinkHeading";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import EditLinkButton from "@/components/anchored-link/EditLinkButton";
 import styles from "./page.module.css";
@@ -31,7 +33,10 @@ import styles from "./page.module.css";
 // of the page: it is the fast path on a phone, and the only one when a
 // target is heavy or gone. Per-user gated, so dynamic, like /doc/[slug].
 
-const PAGE_TITLE = "Linked passages";
+// A named link's heading and tab title are its name (docs/ANCHORED_LINKS.md,
+// "Naming a link"); the generic title stays for an unnamed one, and for the
+// "nothing readable" page, which names nothing about the link on purpose.
+const PAGE_TITLE = UNNAMED_LINK_TITLE;
 
 // "not-found" covers a deleted link and someone else's draft as well as a
 // bad id — the loader's own existence rule. There is no "forbidden" arm:
@@ -44,7 +49,9 @@ const loadLink = gated(async (user, id: string) => {
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  return titleWhenOk(await loadLink(id), () => PAGE_TITLE);
+  return titleWhenOk(await loadLink(id), (landing) =>
+    landing.status === "ok" ? anchoredLinkTitle(landing.link.name) : PAGE_TITLE,
+  );
 }
 
 export default async function AnchoredLinkPage({
@@ -95,7 +102,7 @@ export default async function AnchoredLinkPage({
 
   return (
     <main className={styles.container} data-testid="anchored-link-landing">
-      <h1 className={styles.title}>{PAGE_TITLE}</h1>
+      <AnchoredLinkHeading linkId={link.id} name={link.name} className={styles.title} />
       <p className={styles.meta}>
         {/* A Server Component: toLocaleDateString here is formatted once and
             shipped as a string (CLAUDE.md's Gotchas). */}

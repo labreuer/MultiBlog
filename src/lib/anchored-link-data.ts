@@ -51,6 +51,14 @@ export type AnchoredLinkTargetGroup = {
 export type AnchoredLinkView = {
   id: string;
   /**
+   * The creator-given name, or null (docs/ANCHORED_LINKS.md, "Naming a
+   * link"). It rides *this* view, which is null when no group survives the
+   * per-target filter — so the landing route's "nothing readable" page and
+   * its 404 cannot show it, structurally: a creator can name a link after
+   * the very targets a viewer may not read.
+   */
+  name: string | null;
+  /**
    * This viewer created the link and it is minted — the Edit affordance's
    * gate (docs/ANCHORED_LINKS.md, "Editing a minted link"), decided here
    * beside the per-target filter so the banner renders what it is handed
@@ -79,6 +87,7 @@ export async function anchoredLinkForViewer(
     where: { id: linkId },
     select: {
       id: true,
+      name: true,
       createdById: true,
       mintedAt: true,
       deletedAt: true,
@@ -152,7 +161,7 @@ export async function anchoredLinkForViewer(
   ).filter((group) => group !== null);
 
   return groups.length > 0
-    ? { id: link.id, canEdit: link.createdById === viewer.id && link.mintedAt !== null, groups }
+    ? { id: link.id, name: link.name, canEdit: link.createdById === viewer.id && link.mintedAt !== null, groups }
     : null;
 }
 

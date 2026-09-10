@@ -38,3 +38,23 @@ export function canUserDeleteAnchoredLink(
   if (link.mintedAt === null) return false;
   return link.createdById === userId || canModerateAnchoredLinks(role);
 }
+
+/**
+ * Whether `userId` may rename this link from /links (docs/ANCHORED_LINKS.md,
+ * "Naming a link"): its creator, at any stage — a draft's name is part of
+ * the working set only its creator can see — or a moderator once it is
+ * minted, the delete rule's arm. A name is presentation, not a passage: the
+ * "creator's alone" rule for *editing* exists because a passage added by
+ * someone else would put their reading into the creator's link, and a
+ * retitle puts nothing in. Never on a deleted row — restore it first, as
+ * every other cell in the kit's tables waits for.
+ */
+export function canUserRenameAnchoredLink(
+  userId: string,
+  role: Role,
+  link: { createdById: string; mintedAt: Date | null; deletedAt: Date | null },
+): boolean {
+  if (link.deletedAt !== null) return false;
+  if (link.createdById === userId) return true;
+  return link.mintedAt !== null && canModerateAnchoredLinks(role);
+}

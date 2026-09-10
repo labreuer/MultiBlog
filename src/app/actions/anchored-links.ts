@@ -5,7 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
-import { canUserDeleteAnchoredLink } from "@/lib/anchored-link-authz";
+import { canUserDeleteAnchoredLink, canUserRenameAnchoredLink } from "@/lib/anchored-link-authz";
+import { normalizeLinkName } from "@/lib/anchored-link-name";
 import { DRAFT_BLOCKS_EDIT_MESSAGE, LAST_PART_MESSAGE } from "@/lib/anchored-link-editing";
 import { appUrl } from "@/lib/app-url";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
@@ -26,7 +27,8 @@ import { ydocStore } from "../../../server/ydoc-store";
 // docs/ANCHORED_LINKS.md — mutations on **the viewer's one open link** (a
 // draft, or a minted link reopened for editing), the mint that turns a
 // draft into a shareable URL, the open/close pair that puts a minted link
-// back in the tray, and (at the bottom) the /links table's soft delete. The
+// back in the tray, the rename both the tray and /links share, and (at the
+// bottom) the /links table's soft delete. The
 // tag-actions shape (src/app/actions/tags.ts on the part-anchors branch)
 // with one owner row per act; what differs is that the act accumulates
 // across pages — each "Add to link" posts its part immediately, captured
@@ -85,6 +87,8 @@ export type OpenLinkView = {
   minted: boolean;
   /** The share URL of a minted link, so the tray's Copy link copies without minting. Null for a draft. */
   url: string | null;
+  /** The creator-given name, or null (docs/ANCHORED_LINKS.md, "Naming a link") — the tray's name field edits it. */
+  name: string | null;
   parts: OpenLinkPart[];
 };
 
@@ -192,6 +196,7 @@ export async function loadMyOpenLink(): Promise<OpenLinkView | null> {
     select: {
       id: true,
       mintedAt: true,
+      name: true,
       anchors: {
         orderBy: [{ partOrder: "asc" }, { id: "asc" }],
         select: {
@@ -227,6 +232,7 @@ export async function loadMyOpenLink(): Promise<OpenLinkView | null> {
     id: link.id,
     minted: link.mintedAt !== null,
     url: link.mintedAt ? appUrl(`/link/${link.id}`) : null,
+    name: link.name,
     parts: link.anchors.map((anchor) => ({
       anchorId: anchor.id,
       label: titles.get(anchor.docId ?? anchor.fileId ?? "") ?? "(no longer available)",
@@ -546,8 +552,46 @@ export async function closeAnchoredLinkEdit(): Promise<void> {
   });
 }
 
-// docs/ANCHORED_LINKS.md, "The management table" — the /links table's one
-// action. A **soft** delete, unlike everything above it: a minted URL has
+/**
+ * Names, renames or un-names a link (docs/ANCHORED_LINKS.md, "Naming a
+ * link"). One write path for both surfaces: the tray's name field passes
+ * the open link's id, and the /links Name cell passes its row's. Who may is
+ * `canUserRenameAnchoredLink` (src/lib/anchored-link-authz.ts) — the
+ * creator at any stage, a moderator once the link is minted, nobody on a
+ * deleted row. What is stored is the normalised name or null, never a
+ * blank; the CHECK on the column agrees. A rename of a *minted* link
+ * stamps `edited_at` — recipients see the name in the banner and on the
+ * landing page, so it is a change they can notice — and an unchanged name
+ * stamps nothing.
+ */
+export async function renameAnchoredLink(linkId: string, nameInput: string): Promise<void> {
+  const session = await requireSignedIn();
+  if (typeof linkId !== "string" || linkId === "" || typeof nameInput !== "string") {
+    throw new Error("Malformed rename.");
+  }
+  const link = await prisma.anchoredLink.findUnique({
+    where: { id: linkId },
+    select: { createdById: true, mintedAt: true, deletedAt: true, name: true },
+  });
+  if (!link || !canUserRenameAnchoredLink(session.user.id, session.user.role, link)) {
+    // One refusal covers "no such id", "not yours" and "someone else's
+    // draft" — none earns a hint that names what the id points at
+    // (openAnchoredLinkForEditing's stance). A deleted row the viewer could
+    // otherwise rename gets the one remedy that is theirs to apply.
+    const restorable =
+      !!link?.deletedAt && canUserRenameAnchoredLink(session.user.id, session.user.role, { ...link, deletedAt: null });
+    throw new Error(restorable ? "Restore the link before renaming it." : "You can't rename this link.");
+  }
+  const name = normalizeLinkName(nameInput);
+  if (name === link.name) return;
+  await prisma.anchoredLink.update({
+    where: { id: linkId },
+    data: { name, ...(link.mintedAt ? { editedAt: new Date() } : {}) },
+  });
+}
+
+// docs/ANCHORED_LINKS.md, "The management table" — the /links table's
+// delete. A **soft** delete, unlike everything above it: a minted URL has
 // been handed out, so its row is a record that a restore may need to bring
 // back exactly, where a draft is a working set nobody else has seen and
 // `discardDraftLink` hard-deletes it. The anchors stay put either way (an

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { canManageDocs, canManageFiles, canViewDocs, canViewFiles } from "@/lib/role-checks";
-import { canUserDeleteAnchoredLink } from "@/lib/anchored-link-authz";
+import { canUserDeleteAnchoredLink, canUserRenameAnchoredLink } from "@/lib/anchored-link-authz";
 import { targetFromColumns, targetKey, type AnchorTarget } from "@/lib/anchors";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { toURLSearchParams } from "@/lib/table-query";
@@ -158,6 +158,10 @@ function buildFilterWhere(
   if (filters.q) {
     const contains = { contains: filters.q, mode: "insensitive" as const };
     where.OR = [
+      // The link's own name is the creator's text, not an excerpt of a
+      // target, and the row is already in scope — so it is searched
+      // unbounded, like the creator's name below it.
+      { name: contains },
       { createdBy: { name: contains } },
       { createdBy: { email: contains } },
       // Quotes and titles are searched only on anchors whose target the
@@ -178,6 +182,10 @@ function buildFilterWhere(
 function buildOrderBy(sort: SortColumn<LinksSortKey>[]): Prisma.AnchoredLinkOrderByWithRelationInput[] {
   return sort.map(({ key, dir }): Prisma.AnchoredLinkOrderByWithRelationInput => {
     switch (key) {
+      case "name":
+        // Unnamed links last in both directions, as createdBy puts the
+        // nameless: a sort by name is a search for one, not for the gaps.
+        return { name: { sort: dir, nulls: "last" } };
       case "createdBy":
         return { createdBy: { name: { sort: dir, nulls: "last" } } };
       case "created":
@@ -261,6 +269,7 @@ export default async function LinksPage({
       skip: (filters.page - 1) * filters.pageSize,
       select: {
         id: true,
+        name: true,
         createdById: true,
         createdAt: true,
         mintedAt: true,
@@ -331,6 +340,7 @@ export default async function LinksPage({
     }
     return {
       id: link.id,
+      name: link.name,
       createdByName: link.createdBy.name ?? link.createdBy.email,
       createdAt: link.createdAt,
       mintedAt: link.mintedAt,
@@ -346,6 +356,11 @@ export default async function LinksPage({
       // arm, unlike canManage: the tray is per creator, and adding a passage
       // to someone else's link would put this viewer's reading in it.
       canEdit: link.createdById === viewer.id && link.mintedAt !== null && link.deletedByUserId === null,
+      // Renaming has the delete rule's moderator arm and the creator at any
+      // stage (docs/ANCHORED_LINKS.md, "Naming a link"): a name is
+      // presentation, not a passage, so the "creator's alone" reasoning for
+      // editing does not reach it.
+      canRename: canUserRenameAnchoredLink(viewer.id, viewer.role, link),
     };
   });
 

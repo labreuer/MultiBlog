@@ -28,6 +28,10 @@ import {
 const PAGE_ONE = "The quick brown fox jumps over the lazy dog on page one.";
 const PAGE_TWO = "A distinctive phrase for page two: xylophone marmalade.";
 const PDF_PHRASE = "brown fox jumps";
+/** Given to the draft before Copy link (docs/ANCHORED_LINKS.md, "Naming a link") — regex-safe for the title assertion. */
+const LINK_NAME = "The fox and the retry rule";
+/** A name that describes a target the reader may not see — and so must not reach them. */
+const PRIVATE_NAME = "Names the private memo";
 
 // The nav test's second doc — a single paragraph, so character index `i`
 // sits at ProseMirror position `i + 1` (the QUOTED_BODY convention,
@@ -143,6 +147,15 @@ test.describe("anchored links", () => {
         timeout: 20_000,
       });
 
+      // A draft can be named before it is minted (docs/ANCHORED_LINKS.md,
+      // "Naming a link"); the mint carries the name across. The field is
+      // disabled while its save is in flight, so enabled means committed.
+      const nameField = tray.getByRole("textbox", { name: "Link name" });
+      await nameField.fill(LINK_NAME);
+      await nameField.press("Enter");
+      await expect(nameField).toBeEnabled();
+      await expect(nameField).toHaveValue(LINK_NAME);
+
       const url = await copyMintedLink(page);
       const linkId = url.pathname.split("/").pop()!;
       expect(url.pathname).toBe(`/link/${linkId}`);
@@ -155,6 +168,9 @@ test.describe("anchored links", () => {
       await gotoOk(page, url.pathname);
       const landing = page.getByTestId("anchored-link-landing");
       await expect(landing).toBeVisible();
+      // The name is the heading and the tab title, in place of "Linked passages".
+      await expect(landing.getByRole("heading", { level: 1 })).toHaveText(LINK_NAME);
+      await expect(page).toHaveTitle(new RegExp(LINK_NAME));
       await expect(landing).toContainText(sharedDoc.title);
       await expect(landing).toContainText(QUOTED_TEXT);
       await expect(landing).toContainText(file.title);
@@ -171,6 +187,7 @@ test.describe("anchored links", () => {
       await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.id}\\?sel=${linkId}`));
       const banner = page.getByTestId("anchored-link-banner");
       await expect(banner).toBeVisible();
+      await expect(banner).toContainText(LINK_NAME);
       await expect(banner).toContainText(QUOTED_TEXT);
       await expect(banner).toContainText(file.title);
       // The highlight arrives when the read-only editor mounts over the SSR
@@ -449,6 +466,7 @@ test.describe("anchored links", () => {
     const link = await createTestAnchoredLink({
       creatorEmail: ADMIN_EMAIL,
       parts: [{ docId: doc.id, from: 1, to: 1 + QUOTED_TEXT.length }],
+      name: PRIVATE_NAME,
     });
     try {
       const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
@@ -459,10 +477,18 @@ test.describe("anchored links", () => {
       await expect(landing).not.toContainText(doc.title);
       await expect(landing).not.toContainText(QUOTED_TEXT);
       await expect(landing.getByTestId("anchored-link-group")).toHaveCount(0);
+      // The name rides the filtered view (docs/ANCHORED_LINKS.md, "Naming a
+      // link"): a creator can name a link after what it points at, so a
+      // page that names nothing shows no name either — not as the heading,
+      // not as the tab title.
+      await expect(landing).not.toContainText(PRIVATE_NAME);
+      await expect(readerPage).not.toHaveTitle(new RegExp(PRIVATE_NAME));
 
       await signIn(page, ADMIN_EMAIL);
       await page.goto(`/link/${link.id}`);
       await page.waitForURL(new RegExp(`/doc/${doc.id}\\?sel=${link.id}$`));
+      // And for the creator, who may read the doc, the banner carries it.
+      await expect(page.getByTestId("anchored-link-banner")).toContainText(PRIVATE_NAME);
     } finally {
       await deleteTestAnchoredLink(link.id);
       await deleteTestDoc(doc.id);

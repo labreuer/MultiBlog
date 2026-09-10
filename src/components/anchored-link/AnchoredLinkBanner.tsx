@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
+import { anchoredLinkTitle } from "@/lib/anchored-link-name";
 import EditLinkButton from "./EditLinkButton";
+import { useLinkName } from "./open-link-store";
 import styles from "./AnchoredLinkBanner.module.css";
 
 // docs/ANCHORED_LINKS.md — what a ?sel= page shows about the link it landed
@@ -60,6 +62,10 @@ function jumpViaDom(anchorId: string, flash: boolean): boolean {
 
 export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, className }: Props) {
   const [dismissed, setDismissed] = useState(false);
+  // The title is the link's name, or "Linked passages" (docs/ANCHORED_LINKS.md,
+  // "Naming a link") — from the store while this link is the open one, so
+  // a rename in the tray on this very page shows here at once.
+  const name = useLinkName(link.id, link.name);
 
   const currentGroup =
     link.groups.find((group) => group.target.kind === currentTarget.kind && group.target.id === currentTarget.id) ??
@@ -89,7 +95,7 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
   return (
     <aside className={`${styles.banner} ${className ?? ""}`} data-testid="anchored-link-banner">
       <div className={styles.headerRow}>
-        <span className={styles.title}>Linked passages</span>
+        <span className={styles.title}>{anchoredLinkTitle(name)}</span>
         <Link className={styles.excerptsLink} href={`/link/${link.id}?noredirect=1`}>
           View as excerpts
         </Link>

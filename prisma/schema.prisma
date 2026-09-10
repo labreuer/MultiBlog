@@ -1312,6 +1312,8 @@ model AnchoredLink {
   createdById String   @map("created_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
+  name String?
+
   /// Null = the creator's open draft; set once, when the URL is handed out.
   mintedAt DateTime? @map("minted_at")
 
