@@ -694,3 +694,206 @@ Deferred by the landing route specifically:
 - **A landing mode stored on the link** (Augment's viewspec): `?noredirect=1` is a
   per-visit flag, not a per-link one. If a minter ever wants "always the excerpt page",
   that is one nullable column, not a new route.
+
+## Appendix — prior art for the open-link store (2026-09-10)
+
+Written after the question "did we just add a DB call to every doc load?", and then
+"isn't that pattern a bit unusual?". The first answer is yes, client-side after hydration,
+and it is **more statements than it looks** — measured against the dev database with
+`log: ["query"]`, not read off the source:
+
+| viewer | statements per page load |
+|---|---|
+| no open link | 1 (`findFirst` on the partial index's own predicate, returns null) |
+| open link, no parts | 2 — the `select` of the `anchors` to-many is its **own** round trip |
+| open link with parts | 4 — the two above plus a `doc` and a `storedFile` label `findMany` |
+
+The second row is the surprise and it is Prisma's default `relationLoadStrategy: "query"`:
+an `include`/`select` of a relation is a second statement joined in the client, not a JOIN.
+`auth()` is free either way (`strategy: "jwt"`, no session table read). "Packaging the
+round trips" below is what to do about it. The rest of this appendix answers the second
+question.
+
+**The mechanism is mainstream and has a name. The motivation is not the one that name is
+famous for.** That gap is the thing worth writing down, because the next person will
+assume the usual rationale and then be puzzled that every route here is dynamic.
+
+### The mechanism: a hole punched for the per-viewer fragment
+
+Deferring the personalized part of a page and filling it separately is
+[Edge Side Includes](https://www.litespeedtech.com/products/features/edge-side-includes),
+known in the PHP/Magento world as
+[hole punching](https://www.litespeedtech.com/products/cache-plugins/magento-acceleration/hole-punching)
+or donut caching, and renamed
+[server islands](https://docs.astro.build/en/guides/server-islands/) by Astro in 4.12.
+Astro's canonical examples are *a user's avatar and their shopping cart* — the two things
+that otherwise force a whole page to be uncacheable.
+
+The cart analogy is closer than a metaphor: the tray is per-user, at most one open at a
+time, built up across pages, and its contents have nothing to do with whichever page is
+showing it. Nobody thinks that shape is strange in a checkout flow.
+
+### The store shape is the standard one
+
+A module-scope vanilla store read through `useSyncExternalStore` is what Zustand, Jotai
+and Redux Toolkit all do internally, and "share state across separate React root trees
+without a common context" is the documented reason to reach for it — which is exactly the
+reason `open-link-store.ts` gives (the PDF surface inside the `ssr:false` island, the tray
+as the page's own sibling). It is also the tearing-safe choice under concurrent rendering;
+a hand-rolled subscribe-and-`forceUpdate` would not be.
+
+### The fetch policy is SWR / TanStack Query, re-derived
+
+| `open-link-store.ts` | library equivalent |
+|---|---|
+| fetch on first subscriber | SWR `revalidateOnMount` |
+| many consumers, one request | SWR key deduping / TanStack observers |
+| `notifyAnchoredLinkChanged()` | `mutate(key)` / `invalidateQueries` |
+| three-valued `undefined` | SWR's `data === undefined` before the first response |
+| `clearOpenLink()` on mint/discard/Done | optimistic `mutate(key, data, false)` |
+
+**The convergence worth keeping:** "coalesced, but never *dropped*" is TanStack Query's
+[`cancelRefetch: true`](https://tanstack.com/query/latest/docs/framework/react/guides/query-invalidation),
+its `invalidateQueries` default since v4, and it is there for the hazard this file's own
+comment names — a request already in flight may have been *sent* before the mutation that
+prompted the invalidation committed, so reusing its answer serves pre-mutation data. Same
+hazard, different remedy: they cancel and restart, we queue one more read. Arriving
+independently at a library's non-obvious default is the best evidence available that the
+reasoning was right.
+
+Server-side, `anchored_link_one_open_per_user` is likewise the textbook
+[partial unique index](https://medium.com/little-programming-joys/unique-partial-indexes-with-postgresql-86e137905c12)
+for "one active cart / one active subscription per user" — the standard answer to a
+uniqueness rule that application code loses under concurrency, which is exactly why
+`getOrCreateOpenLink` can treat P2002 as "re-find the winner" rather than an error.
+
+### Where the precedent stops: we have no cache to protect
+
+ESI, donut caching and server islands all exist to keep the *other* 95% of a page
+cacheable. `/doc/[slug]` is `gated()` and per-request dynamic — as the actions file says
+in defending its no-`revalidatePath` rule, there is nothing cached to invalidate. **So the
+famous justification for deferring the fragment does not apply here.** What justifies it
+is delivery: there is no push channel (deliberately), and the mutators are elsewhere — a
+part added on another doc, an Edit from `/links`, a second tab. Arriving at a page is
+precisely the moment the client cannot know what happened while it wasn't looking.
+
+Two consequences:
+
+- **Don't reach for PPR / Cache Components here.** It is the current mainstream answer for
+  the caching case, and Next's own guidance now prefers it to a post-hydration fetch — but
+  it would buy nothing on a route that was never static, and it still cannot deliver an
+  update *after* the render, which is the actual requirement.
+- **Don't let a reader infer that these routes could be cached.** They can't, and the
+  store is not evidence that they could be.
+
+### What is genuinely unusual: hand-rolling it
+
+Most Next.js apps reach for SWR or TanStack Query at this point; this is ~100 lines
+instead, consistent with `test:unit`'s no-new-dependency stance and with a surface this
+small. The cost is owning invalidation semantics ourselves. `cancelRefetch`'s hazard is
+handled; these neighbours are **unimplemented rather than decided against**, each with its
+own trigger:
+
+- **No retry.** The `.catch(() => {})` is quiet by design — the next notify re-reads — but
+  a load that fails with no notify afterwards leaves the tray blank until a navigation.
+  Trigger: anyone reporting a tray that "lost" its parts and got them back by reloading.
+- **No cross-tab sync.** The notify channel is module scope, so two tabs of the same
+  viewer don't tell each other; each finds out on its own next page load. Trigger: a part
+  added in one tab that a second tab keeps painting stale. `BroadcastChannel` is the fix.
+- **No revalidate-on-focus.** Nothing re-reads when a backgrounded tab comes forward.
+
+Reach for a library at the *second* such store, not to retrofit this one.
+
+### Packaging the round trips
+
+Measured 2026-09-10 on the dev database, a throwaway client with
+`log: [{ emit: "event", level: "query" }]` counting statements — the shapes, not the
+timings, which are meaningless over a loopback socket. What each option actually does:
+
+| approach | statements | what it is for |
+|---|---|---|
+| `findFirst` + `select` of a to-many | **2** | today's default |
+| same, `relationLoadStrategy: "join"` | **1** | one LATERAL JOIN, `__prisma_data__` aggregated in Postgres |
+| `Promise.all([a, b])` | 2 | *concurrency*, not batching — two connections from the pool |
+| `prisma.$transaction([a, b])` | **3** | atomicity — it *adds* a `COMMIT` round trip |
+| one `$queryRaw` with subselects | **1** | arbitrary unrelated payloads in one statement |
+
+Three things follow.
+
+- **`$transaction([…])` is not a batching primitive**, whatever the array form suggests.
+  It buys a consistent snapshot across the queries and costs a round trip for the commit.
+  Reach for it when two reads must agree, never to make two reads cheaper.
+- **`relationLoadStrategy: "join"` would collapse `loadMyOpenLink` to a single statement —
+  and is deliberately not taken (2026-09-10).** See "The join strategy, deferred" below.
+- **A single `$queryRaw` is the only thing that can package *unrelated* payloads** — a doc
+  and an open link have no relation for Prisma to join through, so subselects returning
+  `row_to_json` are the mechanism. It is also the option to reach for last here: it hands
+  back `unknown`, so the result needs parsing on the way out (this file's rule about never
+  casting a blob applies to a query result too), and it goes around `prisma.ts`'s
+  soft-delete `$extends` — the extension exists precisely so a new query site *can't*
+  forget the filter, and raw SQL is a query site that always forgets.
+
+**But note what it cannot reach.** The doc query and the open-link query are not in the
+same request to begin with: the page render is one HTTP request and the store's read is a
+later server action. Packaging them together means first moving the read into the page
+render — the seed discussed above — which trades an HTTP round trip for a DB one and
+brings back the two-delivery-path cost. So the batching worth doing is *within*
+`loadMyOpenLink`, which needs no architectural change at all.
+
+**And note the ceiling.** Everything above is one statement per round trip: the
+`@prisma/adapter-pg` driver rides node-postgres, which has no libpq-style pipeline mode,
+and `$queryRaw` uses the extended protocol, which refuses multiple statements per message.
+There is no way to hand Postgres a pile of independent queries in one message from here —
+only ways to write fewer, larger ones. Over a loopback socket none of this is measurable;
+it is worth caring about on the day the database stops being on the same box (DEPLOY.md).
+
+### The join strategy, deferred
+
+**Decided 2026-09-10: `loadMyOpenLink` stays at four statements, because the one-statement
+version costs a preview feature.** Recorded here with the measurement and the recipe so
+the decision can be re-taken cheaply, not re-derived.
+
+What it buys, measured rather than assumed: `relationLoadStrategy: "join"` on the existing
+`findFirst` emits one LATERAL JOIN with the anchors aggregated into `__prisma_data__` by
+Postgres — 1 statement instead of 2, same parts back. Fold the part labels in as relations
+on `anchors` (`doc: { select: { title: true } }`, `file: { select: { title: true } }`)
+instead of the separate `findMany` + `Map`, and the whole read is **1 statement instead of
+4**, with no hand-written SQL and no loss of typing. That is a better shape than anything
+`$queryRaw` could give, and it is why this is the option worth revisiting first.
+
+What it costs: `relationJoins` is **still a preview feature in Prisma 7.9** — verified in
+the CLI build, where `isPreviewFeatureOn("relationJoins")` is the condition that adds
+`relationLoadStrategy` to the generated query-arg types at all. So although the strategy is
+opt-in *per query*, enabling it is a **generator-wide** `previewFeatures` edit: a preview
+flag riding in `schema.prisma`, and every model's arg types changing, for the benefit of
+one query whose round trips are unmeasurable over a loopback socket. Not a trade worth
+making today.
+
+Revisit when any of these lands, in rough order of likelihood:
+
+- **`relationJoins` goes GA** — then the flag disappears and this is a two-line change.
+- **The database stops being on the same box** (DEPLOY.md): three saved round trips per
+  page load stop being theoretical the moment they cross a network.
+- **A second query site wants it** — one preview flag for one query is a bad trade; for a
+  pattern it is an ordinary one.
+
+The recipe, in order: `previewFeatures = ["views", "relationJoins"]`, then
+`npm run check:schema` (the whole-file rewrite rule — read what `prisma format` touched
+outside your block), then `npx prisma generate` with the dev server stopped (the EPERM
+rule), then `relationLoadStrategy: "join"` on the `findFirst`. If the label relations go in
+too, **confirm the fallback first**: today's `titles.get(…) ?? "(no longer available)"`
+fires when the row is *absent*, and a nullable relation reaches the same outcome by a
+different route — the case to check by hand is a part whose target has since been
+soft-deleted, which is not the same case as a target that was hard-deleted.
+
+This section's numbers came from a throwaway probe with the flag temporarily on; the flag
+was reverted and `schema.prisma` is unchanged in git.
+
+### Open question
+
+Whether a client-side nav between two reading routes triggers an extra read. The store
+refetches whenever its listener count goes 0 → 1, and the old route's tray plausibly
+unmounts before the new one mounts — but that was reasoned from `subscribe()`, never
+measured. Worth confirming before anyone optimizes against the per-load cost. The
+module-scope cache means it would be invisible either way: the previous answer renders
+immediately while the re-read is in flight.
