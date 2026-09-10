@@ -6816,6 +6816,9 @@ whole subtree, and stops each level's indent from compounding with every ancesto
 Keyboard movement is the APG tree pattern over `visibleOrder` — one tab stop, arrows within,
 the same roving-tabindex arrangement the tab strip above it uses.
 
+The page number beside each entry is the document's own **page label** where it has them —
+§19c, built straight after this and for this reason.
+
 **Verification.** `e2e/pdf-outline.spec.ts` (a click lands on the entry's page, scrolling moves
 the highlight, collapsing hands it to the ancestor, the arrows move and open, the fourth tab
 doesn't overflow the strip) plus `src/lib/pdf-outline.test.ts` for the destination arithmetic
@@ -6823,6 +6826,46 @@ and the highlight rules. `scripts/make-test-pdf.ts` grew outline support to make
 testable: no PDF in the repo had one, and the generated fixture covers an inline destination
 array, a **named** destination resolved through the catalog's `/Dests`, and a closed-by-default
 subtree — the three arms the resolver has to tell apart.
+
+### 19c. Page labels — what the document calls its own pages
+
+**Built 2026-09-10**, immediately after §19b, because the Contents pane made the gap
+impossible to miss: an entry pointing at the fourth sheet of a book with three pages of front
+matter is page **1**, and a table of contents that says "4" is the one thing a table of
+contents exists not to make a reader work out.
+
+A page's *index* is where it sits in the file; its **label** is what is printed on it
+(`/PageLabels`, exposed as `pdf.getPageLabels()`). They differ in anything with front matter,
+an appendix numbered `A-1`, or a scanned volume whose numbering starts partway in.
+
+**Indices stay 1-based everywhere internally.** Anchors, presence, the offset table, every
+jump: unchanged. This is a display concern, and `pageLabelFor` (`src/lib/pdf-page-labels.ts`)
+is the one function that answers it — for the Contents pane's badge, the annotation cards'
+`p. 4`, the composer's "Annotating page …", the indicator strip's tick titles and the
+toolbar's box. Anything *computed* from a page keeps counting sheets.
+
+**Labels are ignored when they say nothing.** `usablePageLabels` rejects a set whose every
+entry is its own ordinary number — plenty of files ship a `/PageLabels` tree that reproduces
+1…N, and honouring it changes no glyph while costing "of 350" its meaning as the box's
+counterpart — and one that is entirely empty. A *partly* empty set is kept with the blanks
+filled in by the ordinary number, since unlabelled front matter beside a labelled body is
+common and dropping the whole set would throw away the informative half. The filled-in array
+is what goes to `PDFViewer.setPageLabels`, so what we render, what pdfjs puts on
+`data-page-label`, and what `pageLabelToPageNumber` will match are one list.
+
+**The page box takes a label back.** `submitPage` tries `pageLabelToPageNumber` first and
+falls through to a sheet number, because a reader typing into a box that is *showing* them a
+label means the label — "1" is the body's first page, which is what a citation means. Labels
+are not unique (front matter 1–12 and a body restarting at 1 give two pages called "1"); the
+first match wins, as it does in pdfjs. The sheet number moves to the box's `title` ("Sheet 4
+of 6") rather than disappearing, since it is what the scrollbar and every "page N of M" habit
+are still counting in.
+
+**Verification.** `src/lib/pdf-page-labels.test.ts` for the "worth showing" rule and its
+rejections; `e2e/pdf-page-labels.spec.ts` for the two surfaces agreeing, a typed label
+navigating, and a 1…N label set correctly ignored. `scripts/make-test-pdf.ts` grew a
+`pageLabels` option — a `/PageLabels` number tree, whose keys are **0-based** page indices,
+the one place in the format that counts from zero.
 
 ## 20. Tags, and the anchor envelope they share with annotations
 

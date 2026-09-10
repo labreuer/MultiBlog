@@ -75,6 +75,20 @@ export type TestOutlineItem = {
 };
 
 /**
+ * One run of page labels, starting at page `from` (1-based) and continuing
+ * until the next run — the `/PageLabels` number tree, as a list.
+ */
+export type TestPageLabelRange = {
+  from: number;
+  /** `D` 1,2,3 · `R`/`r` roman · `A`/`a` letters. Omitted means prefix-only. */
+  style?: "D" | "R" | "r" | "A" | "a";
+  /** Prepended to every label in the run, e.g. `"A-"`. */
+  prefix?: string;
+  /** What the run counts from. Defaults to 1, which is the whole point of a run. */
+  start?: number;
+};
+
+/**
  * Builds a PDF whose page `i` contains `pages[i]`, one line per array entry.
  *
  * The output is a valid PDF 1.4 with a correct cross-reference table — pdfjs
@@ -84,7 +98,7 @@ export type TestOutlineItem = {
  */
 export function buildTestPdf(
   pages: readonly (readonly string[])[],
-  options: { outline?: readonly TestOutlineItem[] } = {},
+  options: { outline?: readonly TestOutlineItem[]; pageLabels?: readonly TestPageLabelRange[] } = {},
 ): Uint8Array {
   if (pages.length === 0) throw new Error("buildTestPdf needs at least one page.");
 
@@ -180,6 +194,21 @@ export function buildTestPdf(
     );
   }
 
+  // `/PageLabels` is a number tree keyed by the **0-based** index of the page a
+  // run starts at — the one place in this format where a page is counted from
+  // zero, and getting it wrong shifts every label by one in a way that still
+  // renders perfectly.
+  const labelRuns = [...(options.pageLabels ?? [])].sort((a, b) => a.from - b.from);
+  const pageLabelNums = labelRuns
+    .map((run) => {
+      const parts: string[] = [];
+      if (run.style) parts.push(`/S /${run.style}`);
+      if (run.prefix) parts.push(`/P (${escapePdfString(run.prefix)})`);
+      if (run.start !== undefined) parts.push(`/St ${run.start}`);
+      return `${run.from - 1} << ${parts.join(" ")} >>`;
+    })
+    .join(" ");
+
   // Written last because it names the outline root, which only exists once the
   // tree above has been numbered. /Dests is the *dictionary* form of a name
   // table — the shorter of the two shapes pdfjs's Catalog.destinations reads,
@@ -189,6 +218,7 @@ export function buildTestPdf(
     `<< /Type /Catalog /Pages ${PAGES} 0 R` +
       (OUTLINES === null ? "" : ` /Outlines ${OUTLINES} 0 R /PageMode /UseOutlines`) +
       (namedDests.length === 0 ? "" : ` /Dests << ${namedDests.join(" ")} >>`) +
+      (pageLabelNums === "" ? "" : ` /PageLabels << /Nums [${pageLabelNums}] >>`) +
       ` >>`,
   );
 

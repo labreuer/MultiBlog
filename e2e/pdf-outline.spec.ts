@@ -76,13 +76,11 @@ async function currentRow(page: import("@playwright/test").Page): Promise<string
 /**
  * Scrolls the viewer so a page's top edge is at the top of the viewport.
  *
- * **Not the page-number box.** Typing into it races the viewer's own readout:
- * every `updateviewarea` writes the current page back into that input, so a
- * scroll still settling from the *previous* move overwrites the typed digits
- * between `fill()` and `Enter`, and the jump then goes to where the reader
- * already was. That is a real (if minor) wart in the toolbar, and it made this
- * spec fail only under a full-suite run — but scrolling is what these tests are
- * about, so they drive the scroller.
+ * **Not the page-number box**, which would be testing the toolbar rather than
+ * the thing these tests are about. (It used to be unusable here as well: the
+ * viewer's own readout overwrote typed digits while a scroll settled. That is
+ * fixed — PdfViewer's `editingPageRef` — and `e2e/pdf-page-labels.spec.ts`
+ * covers typing into it.)
  *
  * Every page has a div even before pdfjs renders it (it virtualises the canvas
  * and text layers, not the boxes), so this works for a page far off screen.

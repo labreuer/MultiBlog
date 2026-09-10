@@ -652,6 +652,30 @@ has one to test against.
 
 ---
 
+## 10b. Page labels
+
+`pdf.getPageLabels()` returns what the document prints on its pages — `["i","ii","iii","1",…]`
+— or `null`. Four things about it are worth knowing before touching it:
+
+- **The array is always full length or absent.** pdfjs builds an entry per page (a page
+  outside any labelling range gets `""`), so there are no holes to iterate around — but there
+  *are* empty strings, and a blank page box is worse than a number.
+- **Labels are not unique.** Front matter numbered 1–12 followed by a body restarting at 1
+  gives two pages called "1". Resolving a label back to a page takes the first match
+  (`PDFViewer.pageLabelToPageNumber`, and our page box through it).
+- **Many files carry labels that are just `1…N`.** Using them changes nothing on screen, so
+  `usablePageLabels` (`src/lib/pdf-page-labels.ts`) treats that set, and an all-empty set, as
+  absent.
+- **`setPageLabels` has to be called after `pagesinit`.** It walks `PDFViewer._pages` to put
+  `data-page-label` on each page div, and that list doesn't exist until the pages are laid out
+  — call it earlier and it stores the labels while labelling nothing, with no error. Same
+  ordering trap as `currentScaleValue`; both are done in `completeReady`.
+
+Anchoring, presence and geometry all keep counting **sheets** (1-based indices). A label
+never enters a computation — only a rendering. PLAN.md §19c.
+
+---
+
 ## 11. Prior art worth reading before reimplementing
 
 - `hypothesis/client` — `src/annotator/anchoring/pdf.js` is the reference implementation of

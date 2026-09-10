@@ -33,7 +33,7 @@ import { targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
 import { parsePdfTarget } from "@/lib/pdf-anchor";
-import { buildTestPdf, type TestOutlineItem } from "../scripts/make-test-pdf";
+import { buildTestPdf, type TestOutlineItem, type TestPageLabelRange } from "../scripts/make-test-pdf";
 import {
   contentExtensions,
   titleExtensions,
@@ -460,6 +460,12 @@ export async function createTestFile(opts: {
    * fixture exercises.
    */
   outline?: readonly TestOutlineItem[];
+  /**
+   * What the generated PDF calls its own pages — front matter in roman
+   * numerals, a body restarting at 1, and so on (PLAN.md §19c). Absent by
+   * default, which is the common case in the wild.
+   */
+  pageLabels?: readonly TestPageLabelRange[];
 }): Promise<TestFile> {
   const { ownerEmail, title = uniqueTitle("file"), visibility = "PRIVATE" } = opts;
   assertSafe(ownerEmail);
@@ -472,7 +478,7 @@ export async function createTestFile(opts: {
     ["Page two begins here, well past the first screenful.", "Distinctive phrase: xylophone marmalade."],
   ];
 
-  const bytes = buildTestPdf(pageLines, { outline: opts.outline });
+  const bytes = buildTestPdf(pageLines, { outline: opts.outline, pageLabels: opts.pageLabels });
   const stored = await storeUploadStream(
     new ReadableStream<Uint8Array>({
       start(controller) {
