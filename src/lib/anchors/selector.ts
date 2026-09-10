@@ -1,3 +1,4 @@
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { parsePdfTarget, type PdfTarget } from "../pdf-anchor";
 import { SELECTOR_KINDS, type SelectorKind } from "./types";
 
@@ -56,6 +57,35 @@ export type PdfTextSelector = PdfTarget;
 export type AnchorSelector =
   | { kind: "DOC_RANGE"; selector: DocRangeSelector }
   | { kind: "PDF_TEXT"; selector: PdfTextSelector };
+
+// How much surrounding text a DOC_RANGE selector carries. The window is in
+// ProseMirror positions and the slice trims it to characters, so a range next
+// to a run of block boundaries still gets its ~50 characters of real text
+// rather than a window eaten by structure.
+const CONTEXT_CHARS = 50;
+
+/**
+ * The `DocRangeSelector` blob for a resolved range — PR 2's writer for the
+ * part-selector jsonb (§20b). Derived from the same materialized node the
+ * offsets and quote came from (`captureAnchorInYdoc` is the caller), so all
+ * four of `anchor_from`, `anchor_to`, `quoted_text`, `selector` describe one
+ * document state by construction.
+ *
+ * Pure, and in this browser-safe half rather than beside its caller in
+ * capture.ts, because nothing in it is server-shaped — it is the write-side
+ * twin of `parseDocRangeSelector` above, and the unit suite exercises its
+ * edges (a range at the document's start, a selection spanning blocks)
+ * without dragging PrismaClient into the test process.
+ */
+export function deriveDocRangeSelector(node: PMNode, from: number, to: number): DocRangeSelector {
+  const before = node.textBetween(Math.max(0, from - CONTEXT_CHARS * 2), from, " ").slice(-CONTEXT_CHARS);
+  const after = node.textBetween(to, Math.min(node.content.size, to + CONTEXT_CHARS * 2), " ").slice(0, CONTEXT_CHARS);
+  let blocks = 0;
+  node.nodesBetween(from, to, (n) => {
+    if (n.isTextblock) blocks++;
+  });
+  return { v: 1, before, after, blocks: Math.max(1, blocks) };
+}
 
 /** Narrows an untrusted string to a selector kind. Null for anything else, including "POST_RANGE" (§20i). */
 export function parseSelectorKind(value: unknown): SelectorKind | null {

@@ -7,12 +7,16 @@ import { useSelectionPopover } from "@/lib/use-selection-popover";
 import { AnnotationClick } from "@/lib/annotation-click-extension";
 import {
   AnnotationHighlight,
+  anchoredLinkAnchorInputs,
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
 import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
 import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
+import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
+import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
+import { useOpenLinkParts } from "./anchored-link/open-link-store";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
@@ -164,6 +168,27 @@ export default function DocReadingBody({
   // editor is display:none behind the SSR'd static body.
   useRegisterMarginNotesEditor(editor, ready);
 
+  // docs/ANCHORED_LINKS.md — the viewer's own open link's parts for this
+  // doc (a draft's, or a reopened minted link's), painted with a dashed
+  // underline beside the annotations and any followed `?sel=` parts.
+  // Client-side rather than a page prop because adding a part deliberately
+  // revalidates nothing (the actions file's "no revalidatePath anywhere") —
+  // the store's notify is the whole delivery.
+  //
+  // When the open link IS the followed one, the same anchor id arrives here
+  // twice, under both kinds — and that is left alone on purpose: one segment
+  // then carries both classes (the dashed rule wins the underline, which is
+  // the honest reading) and *both* data attributes, so the banner's jump,
+  // which queries the followed-link one, keeps working while editing.
+  const openParts = useOpenLinkParts("doc", docId);
+  const allAnchors = useMemo(
+    () =>
+      openParts.length === 0
+        ? annotationAnchors
+        : [...annotationAnchors, ...anchoredLinkAnchorInputs(openParts, "draft-link")],
+    [annotationAnchors, openParts],
+  );
+
   // Posting, deleting or replying re-renders this tree with a new anchor list
   // (router.refresh()); this is what gets it into the already-built editor.
   // Also the only thing that gives a detached anchor another look — see
@@ -171,8 +196,8 @@ export default function DocReadingBody({
   // keystroke.
   useEffect(() => {
     if (!editor) return;
-    setAnnotationAnchors(editor.view, annotationAnchors);
-  }, [editor, annotationAnchors]);
+    setAnnotationAnchors(editor.view, allAnchors);
+  }, [editor, allAnchors]);
 
   function handleUnfreeze() {
     selection.clear();
@@ -216,6 +241,24 @@ export default function DocReadingBody({
           quotedText={selection.pending.quotedText}
           atVersion={selection.pending.atVersion}
           ydocUpdateId={scrubUpdateId}
+          onAddToLink={async () => {
+            // docs/ANCHORED_LINKS.md — the part posts to the server *now*,
+            // verified against the version this selection was read at; the
+            // tray re-fetches on the notify. Reading views only — the doc
+            // editor's widget never supplies this prop.
+            const pending = selection.pending;
+            if (!pending) return null;
+            const result = await addAnchoredLinkPart(
+              "doc",
+              docId,
+              { kind: "doc-range", from: pending.from, to: pending.to, quotedText: pending.quotedText },
+              pending.atVersion ?? undefined,
+            );
+            if (result.error) return result.error;
+            selection.clear();
+            notifyAnchoredLinkChanged();
+            return null;
+          }}
           onPosted={() => selection.clear()}
           onCancel={() => selection.clear()}
         />

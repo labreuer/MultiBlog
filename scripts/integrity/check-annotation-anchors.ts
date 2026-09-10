@@ -53,7 +53,8 @@
 //      *somewhere* — one that never landed is document-level, which is a
 //      state the system renders rather than a fault.
 //
-// AND, SINCE PLAN.md §20g, THE SAME INVARIANT OVER `tag_anchor`.
+// AND, SINCE PLAN.md §20g, THE SAME INVARIANT OVER `tag_anchor` — AND, SINCE
+// docs/ANCHORED_LINKS.md, OVER `anchored_link_anchor`.
 //
 // The replay invariant is a **per-row property**, not an annotation-specific
 // one: "materialize the state the stamp names; textBetween(anchor_from,
@@ -61,7 +62,8 @@
 // is a range into a ydoc, whoever owns it. So one checker walks every anchor
 // table rather than one per consumer family, which is the point of the shared
 // row shape (§20b) — a second copy of this logic would be a second thing to
-// keep in step with §13o's trust rule.
+// keep in step with §13o's trust rule. The two tables share one walk below,
+// parameterised only by which findMany fetched the rows.
 //
 // In PR 1 that walk is **trivially green**: every tag_anchor row is
 // whole-object (all four part columns null, guaranteed by
@@ -144,30 +146,44 @@ function nodeAt(ydocId: string, throughUpdateId: bigint, isAnnotationBody: boole
   return pending;
 }
 
-// PLAN.md §20g — the tag side of the same invariant.
+// The shared §20b column shape, as the one select both part-anchor walks use.
+const PART_ANCHOR_SELECT = {
+  id: true,
+  docId: true,
+  postId: true,
+  fileId: true,
+  targetAnnotationId: true,
+  selectorKind: true,
+  anchorFrom: true,
+  anchorTo: true,
+  quotedText: true,
+  ydocUpdateId: true,
+} as const;
+
+type PartAnchorRow = {
+  id: string;
+  docId: string | null;
+  postId: string | null;
+  fileId: string | null;
+  targetAnnotationId: string | null;
+  selectorKind: "DOC_RANGE" | "PDF_TEXT" | null;
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  quotedText: string;
+  ydocUpdateId: bigint | null;
+};
+
+// PLAN.md §20g / docs/ANCHORED_LINKS.md — the consumer-family side of the
+// same invariant, one walk for both tables (`tag_anchor`,
+// `anchored_link_anchor`) since the row shape is the compiler-shared §20b
+// envelope.
 //
 // Only `DOC_RANGE` rows have anything to verify. A whole-object row (every
 // part column null) makes no claim about any text, and a `PDF_TEXT` row is
 // checked against stored page text rather than a replay — a different question
 // with a different failure mode, which is why check-pdf-anchors.ts exists as a
 // sibling rather than a branch in here (the same split §19 already made).
-async function checkTagAnchors(docFilter: string | undefined): Promise<{ checked: number; total: number }> {
-  const rows = await prisma.tagAnchor.findMany({
-    where: docFilter ? { docId: docFilter } : {},
-    select: {
-      id: true,
-      docId: true,
-      postId: true,
-      fileId: true,
-      targetAnnotationId: true,
-      selectorKind: true,
-      anchorFrom: true,
-      anchorTo: true,
-      quotedText: true,
-      ydocUpdateId: true,
-    },
-  });
-
+async function checkPartAnchors(rows: PartAnchorRow[]): Promise<{ checked: number; total: number }> {
   let checked = 0;
 
   for (const row of rows) {
@@ -180,8 +196,9 @@ async function checkTagAnchors(docFilter: string | undefined): Promise<{ checked
     // ydoc from the arc rather than from the owner is the whole difference.
     const target = targetFromColumns(row);
     if (!target) {
-      // Unreachable while tag_anchor_one_target_check holds — which
-      // scripts/integrity/check-tag-constraints.ts is what proves.
+      // Unreachable while the one-target CHECKs hold (each table has its
+      // own) — which scripts/integrity/check-tag-constraints.ts is what
+      // proves.
       report("error", row.id, "target-arc", "no single target: the object arc is malformed");
       continue;
     }
@@ -403,14 +420,20 @@ async function main() {
     }
   }
 
-  const tagWalk = await checkTagAnchors(docId);
+  const tagWalk = await checkPartAnchors(
+    await prisma.tagAnchor.findMany({ where: docId ? { docId } : {}, select: PART_ANCHOR_SELECT }),
+  );
+  const linkWalk = await checkPartAnchors(
+    await prisma.anchoredLinkAnchor.findMany({ where: docId ? { docId } : {}, select: PART_ANCHOR_SELECT }),
+  );
 
   const errors = findings.filter((f) => f.level === "error");
   const warns = findings.filter((f) => f.level === "warn");
 
   console.log(
-    `\nchecked ${checked} anchored annotation(s) of ${annotations.length} total, and ` +
-      `${tagWalk.checked} part-anchored tag row(s) of ${tagWalk.total} total — ` +
+    `\nchecked ${checked} anchored annotation(s) of ${annotations.length} total, ` +
+      `${tagWalk.checked} part-anchored tag row(s) of ${tagWalk.total} total, and ` +
+      `${linkWalk.checked} anchored-link part(s) of ${linkWalk.total} total — ` +
       `${errors.length} error(s), ${warns.length} warning(s)`,
   );
   for (const f of [...errors, ...warns]) {

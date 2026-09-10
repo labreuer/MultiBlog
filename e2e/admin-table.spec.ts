@@ -659,7 +659,7 @@ test.describe("admin table kit", () => {
   });
 
   test("every admin table paginates and keeps its controls when nothing matches", async ({ page }) => {
-    for (const path of ["/posts", "/docs", "/users", "/comments", "/annotations"]) {
+    for (const path of ["/posts", "/docs", "/users", "/comments", "/annotations", "/links"]) {
       // A search no row can match: the table must still render its header and
       // an empty-state row rather than collapsing to a bare paragraph, or the
       // filter that produced the empty result would be unreachable (§16d).
@@ -680,7 +680,7 @@ test.describe("admin table kit", () => {
   // cover it. STYLE.md, "Narrow viewports and horizontal overflow".
   test("a narrow viewport scrolls the table instead of clipping it", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 664 });
-    for (const path of ["/posts", "/docs", "/users", "/comments", "/annotations"]) {
+    for (const path of ["/posts", "/docs", "/users", "/comments", "/annotations", "/links"]) {
       await page.goto(path);
       await page.waitForSelector("table");
       const m = await page.evaluate(() => {

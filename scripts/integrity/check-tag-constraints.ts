@@ -1,4 +1,5 @@
-// Proves the hand-written DDL in add_tags actually enforces what its
+// Proves the hand-written DDL in add_tags — and, since
+// docs/ANCHORED_LINKS.md, in add_anchored_links — actually enforces what its
 // comments claim (PLAN.md §20b/§20c).
 //
 // Everything else in this folder verifies *stored data*. This one verifies the
@@ -49,6 +50,17 @@ type Fixtures = {
   postId: string;
   /** The probe tag's exact name, so the case-collision probe can differ from it *only* by case. */
   tagName: string;
+  /** An open draft anchored_link, owned by linkUserId (docs/ANCHORED_LINKS.md). */
+  linkId: string;
+  /**
+   * A user created inside the probe transaction, so the one-open-per-user
+   * probes run against a creator guaranteed to have exactly the open link
+   * this script gave them — the first real user may legitimately have one
+   * of their own.
+   */
+  linkUserId: string;
+  /** A second probe user with *nothing* open, for the rows that must go in when the slot is free. */
+  linkUser2Id: string;
 };
 
 type Probe = {
@@ -110,6 +122,89 @@ const MUST_REJECT: Probe[] = [
         INSERT INTO tag (id, slug, name, created_by_id, created_at)
         VALUES ('probe-case', 'probe-case-slug', ${f.tagName.toUpperCase()}, ${f.userId}, now())`,
   },
+  // docs/ANCHORED_LINKS.md — the third table on the §20a envelope carries its
+  // own copies of both CHECKs; anchored_link itself carries the partial unique
+  // index that makes "the viewer's open link" a definite article, the CHECK
+  // that keeps reopened_at off drafts, and the one that keeps a name from
+  // being blank.
+  {
+    name: "a blank link name",
+    constraint: "anchored_link_name_not_blank_check",
+    why:
+      "a name is null or a name — the writer stores whitespace-only input as null, and every reader's " +
+      'fallback is `?? "Linked passages"` with no second "or blank" check (docs/ANCHORED_LINKS.md, "Naming a link")',
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, name)
+        VALUES ('probe-link-blank-name', ${f.linkUser2Id}, now(), now(), '   ')`,
+  },
+  {
+    name: "link anchor with no target",
+    constraint: "anchored_link_anchor_one_target_check",
+    why: "the same §20a arc rule, restated per anchor table by design (a shared CHECK cannot span tables)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`INSERT INTO anchored_link_anchor (id, link_id) VALUES ('probe-link-none', ${f.linkId})`,
+  },
+  {
+    name: "link anchor with two targets",
+    constraint: "anchored_link_anchor_one_target_check",
+    why: "one row means exactly one object, in every consumer family (§20a)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, doc_id, post_id)
+        VALUES ('probe-link-two', ${f.linkId}, ${f.docId}, ${f.postId})`,
+  },
+  {
+    name: "link anchor selector_kind with no offsets",
+    constraint: "anchored_link_anchor_selector_columns_check",
+    why: "the same half-written state the tag CHECK rejects — and here every real row is a part, so the gap would be wider",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, doc_id, selector_kind)
+        VALUES ('probe-link-kindonly', ${f.linkId}, ${f.docId}, 'DOC_RANGE')`,
+  },
+  {
+    name: "link anchor offsets with no selector_kind",
+    constraint: "anchored_link_anchor_selector_columns_check",
+    why: "the mirror image — offsets expressed in no stated coordinate mechanism (§20b)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, doc_id, anchor_from, anchor_to, selector)
+        VALUES ('probe-link-offsets', ${f.linkId}, ${f.docId}, 3, 9, '{"v":1,"before":"","after":"","blocks":1}'::jsonb)`,
+  },
+  {
+    name: "a second open draft for one user",
+    constraint: "anchored_link_one_open_per_user",
+    why:
+      "loadMyOpenLink is a definite article, and the get-or-create race's loser gets a catchable P2002 " +
+      "rather than a twin draft (docs/ANCHORED_LINKS.md)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at)
+        VALUES ('probe-draft-two', ${f.linkUserId}, now())`,
+  },
+  {
+    name: "a reopened minted link while a draft is open",
+    constraint: "anchored_link_one_open_per_user",
+    why:
+      "the tray holds one link, draft or reopened — Edit over a draft with passages must refuse, and this is " +
+      "what the stale-tab race falls back on (docs/ANCHORED_LINKS.md, \"Editing a minted link\")",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, reopened_at)
+        VALUES ('probe-reopen-two', ${f.linkUserId}, now(), now(), now())`,
+  },
+  {
+    name: "reopened_at on an unminted link",
+    constraint: "anchored_link_reopened_only_when_minted_check",
+    why:
+      "reopened_at means one thing — a minted link back in the tray — and a draft is open by being unminted; " +
+      "a draft carrying it would be a second, disagreeing definition of open",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, reopened_at)
+        VALUES ('probe-reopen-draft', ${f.linkUser2Id}, now(), now())`,
+  },
 ];
 
 // A constraint set that rejects everything is not a passing test. These are
@@ -140,6 +235,47 @@ const MUST_ACCEPT: Probe[] = [
       tx.$executeRaw`
         INSERT INTO tag_anchor (id, assignment_id, doc_id, selector_kind, anchor_from, anchor_to, quoted_text)
         VALUES ('probe-docrange', ${f.assignmentId}, ${f.docId}, 'DOC_RANGE', 3, 9, 'six ch')`,
+  },
+  {
+    name: "DOC_RANGE link part — the shape the writer actually produces",
+    constraint: "",
+    why: "addAnchoredLinkPart's doc row: offsets, quote and context blob together (docs/ANCHORED_LINKS.md)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor
+          (id, link_id, doc_id, selector_kind, anchor_from, anchor_to, quoted_text, selector)
+        VALUES ('probe-link-ok', ${f.linkId}, ${f.docId}, 'DOC_RANGE', 3, 9, 'six ch',
+          '{"v":1,"before":"","after":"","blocks":1}'::jsonb)`,
+  },
+  {
+    name: "a second link for a user whose first is minted",
+    constraint: "",
+    // This is what makes the index *partial* rather than one-link-per-user:
+    // minting frees the slot, which is the entire lifecycle (mint → new
+    // draft accumulates → mint again; Edit reopens, Done frees it again).
+    why: "minting frees the one-open slot — the WHERE clause is the feature, not an optimisation",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at)
+        VALUES ('probe-link-minted', ${f.linkUserId}, now(), now())`,
+  },
+  {
+    name: "a reopened minted link when nothing else is open",
+    constraint: "",
+    why: "the row openAnchoredLinkForEditing writes once the slot is free (docs/ANCHORED_LINKS.md)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, reopened_at)
+        VALUES ('probe-link-reopened', ${f.linkUser2Id}, now(), now(), now())`,
+  },
+  {
+    name: "a named minted link",
+    constraint: "",
+    why: 'the row renameAnchoredLink writes — a name that survived normalisation (docs/ANCHORED_LINKS.md, "Naming a link")',
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, name)
+        VALUES ('probe-link-named', ${f.linkUser2Id}, now(), now(), 'Probe: a named link')`,
   },
 ];
 
@@ -212,12 +348,36 @@ async function main() {
         data: { tagId: tag.id, userId: user.id },
         select: { id: true },
       });
+      // The link fixtures get their own user — see Fixtures.linkUserId.
+      const linkUser = await tx.user.create({
+        data: {
+          email: `probe-link-${Date.now()}@probe.invalid`,
+          slug: `probe-link-user-${Date.now()}`,
+          adminInitials: "PL",
+        },
+        select: { id: true },
+      });
+      const linkUser2 = await tx.user.create({
+        data: {
+          email: `probe-link2-${Date.now()}@probe.invalid`,
+          slug: `probe-link-user2-${Date.now()}`,
+          adminInitials: "PM",
+        },
+        select: { id: true },
+      });
+      const link = await tx.anchoredLink.create({
+        data: { createdById: linkUser.id },
+        select: { id: true },
+      });
       const fixtures: Fixtures = {
         userId: user.id,
         assignmentId: assignment.id,
         docId: doc.id,
         postId: post.id,
         tagName,
+        linkId: link.id,
+        linkUserId: linkUser.id,
+        linkUser2Id: linkUser2.id,
       };
 
       for (const probe of MUST_REJECT) {

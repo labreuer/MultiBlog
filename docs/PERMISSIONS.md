@@ -299,6 +299,117 @@ while the record of who applied it to what survives for a restore to bring back.
 *object* instead cascades its anchors away outright — an anchor pointing at a deleted doc is
 unreachable, not merely stale.
 
+## Anchored links (docs/ANCHORED_LINKS.md)
+
+**A link is one person's act of pointing, and pointing claims nothing about the target.**
+That is what separates its rules from tags: a tag is curatorial (it changes what a term
+denotes, for everyone) and takes a role floor; a link is a pointer that only its recipients
+ever see, so its create rule is the annotate precedent — signed in, plus the target's own
+read gate, and nothing else.
+
+| Permission | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER | signed out |
+|---|---|---|---|---|---|---|
+| Add a passage you may read to your draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| See / edit / mint / discard **your own** draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Reopen, add to, remove from, reorder **your own** minted link (live; never to zero passages) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Edit **someone else's** minted link, whatever the role | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Name, rename or un-name **your own** link, draft or minted (the tray; `/links` too where you may browse it) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Rename **someone else's** minted link (`/links`) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| See **someone else's** unminted draft | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Follow a minted link (per readable target) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Browse `/links` (your own links, plus minted links with a target you may read) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Delete / restore **your own** minted link | ✅ | ✅ | ✅ | ✅† | ❌* | ❌ |
+| Delete / restore **someone else's** minted link | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Delete a draft from `/links` (rather than discarding it from the tray) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+\* By inheritance, not by a link rule: `addAnchoredLinkPart` has **no role floor of its
+own** — the target's read predicate is the whole gate — but both reading routes gate on
+`canViewDocs`/`canViewFiles` (AUTHORIZED+), so a COMMENTER can reach no surface that
+creates or follows a link today. If those floors ever move, links move with them for free;
+that is the design, not an accident.
+
+† The action permits it (`canUserDeleteAnchoredLink` has no role floor for the creator,
+matching `addAnchoredLinkPart`), but `/links` is `canManageDocs`-gated like every admin
+listing, so an AUTHORIZED user has no surface from which to invoke it today.
+
+**A name is presentation, not a passage.** Renaming takes the delete rule's shape —
+the creator at any stage, or a moderator once the link is minted, never on a deleted row
+(`canUserRenameAnchoredLink`) — rather than editing's creator-only one, because the reason
+editing is the creator's alone (a passage added by someone else would put *their* reading
+into the creator's link) does not reach a retitle. The name rides the filtered follow
+view, so a viewer who may read none of the link's targets never sees it, on any surface
+(docs/ANCHORED_LINKS.md, "Naming a link").
+
+**Editing a minted link is the creator's alone, and live** (docs/ANCHORED_LINKS.md, "Editing
+a minted link"). Reopening puts the link back in its creator's tray — one open link per
+creator, draft or reopened, by the partial unique index — and every add, remove and reorder
+lands on the row recipients are already following; nothing is staged, and the URL never stops
+resolving. There is no moderator arm, unlike delete: the tray is per creator, and a passage
+added by anyone else would put *their* reading into the creator's link. Two rules keep live
+editing honest: a minted link never drops to zero passages (the last remove is refused, with
+"delete the link instead"), and a soft delete closes any edit in progress. Adding a passage
+still wears the target's own read gate, exactly as for a draft.
+
+**`/links` lists by readability, and its cells filter per target.** A row is a link the
+viewer created (their own draft included) or a minted link *some* anchor of which points
+into a doc or file they may read — the follow filter as a `where`, restated in
+`src/app/links/page.tsx` the way `/annotations` restates the doc and file read rules.
+Readability rather than manage-ability bounds the listing because the cells show
+`quoted_text`, and so does the free-text search, or `?q=` would probe quotes the viewer
+cannot see. Within a listed row an unreadable target is omitted without acknowledgment,
+exactly as the banner omits it. There is no ADMIN "Show all" override. Deleting is a soft
+delete by the creator or ADMIN/EDITOR (`LINK_MODERATOR_ROLES`, the same two roles as
+`canCurateTags`, stated independently); a deleted link 404s for everyone until restored.
+A draft is never deleted from the table — the tray's Discard is its one exit.
+
+**Review later — the Owners dropdown's disclosure (added 2026-09-08).** `/links`' Owners
+filter lists the **distinct creators of the rows the viewer may list** rather than `/files`'
+byline-eligible set, on two arguments made quickly and not yet re-examined: a link's creator
+has no role floor, so the eligible set would omit AUTHORIZED creators; and offering every
+account would hand an AUTHOR the site's whole user list. The claim to check is that the
+scoped list shows no name the Created by column doesn't already — it is drawn from the
+viewer scope alone (own links plus minted-and-readable), *including soft-deleted links*, so
+a creator whose every listed link is deleted appears in the dropdown while "Show deleted" is
+off, one toggle before the column would show them. Also worth a second look: the filter
+carries user **slugs** in the querystring (as `/docs` and `/files` already do), and the
+`?user=<id>` deep link narrows by creator *id* with no slug allowlist. Neither widens the
+scope — both are ANDed under it — but this section's rows were written before the control
+existed, and none of them names it.
+
+**Following is a per-target read filter with silent omission — a recorded deviation from
+§20i's conjunctive default.** §20i pre-declared that a cross-container reference is
+"visible only if every target is"; anchored links deliberately decline that.
+`anchoredLinkForViewer` rebuilds each target from the arc and wears its existing predicate
+(`canUserReadDoc`, `canUserReadFile` — so a PRIVATE doc keeps its no-admin-bypass by
+inheritance), and a group whose target is unreadable, deleted, or of a kind the writer
+never produces is omitted with **no acknowledgment**: no placeholder, no count. The
+rationale (docs/ANCHORED_LINKS.md, "Following a link"): §14c's conjunctive precedent
+protects a surface that *jointly renders* two documents, while a link's groups are
+independent pointers like `/tag/[slug]`'s three sections — and silent omission leaks
+nothing, since "references something I can't see" and "references nothing else" are
+indistinguishable. `?sel=` grants nothing: a link naming a PRIVATE doc still meets that
+doc's own Forbidden page.
+
+**An unminted draft is its creator's alone** — `anchoredLinkForViewer` returns null for
+anyone else, whatever their role, and every mutation (`add`/`remove`/`discard`/`mint`)
+scopes to `createdById` server-side. One open draft per user is DB-enforced
+(`anchored_link_one_draft_per_user`, a partial unique index), so there is no draft-picker
+surface to gate.
+
+**The banner and tray add no second check.** `AnchoredLinkBanner` renders only what the
+server's filtered view handed it, from inside a page whose gate already ran — `TagChips`'
+stance. The tray shows only `loadMyDraftLink()`'s answer, which is creator-scoped by the
+query itself.
+
+**The landing route routes per viewer, and its empty page names nothing.** `/link/[id]`
+(docs/ANCHORED_LINKS.md, "The landing route") applies the same filter to decide the
+*page*: one readable group redirects into it, several render as excerpts of the readable
+groups only, none renders a page that acknowledges the link — the viewer holds its id
+already — and nothing about what it points at, not a count, not a kind. An id that names
+no link, a deleted link, or someone else's unminted draft is a 404, the existence rule
+`anchoredLinkForViewer` already applies. `?noredirect=1` changes only whether the route
+redirects; like `?sel=`, it grants nothing.
+
 ## Where each rule lives
 
 Re-derive from these rather than trusting the tables after an authz change:
@@ -326,12 +437,23 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts` |
 | `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
 | `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |
+| Anchored-link follow filter (per-target, silent omission) | `src/lib/anchored-link-data.ts` |
+| Anchored-link landing (per-viewer redirect; existence vs. empty page) | `src/app/link/[id]/page.tsx`, `anchoredLinkLandingFor` in `src/lib/anchored-link-data.ts` |
+| Anchored-link create/draft/mint (read-the-target, creator-scoped) | `src/app/actions/anchored-links.ts` |
+| Anchored-link delete/restore (creator or ADMIN/EDITOR; never a draft) | `src/lib/anchored-link-authz.ts`, applied in `src/app/actions/anchored-links.ts` |
+| Anchored-link edit (creator-only reopen/close; add/remove/reorder on the open link; last-part rule) | `src/app/actions/anchored-links.ts`; the Edit affordance's four states in `src/lib/anchored-link-editing.ts` |
+| `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader
 seeing a public post's chip but no tagger, and the EDITOR who cannot see a PRIVATE doc under
 a term they can otherwise browse.
+
+`e2e/anchored-links.spec.ts`'s second test pins the link rules' load-bearing row — the
+reader who may see only the PDF half of a PRIVATE-doc+shared-PDF link gets that page's
+banner and regions with nothing acknowledging the doc group, while the doc's own URL still
+forbids the page.
 
 `e2e/doc-visibility.spec.ts` pins these tables' load-bearing rows — the PRIVATE denials for
 ADMIN and EDITOR, the byline author's access, the `SHARED` carve-out, the `/docs` override's

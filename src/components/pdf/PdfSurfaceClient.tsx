@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import type { ReactNode } from "react";
 import type { PdfAnnotationEntry } from "./PdfAnnotationPanel";
+import type { AnchoredLinkView } from "@/lib/anchored-link-data";
 
 // PLAN.md §19 — the `ssr: false` boundary.
 //
@@ -35,6 +36,8 @@ export default function PdfSurfaceClient(props: {
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
+  /** The link a ?sel= visit resolved, or null — docs/ANCHORED_LINKS.md. */
+  anchoredLink: AnchoredLinkView | null;
   metadata: ReactNode;
 }) {
   return <PdfAnnotationSurface {...props} />;

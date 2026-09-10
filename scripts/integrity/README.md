@@ -134,3 +134,14 @@ invariant is a per-row property, so one checker covers every anchor table rather
 consumer family. In PR 1 that walk reports `0 of 0` — every tag anchor is whole-object and
 makes no claim about any text — and the zero is itself the assertion that PR 1 kept its
 tie-off promise.
+
+Since docs/ANCHORED_LINKS.md, the same one-walk-per-invariant rule covers
+`anchored_link_anchor` — the third table on the §20a envelope, and the first with real part
+rows on main: its `DOC_RANGE` parts join `check-annotation-anchors.ts`'s replay walk, its
+`PDF_TEXT` parts join `check-pdf-anchors.ts`'s page-text pass, and `check-tag-constraints.ts`
+probes its two CHECKs plus, on `anchored_link` itself, the `anchored_link_one_open_per_user`
+partial unique index and the reopened-only-when-minted CHECK (both directions: a second open
+draft must be refused, as must a reopened link beside a draft and `reopened_at` on a draft; a
+second link for a user whose first is *minted* must go in, as must a reopened link once the
+slot is free), and the not-blank CHECK on `name` (a whitespace-only name must be refused; a
+real one must go in — docs/ANCHORED_LINKS.md, "Naming a link").

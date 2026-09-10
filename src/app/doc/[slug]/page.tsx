@@ -18,8 +18,11 @@ import CompareWithPicker from "@/components/CompareWithPicker";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
-import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
-import { signInPath } from "@/lib/sign-in-redirect";
+import { annotationAnchorInputs, anchoredLinkAnchorInputs } from "@/lib/annotation-highlight-extension";
+import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
+import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
+import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
+import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { DocScrubProvider } from "@/components/DocScrubContext";
@@ -76,12 +79,23 @@ export async function generateMetadata({
   return titleWhenOk(await loadDocForRead(slug), (doc) => docTitleOrFallback(doc.title));
 }
 
-export default async function PublicDocPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function PublicDocPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ sel?: string }>;
+}) {
   const { slug } = await params;
+  const { sel } = await searchParams;
   // Free — generateMetadata already ran this for the same request.
   const access = await loadDocForRead(slug);
   if (access.status === "signed-out") {
-    redirect(signInPath(`/doc/${slug}`));
+    // The return path keeps ?sel=: a shared anchored link is the one URL a
+    // signed-out reader is likeliest to arrive by, and a callbackUrl that
+    // kept only the pathname would sign them in onto the doc with its
+    // passages silently gone (docs/ANCHORED_LINKS.md).
+    redirect(signInPath(pathWithQuery(`/doc/${slug}`, new URLSearchParams(sel ? { sel } : {}))));
   }
   if (access.status === "redirect") {
     redirect(access.to);
@@ -108,7 +122,24 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
   // with the content. One fetch, so the highlight and the card can't be
   // derived from two different snapshots.
   const threads = await getDocAnnotationsAsThreads(doc.id);
-  const annotationAnchors = annotationAnchorInputs(buildAnnotationEntries(threads));
+
+  // docs/ANCHORED_LINKS.md — a ?sel= page resolves the link it names, per
+  // viewer. Outside the `gated` memo on purpose: the memo keys on its
+  // arguments and generateMetadata already ran it without the searchParam,
+  // so folding `sel` in would just split the doc load into two queries. Null
+  // (no such link, or nothing this viewer may see) renders as if ?sel= were
+  // absent.
+  const link = sel ? await anchoredLinkForViewer(sel, user) : null;
+  const linkGroupHere = link?.groups.find((g) => g.target.kind === "doc" && g.target.id === doc.id) ?? null;
+
+  // This doc's DOC_RANGE parts merge into the same anchor list the
+  // annotations ride: one list, one plugin state, one per-transaction
+  // resolve pass — the `kind` field on each input keeps the two apart
+  // downstream (annotation-highlight-extension.ts).
+  const annotationAnchors = [
+    ...annotationAnchorInputs(buildAnnotationEntries(threads)),
+    ...(linkGroupHere ? anchoredLinkAnchorInputs(linkGroupHere.parts) : []),
+  ];
 
   // bodyJSON seeds DocReadingBody's editor so its first paint is identical to
   // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
@@ -161,7 +192,21 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
             <MarginNotesProvider>
               <div className={styles.layout}>
                 <div className={styles.mainColumn}>
+                  {link && (
+                    <AnchoredLinkBanner link={link} currentTarget={{ kind: "doc", id: doc.id }} />
+                  )}
+                  {/* The key makes doc identity a mount boundary. A client-side
+                      nav between two docs (the anchored-link banner's group
+                      links are the first surface that does this) otherwise
+                      *reuses* DocReadingBody: its editor still holds the old
+                      doc until the new provider syncs, so the anchors effect
+                      pushes the new doc's quotes against the old doc's text and
+                      detaches every one — and detachment is only re-evaluated
+                      on the next anchor push (annotation-highlight-extension.ts),
+                      which never comes. Remounting also retires the same-class
+                      staleness in ready/synced and in DocView's scrub state. */}
                   <DocView
+                    key={doc.id}
                     docId={doc.id}
                     initialTitle={docTitleOrFallback(doc.title)}
                     initialBodyJSON={bodyJSON}
@@ -229,6 +274,10 @@ export default async function PublicDocPage({ params }: { params: Promise<{ slug
           </DocScrubProvider>
         </AnnotationMoveProvider>
       </DocPresenceProvider>
+      {/* docs/ANCHORED_LINKS.md — self-fetching, fixed-position, renders
+          nothing without a draft; the server row is its state, so it needs
+          nothing from this page but a mount point outside the layout grid. */}
+      <AnchoredLinkTray />
     </main>
   );
 }

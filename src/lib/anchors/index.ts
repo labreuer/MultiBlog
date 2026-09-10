@@ -18,7 +18,14 @@ export {
   targetKey,
   type AnchorTargetColumns,
 } from "./target";
-export { parseSelector, parseSelectorKind, type AnchorSelector, type DocRangeSelector, type PdfTextSelector } from "./selector";
+export {
+  parseSelector,
+  parseSelectorKind,
+  deriveDocRangeSelector,
+  type AnchorSelector,
+  type DocRangeSelector,
+  type PdfTextSelector,
+} from "./selector";
 export {
   ANCHOR_TARGET_KINDS,
   SELECTOR_KINDS,

@@ -200,8 +200,98 @@ async function main(): Promise<void> {
     note(`${a.id}: page ${target.pageIndex + 1} "${truncate(target.quote.exact)}" ✓`);
   }
 
+  // docs/ANCHORED_LINKS.md — the same claim, written by a different consumer:
+  // an anchored-link part's `selector` is a whole PdfTarget blob (PDF_TEXT),
+  // derived by the same capturePdfTextAnchor call an annotation's is, so it
+  // is checked here rather than growing a replay branch it has no state for.
+  // The page-text cache above is shared — link parts and annotations
+  // routinely quote the same pages.
+  const linkParts = await prisma.anchoredLinkAnchor.findMany({
+    where: { selectorKind: "PDF_TEXT", ...(fileId ? { fileId } : {}) },
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      fileId: true,
+      selector: true,
+      quotedText: true,
+      file: { select: { pageCount: true } },
+    },
+  });
+
+  console.log(`\nChecking ${linkParts.length} anchored-link PDF part(s)…\n`);
+  let linkChecked = 0;
+
+  for (const part of linkParts) {
+    if (part.fileId === null) {
+      // The selector-columns CHECK keeps the kind and blob together, but
+      // nothing but its writer ties PDF_TEXT to the file arm — the mirror of
+      // the DOC_RANGE-on-a-file finding in check-annotation-anchors.ts.
+      report("error", part.id, "target-mechanism", "PDF_TEXT selector on a non-file target");
+      continue;
+    }
+    const target = parsePdfTarget(part.selector);
+    if (!target) {
+      report("error", part.id, "target-malformed", "selector is present but doesn't parse as a Target");
+      continue;
+    }
+    if (target.quads.length === 0) {
+      report("error", part.id, "no-quads", "target has no quads — nothing anchors it");
+    }
+    const pageCount = part.file?.pageCount;
+    if (pageCount !== null && pageCount !== undefined && target.pageIndex >= pageCount) {
+      report("error", part.id, "page-out-of-range", `pageIndex ${target.pageIndex} but the file has ${pageCount} page(s)`);
+      continue;
+    }
+
+    // The column and the blob hold the same string by construction —
+    // capturePdfTextAnchor writes its own verified quote into both.
+    if (part.quotedText !== target.quote.exact) {
+      report(
+        "error",
+        part.id,
+        "column-blob-divergence",
+        `quotedText "${truncate(part.quotedText)}" != target.quote.exact "${truncate(target.quote.exact)}"`,
+      );
+      continue;
+    }
+
+    if (!target.quote.exact && !target.position) {
+      note(`${part.id}: region part on page ${target.pageIndex + 1} — no quote to verify`);
+      continue;
+    }
+    const text = await pageText(part.fileId, target.pageIndex, target.textVersion);
+    if (text === null) {
+      report(
+        "warn",
+        part.id,
+        "no-page-text",
+        `no stored page text for page ${target.pageIndex + 1} at textVersion ${target.textVersion}`,
+      );
+      continue;
+    }
+    if (!target.position) {
+      report("warn", part.id, "no-position", "has a quote but no position — the quote can't be located to verify");
+      continue;
+    }
+
+    linkChecked++;
+    const slice = text.slice(target.position.start, target.position.end);
+    if (slice !== target.quote.exact) {
+      report(
+        "error",
+        part.id,
+        "quote-mismatch",
+        `page ${target.pageIndex + 1} [${target.position.start}, ${target.position.end}) reads ` +
+          `"${truncate(slice)}" but the target claims "${truncate(target.quote.exact)}"`,
+      );
+      continue;
+    }
+
+    note(`${part.id}: page ${target.pageIndex + 1} "${truncate(target.quote.exact)}" ✓`);
+  }
+
   console.log(
-    `\n${checked} quote(s) verified against stored page text. ` +
+    `\n${checked} annotation quote(s) and ${linkChecked} anchored-link part(s) verified against stored page text. ` +
       `${errors} error(s), ${warnings} warning(s).`,
   );
   if (errors > 0) process.exitCode = 1;

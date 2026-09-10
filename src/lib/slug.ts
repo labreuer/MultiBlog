@@ -14,6 +14,8 @@ export const RESERVED_SLUGS = new Set([
   "forgot-password",
   "pdf",
   "invite",
+  "link",
+  "links",
   "tag",
   "tags",
   "posts",

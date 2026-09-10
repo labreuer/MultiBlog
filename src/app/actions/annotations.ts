@@ -5,7 +5,6 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
-import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { isAdmin } from "@/lib/authz";
 import { applyAnnotationMark, flushAnnotationCache, removeAnnotationMark } from "@/lib/annotation-admin";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -17,7 +16,7 @@ import {
   requireDocAnnotationId,
   type AnnotationTarget,
 } from "@/lib/annotation-container";
-import { captureAnchorInYdoc } from "@/lib/anchors/capture";
+import { captureAnchorInYdoc, capturePdfTextAnchor } from "@/lib/anchors/capture";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
 import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
@@ -581,43 +580,13 @@ async function postFileAnnotation(opts: {
 
   // A root annotation may carry a PDF target; a reply never does — its anchor
   // points into its parent's body, not into the document, for the same reason
-  // §13p gives on the doc side. Parsed rather than trusted: parsePdfTarget
-  // checks shape and finiteness, and the quote check below does the rest.
-  const target = parentId === null ? parsePdfTarget(opts.rawTarget) : null;
-
-  let quotedText = "";
-  let storedTarget: PdfTarget | null = null;
-
-  if (target) {
-    // The page text this server extracted at upload, at the *same*
-    // textVersion the client measured against. A mismatch means the client is
-    // running a different normaliser than the one that produced our stored
-    // text — after a deploy mid-session, say — and the honest response is to
-    // keep the quads (which are version-independent) and drop the quote,
-    // rather than slice text the offsets don't describe.
-    const pageText = await prisma.filePageText.findUnique({
-      where: {
-        fileId_pageIndex_textVersion: {
-          fileId,
-          pageIndex: target.pageIndex,
-          textVersion: target.textVersion,
-        },
-      },
-      select: { text: true },
-    });
-
-    if (pageText && target.position) {
-      const slice = pageText.text.slice(target.position.start, target.position.end);
-      // Verified against the client's own reading before being believed. If
-      // they disagree, the offsets are stale relative to our text and the
-      // quote is dropped — the annotation stays anchored by its quads and
-      // renders without a blockquote, rather than quoting the wrong sentence.
-      quotedText = slice === target.quote.exact ? slice : "";
-    }
-    // Whatever the quote came to, the stored target carries the server's
-    // answer rather than the client's, so the row cannot disagree with itself.
-    storedTarget = { ...target, quote: { ...target.quote, exact: quotedText } };
-  }
+  // §13p gives on the doc side. `capturePdfTextAnchor` parses rather than
+  // trusts, and derives the quote from this server's own page text — since
+  // PR 2 it is the one writer of a PDF anchor's `quote.exact`, shared with
+  // `tag_anchor`'s PDF_TEXT parts.
+  const captured = parentId === null ? await capturePdfTextAnchor({ fileId, rawTarget: opts.rawTarget }) : null;
+  const quotedText = captured?.quotedText ?? "";
+  const storedTarget = captured?.target ?? null;
 
   await prisma.annotation.update({
     where: { id: annotationId },

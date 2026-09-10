@@ -1,0 +1,96 @@
+/* docs/ANCHORED_LINKS.md, "The landing route" — /link/[id]'s excerpt page.
+   Every color is a globals.css token (STYLE.md). Sized like /tag/[slug]: a
+   reading column for quotes, not the 800px article width. */
+
+.container {
+  max-width: 720px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+  font-family: sans-serif;
+}
+
+.title {
+  font-size: 1.8rem;
+}
+
+.meta {
+  margin-top: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* The creator's Edit affordance, under the meta line. */
+.edit {
+  margin-top: 0.75rem;
+}
+
+.empty {
+  margin-top: 1.5rem;
+  color: var(--text-muted);
+}
+
+.sideBySide,
+.open {
+  font-size: 0.9rem;
+}
+
+.sideBySide {
+  margin-top: 1rem;
+}
+
+/* PLAN.md §14f — side-by-side stacks to one column below 900px, where "side
+   by side" is a promise the layout can't keep; the offer hides at the same
+   width rather than sending a phone there. */
+@media (max-width: 900px) {
+  .sideBySide {
+    display: none;
+  }
+}
+
+.sideBySide a,
+.open a {
+  color: var(--link);
+}
+
+.group {
+  margin-top: 2rem;
+}
+
+.groupTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 1.1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.25rem;
+}
+
+.kind {
+  font-size: 0.75rem;
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.parts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+  list-style: none;
+}
+
+/* The banner's .partQuote rule, grown up: the same --link rail, un-clamped,
+   because here the quote is the content rather than a handle for it. */
+.quote {
+  padding: 0.2rem 0 0.2rem 0.8rem;
+  border-left: 3px solid color-mix(in srgb, var(--link) 55%, transparent);
+  color: var(--foreground);
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.open {
+  margin-top: 0.6rem;
+}

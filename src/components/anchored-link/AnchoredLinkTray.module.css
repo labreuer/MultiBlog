@@ -1,0 +1,227 @@
+/* docs/ANCHORED_LINKS.md — the tray for the viewer's open link (a draft,
+   or a minted link reopened for editing): a fixed bottom-right island on
+   both reading surfaces and the landing route. Fixed positioning is the point — it stays out
+   of both pages' layout math (the doc page's margin-notes grid, the PDF
+   viewer's own chrome) and reads as "your working set follows you". */
+
+.tray {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 40;
+  width: min(320px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--shadow-color);
+  font-size: 0.85rem;
+}
+
+.headerRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.title {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.count {
+  color: var(--text-muted);
+}
+
+.partList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.partRow {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+/* Reorder is a drag by the grip or the text — both wear the hand — and the
+   rule below says where the row would land. touch-action: none on the two
+   handles so a touch drag is a drag, not a scroll; user-select: none on the
+   text so it is a handle rather than a selection start. */
+.grip {
+  align-self: center;
+  display: inline-flex;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.grip:disabled {
+  cursor: default;
+}
+
+.partText {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.dragging {
+  opacity: 0.5;
+}
+
+/* While a row is held the whole tray shows the closed hand, whichever
+   element the pointer happens to be over. */
+.trayDragging,
+.trayDragging * {
+  cursor: grabbing;
+}
+
+/* The drop indicator — an <hr> in spirit: a rule in the gap between rows,
+   before the row the held part would precede, or after the last one. */
+.dropBefore::before,
+.dropAfter::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--link);
+  pointer-events: none;
+}
+
+.dropBefore::before {
+  top: -3px;
+}
+
+.dropAfter::after {
+  bottom: -3px;
+}
+
+.partLabel {
+  color: var(--text-muted);
+}
+
+.removePart {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 0.2rem;
+  line-height: 1;
+}
+
+.removePart:hover {
+  color: var(--danger);
+}
+
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.copy {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 3px 8px;
+  border: 1px solid var(--foreground);
+  border-radius: 4px;
+  background: var(--foreground);
+  color: var(--background);
+  cursor: pointer;
+}
+
+.copy:disabled {
+  background: var(--surface-hover);
+  border-color: var(--border);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* A reopened link's way to its excerpt page — the same quiet text style as
+   Discard/Done, minus the right-alignment those keep. */
+.view {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  padding: 3px 0;
+}
+
+.discard {
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.85rem;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 3px 0;
+}
+
+.error {
+  color: var(--error);
+  margin: 0;
+}
+
+.copiedNote {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.copiedUrl {
+  word-break: break-all;
+  color: var(--link);
+  margin: 0;
+}
+
+.dismiss {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.1rem 0.2rem;
+}
+
+.dismiss:hover {
+  color: var(--foreground);
+}
+
+/* The link's optional name (docs/ANCHORED_LINKS.md, "Naming a link") — the
+   tray's one text field, between the header and the part list. Inherits the
+   tray's type size; tokens only, like every control here. */
+.nameInput {
+  font: inherit;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.nameInput::placeholder {
+  color: var(--text-muted);
+}

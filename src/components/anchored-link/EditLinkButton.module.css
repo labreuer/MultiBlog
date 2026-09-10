@@ -1,0 +1,46 @@
+/* docs/ANCHORED_LINKS.md, "Editing a minted link" — the Edit affordance.
+   Quiet by design: it sits inside a banner, a meta line or a table cell,
+   none of which it should dominate. The hint beside a disabled button is
+   the state's whole explanation and is always visible text. */
+
+.wrap {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.button {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--foreground);
+}
+
+.button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.hint,
+.status {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.status {
+  font-style: italic;
+}
+
+.error {
+  font-size: 0.8rem;
+  color: var(--error);
+}

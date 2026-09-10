@@ -173,6 +173,12 @@ export async function deleteTestUser(email: string): Promise<void> {
     // a group this user created).
     await prisma.docLink.deleteMany({ where: { userId: user.id } });
     await prisma.docLinkGroup.deleteMany({ where: { userId: user.id } });
+    // anchored_link.created_by_id is the same shape of required RESTRICT FK
+    // (docs/ANCHORED_LINKS.md) — a link minted or drafted during a test
+    // would otherwise block its creator's teardown. Hard delete; the FK
+    // cascade takes the anchor rows. deleted_by_user_id is SET NULL and
+    // needs nothing.
+    await prisma.anchoredLink.deleteMany({ where: { createdById: user.id } });
   }
   await prisma.user.deleteMany({ where: { email } });
 }
@@ -1424,6 +1430,109 @@ export async function deleteTestTag(idOrSlug: string): Promise<void> {
   await prismaIncludingDeleted.tag.delete({ where: { id: tag.id } });
 }
 
+// ---------------------------------------------------------------------------
+// Anchored links (docs/ANCHORED_LINKS.md) — link-making machinery for specs
+// about *following*: creation has its own UI-driven coverage
+// (anchored-links.spec.ts's first test), so everything else mints straight
+// to the database and gets on with the navigation or visibility it is
+// actually testing.
+// ---------------------------------------------------------------------------
+
+export type TestAnchoredLink = {
+  id: string;
+  /** One per part, in part order — the ids the highlight spans carry. */
+  anchors: { id: string; quotedText: string }[];
+};
+
+/**
+ * A minted link over DOC_RANGE parts, written the way the real writer writes
+ * them: quoted_text is derived here from the doc's own seeded body — a
+ * fixture naming offsets that hold no text fails loudly at creation, not as
+ * an integrity finding later — and ydoc_update_id stamps the target doc's
+ * own log tail, so the rows satisfy the same quote-at-stamp invariant
+ * check-annotation-anchors.ts replays. The selector blob stays null (the
+ * §20e backfill shape the constraint probes pin); nothing a spec asserts on
+ * reads it. Minted by default, deliberately, so however many links one spec
+ * creates none collides with the one-open-draft-per-user partial index;
+ * `minted: false` leaves the creator's open draft, and is for a *throwaway*
+ * creator only — the shared admin's draft slot belongs to the tray test
+ * (anchored-links.spec.ts), and a fixture draft there would be the row its
+ * "Add to link" lands parts in.
+ */
+export async function createTestAnchoredLink(opts: {
+  creatorEmail: string;
+  parts: { docId: string; from: number; to: number }[];
+  minted?: boolean;
+  /** A minted link already back in its creator's tray (docs/ANCHORED_LINKS.md, "Editing a minted link"). */
+  reopened?: boolean;
+  /**
+   * A creator-given name (docs/ANCHORED_LINKS.md, "Naming a link"), stored
+   * as given — this fixture is not the writer, so pass one already
+   * normalised (the CHECK refuses a blank either way).
+   */
+  name?: string;
+}): Promise<TestAnchoredLink> {
+  const { creatorEmail, parts, minted = true, reopened = false, name = null } = opts;
+  assertSafe(creatorEmail);
+  if (reopened && !minted) throw new Error("Only a minted link can be reopened — a draft is open by being unminted.");
+  const creator = await prisma.user.findUniqueOrThrow({ where: { email: creatorEmail } });
+
+  // A draft or a reopened link takes the creator's one-open slot
+  // (anchored_link_one_open_per_user), so a test wanting either should use
+  // a throwaway creator rather than the shared admin.
+  const link = await prisma.anchoredLink.create({
+    data: {
+      createdById: creator.id,
+      mintedAt: minted ? new Date() : null,
+      reopenedAt: reopened ? new Date() : null,
+      name,
+    },
+    select: { id: true },
+  });
+
+  const anchors: TestAnchoredLink["anchors"] = [];
+  for (const [index, part] of parts.entries()) {
+    const doc = await prisma.doc.findUniqueOrThrow({ where: { id: part.docId }, select: { proseJson: true } });
+    if (!doc.proseJson) throw new Error(`Test doc ${part.docId} has no cached body to derive a quote from.`);
+    const node = pmDocContentSchema.nodeFromJSON(doc.proseJson as JSONContent);
+    const quotedText = node.textBetween(part.from, part.to, " ");
+    if (!quotedText.trim()) {
+      throw new Error(`[${part.from}, ${part.to}) of test doc ${part.docId} holds no text to anchor.`);
+    }
+    const stamp = await ydocStore.maxUpdateId(ydocIdForDoc(part.docId));
+    if (stamp === null) throw new Error(`Test doc ${part.docId} has no update history to stamp against.`);
+    const anchor = await prisma.anchoredLinkAnchor.create({
+      data: {
+        linkId: link.id,
+        docId: part.docId,
+        selectorKind: "DOC_RANGE",
+        anchorFrom: part.from,
+        anchorTo: part.to,
+        quotedText,
+        ydocUpdateId: stamp,
+        partOrder: index,
+      },
+      select: { id: true },
+    });
+    anchors.push({ id: anchor.id, quotedText });
+  }
+
+  return { id: link.id, anchors };
+}
+
+/** Hard-deletes one test link; the FK cascade takes its anchor rows. */
+export async function deleteTestAnchoredLink(id: string): Promise<void> {
+  const link = await prisma.anchoredLink.findUnique({
+    where: { id },
+    select: { createdBy: { select: { email: true } } },
+  });
+  if (!link) return;
+  if (!SAFE_EMAIL.test(link.createdBy.email)) {
+    throw new Error(`Refusing to delete anchored link ${id} — its creator is not a throwaway account.`);
+  }
+  await prisma.anchoredLink.delete({ where: { id } });
+}
+
 export async function sweepTestData(): Promise<{
   posts: number;
   docs: number;
@@ -1589,6 +1698,8 @@ const handlers = {
   sweepTestData,
   getInvites,
   createTestInvite,
+  createTestAnchoredLink,
+  deleteTestAnchoredLink,
 };
 
 export type DbHandlers = typeof handlers;

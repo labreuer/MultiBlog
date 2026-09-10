@@ -22,13 +22,29 @@ import { buildSegments } from "./decoration-segments";
 // however many of them there are.
 
 export type AnnotationAnchorInput = {
-  /** The root annotation's id — the same value a mark would carry. */
+  /** The root annotation's id — the same value a mark would carry. For a link part, the anchor row's id. */
   id: string;
   from: number;
   to: number;
   /** Derived server-side at post time; here it is what re-finds the range. */
   quotedText: string;
-  color: string;
+  /** Author color for an annotation; absent for a link part, whose paint is a class, not a per-author tint. */
+  color?: string;
+  // docs/ANCHORED_LINKS.md — an anchored-link part rides the same plugin
+  // state and per-transaction resolve pass as an annotation range, so twenty
+  // link ranges cost what twenty more annotations would (annotation-marks.ts's
+  // "one pass for every id" rule). What differs is only presentation and
+  // routing, which is what this field keys: the decoration class, and which
+  // of the two range maps the id lands in.
+  //
+  // `draft-link` is a part of the viewer's own *open* link — a draft, or a
+  // minted link reopened for editing — same table, same resolve, drawn with
+  // a dashed underline instead of a solid one (prose.module.css). It is kept
+  // a separate kind rather than a flag because the two are painted
+  // differently and queried differently: only a *followed* part is a banner
+  // jump target, so only it gets `data-anchored-link-ids` (a part that is
+  // both, the creator editing the link they follow, gets both attributes).
+  kind?: "annotation" | "link" | "draft-link";
 };
 
 type TrackedAnchor = AnnotationAnchorInput & {
@@ -38,7 +54,14 @@ type TrackedAnchor = AnnotationAnchorInput & {
 
 export type AnnotationHighlightState = {
   anchors: TrackedAnchor[];
+  /** Annotation ids only — the map every §13o consumer already reads. */
   ranges: Map<string, AnchorRange>;
+  /**
+   * `anchored_link_anchor` row ids — one id family, whether the link is
+   * followed or the viewer's own open one — kept apart from `ranges` so a rail
+   * card and a thread jump can't mistake one family for the other.
+   */
+  linkRanges: Map<string, AnchorRange>;
 };
 
 export const annotationHighlightKey = new PluginKey<AnnotationHighlightState>("annotationHighlight");
@@ -56,6 +79,11 @@ export function setAnnotationAnchors(view: EditorView, anchors: AnnotationAnchor
 /** Where each column-anchored annotation currently sits, or an empty map on an editor without this plugin. */
 export function getAnnotationAnchorRanges(state: EditorState): Map<string, AnchorRange> {
   return annotationHighlightKey.getState(state)?.ranges ?? new Map();
+}
+
+/** Where each anchored-link part currently sits (docs/ANCHORED_LINKS.md), keyed by anchor row id. */
+export function getAnchoredLinkRanges(state: EditorState): Map<string, AnchorRange> {
+  return annotationHighlightKey.getState(state)?.linkRanges ?? new Map();
 }
 
 /**
@@ -81,6 +109,33 @@ export function annotationAnchorInputs(
       to: entry.anchorTo!,
       quotedText: entry.quotedText,
       color: entry.color,
+    }));
+}
+
+/**
+ * An anchored link's DOC_RANGE parts in the shape this plugin tracks
+ * (docs/ANCHORED_LINKS.md). Structural parameter for the same reason as
+ * above — `AnchoredLinkPart` (anchored-link-data.ts) and `DraftLinkPart`
+ * (the actions file) both satisfy it without this browser-safe file
+ * importing a Prisma-touching one. PDF_TEXT parts (null offsets) fall out
+ * here; theirs is the anno-layer's job.
+ *
+ * `kind` picks which link the parts belong to: a followed one from `?sel=`
+ * (server props, the default) or the viewer's own draft (fetched client-side
+ * — see open-link-store.ts).
+ */
+export function anchoredLinkAnchorInputs(
+  parts: { anchorId: string; from: number | null; to: number | null; quotedText: string }[],
+  kind: "link" | "draft-link" = "link",
+): AnnotationAnchorInput[] {
+  return parts
+    .filter((part) => part.from !== null && part.to !== null && part.quotedText !== "")
+    .map((part) => ({
+      id: part.anchorId,
+      from: part.from!,
+      to: part.to!,
+      quotedText: part.quotedText,
+      kind,
     }));
 }
 
@@ -132,12 +187,14 @@ function reresolve(anchors: TrackedAnchor[], tr: Transaction, oldSize: number, n
 /** Slack around the size-delta window, so a same-length edit still has somewhere to look. */
 const NEARBY_PAD = 64;
 
-function rangeMap(anchors: TrackedAnchor[]): Map<string, AnchorRange> {
+function rangeMaps(anchors: TrackedAnchor[]): Pick<AnnotationHighlightState, "ranges" | "linkRanges"> {
   const ranges = new Map<string, AnchorRange>();
+  const linkRanges = new Map<string, AnchorRange>();
   for (const anchor of anchors) {
-    if (anchor.resolved) ranges.set(anchor.id, anchor.resolved);
+    if (!anchor.resolved) continue;
+    (anchor.kind === "link" || anchor.kind === "draft-link" ? linkRanges : ranges).set(anchor.id, anchor.resolved);
   }
-  return ranges;
+  return { ranges, linkRanges };
 }
 
 export const AnnotationHighlight = Extension.create<{ anchors: AnnotationAnchorInput[] }>({
@@ -156,17 +213,17 @@ export const AnnotationHighlight = Extension.create<{ anchors: AnnotationAnchorI
         state: {
           init: (_config, state) => {
             const anchors = resolveAll(initial, state.doc);
-            return { anchors, ranges: rangeMap(anchors) };
+            return { anchors, ...rangeMaps(anchors) };
           },
           apply(tr, value, oldState, newState) {
             const meta = tr.getMeta(annotationHighlightKey) as AnnotationAnchorInput[] | undefined;
             if (meta !== undefined) {
               const anchors = resolveAll(meta, newState.doc);
-              return { anchors, ranges: rangeMap(anchors) };
+              return { anchors, ...rangeMaps(anchors) };
             }
             if (!tr.docChanged) return value;
             const anchors = reresolve(value.anchors, tr, oldState.doc.content.size, newState.doc);
-            return { anchors, ranges: rangeMap(anchors) };
+            return { anchors, ...rangeMaps(anchors) };
           },
         },
         props: {
@@ -181,21 +238,64 @@ export const AnnotationHighlight = Extension.create<{ anchors: AnnotationAnchorI
             // the attribute here is plural (`data-annotation-ids`) where the
             // mark's is singular, the same split quote-highlight-extension.ts
             // already has against it.
+            //
+            // Both kinds go through **one** buildSegments pass rather than one
+            // per kind, for the same reason: an annotation range overlapping a
+            // link range is two decorations fighting over one span, so it
+            // has to become one segment carrying both classes — a background
+            // wash *and* an outline compose; two overlapping inline
+            // decorations don't.
             const decorations = buildSegments(
               current.anchors
                 .filter((a) => a.resolved)
-                .map((a) => ({ id: a.id, from: a.resolved!.from, to: a.resolved!.to, color: a.color })),
+                .map((a) => ({
+                  id: a.id,
+                  from: a.resolved!.from,
+                  to: a.resolved!.to,
+                  color: a.kind === "link" || a.kind === "draft-link" ? null : (a.color ?? null),
+                  kind: a.kind ?? ("annotation" as const),
+                })),
               state.doc.content.size,
-            ).map((segment) =>
-              Decoration.inline(segment.from, segment.to, {
-                class: "annotation-highlight",
-                "data-annotation-ids": segment.ids.join(" "),
+            ).map((segment) => {
+              const annotationSources = segment.sources.filter((s) => s.kind === "annotation");
+              const linkSources = segment.sources.filter((s) => s.kind === "link");
+              const draftSources = segment.sources.filter((s) => s.kind === "draft-link");
+              const annotationColors = new Set(annotationSources.map((s) => s.color));
+              return Decoration.inline(segment.from, segment.to, {
+                // A draft part carries the link class *as well*: the wash is
+                // the same "a link names this passage" statement, and the
+                // draft class only restyles the underline (dashed, the
+                // in-progress convention .pending-annotation set).
+                class: [
+                  annotationSources.length > 0 ? "annotation-highlight" : null,
+                  linkSources.length > 0 || draftSources.length > 0 ? "anchored-link-highlight" : null,
+                  draftSources.length > 0 ? "anchored-link-draft-highlight" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" "),
+                ...(annotationSources.length > 0
+                  ? { "data-annotation-ids": annotationSources.map((s) => s.id).join(" ") }
+                  : {}),
+                // Minted and draft ids stay in separate attributes: the
+                // banner's jump queries the first, and a draft part is not a
+                // jump target — nothing links to a link that doesn't exist yet.
+                ...(linkSources.length > 0
+                  ? { "data-anchored-link-ids": linkSources.map((s) => s.id).join(" ") }
+                  : {}),
+                ...(draftSources.length > 0
+                  ? { "data-anchored-link-draft-ids": draftSources.map((s) => s.id).join(" ") }
+                  : {}),
                 // Null exactly when annotations by different authors overlap
                 // here: one span, one background, so it goes to the neutral
-                // fallback rather than arbitrarily picking an author.
-                ...(segment.color ? { style: `--thread-color:${segment.color}` } : {}),
-              }),
-            );
+                // fallback rather than arbitrarily picking an author. Link
+                // sources are excluded from the vote — their paint is the
+                // class, not a tint — so a link part over one author's
+                // annotation doesn't gray it out.
+                ...(annotationSources.length > 0 && annotationColors.size === 1 && annotationSources[0].color
+                  ? { style: `--thread-color:${annotationSources[0].color}` }
+                  : {}),
+              });
+            });
 
             return DecorationSet.create(state.doc, decorations);
           },

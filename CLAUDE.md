@@ -14,6 +14,8 @@ to re-derive the decision from.
 | [PLAN.md](PLAN.md) | Architecture and build order. §10 tracks what's actually built vs. planned. |
 | [TODO.md](TODO.md) | Open items carrying enough context to act on directly. |
 | [docs/COLLAB.md](docs/COLLAB.md) | How a remark stays attached to a passage while the passage moves — every strategy used, the ones rejected, and how to pick. |
+| [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
+| [docs/ANCHORED_LINKS.md](docs/ANCHORED_LINKS.md) | Anchored links as built: one `/link/<id>` URL for passages across docs and PDFs — schema, the landing route that redirects or excerpts per viewer, the per-target visibility rule, the tray (a draft, or a minted link reopened for editing — one open link per creator), and every deviation from the plan. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
@@ -39,7 +41,8 @@ to re-derive the decision from.
 Each of these has been decided once and is easy to undo by accident. Read the linked section
 before changing the behavior it describes.
 
-- **Admin tables are one kit.** `/posts`, `/docs`, `/users`, `/comments`, `/annotations` all
+- **Admin tables are one kit.** `/posts`, `/docs`, `/files`, `/users`, `/comments`,
+  `/annotations`, `/tags` and `/links` all
   render through `src/components/table/` plus a per-table `*-query.ts` over
   `src/lib/table-query.ts`. Filters, sort, pagination and the show-deleted toggle live in the
   querystring and are applied in Postgres, never client-side; a new admin table means a
@@ -71,8 +74,9 @@ before changing the behavior it describes.
   thing being removed, not an implementation detail. `resolveAnnotationRanges`
   (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
   jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
-- **One anchor row shape, per-consumer tables.** `tag_anchor` (and, from PR 2,
-  `annotation_anchor`) share a column shape by *compiler*, not by convention:
+- **One anchor row shape, per-consumer tables.** `tag_anchor` and `anchored_link_anchor`
+  (docs/ANCHORED_LINKS.md — and, from PR 2, `annotation_anchor`) share a column shape by
+  *compiler*, not by convention:
   `src/lib/anchors/` holds the target arc as a discriminated union, `parseSelector`, and the
   capture/resolve pair, and every consumer goes through it. The object side is four nullable
   FKs with exactly one non-null, enforced by a hand-written CHECK — so **a new targetable kind

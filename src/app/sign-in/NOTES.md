@@ -183,11 +183,11 @@ idiomatic v5 answer is `middleware.ts` with a matcher: NextAuth's own wrapper
 then supplies `callbackUrl` for free, and no page changes at all.
 
 Be accurate about what that would have cost, because the tempting wrong answer
-is that these gates are too varied for a matcher. **They aren't. All 23 are
+is that these gates are too varied for a matcher. **They aren't. All 24 are
 "is the viewer signed in", with nothing else in them.** That is not obvious from
-reading the five routes that go through `gated()` (`/doc/[slug]`,
+reading the six routes that go through `gated()` (`/doc/[slug]`,
 `/doc/[slug]/edit`, `/pdf/[slug]`, `/posts/[id]/edit`,
-`/side-by-side/[left]/[right]`), which redirect on `access.status ===
+`/side-by-side/[left]/[right]`, `/link/[id]`), which redirect on `access.status ===
 "signed-out"` and look like they are consulting the database — but
 `src/lib/route-access.ts` returns that status **before** it calls the route's
 own `load`. The database only ever decides `forbidden`/`not-found`/`redirect`,
@@ -207,7 +207,7 @@ and the choice is only about where the *destination* is named:
   tree that nothing typechecks, and drift shows up as a route quietly losing its
   callbackUrl — a degradation rather than a breakage, so nothing surfaces it.
 - What's here: the destination is named by the code that decided to redirect,
-  and there is nothing to keep in sync. Its cost is 23 call sites.
+  and there is nothing to keep in sync. Its cost is 24 call sites.
 
 The last was chosen on drift, not on capability, and it is a preference rather
 than a constraint. (The edge-runtime problem — `auth()` pulling in Prisma and
@@ -273,7 +273,7 @@ had failed, with the file already on disk. A gate whose own URL isn't a page nee
 landing page to point at (`/files/[slug]`, PLAN.md §19).
 
 **The drift this leaves is guarded.** Choosing per-gate over a matcher trades a
-path list that can go stale for 23 call sites that can be written wrong — a new
+path list that can go stale for 24 call sites that can be written wrong — a new
 gated route can carry a plain `redirect("/sign-in")` and be correct in every
 visible way: it compiles, it lints, it gates, its tests pass, and the only
 symptom is that whoever followed the link lands on /dashboard instead of what

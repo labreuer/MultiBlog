@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { AUTHOR_MODES, type AuthorMode } from "@/lib/table-query";
+import { AUTHOR_MODES, DEFAULT_AUTHOR_MODE, type AuthorMode } from "@/lib/table-query";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import styles from "./AdminTable.module.css";
 
@@ -15,7 +15,11 @@ export type AuthorOption = { slug: string; label: string };
 // reports `{ authors, authorMode }`, the shape /docs and /posts already spread
 // straight into `updateFilters`, so adding /files changed nothing for them.
 // /files' own keys are `owners`/`ownerMode`, and FilesTable does that one-line
-// translation at its call site. Deliberately not an extension of MultiSelectDropdown
+// translation at its call site. /links renders it over a *to-one* relation
+// (a link's single creator) and so passes no `mode`: the Match select is then
+// not rendered, since ALL and EXACTLY collapse into ANY over one person, and
+// the callback reports the default mode for the caller to ignore.
+// Deliberately not an extension of MultiSelectDropdown
 // (TableControls.tsx): that component's option value *is* its own label, so
 // it can't carry a slug with a separate display name, and its `Set<T> |
 // "ALL"` selection snaps an empty selection back to "ALL" — wrong here, where
@@ -32,7 +36,8 @@ export function AuthorFilterPanel({
   options: readonly AuthorOption[];
   /** Checked slugs. Empty means no filter, whatever `mode` is. */
   selected: readonly string[];
-  mode: AuthorMode;
+  /** Omit for a to-one relation: no Match select, and the summary names no mode. */
+  mode?: AuthorMode;
   /**
    * One callback for both halves — a checkbox and the mode select are each one
    * navigation. Keyed for /docs and /posts, who spread it into `updateFilters`
@@ -57,11 +62,16 @@ export function AuthorFilterPanel({
   // wrapping flex row, and .dropdownPanel is white-space: nowrap — spelling
   // out several names would push Columns onto a second line. The full list is
   // still available in the summary's title, so hovering answers "which ones?".
+  const modePrefix = mode === undefined ? "" : `${mode} `;
   const summary =
-    chosen.length === 0 ? "All" : chosen.length === 1 ? `${mode} ${chosen[0].label}` : `${mode} ${chosen.length} selected`;
+    chosen.length === 0
+      ? "All"
+      : chosen.length === 1
+        ? `${modePrefix}${chosen[0].label}`
+        : `${modePrefix}${chosen.length} selected`;
 
-  function commit(slugs: string[], nextMode: AuthorMode) {
-    onChange({ authors: slugs, authorMode: nextMode });
+  function commit(slugs: string[], nextMode: AuthorMode | undefined) {
+    onChange({ authors: slugs, authorMode: nextMode ?? DEFAULT_AUTHOR_MODE });
   }
 
   function toggle(slug: string, isChecked: boolean) {
@@ -98,20 +108,22 @@ export function AuthorFilterPanel({
         </div>
 
         <div className={styles.columnPickerActions}>
-          <label>
-            Match:{" "}
-            <select
-              value={mode}
-              aria-label={`${Noun} match mode`}
-              onChange={(e) => commit([...selected], e.target.value as AuthorMode)}
-            >
-              {AUTHOR_MODES.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </label>
+          {mode !== undefined && (
+            <label>
+              Match:{" "}
+              <select
+                value={mode}
+                aria-label={`${Noun} match mode`}
+                onChange={(e) => commit([...selected], e.target.value as AuthorMode)}
+              >
+                {AUTHOR_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button
             type="button"
             aria-label={`Clear ${noun} filter`}

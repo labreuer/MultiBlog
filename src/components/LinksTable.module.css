@@ -1,0 +1,33 @@
+/* docs/ANCHORED_LINKS.md — /links' own bits, alongside the shared table kit's
+   AdminTable.module.css. Mirrors TagsTable.module.css. Every color is a
+   globals.css token (STYLE.md). */
+
+/* One line per passage under the count. Secondary and small: the count is the
+   cell's value, the quotes are what tell two links with the same count apart. */
+.quote {
+  margin-top: 0.15rem;
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+/* The landing page's .kind, at cell scale — "DOC" / "PDF" before each target
+   title, so a mixed link reads as mixed at a glance. */
+.kind {
+  margin-right: 0.35rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.targetRow + .targetRow {
+  margin-top: 0.15rem;
+}
+
+/* The raw cuid — hidden by default, monospace when shown so two ids can be
+   compared by eye. */
+.idCell {
+  font-family: monospace;
+  font-size: 0.85em;
+}
