@@ -6678,11 +6678,13 @@ descriptions *above*, which is this document's own business.
   The two questions are therefore asked in two places. The toolbar carries a **show/hide
   icon** and says nothing about contents; the panel carries a **tab strip** — Annotations ·
   Metadata · Collab — and says nothing about whether it is open. A fourth pane touches the
-  panel alone, and closing and reopening comes back to the tab you were on. The icon is a
-  drawn pane outline whose right section is **filled while the panel is open**, so the button
-  reports state rather than only naming its target: `aria-pressed` alone is invisible to
-  everyone not using a screen reader, and the toolbar's other glyphs (‹ › ⟳) are directional
-  or rotational with no character available for this one.
+  panel alone, and closing and reopening comes back to the tab you were on. (That fourth pane
+  arrived on 2026-09-10 and is **Contents**, first in the strip — §19b. The claim being made
+  here is the one that held: adding it moved no other control and cost the viewer no height.)
+  The icon is a drawn pane outline whose right section is **filled while the panel is open**,
+  so the button reports state rather than only naming its target: `aria-pressed` alone is
+  invisible to everyone not using a screen reader, and the toolbar's other glyphs (‹ › ⟳) are
+  directional or rotational with no character available for this one.
 
   **The Collab tab ships empty**, deliberately, so the strip is the shape it will keep.
   TODO.md carries what is likely to go in it.

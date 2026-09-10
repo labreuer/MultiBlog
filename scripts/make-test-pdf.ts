@@ -16,12 +16,21 @@
 // substitute for testing against a real-world PDF by hand — ligatures, kerned
 // gaps and multi-column reading order are the things this cannot reproduce.
 //
-// The one thing beyond text it can write is an **outline** (a table of
-// contents), because /pdf/[slug]'s Contents pane has nothing to show without
-// one and no PDF in the repo has one. It covers the two ways an entry names its
-// destination — an explicit array and a name looked up in the catalog's
-// /Dests — plus the closed-by-default subtree, since those are the three arms
-// src/lib/pdf-outline.ts has to tell apart.
+// Two things beyond text it can write, each because nothing in the repo had one
+// to test against:
+//
+//   - an **outline** (a table of contents), since /pdf/[slug]'s Contents pane
+//     has nothing to show without one. It covers the two ways an entry names
+//     its destination — an explicit array and a name looked up in the catalog's
+//     /Dests — plus the closed-by-default subtree, since those are the three
+//     arms src/lib/pdf-outline.ts has to tell apart.
+//   - **page labels** (`/PageLabels`), what the document calls its own pages —
+//     roman-numbered front matter, a body restarting at 1, and the 1…N set
+//     `usablePageLabels` has to reject. PLAN.md §19c.
+//
+// Still no images, in either case: the content streams are text operators and
+// nothing else, so no fixture built here exercises a pdfjs image decoder
+// (CLAUDE.md, and e2e/pdf-assets.spec.ts is the guard that stands in for it).
 //
 // Usage: `npx tsx scripts/make-test-pdf.ts out.pdf` writes the three-page
 // sample; the e2e fixtures import buildTestPdf directly.
