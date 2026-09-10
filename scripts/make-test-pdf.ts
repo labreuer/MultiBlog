@@ -16,6 +16,13 @@
 // substitute for testing against a real-world PDF by hand — ligatures, kerned
 // gaps and multi-column reading order are the things this cannot reproduce.
 //
+// The one thing beyond text it can write is an **outline** (a table of
+// contents), because /pdf/[slug]'s Contents pane has nothing to show without
+// one and no PDF in the repo has one. It covers the two ways an entry names its
+// destination — an explicit array and a name looked up in the catalog's
+// /Dests — plus the closed-by-default subtree, since those are the three arms
+// src/lib/pdf-outline.ts has to tell apart.
+//
 // Usage: `npx tsx scripts/make-test-pdf.ts out.pdf` writes the three-page
 // sample; the e2e fixtures import buildTestPdf directly.
 
@@ -44,6 +51,29 @@ function contentStreamFor(lines: readonly string[]): string {
   return `${shown}\n`;
 }
 
+/** One entry of a test document's outline. */
+export type TestOutlineItem = {
+  title: string;
+  /** 1-based, as a reader would say it. */
+  page: number;
+  /** PDF user-space y (up from the page's bottom). Defaults to the first baseline. */
+  y?: number;
+  /**
+   * When given, the entry points at this *name*, defined in the catalog's
+   * /Dests, instead of carrying its destination array inline. Both are legal
+   * and pdfjs reports them differently — a string rather than an array — so a
+   * fixture that only ever wrote one of them would leave the other untested.
+   */
+  named?: string;
+  /**
+   * Whether the subtree ships open. Written as the sign of the entry's /Count
+   * (PDF 32000-1 §12.3.3), which is what `defaultExpanded` reads. Defaults to
+   * open; ignored for a leaf.
+   */
+  open?: boolean;
+  children?: readonly TestOutlineItem[];
+};
+
 /**
  * Builds a PDF whose page `i` contains `pages[i]`, one line per array entry.
  *
@@ -52,7 +82,10 @@ function contentStreamFor(lines: readonly string[]): string {
  * what keeps this a test of *our* extraction rather than of pdfjs's recovery
  * path.
  */
-export function buildTestPdf(pages: readonly (readonly string[])[]): Uint8Array {
+export function buildTestPdf(
+  pages: readonly (readonly string[])[],
+  options: { outline?: readonly TestOutlineItem[] } = {},
+): Uint8Array {
   if (pages.length === 0) throw new Error("buildTestPdf needs at least one page.");
 
   // Object numbering: 1 = catalog, 2 = pages tree, 3 = font, then a page and a
@@ -65,7 +98,6 @@ export function buildTestPdf(pages: readonly (readonly string[])[]): Uint8Array 
   const contentObjNumber = (i: number) => firstPageObj + i * 2 + 1;
 
   const objects = new Map<number, string>();
-  objects.set(CATALOG, `<< /Type /Catalog /Pages ${PAGES} 0 R >>`);
   objects.set(
     PAGES,
     `<< /Type /Pages /Count ${pages.length} /Kids [${pages.map((_, i) => `${pageObjNumber(i)} 0 R`).join(" ")}] >>`,
@@ -84,6 +116,81 @@ export function buildTestPdf(pages: readonly (readonly string[])[]): Uint8Array 
       `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}endstream`,
     );
   });
+
+  // ---- the outline, when one was asked for --------------------------------
+  //
+  // Object numbers are allocated in one depth-first pass *before* anything is
+  // written, because every entry names its parent, its siblings and its
+  // children by reference — a tree of forward references that cannot be
+  // resolved as it is emitted.
+  const outline = options.outline ?? [];
+  let nextObject = firstPageObj + pages.length * 2;
+  const OUTLINES = outline.length > 0 ? nextObject++ : null;
+
+  type Numbered = { item: TestOutlineItem; number: number; children: Numbered[] };
+  const number = (items: readonly TestOutlineItem[]): Numbered[] =>
+    items.map((item) => {
+      const assigned = nextObject++;
+      return { item, number: assigned, children: number(item.children ?? []) };
+    });
+  const numbered = number(outline);
+
+  /** How many rows a viewer would show under this entry with the tree as shipped. */
+  const visibleUnder = (entries: readonly Numbered[]): number =>
+    entries.reduce(
+      (total, entry) => total + 1 + (entry.item.open === false ? 0 : visibleUnder(entry.children)),
+      0,
+    );
+
+  /** Named destinations, collected as the tree is written. */
+  const namedDests: string[] = [];
+  const destArray = (item: TestOutlineItem): string =>
+    `[${pageObjNumber(item.page - 1)} 0 R /XYZ ${MARGIN_LEFT} ${item.y ?? TOP_BASELINE} null]`;
+
+  const emitOutline = (entries: readonly Numbered[], parent: number) => {
+    entries.forEach((entry, index) => {
+      const { item, children } = entry;
+      const parts = [`/Title (${escapePdfString(item.title)})`, `/Parent ${parent} 0 R`];
+      if (index > 0) parts.push(`/Prev ${entries[index - 1].number} 0 R`);
+      if (index + 1 < entries.length) parts.push(`/Next ${entries[index + 1].number} 0 R`);
+      if (children.length > 0) {
+        parts.push(`/First ${children[0].number} 0 R`, `/Last ${children[children.length - 1].number} 0 R`);
+        // The sign is the open/closed hint; the magnitude is how many rows open
+        // up. A closed entry still states the count it *would* reveal.
+        const open = item.open !== false;
+        parts.push(`/Count ${open ? "" : "-"}${visibleUnder(children)}`);
+      }
+      if (item.named) {
+        namedDests.push(`/${item.named} ${destArray(item)}`);
+        parts.push(`/Dest /${item.named}`);
+      } else {
+        parts.push(`/Dest ${destArray(item)}`);
+      }
+      objects.set(entry.number, `<< ${parts.join(" ")} >>`);
+      emitOutline(children, entry.number);
+    });
+  };
+
+  if (OUTLINES !== null) {
+    emitOutline(numbered, OUTLINES);
+    objects.set(
+      OUTLINES,
+      `<< /Type /Outlines /First ${numbered[0].number} 0 R ` +
+        `/Last ${numbered[numbered.length - 1].number} 0 R /Count ${visibleUnder(numbered)} >>`,
+    );
+  }
+
+  // Written last because it names the outline root, which only exists once the
+  // tree above has been numbered. /Dests is the *dictionary* form of a name
+  // table — the shorter of the two shapes pdfjs's Catalog.destinations reads,
+  // and enough to prove a named destination resolves.
+  objects.set(
+    CATALOG,
+    `<< /Type /Catalog /Pages ${PAGES} 0 R` +
+      (OUTLINES === null ? "" : ` /Outlines ${OUTLINES} 0 R /PageMode /UseOutlines`) +
+      (namedDests.length === 0 ? "" : ` /Dests << ${namedDests.join(" ")} >>`) +
+      ` >>`,
+  );
 
   // Assemble, recording each object's byte offset for the xref table. Built as
   // latin1 throughout: a PDF's structure is bytes, not characters, and every

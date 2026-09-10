@@ -480,13 +480,34 @@ count from 9 to 6.
 
 ---
 
+## Two deliberate gaps in the PDF Contents pane
+
+**Status:** both shipped as decisions, 2026-09-10 (PLAN.md §19b). Neither is unfinished work;
+both are here so they are not "fixed" by someone who assumes they were oversights.
+
+1. **An outline entry pointing at a URL doesn't navigate.** A PDF outline entry may carry a
+   `url` instead of a destination in the document. `PdfOutlinePanel` renders it as an ordinary
+   row that jumps nowhere. Following it would mean opening an arbitrary URL taken out of a file
+   somebody uploaded, from a page the reader trusts — a phishing surface, and one that wants
+   its own decision about interstitials and `rel`/`target` handling rather than arriving as a
+   side effect of a table of contents. The row is deliberately not *hidden*: an outline with
+   holes in it would be worse than one with an inert entry.
+
+2. **A PDF without an outline gets an empty state, not a derived one.** No heading detection
+   over `file_page_text`, no font-size heuristics. That is a genuinely different feature —
+   its failure mode is a *wrong* table of contents rather than none, which is harder to
+   notice and harder to trust — and it would need its own storage decision, since deriving it
+   per page load is not free.
+
+---
+
 ## The PDF side panel's Collab tab is a stub
 
 **Status:** shipped empty on purpose, 2026-08-25. `PdfCollabPanel` renders "Nothing here yet."
 
-`/pdf/[slug]`'s side panel is three tabs — Annotations, Metadata, Collab (PLAN.md §19's
-deviation list). The third exists so the strip is the shape it will keep rather than growing a
-tab later and moving the other two; it was not left half-built.
+`/pdf/[slug]`'s side panel is four tabs — Contents, Annotations, Metadata, Collab (PLAN.md
+§19's deviation list, plus §19b for the first). Collab exists so the strip is the shape it will
+keep rather than growing a tab later and moving the others; it was not left half-built.
 
 What is likely to go in it, and why this is a note rather than a decision: Phase 4's presence
 pieces sit in the chrome *around* the viewer. The

@@ -6764,6 +6764,66 @@ Per-phase, and each phase is independently shippable:
   rails read well, that the viewport thumb's 20px threshold behaves at both extremes, and
   that a rectangle selection over a figure produces a sensible highlight.
 
+### 19b. The Contents pane — the document's own table of contents
+
+**Built 2026-09-10.** A fourth tab in the side panel §19's Phase 3 already built, showing the
+outline the PDF itself carries: a tree that expands and collapses, jumps the viewer to an
+entry, and says which entry the reader is currently inside.
+
+It is a *reading* aid built entirely out of what the file declares — no extraction, no
+heuristics, nothing stored. A PDF without an outline gets a pane that says so.
+
+**Where the pieces live.** The same split as §19's geometry: every rule is a pure function in
+`src/lib/pdf-outline.ts` with a unit-test table beside it, the worker round trips are in
+`src/components/pdf/use-pdf-outline.ts`, and the rendering is
+`src/components/pdf/PdfOutlinePanel.tsx`. The surface owns exactly one new piece of state —
+which entry is current — and the pane owns which rows are open.
+
+**Four decisions worth stating, because each has a plausible wrong answer:**
+
+- **The current entry is the last one at or above a reading line 25% down the viewport**
+  (`READING_LINE_FRACTION`), ordered by resolved position rather than by tree order. "The
+  first heading visible in the viewport" highlights nothing through the middle of a long
+  section — which is most of the time in exactly the documents that have an outline. Tree
+  order breaks on the outlines real generators emit out of order.
+- **A collapsed subtree hands its highlight to the outermost closed ancestor, and nothing
+  auto-expands.** A collapsed "Chapter 4" lighting up while you read §4.2 is the feature;
+  opening the tree to follow the scroll would delete it, and would move rows under the pointer
+  of a reader trying to click one.
+- **Jumps go through pdfjs's `PDFLinkService.goToDestination`, not `jumpDestinationY`.** A
+  destination is something the document declared — a name, an array leading with a page ref,
+  any of the `Fit` variants — and pdfjs resolves all of it, keeping the reader's zoom where the
+  destination doesn't set one. This is why `linkService` is now on `PdfViewerHandle`. The
+  visible difference from an annotation jump is deliberate: a heading lands at the top of the
+  viewport rather than a quarter down, because a quote needs the context above it and a
+  heading *is* that context. It also leaves the clicked heading just above the reading line,
+  so the entry clicked is the entry that lights up.
+- **The PDF's own `/Count` sign decides what starts open**, at the top level too. A chapter
+  that ships closed is how a long document keeps its contents readable. The single override is
+  the document that ships *everything* closed, where the top level opens so the pane isn't a
+  list of rows with no visible way in.
+
+**Two things it deliberately does not do**, both recorded in TODO.md rather than left to be
+rediscovered: an outline entry pointing at a **URL** renders as a plain row and does not
+navigate (opening an arbitrary URL out of an uploaded file is a phishing surface that deserves
+its own decision), and there is **no fallback** for a PDF without an outline — no heading
+detection over `file_page_text`, which is a different feature with its own failure modes.
+
+**Rendered flat.** Every visible row is a DOM sibling carrying `aria-level` /
+`aria-posinset` / `aria-setsize`, rather than nested `role="group"` elements. ARIA allows
+either; flat is what keeps the focus ring around one row instead of around a row and its
+whole subtree, and stops each level's indent from compounding with every ancestor's padding.
+Keyboard movement is the APG tree pattern over `visibleOrder` — one tab stop, arrows within,
+the same roving-tabindex arrangement the tab strip above it uses.
+
+**Verification.** `e2e/pdf-outline.spec.ts` (a click lands on the entry's page, scrolling moves
+the highlight, collapsing hands it to the ancestor, the arrows move and open, the fourth tab
+doesn't overflow the strip) plus `src/lib/pdf-outline.test.ts` for the destination arithmetic
+and the highlight rules. `scripts/make-test-pdf.ts` grew outline support to make any of it
+testable: no PDF in the repo had one, and the generated fixture covers an inline destination
+array, a **named** destination resolved through the catalog's `/Dests`, and a closed-by-default
+subtree — the three arms the resolver has to tell apart.
+
 ## 20. Tags, and the anchor envelope they share with annotations
 
 Tags are new: a vocabulary of terms (`tag`), applied to content by acts of tagging

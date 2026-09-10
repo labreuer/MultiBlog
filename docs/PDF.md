@@ -606,6 +606,52 @@ firing. See `PdfAnnotationSurface`'s trigger comment for the implemented form.
 
 ---
 
+## 10a. The outline (table of contents)
+
+What `pdf.getOutline()` gives back, and what it takes to turn it into a position. Written
+down because three of the four steps have a silent failure mode.
+
+**The shape.** An array of `{ title, dest, url, count, items[] }`, nested. Two things about
+the shipped types matter: `items` is typed `Array<any>`, so the generated `.d.ts` cannot
+describe a tree at all (we declare `PdfOutlineItem` in `src/lib/pdf-outline.ts` instead — a
+real pdfjs node satisfies it structurally), and `count` is present only for a parent, where
+**its sign is the author's open/closed choice** (PDF 32000-1 §12.3.3) rather than a
+count of anything we display.
+
+**`dest` is one of three things**, and conflating any two of them costs every entry its
+position without throwing:
+
+1. **A string** — a *named* destination, looked up in the catalog. Fetch the whole
+   dictionary once with `pdf.getDestinations()`, not `getDestination(name)` per entry.
+   Verified against 6.2.108 it comes back as a **`Map`** (`Catalog.destinations` builds one,
+   and it survives the structured clone out of the worker); older pdfjs returned a plain
+   object, so check the shape rather than assuming it.
+2. **An array leading with an integer** — a page index outright.
+3. **An array leading with a `{num, gen}` ref** — a page *object*, which only the worker can
+   turn into an index (`pdf.getPageIndex(ref)`, one round trip each; dedupe by `num/gen`,
+   since sibling entries on one page are the norm). A named destination's array almost always
+   takes this form, so a resolver that only handles case 2 quietly sends everything to page 1.
+
+**The y is in a different slot per destination type**, and there isn't always one: `XYZ` →
+`dest[3]` (which may be `null`, meaning "keep the current position"), `FitH`/`FitBH` →
+`dest[2]`, `FitR` → `dest[5]` (the rectangle's *top*), and `Fit`/`FitB`/`FitV`/`FitBV` carry
+no vertical position at all. Missing or unusable means the page's top — which is where pdfjs
+scrolls to as well, so the highlight and the jump agree rather than differing by a screenful.
+It is then PDF user space (y up from the page's bottom) and has to be flipped against the
+page height like every other §5 conversion.
+
+**Don't re-implement the jump.** `PDFLinkService.goToDestination(dest)` takes any of the
+three forms above and every `Fit` variant, and keeps the reader's zoom where the destination
+doesn't set one. It is on `PdfViewerHandle` for this. The anchoring machinery
+(`jumpDestinationY`) stays for annotations, whose quads are ours rather than the document's.
+
+**Most PDFs have no outline**, and `getOutline()` resolves to `null` for them — an ordinary
+answer, not an error. The pane says so. `scripts/make-test-pdf.ts` can write one (an inline
+array, a named destination, and a closed-by-default subtree) because nothing else in the repo
+has one to test against.
+
+---
+
 ## 11. Prior art worth reading before reimplementing
 
 - `hypothesis/client` — `src/annotator/anchoring/pdf.js` is the reference implementation of
