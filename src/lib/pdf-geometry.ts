@@ -57,6 +57,21 @@ export function documentFraction(offsets: PageOffsets, pageIndex: number, yFromT
   return clamp01((top + yFromTop) / offsets.total);
 }
 
+/**
+ * A page's height at scale 1, recovered from the cumulative offset table.
+ *
+ * The table is the only source that answers for *every* page — pdfjs
+ * virtualises, so a rendered page's box exists only for the handful it is
+ * currently keeping. Every caller that converts PDF user space (y upward from
+ * the page's bottom) into a `yFromTop` needs this, which is why it lives beside
+ * `documentFraction` rather than in whichever component asked first.
+ */
+export function pageHeightAt(offsets: PageOffsets, pageIndex: number): number {
+  const top = offsets.tops[pageIndex];
+  if (top === undefined) return 0;
+  return (offsets.tops[pageIndex + 1] ?? offsets.total) - top;
+}
+
 /** The inverse: which page a 0..1 fraction lands on, and how far down it. */
 export function pageAtFraction(offsets: PageOffsets, fraction: number): { pageIndex: number; yFromTop: number } {
   const target = clamp01(fraction) * offsets.total;

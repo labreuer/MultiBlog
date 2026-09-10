@@ -22,6 +22,17 @@ import styles from "./PdfViewer.module.css";
 export type PdfViewerHandle = {
   viewer: InstanceType<typeof pdfjsViewer.PDFViewer>;
   eventBus: InstanceType<typeof pdfjsViewer.EventBus>;
+  /**
+   * pdfjs's own destination resolver, exposed because an outline entry's `dest`
+   * is not something to re-implement: it may be a *name* to look up, an
+   * explicit array whose first element is a page ref rather than a number, and
+   * any of `XYZ`/`Fit`/`FitH`/`FitR`/… — `goToDestination` handles all of it and
+   * keeps the reader's own zoom for an `XYZ` whose zoom slot is null.
+   *
+   * Everything anchored still goes through `jumpDestinationY` instead: an
+   * annotation's quads are ours, not a destination the document declared.
+   */
+  linkService: InstanceType<typeof pdfjsViewer.PDFLinkService>;
   pdf: pdfjs.PDFDocumentProxy;
   offsets: PageOffsets;
   container: HTMLDivElement;
@@ -217,7 +228,7 @@ export default function PdfViewer({
         );
         if (cancelled) return;
 
-        pending = { viewer, eventBus, pdf, offsets: buildPageOffsets(heights), container };
+        pending = { viewer, eventBus, linkService, pdf, offsets: buildPageOffsets(heights), container };
         completeReady();
       })
       .catch((err: unknown) => {

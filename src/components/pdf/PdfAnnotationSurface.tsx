@@ -19,6 +19,7 @@ import {
   JUMP_VIEWPORT_FRACTION,
   documentFraction,
   jumpDestinationY,
+  pageHeightAt,
   visibleFractionRange,
 } from "@/lib/pdf-geometry";
 import { captureTextTarget, type CapturePage } from "@/lib/pdf-anchor-capture";
@@ -857,13 +858,6 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
       </AnnotationMoveProvider>
     </DocPresenceProvider>
   );
-}
-
-/** A page's height at scale 1, recovered from the cumulative offset table. */
-function pageHeightAt(offsets: PdfViewerHandle["offsets"], pageIndex: number): number {
-  const top = offsets.tops[pageIndex];
-  if (top === undefined) return 0;
-  return (offsets.tops[pageIndex + 1] ?? offsets.total) - top;
 }
 
 /**
