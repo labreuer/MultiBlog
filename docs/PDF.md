@@ -699,6 +699,11 @@ takes `pan-x pan-y`: one-finger scrolling, momentum and the scrollbars stay nati
 and double-tap zoom come to us. `none` would take the scrolling with it and freeze the document
 on a phone — a far worse bug than the one being fixed.
 
+**A named scale is computed once, not maintained.** `currentScaleValue = "page-width"` resolves
+to a number there and then; `PDFViewer` has no resize handling of its own (that lives in
+Mozilla's viewer application, which is not what we build on — §13). Assigning the same string
+back is what recomputes it, which reads as a no-op and is not. PLAN.md §19e.
+
 **Zoom around a point, not around the scale.** `PDFViewer.updateScale({ scaleFactor, origin })`
 takes `origin` as a client-space `[x, y]` and adjusts `scrollLeft`/`scrollTop` around it, which
 is the whole difference between a gesture and a lurch. Pass `drawingDelay` (< 1000) during a

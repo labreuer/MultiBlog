@@ -5,6 +5,7 @@ import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } f
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
 import { usablePageLabels } from "@/lib/pdf-page-labels";
 import { usePdfZoomGestures } from "./use-pdf-zoom-gestures";
+import { usePdfRefit } from "./use-pdf-refit";
 import "pdfjs-dist/web/pdf_viewer.css";
 import styles from "./PdfViewer.module.css";
 
@@ -339,6 +340,9 @@ export default function PdfViewer({
   // Bound to the scroll container for the life of the document, which is why it
   // takes the ref: nothing it does depends on this component re-rendering.
   usePdfZoomGestures(handleRef, status === "ready");
+  // PLAN.md §19e — and keeping that zoom right when the container changes
+  // shape: a rotation, a window drag, the side panel opening.
+  usePdfRefit(handleRef, status === "ready");
 
   const goToPage = useCallback((next: number) => {
     const handle = handleRef.current;

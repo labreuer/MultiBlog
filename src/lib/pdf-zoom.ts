@@ -79,3 +79,44 @@ export function touchMidpoint(
 ): [number, number] {
   return [(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2];
 }
+
+/**
+ * The scale values that mean "work it out from the container" rather than
+ * naming a number.
+ *
+ * They are the ones that must be **re-applied** when the container changes
+ * size: pdfjs computes them once, at the moment they are set, and then holds a
+ * number — so a viewer fitted to a portrait phone stays fitted to a portrait
+ * phone after the reader turns it sideways. (`PDFViewer` has no resize handling
+ * of its own; that lives in Mozilla's viewer *application*, which is not what
+ * we build on. docs/PDF.md §13.)
+ */
+const NAMED_SCALES = new Set(["auto", "page-fit", "page-width", "page-actual"]);
+
+export function isNamedScale(value: string | null | undefined): boolean {
+  return typeof value === "string" && NAMED_SCALES.has(value);
+}
+
+/**
+ * What to multiply an explicitly-chosen scale by when the container's width
+ * changes out from under it — a rotation, in practice.
+ *
+ * **Why a ratio rather than a re-fit.** A reader who has pinched has said what
+ * size they want; re-fitting would throw that away. But holding the number
+ * fixed is worse in one direction: turning a tablet from landscape to portrait
+ * takes width away, and a page that fitted before now needs sideways panning to
+ * read a line — the one thing a reader can't work around. Scaling with the
+ * width keeps *how much of the page they see* fixed, which is the part that
+ * makes a line readable, and it can never make the overflow worse than it was.
+ *
+ * The width ratio stands in for the ratio of the two fit-to-width scales, which
+ * it equals up to pdfjs's fixed scrollbar allowance — a couple of percent at
+ * phone widths, against a value the reader chose by feel in the first place.
+ * Computing the real thing means either duplicating pdfjs's internal padding
+ * constants or setting the scale to `page-width` to read it back, which the
+ * reader would see happen.
+ */
+export function refitScaleFactor(previousWidth: number, nextWidth: number): number {
+  if (!(previousWidth > 0) || !(nextWidth > 0)) return 1;
+  return nextWidth / previousWidth;
+}

@@ -164,3 +164,133 @@ test.describe("pdf zoom gestures", () => {
     expect(touchAction).toBe("pan-x pan-y");
   });
 });
+
+// PLAN.md §19e — the zoom when the container changes shape.
+//
+// `PDFViewer` computes a named scale once and then holds the number, so without
+// this a phone rotated to landscape keeps a page fitted to its portrait width,
+// sitting in a column of empty space. Driven with `setViewportSize`, which is
+// what a rotation is from the page's point of view: the two dimensions swap and
+// the orientation media query flips.
+test.describe("pdf zoom on a rotation", () => {
+  let file: TestFile;
+
+  test.beforeAll(async () => {
+    file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+  });
+
+  test.afterAll(async () => {
+    await deleteTestFile(file.id);
+  });
+
+  /** The viewer's scroll container width — what a fit-to-width is computed against. */
+  const containerWidth = (page: import("@playwright/test").Page) =>
+    page.evaluate(() => document.querySelector("[data-pdf-container]")?.clientWidth ?? 0);
+
+  test("fit-to-width re-fits when a phone is turned sideways", async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      const portraitScale = await currentScale(page);
+      const portraitWidth = await containerWidth(page);
+      expect(portraitScale).toBeGreaterThan(0);
+
+      await page.setViewportSize({ width: 844, height: 390 });
+
+      await expect.poll(() => currentScale(page)).toBeGreaterThan(portraitScale);
+
+      // The assertion that means something: the page is *fitted* to the new
+      // width — filling it, without overflowing it. A ratio against the
+      // container widths would be the wrong test, because pdfjs's fit reserves
+      // a fixed allowance for a scrollbar, which is a tenth of a phone's width
+      // and a fortieth of a desktop's.
+      const landscapeWidth = await containerWidth(page);
+      expect(landscapeWidth).toBeGreaterThan(portraitWidth);
+      const fit = await page.evaluate(() => {
+        const container = document.querySelector<HTMLElement>("[data-pdf-container]");
+        const page1 = container?.querySelector<HTMLElement>(".page");
+        return { page: page1?.getBoundingClientRect().width ?? 0, container: container?.clientWidth ?? 0 };
+      });
+      expect(fit.page).toBeLessThanOrEqual(fit.container);
+      expect(fit.page).toBeGreaterThan(fit.container - 60);
+
+      // Still a standing instruction, not a number it happened to land on.
+      await expect(page.getByLabel("Zoom")).toHaveValue("page-width");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("a zoom the reader chose is scaled with the width, not thrown away", async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 844, height: 390 },
+    });
+    const page = await context.newPage();
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      // An explicit choice, the same kind a pinch leaves behind: a number.
+      await page.getByLabel("Zoom").selectOption("1");
+      await expect.poll(() => currentScale(page)).toBeGreaterThan(0);
+      const chosenScale = await currentScale(page);
+      const landscapeWidth = await containerWidth(page);
+
+      // Landscape to portrait takes width away — the direction where holding
+      // the number fixed would leave a line needing sideways panning to read.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect.poll(() => currentScale(page)).toBeLessThan(chosenScale);
+
+      const portraitWidth = await containerWidth(page);
+      // Within a tolerance rather than exactly: the width ratio stands in for
+      // the ratio of the two fit-to-width scales, and differs from it by
+      // pdfjs's fixed scrollbar allowance (`refitScaleFactor` says why that
+      // trade is the right one for a zoom the reader chose by feel).
+      const scaleRatio = (await currentScale(page)) / chosenScale;
+      const widthRatio = portraitWidth / landscapeWidth;
+      expect(Math.abs(scaleRatio - widthRatio) / widthRatio).toBeLessThan(0.15);
+      // Scaled, not re-fitted: it is still the reader's own zoom.
+      await expect(page.getByLabel("Zoom")).not.toHaveValue("page-width");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("an ordinary resize leaves a chosen zoom alone", async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, `/pdf/${file.slug}`);
+    await waitForViewer(page);
+
+    await page.getByLabel("Zoom").selectOption("1");
+    await expect.poll(() => currentScale(page)).toBeGreaterThan(0);
+    const chosen = await currentScale(page);
+
+    // A window drag on a desktop, staying landscape: the container narrows and
+    // the reader's number stays exactly where they put it.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await expect.poll(() => containerWidth(page)).toBeLessThan(1280);
+    expect(await currentScale(page)).toBe(chosen);
+  });
+
+  test("but fit-to-width follows an ordinary resize, because that is what it means", async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, `/pdf/${file.slug}`);
+    await waitForViewer(page);
+    const before = await currentScale(page);
+
+    await page.setViewportSize({ width: 900, height: 700 });
+    await expect.poll(() => currentScale(page)).toBeLessThan(before);
+    await expect(page.getByLabel("Zoom")).toHaveValue("page-width");
+  });
+});

@@ -6910,6 +6910,47 @@ has the factors and their clamps under unit test. **The iOS half is not verified
 docs/PDF.md §10c carries the recipe (`scripts/remote-console.ts`) rather than an assumption —
 this file already records two iOS touch claims that measured false.
 
+### 19e. Re-fitting the zoom when the container changes shape
+
+**Built 2026-09-10**, alongside §19d. `PDFViewer` computes a named scale **once**, when it is
+set, and then holds the resulting number — Mozilla's viewer *application* re-applies it on
+resize, and we build on the library, so nothing did. The visible cost was a phone: open a
+document fitted to a portrait width, turn it sideways, and the page stays the size it was, in a
+column of empty space.
+
+Two rules, because a reader can have said two different things:
+
+- **A named scale is a standing instruction.** "Fit the width" means fit *this* width, so it is
+  re-applied on any container width change — a rotation, a window drag, the side panel opening.
+- **A number is a decision already made.** An explicit zoom survives ordinary resizes untouched,
+  and is scaled only by a **rotation**, in proportion to the width.
+
+**Why a rotation touches a chosen zoom at all**, when the reader chose it: turning a tablet from
+landscape to portrait takes width away, and a page that fitted before then needs sideways panning
+to read a single line — the one thing a reader cannot work around by scrolling. Scaling with the
+width keeps *how much of the page they see* fixed, which is the part that decides whether a line
+is readable.
+
+**The width ratio is an approximation, deliberately.** It stands in for the ratio of the two
+fit-to-width scales, which it equals up to pdfjs's fixed scrollbar allowance — about a tenth of a
+phone's width. Computing the real thing means either duplicating pdfjs's internal padding
+constants or setting the scale to `page-width` to read it back, which the reader would watch
+happen. It only ever applies to a zoom the reader picked by feel, so a few percent is beneath
+notice; anyone *exactly* fitted is on the named scale, which is exact.
+
+**A rotation is recorded, not acted on.** The orientation media query flips before the layout it
+causes, so the handler only timestamps; the `ResizeObserver` on the container is what knows the
+new width, and it expires the arming after 1.2s (iOS animates the rotation). `matchMedia
+("(orientation: portrait)")` rather than `screen.orientation` or the deprecated
+`orientationchange` — one spelling every engine in the baseline agrees on — gated on
+`(pointer: coarse)`, since dragging a desktop window through square is not a reader turning a
+device over.
+
+**Verification.** `e2e/pdf-zoom.spec.ts`'s second describe, driven by `setViewportSize`, which is
+what a rotation is from the page's side. The fit case asserts the page *fits* the new width
+rather than a ratio — the ratio assertion is what caught the scrollbar allowance in the first
+place.
+
 ## 20. Tags, and the anchor envelope they share with annotations
 
 Tags are new: a vocabulary of terms (`tag`), applied to content by acts of tagging

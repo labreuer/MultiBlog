@@ -4,7 +4,9 @@ import {
   MAX_STEP_IN,
   MAX_STEP_OUT,
   clampScaleFactor,
+  isNamedScale,
   pinchScaleFactor,
+  refitScaleFactor,
   touchDistance,
   touchMidpoint,
   wheelScaleFactor,
@@ -70,4 +72,37 @@ test("distance and midpoint are the plain geometry", () => {
   const b = { clientX: 30, clientY: 40 };
   assert.equal(touchDistance(a, b), 50);
   assert.deepEqual(touchMidpoint(a, b), [15, 20]);
+});
+
+test("the named scales are the ones that have to be recomputed on a resize", () => {
+  for (const named of ["auto", "page-fit", "page-width", "page-actual"]) {
+    assert.ok(isNamedScale(named), named);
+  }
+  // A number — including the string pdfjs itself stores after a pinch — is a
+  // decision the reader made, not a rule to re-evaluate.
+  assert.ok(!isNamedScale("1.35"));
+  assert.ok(!isNamedScale("1"));
+  assert.ok(!isNamedScale(null));
+  assert.ok(!isNamedScale(undefined));
+  assert.ok(!isNamedScale(""));
+});
+
+test("a rotation scales a chosen zoom with the width it has to live in", () => {
+  // Landscape to portrait: less width, so the same fraction of the page.
+  assert.ok(Math.abs(refitScaleFactor(800, 400) - 0.5) < 1e-12);
+  // And back.
+  assert.equal(refitScaleFactor(400, 800), 2);
+  assert.equal(refitScaleFactor(400, 400), 1);
+});
+
+test("a rotation with no width to compare against changes nothing", () => {
+  assert.equal(refitScaleFactor(0, 400), 1);
+  assert.equal(refitScaleFactor(400, 0), 1);
+  assert.equal(refitScaleFactor(Number.NaN, 400), 1);
+});
+
+test("the refit factor is deliberately not clamped like a gesture step is", () => {
+  // A quarter-turn can halve the width, and that is one legitimate move rather
+  // than a runaway gesture — clamping it would leave the page overflowing.
+  assert.ok(refitScaleFactor(1000, 390) < MAX_STEP_OUT);
 });
