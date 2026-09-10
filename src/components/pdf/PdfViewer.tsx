@@ -422,48 +422,76 @@ export default function PdfViewer({
       <div className={styles.toolbar}>
         <span className={styles.title}>{title}</span>
 
-        <button type="button" onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1} aria-label="Previous page">
-          ‹
-        </button>
-        <label>
-          <span className="sr-only">Page</span>
-          <input
-            className={styles.pageInput}
-            value={pageDraft}
-            aria-label="Page number"
-            onChange={(event) => {
-              editingPageRef.current = true;
-              setPageDraft(event.target.value);
-            }}
-            // Cleared *before* submitting, both here and on Enter, so the move
-            // that follows resyncs the box to the page it landed on — a reader
-            // who typed a sheet number into a labelled document sees the label
-            // it corresponds to, rather than their own input left standing.
-            onBlur={() => {
-              editingPageRef.current = false;
-              submitPage(pageDraft);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
+        {/* The page controls read as one instrument — step back, where you are,
+            how many there are, step forward — so they are grouped and share a
+            tighter gap than the toolbar's own. Without the wrapper the only
+            lever is the toolbar's single `gap`, which also sets the distance
+            between the *clusters*, and closing one up closes up the other. */}
+        <div className={styles.pageGroup}>
+          <button type="button" onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1} aria-label="Previous page">
+            ‹
+          </button>
+          <label>
+            {/* Visible text, and always was: this carried a `sr-only` class
+                that is defined in no stylesheet in the project, so it has been
+                rendering as an ordinary word since the day it was written. Kept
+                visible on purpose now — the box beside it holds a page *label*
+                as often as a number ("iv"), which needs saying — and named for
+                what it is. */}
+            <span className={styles.controlLabel}>Page</span>
+            <input
+              className={styles.pageInput}
+              value={pageDraft}
+              aria-label="Page number"
+              onChange={(event) => {
+                editingPageRef.current = true;
+                setPageDraft(event.target.value);
+              }}
+              // Focusing selects what's there, so typing a page number replaces
+              // it rather than appending to it — the box is three characters
+              // wide and a reader who has to clear it first will get "412" out
+              // of an intended "12" often enough to notice.
+              //
+              // Focus also counts as editing, which is what makes that
+              // selection survive: the readout would otherwise rewrite the
+              // value out from under it on the next scroll frame, dropping the
+              // selection with it. The cost is that the box stops following the
+              // document while it has focus, which is the right trade — it is
+              // the reader's box at that point.
+              onFocus={(event) => {
+                editingPageRef.current = true;
+                event.currentTarget.select();
+              }}
+              // Cleared *before* submitting, both here and on Enter, so the move
+              // that follows resyncs the box to the page it landed on — a reader
+              // who typed a sheet number into a labelled document sees the label
+              // it corresponds to, rather than their own input left standing.
+              onBlur={() => {
                 editingPageRef.current = false;
                 submitPage(pageDraft);
-              }
-            }}
-            // Where the box shows a label, the sheet number is the thing the
-            // reader can no longer see — and it is what a scrollbar position,
-            // a "page 4 of 350" habit and every other viewer are counting in.
-            title={pageLabels ? `Sheet ${pageNumber} of ${pageCount}` : undefined}
-          />
-        </label>
-        <span className={styles.pageCount}>of {pageCount || "…"}</span>
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  editingPageRef.current = false;
+                  submitPage(pageDraft);
+                }
+              }}
+              // Where the box shows a label, the sheet number is the thing the
+              // reader can no longer see — and it is what a scrollbar position,
+              // a "page 4 of 350" habit and every other viewer are counting in.
+              title={pageLabels ? `Sheet ${pageNumber} of ${pageCount}` : undefined}
+            />
+          </label>
+          <span className={styles.pageCount}>of {pageCount || "…"}</span>
 
-        <button type="button" onClick={() => goToPage(pageNumber + 1)} disabled={pageCount > 0 && pageNumber >= pageCount} aria-label="Next page">
-          ›
-        </button>
+          <button type="button" onClick={() => goToPage(pageNumber + 1)} disabled={pageCount > 0 && pageNumber >= pageCount} aria-label="Next page">
+            ›
+          </button>
+        </div>
 
         <label>
-          <span className="sr-only">Zoom</span>
+          <span className={styles.controlLabel}>Zoom</span>
           <select value={zoom} aria-label="Zoom" onChange={(event) => applyZoom(event.target.value)}>
             {/* A pinch lands on any scale it likes, and a <select> whose value
                 matches no option renders blank — so the current scale gets an
@@ -481,7 +509,17 @@ export default function PdfViewer({
           </select>
         </label>
 
-        <button type="button" onClick={rotate} aria-label="Rotate">
+        {/* The glyph says "rotate" and nothing about *what*, which matters here
+            because pdfjs's `pagesRotation` turns the whole document rather than
+            the page on screen — the reader is owed that before they press it,
+            not after. The accessible name says the same words as the tooltip:
+            a title that a screen reader never reads is half a fix. */}
+        <button
+          type="button"
+          onClick={rotate}
+          aria-label="Rotate all pages 90° clockwise"
+          title="Rotate all pages 90° clockwise"
+        >
           ⟳
         </button>
 
