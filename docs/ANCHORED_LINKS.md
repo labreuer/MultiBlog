@@ -50,10 +50,10 @@ govern everything else:
 
 Origins: `b5fa049` was cherry-picked clean from the `part-anchors` branch (the
 one-writer-per-anchor-field refactor: `deriveDocRangeSelector`, `captureAnchorInYdoc`
-returning the selector, `capturePdfTextAnchor`); `docs/MULTI_ANCHORING.md` came over
-verbatim. The highlight-extension and anno-layer generalizations were **re-expressed from
-that branch's commits as templates** (`kind: "link"` where it says `"tag"`), not picked —
-its `annotation_anchor` migration/backfill was deliberately not depended on, and
+returning the selector, `capturePdfTextAnchor`); `docs/research/multi-anchoring.md` came
+over verbatim. The highlight-extension and anno-layer generalizations were **re-expressed
+from that branch's commits as templates** (`kind: "link"` where it says `"tag"`), not
+picked — its `annotation_anchor` migration/backfill was deliberately not depended on, and
 `resolveCaptureStamp` is duplicated into the actions file until that branch lands.
 
 ## Schema
@@ -671,10 +671,10 @@ Everything unmentioned went in as written. Where the build differs:
 
 Post targets (`POST_RANGE` has no selector kind), annotation-body targets (arc ready,
 writer refuses), multi-page PDF selections (capture is start-page-only today), part roles
-(MULTI_ANCHORING: these parts are homogeneous), drift persistence. (The `/links` table,
-minted-link deletion and editing after mint, all deferred here until 2026-09-08, and link
-names, deferred until 2026-09-09, are built — "The management table", "Editing a minted
-link" and "Naming a link" above.)
+(`docs/research/multi-anchoring.md`: these parts are homogeneous), drift persistence. (The
+`/links` table, minted-link deletion and editing after mint, all deferred here until
+2026-09-08, and link names, deferred until 2026-09-09, are built — "The management table",
+"Editing a minted link" and "Naming a link" above.)
 
 Deferred by the landing route specifically:
 
