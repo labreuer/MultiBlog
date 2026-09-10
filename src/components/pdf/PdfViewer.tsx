@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } from "@/lib/pdfjs-client";
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
 import { usablePageLabels } from "@/lib/pdf-page-labels";
+import { usePdfZoomGestures } from "./use-pdf-zoom-gestures";
 import "pdfjs-dist/web/pdf_viewer.css";
 import styles from "./PdfViewer.module.css";
 
@@ -203,6 +204,17 @@ export default function PdfViewer({
     eventBus.on("updateviewarea", onViewArea);
     eventBus.on("pagechanging", onViewArea);
 
+    // The zoom control is a readout as well as a control, and a pinch changes
+    // the scale without going through it. `presetValue` is set only when the
+    // scale came from a named mode, so a gesture lands the numeric scale here
+    // and the dropdown stops claiming "Fit width" for a document that is no
+    // longer fitted to anything.
+    const onScaleChanging = ({ scale, presetValue }: { scale: number; presetValue?: string }) => {
+      if (cancelled) return;
+      setZoom(presetValue ?? String(scale));
+    };
+    eventBus.on("scalechanging", onScaleChanging);
+
     // **Registered before `setDocument`, not after the awaits below.**
     // `pagesinit` fires almost immediately once the document is handed over,
     // and the page-dimension fetch afterwards is a few worker round trips — so
@@ -305,6 +317,7 @@ export default function PdfViewer({
       if (frame) cancelAnimationFrame(frame);
       eventBus.off("updateviewarea", onViewArea);
       eventBus.off("pagechanging", onViewArea);
+      eventBus.off("scalechanging", onScaleChanging);
       eventBus.off("pagesinit", onPagesInit);
       handleRef.current = null;
       // Order matters: drop the viewer's reference to the document before
@@ -321,6 +334,11 @@ export default function PdfViewer({
       task.destroy().catch(() => {});
     };
   }, [fileUrl]);
+
+  // PLAN.md §19d — pinch and ctrl-wheel zoom the document rather than the page.
+  // Bound to the scroll container for the life of the document, which is why it
+  // takes the ref: nothing it does depends on this component re-rendering.
+  usePdfZoomGestures(handleRef, status === "ready");
 
   const goToPage = useCallback((next: number) => {
     const handle = handleRef.current;
@@ -443,6 +461,14 @@ export default function PdfViewer({
         <label>
           <span className="sr-only">Zoom</span>
           <select value={zoom} aria-label="Zoom" onChange={(event) => applyZoom(event.target.value)}>
+            {/* A pinch lands on any scale it likes, and a <select> whose value
+                matches no option renders blank — so the current scale gets an
+                option of its own whenever it isn't one of the presets. Listed
+                first so it reads as the current state rather than as a tenth
+                zoom level someone chose to offer. */}
+            {!(ZOOM_PRESETS as readonly string[]).includes(zoom) && (
+              <option value={zoom}>{`${Math.round(Number(zoom) * 100)}%`}</option>
+            )}
             {ZOOM_PRESETS.map((preset) => (
               <option key={preset} value={preset}>
                 {preset === "page-fit" ? "Fit page" : preset === "page-width" ? "Fit width" : `${Number(preset) * 100}%`}

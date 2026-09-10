@@ -120,6 +120,13 @@
   inset: 0;
   overflow: auto;
   background: var(--surface-muted);
+  /* **Pinch belongs to the document, not to the page** (PLAN.md §19d). Naming
+     the pans we still want the engine to handle is what leaves one-finger
+     scrolling native — and momentum, and the scrollbars — while handing us the
+     pinch and the double-tap zoom that would otherwise resize the whole site
+     around a viewer that is already full-height. `none` would take the
+     scrolling with it. Everywhere outside this box, both still zoom the page. */
+  touch-action: pan-x pan-y;
 }
 
 /* **A custom scrollbar, purely so the two rails can line up with it.**

@@ -6867,6 +6867,49 @@ navigating, and a 1…N label set correctly ignored. `scripts/make-test-pdf.ts` 
 `pageLabels` option — a `/PageLabels` number tree, whose keys are **0-based** page indices,
 the one place in the format that counts from zero.
 
+### 19d. Zoom gestures — pinch and ctrl-wheel belong to the document
+
+**Built 2026-09-10.** On a full-viewport app shell whose whole point is that the viewer fills
+the height, the browser's own zoom is the wrong response to a pinch: it resizes the chrome, the
+toolbar and the side panel around a document that stays exactly as illegible as it was. So
+inside `.viewerContainer`, pinch and ctrl-wheel change `PDFViewer`'s scale instead. Everywhere
+else on the page, both still zoom the page.
+
+**Three input paths, two gestures**, all ending in one `viewer.updateScale({ scaleFactor,
+origin })`:
+
+- **ctrl-wheel** — and every *trackpad* pinch, which no engine reports as a touch event; they
+  all synthesise a `wheel` with `ctrlKey`. `metaKey` too, since Cmd-scroll is macOS's own page
+  zoom.
+- **two-finger `touchmove`** — phones and Android.
+- **Safari's `gesture*` events** — non-standard, WebKit-only, carrying a cumulative `scale`.
+  Preferred where they exist, with the touch path standing down the moment one arrives, or the
+  two compose and square the zoom.
+
+**`origin` is the point that stays put**, in client space; pdfjs adjusts the scroll around it.
+That is the difference between a gesture and a lurch, and it is the reason this goes through
+`updateScale` rather than setting `currentScale`.
+
+**The container takes `touch-action: pan-x pan-y`, never `none`.** Naming the pans keeps
+one-finger scrolling, momentum and the scrollbars native while handing us pinch and double-tap
+zoom; `none` would freeze the document on a phone, which is a worse bug than the one being
+fixed.
+
+**The zoom dropdown had to become a readout as well as a control.** A gesture lands on any
+scale it likes, and a `<select>` whose value matches no option renders *blank* — so
+`scalechanging` now feeds it, and a non-preset scale gets an option of its own showing the
+percentage. Picking "Fit width" and then pinching correctly stops the document being fitted to
+anything, which the control now says.
+
+**What is verified, and what is not.** `e2e/pdf-zoom.spec.ts` covers ctrl-wheel (including the
+negative half — the page's own zoom must not move — which a `{ passive: true }` slip would
+break while everything else still passed), an ordinary wheel still scrolling, the dropdown's
+readout, the touch arithmetic reaching pdfjs, and the `touch-action` value. `src/lib/pdf-zoom.ts`
+has the factors and their clamps under unit test. **The iOS half is not verified**: whether
+`touch-action` alone suppresses Safari's own pinch zoom is a real-device measurement, and
+docs/PDF.md §10c carries the recipe (`scripts/remote-console.ts`) rather than an assumption —
+this file already records two iOS touch claims that measured false.
+
 ## 20. Tags, and the anchor envelope they share with annotations
 
 Tags are new: a vocabulary of terms (`tag`), applied to content by acts of tagging

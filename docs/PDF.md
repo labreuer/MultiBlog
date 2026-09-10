@@ -676,6 +676,64 @@ never enters a computation — only a rendering. PLAN.md §19c.
 
 ---
 
+## 10c. Zoom gestures, and who gets to handle them
+
+Pinch and ctrl-wheel resize the **document**, not the page (PLAN.md §19d). Capturing them is
+per-engine, and the parts that are settled are worth separating from the part that is not.
+
+**A trackpad pinch is not a touch event anywhere.** Every engine reports it as a `wheel` with
+`ctrlKey` set — the same shape as a held ctrl — so one handler serves both, and a handler that
+looks for touches will never see a MacBook or a Windows precision trackpad at all.
+
+**`deltaMode` is not always pixels.** Firefox reports wheel deltas in *lines* (`1`); Chrome and
+Safari in pixels (`0`). Read raw, a gesture tuned in Chrome moves about sixteen times too
+little in Firefox — which reads as the feature not working rather than as a scale being wrong.
+`wheelScaleFactor` converts (`src/lib/pdf-zoom.ts`).
+
+**`preventDefault` needs a non-passive listener.** `{ passive: true }` (or the default, for
+`wheel`/`touchmove`, in every current engine) silently ignores the call, so the document zooms
+*and* the page does. Nothing throws; it just looks broken on a machine that isn't yours.
+
+**`touch-action` is how the engine is told, and `none` is the wrong value here.** The container
+takes `pan-x pan-y`: one-finger scrolling, momentum and the scrollbars stay native while pinch
+and double-tap zoom come to us. `none` would take the scrolling with it and freeze the document
+on a phone — a far worse bug than the one being fixed.
+
+**Zoom around a point, not around the scale.** `PDFViewer.updateScale({ scaleFactor, origin })`
+takes `origin` as a client-space `[x, y]` and adjusts `scrollLeft`/`scrollTop` around it, which
+is the whole difference between a gesture and a lurch. Pass `drawingDelay` (< 1000) during a
+gesture so it restyles now and re-renders once the fingers stop.
+
+### The part that is not settled: iOS
+
+Safari fires its own non-standard `gesturestart` / `gesturechange` / `gestureend` alongside (or
+instead of) two-finger `touchmove`, carrying a cumulative `scale`. The implementation prefers
+them and stands the touch path down as soon as one arrives, or the two would compose and square
+the zoom.
+
+**Whether `touch-action: pan-x pan-y` alone stops iOS's own pinch zoom is a measurement, not a
+fact to be looked up** — CLAUDE.md's standing rule, and this file already records two claims
+about iOS touch behaviour that were measured false. To take it, with the phone on the LAN:
+
+```
+npx tsx scripts/remote-console.ts          # terminal A; open the printed URL on the phone,
+                                           # then navigate it to a /pdf/[slug]
+curl -s --data-binary '
+  window.__pinch = { gesture: 0, touchmove: 0, scaleAtStart: visualViewport.scale };
+  const c = document.querySelector("[data-pdf-container]");
+  c.addEventListener("gesturechange", () => window.__pinch.gesture++, true);
+  c.addEventListener("touchmove", (e) => { if (e.touches.length === 2) window.__pinch.touchmove++; }, true);
+  "armed"' localhost:4322/eval
+# …pinch the document on the phone, then:
+curl -s --data-binary '({ ...window.__pinch, pageScaleNow: visualViewport.scale,
+  docScale: getComputedStyle(document.querySelector(".pdfViewer")).getPropertyValue("--scale-factor") })' localhost:4322/eval
+```
+
+`pageScaleNow` still `1` is the answer that matters: the page did not zoom. A rising
+`docScale` says ours did. Which counter moved says which path the engine took.
+
+---
+
 ## 11. Prior art worth reading before reimplementing
 
 - `hypothesis/client` — `src/annotator/anchoring/pdf.js` is the reference implementation of
