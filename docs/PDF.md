@@ -372,6 +372,29 @@ pdfViewer.scrollPageIntoView({
 Passing `null` for zoom preserves the local user's zoom, which is almost always what you want —
 followers should see the same *content*, not be forced into the leader's zoom level.
 
+**Two pdfjs details make the round trip lossy at a page boundary, and they compose into a snap
+that reads as a network problem.** Both are fixed in `use-pdf-presence.ts`; re-check them on any
+`pdfjs-dist` bump.
+
+- **`viewer.currentPageNumber` is the *most-visible* page, not the topmost one.** `update()`
+  asks `_getVisiblePages()` with `sortByVisibility: true` and takes `visiblePages[0].id`; the
+  `stillFullyVisible` shortcut that would hold the number steady needs `percent === 100`, which
+  page-width on a phone never reaches. So it flips to page N+1 at the *area* crossover — about
+  half a screen before the container's top edge reaches page N+1 — and measuring the visible
+  region against that page produces a `pdfPoint` above its own top edge. Derive the page from
+  geometry instead (`topmostVisiblePageIndex`). pdfjs does the same thing internally for
+  `_updateLocation`, using `visible.first`, which is captured *before* the visibility sort.
+- **`scrollPageIntoView` clamps with `Math.max(…, 0)` unless you pass `allowNegativeOffset`.** A
+  destination above its page's top edge therefore becomes "put this page's top edge at the top of
+  the viewport". Combined with the above that is a jump forward of up to half a screen, then a
+  dead zone while every further broadcast clamps to the same 0 — jumpy at every page boundary,
+  tight everywhere else. A point outside the page is not malformed: it is what "the visible
+  region starts in the previous page" looks like.
+
+One more sign error to not repeat: **CSS px per PDF point is `currentScale * PDF_TO_CSS_UNITS`,
+never `currentScale`** (§5). The tolerance compare below is in PDF points and got this wrong for
+as long as it existed, which made it ~33% looser than the 2% it claims.
+
 ### Transport
 
 - **Annotations → ydoc.** `Y.Map<string, Annotation>` keyed by annotation id. Gets CRDT merge,
