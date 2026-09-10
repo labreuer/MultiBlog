@@ -24,13 +24,15 @@ import {
 // drift. /annotations' Quote column is the precedent for a display-only column
 // on the kit. Everything that *is* sortable here is a plain column or a
 // to-one relation: createdBy, createdAt, mintedAt, id, the soft-delete pair.
-export type LinksSortKey = "createdBy" | "created" | "minted" | "id" | "deletedAt" | "deleted";
+export type LinksSortKey = "createdBy" | "created" | "minted" | "edited" | "id" | "deletedAt" | "deleted";
 
-const SORT_KEYS: readonly LinksSortKey[] = ["createdBy", "created", "minted", "id", "deletedAt", "deleted"];
+const SORT_KEYS: readonly LinksSortKey[] = ["createdBy", "created", "minted", "edited", "id", "deletedAt", "deleted"];
 
-// Newest first, like /files: a link is written once (its parts are frozen at
-// mint), so "what was shared recently" is the landing view anyone comes here
-// for — there is no updatedAt for a link's life to be measured in.
+// Newest first, like /files: "what was shared recently" is the landing view
+// anyone comes here for. A minted link's parts can change since 2026-09-08
+// (docs/ANCHORED_LINKS.md, "Editing a minted link"), and `edited` — null
+// until the first such change — is the sort for "what changed recently";
+// it is not the default because most links are never edited.
 export const DEFAULT_SORT: SortColumn<LinksSortKey>[] = [{ key: "created", dir: "desc" }];
 
 // `owners` — creator slugs, /files' `?owners=` over `anchored_link.created_by`

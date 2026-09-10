@@ -37,12 +37,13 @@ export type AnnotationAnchorInput = {
   // routing, which is what this field keys: the decoration class, and which
   // of the two range maps the id lands in.
   //
-  // `draft-link` is a part of the viewer's own unminted link — same table,
-  // same resolve, drawn with a dashed underline instead of a solid one
-  // (prose.module.css). It is kept a separate kind rather than a flag
-  // because the two are painted differently and queried differently: only a
-  // *minted* part is a banner jump target, so only it gets
-  // `data-anchored-link-ids`.
+  // `draft-link` is a part of the viewer's own *open* link — a draft, or a
+  // minted link reopened for editing — same table, same resolve, drawn with
+  // a dashed underline instead of a solid one (prose.module.css). It is kept
+  // a separate kind rather than a flag because the two are painted
+  // differently and queried differently: only a *followed* part is a banner
+  // jump target, so only it gets `data-anchored-link-ids` (a part that is
+  // both, the creator editing the link they follow, gets both attributes).
   kind?: "annotation" | "link" | "draft-link";
 };
 
@@ -57,7 +58,7 @@ export type AnnotationHighlightState = {
   ranges: Map<string, AnchorRange>;
   /**
    * `anchored_link_anchor` row ids — one id family, whether the link is
-   * minted or still the viewer's draft — kept apart from `ranges` so a rail
+   * followed or the viewer's own open one — kept apart from `ranges` so a rail
    * card and a thread jump can't mistake one family for the other.
    */
   linkRanges: Map<string, AnchorRange>;
@@ -121,7 +122,7 @@ export function annotationAnchorInputs(
  *
  * `kind` picks which link the parts belong to: a followed one from `?sel=`
  * (server props, the default) or the viewer's own draft (fetched client-side
- * — see draft-link-store.ts).
+ * — see open-link-store.ts).
  */
 export function anchoredLinkAnchorInputs(
   parts: { anchorId: string; from: number | null; to: number | null; quotedText: string }[],

@@ -10,7 +10,7 @@ import PdfCollabPanel from "./PdfCollabPanel";
 import { loadPdfAnnotationEntries } from "@/app/actions/annotations";
 import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
 import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
-import { useDraftLinkParts } from "@/components/anchored-link/draft-link-store";
+import { useOpenLinkParts } from "@/components/anchored-link/open-link-store";
 import { AnnotationReloadProvider } from "@/components/annotation/annotation-reload-context";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
@@ -218,14 +218,15 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     linkPartsRef.current = linkParts;
   }, [linkParts]);
 
-  // The viewer's own in-progress link parts for this file — the same regions
-  // dashed (anno-layer.ts), arriving from the client-side draft store rather
-  // than a prop, since adding one revalidates nothing by design.
+  // The viewer's own open link's parts for this file (a draft's, or a
+  // reopened minted link's) — the same regions dashed (anno-layer.ts),
+  // arriving from the client-side store rather than a prop, since adding
+  // one revalidates nothing by design.
   //
   // **Deliberately a second list, not merged into `linkParts`**: that one
-  // also decides the on-load `?sel=` jump, and a draft part must never
-  // hijack where a followed link lands.
-  const draftParts = useDraftLinkParts("file", fileId);
+  // also decides the on-load `?sel=` jump, and an in-progress part must
+  // never hijack where a followed link lands.
+  const draftParts = useOpenLinkParts("file", fileId);
   const draftRegions = useMemo(
     (): { anchorId: string; target: PdfTarget }[] =>
       draftParts.flatMap((part) =>
@@ -281,23 +282,31 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     if (!ready || !handle) return;
 
     const layers = attachAnnoLayers(handle.viewer, handle.eventBus, {
-      entriesForPage: (pageIndex) => [
-        // Link regions first: append order is stacking order in this layer,
-        // and wayfinding yields to discussion — every annotation fill draws
-        // over the outline, and with no data-anno-id the outline never
-        // intercepts a click either (anno-layer.ts).
-        ...linkPartsRef.current
-          .filter(({ target }) => target.pageIndex === pageIndex)
-          .map(({ part, target }): AnnoLayerEntry => ({ id: part.anchorId, target, color: "", variant: "link" })),
-        ...draftRegionsRef.current
-          .filter(({ target }) => target.pageIndex === pageIndex)
-          .map(({ anchorId, target }): AnnoLayerEntry => ({ id: anchorId, target, color: "", variant: "draft-link" })),
-        ...entriesRef.current
-          // entryHasVisibleContent, not just a page match: a soft-deleted
-          // thread must take its highlight with it.
-          .filter((entry) => entry.target?.pageIndex === pageIndex && entryHasVisibleContent(entry))
-          .map((entry): AnnoLayerEntry => ({ id: entry.root.id, target: entry.target!, color: entry.color })),
-      ],
+      entriesForPage: (pageIndex) => {
+        // A followed part that is also in the open link (the creator editing
+        // the very link they are following) draws once, dashed: two outlines
+        // on one set of quads would read as solid whichever was on top. The
+        // doc surface keeps both, since its jump needs the followed-link
+        // attribute; here the jump is target-based and needs no region.
+        const openIds = new Set(draftRegionsRef.current.map((region) => region.anchorId));
+        return [
+          // Link regions first: append order is stacking order in this layer,
+          // and wayfinding yields to discussion — every annotation fill draws
+          // over the outline, and with no data-anno-id the outline never
+          // intercepts a click either (anno-layer.ts).
+          ...linkPartsRef.current
+            .filter(({ part, target }) => target.pageIndex === pageIndex && !openIds.has(part.anchorId))
+            .map(({ part, target }): AnnoLayerEntry => ({ id: part.anchorId, target, color: "", variant: "link" })),
+          ...draftRegionsRef.current
+            .filter(({ target }) => target.pageIndex === pageIndex)
+            .map(({ anchorId, target }): AnnoLayerEntry => ({ id: anchorId, target, color: "", variant: "draft-link" })),
+          ...entriesRef.current
+            // entryHasVisibleContent, not just a page match: a soft-deleted
+            // thread must take its highlight with it.
+            .filter((entry) => entry.target?.pageIndex === pageIndex && entryHasVisibleContent(entry))
+            .map((entry): AnnoLayerEntry => ({ id: entry.root.id, target: entry.target!, color: entry.color })),
+        ];
+      },
       // PLAN.md §19 — other readers' live selections, drawn in the same layer
       // and with the same filled highlight an annotation gets, in that
       // reader's own colour. They appear for whichever pages are rendered,

@@ -1297,11 +1297,12 @@ view TagMetrics {
 // The row's cuid *is* the URL id (`?sel=<id>`); no separate token column.
 //
 // `minted_at` null means **the creator's open draft** — the tray's working
-// set, visible to no one else. A partial unique index in the migration
-// (`anchored_link_one_draft_per_user`: one row per creator with
-// `minted_at IS NULL AND deleted_at IS NULL`) is what makes
-// `loadMyDraftLink` a definite article and the get-or-create race a
-// catchable P2002. Prisma has no partial-index DSL, so it lives in SQL only.
+// set, visible to no one else. `reopened_at` (below) is the same tray holding
+// a minted link for editing. A partial unique index in the migrations
+// (`anchored_link_one_open_per_user`: one row per creator that is unminted
+// or reopened, and not deleted) is what makes `loadMyOpenLink` a definite
+// article and the get-or-create race a catchable P2002. Prisma has no
+// partial-index DSL, so it lives in SQL only.
 //
 // Like `TagAssignment`, deliberately **not** in the $extends soft-delete
 // filter (read through anchor includes, which the filter cannot reach);
@@ -1313,6 +1314,19 @@ model AnchoredLink {
 
   /// Null = the creator's open draft; set once, when the URL is handed out.
   mintedAt DateTime? @map("minted_at")
+
+  /// docs/ANCHORED_LINKS.md, "Editing a minted link" — set while a *minted*
+  /// link is back in its creator's tray, cleared by Done (and by a soft
+  /// delete, so a restore can never collide with the index below). Never set
+  /// on a draft, which is open by being unminted (a CHECK in the migration):
+  /// "open" = `minted_at IS NULL OR reopened_at IS NOT NULL`, and the
+  /// partial unique index `anchored_link_one_open_per_user` is over exactly
+  /// that predicate — one link in the tray per creator, draft or reopened.
+  reopenedAt DateTime? @map("reopened_at")
+
+  /// When a *minted* link's parts last changed (add, remove, reorder). Null
+  /// until the first edit after mint; a draft's changes are not edits.
+  editedAt DateTime? @map("edited_at")
 
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")

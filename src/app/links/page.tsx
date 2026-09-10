@@ -187,6 +187,10 @@ function buildOrderBy(sort: SortColumn<LinksSortKey>[]): Prisma.AnchoredLinkOrde
         // pair uses, so ascending leads with the (at most one) draft and
         // descending ends with it.
         return { mintedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+      case "edited":
+        // Null until a minted link's first edit — the never-edited majority
+        // sort together at whichever end the nulls rule puts them.
+        return { editedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
       case "id":
         return { id: dir };
       case "deletedAt":
@@ -260,6 +264,8 @@ export default async function LinksPage({
         createdById: true,
         createdAt: true,
         mintedAt: true,
+        reopenedAt: true,
+        editedAt: true,
         deletedAt: true,
         deletedByUserId: true,
         createdBy: { select: { name: true, email: true } },
@@ -328,12 +334,18 @@ export default async function LinksPage({
       createdByName: link.createdBy.name ?? link.createdBy.email,
       createdAt: link.createdAt,
       mintedAt: link.mintedAt,
+      reopened: link.reopenedAt !== null,
+      editedAt: link.editedAt,
       targets,
       deletedAt: link.deletedAt,
       deleted: link.deletedByUserId !== null,
       // Decided here from columns already selected rather than per row
       // through a query — the /files shape. Never true for a draft.
       canManage: canUserDeleteAnchoredLink(viewer.id, viewer.role, link),
+      // Editing is the creator's alone (docs/PERMISSIONS.md) — no moderator
+      // arm, unlike canManage: the tray is per creator, and adding a passage
+      // to someone else's link would put this viewer's reading in it.
+      canEdit: link.createdById === viewer.id && link.mintedAt !== null && link.deletedByUserId === null,
     };
   });
 

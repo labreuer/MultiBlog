@@ -47,8 +47,9 @@ type Props = {
   // LiveAnnotationComposer, which is where it actually matters (submit
   // time, not composer-open time).
   resolveAnchor?: () => { from: number; to: number } | null;
-  // docs/ANCHORED_LINKS.md — posts the current selection as a draft-link
-  // part; resolves to an error message, or null on success (the caller
+  // docs/ANCHORED_LINKS.md — posts the current selection as a part of the
+  // viewer's open link (their draft, or a minted link they are editing);
+  // resolves to an error message, or null on success (the caller
   // clears the selection itself, which unmounts this popover). Supplied by
   // the reading view only — the doc editor's widget leaves it undefined and
   // gets no button, the same way autoOpen keys that surface's other

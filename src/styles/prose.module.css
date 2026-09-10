@@ -213,8 +213,9 @@
   border-radius: 2px;
 }
 
-/* docs/ANCHORED_LINKS.md — a passage of the *draft* link the viewer is
-   assembling, painted only for its creator (the draft is session-scoped).
+/* docs/ANCHORED_LINKS.md — a passage of the viewer's *open* link (a draft
+   being assembled, or a minted link reopened for editing), painted only for
+   its creator (the open link is session-scoped).
    It carries .anchored-link-highlight too and so inherits the wash: it is a
    link part, and saying which link is the underline's job, not a second
    colour. Dashed is **the** in-progress underline on this surface, the same

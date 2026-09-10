@@ -53,12 +53,14 @@ type Fixtures = {
   /** An open draft anchored_link, owned by linkUserId (docs/ANCHORED_LINKS.md). */
   linkId: string;
   /**
-   * A user created inside the probe transaction, so the one-draft-per-user
-   * probes run against a creator guaranteed to have exactly the drafts this
-   * script gave them — the first real user may legitimately have an open
-   * draft of their own.
+   * A user created inside the probe transaction, so the one-open-per-user
+   * probes run against a creator guaranteed to have exactly the open link
+   * this script gave them — the first real user may legitimately have one
+   * of their own.
    */
   linkUserId: string;
+  /** A second probe user with *nothing* open, for the rows that must go in when the slot is free. */
+  linkUser2Id: string;
 };
 
 type Probe = {
@@ -121,8 +123,9 @@ const MUST_REJECT: Probe[] = [
         VALUES ('probe-case', 'probe-case-slug', ${f.tagName.toUpperCase()}, ${f.userId}, now())`,
   },
   // docs/ANCHORED_LINKS.md — the third table on the §20a envelope carries its
-  // own copies of both CHECKs, plus the partial unique index that makes "the
-  // viewer's draft" a definite article.
+  // own copies of both CHECKs; anchored_link itself carries the partial unique
+  // index that makes "the viewer's open link" a definite article, and the
+  // CHECK that keeps reopened_at off drafts.
   {
     name: "link anchor with no target",
     constraint: "anchored_link_anchor_one_target_check",
@@ -159,14 +162,36 @@ const MUST_REJECT: Probe[] = [
   },
   {
     name: "a second open draft for one user",
-    constraint: "anchored_link_one_draft_per_user",
+    constraint: "anchored_link_one_open_per_user",
     why:
-      "loadMyDraftLink is a definite article, and the get-or-create race's loser gets a catchable P2002 " +
+      "loadMyOpenLink is a definite article, and the get-or-create race's loser gets a catchable P2002 " +
       "rather than a twin draft (docs/ANCHORED_LINKS.md)",
     attempt: (tx, f) =>
       tx.$executeRaw`
         INSERT INTO anchored_link (id, created_by_id, created_at)
         VALUES ('probe-draft-two', ${f.linkUserId}, now())`,
+  },
+  {
+    name: "a reopened minted link while a draft is open",
+    constraint: "anchored_link_one_open_per_user",
+    why:
+      "the tray holds one link, draft or reopened — Edit over a draft with passages must refuse, and this is " +
+      "what the stale-tab race falls back on (docs/ANCHORED_LINKS.md, \"Editing a minted link\")",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, reopened_at)
+        VALUES ('probe-reopen-two', ${f.linkUserId}, now(), now(), now())`,
+  },
+  {
+    name: "reopened_at on an unminted link",
+    constraint: "anchored_link_reopened_only_when_minted_check",
+    why:
+      "reopened_at means one thing — a minted link back in the tray — and a draft is open by being unminted; " +
+      "a draft carrying it would be a second, disagreeing definition of open",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, reopened_at)
+        VALUES ('probe-reopen-draft', ${f.linkUser2Id}, now(), now())`,
   },
 ];
 
@@ -215,12 +240,21 @@ const MUST_ACCEPT: Probe[] = [
     constraint: "",
     // This is what makes the index *partial* rather than one-link-per-user:
     // minting frees the slot, which is the entire lifecycle (mint → new
-    // draft accumulates → mint again).
-    why: "minting frees the one-draft slot — the WHERE clause is the feature, not an optimisation",
+    // draft accumulates → mint again; Edit reopens, Done frees it again).
+    why: "minting frees the one-open slot — the WHERE clause is the feature, not an optimisation",
     attempt: (tx, f) =>
       tx.$executeRaw`
         INSERT INTO anchored_link (id, created_by_id, created_at, minted_at)
         VALUES ('probe-link-minted', ${f.linkUserId}, now(), now())`,
+  },
+  {
+    name: "a reopened minted link when nothing else is open",
+    constraint: "",
+    why: "the row openAnchoredLinkForEditing writes once the slot is free (docs/ANCHORED_LINKS.md)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link (id, created_by_id, created_at, minted_at, reopened_at)
+        VALUES ('probe-link-reopened', ${f.linkUser2Id}, now(), now(), now())`,
   },
 ];
 
@@ -302,6 +336,14 @@ async function main() {
         },
         select: { id: true },
       });
+      const linkUser2 = await tx.user.create({
+        data: {
+          email: `probe-link2-${Date.now()}@probe.invalid`,
+          slug: `probe-link-user2-${Date.now()}`,
+          adminInitials: "PM",
+        },
+        select: { id: true },
+      });
       const link = await tx.anchoredLink.create({
         data: { createdById: linkUser.id },
         select: { id: true },
@@ -314,6 +356,7 @@ async function main() {
         tagName,
         linkId: link.id,
         linkUserId: linkUser.id,
+        linkUser2Id: linkUser2.id,
       };
 
       for (const probe of MUST_REJECT) {

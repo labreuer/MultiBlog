@@ -146,7 +146,7 @@ export default async function PdfPage({
         anchoredLink={anchoredLink}
         metadata={<TagChips key="tags" target={{ kind: "file", id: file.id }} />}
       />
-      {/* docs/ANCHORED_LINKS.md — the draft-link tray, a self-fetching
+      {/* docs/ANCHORED_LINKS.md — the open-link tray, a self-fetching
           sibling of the viewer island rather than a child of it: it must
           not wait out the ssr:false boundary, and fixed positioning keeps
           it out of the viewer's own chrome. */}

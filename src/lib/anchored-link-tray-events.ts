@@ -1,6 +1,8 @@
-// docs/ANCHORED_LINKS.md — the one signal between "a draft part was added or
-// removed" (a popover, on either reading surface) and the tray that shows
-// the draft. A module-scope listener set — the render-listener pattern
+// docs/ANCHORED_LINKS.md — the one signal between "the open link changed"
+// (a part added from a popover on either reading surface; a minted link
+// reopened from an Edit button) and everything that shows it: the tray, the
+// surfaces' in-progress paint, every Edit affordance (open-link-store.ts is
+// the reader side). A module-scope listener set — the render-listener pattern
 // PdfAnnotationSurface already uses — rather than React context, because
 // the two ends live in different trees: on the PDF page the popover is
 // inside the ssr:false island and the tray is the page's own sibling.

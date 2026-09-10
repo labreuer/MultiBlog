@@ -16,7 +16,7 @@ import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
 import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
-import { useDraftLinkParts } from "./anchored-link/draft-link-store";
+import { useOpenLinkParts } from "./anchored-link/open-link-store";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
@@ -168,18 +168,25 @@ export default function DocReadingBody({
   // editor is display:none behind the SSR'd static body.
   useRegisterMarginNotesEditor(editor, ready);
 
-  // docs/ANCHORED_LINKS.md — the viewer's own in-progress link parts for
-  // this doc, painted with a dashed underline beside the annotations and any
-  // followed `?sel=` parts. Client-side rather than a page prop because
-  // adding a part deliberately revalidates nothing (the actions file's "no
-  // revalidatePath anywhere") — the store's notify is the whole delivery.
-  const draftParts = useDraftLinkParts("doc", docId);
+  // docs/ANCHORED_LINKS.md — the viewer's own open link's parts for this
+  // doc (a draft's, or a reopened minted link's), painted with a dashed
+  // underline beside the annotations and any followed `?sel=` parts.
+  // Client-side rather than a page prop because adding a part deliberately
+  // revalidates nothing (the actions file's "no revalidatePath anywhere") —
+  // the store's notify is the whole delivery.
+  //
+  // When the open link IS the followed one, the same anchor id arrives here
+  // twice, under both kinds — and that is left alone on purpose: one segment
+  // then carries both classes (the dashed rule wins the underline, which is
+  // the honest reading) and *both* data attributes, so the banner's jump,
+  // which queries the followed-link one, keeps working while editing.
+  const openParts = useOpenLinkParts("doc", docId);
   const allAnchors = useMemo(
     () =>
-      draftParts.length === 0
+      openParts.length === 0
         ? annotationAnchors
-        : [...annotationAnchors, ...anchoredLinkAnchorInputs(draftParts, "draft-link")],
-    [annotationAnchors, draftParts],
+        : [...annotationAnchors, ...anchoredLinkAnchorInputs(openParts, "draft-link")],
+    [annotationAnchors, openParts],
   );
 
   // Posting, deleting or replying re-renders this tree with a new anchor list

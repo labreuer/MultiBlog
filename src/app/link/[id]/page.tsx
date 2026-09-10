@@ -4,6 +4,8 @@ import type { Metadata } from "next";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import { anchoredLinkLandingFor } from "@/lib/anchored-link-data";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
+import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
+import EditLinkButton from "@/components/anchored-link/EditLinkButton";
 import styles from "./page.module.css";
 
 // docs/ANCHORED_LINKS.md, "The landing route" — the URL a minted link hands
@@ -78,7 +80,7 @@ export default async function AnchoredLinkPage({
     );
   }
 
-  const { link, createdBy, mintedAt } = landing;
+  const { link, createdBy, mintedAt, editedAt } = landing;
   if (!stay && link.groups.length === 1) {
     redirect(link.groups[0].href);
   }
@@ -97,9 +99,25 @@ export default async function AnchoredLinkPage({
       <p className={styles.meta}>
         {/* A Server Component: toLocaleDateString here is formatted once and
             shipped as a string (CLAUDE.md's Gotchas). */}
-        {mintedAt ? <>Shared by {createdBy.name ?? "someone"} on {mintedAt.toLocaleDateString()}. </> : <>Your draft link. </>}
+        {mintedAt ? (
+          <>
+            Shared by {createdBy.name ?? "someone"} on {mintedAt.toLocaleDateString()}
+            {editedAt && <>, edited {editedAt.toLocaleDateString()}</>}.{" "}
+          </>
+        ) : (
+          <>Your draft link. </>
+        )}
         Quotes are as captured when each passage was added.
       </p>
+      {/* docs/ANCHORED_LINKS.md, "Editing a minted link" — the creator's way
+          into the tray from here. The tray itself is mounted below, so a
+          reopened link is edited on this page too: remove, reorder, Done;
+          adding a passage means "Open in context" on one of the groups. */}
+      {link.canEdit && (
+        <p className={styles.edit}>
+          <EditLinkButton linkId={link.id} />
+        </p>
+      )}
       {docPair && (
         <p className={styles.sideBySide}>
           <Link href={docPair}>Open side by side</Link>
@@ -127,6 +145,7 @@ export default async function AnchoredLinkPage({
           </p>
         </section>
       ))}
+      <AnchoredLinkTray />
     </main>
   );
 }

@@ -41,6 +41,7 @@ import {
   SearchBox,
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
+import EditLinkButton from "@/components/anchored-link/EditLinkButton";
 import adminStyles from "@/components/table/AdminTable.module.css";
 import styles from "./LinksTable.module.css";
 
@@ -55,10 +56,14 @@ import styles from "./LinksTable.module.css";
 // the banner and the landing page omit it. That is also why Passages and
 // Targets carry no sortKey (src/lib/links-query.ts).
 //
-// The one action is Delete/Restore, a soft delete: a deleted link 404s for
+// Two actions. Delete/Restore is a soft delete: a deleted link 404s for
 // everyone who follows it until restored. Who may do it is decided per row on
 // the server (`canManage`, the /files shape) — its creator or ADMIN/EDITOR,
-// and never a draft, which is discarded from its tray instead.
+// and never a draft, which is discarded from its tray instead. Edit puts one
+// of the viewer's *own* minted links in their tray and takes them to its
+// excerpt page, where the tray is (docs/ANCHORED_LINKS.md, "Editing a minted
+// link"); `canEdit` is the creator-only gate, and the button itself knows
+// whether it may proceed right now (EditLinkButton).
 
 export type LinkRowTarget = {
   kind: "doc" | "file";
@@ -75,14 +80,20 @@ export type LinkRow = {
   createdAt: Date;
   /** Null for the viewer's own open draft — the only draft this table ever lists. */
   mintedAt: Date | null;
+  /** A minted link back in its creator's tray — only ever the viewer's own, since nobody else's tray is listed. */
+  reopened: boolean;
+  /** When a minted link's parts last changed; null until its first edit. */
+  editedAt: Date | null;
   /** Readable target groups in first-part order; empty when the viewer may read none. */
   targets: LinkRowTarget[];
   deletedAt: Date | null;
   deleted: boolean;
   canManage: boolean;
+  /** The viewer created it, it is minted, and it is not deleted. */
+  canEdit: boolean;
 };
 
-const SORTABLE_KEYS = ["createdBy", "created", "minted", "id", "deletedAt", "deleted"] as const;
+const SORTABLE_KEYS = ["createdBy", "created", "minted", "edited", "id", "deletedAt", "deleted"] as const;
 
 // The tray shows ~60 characters of a part; a table cell has a little more
 // room but not a paragraph's worth.
@@ -204,8 +215,25 @@ export default function LinksTable({
       nowrap: true,
       // "Minted" is the feature's own word for the moment Copy link turns a
       // draft into a URL (docs/ANCHORED_LINKS.md). A blank here would read as
-      // missing data; it is a state.
-      cell: (row) => (row.mintedAt ? formatDate(row.mintedAt, "yyyy-MM-dd HH:mm") : <em>draft</em>),
+      // missing data; it is a state — and so is "editing", a minted link the
+      // viewer has back in their tray.
+      cell: (row) =>
+        row.mintedAt ? (
+          <>
+            {formatDate(row.mintedAt, "yyyy-MM-dd HH:mm")}
+            {row.reopened && <em> · editing</em>}
+          </>
+        ) : (
+          <em>draft</em>
+        ),
+    },
+    {
+      key: "edited",
+      header: "Edited at",
+      sortKey: "edited",
+      nowrap: true,
+      defaultHidden: true,
+      cell: (row) => (row.editedAt ? formatDate(row.editedAt, "yyyy-MM-dd HH:mm") : ""),
     },
     {
       key: "id",
@@ -223,6 +251,16 @@ export default function LinksTable({
       nowrap: true,
       defaultHidden: true,
       cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, "yyyy-MM-dd HH:mm") : ""),
+    },
+    {
+      key: "edit",
+      header: "Edit",
+      // Creator-only, so most rows are blank for most viewers; the button
+      // decides its own enabled/blocked/open state from the open-link store.
+      cell: (row) =>
+        row.canEdit ? (
+          <EditLinkButton linkId={row.id} onOpened={() => router.push(`/link/${row.id}?noredirect=1`)} />
+        ) : null,
     },
     {
       key: "deleted",
@@ -369,9 +407,13 @@ export default function LinksTable({
             order rows the way a given viewer sees them. Passages links to the link&apos;s excerpt page (
             <code>/link/&lt;id&gt;?noredirect=1</code>); each target opens in context with its passages highlighted.{" "}
             <strong>Minted at</strong> is blank-as-<em>draft</em> only for your own open draft, which this table lists
-            but cannot delete — discard it from its tray. Deleting a minted link is a soft delete by its creator or
-            an ADMIN/EDITOR (docs/PERMISSIONS.md): the URL stops resolving for everyone until the link is restored.{" "}
-            <strong>Id</strong> and <strong>Deleted at</strong> are hidden by default (Columns picker, above).
+            but cannot delete — discard it from its tray — and reads <em>editing</em> beside the date while one of
+            your minted links is back in your tray. <strong>Edit</strong> is offered on your own minted links only:
+            it opens the link in your tray and takes you to its excerpt page; while a draft with passages is open the
+            button waits, and says so. <strong>Edited at</strong> is when a minted link&apos;s passages last changed.
+            Deleting a minted link is a soft delete by its creator or an ADMIN/EDITOR (docs/PERMISSIONS.md): the URL
+            stops resolving for everyone until the link is restored. <strong>Id</strong>, <strong>Edited at</strong>{" "}
+            and <strong>Deleted at</strong> are hidden by default (Columns picker, above).
           </p>
         }
       />

@@ -19,6 +19,11 @@
   font-size: 0.9rem;
 }
 
+/* The creator's Edit affordance, under the meta line. */
+.edit {
+  margin-top: 0.75rem;
+}
+
 .empty {
   margin-top: 1.5rem;
   color: var(--text-muted);

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
+import EditLinkButton from "./EditLinkButton";
 import styles from "./AnchoredLinkBanner.module.css";
 
 // docs/ANCHORED_LINKS.md — what a ?sel= page shows about the link it landed
@@ -17,6 +18,9 @@ import styles from "./AnchoredLinkBanner.module.css";
 // (anchoredLinkForViewer): whatever `link.groups` holds is what this viewer
 // may see, and an omitted group is acknowledged nowhere — this component
 // renders what it is handed and adds no second check, TagChips' stance.
+// The same goes for `link.canEdit`: the creator's Edit affordance shows
+// because the server said so, and whether it may proceed right now is the
+// affordance's own question (EditLinkButton).
 //
 // A part whose range no longer resolves is still *listed* (the quote is a
 // real column and still reads), it is just painted nowhere — so its jump
@@ -89,6 +93,7 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
         <Link className={styles.excerptsLink} href={`/link/${link.id}?noredirect=1`}>
           View as excerpts
         </Link>
+        {link.canEdit && <EditLinkButton linkId={link.id} />}
         <button
           type="button"
           className={styles.dismiss}

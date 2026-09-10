@@ -291,9 +291,10 @@
   outline-offset: -1px;
 }
 
-/* A part of the viewer's own *draft* link — the same outline, dashed, the
-   doc side's dashed underline in this surface's vocabulary. Painted only
-   for its creator: the draft is session-scoped (draft-link-store.ts). */
+/* A part of the viewer's own *open* link (a draft, or a minted link reopened
+   for editing) — the same outline, dashed, the doc side's dashed underline in
+   this surface's vocabulary. Painted only for its creator: the open link is
+   session-scoped (open-link-store.ts). */
 :global(.annoRect.annoRectLink.annoRectDraftLink) {
   outline-style: dashed;
 }

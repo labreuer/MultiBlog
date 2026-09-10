@@ -1,5 +1,6 @@
-/* docs/ANCHORED_LINKS.md — the draft-link tray: a fixed bottom-right island
-   on both reading surfaces. Fixed positioning is the point — it stays out
+/* docs/ANCHORED_LINKS.md — the tray for the viewer's open link (a draft,
+   or a minted link reopened for editing): a fixed bottom-right island on
+   both reading surfaces and the landing route. Fixed positioning is the point — it stays out
    of both pages' layout math (the doc page's margin-notes grid, the PDF
    viewer's own chrome) and reads as "your working set follows you". */
 
@@ -45,9 +46,29 @@
 }
 
 .partRow {
+  position: relative;
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
+}
+
+/* Reorder is a drag by the grip or the text — both wear the hand — and the
+   rule below says where the row would land. touch-action: none on the two
+   handles so a touch drag is a drag, not a scroll; user-select: none on the
+   text so it is a handle rather than a selection start. */
+.grip {
+  align-self: center;
+  display: inline-flex;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.grip:disabled {
+  cursor: default;
 }
 
 .partText {
@@ -57,6 +78,42 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-secondary);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.dragging {
+  opacity: 0.5;
+}
+
+/* While a row is held the whole tray shows the closed hand, whichever
+   element the pointer happens to be over. */
+.trayDragging,
+.trayDragging * {
+  cursor: grabbing;
+}
+
+/* The drop indicator — an <hr> in spirit: a rule in the gap between rows,
+   before the row the held part would precede, or after the last one. */
+.dropBefore::before,
+.dropAfter::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--link);
+  pointer-events: none;
+}
+
+.dropBefore::before {
+  top: -3px;
+}
+
+.dropAfter::after {
+  bottom: -3px;
 }
 
 .partLabel {
@@ -98,6 +155,15 @@
   border-color: var(--border);
   color: var(--text-muted);
   cursor: default;
+}
+
+/* A reopened link's way to its excerpt page — the same quiet text style as
+   Discard/Done, minus the right-alignment those keep. */
+.view {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  padding: 3px 0;
 }
 
 .discard {

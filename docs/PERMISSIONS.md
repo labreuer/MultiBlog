@@ -311,6 +311,8 @@ read gate, and nothing else.
 |---|---|---|---|---|---|---|
 | Add a passage you may read to your draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
 | See / edit / mint / discard **your own** draft | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Reopen, add to, remove from, reorder **your own** minted link (live; never to zero passages) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
+| Edit **someone else's** minted link, whatever the role | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | See **someone else's** unminted draft | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Follow a minted link (per readable target) | ✅ | ✅ | ✅ | ✅ | ❌* | ❌ |
 | Browse `/links` (your own links, plus minted links with a target you may read) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
@@ -327,6 +329,16 @@ that is the design, not an accident.
 † The action permits it (`canUserDeleteAnchoredLink` has no role floor for the creator,
 matching `addAnchoredLinkPart`), but `/links` is `canManageDocs`-gated like every admin
 listing, so an AUTHORIZED user has no surface from which to invoke it today.
+
+**Editing a minted link is the creator's alone, and live** (docs/ANCHORED_LINKS.md, "Editing
+a minted link"). Reopening puts the link back in its creator's tray — one open link per
+creator, draft or reopened, by the partial unique index — and every add, remove and reorder
+lands on the row recipients are already following; nothing is staged, and the URL never stops
+resolving. There is no moderator arm, unlike delete: the tray is per creator, and a passage
+added by anyone else would put *their* reading into the creator's link. Two rules keep live
+editing honest: a minted link never drops to zero passages (the last remove is refused, with
+"delete the link instead"), and a soft delete closes any edit in progress. Adding a passage
+still wears the target's own read gate, exactly as for a draft.
 
 **`/links` lists by readability, and its cells filter per target.** A row is a link the
 viewer created (their own draft included) or a minted link *some* anchor of which points
@@ -419,6 +431,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Anchored-link landing (per-viewer redirect; existence vs. empty page) | `src/app/link/[id]/page.tsx`, `anchoredLinkLandingFor` in `src/lib/anchored-link-data.ts` |
 | Anchored-link create/draft/mint (read-the-target, creator-scoped) | `src/app/actions/anchored-links.ts` |
 | Anchored-link delete/restore (creator or ADMIN/EDITOR; never a draft) | `src/lib/anchored-link-authz.ts`, applied in `src/app/actions/anchored-links.ts` |
+| Anchored-link edit (creator-only reopen/close; add/remove/reorder on the open link; last-part rule) | `src/app/actions/anchored-links.ts`; the Edit affordance's four states in `src/lib/anchored-link-editing.ts` |
 | `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |

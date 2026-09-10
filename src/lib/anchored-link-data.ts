@@ -50,6 +50,14 @@ export type AnchoredLinkTargetGroup = {
 
 export type AnchoredLinkView = {
   id: string;
+  /**
+   * This viewer created the link and it is minted — the Edit affordance's
+   * gate (docs/ANCHORED_LINKS.md, "Editing a minted link"), decided here
+   * beside the per-target filter so the banner renders what it is handed
+   * and checks nothing itself. Whether Edit may *proceed* right now is the
+   * open-link store's question, not this one's.
+   */
+  canEdit: boolean;
   groups: AnchoredLinkTargetGroup[];
 };
 
@@ -143,7 +151,9 @@ export async function anchoredLinkForViewer(
     )
   ).filter((group) => group !== null);
 
-  return groups.length > 0 ? { id: link.id, groups } : null;
+  return groups.length > 0
+    ? { id: link.id, canEdit: link.createdById === viewer.id && link.mintedAt !== null, groups }
+    : null;
 }
 
 // docs/ANCHORED_LINKS.md, "The landing route" — what /link/[id] needs beyond
@@ -164,6 +174,8 @@ export type AnchoredLinkLanding =
       createdBy: { name: string | null };
       /** Null only for the creator's own draft, which the landing route also serves. */
       mintedAt: Date | null;
+      /** When a minted link's parts last changed; null until its first edit. */
+      editedAt: Date | null;
     };
 
 export async function anchoredLinkLandingFor(
@@ -175,6 +187,7 @@ export async function anchoredLinkLandingFor(
     select: {
       createdById: true,
       mintedAt: true,
+      editedAt: true,
       deletedAt: true,
       createdBy: { select: { name: true } },
     },
@@ -183,5 +196,5 @@ export async function anchoredLinkLandingFor(
   if (!row.mintedAt && row.createdById !== viewer.id) return { status: "not-found" };
   const link = await anchoredLinkForViewer(linkId, viewer);
   if (!link) return { status: "nothing-readable" };
-  return { status: "ok", link, createdBy: row.createdBy, mintedAt: row.mintedAt };
+  return { status: "ok", link, createdBy: row.createdBy, mintedAt: row.mintedAt, editedAt: row.editedAt };
 }

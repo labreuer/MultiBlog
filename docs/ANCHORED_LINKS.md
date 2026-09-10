@@ -1,10 +1,11 @@
 # Anchored links — a URL for a set of passages across docs and PDFs
 
-**Status: built** (2026-08-31). This file began as the implementation plan and is
-rewritten as-built per the house convention — "Deviations from the plan" below records
-where the build differs from what was designed; the plan text itself lives in this file's
-git history (first commit of the `anchored-links` branch). UI sketch, drawn in
-`globals.css`'s own tokens: [docs/Anchored_Links.html](Anchored_Links.html).
+**Status: built** (2026-08-31; editing a minted link since 2026-09-08). This file began as
+the implementation plan and is rewritten as-built per the house convention — "Deviations
+from the plan" below records where the build differs from what was designed; the plan text
+itself lives in this file's git history (first commit of the `anchored-links` branch). UI
+sketch, drawn in `globals.css`'s own tokens: [docs/Anchored_Links.html](Anchored_Links.html)
+— its "immutable in v1" note predates editing.
 
 ## What an anchored link is
 
@@ -40,11 +41,11 @@ govern everything else:
   which cannot hold across pages) never applies; each anchor row carries its own
   `ydocUpdateId`, and the server row *is* the tray's cross-page persistence.
 - **Both links a page can be showing are painted**: the one being *followed* (`?sel=`,
-  delivered as initial server props) and the one being *assembled* (the viewer's own
-  draft, fetched client-side). They share the highlight and differ in the underline —
-  solid vs. dashed; "Painting a draft" below. The draft started tray-only, as text; the
-  reason it isn't is that adding a part to a passage you are looking at and seeing
-  nothing happen to it reads as a failure.
+  delivered as initial server props) and the one that is *open* (the viewer's own draft,
+  or a minted link they have reopened to edit — fetched client-side). They share the
+  highlight and differ in the underline — solid vs. dashed; "Painting a draft" below. The
+  draft started tray-only, as text; the reason it isn't is that adding a part to a
+  passage you are looking at and seeing nothing happen to it reads as a failure.
 
 Origins: `b5fa049` was cherry-picked clean from the `part-anchors` branch (the
 one-writer-per-anchor-field refactor: `deriveDocRangeSelector`, `captureAnchorInYdoc`
@@ -60,7 +61,10 @@ Two models after the tag block in `prisma/schema.prisma`, migration
 `20260831200826_add_anchored_links`:
 
 - **`anchored_link`** — id (cuid, the URL id), `created_by_id`, `created_at`,
-  `minted_at` (null = the creator's open draft), soft-delete pair. Like
+  `minted_at` (null = the creator's open draft), `reopened_at` (a minted link back in its
+  creator's tray — "Editing a minted link" below; migration
+  `20260908210830_reopen_anchored_links`), `edited_at` (when a minted link's parts last
+  changed; null until its first edit), soft-delete pair. Like
   `TagAssignment`, deliberately outside `prisma.ts`'s soft-delete `$extends` (read
   through anchor includes, which the extension cannot reach); `deletedAt` filters by hand.
 - **`anchored_link_anchor`** — the §20b row shape verbatim under `link_id`
@@ -76,12 +80,19 @@ Hand-appended DDL (the `add_tags` convention — Prisma has no CHECK or partial-
   Unlike `tag_anchor`, every row this table's writer produces has the group non-null: a
   selector-less anchored-link anchor would be a link to a whole object, which is what an
   ordinary href already is.
-- **`anchored_link_one_draft_per_user`** — a partial unique index on `(created_by_id)
-  WHERE minted_at IS NULL AND deleted_at IS NULL`. This is what makes `loadMyDraftLink` a
-  definite article and the get-or-create race a catchable P2002; minting frees the slot,
-  which is the whole lifecycle. `scripts/integrity/check-tag-constraints.ts` probes all
-  three, in both directions for the index (a second open draft must be refused; a second
-  link for a user whose first is *minted* must go in — the WHERE clause is the feature).
+- **`anchored_link_one_open_per_user`** — a partial unique index on `(created_by_id)
+  WHERE (minted_at IS NULL OR reopened_at IS NOT NULL) AND deleted_at IS NULL`: one link
+  in the tray per creator, a draft or a reopened minted one. This is what makes
+  `loadMyOpenLink` a definite article and the get-or-create race a catchable P2002;
+  minting and Done both free the slot, which is the whole lifecycle. It replaced
+  `anchored_link_one_draft_per_user`, whose predicate was the draft half of this one.
+- **`anchored_link_reopened_only_when_minted_check`** — `reopened_at IS NULL OR minted_at
+  IS NOT NULL`. A draft is open by being unminted and never carries the column, so "open"
+  stays one predicate rather than two columns that could disagree.
+  `scripts/integrity/check-tag-constraints.ts` probes all four, in both directions for the
+  index (a second open draft must be refused, and so must a reopened link beside a draft; a
+  second link for a user whose first is *minted* must go in, and so must a reopened link
+  once the slot is free — the WHERE clause is the feature).
 
 The v1 writer produces only `doc_id`+`DOC_RANGE` and `file_id`+`PDF_TEXT` rows;
 `post_id`/`target_annotation_id`/`anchored_event_id` ship inert on `tag_anchor`'s
@@ -98,7 +109,9 @@ predicate (`canUserReadDoc` / `canUserReadFile`; the doc/file lookups ride the s
 `$extends`, so a deleted target simply comes back null). Groups keep the order their first
 part appears in; hrefs carry `?sel=` — **doc by id** (docs have no slug history;
 rename-proof beats pretty), file by slug. No group surviving returns null and callers
-behave as if `?sel=` were absent. The returned view is BigInt-free by design (stamps
+behave as if `?sel=` were absent. The view carries `canEdit` (this viewer is the creator
+and the link is minted), the Edit affordance's gate, decided here beside the filter so the
+banner renders what it is handed. The returned view is BigInt-free by design (stamps
 omitted): it crosses into client props on both surfaces.
 
 `anchoredLinkLandingFor(linkId, viewer)` is the landing route's read on top of it: the
@@ -171,7 +184,8 @@ kind.
 
 ## Painting a draft
 
-The passages already in the viewer's draft are drawn on whichever surface they belong
+The passages already in the viewer's open link — the draft, or a minted link reopened for
+editing ("Editing a minted link" below) — are drawn on whichever surface they belong
 to, so "Add to link" visibly does something to the passage it was invoked on. **Same
 highlight as a followed link's, dashed underline instead of solid** (doc:
 `anchored-link-draft-highlight` over the base class, `border-bottom-style: dashed`; PDF:
@@ -182,12 +196,12 @@ composing annotation — one vocabulary for "not committed yet" across the surfa
 second dash pattern to be learned separately. The two stay distinguishable by colour (the
 composing author's own vs. `--link`) and by wash, which is what they already differ in.
 
-- **Only its creator ever sees it.** `loadMyDraftLink` is session-scoped, so there is no
+- **Only its creator ever sees it.** `loadMyOpenLink` is session-scoped, so there is no
   other viewer's draft to leak and nothing here re-checks anything (`TagChips`' stance).
 - **Delivery is client-side, and had to be.** Adding a part revalidates nothing on
   purpose (above), so a server prop would paint one navigation late.
-  `src/components/anchored-link/draft-link-store.ts` is **one** module-scope copy of the
-  draft shared by every consumer: it subscribes to the tray-events channel on the first
+  `src/components/anchored-link/open-link-store.ts` is **one** module-scope copy of the
+  open link shared by every consumer: it subscribes to the tray-events channel on the first
   mount, re-reads on each notify, and hands the same answer to the tray's text list and
   to each surface's highlights — a store rather than a hook per consumer because the
   consumers have no common React ancestor to hang a context off (the PDF page's surface
@@ -201,14 +215,15 @@ composing author's own vs. `--link`) and by wash, which is what they already dif
 - **The PDF surface keeps draft regions in a second list**, not merged into `linkParts`:
   that list also decides the on-load `?sel=` jump, and a draft part must never hijack
   where a followed link lands.
-- `loadMyDraftLink` therefore returns each part's target, offsets and selector, not just
+- `loadMyOpenLink` therefore returns each part's target, offsets and selector, not just
   its label and quote — still BigInt-free (no `ydocUpdateId`), the same rule
   `anchoredLinkForViewer` follows for the same reason.
 
 ## Server actions — `src/app/actions/anchored-links.ts`
 
-`loadMyDraftLink` / `addAnchoredLinkPart` / `removeAnchoredLinkPart` / `discardDraftLink`
-/ `mintAnchoredLink`. The load-bearing rules:
+`loadMyOpenLink` / `addAnchoredLinkPart` / `removeAnchoredLinkPart` /
+`reorderAnchoredLinkParts` / `discardDraftLink` / `mintAnchoredLink` /
+`openAnchoredLinkForEditing` / `closeAnchoredLinkEdit`. The load-bearing rules:
 
 - **Create-permission is read-the-target** — signed in plus `canUserReadDoc`/
   `canUserReadFile`, the annotate precedent, no role floor of its own (docs/PERMISSIONS.md
@@ -223,8 +238,10 @@ composing author's own vs. `--link`) and by wash, which is what they already dif
 - PDF part: `capturePdfTextAnchor` → `{fileId, PDF_TEXT, selector: target, quotedText}`,
   null offsets/stamp (the `KNOWN_RESIDUALS` shape `check-tag-constraints` names as
   intended).
-- `partOrder` = current count at add time; remove is draft-owner-only hard delete with no
-  renumbering; discard hard-deletes the draft (cascade). `mintAnchoredLink` requires ≥1
+- `partOrder` = current count at add time; remove is a hard delete on the viewer's open
+  link with no renumbering (and, on a minted link, never of the last part); reorder
+  renumbers the whole set 0..n-1 in a transaction and refuses a set that no longer matches
+  the row; discard hard-deletes the draft (cascade). `mintAnchoredLink` requires ≥1
   part, refuses to mint when no part's target still exists (a link that would land
   nowhere), stamps `mintedAt`, and returns `appUrl(/link/<id>)`. Which target a recipient
   lands on is the landing route's question, answered per viewer at follow time — it used
@@ -263,7 +280,10 @@ offers **"Open side by side"** (`/side-by-side/<a>/<b>` — both passed the pred
 route gates on), hidden by CSS below the 900px width where §14f's layout stacks; that
 surface does not yet paint link parts ("Explicitly deferred"). The signed-out redirect
 carries `?noredirect=` through `signInPath`, so signing in returns to the page asked for
-rather than the redirect it declined; `check:sign-in` covers the gate like any other.
+rather than the redirect it declined; `check:sign-in` covers the gate like any other. The
+creator sees an **Edit link** button under the meta line and the tray is mounted on this
+page ("Editing a minted link" below); once a minted link's parts have changed the meta
+line reads ", edited <date>" after the share date.
 
 **Doc follow** (`src/app/doc/[slug]/page.tsx`): reads `searchParams.sel` after the gate,
 outside the `gated` memo (it keys on arguments and `generateMetadata` already ran it).
@@ -304,16 +324,23 @@ stops rendering the stale message. Both paths post immediately, clear the select
 `notifyAnchoredLinkChanged()`.
 
 **The tray** (`src/components/anchored-link/AnchoredLinkTray.tsx`,
-`data-testid="anchored-link-tray"`): a fixed bottom-right island both pages mount as a
-**self-fetching sibling** (doc: end of `<main>`; pdf: sibling of `PdfSurfaceClient`,
-outside the `ssr:false` boundary). Reads the shared draft store — which fetches on the
-first consumer's mount and on every notify — rather than owning the fetch itself, so the
-list and the surface's highlights can never disagree about what is in the draft; renders
-nothing without a draft or with an empty one. Part list (label +
-~60-char snippet, per-part ✕), **Copy link** (mint → clipboard → "Link copied" note with
-the recipients-see-only-what-they-may-read sentence → tray clears; a clipboard-permission
-failure still mints and shows the URL as text), **Discard**. Fixed positioning keeps it
-out of both pages' layout math.
+`data-testid="anchored-link-tray"`, `data-mode="draft"|"editing"`): a fixed bottom-right
+island both reading pages and the landing route mount as a **self-fetching sibling** (doc:
+end of `<main>`; pdf: sibling of `PdfSurfaceClient`, outside the `ssr:false` boundary).
+Reads the shared open-link store — which fetches on the first consumer's mount and on
+every notify — rather than owning the fetch itself, so the list and the surface's
+highlights can never disagree about what is open; renders nothing without an open link or
+with an empty draft. Part list (a grip, label + ~60-char snippet, per-part ✕), then the
+mode's buttons. **Reorder is a drag** by the grip or the text — both show the hand, and a
+rule between rows marks the slot the held row would drop into; pointer events rather than
+HTML5 drag-and-drop, which iOS never delivers for touch, and no library for a handful of
+rows. The grip takes the arrow keys, so the keyboard kept what the up/down buttons gave it.
+A draft: **Copy link** (mint →
+clipboard → "Link copied" note with the recipients-see-only-what-they-may-read sentence →
+tray clears; a clipboard-permission failure still mints and shows the URL as text) and
+**Discard**. A reopened link: **Copy link** (the URL it has had all along — no mint; an
+inline "Link copied." note), **View** (the excerpt page) and **Done**. Fixed positioning
+keeps it out of every page's layout math.
 
 **The management table** (`src/app/links/page.tsx`, `src/components/LinksTable.tsx`,
 `src/lib/links-query.ts`; `"links"` in `AdminTableName`, `RESERVED_SLUGS` and the
@@ -331,8 +358,10 @@ PDF's passages alone — no count, no placeholder, the banner's rule. The free-t
 bounded by the same clause, or `?q=` would be a probe into quotes the viewer cannot see.
 Columns: Passages (readable parts' count, linking to `/link/<id>?noredirect=1`, with each
 quote as a snippet beneath), Targets (kind + title, each carrying `?sel=`), Created by,
-Created at, Minted at (*draft* for the viewer's own open one), Id and Deleted at (both
-default-hidden), and the delete/restore control. **Passages and Targets carry no sort
+Created at, Minted at (*draft* for the viewer's own open one; *· editing* beside the date
+for their own reopened one), Edited at (default-hidden; null until a minted link's first
+edit), Id and Deleted at (both default-hidden), Edit (the creator's own minted rows only —
+"Editing a minted link" below), and the delete/restore control. **Passages and Targets carry no sort
 key** — they are per-viewer values, and nothing Postgres could `ORDER BY` (a view has no
 viewer) matches what the cell shows; `/annotations`' Quote is the precedent. Deep links
 `?user=`, `?doc=`, `?file=`. No ADMIN "Show all": an override here would widen which
@@ -350,13 +379,87 @@ link has one creator, so ALL and EXACTLY collapse into ANY and the Match select 
 rendered (`AuthorFilterPanel` takes `mode` as optional for this). If links ever gain
 co-owners, the mode comes back with the relation.
 
-Its one action is a **soft delete of a minted link** — `deleteAnchoredLink` /
+Its delete is a **soft delete of a minted link** — `deleteAnchoredLink` /
 `restoreAnchoredLink` and their bulk pair in `src/app/actions/anchored-links.ts`, gated by
 `canUserDeleteAnchoredLink` (`src/lib/anchored-link-authz.ts`): the creator or
 ADMIN/EDITOR, never a draft (a draft is discarded from its tray, and a restorable
 soft-deleted draft could later collide with the one-open-draft partial index). The anchors
 stay; `anchoredLinkForViewer` reads `deletedAt`, so a deleted link 404s for everyone until
-restored. docs/PERMISSIONS.md carries the rows.
+restored. Deleting also clears `reopened_at`, closing an edit in progress, so a restore can
+never collide with the one-open index. docs/PERMISSIONS.md carries the rows.
+
+## Editing a minted link
+
+Since 2026-09-08 a minted link is editable by its creator: reopen it into the tray, add,
+remove and reorder passages, Done. The decisions, each recorded because the obvious
+alternative was considered:
+
+- **In place, and live.** The URL is the row id and recipients keep it, so every add,
+  remove and reorder lands on the row they are following the moment it happens — exactly
+  as "Add to link" already posts each draft part. Staged edits (a copy of the part rows
+  and a swap on Save) were rejected: a second row set for parts that cost one click to add
+  back, and a Save button whose only job is to make a wayfinding pointer atomic.
+- **The tray is the editor.** A reopened link shows in the tray with the same part list
+  and controls as a draft; only the title and the buttons differ ("The tray" above). One
+  editing surface: the landing page mounts the tray too, so remove/reorder/Done work from
+  the excerpt page, and adding a passage means "Open in context" onto a reading view.
+- **`reopened_at`, not a nulled `minted_at`.** Nulling `minted_at` to reopen would make
+  the row indistinguishable from a never-shared draft, and every reader treats one as
+  such: the follow read hides it from everyone but its creator (the URL goes dark for the
+  duration), Discard hard-deletes it, the delete guard refuses it, a re-mint restamps the
+  share date, and the last-part rule below would not apply. Each is patchable by asking
+  "a real draft, or a reopened link?", which needs a second bit on the row — and once
+  there is one, `minted_at` keeps meaning "shared since" and the bit means "in the tray".
+  A draft never carries it (the CHECK), so "open" is one predicate, `minted_at IS NULL OR
+  reopened_at IS NOT NULL`, which the partial unique index and `openLinkWhere` both spell.
+- **One open link per creator, draft or reopened**, by that index. Opening a minted link
+  while an *empty* draft is open discards the draft (it is the row removing a draft's last
+  part leaves behind, with nothing in it to finish); while a draft *with passages* is open
+  it refuses, with the same sentence the Edit button shows beside itself; while another
+  minted link is mid-edit it closes that one, whose edits were live anyway.
+- **The creator's alone.** No moderator arm, unlike delete: the tray is per creator, and a
+  passage added by anyone else would put *their* reading into the creator's link.
+  docs/PERMISSIONS.md has the rows. Adding still wears the target's read gate.
+- **Never to zero passages.** Removing a minted link's last part is refused ("delete the
+  link instead"): a shared URL that resolves to nothing is what delete is for, and the
+  landing route would otherwise render its "no passages" page for a link that used to
+  have one. Count-then-delete, so it runs in a transaction holding the link row. A draft's
+  last part still comes out, leaving the empty row as before.
+- **A soft delete closes the edit** (`reopened_at` cleared with `deleted_at` set): the
+  index ignores deleted rows, so a restore of a still-reopened link could otherwise collide
+  with whatever the creator opened since.
+- **`edited_at`** is stamped on every add, remove and reorder of a minted link, never of
+  a draft. The landing page's meta line reads ", edited <date>" and `/links` sorts on it
+  (hidden by default — most links are never edited).
+
+**The Edit affordance** (`src/components/anchored-link/EditLinkButton.tsx`, one component
+mounted in the banner, under the landing page's meta line, and in a `/links` row) decides
+its state from the open-link store, never from the server (`editAffordance`,
+`src/lib/anchored-link-editing.ts`, unit-tested): the moment the tray's Copy link or
+Discard finishes, every Edit button on the page re-derives itself from the same store the
+tray re-rendered from. Four states — nothing until the store has answered (a button that
+rendered off `null` before the fetch returned would flash enabled and then grey out);
+"Edit link" when nothing is open, an empty draft is, or another minted link is mid-edit;
+"Open in your tray" when this link is the open one (Done lives in the tray); and
+*disabled with the reason as visible text* when a draft with passages is open — text
+rather than a tooltip, because a disabled button takes no hover or focus and a title never
+shows on a phone. The reason is the exported string the server refuses with, so the two
+cannot drift. Whether the affordance renders at all is the server's `canEdit` on the
+follow view and the landing loader (creator and minted), decided beside the per-target
+filter so the banner and landing page render what they are handed.
+
+**Paint while editing** — when the open link is the followed one, the same anchor id
+reaches a surface twice, as a followed part and an open one. The doc side keeps both:
+one segment carries both classes (the dashed rule wins the underline, the honest reading)
+and *both* data attributes, so the banner's jump, which queries the followed-link one,
+keeps working. The PDF side draws once, dashed — two outlines on one set of quads would
+read as solid whichever was on top — which is safe because its jump is target-based and
+needs no region.
+
+**Logging out mid-draft** changes nothing: the draft (or reopened link) is a server row,
+and the next page that mounts the tray shows it again. Nothing on the dashboard says it
+exists; the disabled Edit button's hint is the one place a forgotten draft announces itself
+away from a reading page.
 
 ## Navigation is a mount boundary
 
@@ -411,6 +514,20 @@ hard refresh. Two stacked defects, both fixed, both load-bearing:
   AUTHOR's draft listing as *draft* with the control off and invisible to the admin; and the
   querystring surviving the sign-in redirect. `e2e/admin-table.spec.ts`'s two every-table
   loops include `/links`.
+- `e2e/anchored-link-editing.spec.ts`, five tests, every creator a throwaway (the one-open
+  slot): the round trip — Edit from the excerpt page, "Open in context", a part added
+  through the popover onto the reopened link, reorder, remove, Done, then the admin follows
+  the same URL into the doc and the banner lists the new set with no Edit anywhere and the
+  excerpt page reads "edited"; the blocked state — a fixture draft with passages disables
+  Edit with the hint, Discard in the same page's tray enables it with no reload, the last
+  part of a shared link refuses, Copy link copies without minting, and a delete/restore
+  from `/links` closes the edit; `/links`' Edit — an empty fixture draft gives way, the
+  row reads *editing* and the admin's row has no Edit; the PDF surface — a link minted
+  through the UI from a PDF part, Edit from the banner inside the `ssr:false` island, the
+  followed region drawn once and dashed while open (the dedupe: `.annoRectLink` stays at
+  one), a second PDF part added, and Done returning it to solid; and the give-way arm — a
+  fixture-`reopened` link A yields to Edit on link B (ready, not blocked), after which A's
+  page offers Edit afresh and `/links` reads *editing* on B alone.
 - Integrity, by the one-walk-per-invariant rule: `check-annotation-anchors.ts`'s
   part-anchor walk is now parameterised over both tables (`tag_anchor`,
   `anchored_link_anchor`) and replays DOC_RANGE parts at their stamps;
@@ -469,13 +586,19 @@ Everything unmentioned went in as written. Where the build differs:
   Engelbart's Augment viewspecs (a link may carry its own arrival mode — `?noredirect=1`
   is the one such flag here).
 
+- **A minted link is editable (2026-09-08)**, reversing both the plan's "no editing after
+  mint" and the sketch's "a mistake is answered by making a fresh link". "Editing a minted
+  link" above has the shape; one column (`reopened_at`, plus `edited_at` for the record)
+  is the whole schema cost, and the one-draft index became the one-open index.
+
 ## Explicitly deferred
 
 Post targets (`POST_RANGE` has no selector kind), annotation-body targets (arc ready,
 writer refuses), multi-page PDF selections (capture is start-page-only today), part roles
-(MULTI_ANCHORING: these parts are homogeneous), drift persistence, editing a link after
-mint, link labels. (The `/links` table and minted-link deletion, deferred here until
-2026-09-08, are built — "The management table" above.)
+(MULTI_ANCHORING: these parts are homogeneous), drift persistence, link labels (the
+editing tray is where a label field would live — one nullable column). (The `/links`
+table, minted-link deletion and editing after mint, all deferred here until 2026-09-08,
+are built — "The management table" and "Editing a minted link" above.)
 
 Deferred by the landing route specifically:
 

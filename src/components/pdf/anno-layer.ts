@@ -43,9 +43,10 @@ export type AnnoLayerEntry = {
   // straight through a link region above it, and a link-only region does
   // nothing on click; the ?sel= banner is its affordance.
   //
-  // `draft-link` is the same region for a part of the viewer's own unminted
-  // link: the same outline, dashed, mirroring the doc side's dashed
-  // underline. Both are link regions in every other respect.
+  // `draft-link` is the same region for a part of the viewer's own *open*
+  // link — a draft, or a minted link reopened for editing: the same outline,
+  // dashed, mirroring the doc side's dashed underline. Both are link regions
+  // in every other respect.
   variant?: "link" | "draft-link";
 };
 

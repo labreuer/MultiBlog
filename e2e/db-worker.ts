@@ -1463,13 +1463,19 @@ export async function createTestAnchoredLink(opts: {
   creatorEmail: string;
   parts: { docId: string; from: number; to: number }[];
   minted?: boolean;
+  /** A minted link already back in its creator's tray (docs/ANCHORED_LINKS.md, "Editing a minted link"). */
+  reopened?: boolean;
 }): Promise<TestAnchoredLink> {
-  const { creatorEmail, parts, minted = true } = opts;
+  const { creatorEmail, parts, minted = true, reopened = false } = opts;
   assertSafe(creatorEmail);
+  if (reopened && !minted) throw new Error("Only a minted link can be reopened — a draft is open by being unminted.");
   const creator = await prisma.user.findUniqueOrThrow({ where: { email: creatorEmail } });
 
+  // A draft or a reopened link takes the creator's one-open slot
+  // (anchored_link_one_open_per_user), so a test wanting either should use
+  // a throwaway creator rather than the shared admin.
   const link = await prisma.anchoredLink.create({
-    data: { createdById: creator.id, mintedAt: minted ? new Date() : null },
+    data: { createdById: creator.id, mintedAt: minted ? new Date() : null, reopenedAt: reopened ? new Date() : null },
     select: { id: true },
   });
 
