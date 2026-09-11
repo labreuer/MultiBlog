@@ -1,6 +1,6 @@
 import type { Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageFiles, canViewFiles } from "@/lib/role-checks";
 
 export { canManageFiles, canViewFiles } from "@/lib/role-checks";
@@ -64,12 +64,23 @@ export async function canUserReadFile(
   return isFileOwner(file.id, userId);
 }
 
-/** Managing: rename, re-slug, change visibility/owners, delete. */
+/**
+ * Managing: rename, re-slug, change visibility/owners, delete — and restore.
+ *
+ * **prismaIncludingDeleted, because restoring is a manage action on a row that
+ * is by definition soft-deleted.** Through the filtered client this question
+ * answered "no such file" for every deleted row, so /files offered a Restore
+ * button (its listing inlines this rule over rows it fetched *with* deleted
+ * ones) that then failed with "You don't have permission to manage this file."
+ * Ownership and visibility are what this decides; whether the row is live is
+ * the caller's business, and `requireManageableFile` was already looking it up
+ * unfiltered for exactly that reason.
+ */
 export async function canUserManageFile(userId: string, role: Role, fileId: string): Promise<boolean> {
   if (!canManageFiles(role)) {
     return false;
   }
-  const file = await prisma.storedFile.findUnique({
+  const file = await prismaIncludingDeleted.storedFile.findUnique({
     where: { id: fileId },
     select: { visibility: true, owners: { where: { userId }, select: { userId: true } } },
   });

@@ -115,6 +115,10 @@ export default function FilesTable({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Set when a restore had to rename the file — see setFileDeleted. Not an
+  // error: the restore worked, and this is the only place the changed url is
+  // said out loud (the Url column shows the new one without saying it is new).
+  const [notice, setNotice] = useState<string | null>(null);
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
@@ -269,11 +273,15 @@ export default function FilesTable({
 
   function handleDeleteToggle(row: FileRow) {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
       try {
         await runWithStatus(row.id, async () => {
           if (row.deleted) {
-            await restoreFile(row.id);
+            const { slug, renamedFrom } = await restoreFile(row.id);
+            if (renamedFrom) {
+              setNotice(`“${renamedFrom}” now belongs to another file — restored as “${slug}”.`);
+            }
           } else {
             await deleteFile(row.id);
             revealRow(row);
@@ -352,6 +360,7 @@ export default function FilesTable({
         </table>
       </div>
       <CellError message={error} />
+      <CellError message={notice} tone="notice" />
 
       <PaginationBar
         totalCount={totalCount}

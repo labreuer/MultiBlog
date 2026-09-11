@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserManageFile } from "@/lib/file-authz";
-import { changeFileSlug, revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
+import { changeFileSlug, freeFileSlugFor, revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
 import { DocVisibility } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
@@ -75,23 +75,52 @@ export async function revertFileSlug(fileId: string): Promise<{ slug: string }> 
   return { slug };
 }
 
-async function setFileDeleted(fileId: string, deleted: boolean): Promise<void> {
-  const { session } = await requireManageableFile(fileId);
-  await prismaIncludingDeleted.storedFile.update({
-    where: { id: fileId },
-    data: deleted
-      ? { deletedByUserId: session.user.id, deletedAt: new Date(), updatedByUserId: session.user.id }
-      : { deletedByUserId: null, deletedAt: null, updatedByUserId: session.user.id },
+/**
+ * Soft-deletes or restores, and — on the way back — settles the slug.
+ *
+ * Deleting a file releases its url (`file_slug_live_key` is unique only among
+ * live files, src/lib/file-slug.ts), which is the point: the reason to delete a
+ * PDF is usually to upload a corrected copy of it, and that copy should be able
+ * to have the name. The other side of that bargain is here. If the url has been
+ * taken by the time someone restores, the restored file is **renamed** —
+ * `report` comes back as `report-2` — rather than refused. Refusing would leave
+ * an admin holding a row they cannot get back without first renaming a file
+ * they may not even have permission to touch, and the only thing the rename
+ * costs is a url that already belongs to something else.
+ *
+ * `renamedFrom` is how the caller is told; FilesTable shows it as a notice. A
+ * bulk restore drops it (settleBulk keeps only success or failure per row) and
+ * lets the refreshed Url column tell that story instead.
+ */
+async function setFileDeleted(fileId: string, deleted: boolean): Promise<{ slug: string; renamedFrom: string | null }> {
+  const { session, file } = await requireManageableFile(fileId);
+  if (deleted) {
+    await prismaIncludingDeleted.storedFile.update({
+      where: { id: fileId },
+      data: { deletedByUserId: session.user.id, deletedAt: new Date(), updatedByUserId: session.user.id },
+    });
+    revalidatePath("/files");
+    return { slug: file.slug, renamedFrom: null };
+  }
+
+  const slug = await prismaIncludingDeleted.$transaction(async (tx) => {
+    const claimed = await freeFileSlugFor(tx, fileId, file.slug);
+    await tx.storedFile.update({
+      where: { id: fileId },
+      data: { deletedByUserId: null, deletedAt: null, updatedByUserId: session.user.id, slug: claimed },
+    });
+    return claimed;
   });
   revalidatePath("/files");
+  return { slug, renamedFrom: slug === file.slug ? null : file.slug };
 }
 
 export async function deleteFile(fileId: string): Promise<void> {
   await setFileDeleted(fileId, true);
 }
 
-export async function restoreFile(fileId: string): Promise<void> {
-  await setFileDeleted(fileId, false);
+export async function restoreFile(fileId: string): Promise<{ slug: string; renamedFrom: string | null }> {
+  return setFileDeleted(fileId, false);
 }
 
 // Per-row rather than one transaction — see bulkDeletePosts for the rationale.

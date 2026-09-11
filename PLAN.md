@@ -6216,7 +6216,8 @@ must not be `File`, which would shadow the DOM/Node global that the upload code 
 
 ```
 model StoredFile {
-  id, slug @unique, title, filename, contentType, byteSize Int, sha256 String,
+  id, slug (unique among live files only — see "a deleted file releases its slug" below),
+  title, filename, contentType, byteSize Int, sha256 String,
   pageCount Int?, visibility DocVisibility @default(PRIVATE),
   createdAt, updatedAt, updatedByUserId, deletedByUserId, deletedAt
   owners FileOwner[]  slugHistory FileSlugHistory[]
@@ -6294,6 +6295,40 @@ Slug from the upload filename, via the existing `slugify` + `RESERVED_SLUGS` mac
 [src/lib/slug.ts](src/lib/slug.ts); `src/lib/file-slug.ts` mirrors
 [src/lib/doc-slug.ts](src/lib/doc-slug.ts) exactly (`uniqueFileSlug`, `changeFileSlug`,
 `revertFileSlug`, its own namespace, no catch-all against post/doc slugs).
+
+**As built (2026-09-10) — a deleted file releases its slug, and only files do.** The mirror
+of doc-slug.ts stops at one place: `file.slug` carries no `UNIQUE`, and
+`file_slug_live_key` is unique only `WHERE deleted_by_user_id IS NULL`
+(`20260911031651_file_slug_unique_when_live`). Uploading a PDF, noticing it carries embedded
+annotations, stripping them and re-uploading the corrected copy is an ordinary sequence, and
+one a deleted row squatting on `report` answers with `report-2` forever. That is the whole
+motivation; docs and posts keep their global `UNIQUE`, because recreating a doc under a
+deleted one's name is not a workflow they have.
+
+Three things follow, all of them in `src/lib/file-slug.ts` and `src/app/actions/files.ts`:
+
+- **"In use" means *live*, on both halves** — a deleted file's current slug and its past
+  ones. `fileSlugInUse` writes the `deletedByUserId: null` predicate out rather than
+  inheriting it from whichever client it was handed, because the two clients disagree
+  (`prisma` filters soft-deleted files, `prismaIncludingDeleted` doesn't). This was already
+  a live bug before the index: the upload route claims its slug through the *extended*
+  client's transaction, so it couldn't see the deleted squatter and the insert died with a
+  raw P2002 — a re-upload answered "Couldn't save that file", not `report-2`.
+- **Nothing may `findUnique` a file by slug**, since two deleted files may share one.
+  `resolveFileParam` is `findFirst` in a deliberate order: the live row, then a redirect into
+  a live file, then the most recently deleted namesake (so an admin's link to a deleted row
+  still resolves), then a redirect into a deleted one.
+- **A restore whose slug was taken renames rather than refuses** — `report` comes back as
+  `report-2`, reported to the caller as `renamedFrom` and shown as a notice under `/files`.
+  Refusing would strand an admin who cannot restore a row without first renaming a file they
+  may not be allowed to touch. `file_slug_history.slug` stays globally unique — the predicate
+  it would need lives on another table — so `changeFileSlug` clears a dead redirect (one
+  pointing into a deleted file) out of the way before recording a live file's old url.
+
+Found on the way: `canUserManageFile` asked the *filtered* client, so every soft-deleted file
+answered "no such file" and **no file could be restored at all** — /files offered the button
+(its listing inlines the same rule over rows it fetched unfiltered) and the action refused it.
+It reads the unfiltered client now; liveness is the caller's question, not this one's.
 
 #### Download route — `src/app/api/files/[id]/[hash]/route.ts`
 

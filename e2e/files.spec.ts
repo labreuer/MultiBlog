@@ -78,6 +78,53 @@ test.describe("files", () => {
     }
   });
 
+  // PLAN.md §19 — the slug half of a soft delete. Uploading a PDF, noticing it
+  // carries embedded annotations, stripping them and re-uploading is the
+  // sequence this exists for: `file_slug_live_key` is unique among live files
+  // only, so the replacement gets the url rather than `-2`. Both halves are
+  // here because the second is the price of the first — once the url can be
+  // taken, a restore has to cope with finding it gone.
+  test("a deleted file gives its url back, and restoring it takes the next one", async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, "/files");
+
+    const title = `E2E reclaim ${Date.now()}`;
+    const first = await uploadFile(page, `${title}.pdf`, buildTestPdf([[`${title} page one.`]]));
+    expect(first.status, first.body).toBe(200);
+    const original = JSON.parse(first.body) as { id: string; slug: string };
+    let replacement: { id: string; slug: string } | null = null;
+
+    try {
+      // ?deleted=1 so the row stays on screen after being deleted, and q so the
+      // only rows in the table are this test's own.
+      const listing = `/files?q=${encodeURIComponent(title)}&deleted=1`;
+      await gotoOk(page, listing);
+      const originalRow = page.getByRole("row").filter({ has: page.locator(`a[href="/pdf/${original.slug}"]`) });
+      await originalRow.getByRole("button", { name: "Delete file" }).click();
+      await expect(originalRow.getByRole("button", { name: "Restore file" })).toBeVisible();
+
+      const second = await uploadFile(page, `${title}.pdf`, buildTestPdf([[`${title} page one, corrected.`]]));
+      expect(second.status, second.body).toBe(200);
+      replacement = JSON.parse(second.body) as { id: string; slug: string };
+      // The whole point: same filename, same title, same url — not `-2`.
+      expect(replacement.slug).toBe(original.slug);
+
+      // From here the two rows share a slug, so the deleted one is identified
+      // by the button it offers rather than by its link.
+      await gotoOk(page, listing);
+      const deletedRow = page.getByRole("row").filter({ has: page.getByRole("button", { name: "Restore file" }) });
+      await deletedRow.getByRole("button", { name: "Restore file" }).click();
+
+      // Renamed rather than refused, and said out loud — the Url column alone
+      // would show the new slug without ever admitting it changed.
+      await expect(page.getByText(`restored as “${original.slug}-2”`)).toBeVisible();
+      await expect(page.locator(`a[href="/pdf/${original.slug}-2"]`)).toBeVisible();
+    } finally {
+      await deleteTestFile(original.id);
+      if (replacement) await deleteTestFile(replacement.id);
+    }
+  });
+
   test("rejects a file that passes the magic check but isn't parseable", async ({ page }) => {
     await signIn(page, ADMIN_EMAIL);
     await gotoOk(page, "/files");

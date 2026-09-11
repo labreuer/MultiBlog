@@ -192,6 +192,13 @@
   font-size: 0.8rem;
 }
 
+/* CellError's tone="notice": the same slot, for something that worked but
+   needs a word of explanation. */
+.cellNotice {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
 .bulkToolbar {
   display: flex;
   gap: 8px;
