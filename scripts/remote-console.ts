@@ -62,6 +62,27 @@
 //     registers a moment later. Expected, not a fault.
 //   - iOS suspends a backgrounded or locked tab, which looks exactly like a
 //     hang. Keep the tab foreground and set Auto-Lock to Never.
+//
+// **The same relay drives desktop Safari.app on this Mac, with no toolchain
+// and no permission grant** — measured 2026-09-14 (Safari 26.6.1, macOS
+// 14.8.9) for PR #31's "real Safari" check. e2e/MACOS.md has the full recipe,
+// the permission ladder and the traps; the short form:
+//   - Pin REMOTE_CONSOLE_TOKEN, start `dev:all` with REMOTE_CONSOLE_SRC in its
+//     *environment* rather than .env (nothing to un-edit afterwards), then
+//     `open -a Safari http://localhost:3000/...`. The page registers within a
+//     second, and the user's own session cookie is already in that jar.
+//   - A navigation kills the client (above) but not the tab: `osascript -e
+//     'tell application "Safari" to get URL of current tab of front window'`
+//     reads where it landed, and `bounds of front window` is the geometry
+//     native input needs. Evidence that must outlive the navigation goes in
+//     sessionStorage — same origin, same tab, and it survives.
+//   - To run code on the *next* page before it hydrates, issue the eval in a
+//     tight loop with `?timeout=250` right after the navigating one: the old
+//     page's poller drops on unload, the new page's synchronous <script> polls
+//     during parse, and the queued command runs at readyState=loading.
+//   - A real gesture — drag-select, click — is `cliclick` (brew) once the app
+//     hosting the session has Accessibility. Below that grant, dispatchEvent
+//     is all there is, and a synthetic selectionchange is not a gesture.
 import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { networkInterfaces } from "node:os";

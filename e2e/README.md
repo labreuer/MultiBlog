@@ -110,6 +110,13 @@ Playwright drives its own builds, so the native selection gestures an iPad uses
 are still unreproducible here. What WebKit shares is the JS engine, which is
 where those two bugs live.
 
+It is not desktop Safari either, and the gap is measurable rather than
+theoretical: the popover fix in the list below was written against a selection
+expansion that Playwright's WebKit build performs and Safari 26.6.1 does not.
+When a webkit finding needs confirming in the real thing, [MACOS.md](MACOS.md)
+has the recipe for driving Safari.app from a session — no WebDriver, and no
+permission grant for the read-only half.
+
 ### First-time setup
 
 ```bash
@@ -163,7 +170,8 @@ around, and five of them were live on chromium too:
 
 What the 92 + 8 turned into, each its own commit: a lost-update race in
 `useLiveDocContent`'s hoisted branch; a failed session fetch read as a dead
-session; a popover reopening over text WebKit re-selected under it; a suite
+session; a popover reopening over text Playwright's WebKit re-selected under
+it (Safari itself does not re-select — [MACOS.md](MACOS.md)); a suite
 that raced every `router.refresh()`; a clipboard read no engine but chromium
 allows; a pinch gesture nothing had ever tested; and Firefox serving post
 pages out of its own HTTP cache (CACHING.md, 2026-09-14).
