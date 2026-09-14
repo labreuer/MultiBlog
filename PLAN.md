@@ -6950,6 +6950,26 @@ takes `touch-action: pan-x pan-y` and never `none` — are docs/PDF.md §10c's, 
 there. The decision here is only *which* element the gesture belongs to: the document, not the
 page.
 
+**A mouse notch is one step of 10%, on every browser and every OS setting** (2026-09-14).
+The first version ran notch and pinch through one exponential and clamped it, so every notch
+in every browser landed on the clamp — 25% in, 20% out — and the constant meant as a guard
+had become the step size. There is no cross-browser *size* for a notch to normalise
+(docs/PDF.md §10c: Chrome's pixel count carries the OS lines-per-notch multiplier, Firefox's
+line count doesn't), so the decision is not to measure one: a delta big enough to be a physical
+notch is one tick, a tick is pdfjs's `DEFAULT_SCALE_DELTA` of 1.1, and only the sub-5-pixel
+band that is demonstrably a pinch keeps the curve. This is the parity pdf.js's own viewer has
+for line mode and never extended to pixel mode. Ctrl and ⌘ are both zoom modifiers
+(`wheelIsZoom`), ⌘ because Cmd-scroll is macOS's own page zoom. `WHEEL_SOFTNESS` was left at
+200 — Firefox's pinch encoding says 100 would track the fingers exactly, so it is a deliberate
+half-speed, to change by feel and not by arithmetic. Tested the same day on all three Playwright
+engines (chromium, firefox, webkit; dev and prod targets): a held-ctrl notch of 240, 100 or 53
+px, ⌘ in place of ctrl, dispatched line and page events, the 2 px pinch frame and the fractional
+carry all behave identically and the page zoom stays at 1 — docs/PDF.md §10c has the table. What
+no engine here could show: Playwright's Firefox sends pixels, so a real Gecko mouse's line-mode
+notch and the read-order shim rest on dispatched events and the getter unit test; macOS trackpad
+feel (`WHEEL_SOFTNESS`), ⌘ on a real Mac, and Windows' lines-per-notch setting are unverified,
+like the iOS half above.
+
 **The zoom dropdown had to become a readout as well as a control.** A gesture lands on any
 scale it likes, and a `<select>` whose value matches no option renders *blank* — so
 `scalechanging` now feeds it, and a non-preset scale gets an option of its own showing the

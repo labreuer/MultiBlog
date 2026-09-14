@@ -62,13 +62,111 @@ test.describe("pdf zoom gestures", () => {
     await expect.poll(() => currentScale(page)).toBeGreaterThan(before);
     expect(await pageZoom(page)).toBe(1);
 
-    // And back out again.
+    // One notch is one step of 10%, however many pixels the engine reported
+    // it as (Playwright sends 240 here; Chrome on Linux sends 53, Windows 100,
+    // Firefox three lines). pdfjs rounds the scale to a hundredth, hence the
+    // band. src/lib/pdf-zoom.ts, `readWheel`.
     const zoomedIn = await currentScale(page);
+    expect(zoomedIn / before).toBeGreaterThan(1.08);
+    expect(zoomedIn / before).toBeLessThan(1.12);
+
+    // And back out again.
     await page.keyboard.down("Control");
     await page.mouse.wheel(0, 240);
     await page.keyboard.up("Control");
     await expect.poll(() => currentScale(page)).toBeLessThan(zoomedIn);
     expect(await pageZoom(page)).toBe(1);
+  });
+
+  // The other modifier a Mac reader has. ⌘-wheel is Chrome's and Safari's own
+  // page zoom on macOS, so a handler that only watched `ctrlKey` would leave
+  // one of the two zoom gestures still resizing the whole site.
+  test("⌘-wheel zooms the document too, by the same step", async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, `/pdf/${file.slug}`);
+    await waitForViewer(page);
+    const before = await currentScale(page);
+
+    await page.mouse.move(400, 400);
+    await page.keyboard.down("Meta");
+    await page.mouse.wheel(0, -240);
+    await page.keyboard.up("Meta");
+
+    await expect.poll(() => currentScale(page)).toBeGreaterThan(before);
+    expect(await pageZoom(page)).toBe(1);
+    const zoomedIn = await currentScale(page);
+    expect(zoomedIn / before).toBeGreaterThan(1.08);
+    expect(zoomedIn / before).toBeLessThan(1.12);
+  });
+
+  // Every shape a wheel event arrives in, and what each is worth. Playwright's
+  // own `mouse.wheel` is pixel-mode in all three engines — its Firefox included,
+  // so a real Gecko mouse's *line*-mode notch (measured 2026-09-14, docs/PDF.md
+  // §10c) is only reachable by dispatching. These are untrusted events, so the
+  // page-zoom half is not in question here; what is being checked is the
+  // classification in `readWheel` and the carry in `createTickAccumulator`,
+  // against the engine's real WheelEvent rather than a plain object.
+  test("a notch is one step whatever unit it comes in, and small deltas add up", async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, `/pdf/${file.slug}`);
+    await waitForViewer(page);
+
+    /** The fields our handler reads; narrower than WheelEventInit so it survives `evaluate`'s serialisation types. */
+    type Wheel = { deltaY: number; deltaMode: number; ctrlKey?: boolean; metaKey?: boolean };
+    /** Dispatches one ctrl-wheel and returns scale-after over scale-before, once the frame has run. */
+    const ratio = async (init: Wheel) => {
+      const before = await currentScale(page);
+      await page.evaluate((init) => {
+        document
+          .querySelector("[data-pdf-container]")!
+          .dispatchEvent(new WheelEvent("wheel", { ...init, bubbles: true, cancelable: true, clientX: 400, clientY: 400 }));
+        // The handler coalesces into one requestAnimationFrame; two frames is
+        // past it, whether or not it changed anything.
+        return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      }, init);
+      return (await currentScale(page)) / before;
+    };
+    // pdfjs rounds the scale to a hundredth, hence bands rather than 1.1 and 1/1.1.
+    const oneStepIn = (r: number) => {
+      expect(r).toBeGreaterThan(1.08);
+      expect(r).toBeLessThan(1.12);
+    };
+    const oneStepOut = (r: number) => {
+      expect(r).toBeGreaterThan(0.89);
+      expect(r).toBeLessThan(0.93);
+    };
+
+    // One notch, in every unit and at every magnitude an engine reports it:
+    // Firefox's three lines, a page, Chrome on Linux (53), Windows at the
+    // default setting (100), Windows at six lines per notch (200), and a
+    // wheel that has been flicked (900).
+    oneStepIn(await ratio({ deltaY: -3, deltaMode: 1, ctrlKey: true }));
+    oneStepOut(await ratio({ deltaY: 3, deltaMode: 1, ctrlKey: true }));
+    oneStepIn(await ratio({ deltaY: -1, deltaMode: 2, ctrlKey: true }));
+    for (const px of [53, 100, 200, 900]) {
+      oneStepIn(await ratio({ deltaY: -px, deltaMode: 0, ctrlKey: true }));
+      oneStepOut(await ratio({ deltaY: px, deltaMode: 0, ctrlKey: true }));
+    }
+
+    // A trackpad pinch frame: a couple of pixels with no sideways component,
+    // on the continuous curve rather than a tick.
+    const pinch = await ratio({ deltaY: -2, deltaMode: 0, ctrlKey: true });
+    expect(pinch).toBeGreaterThan(1.0);
+    expect(pinch).toBeLessThan(1.03);
+
+    // The band between: fractional ticks that carry until they make a whole
+    // one. Three of 10px are a third each.
+    expect(await ratio({ deltaY: -10, deltaMode: 0, ctrlKey: true })).toBe(1);
+    expect(await ratio({ deltaY: -10, deltaMode: 0, ctrlKey: true })).toBe(1);
+    oneStepIn(await ratio({ deltaY: -10, deltaMode: 0, ctrlKey: true }));
+
+    // A reversal drops the carry: 0.7 of a tick in, then a whole notch out, is
+    // exactly one step out — not 0.3 of one.
+    expect(await ratio({ deltaY: -21, deltaMode: 0, ctrlKey: true })).toBe(1);
+    oneStepOut(await ratio({ deltaY: 100, deltaMode: 0, ctrlKey: true }));
+
+    // ⌘ counts the same as ctrl on the dispatched path too.
+    oneStepIn(await ratio({ deltaY: -100, deltaMode: 0, metaKey: true }));
   });
 
   test("an ordinary wheel still scrolls and does not zoom", async ({ page }) => {

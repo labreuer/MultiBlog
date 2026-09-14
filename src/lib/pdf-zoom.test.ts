@@ -3,50 +3,127 @@ import { test } from "node:test";
 import {
   MAX_STEP_IN,
   MAX_STEP_OUT,
+  WHEEL_TICK_FACTOR,
   clampScaleFactor,
+  createTickAccumulator,
   isNamedScale,
   pinchScaleFactor,
+  readWheel,
   refitScaleFactor,
+  tickScaleFactor,
   touchDistance,
   touchMidpoint,
-  wheelScaleFactor,
+  wheelIsZoom,
+  type WheelIntent,
 } from "./pdf-zoom";
 
 // PLAN.md §19d. Every one of these is a factor rather than a boolean, which is
 // the kind of wrong that ships: a gesture that zooms sixteen times too fast
 // still zooms, and reads as a bad feel rather than as a bug in a number.
 
-test("scrolling down zooms out, up zooms in", () => {
-  assert.ok(wheelScaleFactor(50, 0) < 1);
-  assert.ok(wheelScaleFactor(-50, 0) > 1);
+const wheel = (deltaY: number, deltaMode = 0, deltaX = 0): WheelIntent =>
+  readWheel({ deltaMode, deltaX, deltaY });
+
+test("ctrl and ⌘ both mean zoom; a bare wheel means scroll", () => {
+  assert.ok(wheelIsZoom({ ctrlKey: true, metaKey: false }));
+  assert.ok(wheelIsZoom({ ctrlKey: false, metaKey: true }));
+  assert.ok(!wheelIsZoom({ ctrlKey: false, metaKey: false }));
 });
 
-test("a mouse notch is clamped to one step, not the exponential's answer", () => {
-  // exp(-100/200) is about 0.61 — a jump of several zoom levels for one notch.
-  assert.equal(wheelScaleFactor(100, 0), MAX_STEP_OUT);
-  assert.equal(wheelScaleFactor(-100, 0), MAX_STEP_IN);
-  assert.equal(wheelScaleFactor(240, 0), MAX_STEP_OUT);
+test("one notch is one tick, whatever the engine and the OS made of it", () => {
+  // Chrome on Windows, Chrome on Linux, Chrome on Windows set to six lines
+  // per notch, Windows set to scroll by pages, Firefox's three lines, and a
+  // Firefox page-mode event: all the same single step.
+  for (const event of [wheel(100), wheel(53), wheel(200), wheel(900), wheel(3, 1), wheel(1, 2)]) {
+    assert.deepEqual(event, { kind: "ticks", ticks: -1 });
+  }
+  assert.deepEqual(wheel(-100), { kind: "ticks", ticks: 1 });
+  assert.deepEqual(wheel(-3, 1), { kind: "ticks", ticks: 1 });
 });
 
-test("a trackpad pinch's small deltas pass through the curve untouched", () => {
-  const factor = wheelScaleFactor(2, 0);
-  assert.ok(factor > MAX_STEP_OUT && factor < 1, `expected a gentle zoom out, got ${factor}`);
-  assert.ok(Math.abs(factor - Math.exp(-0.01)) < 1e-12);
+test("a tick is pdfjs's own step, in both directions", () => {
+  assert.equal(tickScaleFactor(1), WHEEL_TICK_FACTOR);
+  assert.ok(Math.abs(tickScaleFactor(-1) - 1 / WHEEL_TICK_FACTOR) < 1e-12);
+  assert.ok(Math.abs(tickScaleFactor(2) - WHEEL_TICK_FACTOR ** 2) < 1e-12);
+  assert.equal(tickScaleFactor(0), 1);
+  assert.equal(tickScaleFactor(Number.NaN), 1);
+  // Nowhere near the clamp: the clamp is for the continuous paths.
+  assert.ok(tickScaleFactor(1) < MAX_STEP_IN);
+  assert.ok(tickScaleFactor(-1) > MAX_STEP_OUT);
 });
 
-test("Firefox's line-mode deltas are converted, not read raw", () => {
-  // Three lines is a notch. Read raw it would be exp(-3/200) — a 1.5% nudge
-  // where Chrome moves 20%, which reads as the gesture being broken in Firefox.
-  assert.equal(wheelScaleFactor(3, 1), MAX_STEP_OUT);
-  assert.equal(wheelScaleFactor(1, 2), MAX_STEP_OUT);
-  // Small line deltas still land inside the clamp rather than pinning to it.
-  assert.ok(wheelScaleFactor(0.25, 1) > MAX_STEP_OUT);
+test("a trackpad pinch's small deltas take the curve, not a step", () => {
+  const intent = wheel(2);
+  assert.equal(intent.kind, "pinch");
+  if (intent.kind !== "pinch") return;
+  assert.ok(intent.factor > MAX_STEP_OUT && intent.factor < 1, `expected a gentle zoom out, got ${intent.factor}`);
+  assert.ok(Math.abs(intent.factor - Math.exp(-0.01)) < 1e-12);
+  const zoomIn = wheel(-2);
+  assert.ok(zoomIn.kind === "pinch" && zoomIn.factor > 1);
 });
 
-test("a zero or nonsense delta changes nothing", () => {
-  assert.equal(wheelScaleFactor(0, 0), 1);
-  assert.equal(wheelScaleFactor(Number.NaN, 0), 1);
-  assert.equal(wheelScaleFactor(Number.POSITIVE_INFINITY, 0), 1);
+test("a small delta with a horizontal component is a ctrl-scroll, not a pinch", () => {
+  // A pinch has no deltaX; a two-finger scroll with ctrl held usually does.
+  assert.deepEqual(wheel(2, 0, 1), { kind: "ticks", ticks: -2 / 30 });
+});
+
+test("the band between pinch and notch is fractional ticks at pdf.js's rate", () => {
+  assert.deepEqual(wheel(15), { kind: "ticks", ticks: -0.5 });
+  assert.deepEqual(wheel(-30), { kind: "ticks", ticks: 1 });
+  assert.deepEqual(wheel(0.25, 1), { kind: "ticks", ticks: -0.25 });
+});
+
+test("deltaMode is read before deltaY — Firefox switches modes on the other order", () => {
+  const reads: string[] = [];
+  const event = {
+    get deltaMode() {
+      reads.push("deltaMode");
+      return 1;
+    },
+    get deltaX() {
+      reads.push("deltaX");
+      return 0;
+    },
+    get deltaY() {
+      reads.push("deltaY");
+      return 3;
+    },
+  };
+  readWheel(event);
+  assert.equal(reads[0], "deltaMode");
+  assert.ok(reads.indexOf("deltaMode") < reads.indexOf("deltaY"));
+});
+
+test("a zero or nonsense delta is nothing", () => {
+  assert.deepEqual(wheel(0), { kind: "none" });
+  assert.deepEqual(wheel(Number.NaN), { kind: "none" });
+  assert.deepEqual(wheel(Number.POSITIVE_INFINITY), { kind: "none" });
+});
+
+test("the accumulator carries fractions forward and hands back whole ticks", () => {
+  const accumulate = createTickAccumulator();
+  assert.equal(accumulate(0.4), 0);
+  assert.equal(accumulate(0.4), 0);
+  assert.equal(accumulate(0.4), 1); // 1.2 → one tick, 0.2 carried
+  assert.equal(accumulate(0.8), 1); // 1.0 → one tick, nothing carried
+  assert.equal(accumulate(0.5), 0);
+});
+
+test("the accumulator drops the carry when the direction reverses", () => {
+  const accumulate = createTickAccumulator();
+  assert.equal(accumulate(0.7), 0);
+  assert.equal(accumulate(-1), -1); // not -0.3 rounded to nothing
+  assert.equal(accumulate(-0.6), 0);
+  assert.equal(accumulate(-0.6), -1);
+});
+
+test("a whole notch through the accumulator is exactly one tick, carry or no carry", () => {
+  const accumulate = createTickAccumulator();
+  assert.equal(accumulate(0.7), 0);
+  assert.equal(accumulate(1), 1); // 1.7 → 1, and the 0.7 stays banked
+  assert.equal(accumulate(0.3), 1);
+  assert.equal(accumulate(Number.NaN), 0);
+  assert.equal(accumulate(0), 0);
 });
 
 test("a pinch compares against the previous move, and is clamped the same way", () => {

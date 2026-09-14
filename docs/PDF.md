@@ -763,10 +763,43 @@ looks for touches will never see a MacBook or a Windows precision trackpad at al
 `metaKey` the same way: Cmd-scroll is macOS's own page zoom, and the document takes it for the
 same reason it takes the pinch.
 
-**`deltaMode` is not always pixels.** Firefox reports wheel deltas in *lines* (`1`); Chrome and
-Safari in pixels (`0`). Read raw, a gesture tuned in Chrome moves about sixteen times too
-little in Firefox — which reads as the feature not working rather than as a scale being wrong.
-`wheelScaleFactor` converts (`src/lib/pdf-zoom.ts`).
+**A wheel notch has no cross-browser size, so don't measure it — count it.** Chrome and Safari
+report pixels (`deltaMode` 0): a notch is 100 on Windows *multiplied by the OS "lines per notch"
+setting*, about 53 on Linux, a whole screen if Windows is set to scroll by pages, and a few
+accelerated pixels for a macOS mouse. Firefox reports lines (`1`): a notch is 3, whatever the OS
+setting. Any pixels-per-tick divisor therefore makes one notch worth one, three or thirty steps
+depending on the machine — the shape of mozilla/pdf.js#16325, which pdf.js has left open for
+Chrome since 2023 (its own viewer counts one tick per event in line mode and divides by 30 in
+pixel mode). `readWheel` (`src/lib/pdf-zoom.ts`) instead treats any pixel delta of 40 or more,
+and any line or page event, as **one notch = one tick = ×1.1**, pdfjs's own step. Below about 5
+pixels with no `deltaX` is a trackpad pinch and takes the exponential; the band between is
+fractional ticks, carried forward by `createTickAccumulator`.
+
+**Read `deltaMode` before `deltaX`/`deltaY`, always.** Since Firefox 88, a wheel event whose
+deltas are read first silently switches itself to pixel mode with the lines converted — a
+compatibility shim for pages that assume pixels (Bugzilla 1392460). Reading the deltas inside a
+single call's argument list (`f(event.deltaY, event.deltaMode)`) is enough to trigger it, which is
+why `readWheel` takes the event and reads the mode first, and why a unit test asserts the order
+with getters. pdf.js hit this exact regression in Firefox 96 (mozilla/pdf.js#14476).
+
+**What Playwright actually delivers, measured** (2026-09-14, Playwright 1.62 on Fedora 44:
+chromium 1234, firefox 1538, webkit 2336; one `mouse.wheel` per row, read on
+`[data-pdf-container]` with `deltaMode` first). All three engines agreed on every row:
+
+| sent | arrives as | document scale | page zoom |
+|---|---|---|---|
+| `mouse.wheel(0, -240)`, Control held | mode 0, `deltaY` −240, `ctrlKey` | ×1.10 | unchanged |
+| `mouse.wheel(0, -100)` / `(0, -53)`, Control held | mode 0, −100 / −53 | ×1.10 | unchanged |
+| `mouse.wheel(0, -3)`, Control held | mode 0, −3 | ×1.016 (pinch curve) | unchanged |
+| `mouse.wheel(0, -240)`, Meta held | mode 0, −240, `metaKey` | ×1.10 | unchanged |
+| dispatched `WheelEvent` 3 lines / 1 page / 53 px, `ctrlKey` | as sent | ×1.10 per event | n/a (untrusted) |
+| dispatched −15 px twice, `ctrlKey` | mode 0 | ×1, then ×1.10 | n/a |
+
+The finding in that table is the first column: **Playwright's Firefox sends pixels too**, so no
+run of the suite exercises Gecko's line-mode notch or the read-order shim — the line branch is
+covered by dispatched events in `e2e/pdf-zoom.spec.ts` and the read order by the getter unit test,
+and a real Gecko mouse remains unmeasured on this change. The ratios read ×1.096–1.102 rather
+than 1.1 exactly because pdfjs rounds the scale to a hundredth.
 
 **`preventDefault` needs a non-passive listener.** `{ passive: true }` (or the default, for
 `wheel`/`touchmove`, in every current engine) silently ignores the call, so the document zooms

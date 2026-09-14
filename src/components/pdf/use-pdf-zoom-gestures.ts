@@ -3,10 +3,13 @@
 import { useEffect, type RefObject } from "react";
 import {
   clampScaleFactor,
+  createTickAccumulator,
   pinchScaleFactor,
+  readWheel,
+  tickScaleFactor,
   touchDistance,
   touchMidpoint,
-  wheelScaleFactor,
+  wheelIsZoom,
 } from "@/lib/pdf-zoom";
 import type { PdfViewerHandle } from "./PdfViewer";
 
@@ -88,14 +91,25 @@ export function usePdfZoomGestures(handleRef: RefObject<PdfViewerHandle | null>,
       if (!frame) frame = requestAnimationFrame(applyQueued);
     };
 
-    // ---- ctrl-wheel, and every trackpad pinch ------------------------------
+    // ---- ctrl-wheel and ⌘-wheel, and every trackpad pinch -------------------
+    //
+    // `readWheel` decides what the event *is* — a pinch frame, or some number
+    // of notches — and reads the event's properties in the order that keeps
+    // Firefox honest (src/lib/pdf-zoom.ts). A notch is one tick, on every
+    // engine and whatever the OS multiplied the delta by; fractional ticks
+    // from fine-grained devices are carried until they make a whole one.
+    const accumulateTicks = createTickAccumulator();
     const onWheel = (event: WheelEvent) => {
-      // `metaKey` as well as `ctrlKey`: on macOS, Cmd-scroll is the browser's
-      // own page zoom, so leaving it alone would mean one of the two zoom
-      // gestures a Mac reader has still resizing the whole site.
-      if (!event.ctrlKey && !event.metaKey) return;
+      if (!wheelIsZoom(event)) return;
       event.preventDefault();
-      zoomBy(wheelScaleFactor(event.deltaY, event.deltaMode), [event.clientX, event.clientY]);
+      const intent = readWheel(event);
+      const origin: [number, number] = [event.clientX, event.clientY];
+      if (intent.kind === "pinch") {
+        zoomBy(intent.factor, origin);
+      } else if (intent.kind === "ticks") {
+        const whole = accumulateTicks(intent.ticks);
+        if (whole !== 0) zoomBy(tickScaleFactor(whole), origin);
+      }
     };
 
     // ---- Safari's gesture events ------------------------------------------
