@@ -151,32 +151,43 @@ it would have told you something true. `webkitLaunchEnv()` is the whole rule.
 ### Where each engine stands
 
 Measured 2026-09-14 on the Ryzen 9 9950X / Fedora 44 box, prod target, 8
-workers, servers warm:
+workers, servers warm. The middle column is what the engines *found* — every
+one of these was a defect or a wrong assumption, not an engine quirk to route
+around, and five of them were live on chromium too:
 
-| project | passed | failed | wall |
+| project | now | at first run | wall |
 |---|---|---|---|
-| chromium | 260 | 0 | 76 s |
-| firefox | 242 | 8 | 96 s |
-| webkit | 237 | 13 | 135 s |
+| chromium | 261 / 0 | 258 / 2 | 61–76 s |
+| firefox | 250 / 1 | 242 / 8 | 78–96 s |
+| webkit | 250 / 0 | 158 / 92 | 85–135 s |
 
-**A red in firefox or webkit is not a release blocker** the way a chromium one
-is — it is a finding to triage. The classes standing as of that run:
+What the 92 + 8 turned into, each its own commit: a lost-update race in
+`useLiveDocContent`'s hoisted branch; a failed session fetch read as a dead
+session; a popover reopening over text WebKit re-selected under it; a suite
+that raced every `router.refresh()`; a clipboard read no engine but chromium
+allows; a pinch gesture nothing had ever tested; and Firefox serving post
+pages out of its own HTTP cache (CACHING.md, 2026-09-14).
 
-- **Clipboard, webkit ×6.** `navigator.clipboard` from `page.evaluate` throws
-  `NotAllowedError`: WebKit ties clipboard access to a user gesture and has no
-  permission to grant instead (`grantClipboard` already skips the grant there,
-  which is a different problem — the grant itself threw "Unknown permission").
-  The tests need a real click, or a different way to read what Copy wrote.
-- **Collab readiness, webkit ×3.** `[data-testid="live-doc-synced"]` never
-  attaches on one side-by-side column inside 10 s.
-- **Popover/menu state, webkit ×3, and one missing link-bubble icon.**
-- **Synthetic pinch, webkit ×1.** `TypeError: Illegal constructor` — the touch
-  event the test builds cannot be constructed in WebKit.
-- **ISR/cache timing, firefox ×5** (landing, moderation, publish): content
-  read one revalidation behind.
-- **Navigation races, firefox ×2 (`NS_BINDING_ABORTED`), webkit ×1** — the
-  editor's own redirect, the same *shape* as the sign-in one below but not the
-  same cause.
+**A red in firefox or webkit is still not a release blocker** the way a
+chromium one is — it is a finding to triage. Two are known and open:
+
+- **`session-refresh.spec.ts:82` on firefox**, roughly one run in three, and
+  three times in ten when repeated against itself. Prod target only: 10 of 10
+  green against the dev target. Established at the moment of failure — the
+  session endpoint answers `role: "ADMIN"`, the header's own text contains
+  `Users`, and the element is there the instant the assertion gives up — so
+  the app is right and the locator is what cannot see it, with Playwright's
+  call log reporting a navigation still in flight. Not the goto retry (it
+  fails with retries disabled), not slowness (20 s fails the same way), not
+  worker count alone (it survives at 4).
+- **Scatter at 8 workers on firefox**, a different unrelated spec each run,
+  all passing alone. The documented too-many-workers signature — the
+  `MEASURED` table in playwright.config.ts was built against chromium, and no
+  equivalent matrix has been run for the other two engines.
+
+The globe-icon assertion in `link-bubble.spec.ts` is skipped on webkit, and
+the touch-pinch test in `pdf-zoom.spec.ts` where `Touch` isn't constructible;
+both say why at the call site.
 
 ### The sign-in race, and the app behaviour behind it
 

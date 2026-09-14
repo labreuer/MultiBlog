@@ -237,7 +237,13 @@ function retryInterruptedNavigations(page: Page): void {
           return await navigate(...args);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          if (attempt === 3 || !INTERRUPTED.some((needle) => message.includes(needle))) throw error;
+          if (attempt === 4 || !INTERRUPTED.some((needle) => message.includes(needle))) throw error;
+          // Let the navigation that won finish before asking again. Retrying
+          // immediately lands back inside the same window — firefox lost a
+          // reload three times running that way, under load, after an
+          // in-place admin-table save (links.spec). Escalating, so a slow
+          // refresh is given room rather than met with three quick misses.
+          await page.waitForTimeout(250 * attempt);
         }
       }
     };

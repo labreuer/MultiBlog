@@ -38,6 +38,9 @@
 /dev-all.log
 /e2e.log
 /e2e-results.json
+# ...and the per-project ones, from `--reporter=list,json` runs of a single
+# browser project. Same thing, one file per engine.
+/*-results.json
 
 # debug
 npm-debug.log*
