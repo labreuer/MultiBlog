@@ -212,8 +212,38 @@ async function signedInContext(browser: Browser, email: string): Promise<Page> {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   await recordClipboardWrites(context);
   const page = await context.newPage();
+  retryInterruptedNavigations(page);
   await signIn(page, email);
   return page;
+}
+
+/**
+ * Playwright's own words for "the page navigated somewhere on its own while
+ * your goto was in flight", per engine.
+ */
+const INTERRUPTED = ["interrupted by another navigation", "NS_BINDING_ABORTED"];
+
+/**
+ * Replaces `page.goto` and `page.reload` with the retrying versions described
+ * on the fixture. Both, because a reload is interrupted by exactly the same
+ * thing — firefox reported one as NS_BINDING_ABORTED with goto already
+ * covered.
+ */
+function retryInterruptedNavigations(page: Page): void {
+  const retry = <A extends unknown[], R>(navigate: (...args: A) => Promise<R>) => {
+    return async (...args: A): Promise<R> => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await navigate(...args);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (attempt === 3 || !INTERRUPTED.some((needle) => message.includes(needle))) throw error;
+        }
+      }
+    };
+  };
+  page.goto = retry(page.goto.bind(page));
+  page.reload = retry(page.reload.bind(page));
 }
 
 export const test = base.extend<Fixtures>({
@@ -221,6 +251,33 @@ export const test = base.extend<Fixtures>({
   context: async ({ context }, use) => {
     await recordClipboardWrites(context);
     await use(context);
+  },
+
+  /**
+   * `page.goto` retries when the page navigated out from under it.
+   *
+   * A server action that ends in `router.refresh()` — publishing a post, the
+   * session refresh on /dashboard — leaves the page with a navigation of its
+   * own still to make after the status text a test waits on has already
+   * appeared. A `goto` issued in that window is aborted: WebKit says
+   * "interrupted by another navigation", Gecko says NS_BINDING_ABORTED, and
+   * chromium quietly tolerates it, which is why the suite only ever saw this
+   * as an occasional flake.
+   *
+   * Retrying is the honest response — the navigation was not refused, it was
+   * beaten to it, and the page we asked for is still the page we want. The
+   * alternative, a wait at every call site after every refreshing action, is
+   * the one that has already failed three times: the failure mode of
+   * forgetting it is a red test that reads exactly like an app bug.
+   *
+   * Bounded at three attempts, so a page that really does keep navigating
+   * elsewhere (a client-side redirect the test did not expect) still reports
+   * it, just three times slower. Anything that is not an interruption throws
+   * on the spot.
+   */
+  page: async ({ page }, use) => {
+    retryInterruptedNavigations(page);
+    await use(page);
   },
 
   // Depending on `page` is deliberate, and the reason for the about:blank:
