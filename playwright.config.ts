@@ -9,6 +9,18 @@ import { defineConfig, devices } from "@playwright/test";
 // see scripts/dev-ports.ts for what a slot is and why DEV_HOST matters as
 // much as the numbers do.
 import { COLLAB_PORT, E2E_WEB_PORT, WEB_PORT, webUrl } from "./scripts/dev-ports";
+import { webkitLaunchEnv } from "./scripts/webkit-libs";
+
+// WebKit's fallback Ubuntu build wants two libraries no Fedora package
+// provides, staged into `.playwright-libs/` by `npm run setup:webkit-libs`.
+// Mutating the environment here rather than in scripts/e2e.ts is what makes
+// `npx playwright test --project=webkit` and `npm run e2e:ui` work too: the
+// config is loaded before any browser is launched, and Playwright's own
+// pre-flight `ldd` check reads LD_LIBRARY_PATH from this same process.
+// Guarded on E2E_WEBKIT so no other project's browser is launched against a
+// different ICU than the system one — and a no-op on a host that doesn't need
+// it. scripts/webkit-libs.ts has the why, including for the skip flag.
+if (process.env.E2E_WEBKIT) Object.assign(process.env, webkitLaunchEnv());
 
 // Two targets (docs/playwright-flakiness.html):
 //
@@ -49,6 +61,11 @@ const PROD = process.env.E2E_TARGET === "prod";
  *                                      wall) with the slowest test at 6.7 s; 16 is no
  *                                      quicker and its tail (p95 5.3 s, slowest 8.9 s)
  *                                      closes on the 10 s expect budget.
+ *   Firefox, same box                  15-run prod matrix (2026-09-14) over {2, 4, 6, 8, 10}:
+ *                                      8 as well — 77 s against 86 s at 6 and 73 s at 10, and
+ *                                      the red rate did not move with the count (2 of 3 from 4
+ *                                      up, every red a specific fault). One table serves both
+ *                                      engines; docs/playwright-flakiness.html has the rows.
  */
 const MEASURED: ReadonlyArray<{ cores: number; workers: number }> = [
   { cores: 12, workers: 2 },
@@ -213,10 +230,12 @@ export default defineConfig({
     // regressions in our own logic, not Gecko's. Same reasoning as
     // chromium-dark's testMatch above. Run it with:
     //
-    //   E2E_FIREFOX=1 npx playwright test --project=firefox
+    //   npm run e2e:firefox            (or: npm run e2e -- --project=firefox)
     //
-    // The flag alone is not enough — without the env var the project does
-    // not exist and Playwright errors with "Project(s) 'firefox' not found".
+    // scripts/e2e.ts sets E2E_FIREFOX from the `--project` it was handed, so
+    // the flag is enough. Driving `npx playwright test` directly bypasses that
+    // and needs `E2E_FIREFOX=1` in front, or the project does not exist and
+    // Playwright errors with "Project(s) 'firefox' not found".
     ...(process.env.E2E_FIREFOX
       ? [
           {
@@ -250,10 +269,20 @@ export default defineConfig({
     // e2e/pdf-webkit-gaps.spec.ts, which simulates each gap in chromium and so
     // runs everywhere — this project is a bonus, not the guard.
     //
+    // **On Fedora it needs two libraries staged first.** Playwright has no
+    // Fedora WebKit build and falls back to the Ubuntu 24.04 one, which links
+    // against an ICU and a libjpeg ABI that Fedora ships at no version —
+    // `npm run setup:webkit-libs` stages them, and scripts/webkit-libs.ts has
+    // the full account, including the one package that does need `dnf`.
+    //
     // Gated behind E2E_WEBKIT for the same reason as firefox above: a project
     // in this list runs on every bare `playwright test`. Run it with:
     //
-    //   E2E_WEBKIT=1 npx playwright test --project=webkit
+    //   npm run e2e:webkit             (or: npm run e2e -- --project=webkit)
+    //
+    // Same caveat as firefox: `npx playwright test --project=webkit` directly
+    // needs `E2E_WEBKIT=1` in front, since it is scripts/e2e.ts that derives
+    // the variable from the flag.
     //
     ...(process.env.E2E_WEBKIT
       ? [

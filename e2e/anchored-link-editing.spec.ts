@@ -1,4 +1,4 @@
-import { test, expect, gotoOk, selectTextInBody, bodyEditor, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
+import { test, expect, gotoOk, copiedText, grantClipboard, selectTextInBody, bodyEditor, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   createTestAnchoredLink,
   createTestDoc,
@@ -196,7 +196,7 @@ test.describe("editing an anchored link", () => {
       minted: false,
     });
     try {
-      await creatorPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await grantClipboard(creatorPage.context());
       await gotoOk(creatorPage, `/link/${link.id}?noredirect=1`);
       const edit = creatorPage.getByTestId("edit-link");
       const editButton = edit.getByRole("button", { name: "Edit link" });
@@ -225,7 +225,7 @@ test.describe("editing an anchored link", () => {
       // no mint, and the tray stays.
       await tray.getByRole("button", { name: "Copy link" }).click();
       await expect(tray).toContainText("Link copied.");
-      expect(await creatorPage.evaluate(() => navigator.clipboard.readText())).toContain(`/link/${link.id}`);
+      expect(await copiedText(creatorPage)).toContain(`/link/${link.id}`);
       await expect(tray).toContainText("Editing link");
 
       // Deleting a reopened link closes the edit with it, so a restore
@@ -299,7 +299,7 @@ test.describe("editing an anchored link", () => {
     });
     let linkId: string | null = null;
     try {
-      await creatorPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await grantClipboard(creatorPage.context());
       // Minted through the UI: the fixture writes doc parts only, and this
       // test is about a PDF part.
       await gotoOk(creatorPage, `/pdf/${file.slug}`);
@@ -310,7 +310,7 @@ test.describe("editing an anchored link", () => {
       await expect(tray).toContainText("1 passage", { timeout: 15_000 });
       await tray.getByRole("button", { name: "Copy link" }).click();
       await expect(tray).toContainText("Recipients see only the passages", { timeout: 15_000 });
-      const url = new URL(await creatorPage.evaluate(() => navigator.clipboard.readText()));
+      const url = new URL(await copiedText(creatorPage));
       linkId = url.pathname.split("/").pop()!;
 
       // Following it as the creator: one readable group, so the landing

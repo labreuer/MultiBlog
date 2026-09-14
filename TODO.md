@@ -382,6 +382,29 @@ released Next (including canary) contains a fix. Two consequences:
   middleware this repo doesn't have. If that string reappears post-upgrade, it's the
   manifest, not the actions.
 
+### 3. Playwright on Firefox can hold a navigation that never commits
+
+Found 2026-09-14 by the Firefox worker matrix (docs/playwright-flakiness.html, follow-up of
+that date). The shape: an action's call log ends in `waiting for "<url>" navigation to
+finish...`, the element is on the page, and the action waits out its whole budget. Playwright's
+`_performWaitForNavigationCheck` holds every locator action while the main frame has a
+*pending document*, which Firefox's driver sets on a navigation-started event and clears only
+on a commit or an abort — and Firefox delivered a start with neither.
+
+The one trigger pinned down is closed on our side: a prerendered page answered from Firefox's
+HTTP cache under `stale-while-revalidate` while the revalidation ran beside it as a second
+document request (CACHING.md, 2026-09-14 addendum), which `Cache-Control: no-cache` on every
+context now prevents. But `link-bubble.spec.ts:415` reached the identical state once after an
+Enter with no request on the wire, so a second trigger exists. If it recurs:
+
+- `PLAYWRIGHT_SKIP_NAVIGATION_CHECK=1` in the environment disables the pre-action check
+  outright (playwright-core reads it in `page.ts`). It is a blunt switch — the check is what
+  stops an action from running against a document about to be replaced — so prefer scoping it
+  to the firefox lane (`scripts/e2e.ts`'s `engineEnv`) over `.env`.
+- Worth an upstream report with a trace: the fixed one reproduced on demand (visit a
+  prerendered page twice in one context, no `no-cache`, under load), which is the kind of
+  repro Playwright's Firefox issues usually lack. playwright 1.62, firefox build 1538.
+
 ---
 
 ## (optional) A pending selection is anchored by offsets plus a text search
@@ -724,3 +747,89 @@ single-paragraph regardless, so even a later assertion would need a new fixture.
 
 Whichever lands, the missing guard is an e2e assertion that a **cross-paragraph** anchor is
 still painted *after* `live-doc-synced` appears, not merely at first paint.
+
+---
+
+## Auth.js re-issues the session cookie on every session GET, so a stale GET can undo a sign-in
+
+**Status:** found 2026-09-14 by the Firefox worker matrix; not fixed. Two e2e tests show it,
+each about once in five under load: `files.spec.ts:194` (a fresh sign-in as another user
+renders `/files` as the *admin* the browser had been) and `session-refresh.spec.ts:108` (a
+deleted user stays signed in). Neither is a test fault, and the suite is right to keep
+catching it.
+
+**Mechanism**, measured from the traces (every `GET /api/auth/session` in them answered with a
+`Set-Cookie`): `@auth/core`'s session action re-encodes the JWT and sets `authjs.session-token`
+again on every read, to push the expiry out. That makes the cookie last-writer-wins across
+concurrent requests, and the header's `SessionProvider` fetch — issued on every page,
+`/sign-in` included — is routinely in flight when a session-changing POST answers:
+
+```
++248 ms  GET  /api/auth/session              (admin token)  → answered +463 ms, Set-Cookie: admin, re-issued
++256 ms  POST /api/auth/callback/credentials                → answered +460 ms, Set-Cookie: owner, the sign-in
+```
+
+Three milliseconds later the admin is back, and every request after carries that lineage. The
+same shape defeats `SessionRefresh`'s dead-session path: its `update({})` POST clears the
+cookie, a GET that started earlier re-sets it, and the confirming GET then sees a live session
+and stands down. src/app/sign-in/NOTES.md has the account.
+
+**A real reader hits this too**: sign in while the header's session fetch is slow and you may
+stay who you were; a deleted account may keep the session `/dashboard` was meant to end.
+
+**Options**, none taken:
+
+1. Check whether the installed `@auth/core` has any way to not re-issue on GET (the
+   `updateAge` setting governs database sessions, and the JWT re-encode looked unconditional).
+   If not, an upstream request with the trace above is the honest first step.
+2. Make sign-in a full navigation whose response sets the cookie, and have the landing page
+   verify that the session's user is the one who just signed in — re-signing in once if not.
+   Covers the sign-in case, not the dead-session one.
+3. Have the sign-in form wait for the provider's in-flight fetch before posting, and have
+   `SessionRefresh` re-check after a settle rather than at once. Narrows the window; does not
+   close it, and depends on `next-auth/react` internals.
+
+Whatever lands, keep the two tests as they are: they are the only thing that sees this.
+
+---
+
+## `DocSettingsPanel`'s smooth scroll into view sometimes never lands on Firefox
+
+**Status:** found 2026-09-14; about 1 firefox run in 16 under load, and 3 of 20 targeted
+repeats, one of them with a 10 s poll already in place. Not fixed. `e2e/doc-settings-collapse.spec.ts`
+polls for the scroll now and reports where the summary was, so a red there is this, not the wait.
+
+The panel's `onToggle` calls `scrollIntoView({ block: "start", behavior: "smooth" })` so the
+summary comes out from under the editor body that overflows the frame (the test file's header
+has the layout, and EditorChrome.module.css says why the frame carries no `overflow: hidden`).
+A smooth scroll is an animation the browser owns, and Firefox abandons one when another scroll
+request lands mid-flight — ProseMirror's `scrollIntoView` on a transaction (the collab sync's
+first update, the awareness cursor) or the panel's own `loadTags()` re-render are the
+candidates, and under load they arrive later, inside the animation. Chromium has not shown it.
+
+When it happens the reader cannot collapse the panel — the click lands in the editor — which
+is the bug report the test was written from.
+
+**Options:** `behavior: "auto"` (an instant scroll cannot be interrupted; loses the animation);
+re-issue the scroll on `scrollend`, or after the tags load; or the structural fix the test's
+header describes, letting the frame clip or the content shrink so the body never paints over
+the summary and the scroll is cosmetic — which is the real fix, if EditorChrome.module.css's
+reason against clipping can be met another way.
+
+---
+
+## `deleteTestFile` can sweep bytes another test's row still needs
+
+**Status:** seen once, 2026-09-14, `anchored-link-editing.spec.ts:291` at 10 workers:
+`/api/files/<id>/<sha256>` answered 503 "File contents are missing" 700 ms after
+`createTestFile` returned, with `[files] … references missing bytes` in the server log. Not
+fixed; not seen in the fifteen matrix runs before it.
+
+File storage is content-addressed, so test files whose bytes match share one blob and one
+`sha256`. `deleteTestFile` (`e2e/db-worker.ts`) deletes its row, counts the rows left on that
+sha, and sweeps the bytes at zero — two steps, and a concurrent `createTestFile` in another
+worker can land its bytes-then-row between them, or its row after the count. And they do
+share bytes: `createTestFile` builds the same two pages of fixed text for every file unless
+the caller passes `pages`, so nearly every test file in the suite is one blob under one sha.
+Either give each test file distinct bytes (the title is already unique — put it in the PDF),
+or never sweep in `deleteTestFile` and leave unreferenced test shas to `cleanup.teardown.ts`.

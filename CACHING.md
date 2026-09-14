@@ -109,10 +109,10 @@ Cache-Control: s-maxage=60, stale-while-revalidate=31535940
 
 Those headers are the fastest way to tell the two layers apart, and need no instrumentation —
 `curl -sSI https://<host>/<slug>` answers "is the *server* stale?" directly. If the server
-says it has fresh content but the browser shows old, the Router Cache is the only thing left
-holding it. Note there is no `max-age`, and nginx is a pure pass-through (no `proxy_cache` in
-`deploy/nginx-app.conf.sample`), so neither the browser's HTTP cache nor a CDN is ever
-involved — those two layers are the whole story.
+says it has fresh content but the browser shows old, the Router Cache is a likely suspect —
+though **not the only one, which this entry originally got wrong**; see the 2026-09-14 entry
+below. nginx is a pure pass-through (no `proxy_cache` in `deploy/nginx-app.conf.sample`), so a
+CDN is genuinely never involved.
 
 **Fixed** by making that one link a plain `<a>` instead of `<Link>`
 (`src/components/PostEditor.tsx`). A hard navigation bypasses the Router Cache entirely and
@@ -169,6 +169,61 @@ server leaves it answering with a mix of old and new assets, observed misbehavin
 e2e prod-lane work (docs/playwright-flakiness.html). Stop web-prod first (it's the preview
 tool's process, so stop it there — `npm run stop:all` sweeps :3000/:3002/:1234 but deliberately
 not :3001), or accept that it needs a restart once the build finishes.
+
+## 2026-09-14 — the browser's HTTP cache *is* involved, on Firefox
+
+The 2026-07-24 entry above concluded that with no `max-age` on the response, "neither the
+browser's HTTP cache nor a CDN is ever involved — those two layers are the whole story". The
+CDN half is right. The browser half is wrong, and only looked right because every measurement
+behind it was taken in Chromium.
+
+The header has not changed:
+
+```
+Cache-Control: s-maxage=60, stale-while-revalidate=31535940
+```
+
+No `max-age` does not mean "not cacheable". It means the response is stale **on arrival** —
+and `stale-while-revalidate` is precisely the directive that says what a cache may do with a
+stale entry: serve it, and revalidate afterwards, out of band. The window here is
+`31535940` seconds, which is a year less a minute. Firefox implements that in its HTTP cache.
+Chromium's support is limited, and in practice it revalidates instead — so the same
+deployment behaves differently per engine, and the engine we happened to test in is the one
+that hides it.
+
+Found by running the e2e suite on firefox for the first time: seven tests read a post page
+one publish behind. What rules out the Router Cache — the 2026-07-24 culprit — is that they
+navigate with `page.goto`, a *hard* navigation, which bypasses it. And a cache-busting query
+string on the same URL returns the fresh copy in the same browser, one line later, which
+rules out the server.
+
+So: a Firefox reader who has already loaded a post page can go on seeing the old one after a
+publish, for as long as their cache keeps the entry, with the revalidation happening silently
+behind them. They get the new version on the visit *after* the one that mattered.
+
+**Not fixed, deliberately.** Capping the window means sending an explicit `Cache-Control` for
+public pages, which is a change to caching policy for every reader and every page, and the
+kind of thing this file exists to reason about with measurements rather than in passing.
+What is fixed is the suite's ability to see the server: `e2e/fixtures.ts` sets
+`Cache-Control: no-cache` on every request, because those tests assert on what the server has
+and never meant to assert on what a browser kept.
+
+**The lesson that generalises**: `curl -sSI` tells you what the *server* thinks, and the two
+Next-side caches are well documented, but a response with no `max-age` and a long
+`stale-while-revalidate` is one a browser may still answer from — and whether it does is a
+per-engine question. Reproduce in more than one.
+
+**Addendum, later the same day.** The header went on the default context only; the
+`secondUser` fixture's context (`signedInContext`) had none, and that is where the suite's
+longest-lived Firefox flake turned out to live. A second visit to `/` in that context was
+answered from the cache and revalidated beside it — two document requests 5 ms apart, the first
+carrying the earlier visit's `ETag` at zero duration, the second a `max-age=0` conditional
+fetch that returned a new one — and Playwright, having resolved `goto` on the cached copy in
+46 ms, kept the revalidation as a navigation that never committed, so every locator action
+after it waited out its budget with the element on the page (`session-refresh.spec.ts:82`, 6 of
+16 matrix runs; docs/playwright-flakiness.html, 2026-09-14 follow-up). One more cost of the
+year-long window, then: not only a stale read, but a document load that looks finished to a
+driver and isn't. Both contexts carry the header now.
 
 ## 2026-07-29 — `/doc/[slug]` (PLAN.md §12) is dynamic by design, and doesn't need ISR to be cheap
 

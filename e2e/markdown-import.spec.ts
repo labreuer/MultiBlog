@@ -3,7 +3,7 @@
 // catches, and the two tests that need special handling — is in
 // docs/DOC_IMPORT.md (§4, §5, §10).
 import type { Page } from "@playwright/test";
-import { test, expect, titleEditor, bodyEditor } from "./fixtures";
+import { test, expect, grantClipboard, titleEditor, bodyEditor } from "./fixtures";
 import { deleteTestDoc } from "./db";
 import { E2E_TITLE_PREFIX } from "./naming";
 
@@ -217,7 +217,7 @@ test("the Read clipboard button fills the box where the browser allows it", asyn
   test.skip(browserName !== "chromium", "clipboard-read can only be granted in Chromium");
 
   const text = `# ${E2E_TITLE_PREFIX}From Clipboard ${Date.now()}\n\nBody.\n`;
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await grantClipboard(page.context());
   await page.goto("/docs");
   // Opening the panel first doubles as the user gesture that focuses the
   // document — writeText() on an unfocused one throws.

@@ -86,6 +86,28 @@ Regression coverage: `e2e/session-refresh.spec.ts` drives a promotion and a dele
 checks in both cases that the change is still invisible elsewhere until `/dashboard` is
 visited.
 
+## Every session GET re-issues the cookie, so overlapping requests can disagree about who you are
+
+Measured 2026-09-14 from Playwright traces (Firefox, production build, under load): every
+`GET /api/auth/session` answers with a `Set-Cookie` for `authjs.session-token` — `@auth/core`
+re-encodes the JWT on each read to push its expiry out. Harmless alone. It stops being
+harmless when two requests carrying the cookie overlap and one of them *changes* the session,
+because the browser keeps whichever response lands last:
+
+- The credentials callback set the new user's cookie at +460 ms. A session GET the header's
+  `SessionProvider` had issued 8 ms *before* the POST answered at +463 ms and set the previous
+  user's token again. `/files` then rendered as the admin the browser had been
+  (`files.spec.ts:194`, about once in five under load).
+- `SessionRefresh`'s `update({})` cleared the cookie for a deleted user; a GET in flight re-set
+  it; the confirming GET `SessionRefresh.tsx` makes before acting saw a live session and stood
+  down, so the dashboard stayed up (`session-refresh.spec.ts:108`, same rate).
+
+So the "row is gone → cookie cleared" sentence above holds only when nothing else was reading
+the session at that moment, and "signed in as X" is a property of the last response to land,
+not of the sign-in. Not fixed; TODO.md has the options. Worth knowing before adding any fetch
+of the session to the sign-in page, and before reading a redirect-to-`/sign-in` failure as a
+fault in `SessionRefresh`'s logic.
+
 ## Why the form uses client `signIn` — and still keeps a server action
 
 `sign-in-form.tsx` calls `signIn` from `next-auth/react` with `redirect: false` and then

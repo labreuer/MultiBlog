@@ -1,4 +1,4 @@
-import { test, expect, signIn, gotoOk, selectTextInBody, bodyEditor, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
+import { test, expect, signIn, gotoOk, copiedText, grantClipboard, selectTextInBody, bodyEditor, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   ADMIN_EMAIL,
   TEST_PASSWORD,
@@ -104,7 +104,7 @@ async function copyMintedLink(page: import("@playwright/test").Page): Promise<UR
   await expect(tray).toContainText("Recipients see only the passages they have permission to read", {
     timeout: 15_000,
   });
-  const url = await page.evaluate(() => navigator.clipboard.readText());
+  const url = await copiedText(page);
   expect(url, "the minted URL landed on the clipboard").toContain("/link/");
   return new URL(url);
 }
@@ -112,7 +112,7 @@ async function copyMintedLink(page: import("@playwright/test").Page): Promise<UR
 test.describe("anchored links", () => {
   test("a draft gathers parts across surfaces, and the minted URL follows back", async ({ page, sharedDoc }) => {
     const file = await makeFile();
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await grantClipboard(page.context());
     try {
       await signIn(page, ADMIN_EMAIL);
 
@@ -222,7 +222,7 @@ test.describe("anchored links", () => {
     // A PRIVATE doc (the admin's alone) plus a SHARED file, in one link.
     const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, bodyText: QUOTED_TEXT });
     const file = await makeFile();
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await grantClipboard(page.context());
     try {
       await signIn(page, ADMIN_EMAIL);
 

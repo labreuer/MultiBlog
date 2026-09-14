@@ -7,14 +7,23 @@
 // The favicon is fetched by the browser straight from the linked site —
 // the design's whole point, no server-side fetch of a user-supplied URL —
 // so the icon host is intercepted with page.route rather than let out to
-// the network. But Playwright itself aborts every request whose URL ends
-// in /favicon.ico, in every browser, before routes or request events see
-// it (playwright-core's requestStarted, `_isFavicon`; e2e/README.md), so
-// the third-party derivation, <origin>/favicon.ico, cannot be observed
-// here at all: under Playwright every third-party site takes the globe
-// fallback. What is covered instead is the own-site branch, which reads
-// the document's <link rel="icon"> and so can be pointed at a routed URL,
-// and the <img> path end to end behind it.
+// the network. The third-party derivation, <origin>/favicon.ico, cannot be
+// *observed* here: Playwright aborts that path itself, before routes or
+// request events see it (playwright-core's requestStarted, `_isFavicon`;
+// e2e/README.md), so every third-party site takes the globe fallback. It
+// What is covered instead is the own-site branch, which reads the document's
+// <link rel="icon"> and so can be pointed at a routed URL, and the <img> path
+// end to end behind it.
+//
+// **The globe assertion itself is chromium/firefox only.** Those two report an
+// aborted image load as an `error` event, which is what `onError` needs; webkit
+// leaves the <img> at `complete: true, naturalWidth: 0` and fires nothing, so
+// `failedIcon` never gets set and the globe never replaces the broken image.
+// That is a property of the abort, not of a 404 — a real Safari fetching a
+// favicon that isn't there gets a response and fires `error` like anyone else —
+// so it is a hole in what this harness can observe, not a bug to patch around
+// in src/. Routing /favicon.ico to a 404 instead does not help: Playwright's
+// abort happens before routes are consulted, on every engine.
 //
 // Links are created the way an author would — caret in place, Ctrl/⌘-K,
 // type, Enter — rather than seeded as marks, so the popover's own paths are
@@ -22,7 +31,7 @@
 // inserts the href as the link's text, which is what makes each link
 // addressable by name below.
 import type { Page } from "@playwright/test";
-import { test as base, expect, bodyEditor, waitForDocCollabReady } from "./fixtures";
+import { test as base, expect, bodyEditor, copiedText, grantClipboard, waitForDocCollabReady } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createTestDoc,
@@ -180,8 +189,13 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
     // The icon: this site's /favicon.ico is what the bubble asks for, and
     // Playwright aborts exactly that (header comment) — which is the
     // fallback's own trigger. The globe, and no broken <img> beside it.
-    await expect(b.locator("svg.tabler-icon-world")).toBeVisible();
-    await expect(b.locator("img")).toHaveCount(0);
+    // Only where an aborted load is reported as an error; the header says why
+    // webkit cannot see this branch and why that is the harness's limit rather
+    // than the app's.
+    if (test.info().project.name !== "webkit") {
+      await expect(b.locator("svg.tabler-icon-world")).toBeVisible();
+      await expect(b.locator("img")).toHaveCount(0);
+    }
 
     // Under the link's line, hanging from its start (placePopover: a gap
     // below, the anchor's own left edge nudged right by the same gap).
@@ -226,7 +240,7 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
 
   test("Copy puts the absolute href on the clipboard and leaves the editor focused", async ({ page, linkDoc }) => {
     void linkDoc;
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await grantClipboard(page.context());
     const href = `${ICON_HOST}/copied`;
     await appendLink(page, "Paragraph one.", href);
     await bodyLink(page, href).click();
@@ -234,7 +248,7 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
     const b = bubble(page);
     await b.getByRole("button", { name: "Copy link" }).click();
     await expect(b.getByRole("button", { name: "Copied" })).toBeVisible();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(href);
+    expect(await copiedText(page)).toBe(href);
 
     // The click did not take focus from the editor (mousedown is
     // prevented), so the bubble is still up — and the check mark gives way
@@ -329,11 +343,11 @@ test.describe("a link into this site's docs previews the doc", () => {
 
       // Copy resolves a relative href against the page, so what lands on
       // the clipboard is a URL that works anywhere.
-      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await grantClipboard(page.context());
       await b.getByRole("button", { name: "Copy link" }).click();
       await expect(b.getByRole("button", { name: "Copied" })).toBeVisible();
       const origin = new URL(page.url()).origin;
-      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${origin}${relative}`);
+      expect(await copiedText(page)).toBe(`${origin}${relative}`);
 
       // The same doc by id, as an absolute URL on this origin — resolved as
       // /doc/[slug] would resolve it (id first, then slug).
@@ -427,6 +441,15 @@ test.describe("the link popover: a title box over a URL box (LinkControls.tsx)",
       const option = page.getByRole("option", { name: title });
       await expect(option).toBeVisible();
       await expect(list).not.toContainText("Recently edited");
+      // The rows shown are the last real answer until the next one lands
+      // (DocRefMenu's onUpdate), so the two lines above can both pass on the
+      // *recent* list — this doc is in it, having just been created, and the
+      // header goes with the first keystroke. ArrowDown then moves the
+      // highlight to index 1 of that stale list, the one-row answer lands, and
+      // index 1 no longer exists: nothing is selected and Enter picks nothing.
+      // Firefox, 2 of 15 runs at 4-6 workers (2026-09-14). Wait for the answer
+      // itself: exactly this doc.
+      await expect(list.getByRole("option")).toHaveCount(1);
       await page.keyboard.press("ArrowDown");
       await expect(option).toHaveAttribute("aria-selected", "true");
       await page.keyboard.press("Enter");

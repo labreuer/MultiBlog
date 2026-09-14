@@ -2,7 +2,7 @@
 //
 // Each fixture owns its own throwaway rows and deletes them afterwards, so
 // specs never share state and can run in any order across workers.
-import { test as base, expect, type Page, type Browser } from "@playwright/test";
+import { test as base, expect, type Page, type Browser, type BrowserContext } from "@playwright/test";
 import {
   ADMIN_EMAIL,
   TEST_PASSWORD,
@@ -81,24 +81,230 @@ type Fixtures = {
   devServer500Watch: void;
 };
 
+/**
+ * Grant clipboard access where the browser has such a permission to grant.
+ *
+ * Only chromium does: `grantPermissions(["clipboard-write"])` throws
+ * "Unknown permission" on WebKit and Firefox, which took out 6 tests in the
+ * webkit project's first run before the call sites went through here. Those
+ * two engines have no permission gate on the clipboard at all — a test that
+ * needs one either works without the grant or fails on its own assertion,
+ * which is the failure worth seeing.
+ */
+/**
+ * Make every page in `context` record what it puts on the clipboard.
+ *
+ * Reading it back is the problem this solves. `navigator.clipboard.readText()`
+ * from `page.evaluate` throws `NotAllowedError` on WebKit — reads are gated on
+ * a user gesture there, and unlike chromium there is no permission to grant
+ * instead (6 tests, the webkit project's largest remaining class). Writes are
+ * not gated, so the app's Copy really does copy on every engine; only the
+ * test's read-back needed replacing.
+ *
+ * Hence a wrapper that **calls through** rather than a stub of the whole API:
+ * what ships still goes through the real `writeText`, so a regression in how
+ * it is called still surfaces, and no engine is asserting against a different
+ * mechanism than the others. Installed on every context rather than at the
+ * call sites, because `addInitScript` only reaches *later* navigations and
+ * several specs grant the permission after the page they care about is
+ * already open.
+ */
+async function recordClipboardWrites(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) return;
+    const write = clipboard.writeText.bind(clipboard);
+    const copied: string[] = [];
+    Object.defineProperty(window, "__e2eCopied", { value: copied, configurable: true });
+    clipboard.writeText = (text: string) => {
+      copied.push(String(text));
+      return write(text);
+    };
+  });
+}
+
+/**
+ * The last string the page asked the clipboard to hold, per
+ * {@link recordClipboardWrites}. Polls, because Copy is fired by a click whose
+ * handler is async.
+ */
+export async function copiedText(page: Page): Promise<string> {
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __e2eCopied?: string[] }).__e2eCopied?.length ?? 0))
+    .toBeGreaterThan(0);
+  return page.evaluate(() => {
+    const copied = (window as unknown as { __e2eCopied?: string[] }).__e2eCopied ?? [];
+    return copied[copied.length - 1];
+  });
+}
+
+export async function grantClipboard(context: BrowserContext): Promise<void> {
+  if (context.browser()?.browserType().name() !== "chromium") return;
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+}
+
 export async function signIn(page: Page, email: string, password = TEST_PASSWORD): Promise<void> {
-  await page.goto("/sign-in");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL("**/dashboard");
+  // **Landing on /dashboard is not the end of signing in**, and everything
+  // below is about the window after it. `SessionRefresh` mounts there and,
+  // once per mount, POSTs /api/auth/session and then calls `router.refresh()`
+  // — so for a few hundred milliseconds the page still has a navigation of
+  // its own coming. A test that navigates inside that window races it, and in
+  // WebKit the race is lost outright: `page.goto` dies with "interrupted by
+  // another navigation", which accounted for 84 of the webkit project's first
+  // 92 failures, across 21 specs. Chromium tolerates it, which is the only
+  // reason it went unnoticed for as long as the suite has existed.
+  //
+  // A navigation in that window also *aborts* the POST, which used to read as
+  // "this session just died" and bounce the page to /sign-in — real app
+  // behaviour that webkit surfaced, fixed in SessionRefresh.tsx. What is left
+  // for the suite to wait out is the refresh navigation itself.
+  //
+  // **A listener rather than two `waitForResponse` calls**, because both
+  // events can land inside the round trip that tells Playwright about the
+  // previous one — arming the second waiter after awaiting the first measured
+  // fine single-worker and then failed 78 tests under the prod suite's eight.
+  // Watching from before the click cannot miss either one. What identifies the
+  // refresh among the half-dozen RSC fetches the dashboard's nav links fire is
+  // the **absent `Next-Router-Prefetch` header**; a matcher without that check
+  // returns on a prefetch, before the refresh exists.
+  let sawSessionPost = false;
+  let refreshSeen!: () => void;
+  const refreshed = new Promise<void>((resolve) => (refreshSeen = resolve));
+  const watch = (response: { url(): string; request(): { method(): string; headers(): Record<string, string> } }) => {
+    const request = response.request();
+    if (request.method() === "POST" && response.url().includes("/api/auth/session")) {
+      sawSessionPost = true;
+      return;
+    }
+    if (!sawSessionPost) return;
+    const url = new URL(response.url());
+    if (url.pathname === "/dashboard" && url.searchParams.has("_rsc") && !request.headers()["next-router-prefetch"]) {
+      refreshSeen();
+    }
+  };
+
+  page.on("response", watch);
+  try {
+    await page.goto("/sign-in");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL("**/dashboard");
+    // Bounded: on the `session === null` branch above there is no refresh to
+    // wait for, and a dead session is a thing tests deliberately create
+    // (e2e/session-refresh.spec.ts).
+    await Promise.race([refreshed, page.waitForTimeout(5_000)]);
+  } finally {
+    page.off("response", watch);
+  }
+
+  // The refresh's *response* is not its *commit* — waiting only for the
+  // response measured 0 of 3 on webkit. `networkidle` covers the gap and
+  // measured 3 of 3, but on a second sign-in in the same page it can take 29 s
+  // (it is what turned files.spec's 3 s into 41 s), so it is capped: by here
+  // the refresh has already been answered, and the cap only bounds the tail.
+  await Promise.race([page.waitForLoadState("networkidle"), page.waitForTimeout(1_500)]);
 }
 
 async function signedInContext(browser: Browser, email: string): Promise<Page> {
   // storageState is explicitly empty rather than inherited — inheriting the
   // admin's would sign this "second user" in as the first one.
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  // The same header the `context` fixture sets, which this context does not
+  // inherit. Without it Firefox serves this user's *second* visit to a
+  // prerendered page out of its own HTTP cache and revalidates beside it — two
+  // document requests 5 ms apart — and Playwright, having resolved goto on the
+  // cached copy, is left holding a pending navigation that never commits, so
+  // every locator action after it waits until the expect times out while the
+  // element sits there (session-refresh.spec, 6 of 16 firefox runs in the
+  // 2026-09-14 matrix, never in a default-context test).
+  await context.setExtraHTTPHeaders({ "Cache-Control": "no-cache" });
+  await recordClipboardWrites(context);
   const page = await context.newPage();
+  retryInterruptedNavigations(page);
   await signIn(page, email);
   return page;
 }
 
+/**
+ * Playwright's own words for "the page navigated somewhere on its own while
+ * your goto was in flight", per engine.
+ */
+const INTERRUPTED = ["interrupted by another navigation", "NS_BINDING_ABORTED"];
+
+/**
+ * Replaces `page.goto` and `page.reload` with the retrying versions described
+ * on the fixture. Both, because a reload is interrupted by exactly the same
+ * thing — firefox reported one as NS_BINDING_ABORTED with goto already
+ * covered.
+ */
+function retryInterruptedNavigations(page: Page): void {
+  const retry = <A extends unknown[], R>(navigate: (...args: A) => Promise<R>) => {
+    return async (...args: A): Promise<R> => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await navigate(...args);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (attempt === 4 || !INTERRUPTED.some((needle) => message.includes(needle))) throw error;
+          // Let the navigation that won finish before asking again. Retrying
+          // immediately lands back inside the same window — firefox lost a
+          // reload three times running that way, under load, after an
+          // in-place admin-table save (links.spec). Escalating, so a slow
+          // refresh is given room rather than met with three quick misses.
+          await page.waitForTimeout(250 * attempt);
+        }
+      }
+    };
+  };
+  page.goto = retry(page.goto.bind(page));
+  page.reload = retry(page.reload.bind(page));
+}
+
 export const test = base.extend<Fixtures>({
+  // Every page records its clipboard writes — see recordClipboardWrites.
+  context: async ({ context }, use) => {
+    // **Ask the server, not the browser's cache.** Next serves a prerendered
+    // page as `s-maxage=60, stale-while-revalidate=31535940` with no
+    // `max-age`, so it is stale on arrival and that year-long window then lets
+    // a browser keep serving the stored copy while it revalidates behind the
+    // reader. Firefox implements that in its HTTP cache and chromium does not,
+    // which is the whole of why seven firefox tests read content one publish
+    // behind — on a *hard* navigation, so Next's Router Cache was never the
+    // layer holding it (CACHING.md, 2026-09-14). These tests assert on what
+    // the server has; this header is how they get to ask it.
+    await context.setExtraHTTPHeaders({ "Cache-Control": "no-cache" });
+    await recordClipboardWrites(context);
+    await use(context);
+  },
+
+  /**
+   * `page.goto` retries when the page navigated out from under it.
+   *
+   * A server action that ends in `router.refresh()` — publishing a post, the
+   * session refresh on /dashboard — leaves the page with a navigation of its
+   * own still to make after the status text a test waits on has already
+   * appeared. A `goto` issued in that window is aborted: WebKit says
+   * "interrupted by another navigation", Gecko says NS_BINDING_ABORTED, and
+   * chromium quietly tolerates it, which is why the suite only ever saw this
+   * as an occasional flake.
+   *
+   * Retrying is the honest response — the navigation was not refused, it was
+   * beaten to it, and the page we asked for is still the page we want. The
+   * alternative, a wait at every call site after every refreshing action, is
+   * the one that has already failed three times: the failure mode of
+   * forgetting it is a red test that reads exactly like an app bug.
+   *
+   * Bounded at three attempts, so a page that really does keep navigating
+   * elsewhere (a client-side redirect the test did not expect) still reports
+   * it, just three times slower. Anything that is not an interruption throws
+   * on the spot.
+   */
+  page: async ({ page }, use) => {
+    retryInterruptedNavigations(page);
+    await use(page);
+  },
+
   // Depending on `page` is deliberate, and the reason for the about:blank:
   // fixtures tear down in reverse setup order, so taking `page` as a
   // dependency puts this teardown *before* the page closes, and lets us drop

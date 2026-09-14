@@ -8,8 +8,12 @@
 //                      the dev-server target on WEB_PORT, one worker — the
 //                      loop for iterating on a single spec against a
 //                      `dev:all` you already have running.
+//   npm run e2e:firefox / npm run e2e:webkit
+//                      the prod target on one of the two engines that are off
+//                      by default (playwright.config.ts says why, and
+//                      e2e/README.md what each is for).
 //
-// Both do the same two things:
+// All of them do the same two things:
 //
 //   1. the read-only port guard (scripts/dev-servers.ts) — refuses to run if a
 //      process from another project holds one of this slot's ports, because
@@ -35,8 +39,25 @@ if (target !== "prod" && target !== "dev") {
 
 if (!checkPorts()) process.exit(1);
 
-const child = spawn(process.execPath, [resolveFromRoot("@playwright/test/cli"), "test", ...process.argv.slice(3)], {
+const args = process.argv.slice(3);
+
+// The firefox and webkit projects only exist when their env var is set
+// (playwright.config.ts says why they are off by default), so asking for one
+// by `--project` alone used to fail with "Project(s) 'webkit' not found" —
+// a flag that names the thing you want and then denies it exists. Reading the
+// flag back here closes that: `npm run e2e -- --project=webkit` is the whole
+// command. Both spellings, because Playwright accepts both.
+const projects = args.flatMap((arg, i) => {
+  if (arg.startsWith("--project=")) return [arg.slice("--project=".length)];
+  if (arg === "--project" && args[i + 1]) return [args[i + 1]];
+  return [];
+});
+const engineEnv: Record<string, string> = {};
+if (projects.includes("firefox")) engineEnv.E2E_FIREFOX = "1";
+if (projects.includes("webkit")) engineEnv.E2E_WEBKIT = "1";
+
+const child = spawn(process.execPath, [resolveFromRoot("@playwright/test/cli"), "test", ...args], {
   stdio: "inherit",
-  env: { ...process.env, E2E_TARGET: target },
+  env: { ...process.env, ...engineEnv, E2E_TARGET: target },
 });
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));

@@ -116,6 +116,21 @@ test.describe("pdf zoom gestures", () => {
     const context = await browser.newContext({ hasTouch: true, isMobile: false });
     const page = await context.newPage();
     try {
+      // WebKit has no `Touch` constructor, and skipping is the honest answer
+      // rather than reaching for `document.createTouch`: on a real Safari the
+      // touch path below never runs at all, because `gesture*` arrives first
+      // and `onTouchMove` stands down the moment it does. The gesture test
+      // that follows is the one that covers what a Safari reader gets.
+      const constructible = await page.evaluate(() => {
+        try {
+          new Touch({ identifier: 0, target: document.body, clientX: 0, clientY: 0 });
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      test.skip(!constructible, "no Touch constructor — see the gesture* test, which is Safari's path anyway");
+
       await signIn(page, ADMIN_EMAIL);
       await gotoOk(page, `/pdf/${file.slug}`);
       await waitForViewer(page);
@@ -148,6 +163,53 @@ test.describe("pdf zoom gestures", () => {
     } finally {
       await context.close();
     }
+  });
+
+  // Safari's own pinch, and **the only path an iPad reader ever takes** — the
+  // touch handler above explicitly stands down once a `gesture*` event has
+  // arrived, so on that device it is the touch test that covers nothing.
+  //
+  // Runs on every engine rather than webkit-only, and for the same reason
+  // e2e/pdf-webkit-gaps.spec.ts simulates WebKit's missing built-ins in
+  // chromium: the listeners are bound by name and read `scale` structurally,
+  // so what is being tested — our arithmetic against a cumulative scale — is
+  // ours rather than the engine's, and a chromium-only run should not lose it.
+  test("Safari's gesture events zoom the document, and the touch path stands down", async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, `/pdf/${file.slug}`);
+    await waitForViewer(page);
+    const before = await currentScale(page);
+
+    const prevented = await page.evaluate(() => {
+      const container = document.querySelector<HTMLElement>("[data-pdf-container]");
+      if (!container) return null;
+      const fire = (type: string, scale?: number) => {
+        // GestureEvent is not constructible anywhere, so the shape is built by
+        // hand — which is all the handler reads, since it types these
+        // structurally rather than through the DOM lib.
+        const event = new Event(type, { bubbles: true, cancelable: true }) as Event & {
+          scale?: number;
+          clientX?: number;
+          clientY?: number;
+        };
+        if (scale !== undefined) event.scale = scale;
+        event.clientX = 300;
+        event.clientY = 300;
+        container.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      fire("gesturestart", 1);
+      // Cumulative from the gesture's start, the way Safari reports it.
+      const steps = [1.2, 1.5, 1.8].map((scale) => fire("gesturechange", scale));
+      fire("gestureend");
+      return steps.every(Boolean);
+    });
+    // The negative assertion this file exists for: a gesture we acted on must
+    // be one the browser will not also zoom the page with.
+    expect(prevented).toBe(true);
+
+    await expect.poll(() => currentScale(page)).toBeGreaterThan(before);
+    expect(await pageZoom(page)).toBe(1);
   });
 
   test("the viewer keeps one-finger scrolling native while claiming the pinch", async ({ page }) => {

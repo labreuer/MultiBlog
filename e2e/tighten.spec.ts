@@ -132,6 +132,15 @@ test("one press is one undo step, and typing done just before it survives the un
     // swallow both.
     await selectAcross(page, "Join me", "Join me");
     await page.keyboard.press("End");
+    // End collapses the DOM selection at once, but ProseMirror learns of it
+    // only from the browser's asynchronous selectionchange — and a transaction
+    // dispatched in that gap writes the *state's* still-expanded selection back
+    // into the DOM (prosemirror-view's updateStateInner names the race and
+    // guards it only for mouse drags). Typing then replaced "Join me" instead
+    // of following it: firefox, 2 of 15 runs at 6-8 workers (2026-09-14). The
+    // button follows the state selection, so "disabled" is the state having
+    // seen the caret.
+    await expect(tightenButton(page)).toBeDisabled();
     await page.keyboard.type(" please");
     await expect(body.locator("p").nth(1)).toHaveText("Join me please");
 

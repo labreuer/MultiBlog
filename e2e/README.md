@@ -80,6 +80,167 @@ read it. The figure had already been wrong twice before that was made a rule:
 Treat every number here as dated, and re-measure rather than infer. See the
 worker-count note below before raising the parallelism.
 
+## Firefox and WebKit
+
+The suite runs on chromium by default. The other two engines exist as projects
+that only come into being when their env var is set, so a bare
+`playwright test` never picks them up — doubling the wall clock of the
+everyday run buys almost nothing when the job is catching regressions in our
+own logic:
+
+```bash
+npm run e2e:firefox    # or: npm run e2e -- --project=firefox
+npm run e2e:webkit     # or: npm run e2e -- --project=webkit
+```
+
+`scripts/e2e.ts` sets `E2E_FIREFOX` / `E2E_WEBKIT` from the `--project` it was
+handed, so the flag is the whole command. Driving `npx playwright test` by hand
+bypasses that and needs the variable in front, or Playwright reports
+"Project(s) 'webkit' not found" — a flag naming the thing it then denies
+exists. Both take the usual filters: `npm run e2e:firefox -- e2e/doc.spec.ts`.
+
+**What each is for.** Firefox is Gecko, for the differences chromium cannot
+surface — chiefly contenteditable selection and `beforeinput`, where
+ProseMirror diverges most. WebKit is for the one class of bug no amount of
+chromium coverage can reach: the PDF surface runs pdfjs, and pdfjs uses modern
+built-ins WebKit ships late or not at all (two have already bitten an iPad —
+`Map.prototype.getOrInsertComputed` and `ReadableStream`'s async iterator, both
+patched in `src/lib/pdfjs-webkit-polyfills.ts`). Neither is iPadOS Safari:
+Playwright drives its own builds, so the native selection gestures an iPad uses
+are still unreproducible here. What WebKit shares is the JS engine, which is
+where those two bugs live.
+
+It is not desktop Safari either, and the gap is measurable rather than
+theoretical: the popover fix in the list below was written against a selection
+expansion that Playwright's WebKit build performs and Safari 26.6.1 does not.
+When a webkit finding needs confirming in the real thing, [MACOS.md](MACOS.md)
+has the recipe for driving Safari.app from a session — no WebDriver, and no
+permission grant for the read-only half.
+
+### First-time setup
+
+```bash
+npm run setup:browsers      # downloads chromium, firefox and webkit builds
+```
+
+Firefox then runs as downloaded. **WebKit on Fedora needs two more steps**,
+because Playwright ships no Fedora WebKit build and falls back to the Ubuntu
+24.04 one:
+
+```bash
+npm run setup:webkit-libs   # stages Ubuntu's libicu74 + libjpeg8 into .playwright-libs/
+sudo dnf install libmanette # the one dependency Fedora does package
+```
+
+The libraries go **into the WebKit bundle's own `sys/lib`**, which is where
+that bundle already keeps the distro libraries it declines to depend on the
+host for. Nothing is installed system-wide, so no other program on the machine
+ever loads an ICU three majors behind. `LD_LIBRARY_PATH` is the obvious reach
+and is **wrong**: the bundle's launcher assigns the variable rather than
+appending to it, so a value set around the run is gone by the time the ELF
+loader reads it — and it fails late, passing Playwright's own pre-flight check
+(which reads the same variable) and then dying in every single
+`browserType.launch`. `scripts/webkit-libs.ts` has that account in full,
+including why a symlink to the system ICU is not an option.
+
+`playwright install --force webkit`, or a bump that pulls a new webkit
+revision, wipes the staged files; re-run `npm run setup:webkit-libs`, which
+keeps its downloads and so only re-copies.
+
+Playwright's pre-flight `ldd` check asks for a third thing,
+`gstreamer1.0-libav` — really `libx264.so`, which is h.264 playback, dlopen'd
+at need and on no path any spec here takes. On Fedora that means enabling RPM
+Fusion Free for a codec nothing plays, so the config instead sets
+`PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS` — but only once it has confirmed
+the staging *and* libmanette itself, so the check stays on in every state where
+it would have told you something true. `webkitLaunchEnv()` is the whole rule.
+
+### Where each engine stands
+
+Measured 2026-09-14 on the Ryzen 9 9950X / Fedora 44 box, prod target, 8
+workers, servers warm. The middle column is what the engines *found* — every
+one of these was a defect or a wrong assumption, not an engine quirk to route
+around, and five of them were live on chromium too:
+
+| project | now | at first run | wall |
+|---|---|---|---|
+| chromium | 261 / 0 | 258 / 2 | 61–76 s |
+| firefox | 251 / 0 | 242 / 8 | 76–77 s |
+| webkit | 250 / 0 | 158 / 92 | 85–135 s |
+
+What the 92 + 8 turned into, each its own commit: a lost-update race in
+`useLiveDocContent`'s hoisted branch; a failed session fetch read as a dead
+session; a popover reopening over text Playwright's WebKit re-selected under
+it (Safari itself does not re-select — [MACOS.md](MACOS.md)); a suite
+that raced every `router.refresh()`; a clipboard read no engine but chromium
+allows; a pinch gesture nothing had ever tested; and Firefox serving post
+pages out of its own HTTP cache (CACHING.md, 2026-09-14).
+
+**A red in firefox or webkit is still not a release blocker** the way a
+chromium one is — it is a finding to triage. Firefox has now had the same
+worker matrix chromium got (3 rounds × {2, 4, 6, 8, 10}, prod target, warm
+servers, 2026-09-14; the table is in docs/playwright-flakiness.html's
+follow-up of that date): **8 is right for it too**, no count from 4 up moved
+the red rate, and every red was a specific fault the load merely widened —
+none was contention. Four were the suite's and are fixed where they sit
+(`signedInContext` in fixtures.ts had no `Cache-Control: no-cache`, and
+tighten, link-bubble and doc-settings-collapse each gained a wait that says
+why). What is left is not the suite's to fix:
+
+- **The session cookie can be put back by a request that started before the
+  sign-in.** Auth.js re-issues `authjs.session-token` on every `GET
+  /api/auth/session`, so a GET in flight across the credentials POST — or
+  across the POST that clears a dead session — answers a few milliseconds
+  later and wins. Seen as `files.spec.ts:194` rendering `/files` as the admin
+  after signing in as another user, and `session-refresh.spec.ts:108` keeping
+  a deleted user signed in; each about once in five under load.
+  src/app/sign-in/NOTES.md has the measured sequence, TODO.md the options.
+- **A navigation Playwright believes is still in flight.** The call log ends
+  in `waiting for "…" navigation to finish...`, the element is on the page,
+  and the action waits out the whole expect budget: Firefox reported a
+  navigation that it never committed or aborted, and Playwright's pre-action
+  check holds every later action until it does. One trigger is known and
+  closed — a prerendered page answered from Firefox's cache while its
+  stale-while-revalidate refetch registered as a second document request,
+  which the `no-cache` header prevents (CACHING.md, 2026-09-14) — but
+  `link-bubble.spec.ts:415` reached the same state once after an Enter with
+  nothing on the wire, so it is not gone. `PLAYWRIGHT_SKIP_NAVIGATION_CHECK=1`
+  turns the check off if it recurs; TODO.md has the upstream note.
+- **`doc-settings-collapse.spec.ts:48`, about one run in sixteen.** The
+  panel's smooth `scrollIntoView` on toggle never lands, so the body stays
+  painted over the summary — the very bug the test guards, real and
+  intermittent on Firefox under load. The probe polls for 10 s now and reports
+  where the summary was; a red here is the app, not the wait. TODO.md.
+- **`anchored-link-editing.spec.ts:291`, once at 10 workers**: the file bytes
+  answered 503 "File contents are missing" 700 ms after the row was created,
+  so the row outlived its bytes: every default test PDF has the same bytes
+  and so one `sha256`, and `deleteTestFile`'s count-then-sweep of it can
+  run between another test's create and its row. Fixture side; TODO.md.
+
+The globe-icon assertion in `link-bubble.spec.ts` is skipped on webkit, and
+the touch-pinch test in `pdf-zoom.spec.ts` where `Touch` isn't constructible;
+both say why at the call site.
+
+### The sign-in race, and the app behaviour behind it
+
+Worth reading before writing anything that signs in. `SessionRefresh` mounts on
+/dashboard and, once per mount, POSTs /api/auth/session and then calls
+`router.refresh()`. So **landing on /dashboard is not the end of signing in**:
+for a few hundred milliseconds the page still has a navigation of its own
+coming, and a test that navigates inside that window races it. WebKit loses the
+race outright — `page.goto` dies with "interrupted by another navigation" —
+which was **84 of the webkit project's first 92 failures, across 21 specs**.
+`signIn()` now waits that window out; the comment there records which waits
+were measured and what each cost.
+
+The part that was *not* a test artifact: a navigation aborts that POST,
+`update({})` swallows the fetch error and resolves `null`, and SessionRefresh
+read null as "this session just died". A signed-in reader who clicked a link
+within a moment of reaching /dashboard — or whose network merely dropped that
+one request — was bounced to the sign-in page with a perfectly good session.
+SessionRefresh now confirms with a second request before acting, and says
+nothing if that one fails too.
+
 ## Fixtures
 
 From `./fixtures` (import `test` and `expect` from there, not from
