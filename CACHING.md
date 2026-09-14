@@ -213,6 +213,18 @@ Next-side caches are well documented, but a response with no `max-age` and a lon
 `stale-while-revalidate` is one a browser may still answer from — and whether it does is a
 per-engine question. Reproduce in more than one.
 
+**Addendum, later the same day.** The header went on the default context only; the
+`secondUser` fixture's context (`signedInContext`) had none, and that is where the suite's
+longest-lived Firefox flake turned out to live. A second visit to `/` in that context was
+answered from the cache and revalidated beside it — two document requests 5 ms apart, the first
+carrying the earlier visit's `ETag` at zero duration, the second a `max-age=0` conditional
+fetch that returned a new one — and Playwright, having resolved `goto` on the cached copy in
+46 ms, kept the revalidation as a navigation that never committed, so every locator action
+after it waited out its budget with the element on the page (`session-refresh.spec.ts:82`, 6 of
+16 matrix runs; docs/playwright-flakiness.html, 2026-09-14 follow-up). One more cost of the
+year-long window, then: not only a stale read, but a document load that looks finished to a
+driver and isn't. Both contexts carry the header now.
+
 ## 2026-07-29 — `/doc/[slug]` (PLAN.md §12) is dynamic by design, and doesn't need ISR to be cheap
 
 Unlike `/[slug]`, `/doc/[slug]` gets no `generateStaticParams` and is never a Full Route Cache

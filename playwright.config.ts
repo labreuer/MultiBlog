@@ -61,6 +61,11 @@ const PROD = process.env.E2E_TARGET === "prod";
  *                                      wall) with the slowest test at 6.7 s; 16 is no
  *                                      quicker and its tail (p95 5.3 s, slowest 8.9 s)
  *                                      closes on the 10 s expect budget.
+ *   Firefox, same box                  15-run prod matrix (2026-09-14) over {2, 4, 6, 8, 10}:
+ *                                      8 as well — 77 s against 86 s at 6 and 73 s at 10, and
+ *                                      the red rate did not move with the count (2 of 3 from 4
+ *                                      up, every red a specific fault). One table serves both
+ *                                      engines; docs/playwright-flakiness.html has the rows.
  */
 const MEASURED: ReadonlyArray<{ cores: number; workers: number }> = [
   { cores: 12, workers: 2 },

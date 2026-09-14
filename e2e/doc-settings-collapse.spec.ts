@@ -41,6 +41,12 @@ async function hitTestSummary(page: import("@playwright/test").Page) {
       hitTag: hit?.tagName ?? null,
       hitText: hit?.textContent?.trim().slice(0, 40) ?? null,
       hitIsContentEditable: (hit as HTMLElement | null)?.isContentEditable ?? null,
+      // Where things were when the probe ran, for a failure to report: the
+      // summary's top edge in the viewport, and how far the toggle's
+      // scrollIntoView had carried the page.
+      summaryTop: Math.round(r.top),
+      viewportHeight: window.innerHeight,
+      scrollY: Math.round(window.scrollY),
     };
   });
 }
@@ -61,15 +67,24 @@ test("the Settings panel can be collapsed again on a doc long enough to fill the
     await summary.click();
     await expect(page.getByRole("button", { name: "Delete" })).toBeVisible();
     // onToggle scrolls the panel into view with behavior: "smooth"; let it land
-    // before hit-testing, so a failure can't be blamed on a moving target.
-    await page.waitForTimeout(1500);
-
-    const expanded = await hitTestSummary(page);
+    // before hit-testing, so a failure can't be blamed on a moving target. A
+    // poll rather than a fixed sleep: firefox at 10 workers overran 1.5 s
+    // (2026-09-14 matrix, then 2 of 5 repeats), and the probe read the
+    // mid-scroll layout with the body still over the summary. The deadline
+    // keeps the real failure — a summary that is *never* clickable — failing,
+    // with the same self-explaining message below.
+    const deadline = Date.now() + 10_000;
+    let expanded = await hitTestSummary(page);
+    while (!expanded.hitIsSummary && Date.now() < deadline) {
+      await page.waitForTimeout(100);
+      expanded = await hitTestSummary(page);
+    }
     expect(expanded.open, "panel should be open after the first click").toBe(true);
     expect(
       expanded.hitIsSummary,
       `the Settings summary is covered by <${expanded.hitTag}> ("${expanded.hitText}"), ` +
-        `contentEditable=${expanded.hitIsContentEditable} — a click there lands in the editor, not on the summary`,
+        `contentEditable=${expanded.hitIsContentEditable} — a click there lands in the editor, not on the summary ` +
+        `(summary top ${expanded.summaryTop}px of ${expanded.viewportHeight}px viewport, scrollY ${expanded.scrollY}px)`,
     ).toBe(true);
 
     // The actual gesture from the bug report: click Settings again to collapse.

@@ -441,6 +441,15 @@ test.describe("the link popover: a title box over a URL box (LinkControls.tsx)",
       const option = page.getByRole("option", { name: title });
       await expect(option).toBeVisible();
       await expect(list).not.toContainText("Recently edited");
+      // The rows shown are the last real answer until the next one lands
+      // (DocRefMenu's onUpdate), so the two lines above can both pass on the
+      // *recent* list — this doc is in it, having just been created, and the
+      // header goes with the first keystroke. ArrowDown then moves the
+      // highlight to index 1 of that stale list, the one-row answer lands, and
+      // index 1 no longer exists: nothing is selected and Enter picks nothing.
+      // Firefox, 2 of 15 runs at 4-6 workers (2026-09-14). Wait for the answer
+      // itself: exactly this doc.
+      await expect(list.getByRole("option")).toHaveCount(1);
       await page.keyboard.press("ArrowDown");
       await expect(option).toHaveAttribute("aria-selected", "true");
       await page.keyboard.press("Enter");

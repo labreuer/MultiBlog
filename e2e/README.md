@@ -158,7 +158,7 @@ around, and five of them were live on chromium too:
 | project | now | at first run | wall |
 |---|---|---|---|
 | chromium | 261 / 0 | 258 / 2 | 61–76 s |
-| firefox | 250 / 1 | 242 / 8 | 78–96 s |
+| firefox | 251 / 0 | 242 / 8 | 76–77 s |
 | webkit | 250 / 0 | 158 / 92 | 85–135 s |
 
 What the 92 + 8 turned into, each its own commit: a lost-update race in
@@ -169,21 +169,45 @@ allows; a pinch gesture nothing had ever tested; and Firefox serving post
 pages out of its own HTTP cache (CACHING.md, 2026-09-14).
 
 **A red in firefox or webkit is still not a release blocker** the way a
-chromium one is — it is a finding to triage. Two are known and open:
+chromium one is — it is a finding to triage. Firefox has now had the same
+worker matrix chromium got (3 rounds × {2, 4, 6, 8, 10}, prod target, warm
+servers, 2026-09-14; the table is in docs/playwright-flakiness.html's
+follow-up of that date): **8 is right for it too**, no count from 4 up moved
+the red rate, and every red was a specific fault the load merely widened —
+none was contention. Four were the suite's and are fixed where they sit
+(`signedInContext` in fixtures.ts had no `Cache-Control: no-cache`, and
+tighten, link-bubble and doc-settings-collapse each gained a wait that says
+why). What is left is not the suite's to fix:
 
-- **`session-refresh.spec.ts:82` on firefox**, roughly one run in three, and
-  three times in ten when repeated against itself. Prod target only: 10 of 10
-  green against the dev target. Established at the moment of failure — the
-  session endpoint answers `role: "ADMIN"`, the header's own text contains
-  `Users`, and the element is there the instant the assertion gives up — so
-  the app is right and the locator is what cannot see it, with Playwright's
-  call log reporting a navigation still in flight. Not the goto retry (it
-  fails with retries disabled), not slowness (20 s fails the same way), not
-  worker count alone (it survives at 4).
-- **Scatter at 8 workers on firefox**, a different unrelated spec each run,
-  all passing alone. The documented too-many-workers signature — the
-  `MEASURED` table in playwright.config.ts was built against chromium, and no
-  equivalent matrix has been run for the other two engines.
+- **The session cookie can be put back by a request that started before the
+  sign-in.** Auth.js re-issues `authjs.session-token` on every `GET
+  /api/auth/session`, so a GET in flight across the credentials POST — or
+  across the POST that clears a dead session — answers a few milliseconds
+  later and wins. Seen as `files.spec.ts:194` rendering `/files` as the admin
+  after signing in as another user, and `session-refresh.spec.ts:108` keeping
+  a deleted user signed in; each about once in five under load.
+  src/app/sign-in/NOTES.md has the measured sequence, TODO.md the options.
+- **A navigation Playwright believes is still in flight.** The call log ends
+  in `waiting for "…" navigation to finish...`, the element is on the page,
+  and the action waits out the whole expect budget: Firefox reported a
+  navigation that it never committed or aborted, and Playwright's pre-action
+  check holds every later action until it does. One trigger is known and
+  closed — a prerendered page answered from Firefox's cache while its
+  stale-while-revalidate refetch registered as a second document request,
+  which the `no-cache` header prevents (CACHING.md, 2026-09-14) — but
+  `link-bubble.spec.ts:415` reached the same state once after an Enter with
+  nothing on the wire, so it is not gone. `PLAYWRIGHT_SKIP_NAVIGATION_CHECK=1`
+  turns the check off if it recurs; TODO.md has the upstream note.
+- **`doc-settings-collapse.spec.ts:48`, about one run in sixteen.** The
+  panel's smooth `scrollIntoView` on toggle never lands, so the body stays
+  painted over the summary — the very bug the test guards, real and
+  intermittent on Firefox under load. The probe polls for 10 s now and reports
+  where the summary was; a red here is the app, not the wait. TODO.md.
+- **`anchored-link-editing.spec.ts:291`, once at 10 workers**: the file bytes
+  answered 503 "File contents are missing" 700 ms after the row was created,
+  so the row outlived its bytes: every default test PDF has the same bytes
+  and so one `sha256`, and `deleteTestFile`'s count-then-sweep of it can
+  run between another test's create and its row. Fixture side; TODO.md.
 
 The globe-icon assertion in `link-bubble.spec.ts` is skipped on webkit, and
 the touch-pinch test in `pdf-zoom.spec.ts` where `Touch` isn't constructible;

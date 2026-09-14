@@ -210,6 +210,15 @@ async function signedInContext(browser: Browser, email: string): Promise<Page> {
   // storageState is explicitly empty rather than inherited — inheriting the
   // admin's would sign this "second user" in as the first one.
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  // The same header the `context` fixture sets, which this context does not
+  // inherit. Without it Firefox serves this user's *second* visit to a
+  // prerendered page out of its own HTTP cache and revalidates beside it — two
+  // document requests 5 ms apart — and Playwright, having resolved goto on the
+  // cached copy, is left holding a pending navigation that never commits, so
+  // every locator action after it waits until the expect times out while the
+  // element sits there (session-refresh.spec, 6 of 16 firefox runs in the
+  // 2026-09-14 matrix, never in a default-context test).
+  await context.setExtraHTTPHeaders({ "Cache-Control": "no-cache" });
   await recordClipboardWrites(context);
   const page = await context.newPage();
   retryInterruptedNavigations(page);
