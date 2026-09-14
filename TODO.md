@@ -501,6 +501,41 @@ both are here so they are not "fixed" by someone who assumes they were oversight
 
 ---
 
+## The PDF Contents pane forgets its expansion state, and has one fixed default
+
+**Status:** noted 2026-09-11, when the depth rule replaced the PDF's own `/Count` as the
+default (PLAN.md §19b); moved here from docs/PDF.md §12 on 2026-09-14. The pane works — this is
+what it should grow, in this order.
+
+1. **Let the reader choose the default.** Today `defaultExpanded` (`src/lib/pdf-outline.ts`)
+   is a depth rule — top-level parents open, everything below closed — and the choices worth
+   offering beside it are *fully expanded*, *fully collapsed*, and **the PDF's own `/Count`**
+   (docs/PDF.md §10a; positive means the author shipped that subtree open). The `/Count` arm is
+   why `count` is still parsed onto `OutlineNode` rather than dropped: it was the rule until
+   2026-09-11, and PLAN.md §19b records why it is no longer the *default* — per-file intent is
+   not a shape a reader can predict before the pane renders — which is an argument against
+   defaulting to it, not against offering it. A depth *number* rather than a three-way choice
+   is tempting and probably wrong: "two levels" means something different in a document whose
+   outline is flat than in one nested five deep.
+
+2. **Remember what the reader opened and closed**, instead of reseeding from the default on
+   every mount. **IndexedDB** is the right store — it is already where a ydoc's local copy
+   lives (docs/YDOC.md), it needs no schema and no round trip, and an expanded set is
+   per-reader-per-device rather than anything to sync or to show anyone else.
+
+The keying is the part to get right, and it is decidable rather than a judgement call: the
+set holds ids like `"1.0.2"` from `flattenOutline`, which are **positions in the outline
+tree, not identities** — the same id means something else in a different file, and in a
+re-exported edition of the same document. So key the stored set on the file's `sha256`, which
+docs/PDF.md §4 already relies on as a file's identity and which by construction cannot drift.
+A revised edition is different bytes, hence a different key, hence a fresh default — the
+honest answer rather than a limitation. Note also that `PdfOutlinePanel`'s `TreeState` is
+keyed on the `nodes` array, so restoring is a matter of seeding that state from the store
+rather than merging into it, and a stored set whose ids no longer exist costs nothing:
+`isVisible` and `visibleOrder` only ever ask about ids they were handed.
+
+---
+
 ## The PDF side panel's Collab tab is a stub
 
 **Status:** shipped empty on purpose, 2026-08-25. `PdfCollabPanel` renders "Nothing here yet."

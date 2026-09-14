@@ -6596,7 +6596,7 @@ type PdfPresence = {
 wire before it becomes an annotation, and `leading`/`following` give §9's follow semantics a
 place to live. **The §9 rules are unchanged and still stated there** — never `scrollTop`,
 `scrollLeft`, a pixel offset or a raw scale; all three echo guards; ~10 Hz outbound with no
-queue, since awareness coalesces. Recorded as a divergence in docs/PDF.md §13.
+queue, since awareness coalesces. docs/PDF.md §9 carries this shape as the wire format.
 
 #### The three affordances
 
@@ -6649,12 +6649,12 @@ visible on other users' views" falls out of the layer only existing for rendered
 
 ### Deviations from this plan, and deferrals
 
-**Where the *implementation* departs from docs/PDF.md, look there, not here:
-[docs/PDF.md](docs/PDF.md) §13 is that list** — `PDFViewerApplication` vs `PDFViewer`,
-§9's annotations-as-ydoc not taken, and §4 step 2's fuzzy match and §3's lazy re-anchor both
-deferred. It carries two further records that never had an entry here, which is the point:
-the two copies had already drifted, and one of them is the file a reader of docs/PDF.md
-will actually reach for.
+**Where the implementation settled differently from docs/PDF.md's original design, that
+file says so in place** — `PDFViewer` rather than `PDFViewerApplication` (its §10),
+`convertToViewportRectangle`'s absence in pdfjs 6 (§5), annotations as rows rather than a
+`Y.Map` (§9), the wider wire format (§9), fuzzy matching and lazy re-anchoring deferred
+(§3, §4). It keeps no separate departures list: each rule there is stated as what is true
+now, and that file is the one a reader of docs/PDF.md actually reaches for.
 
 What follows is the other kind — where the shipped feature departs from the phase
 descriptions *above*, which is this document's own business.
@@ -6747,6 +6747,17 @@ descriptions *above*, which is this document's own business.
   Mechanically it is a rendered Server Component handed across the `ssr: false` boundary as a
   prop (`PdfSurfaceClient`'s header), which is the only way anything server-rendered gets
   inside that island.
+- **Several names in the phases above are the plan's, not the tree's**, and the phase text is
+  left as written. The one to know about is Phase 0's `GlobalWorkerOptions.workerPort`: it is
+  exactly the trap docs/PDF.md §10 lists (a supplied port is shared, so the second mount dies
+  with "the worker is being destroyed"), and `src/lib/pdfjs-client.ts` sets `workerSrc`
+  instead. The rest are renames: Phase 0's `e2e/pdfjs-internals.spec.ts` is the first test in
+  `e2e/pdf-viewer.spec.ts`; Phase 3's `PdfAnnotationList` is `PdfAnnotationPanel.tsx` with
+  the rail positioning in `use-pdf-margin-notes.ts`; Phase 4's `PdfPresenceProvider` is the
+  `usePdfPresence` hook (`use-pdf-presence.ts` — the surface reuses `DocPresenceProvider` for
+  the composer rather than adding a second provider), its `src/lib/pdf-rail-layout.ts` is
+  `src/lib/pdf-geometry.ts`, and Verification's `e2e/pdf-sync.spec.ts` is
+  `e2e/pdf-presence.spec.ts`.
 
 ---
 
@@ -6930,24 +6941,14 @@ inside `.viewerContainer`, pinch and ctrl-wheel change `PDFViewer`'s scale inste
 else on the page, both still zoom the page.
 
 **Three input paths, two gestures**, all ending in one `viewer.updateScale({ scaleFactor,
-origin })`:
-
-- **ctrl-wheel** — and every *trackpad* pinch, which no engine reports as a touch event; they
-  all synthesise a `wheel` with `ctrlKey`. `metaKey` too, since Cmd-scroll is macOS's own page
-  zoom.
-- **two-finger `touchmove`** — phones and Android.
-- **Safari's `gesture*` events** — non-standard, WebKit-only, carrying a cumulative `scale`.
-  Preferred where they exist, with the touch path standing down the moment one arrives, or the
-  two compose and square the zoom.
-
-**`origin` is the point that stays put**, in client space; pdfjs adjusts the scroll around it.
-That is the difference between a gesture and a lurch, and it is the reason this goes through
-`updateScale` rather than setting `currentScale`.
-
-**The container takes `touch-action: pan-x pan-y`, never `none`.** Naming the pans keeps
-one-finger scrolling, momentum and the scrollbars native while handing us pinch and double-tap
-zoom; `none` would freeze the document on a phone, which is a worse bug than the one being
-fixed.
+origin })`: ctrl-wheel (which is also every trackpad pinch, and `metaKey` beside it),
+two-finger `touchmove` (phones and Android), and Safari's non-standard `gesture*` events,
+preferred where they exist with the touch path standing down. The engine facts behind each —
+why a trackpad pinch is a `wheel`, why `deltaMode` needs converting, why the listener must be
+non-passive, why `updateScale`'s `origin` rather than `currentScale`, and why the container
+takes `touch-action: pan-x pan-y` and never `none` — are docs/PDF.md §10c's, stated once
+there. The decision here is only *which* element the gesture belongs to: the document, not the
+page.
 
 **The zoom dropdown had to become a readout as well as a control.** A gesture lands on any
 scale it likes, and a `<select>` whose value matches no option renders *blank* — so
@@ -6968,9 +6969,9 @@ this file already records two iOS touch claims that measured false.
 
 **Built 2026-09-10**, alongside §19d. `PDFViewer` computes a named scale **once**, when it is
 set, and then holds the resulting number — Mozilla's viewer *application* re-applies it on
-resize, and we build on the library, so nothing did. The visible cost was a phone: open a
-document fitted to a portrait width, turn it sideways, and the page stays the size it was, in a
-column of empty space.
+resize, and we build on the library, so nothing did (docs/PDF.md §10c). The visible cost was
+a phone: open a document fitted to a portrait width, turn it sideways, and the page stays the
+size it was, in a column of empty space.
 
 Two rules, because a reader can have said two different things:
 

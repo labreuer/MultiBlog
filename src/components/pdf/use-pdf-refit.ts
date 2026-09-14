@@ -12,7 +12,7 @@ import type { PdfViewerHandle } from "./PdfViewer";
 // fitted to a portrait phone stays fitted to a portrait phone after the reader
 // turns it sideways, sitting in a column of empty space. Mozilla's viewer
 // *application* re-applies the scale on window resize; we build on the library,
-// which is where that responsibility stops (docs/PDF.md §13).
+// which is where that responsibility stops (docs/PDF.md §10c).
 //
 // Two rules, because the reader has said two different things:
 //

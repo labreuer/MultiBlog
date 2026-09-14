@@ -89,7 +89,7 @@ export function touchMidpoint(
  * number — so a viewer fitted to a portrait phone stays fitted to a portrait
  * phone after the reader turns it sideways. (`PDFViewer` has no resize handling
  * of its own; that lives in Mozilla's viewer *application*, which is not what
- * we build on. docs/PDF.md §13.)
+ * we build on. docs/PDF.md §10c.)
  */
 const NAMED_SCALES = new Set(["auto", "page-fit", "page-width", "page-actual"]);
 
