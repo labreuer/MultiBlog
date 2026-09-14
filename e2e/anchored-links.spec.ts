@@ -1,4 +1,4 @@
-import { test, expect, signIn, gotoOk, grantClipboard, selectTextInBody, bodyEditor, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
+import { test, expect, signIn, gotoOk, copiedText, grantClipboard, selectTextInBody, bodyEditor, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   ADMIN_EMAIL,
   TEST_PASSWORD,
@@ -104,7 +104,7 @@ async function copyMintedLink(page: import("@playwright/test").Page): Promise<UR
   await expect(tray).toContainText("Recipients see only the passages they have permission to read", {
     timeout: 15_000,
   });
-  const url = await page.evaluate(() => navigator.clipboard.readText());
+  const url = await copiedText(page);
   expect(url, "the minted URL landed on the clipboard").toContain("/link/");
   return new URL(url);
 }

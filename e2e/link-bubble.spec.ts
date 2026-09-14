@@ -22,7 +22,7 @@
 // inserts the href as the link's text, which is what makes each link
 // addressable by name below.
 import type { Page } from "@playwright/test";
-import { test as base, expect, bodyEditor, grantClipboard, waitForDocCollabReady } from "./fixtures";
+import { test as base, expect, bodyEditor, copiedText, grantClipboard, waitForDocCollabReady } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createTestDoc,
@@ -234,7 +234,7 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
     const b = bubble(page);
     await b.getByRole("button", { name: "Copy link" }).click();
     await expect(b.getByRole("button", { name: "Copied" })).toBeVisible();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(href);
+    expect(await copiedText(page)).toBe(href);
 
     // The click did not take focus from the editor (mousedown is
     // prevented), so the bubble is still up — and the check mark gives way
@@ -333,7 +333,7 @@ test.describe("a link into this site's docs previews the doc", () => {
       await b.getByRole("button", { name: "Copy link" }).click();
       await expect(b.getByRole("button", { name: "Copied" })).toBeVisible();
       const origin = new URL(page.url()).origin;
-      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${origin}${relative}`);
+      expect(await copiedText(page)).toBe(`${origin}${relative}`);
 
       // The same doc by id, as an absolute URL on this origin — resolved as
       // /doc/[slug] would resolve it (id first, then slug).

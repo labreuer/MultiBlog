@@ -91,6 +91,53 @@ type Fixtures = {
  * needs one either works without the grant or fails on its own assertion,
  * which is the failure worth seeing.
  */
+/**
+ * Make every page in `context` record what it puts on the clipboard.
+ *
+ * Reading it back is the problem this solves. `navigator.clipboard.readText()`
+ * from `page.evaluate` throws `NotAllowedError` on WebKit — reads are gated on
+ * a user gesture there, and unlike chromium there is no permission to grant
+ * instead (6 tests, the webkit project's largest remaining class). Writes are
+ * not gated, so the app's Copy really does copy on every engine; only the
+ * test's read-back needed replacing.
+ *
+ * Hence a wrapper that **calls through** rather than a stub of the whole API:
+ * what ships still goes through the real `writeText`, so a regression in how
+ * it is called still surfaces, and no engine is asserting against a different
+ * mechanism than the others. Installed on every context rather than at the
+ * call sites, because `addInitScript` only reaches *later* navigations and
+ * several specs grant the permission after the page they care about is
+ * already open.
+ */
+async function recordClipboardWrites(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) return;
+    const write = clipboard.writeText.bind(clipboard);
+    const copied: string[] = [];
+    Object.defineProperty(window, "__e2eCopied", { value: copied, configurable: true });
+    clipboard.writeText = (text: string) => {
+      copied.push(String(text));
+      return write(text);
+    };
+  });
+}
+
+/**
+ * The last string the page asked the clipboard to hold, per
+ * {@link recordClipboardWrites}. Polls, because Copy is fired by a click whose
+ * handler is async.
+ */
+export async function copiedText(page: Page): Promise<string> {
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __e2eCopied?: string[] }).__e2eCopied?.length ?? 0))
+    .toBeGreaterThan(0);
+  return page.evaluate(() => {
+    const copied = (window as unknown as { __e2eCopied?: string[] }).__e2eCopied ?? [];
+    return copied[copied.length - 1];
+  });
+}
+
 export async function grantClipboard(context: BrowserContext): Promise<void> {
   if (context.browser()?.browserType().name() !== "chromium") return;
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -165,12 +212,19 @@ async function signedInContext(browser: Browser, email: string): Promise<Page> {
   // storageState is explicitly empty rather than inherited — inheriting the
   // admin's would sign this "second user" in as the first one.
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  await recordClipboardWrites(context);
   const page = await context.newPage();
   await signIn(page, email);
   return page;
 }
 
 export const test = base.extend<Fixtures>({
+  // Every page records its clipboard writes — see recordClipboardWrites.
+  context: async ({ context }, use) => {
+    await recordClipboardWrites(context);
+    await use(context);
+  },
+
   // Depending on `page` is deliberate, and the reason for the about:blank:
   // fixtures tear down in reverse setup order, so taking `page` as a
   // dependency puts this teardown *before* the page closes, and lets us drop
