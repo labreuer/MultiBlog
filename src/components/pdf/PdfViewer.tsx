@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } from "@/lib/pdfjs-client";
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
+import { pageTotalLabel, usablePageLabels } from "@/lib/pdf-page-labels";
+import { usePdfZoomGestures } from "./use-pdf-zoom-gestures";
+import { usePdfRefit } from "./use-pdf-refit";
 import "pdfjs-dist/web/pdf_viewer.css";
 import styles from "./PdfViewer.module.css";
 
@@ -22,9 +25,26 @@ import styles from "./PdfViewer.module.css";
 export type PdfViewerHandle = {
   viewer: InstanceType<typeof pdfjsViewer.PDFViewer>;
   eventBus: InstanceType<typeof pdfjsViewer.EventBus>;
+  /**
+   * pdfjs's own destination resolver, exposed because an outline entry's `dest`
+   * is not something to re-implement: it may be a *name* to look up, an
+   * explicit array whose first element is a page ref rather than a number, and
+   * any of `XYZ`/`Fit`/`FitH`/`FitR`/… — `goToDestination` handles all of it and
+   * keeps the reader's own zoom for an `XYZ` whose zoom slot is null.
+   *
+   * Everything anchored still goes through `jumpDestinationY` instead: an
+   * annotation's quads are ours, not a destination the document declared.
+   */
+  linkService: InstanceType<typeof pdfjsViewer.PDFLinkService>;
   pdf: pdfjs.PDFDocumentProxy;
   offsets: PageOffsets;
   container: HTMLDivElement;
+  /**
+   * What this document calls its own pages, or null where that is just 1…N
+   * (`usablePageLabels` decides). Every surface that *displays* a page number
+   * reads it through `pageLabelFor`; nothing computed from a page ever does.
+   */
+  pageLabels: string[] | null;
 };
 
 /** One tab in the side panel, and the pane it selects. */
@@ -114,6 +134,21 @@ export default function PdfViewer({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerElementRef = useRef<HTMLDivElement>(null);
+  /**
+   * True while the reader is typing in the page box.
+   *
+   * The box is both an input and a readout, and the readout wins on every
+   * `updateviewarea` — which fires continuously while a scroll settles. So
+   * digits typed into it during those few hundred milliseconds were being
+   * overwritten before the reader could press Enter, and the jump then went
+   * back to where they already were. Invisible in ordinary use and maddening
+   * when it happens; it surfaced as an e2e failure that only appeared under a
+   * full-suite run, twice.
+   *
+   * A ref rather than state: it is read inside a rAF callback that must not
+   * re-subscribe, and nothing renders differently because of it.
+   */
+  const editingPageRef = useRef(false);
   const handleRef = useRef<PdfViewerHandle | null>(null);
   const onReadyRef = useRef(onReady);
   useEffect(() => {
@@ -125,6 +160,12 @@ export default function PdfViewer({
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [pageDraft, setPageDraft] = useState("1");
+  /**
+   * What the document calls its pages, once it is open — null for the usual
+   * 1…N. Held in state as well as on the handle because the toolbar is React
+   * and has to re-render when it arrives.
+   */
+  const [pageLabels, setPageLabels] = useState<string[] | null>(null);
   const [zoom, setZoom] = useState<string>("page-width");
 
   useEffect(() => {
@@ -151,11 +192,29 @@ export default function PdfViewer({
         frame = 0;
         if (cancelled) return;
         setPageNumber(viewer.currentPageNumber);
-        setPageDraft(String(viewer.currentPageNumber));
+        // The *label* in the box — "iv", not "4" — since that is what is
+        // printed on the page the reader is looking at. `currentPageLabel` is
+        // null whenever no labels were set, which is the ordinary case.
+        //
+        // Never over what the reader is currently typing (see editingPageRef).
+        if (!editingPageRef.current) {
+          setPageDraft(viewer.currentPageLabel ?? String(viewer.currentPageNumber));
+        }
       });
     };
     eventBus.on("updateviewarea", onViewArea);
     eventBus.on("pagechanging", onViewArea);
+
+    // The zoom control is a readout as well as a control, and a pinch changes
+    // the scale without going through it. `presetValue` is set only when the
+    // scale came from a named mode, so a gesture lands the numeric scale here
+    // and the dropdown stops claiming "Fit width" for a document that is no
+    // longer fitted to anything.
+    const onScaleChanging = ({ scale, presetValue }: { scale: number; presetValue?: string }) => {
+      if (cancelled) return;
+      setZoom(presetValue ?? String(scale));
+    };
+    eventBus.on("scalechanging", onScaleChanging);
 
     // **Registered before `setDocument`, not after the awaits below.**
     // `pagesinit` fires almost immediately once the document is handed over,
@@ -173,10 +232,21 @@ export default function PdfViewer({
 
     const completeReady = () => {
       if (!pagesReady || !pending || cancelled) return;
+      // The labels go to pdfjs as well as onto the handle, so its own page divs
+      // carry `data-page-label` (it uses that for a page's accessible name and
+      // when printing) and `currentPageLabel`/`pageLabelToPageNumber` agree
+      // with what the toolbar shows. Handing over the *filled-in* array rather
+      // than the raw one is what keeps those three in step.
+      //
+      // **Here rather than beside the fetch**, for the same reason the scale is:
+      // it walks `_pages`, which doesn't exist until `pagesinit`. Called
+      // earlier it would store the labels and silently label no page.
+      viewer.setPageLabels(pending.pageLabels);
       // Settable only once the first page has been laid out; assigning earlier
       // is silently dropped and the viewer opens at some default.
       viewer.currentScaleValue = "page-width";
       handleRef.current = pending;
+      setPageLabels(pending.pageLabels);
       setStatus("ready");
       onReadyRef.current?.(pending);
     };
@@ -207,17 +277,33 @@ export default function PdfViewer({
         // buildPageOffsets' note on why the internal one is the wrong source.
         // Fetched in parallel: getPage is a worker round trip apiece, and a
         // 300-page document would otherwise spend a visible moment here.
-        const heights = await Promise.all(
-          Array.from({ length: pdf.numPages }, async (_, i) => {
-            const page = await pdf.getPage(i + 1);
-            const height = page.getViewport({ scale: 1 }).height;
-            page.cleanup();
-            return height;
-          }),
-        );
+        const [heights, rawLabels] = await Promise.all([
+          Promise.all(
+            Array.from({ length: pdf.numPages }, async (_, i) => {
+              const page = await pdf.getPage(i + 1);
+              const height = page.getViewport({ scale: 1 }).height;
+              page.cleanup();
+              return height;
+            }),
+          ),
+          // A page's label is what is printed on it — "iv" for the fourth
+          // sheet of front matter. Never fatal: a document without them (most)
+          // resolves null, and a malformed tree throws inside the worker and is
+          // reported as none rather than taking the document down with it.
+          pdf.getPageLabels().catch(() => null),
+        ]);
         if (cancelled) return;
 
-        pending = { viewer, eventBus, pdf, offsets: buildPageOffsets(heights), container };
+        const pageLabels = usablePageLabels(rawLabels, pdf.numPages);
+        pending = {
+          viewer,
+          eventBus,
+          linkService,
+          pdf,
+          offsets: buildPageOffsets(heights),
+          container,
+          pageLabels,
+        };
         completeReady();
       })
       .catch((err: unknown) => {
@@ -232,6 +318,7 @@ export default function PdfViewer({
       if (frame) cancelAnimationFrame(frame);
       eventBus.off("updateviewarea", onViewArea);
       eventBus.off("pagechanging", onViewArea);
+      eventBus.off("scalechanging", onScaleChanging);
       eventBus.off("pagesinit", onPagesInit);
       handleRef.current = null;
       // Order matters: drop the viewer's reference to the document before
@@ -249,12 +336,49 @@ export default function PdfViewer({
     };
   }, [fileUrl]);
 
+  // PLAN.md §19d — pinch and ctrl-wheel zoom the document rather than the page.
+  // Bound to the scroll container for the life of the document, which is why it
+  // takes the ref: nothing it does depends on this component re-rendering.
+  usePdfZoomGestures(handleRef, status === "ready");
+  // PLAN.md §19e — and keeping that zoom right when the container changes
+  // shape: a rotation, a window drag, the side panel opening.
+  usePdfRefit(handleRef, status === "ready");
+
   const goToPage = useCallback((next: number) => {
     const handle = handleRef.current;
     if (!handle) return;
     const clamped = Math.max(1, Math.min(handle.pdf.numPages, Math.floor(next)));
     handle.viewer.currentPageNumber = clamped;
   }, []);
+
+  /**
+   * What the page box does when it is submitted.
+   *
+   * **A label first, a page number second.** In a document with front matter
+   * the two overlap — "1" is both the first sheet and, more usefully, the first
+   * page of the body — and the reader typing into a box that is *showing* them
+   * a label means the label. Falling through to the number keeps the box usable
+   * on the vast majority of documents, which have no labels at all, and for
+   * anyone who knows which sheet they want.
+   *
+   * A label that names no page and text that isn't a number both leave the
+   * viewer where it is; the box is then put back to the current page by the
+   * next `updateviewarea`, which is the same thing that would happen anyway.
+   */
+  const submitPage = useCallback(
+    (draft: string) => {
+      const handle = handleRef.current;
+      if (!handle) return;
+      const byLabel = handle.viewer.pageLabelToPageNumber(draft.trim());
+      if (byLabel !== null) {
+        handle.viewer.currentPageNumber = byLabel;
+        return;
+      }
+      const typed = Number(draft);
+      goToPage(Number.isFinite(typed) && typed > 0 ? typed : pageNumber);
+    },
+    [goToPage, pageNumber],
+  );
 
   const applyZoom = useCallback((value: string) => {
     const handle = handleRef.current;
@@ -298,34 +422,92 @@ export default function PdfViewer({
       <div className={styles.toolbar}>
         <span className={styles.title}>{title}</span>
 
-        <button type="button" onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1} aria-label="Previous page">
-          ‹
-        </button>
-        <label>
-          <span className="sr-only">Page</span>
-          <input
-            className={styles.pageInput}
-            value={pageDraft}
-            aria-label="Page number"
-            onChange={(event) => setPageDraft(event.target.value)}
-            onBlur={() => goToPage(Number(pageDraft) || pageNumber)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                goToPage(Number(pageDraft) || pageNumber);
-              }
-            }}
-          />
-        </label>
-        <span className={styles.pageCount}>of {pageCount || "…"}</span>
+        {/* The page controls read as one instrument — step back, where you are,
+            how many there are, step forward — so they are grouped and share a
+            tighter gap than the toolbar's own. Without the wrapper the only
+            lever is the toolbar's single `gap`, which also sets the distance
+            between the *clusters*, and closing one up closes up the other. */}
+        <div className={styles.pageGroup}>
+          <button type="button" onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1} aria-label="Previous page">
+            ‹
+          </button>
+          <label>
+            {/* Visible text, and always was: this carried a `sr-only` class
+                that is defined in no stylesheet in the project, so it has been
+                rendering as an ordinary word since the day it was written. Kept
+                visible on purpose now — the box beside it holds a page *label*
+                as often as a number ("iv"), which needs saying — and named for
+                what it is. */}
+            <span className={styles.controlLabel}>Page</span>
+            <input
+              className={styles.pageInput}
+              value={pageDraft}
+              aria-label="Page number"
+              onChange={(event) => {
+                editingPageRef.current = true;
+                setPageDraft(event.target.value);
+              }}
+              // Focusing selects what's there, so typing a page number replaces
+              // it rather than appending to it — the box is three characters
+              // wide and a reader who has to clear it first will get "412" out
+              // of an intended "12" often enough to notice.
+              //
+              // Focus also counts as editing, which is what makes that
+              // selection survive: the readout would otherwise rewrite the
+              // value out from under it on the next scroll frame, dropping the
+              // selection with it. The cost is that the box stops following the
+              // document while it has focus, which is the right trade — it is
+              // the reader's box at that point.
+              onFocus={(event) => {
+                editingPageRef.current = true;
+                event.currentTarget.select();
+              }}
+              // Cleared *before* submitting, both here and on Enter, so the move
+              // that follows resyncs the box to the page it landed on — a reader
+              // who typed a sheet number into a labelled document sees the label
+              // it corresponds to, rather than their own input left standing.
+              onBlur={() => {
+                editingPageRef.current = false;
+                submitPage(pageDraft);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  editingPageRef.current = false;
+                  submitPage(pageDraft);
+                }
+              }}
+              // Where the box shows a label, the sheet number is the thing the
+              // reader can no longer see — and it is what a scrollbar position,
+              // a "page 4 of 350" habit and every other viewer are counting in.
+              title={pageLabels ? `Sheet ${pageNumber} of ${pageCount}` : undefined}
+            />
+          </label>
+          {/* The box's counterpart, so it counts in the same units the box
+              shows — the document's last numbered page, not its sheet count,
+              wherever the two differ (`pageTotalLabel` has the tail rule). The
+              sheet count keeps a home in the title for the same reason it does
+              on the box: it is what the scrollbar is counting in. */}
+          <span className={styles.pageCount} title={pageLabels ? `${pageCount} sheets` : undefined}>
+            of {pageCount ? pageTotalLabel(pageLabels, pageCount) : "…"}
+          </span>
 
-        <button type="button" onClick={() => goToPage(pageNumber + 1)} disabled={pageCount > 0 && pageNumber >= pageCount} aria-label="Next page">
-          ›
-        </button>
+          <button type="button" onClick={() => goToPage(pageNumber + 1)} disabled={pageCount > 0 && pageNumber >= pageCount} aria-label="Next page">
+            ›
+          </button>
+        </div>
 
         <label>
-          <span className="sr-only">Zoom</span>
+          <span className={styles.controlLabel}>Zoom</span>
           <select value={zoom} aria-label="Zoom" onChange={(event) => applyZoom(event.target.value)}>
+            {/* A pinch lands on any scale it likes, and a <select> whose value
+                matches no option renders blank — so the current scale gets an
+                option of its own whenever it isn't one of the presets. Listed
+                first so it reads as the current state rather than as a tenth
+                zoom level someone chose to offer. */}
+            {!(ZOOM_PRESETS as readonly string[]).includes(zoom) && (
+              <option value={zoom}>{`${Math.round(Number(zoom) * 100)}%`}</option>
+            )}
             {ZOOM_PRESETS.map((preset) => (
               <option key={preset} value={preset}>
                 {preset === "page-fit" ? "Fit page" : preset === "page-width" ? "Fit width" : `${Number(preset) * 100}%`}
@@ -334,7 +516,17 @@ export default function PdfViewer({
           </select>
         </label>
 
-        <button type="button" onClick={rotate} aria-label="Rotate">
+        {/* The glyph says "rotate" and nothing about *what*, which matters here
+            because pdfjs's `pagesRotation` turns the whole document rather than
+            the page on screen — the reader is owed that before they press it,
+            not after. The accessible name says the same words as the tooltip:
+            a title that a screen reader never reads is half a fix. */}
+        <button
+          type="button"
+          onClick={rotate}
+          aria-label="Rotate all pages 90° clockwise"
+          title="Rotate all pages 90° clockwise"
+        >
           ⟳
         </button>
 

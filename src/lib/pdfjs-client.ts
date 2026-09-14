@@ -14,7 +14,9 @@ import * as pdfjsViewer from "pdfjs-dist/web/pdf_viewer.mjs";
 //
 // Everything that imports pdfjs in the client goes through here, so the worker
 // is wired exactly once and every internal we depend on is named in one place
-// (which is what e2e/pdfjs-internals.spec.ts asserts against).
+// (which is what e2e/pdf-viewer.spec.ts's first test asserts against — PLAN.md
+// §19 Phase 0 names a standalone e2e/pdfjs-internals.spec.ts, which was never
+// written as its own file).
 //
 // **`pdfjs-dist/web/pdf_viewer.mjs`, not `PDFViewerApplication`.** docs/PDF.md
 // §10 names the latter, and it isn't importable: it is the bundled

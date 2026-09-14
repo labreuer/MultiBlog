@@ -6,6 +6,7 @@ import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-
 import PdfViewer, { type PdfPane, type PdfViewerHandle } from "./PdfViewer";
 import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import PdfMetadataPanel from "./PdfMetadataPanel";
+import PdfOutlinePanel from "./PdfOutlinePanel";
 import PdfCollabPanel from "./PdfCollabPanel";
 import { loadPdfAnnotationEntries } from "@/app/actions/annotations";
 import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
@@ -14,13 +15,18 @@ import { useOpenLinkParts } from "@/components/anchored-link/open-link-store";
 import { AnnotationReloadProvider } from "@/components/annotation/annotation-reload-context";
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
+import { usePdfOutline } from "./use-pdf-outline";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
 import {
   JUMP_VIEWPORT_FRACTION,
+  READING_LINE_FRACTION,
   documentFraction,
   jumpDestinationY,
+  pageHeightAt,
   visibleFractionRange,
 } from "@/lib/pdf-geometry";
+import { activeNodeAt, type OutlineNode } from "@/lib/pdf-outline";
+import { pageLabelFor } from "@/lib/pdf-page-labels";
 import { captureTextTarget, type CapturePage } from "@/lib/pdf-anchor-capture";
 import { resolveTargetRects } from "@/lib/pdf-anchor-resolve";
 import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
@@ -49,6 +55,7 @@ const POSITIONED_MEDIA_QUERY = "(min-width: 768px)";
 
 // The side panel's tab ids. Plain strings rather than an enum because they are
 // also half of each tab's and pane's DOM id, which `aria-controls` pairs up.
+const CONTENTS_PANE = "contents";
 const ANNOTATIONS_PANE = "annotations";
 const METADATA_PANE = "metadata";
 const COLLAB_PANE = "collab";
@@ -243,6 +250,12 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   // the highlights follow a post or a delete without waiting for a scroll.
   const layerRedrawRef = useRef<(() => void) | null>(null);
 
+  // Likewise for "the rendering moved": the outline arrives a few worker round
+  // trips after the viewer is ready, and no scroll event follows it. Without
+  // this the Contents pane opens with nothing highlighted until the reader
+  // happens to scroll — which looks exactly like the highlight not working.
+  const movedRef = useRef<(() => void) | null>(null);
+
   // Held in state as well as in the ref: the rails are React and need the
   // offsets table to re-render against, where the imperative callbacks need the
   // stable ref.
@@ -275,6 +288,22 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   // signal everything else here uses.
   const [visibleRange, setVisibleRange] = useState<{ start: number; end: number } | null>(null);
   const [railHeight, setRailHeight] = useState(0);
+
+  // PLAN.md §19b — the document's own table of contents, and which of its
+  // entries the reader is inside.
+  //
+  // Only the *id* is state. The reading line moves on every scroll frame, and
+  // keeping the fraction would re-render the whole surface (the panel, every
+  // card) for a number nothing displays; the id changes a few times per
+  // document. So the fraction lives in the scroll handler and the id is set
+  // only when it actually differs — see `onMoved` below.
+  const outline = usePdfOutline(handle);
+  const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null);
+  const outlineNodesRef = useRef(outline.nodes);
+  useEffect(() => {
+    outlineNodesRef.current = outline.nodes;
+    movedRef.current?.();
+  }, [outline.nodes]);
 
   // ---- the highlight layer ------------------------------------------------
   useEffect(() => {
@@ -346,7 +375,24 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
       const top = fractionAtViewportY(handle, containerRect.top);
       const bottom = fractionAtViewportY(handle, containerRect.bottom);
       setVisibleRange(top && bottom ? visibleFractionRange(handle.offsets, top, bottom) : null);
+
+      // Where the reader is, for the Contents pane. Measured at the reading
+      // line rather than at the top edge, and falling back to the top edge
+      // when the line lands between two pages — `fractionAtViewportY` answers
+      // null there, and dropping the highlight for the frame it takes to
+      // scroll past a page break would make it blink on every page.
+      const nodes = outlineNodesRef.current;
+      if (nodes.length > 0) {
+        const lineY = containerRect.top + containerRect.height * READING_LINE_FRACTION;
+        const at = fractionAtViewportY(handle, lineY) ?? top;
+        if (at) {
+          const active = activeNodeAt(nodes, documentFraction(handle.offsets, at.pageIndex, at.yFromTop));
+          // Set only on a change: this runs on every scroll frame.
+          setActiveOutlineId((current) => (current === (active?.id ?? null) ? current : (active?.id ?? null)));
+        }
+      }
     };
+    movedRef.current = onMoved;
     handle.eventBus.on("updateviewarea", onMoved);
     handle.eventBus.on("pagerendered", onMoved);
     handle.eventBus.on("scalechanging", onMoved);
@@ -356,6 +402,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
 
     return () => {
       layerRedrawRef.current = null;
+      movedRef.current = null;
       layers.destroy();
       detachClicks();
       handle.eventBus.off("updateviewarea", onMoved);
@@ -664,6 +711,33 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     [jumpToTarget],
   );
 
+  /**
+   * Jump to an outline entry (PLAN.md §19b).
+   *
+   * **pdfjs's own `goToDestination`, not `jumpToTarget`.** A destination is
+   * something the *document* declared — it may be a name, an array leading with
+   * a page ref, or any of the Fit variants — and pdfjs already resolves all of
+   * that, keeping the reader's zoom where the destination doesn't set one.
+   *
+   * The visible difference from an annotation jump is deliberate: this lands
+   * the heading at the top of the viewport rather than a quarter of the way
+   * down. A quote needs the context above it; a heading is the context, and has
+   * nothing above it worth showing. It also leaves the heading just above the
+   * reading line, so the entry the reader clicked is the entry that lights up.
+   */
+  const jumpToOutlineNode = useCallback(
+    (node: OutlineNode) => {
+      const current = handleRef.current;
+      if (!current || node.dest === null) return;
+      void current.linkService.goToDestination(node.dest);
+      // On a phone the panel is an overlay *over* the viewer
+      // (PdfViewer.module.css below 768px), so jumping without closing it
+      // scrolls the document behind a list that is still covering it.
+      if (!positioned) setPanelOpen(false);
+    },
+    [positioned],
+  );
+
   // docs/ANCHORED_LINKS.md — the follow path's on-load jump, once, when the
   // viewer says it's ready: the banner can't do this itself here (the doc
   // side's DOM-query retry has nothing to query — quads live in a
@@ -695,7 +769,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           id: entry.root.id,
           fraction: documentFraction(handle.offsets, target.pageIndex, Math.max(0, pageHeight - top)),
           color: entry.color,
-          label: entry.quotedText || `Annotation on page ${target.pageIndex + 1}`,
+          label: entry.quotedText || `Annotation on page ${pageLabelFor(handle.pageLabels, target.pageIndex)}`,
         },
       ];
     });
@@ -735,19 +809,33 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           pendingTarget={pending?.target ?? null}
           pendingKey={pending?.key ?? 0}
           onClearPending={() => setPending(null)}
+          pageLabels={handle?.pageLabels ?? null}
         />
       </AnnotationReloadProvider>
     ),
-    [fileId, liveEntries, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries],
+    [fileId, liveEntries, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries, handle],
   );
 
   const panes = useMemo<PdfPane[]>(
     () => [
+      {
+        value: CONTENTS_PANE,
+        label: "Contents",
+        content: (
+          <PdfOutlinePanel
+            state={outline}
+            activeId={activeOutlineId}
+            onJumpTo={jumpToOutlineNode}
+            pageLabels={handle?.pageLabels ?? null}
+            visible={panelOpen && activePane === CONTENTS_PANE}
+          />
+        ),
+      },
       { value: ANNOTATIONS_PANE, label: "Annotations", content: panel },
       { value: METADATA_PANE, label: "Metadata", content: <PdfMetadataPanel>{metadata}</PdfMetadataPanel> },
       { value: COLLAB_PANE, label: "Collab", content: <PdfCollabPanel /> },
     ],
-    [panel, metadata],
+    [panel, metadata, outline, activeOutlineId, jumpToOutlineNode, panelOpen, activePane, handle],
   );
 
   return (
@@ -857,13 +945,6 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
       </AnnotationMoveProvider>
     </DocPresenceProvider>
   );
-}
-
-/** A page's height at scale 1, recovered from the cumulative offset table. */
-function pageHeightAt(offsets: PdfViewerHandle["offsets"], pageIndex: number): number {
-  const top = offsets.tops[pageIndex];
-  if (top === undefined) return 0;
-  return (offsets.tops[pageIndex + 1] ?? offsets.total) - top;
 }
 
 /**

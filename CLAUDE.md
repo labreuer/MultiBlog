@@ -11,7 +11,7 @@ to re-derive the decision from.
 
 | | |
 |---|---|
-| [PLAN.md](PLAN.md) | Architecture and build order. §10 tracks what's actually built vs. planned. |
+| [PLAN.md](PLAN.md) | Architecture and build order — the **fallback**, not the default home. Record a decision here only when no doc below owns its topic; where one does, that doc holds the reasoning and PLAN.md merely links to it. What is actually built is noted per section ("Built &lt;date&gt;", "as built", "Known gaps") — **not** in §10, which stopped at 2026-07-25. |
 | [TODO.md](TODO.md) | Open items carrying enough context to act on directly. |
 | [docs/COLLAB.md](docs/COLLAB.md) | How a remark stays attached to a passage while the passage moves — every strategy used, the ones rejected, and how to pick. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |

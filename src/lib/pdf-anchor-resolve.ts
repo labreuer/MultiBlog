@@ -45,8 +45,8 @@ export type ResolutionStatus = "anchored" | "shifted" | "orphaned";
  * The quads, in page-relative CSS pixels at the page's current scale and
  * rotation.
  *
- * **docs/PDF.md §5 names `convertToViewportRectangle`; it does not exist in
- * pdfjs 6** — the type declares only `convertToViewportPoint` and
+ * **`convertToViewportRectangle` does not exist in pdfjs 6** (docs/PDF.md §5)
+ * — the type declares only `convertToViewportPoint` and
  * `convertToPdfPoint`, and so does the shipped `pdf.mjs`. Converting the two
  * opposite corners as points and taking min/max is exactly equivalent for an
  * axis-aligned rectangle, which is all a quad's bounding box ever is here.

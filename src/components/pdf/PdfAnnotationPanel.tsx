@@ -8,6 +8,7 @@ import { usePdfMarginNotes } from "./use-pdf-margin-notes";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import { quadsTopY } from "@/lib/pdf-anchor";
 import { JUMP_VIEWPORT_FRACTION } from "@/lib/pdf-geometry";
+import { pageLabelFor } from "@/lib/pdf-page-labels";
 import styles from "./PdfAnnotations.module.css";
 
 // PLAN.md §19 Phase 3 — the annotation column beside the PDF.
@@ -93,6 +94,13 @@ type Props = {
   pendingKey: number;
   /** Drop the captured selection — the composer was cancelled, or the reader changed their mind. */
   onClearPending: () => void;
+  /**
+   * What the document calls its pages (PLAN.md §19c), or null for the ordinary
+   * 1…N. A card's badge says what is printed on the page it points at, so it
+   * agrees with the Contents pane and the toolbar rather than being the one
+   * place still counting sheets.
+   */
+  pageLabels: string[] | null;
 };
 
 export default function PdfAnnotationPanel({
@@ -105,6 +113,7 @@ export default function PdfAnnotationPanel({
   pendingTarget,
   pendingKey,
   onClearPending,
+  pageLabels,
 }: Props) {
   // Position order is (page, then down the page), with creation time breaking
   // ties — for the unanchored entries, which share one page/y sentinel, that is
@@ -179,9 +188,9 @@ export default function PdfAnnotationPanel({
               // nothing about what the control does; `title` is only used as an
               // accessible name when an element has no content, so it doesn't
               // fill the gap here.
-              aria-label={`Jump to this passage on page ${entry.target.pageIndex + 1}`}
+              aria-label={`Jump to this passage on page ${pageLabelFor(pageLabels, entry.target.pageIndex)}`}
             >
-              p. {entry.target.pageIndex + 1}
+              p. {pageLabelFor(pageLabels, entry.target.pageIndex)}
             </button>
           )}
           {entry.quotedText && (
@@ -197,7 +206,7 @@ export default function PdfAnnotationPanel({
         </div>
       );
     },
-    [fileId, isAnchored, onJumpTo, railMode],
+    [fileId, isAnchored, onJumpTo, railMode, pageLabels],
   );
 
   // The panel's own chrome, grouped so rail mode can lift it out of the flow
@@ -214,7 +223,7 @@ export default function PdfAnnotationPanel({
       {pendingTarget && (
         <div className={styles.pendingQuote}>
           <span className={styles.pendingLabel}>
-            Annotating page {pendingTarget.pageIndex + 1}
+            Annotating page {pageLabelFor(pageLabels, pendingTarget.pageIndex)}
             {pendingTarget.quote.exact ? "" : " (region)"}
           </span>
           {pendingTarget.quote.exact && <blockquote>{pendingTarget.quote.exact}</blockquote>}

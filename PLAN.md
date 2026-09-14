@@ -6216,7 +6216,8 @@ must not be `File`, which would shadow the DOM/Node global that the upload code 
 
 ```
 model StoredFile {
-  id, slug @unique, title, filename, contentType, byteSize Int, sha256 String,
+  id, slug (unique among live files only — see "a deleted file releases its slug" below),
+  title, filename, contentType, byteSize Int, sha256 String,
   pageCount Int?, visibility DocVisibility @default(PRIVATE),
   createdAt, updatedAt, updatedByUserId, deletedByUserId, deletedAt
   owners FileOwner[]  slugHistory FileSlugHistory[]
@@ -6294,6 +6295,40 @@ Slug from the upload filename, via the existing `slugify` + `RESERVED_SLUGS` mac
 [src/lib/slug.ts](src/lib/slug.ts); `src/lib/file-slug.ts` mirrors
 [src/lib/doc-slug.ts](src/lib/doc-slug.ts) exactly (`uniqueFileSlug`, `changeFileSlug`,
 `revertFileSlug`, its own namespace, no catch-all against post/doc slugs).
+
+**As built (2026-09-10) — a deleted file releases its slug, and only files do.** The mirror
+of doc-slug.ts stops at one place: `file.slug` carries no `UNIQUE`, and
+`file_slug_live_key` is unique only `WHERE deleted_by_user_id IS NULL`
+(`20260911031651_file_slug_unique_when_live`). Uploading a PDF, noticing it carries embedded
+annotations, stripping them and re-uploading the corrected copy is an ordinary sequence, and
+one a deleted row squatting on `report` answers with `report-2` forever. That is the whole
+motivation; docs and posts keep their global `UNIQUE`, because recreating a doc under a
+deleted one's name is not a workflow they have.
+
+Three things follow, all of them in `src/lib/file-slug.ts` and `src/app/actions/files.ts`:
+
+- **"In use" means *live*, on both halves** — a deleted file's current slug and its past
+  ones. `fileSlugInUse` writes the `deletedByUserId: null` predicate out rather than
+  inheriting it from whichever client it was handed, because the two clients disagree
+  (`prisma` filters soft-deleted files, `prismaIncludingDeleted` doesn't). This was already
+  a live bug before the index: the upload route claims its slug through the *extended*
+  client's transaction, so it couldn't see the deleted squatter and the insert died with a
+  raw P2002 — a re-upload answered "Couldn't save that file", not `report-2`.
+- **Nothing may `findUnique` a file by slug**, since two deleted files may share one.
+  `resolveFileParam` is `findFirst` in a deliberate order: the live row, then a redirect into
+  a live file, then the most recently deleted namesake (so an admin's link to a deleted row
+  still resolves), then a redirect into a deleted one.
+- **A restore whose slug was taken renames rather than refuses** — `report` comes back as
+  `report-2`, reported to the caller as `renamedFrom` and shown as a notice under `/files`.
+  Refusing would strand an admin who cannot restore a row without first renaming a file they
+  may not be allowed to touch. `file_slug_history.slug` stays globally unique — the predicate
+  it would need lives on another table — so `changeFileSlug` clears a dead redirect (one
+  pointing into a deleted file) out of the way before recording a live file's old url.
+
+Found on the way: `canUserManageFile` asked the *filtered* client, so every soft-deleted file
+answered "no such file" and **no file could be restored at all** — /files offered the button
+(its listing inlines the same rule over rows it fetched unfiltered) and the action refused it.
+It reads the unfiltered client now; liveness is the caller's question, not this one's.
 
 #### Download route — `src/app/api/files/[id]/[hash]/route.ts`
 
@@ -6561,7 +6596,7 @@ type PdfPresence = {
 wire before it becomes an annotation, and `leading`/`following` give §9's follow semantics a
 place to live. **The §9 rules are unchanged and still stated there** — never `scrollTop`,
 `scrollLeft`, a pixel offset or a raw scale; all three echo guards; ~10 Hz outbound with no
-queue, since awareness coalesces. Recorded as a divergence in docs/PDF.md §13.
+queue, since awareness coalesces. docs/PDF.md §9 carries this shape as the wire format.
 
 #### The three affordances
 
@@ -6614,12 +6649,12 @@ visible on other users' views" falls out of the layer only existing for rendered
 
 ### Deviations from this plan, and deferrals
 
-**Where the *implementation* departs from docs/PDF.md, look there, not here:
-[docs/PDF.md](docs/PDF.md) §13 is that list** — `PDFViewerApplication` vs `PDFViewer`,
-§9's annotations-as-ydoc not taken, and §4 step 2's fuzzy match and §3's lazy re-anchor both
-deferred. It carries two further records that never had an entry here, which is the point:
-the two copies had already drifted, and one of them is the file a reader of docs/PDF.md
-will actually reach for.
+**Where the implementation settled differently from docs/PDF.md's original design, that
+file says so in place** — `PDFViewer` rather than `PDFViewerApplication` (its §10),
+`convertToViewportRectangle`'s absence in pdfjs 6 (§5), annotations as rows rather than a
+`Y.Map` (§9), the wider wire format (§9), fuzzy matching and lazy re-anchoring deferred
+(§3, §4). It keeps no separate departures list: each rule there is stated as what is true
+now, and that file is the one a reader of docs/PDF.md actually reaches for.
 
 What follows is the other kind — where the shipped feature departs from the phase
 descriptions *above*, which is this document's own business.
@@ -6678,11 +6713,13 @@ descriptions *above*, which is this document's own business.
   The two questions are therefore asked in two places. The toolbar carries a **show/hide
   icon** and says nothing about contents; the panel carries a **tab strip** — Annotations ·
   Metadata · Collab — and says nothing about whether it is open. A fourth pane touches the
-  panel alone, and closing and reopening comes back to the tab you were on. The icon is a
-  drawn pane outline whose right section is **filled while the panel is open**, so the button
-  reports state rather than only naming its target: `aria-pressed` alone is invisible to
-  everyone not using a screen reader, and the toolbar's other glyphs (‹ › ⟳) are directional
-  or rotational with no character available for this one.
+  panel alone, and closing and reopening comes back to the tab you were on. (That fourth pane
+  arrived on 2026-09-10 and is **Contents**, first in the strip — §19b. The claim being made
+  here is the one that held: adding it moved no other control and cost the viewer no height.)
+  The icon is a drawn pane outline whose right section is **filled while the panel is open**,
+  so the button reports state rather than only naming its target: `aria-pressed` alone is
+  invisible to everyone not using a screen reader, and the toolbar's other glyphs (‹ › ⟳) are
+  directional or rotational with no character available for this one.
 
   **The Collab tab ships empty**, deliberately, so the strip is the shape it will keep.
   TODO.md carries what is likely to go in it.
@@ -6710,6 +6747,17 @@ descriptions *above*, which is this document's own business.
   Mechanically it is a rendered Server Component handed across the `ssr: false` boundary as a
   prop (`PdfSurfaceClient`'s header), which is the only way anything server-rendered gets
   inside that island.
+- **Several names in the phases above are the plan's, not the tree's**, and the phase text is
+  left as written. The one to know about is Phase 0's `GlobalWorkerOptions.workerPort`: it is
+  exactly the trap docs/PDF.md §10 lists (a supplied port is shared, so the second mount dies
+  with "the worker is being destroyed"), and `src/lib/pdfjs-client.ts` sets `workerSrc`
+  instead. The rest are renames: Phase 0's `e2e/pdfjs-internals.spec.ts` is the first test in
+  `e2e/pdf-viewer.spec.ts`; Phase 3's `PdfAnnotationList` is `PdfAnnotationPanel.tsx` with
+  the rail positioning in `use-pdf-margin-notes.ts`; Phase 4's `PdfPresenceProvider` is the
+  `usePdfPresence` hook (`use-pdf-presence.ts` — the surface reuses `DocPresenceProvider` for
+  the composer rather than adding a second provider), its `src/lib/pdf-rail-layout.ts` is
+  `src/lib/pdf-geometry.ts`, and Verification's `e2e/pdf-sync.spec.ts` is
+  `e2e/pdf-presence.spec.ts`.
 
 ---
 
@@ -6763,6 +6811,200 @@ Per-phase, and each phase is independently shippable:
 - **By hand in the browser pane** — only for what the suite can't assert: that the two 1px
   rails read well, that the viewport thumb's 20px threshold behaves at both extremes, and
   that a rectangle selection over a figure produces a sensible highlight.
+
+### 19b. The Contents pane — the document's own table of contents
+
+**Built 2026-09-10.** A fourth tab in the side panel §19's Phase 3 already built, showing the
+outline the PDF itself carries: a tree that expands and collapses, jumps the viewer to an
+entry, and says which entry the reader is currently inside.
+
+It is a *reading* aid built entirely out of what the file declares — no extraction, no
+heuristics, nothing stored. A PDF without an outline gets a pane that says so.
+
+**Where the pieces live.** The same split as §19's geometry: every rule is a pure function in
+`src/lib/pdf-outline.ts` with a unit-test table beside it, the worker round trips are in
+`src/components/pdf/use-pdf-outline.ts`, and the rendering is
+`src/components/pdf/PdfOutlinePanel.tsx`. The surface owns exactly one new piece of state —
+which entry is current — and the pane owns which rows are open.
+
+**Four decisions worth stating, because each has a plausible wrong answer:**
+
+- **The current entry is the last one at or above a reading line 25% down the viewport**
+  (`READING_LINE_FRACTION`), ordered by resolved position rather than by tree order. "The
+  first heading visible in the viewport" highlights nothing through the middle of a long
+  section — which is most of the time in exactly the documents that have an outline. Tree
+  order breaks on the outlines real generators emit out of order.
+- **A collapsed subtree hands its highlight to the outermost closed ancestor, and nothing
+  auto-expands.** A collapsed "Chapter 4" lighting up while you read §4.2 is the feature;
+  opening the tree to follow the scroll would delete it, and would move rows under the pointer
+  of a reader trying to click one.
+- **Jumps go through pdfjs's `PDFLinkService.goToDestination`, not `jumpDestinationY`.** A
+  destination is something the document declared — a name, an array leading with a page ref,
+  any of the `Fit` variants — and pdfjs resolves all of it, keeping the reader's zoom where the
+  destination doesn't set one. This is why `linkService` is now on `PdfViewerHandle`. The
+  visible difference from an annotation jump is deliberate: a heading lands at the top of the
+  viewport rather than a quarter down, because a quote needs the context above it and a
+  heading *is* that context. It also leaves the clicked heading just above the reading line,
+  so the entry clicked is the entry that lights up.
+- **Two levels start visible, by depth alone** (`defaultExpanded`): top-level parents open
+  and nothing below does, so the pane reads as chapters and their sections, with level 3 and
+  below behind a twisty rather than dumped out in full. The PDF's own `/Count` sign — the author saying which subtrees ship open
+  (PDF 32000-1 §12.3.3) — is read through to `OutlineNode` and **deliberately not acted on**:
+  it answers what *one file's* author wanted, where the pane needs the same shape from one
+  file to the next, and following it makes a 400-entry outline that ships open bury its top
+  level and one that ships closed hide that there is anything underneath. That was the rule
+  until 2026-09-11.
+
+**Two things it deliberately does not do**, both recorded in TODO.md rather than left to be
+rediscovered: an outline entry pointing at a **URL** renders as a plain row and does not
+navigate (opening an arbitrary URL out of an uploaded file is a phishing surface that deserves
+its own decision), and there is **no fallback** for a PDF without an outline — no heading
+detection over `file_page_text`, which is a different feature with its own failure modes.
+
+**Rendered flat.** Every visible row is a DOM sibling carrying `aria-level` /
+`aria-posinset` / `aria-setsize`, rather than nested `role="group"` elements. ARIA allows
+either; flat is what keeps the focus ring around one row instead of around a row and its
+whole subtree, and stops each level's indent from compounding with every ancestor's padding.
+Keyboard movement is the APG tree pattern over `visibleOrder` — one tab stop, arrows within,
+the same roving-tabindex arrangement the tab strip above it uses.
+
+The page number beside each entry is the document's own **page label** where it has them —
+§19c, built straight after this and for this reason.
+
+**Verification.** `e2e/pdf-outline.spec.ts` (a click lands on the entry's page, scrolling moves
+the highlight, collapsing hands it to the ancestor, the arrows move and open, the fourth tab
+doesn't overflow the strip) plus `src/lib/pdf-outline.test.ts` for the destination arithmetic
+and the highlight rules. `scripts/make-test-pdf.ts` grew outline support to make any of it
+testable: no PDF in the repo had one, and the generated fixture covers an inline destination
+array, a **named** destination resolved through the catalog's `/Dests`, and a closed-by-default
+subtree — the three arms the resolver has to tell apart.
+
+### 19c. Page labels — what the document calls its own pages
+
+**Built 2026-09-10**, immediately after §19b, because the Contents pane made the gap
+impossible to miss: an entry pointing at the fourth sheet of a book with three pages of front
+matter is page **1**, and a table of contents that says "4" is the one thing a table of
+contents exists not to make a reader work out.
+
+A page's *index* is where it sits in the file; its **label** is what is printed on it
+(`/PageLabels`, exposed as `pdf.getPageLabels()`). They differ in anything with front matter,
+an appendix numbered `A-1`, or a scanned volume whose numbering starts partway in.
+
+**Indices stay 1-based everywhere internally.** Anchors, presence, the offset table, every
+jump: unchanged. This is a display concern, and `pageLabelFor` (`src/lib/pdf-page-labels.ts`)
+is the one function that answers it — for the Contents pane's badge, the annotation cards'
+`p. 4`, the composer's "Annotating page …", the indicator strip's tick titles and the
+toolbar's box. Anything *computed* from a page keeps counting sheets.
+
+**Labels are ignored when they say nothing.** `usablePageLabels` rejects a set whose every
+entry is its own ordinary number — plenty of files ship a `/PageLabels` tree that reproduces
+1…N, so honouring it changes no glyph on screen while switching on the chrome that exists to
+explain a label, down to a "Sheet 4 of 6" title on a box already showing 4 — and one that is
+entirely empty. A *partly* empty set is kept with the blanks filled in by the ordinary
+number, since unlabelled front matter beside a labelled body is common and dropping the whole
+set would throw away the informative half. The filled-in array is what goes to
+`PDFViewer.setPageLabels`, so what we render, what pdfjs puts on `data-page-label`, and what
+`pageLabelToPageNumber` will match are one list.
+
+**The page box takes a label back.** `submitPage` tries `pageLabelToPageNumber` first and
+falls through to a sheet number, because a reader typing into a box that is *showing* them a
+label means the label — "1" is the body's first page, which is what a citation means. Labels
+are not unique (front matter 1–12 and a body restarting at 1 give two pages called "1"); the
+first match wins, as it does in pdfjs. The sheet number moves to the box's `title` ("Sheet 4
+of 6") rather than disappearing, since it is what the scrollbar and every "page N of M" habit
+are still counting in.
+
+**The total beside the box counts in the box's units too** (`pageTotalLabel`, added
+2026-09-14). A box showing "1" next to "of 362" is a pair that doesn't go together; what the
+reader's copy says the book runs to is 350. **The last label is the wrong answer**, though,
+because the end of a document is where labels stop being numbers — an index, a colophon, an
+appendix running `A-1` — and "of A-12" names no quantity at all. So the last **five** pages are
+searched from the back for a plain integer and the first one found wins, with the sheet count
+as the fallback when the whole tail is unnumbered. Five because back matter is short: a window
+wide enough to tunnel through an entire unnumbered appendix would start answering with a body
+page number, which is worse than the sheet count — it reads authoritative and undercounts. The
+sheet count keeps a home in this element's own `title` ("6 sheets"), as it does on the box.
+
+**Verification.** `src/lib/pdf-page-labels.test.ts` for the "worth showing" rule and its
+rejections, and for the total's tail window (a clean numbered ending, an index, an appendix
+long enough to give up on); `e2e/pdf-page-labels.spec.ts` for the two surfaces agreeing, a
+typed label navigating, and a 1…N label set correctly ignored. `scripts/make-test-pdf.ts` grew a
+`pageLabels` option — a `/PageLabels` number tree, whose keys are **0-based** page indices,
+the one place in the format that counts from zero.
+
+### 19d. Zoom gestures — pinch and ctrl-wheel belong to the document
+
+**Built 2026-09-10.** On a full-viewport app shell whose whole point is that the viewer fills
+the height, the browser's own zoom is the wrong response to a pinch: it resizes the chrome, the
+toolbar and the side panel around a document that stays exactly as illegible as it was. So
+inside `.viewerContainer`, pinch and ctrl-wheel change `PDFViewer`'s scale instead. Everywhere
+else on the page, both still zoom the page.
+
+**Three input paths, two gestures**, all ending in one `viewer.updateScale({ scaleFactor,
+origin })`: ctrl-wheel (which is also every trackpad pinch, and `metaKey` beside it),
+two-finger `touchmove` (phones and Android), and Safari's non-standard `gesture*` events,
+preferred where they exist with the touch path standing down. The engine facts behind each —
+why a trackpad pinch is a `wheel`, why `deltaMode` needs converting, why the listener must be
+non-passive, why `updateScale`'s `origin` rather than `currentScale`, and why the container
+takes `touch-action: pan-x pan-y` and never `none` — are docs/PDF.md §10c's, stated once
+there. The decision here is only *which* element the gesture belongs to: the document, not the
+page.
+
+**The zoom dropdown had to become a readout as well as a control.** A gesture lands on any
+scale it likes, and a `<select>` whose value matches no option renders *blank* — so
+`scalechanging` now feeds it, and a non-preset scale gets an option of its own showing the
+percentage. Picking "Fit width" and then pinching correctly stops the document being fitted to
+anything, which the control now says.
+
+**What is verified, and what is not.** `e2e/pdf-zoom.spec.ts` covers ctrl-wheel (including the
+negative half — the page's own zoom must not move — which a `{ passive: true }` slip would
+break while everything else still passed), an ordinary wheel still scrolling, the dropdown's
+readout, the touch arithmetic reaching pdfjs, and the `touch-action` value. `src/lib/pdf-zoom.ts`
+has the factors and their clamps under unit test. **The iOS half is not verified**: whether
+`touch-action` alone suppresses Safari's own pinch zoom is a real-device measurement, and
+docs/PDF.md §10c carries the recipe (`scripts/remote-console.ts`) rather than an assumption —
+this file already records two iOS touch claims that measured false.
+
+### 19e. Re-fitting the zoom when the container changes shape
+
+**Built 2026-09-10**, alongside §19d. `PDFViewer` computes a named scale **once**, when it is
+set, and then holds the resulting number — Mozilla's viewer *application* re-applies it on
+resize, and we build on the library, so nothing did (docs/PDF.md §10c). The visible cost was
+a phone: open a document fitted to a portrait width, turn it sideways, and the page stays the
+size it was, in a column of empty space.
+
+Two rules, because a reader can have said two different things:
+
+- **A named scale is a standing instruction.** "Fit the width" means fit *this* width, so it is
+  re-applied on any container width change — a rotation, a window drag, the side panel opening.
+- **A number is a decision already made.** An explicit zoom survives ordinary resizes untouched,
+  and is scaled only by a **rotation**, in proportion to the width.
+
+**Why a rotation touches a chosen zoom at all**, when the reader chose it: turning a tablet from
+landscape to portrait takes width away, and a page that fitted before then needs sideways panning
+to read a single line — the one thing a reader cannot work around by scrolling. Scaling with the
+width keeps *how much of the page they see* fixed, which is the part that decides whether a line
+is readable.
+
+**The width ratio is an approximation, deliberately.** It stands in for the ratio of the two
+fit-to-width scales, which it equals up to pdfjs's fixed scrollbar allowance — about a tenth of a
+phone's width. Computing the real thing means either duplicating pdfjs's internal padding
+constants or setting the scale to `page-width` to read it back, which the reader would watch
+happen. It only ever applies to a zoom the reader picked by feel, so a few percent is beneath
+notice; anyone *exactly* fitted is on the named scale, which is exact.
+
+**A rotation is recorded, not acted on.** The orientation media query flips before the layout it
+causes, so the handler only timestamps; the `ResizeObserver` on the container is what knows the
+new width, and it expires the arming after 1.2s (iOS animates the rotation). `matchMedia
+("(orientation: portrait)")` rather than `screen.orientation` or the deprecated
+`orientationchange` — one spelling every engine in the baseline agrees on — gated on
+`(pointer: coarse)`, since dragging a desktop window through square is not a reader turning a
+device over.
+
+**Verification.** `e2e/pdf-zoom.spec.ts`'s second describe, driven by `setViewportSize`, which is
+what a rotation is from the page's side. The fit case asserts the page *fits* the new width
+rather than a ratio — the ratio assertion is what caught the scrollbar allowance in the first
+place.
 
 ## 20. Tags, and the anchor envelope they share with annotations
 

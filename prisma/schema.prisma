@@ -944,9 +944,21 @@ model DocLinkGroup {
 // two people may upload the same paper under different titles, visibilities
 // and bylines, and those are different documents socially even though the
 // storage layer stores one copy.
+//
+// **A deleted file releases its slug**, which is why `slug` carries no
+// `@unique` here: uniqueness is a *partial* index in the migrations
+// (`file_slug_live_key`, over `slug` WHERE `deleted_by_user_id IS NULL`),
+// which Prisma has no DSL for. Stripping a PDF's embedded annotations and
+// re-uploading it is an ordinary thing to do, and a soft-deleted row squatting
+// on `report` forever — so that the replacement is `report-2` — is a bad
+// answer to it. The consequences to know: two *deleted* files may share a
+// slug, so nothing may `findUnique` on one (`resolveFileParam` prefers the
+// live row), and a restore whose slug has since been taken is renamed rather
+// than refused (src/app/actions/files.ts). Docs and posts deliberately do not
+// follow — PLAN.md §19.
 model StoredFile {
   id          String        @id @default(cuid())
-  slug        String        @unique
+  slug        String
   // Shown everywhere a doc shows its title; seeded from the upload filename
   // and independently renamable afterwards.
   title       String
@@ -982,6 +994,9 @@ model StoredFile {
   updatedBy           User?                @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
   deletedBy           User?                @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
 
+  // Plain, not unique, and covering deleted rows too: `file_slug_live_key` is
+  // partial, so it can't serve a lookup that has to find a deleted file.
+  @@index([slug])
   @@index([sha256])
   @@map("file")
 }

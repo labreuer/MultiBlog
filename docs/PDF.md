@@ -1,15 +1,18 @@
-# PDF.js External Annotations — Architecture & Implementation Rules
+# The PDF viewer — external annotations, file storage, and pdfjs
 
-Reference for work on the in-browser PDF viewer: annotations stored **outside** the PDF,
-plus multi-client viewport synchronisation.
+Reference for work on the in-browser PDF viewer (`/pdf/[slug]`, `src/components/pdf/`,
+`src/lib/pdf-*.ts`): annotations stored **outside** the PDF, the file's bytes and who may
+read them, multi-client viewport sync, and pdfjs's many non-obvious failures.
 
-**Status of this document.** The anchor model, coordinate rules, layer structure, and sync
-wire format below were *recommendations* worked out in design discussion. **They are now
-built** — PLAN.md §19, `src/lib/pdf-anchor*.ts`, `src/components/pdf/`. Where the
-implementation departs from what is written here, §13 at the end says so and why; treat any
-un-annotated statement below as still current. The renderer choice (PDF.js) and the "annotations live
-outside the file" constraint are settled. Treat everything else as a strong default —
-if you find a concrete reason it's wrong, say so rather than silently working around it.
+**How to read this file.** It began as the design PLAN.md §19 adopted and is now the account
+of what is built: every statement is current unless it says otherwise, and where the
+implementation settled differently from the original design, the section concerned says so
+in place rather than in an appendix. The split with PLAN.md §19 is deliberate — PLAN records
+*why* the feature is shaped this way and in what order it was built; this file records *how
+the surface behaves and what will bite you*. The renderer choice (PDF.js) and the
+"annotations live outside the file" constraint are settled. Treat everything else as a strong
+default — if you find a concrete reason it's wrong, say so rather than silently working
+around it.
 
 ---
 
@@ -88,6 +91,13 @@ type Quad = [number, number, number, number, number, number, number, number];
 **Resolution status is derived, never stored.** Compute `anchored | shifted | orphaned` at
 load time and hold it in client state.
 
+As built, `DocId` is `StoredFile.sha256`, and `Target` is stored verbatim in
+`Annotation.pdfTarget` — one jsonb column rather than seven (invariant 3; PLAN.md §19
+Phase 1) — on a row that is otherwise an ordinary `Annotation` with `fileId` set instead of
+`docId`. Only roots carry a target: a reply anchors into its parent's body exactly as on the
+doc side (PLAN.md §13p). The `Annotation` type above is the shape the reasoning is about,
+not the Prisma model.
+
 ---
 
 ## 2a. The file's bytes — on disk, not a `bytea`
@@ -113,6 +123,9 @@ Consequences worth remembering:
   `request.formData()` buffers the whole upload before user code sees it. nginx needs
   `client_max_body_size` raised to match (`deploy/nginx-app.conf.sample`); the uploader names
   the proxy explicitly on a 413 or a severed connection, since neither mentions nginx.
+- **Access is docs' PRIVATE/SHARED model** (`src/lib/file-authz.ts`, docs/PERMISSIONS.md),
+  and an annotation on a file is an ordinary `Annotation` row, so it inherits DRAFT privacy,
+  soft delete and `requireOwnOrAdmin` unchanged.
 
 ### A file's listed users are `FileOwner`s, not authors
 
@@ -140,7 +153,9 @@ Pipeline, applied per page to `page.getTextContent()`:
 1. Join `items` in order. PDF.js frequently omits inter-item spaces — insert a space when
    the gap between item bounding boxes exceeds a fraction of the font size, and a newline
    when `item.hasEOL` is set.
-2. Unicode NFKC.
+2. Unicode NFKC — **per character, not over the joined string**. Whole-string NFKC can merge
+   or reorder across characters, which is incompatible with the exact offset map below;
+   per-character keeps the map exact and the function deterministic.
 3. Decompose ligatures (ﬁ, ﬂ, ﬀ, ﬃ, ﬄ, ﬅ, ﬆ).
 4. Strip soft hyphens (U+00AD) and zero-width characters.
 5. Normalise dashes and quote characters to ASCII.
@@ -150,11 +165,18 @@ While joining, build an **offset map**: normalised char index → `{ itemIndex, 
 This is what makes `position` → `quads` recoverable without a rendered text layer, and it is
 the reason normalisation must be a pure function of `getTextContent()` output.
 
-Cache normalised page text + offset map per `(docId, pageIndex, textVersion)`. It is
-expensive and completely stable for a given version.
+The normalised text of every page is **stored** — `file_page_text`, extracted once at upload
+(PLAN.md §19 Phase 1) — and the browser caches text + offset map per
+`(fileId, pageIndex, textVersion)`, which is expensive to build and completely stable for a
+given version. Storing it is what makes `quotedText`'s server-side derivation (§4) a string
+slice rather than a re-parse of the PDF per post; search over it is a free consequence, not
+the reason. Both sides that matter — upload extraction and selection capture — call the same
+function (`src/lib/pdf-text.ts`), so they agree by construction.
 
-When `textVersion` changes, re-anchor **lazily** on next open and rewrite the stored
-`quote`/`position` if resolution succeeds. Do not batch-migrate.
+When `textVersion` changes, the intended recovery is to re-anchor **lazily** on next open and
+rewrite the stored `quote`/`position` if resolution succeeds — never a batch migration.
+**Not built yet**: it is deferred together with §4's fuzzy match, and the quads carry every
+annotation meanwhile.
 
 ---
 
@@ -165,7 +187,9 @@ Resolve order, per annotation:
 1. **Exact quote match** in normalised page text, searching outward from `position.start`.
    Cheap, and correct in the overwhelming majority of cases.
 2. **Fuzzy quote match** — bounded edit distance, within a window around `position.start`.
-   Only if step 1 misses.
+   Only if step 1 misses. **Not built**: it matters only after a `textVersion` bump, and
+   doing it properly needs a worker (below); steps 1, 3 and 4 make the viewer correct
+   without it, because the quads always resolve.
 3. **Quads fallback** — use `target.quads` directly. Always available; correct unless the
    PDF bytes changed, which `docId` already rules out.
 4. **Orphaned** — if the text under the resolved quads fails the quote check, mark orphaned
@@ -199,9 +223,14 @@ The only conversion API to use:
 
 ```ts
 const viewport = page.getViewport({ scale, rotation });
-viewport.convertToPdfPoint(x, y);              // page-relative CSS px -> PDF user space
-viewport.convertToViewportRectangle(rect);     // PDF user space -> page-relative CSS px
+viewport.convertToPdfPoint(x, y);         // page-relative CSS px -> PDF user space
+viewport.convertToViewportPoint(x, y);    // PDF user space -> page-relative CSS px
 ```
+
+There is no rectangle conversion in pdfjs 6 — `convertToViewportRectangle` exists in neither
+the types nor the shipped `pdf.mjs`. Convert a box's two opposite corners as points and take
+min/max; for an axis-aligned rectangle, which is all a quad's bounding box ever is here, that
+is exactly equivalent (`src/lib/pdf-anchor-resolve.ts`).
 
 Rules:
 
@@ -235,7 +264,11 @@ Rules:
   deriving a length or an offset in PDF space from the bare zoom level is out by exactly 4/3.
   Prefer `pageView.viewport`, which is already the product; reach for `currentScale` only
   when the page you need has not been built, and multiply. 4/3 is small enough to read as a
-  chosen value rather than a unit error — see §13.
+  chosen value rather than a unit error, and that is how it once cost a release cycle:
+  "scroll a jumped-to passage 25% down the viewport" computed its offset from `currentScale`
+  and landed the passage at 0.333. Nothing threw, no test could see it, and a third of the
+  way down looks exactly like a value somebody chose; it was found by measuring the rendered
+  position against the container, which is the only thing that would have found it.
 
 Selection → stored anchor:
 
@@ -348,19 +381,29 @@ converts to PDF space via §5.
 ### Wire format
 
 ```ts
-interface ViewportState {
-  pageIndex: number;
-  pdfPoint: [left: number, top: number];   // PDF user space, top-left of visible region
-  zoomMode: 'page-fit' | 'page-width' | number;
-  clientId: string;
-  t: number;                                // monotonic, for staleness
-}
+type PdfPresence = {                                  // src/lib/pdf-presence.ts
+  user: { id, name, color },                          // author palette — a remote cursor is attributable
+  viewport: {
+    pageIndex: number;
+    pdfPoint: [left: number, top: number];            // PDF user space, top-left of visible region
+    zoomMode: 'page-fit' | 'page-width' | number;
+    t: number;                                        // monotonic, for staleness
+  } | null,
+  selection: { pageIndex, quads: Quad[] } | null,     // in progress — visible before it becomes an annotation
+  leading: boolean,                                   // "I'm presenting — come join me"
+  following: string | null,                           // clientId being followed
+};
 ```
+
+`viewport` is the part the rules below are about. `user`, `selection` and the
+`leading`/`following` pair are what presence needs beyond following a scroll — the original
+design's `ViewportState` was the `viewport` field alone, and PLAN.md §19 Phase 4 records the
+widening.
 
 Never broadcast `scrollTop`, `scrollLeft`, pixel offsets, or a raw scale — they are meaningless
 on a different window size, zoom level, or DPR.
 
-This maps 1:1 onto a PDF destination array, which is also what PDF.js consumes:
+`viewport` maps 1:1 onto a PDF destination array, which is also what PDF.js consumes:
 
 ```ts
 pdfViewer.scrollPageIntoView({
@@ -372,10 +415,37 @@ pdfViewer.scrollPageIntoView({
 Passing `null` for zoom preserves the local user's zoom, which is almost always what you want —
 followers should see the same *content*, not be forced into the leader's zoom level.
 
+**Two pdfjs details make the round trip lossy at a page boundary, and they compose into a snap
+that reads as a network problem.** Both are fixed in `use-pdf-presence.ts`; re-check them on any
+`pdfjs-dist` bump.
+
+- **`viewer.currentPageNumber` is the *most-visible* page, not the topmost one.** `update()`
+  asks `_getVisiblePages()` with `sortByVisibility: true` and takes `visiblePages[0].id`; the
+  `stillFullyVisible` shortcut that would hold the number steady needs `percent === 100`, which
+  page-width on a phone never reaches. So it flips to page N+1 at the *area* crossover — about
+  half a screen before the container's top edge reaches page N+1 — and measuring the visible
+  region against that page produces a `pdfPoint` above its own top edge. Derive the page from
+  geometry instead (`topmostVisiblePageIndex`). pdfjs does the same thing internally for
+  `_updateLocation`, using `visible.first`, which is captured *before* the visibility sort.
+- **`scrollPageIntoView` clamps with `Math.max(…, 0)` unless you pass `allowNegativeOffset`.** A
+  destination above its page's top edge therefore becomes "put this page's top edge at the top of
+  the viewport". Combined with the above that is a jump forward of up to half a screen, then a
+  dead zone while every further broadcast clamps to the same 0 — jumpy at every page boundary,
+  tight everywhere else. A point outside the page is not malformed: it is what "the visible
+  region starts in the previous page" looks like.
+
+One more sign error to not repeat: **CSS px per PDF point is `currentScale * PDF_TO_CSS_UNITS`,
+never `currentScale`** (§5). The tolerance compare below is in PDF points and got this wrong for
+as long as it existed, which made it ~33% looser than the 2% it claims.
+
 ### Transport
 
-- **Annotations → ydoc.** `Y.Map<string, Annotation>` keyed by annotation id. Gets CRDT merge,
-  offline, and the existing Hocuspocus persistence path for free.
+- **Annotations → Postgres rows**, not a `Y.Map` in the per-file ydoc. The ydoc
+  `ydoc:pdf:<fileId>` exists and stays empty, carrying awareness only. A `Y.Map` would have
+  bought CRDT merge and offline creation, and lost five things specific to this codebase —
+  chiefly that Hocuspocus authorizes the connection rather than the keys (every DRAFT
+  readable, every entry deletable, unattributed) and that `/annotations` could not see them.
+  PLAN.md §19, *Decisions taken*, has the full comparison.
 - **Viewport → awareness.** Ephemeral and unpersisted by design. Putting viewport updates in
   the ydoc would bloat the update log badly, which matters given the `gc: false` work.
 
@@ -409,9 +479,14 @@ positioned beside one" has the measurements and the fix.
 
 ## 10. Version coupling
 
-`PDFViewerApplication`, `PDFViewer`, `pageView.div`, and the `eventBus` event names are all
-internals. Pin `pdfjs-dist` exactly and add a smoke test asserting the specific internals we
-touch still exist, so an upgrade fails loudly in CI rather than silently at runtime.
+The viewer is built on **`PDFViewer` + `EventBus` + `PDFLinkService` from
+`pdfjs-dist/web/pdf_viewer.mjs`** — not `PDFViewerApplication`, which is the bundled
+`web/viewer.html` *application* rather than an importable library entry. Those classes,
+`pageView.div`, and the `eventBus` event names are all internals with no stability promise.
+`pdfjs-dist` is pinned exactly (invariant 6), every browser-side import of it goes through
+`src/lib/pdfjs-client.ts` so the internals we depend on are named in one place, and the
+first test in `e2e/pdf-viewer.spec.ts` asserts they still exist — so an upgrade fails loudly
+there rather than silently at runtime.
 
 Hypothesis — who have done exactly this integration for over a decade — ship a standing warning
 that new PDF.js releases may be incompatible with their client. Budget for upgrade work; do not
@@ -435,8 +510,8 @@ Each of these fails in a way that does not look like its cause. Re-check them on
   library, opposite spellings, because one goes through Node's ESM loader and the other
   through pdfjs's own filesystem read.
 - **`PDFDocumentProxy.destroy()` is gone in 6.x.** It has `cleanup()`, which drops cached
-  fonts and leaves the worker alive. Destroy the *loading task* instead. §5's
-  `convertToViewportRectangle` is gone in 6.x too — §13 has the replacement.
+  fonts and leaves the worker alive. Destroy the *loading task* instead.
+  `convertToViewportRectangle` is gone in 6.x too (§5).
 - **There are FOUR runtime asset directories, not two**, all fetched by URLs pdfjs builds by
   concatenation, so no bundler can see them: `standard_fonts/`, `cmaps/`, **`wasm/`** (the
   JBIG2 and JPEG 2000 decoders) and `iccs/`. Copy all four into `public/` from a `prebuild`/
@@ -606,6 +681,142 @@ firing. See `PdfAnnotationSurface`'s trigger comment for the implemented form.
 
 ---
 
+## 10a. The outline (table of contents)
+
+What `pdf.getOutline()` gives back, and what it takes to turn it into a position. Written
+down because three of the four steps have a silent failure mode.
+
+**The shape.** An array of `{ title, dest, url, count, items[] }`, nested. Two things about
+the shipped types matter: `items` is typed `Array<any>`, so the generated `.d.ts` cannot
+describe a tree at all (we declare `PdfOutlineItem` in `src/lib/pdf-outline.ts` instead — a
+real pdfjs node satisfies it structurally), and `count` is present only for a parent, where
+**its sign is the author's open/closed choice** (PDF 32000-1 §12.3.3) rather than a
+count of anything we display — we carry it and do not obey it, opening two levels by depth
+instead (PLAN.md §19b).
+
+**`dest` is one of three things**, and conflating any two of them costs every entry its
+position without throwing:
+
+1. **A string** — a *named* destination, looked up in the catalog. Fetch the whole
+   dictionary once with `pdf.getDestinations()`, not `getDestination(name)` per entry.
+   Verified against 6.2.108 it comes back as a **`Map`** (`Catalog.destinations` builds one,
+   and it survives the structured clone out of the worker); older pdfjs returned a plain
+   object, so check the shape rather than assuming it.
+2. **An array leading with an integer** — a page index outright.
+3. **An array leading with a `{num, gen}` ref** — a page *object*, which only the worker can
+   turn into an index (`pdf.getPageIndex(ref)`, one round trip each; dedupe by `num/gen`,
+   since sibling entries on one page are the norm). A named destination's array almost always
+   takes this form, so a resolver that only handles case 2 quietly sends everything to page 1.
+
+**The y is in a different slot per destination type**, and there isn't always one: `XYZ` →
+`dest[3]` (which may be `null`, meaning "keep the current position"), `FitH`/`FitBH` →
+`dest[2]`, `FitR` → `dest[5]` (the rectangle's *top*), and `Fit`/`FitB`/`FitV`/`FitBV` carry
+no vertical position at all. Missing or unusable means the page's top — which is where pdfjs
+scrolls to as well, so the highlight and the jump agree rather than differing by a screenful.
+It is then PDF user space (y up from the page's bottom) and has to be flipped against the
+page height like every other §5 conversion.
+
+**Don't re-implement the jump.** `PDFLinkService.goToDestination(dest)` takes any of the
+three forms above and every `Fit` variant, and keeps the reader's zoom where the destination
+doesn't set one. It is on `PdfViewerHandle` for this. The anchoring machinery
+(`jumpDestinationY`) stays for annotations, whose quads are ours rather than the document's.
+
+**Most PDFs have no outline**, and `getOutline()` resolves to `null` for them — an ordinary
+answer, not an error. The pane says so. `scripts/make-test-pdf.ts` can write one (an inline
+array, a named destination, and a closed-by-default subtree) because nothing else in the repo
+has one to test against.
+
+---
+
+## 10b. Page labels
+
+`pdf.getPageLabels()` returns what the document prints on its pages — `["i","ii","iii","1",…]`
+— or `null`. Four things about it are worth knowing before touching it:
+
+- **The array is always full length or absent.** pdfjs builds an entry per page (a page
+  outside any labelling range gets `""`), so there are no holes to iterate around — but there
+  *are* empty strings, and a blank page box is worse than a number.
+- **Labels are not unique.** Front matter numbered 1–12 followed by a body restarting at 1
+  gives two pages called "1". Resolving a label back to a page takes the first match
+  (`PDFViewer.pageLabelToPageNumber`, and our page box through it).
+- **Many files carry labels that are just `1…N`.** Using them changes nothing on screen, so
+  `usablePageLabels` (`src/lib/pdf-page-labels.ts`) treats that set, and an all-empty set, as
+  absent.
+- **`setPageLabels` has to be called after `pagesinit`.** It walks `PDFViewer._pages` to put
+  `data-page-label` on each page div, and that list doesn't exist until the pages are laid out
+  — call it earlier and it stores the labels while labelling nothing, with no error. Same
+  ordering trap as `currentScaleValue`; both are done in `completeReady`.
+
+Anchoring, presence and geometry all keep counting **sheets** (1-based indices). A label
+never enters a computation — only a rendering. PLAN.md §19c.
+
+---
+
+## 10c. Zoom gestures, and who gets to handle them
+
+Pinch and ctrl-wheel resize the **document**, not the page (PLAN.md §19d). Capturing them is
+per-engine, and the parts that are settled are worth separating from the part that is not.
+
+**A trackpad pinch is not a touch event anywhere.** Every engine reports it as a `wheel` with
+`ctrlKey` set — the same shape as a held ctrl — so one handler serves both, and a handler that
+looks for touches will never see a MacBook or a Windows precision trackpad at all. Treat
+`metaKey` the same way: Cmd-scroll is macOS's own page zoom, and the document takes it for the
+same reason it takes the pinch.
+
+**`deltaMode` is not always pixels.** Firefox reports wheel deltas in *lines* (`1`); Chrome and
+Safari in pixels (`0`). Read raw, a gesture tuned in Chrome moves about sixteen times too
+little in Firefox — which reads as the feature not working rather than as a scale being wrong.
+`wheelScaleFactor` converts (`src/lib/pdf-zoom.ts`).
+
+**`preventDefault` needs a non-passive listener.** `{ passive: true }` (or the default, for
+`wheel`/`touchmove`, in every current engine) silently ignores the call, so the document zooms
+*and* the page does. Nothing throws; it just looks broken on a machine that isn't yours.
+
+**`touch-action` is how the engine is told, and `none` is the wrong value here.** The container
+takes `pan-x pan-y`: one-finger scrolling, momentum and the scrollbars stay native while pinch
+and double-tap zoom come to us. `none` would take the scrolling with it and freeze the document
+on a phone — a far worse bug than the one being fixed.
+
+**A named scale is computed once, not maintained.** `currentScaleValue = "page-width"` resolves
+to a number there and then; `PDFViewer` has no resize handling of its own (that lives in
+Mozilla's viewer application, which is not what we build on — §10). Assigning the same string
+back is what recomputes it, which reads as a no-op and is not. PLAN.md §19e.
+
+**Zoom around a point, not around the scale.** `PDFViewer.updateScale({ scaleFactor, origin })`
+takes `origin` as a client-space `[x, y]` and adjusts `scrollLeft`/`scrollTop` around it, which
+is the whole difference between a gesture and a lurch. Pass `drawingDelay` (< 1000) during a
+gesture so it restyles now and re-renders once the fingers stop.
+
+### The part that is not settled: iOS
+
+Safari fires its own non-standard `gesturestart` / `gesturechange` / `gestureend` alongside (or
+instead of) two-finger `touchmove`, carrying a cumulative `scale`. The implementation prefers
+them and stands the touch path down as soon as one arrives, or the two would compose and square
+the zoom.
+
+**Whether `touch-action: pan-x pan-y` alone stops iOS's own pinch zoom is a measurement, not a
+fact to be looked up** — CLAUDE.md's standing rule, and this file already records two claims
+about iOS touch behaviour that were measured false. To take it, with the phone on the LAN:
+
+```
+npx tsx scripts/remote-console.ts          # terminal A; open the printed URL on the phone,
+                                           # then navigate it to a /pdf/[slug]
+curl -s --data-binary '
+  window.__pinch = { gesture: 0, touchmove: 0, scaleAtStart: visualViewport.scale };
+  const c = document.querySelector("[data-pdf-container]");
+  c.addEventListener("gesturechange", () => window.__pinch.gesture++, true);
+  c.addEventListener("touchmove", (e) => { if (e.touches.length === 2) window.__pinch.touchmove++; }, true);
+  "armed"' localhost:4322/eval
+# …pinch the document on the phone, then:
+curl -s --data-binary '({ ...window.__pinch, pageScaleNow: visualViewport.scale,
+  docScale: getComputedStyle(document.querySelector(".pdfViewer")).getPropertyValue("--scale-factor") })' localhost:4322/eval
+```
+
+`pageScaleNow` still `1` is the answer that matters: the page did not zoom. A rising
+`docScale` says ours did. Which counter moved says which path the engine took.
+
+---
+
 ## 11. Prior art worth reading before reimplementing
 
 - `hypothesis/client` — `src/annotator/anchoring/pdf.js` is the reference implementation of
@@ -627,71 +838,11 @@ available without rendering.
 
 ## 12. Open
 
-- ~~Whether to keep a server-side copy of normalised page text for search, or recompute
-  client-side.~~ **Settled: stored.** `file_page_text` holds the normalised text of every
-  page, extracted once at upload (PLAN.md §19). It was not the search argument that decided
-  it — it is that `quotedText` has to be derived server-side to keep §12i's "the selected
-  text is a request field only, never a column" true, and doing that per annotation would
-  otherwise mean re-parsing the PDF on every post. Storing it makes the derivation a string
-  slice. Search is a free consequence, not the reason.
-- ~~Annotation permissions / visibility scoping.~~ **Settled: a file carries docs'
-  PRIVATE/SHARED model** (`src/lib/file-authz.ts`, docs/PERMISSIONS.md), and an annotation on
-  one is an ordinary `Annotation` row, so it inherits DRAFT privacy, soft delete, and
-  `requireOwnOrAdmin` unchanged.
-- Behaviour when the same logical document arrives with different bytes (different `docId`)
-  — re-anchor across editions, or treat as unrelated. **Still open**, and note that
-  content-addressed storage makes the two *share* bytes when they are identical and stay
-  wholly separate when they are not; nothing bridges editions.
-
----
-
-## 13. Where the implementation departs from this document
-
-Recorded here rather than silently, because each of these reads as a bug in our code until
-you know it isn't.
-
-**§10 names `PDFViewerApplication`; the viewer is built on `PDFViewer`.** The former is the
-bundled `web/viewer.html` *application*, not an importable library entry. `PDFViewer` +
-`EventBus` + `PDFLinkService` from `pdfjs-dist/web/pdf_viewer.mjs` is the library-level
-equivalent and exposes every internal §5 and §8 rely on. The version-pinning discipline §10
-asks for is unchanged, and `e2e/pdf-viewer.spec.ts` is the smoke test it asks for.
-
-**§5 names `convertToViewportRectangle`; it does not exist in pdfjs 6.** Neither the types
-nor the shipped `pdf.mjs` have it — only `convertToViewportPoint` and `convertToPdfPoint`.
-Converting the two opposite corners as points is exactly equivalent for an axis-aligned box,
-which is all a quad's bounding box ever is here. Every *rule* in §5 still holds.
-
-**§9's "annotations → ydoc" is not taken.** Annotations are Postgres rows, for five reasons
-set out in PLAN.md §19 — chiefly that Hocuspocus authorizes the connection rather than the
-keys, so a `Y.Map` would expose every DRAFT and let anyone delete any entry unattributed, and
-that `/annotations` could not see them at all. §9's *viewport* half is taken exactly as
-written, including all three echo guards.
-
-**§4 step 2 (fuzzy quote match) is deferred.** It matters only after a `textVersion` bump,
-and §4 itself warns against running it synchronously (Hypothesis's ten-second stall). Doing
-it properly needs a worker; steps 1, 3 and 4 make the viewer correct without it, because the
-quads always resolve. §3's lazy re-anchor on a version change is deferred with it.
-
-**§5 said nothing about `currentScale`, and the omission cost a release cycle.** The rule is
-now written into §5 itself. Recorded here because of how it failed rather than that it did:
-"scroll a jumped-to passage 25% down the viewport" computed its offset from `currentScale`
-and landed the passage at 0.333 instead. Nothing threw, no test could see it, and a third of
-the way down looks exactly like a value somebody chose. It was found by measuring the
-rendered position against the container, which is the only thing that would have found it.
-
-**§3's NFKC is applied per character, not to the joined string.** Whole-string NFKC can merge
-or reorder across characters, which is incompatible with the exact offset map §3 also
-requires. Per-character keeps the map exact and the function deterministic — which is what §3
-actually rests on — and both sides that matter (upload extraction and selection capture) call
-the same function, so they agree by construction. See `src/lib/pdf-text.ts`.
-
-**§9's wire format is a subset of what ships.** §9 describes a `ViewportState` carrying a
-viewport and nothing else. The implemented `PdfPresence` (`src/lib/pdf-presence.ts`) adds
-three fields §9 never anticipated, because presence here does more than follow a scroll
-position: `user` (id, name, and the author-palette colour, so a remote cursor is
-attributable), `selection` (page index plus quads, so an in-progress selection is visible to
-other readers before it becomes an annotation), and the `leading`/`following` pair that
-§9's *Follow semantics* describes in prose without giving them a place on the wire. Every
-§9 *rule* still holds and is still where the rules live: never broadcast `scrollTop`,
-`scrollLeft`, a pixel offset or a raw scale; all three echo guards; ~10 Hz outbound with no
-queue. Only the shape is wider.
+- **Behaviour when the same logical document arrives with different bytes** — a new edition,
+  a re-export, a copy with its embedded annotations stripped: re-anchor across editions, or
+  treat as unrelated. Content-addressed storage makes the two *share* bytes when they are
+  identical and stay wholly separate when they are not; nothing bridges editions today, and
+  every anchor is keyed on one edition's `sha256` by construction (§4).
+- **The Contents pane's expansion default, and remembering what a reader opened** — TODO.md,
+  "The PDF Contents pane forgets its expansion state". An item with enough design in it to
+  act on, so it lives there rather than here.

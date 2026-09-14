@@ -67,8 +67,26 @@
   background: var(--surface-hover);
 }
 
+/* The page controls as one instrument: back, where you are, how many, forward.
+   Its own gap, tighter than `.toolbar`'s, because that one also sets the
+   distance between the toolbar's *clusters* — closing this up through the
+   toolbar would run the page controls into the zoom control beside them. */
+.pageGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* The word in front of a control, inside its <label>. Just enough space to read
+   as a label rather than as part of the value. */
+.controlLabel {
+  margin-right: 0.2em;
+}
+
 .pageInput {
-  width: 4ch;
+  /* Wide enough for a four-figure page and the roman numerals a labelled
+     document uses for its front matter ("viii"), which 4ch clipped. */
+  width: 5ch;
   text-align: right;
   font: inherit;
   font-size: 0.85rem;
@@ -120,6 +138,13 @@
   inset: 0;
   overflow: auto;
   background: var(--surface-muted);
+  /* **Pinch belongs to the document, not to the page** (PLAN.md §19d). Naming
+     the pans we still want the engine to handle is what leaves one-finger
+     scrolling native — and momentum, and the scrollbars — while handing us the
+     pinch and the double-tap zoom that would otherwise resize the whole site
+     around a viewer that is already full-height. `none` would take the
+     scrolling with it. Everywhere outside this box, both still zoom the page. */
+  touch-action: pan-x pan-y;
 }
 
 /* **A custom scrollbar, purely so the two rails can line up with it.**

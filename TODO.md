@@ -480,13 +480,69 @@ count from 9 to 6.
 
 ---
 
+## Two deliberate gaps in the PDF Contents pane
+
+**Status:** both shipped as decisions, 2026-09-10 (PLAN.md §19b). Neither is unfinished work;
+both are here so they are not "fixed" by someone who assumes they were oversights.
+
+1. **An outline entry pointing at a URL doesn't navigate.** A PDF outline entry may carry a
+   `url` instead of a destination in the document. `PdfOutlinePanel` renders it as an ordinary
+   row that jumps nowhere. Following it would mean opening an arbitrary URL taken out of a file
+   somebody uploaded, from a page the reader trusts — a phishing surface, and one that wants
+   its own decision about interstitials and `rel`/`target` handling rather than arriving as a
+   side effect of a table of contents. The row is deliberately not *hidden*: an outline with
+   holes in it would be worse than one with an inert entry.
+
+2. **A PDF without an outline gets an empty state, not a derived one.** No heading detection
+   over `file_page_text`, no font-size heuristics. That is a genuinely different feature —
+   its failure mode is a *wrong* table of contents rather than none, which is harder to
+   notice and harder to trust — and it would need its own storage decision, since deriving it
+   per page load is not free.
+
+---
+
+## The PDF Contents pane forgets its expansion state, and has one fixed default
+
+**Status:** noted 2026-09-11, when the depth rule replaced the PDF's own `/Count` as the
+default (PLAN.md §19b); moved here from docs/PDF.md §12 on 2026-09-14. The pane works — this is
+what it should grow, in this order.
+
+1. **Let the reader choose the default.** Today `defaultExpanded` (`src/lib/pdf-outline.ts`)
+   is a depth rule — top-level parents open, everything below closed — and the choices worth
+   offering beside it are *fully expanded*, *fully collapsed*, and **the PDF's own `/Count`**
+   (docs/PDF.md §10a; positive means the author shipped that subtree open). The `/Count` arm is
+   why `count` is still parsed onto `OutlineNode` rather than dropped: it was the rule until
+   2026-09-11, and PLAN.md §19b records why it is no longer the *default* — per-file intent is
+   not a shape a reader can predict before the pane renders — which is an argument against
+   defaulting to it, not against offering it. A depth *number* rather than a three-way choice
+   is tempting and probably wrong: "two levels" means something different in a document whose
+   outline is flat than in one nested five deep.
+
+2. **Remember what the reader opened and closed**, instead of reseeding from the default on
+   every mount. **IndexedDB** is the right store — it is already where a ydoc's local copy
+   lives (docs/YDOC.md), it needs no schema and no round trip, and an expanded set is
+   per-reader-per-device rather than anything to sync or to show anyone else.
+
+The keying is the part to get right, and it is decidable rather than a judgement call: the
+set holds ids like `"1.0.2"` from `flattenOutline`, which are **positions in the outline
+tree, not identities** — the same id means something else in a different file, and in a
+re-exported edition of the same document. So key the stored set on the file's `sha256`, which
+docs/PDF.md §4 already relies on as a file's identity and which by construction cannot drift.
+A revised edition is different bytes, hence a different key, hence a fresh default — the
+honest answer rather than a limitation. Note also that `PdfOutlinePanel`'s `TreeState` is
+keyed on the `nodes` array, so restoring is a matter of seeding that state from the store
+rather than merging into it, and a stored set whose ids no longer exist costs nothing:
+`isVisible` and `visibleOrder` only ever ask about ids they were handed.
+
+---
+
 ## The PDF side panel's Collab tab is a stub
 
 **Status:** shipped empty on purpose, 2026-08-25. `PdfCollabPanel` renders "Nothing here yet."
 
-`/pdf/[slug]`'s side panel is three tabs — Annotations, Metadata, Collab (PLAN.md §19's
-deviation list). The third exists so the strip is the shape it will keep rather than growing a
-tab later and moving the other two; it was not left half-built.
+`/pdf/[slug]`'s side panel is four tabs — Contents, Annotations, Metadata, Collab (PLAN.md
+§19's deviation list, plus §19b for the first). Collab exists so the strip is the shape it will
+keep rather than growing a tab later and moving the others; it was not left half-built.
 
 What is likely to go in it, and why this is a note rather than a decision: Phase 4's presence
 pieces sit in the chrome *around* the viewer. The

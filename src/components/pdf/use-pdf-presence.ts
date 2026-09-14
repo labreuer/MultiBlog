@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useSession } from "next-auth/react";
 import { getCollabUrl } from "@/lib/collab-url";
+import { pdfjs } from "@/lib/pdfjs-client";
 import {
   PRESENCE_THROTTLE_MS,
   isStale,
@@ -136,17 +137,15 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
     let counter = 0;
 
     const currentViewport = (): ViewportState | null => {
-      const pageIndex = handle.viewer.currentPageNumber - 1;
-      const pageView = handle.viewer.getPageView(pageIndex) as
-        | { div?: HTMLElement; viewport?: { convertToPdfPoint: (x: number, y: number) => number[] } }
-        | undefined;
+      const containerRect = handle.container.getBoundingClientRect();
+      const pageIndex = topmostVisiblePageIndex(handle, containerRect.top);
+      const pageView = pageViewAt(handle, pageIndex);
       if (!pageView?.div || !pageView.viewport) return null;
 
       // The top-left of the *visible* region, expressed in the page's own
       // coordinate space — which is what makes it portable. Measured as "where
       // the container's top edge falls within this page", so a reader halfway
       // down page 4 broadcasts that, not "scrolled 3182px".
-      const containerRect = handle.container.getBoundingClientRect();
       const pageRect = pageView.div.getBoundingClientRect();
       const [left, top] = pageView.viewport.convertToPdfPoint(
         containerRect.left - pageRect.left,
@@ -167,7 +166,12 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
       if (applyingRemoteRef.current) return;
       const next = currentViewport();
       if (!next) return;
-      const visibleHeight = Math.max(1, handle.container.clientHeight / handle.viewer.currentScale);
+      // In PDF points, so the tolerance scales with the zoom. `currentScale` is
+      // *not* the CSS-px-per-point factor — that is `currentScale *
+      // PDF_TO_CSS_UNITS` (docs/PDF.md §5), the same conversion
+      // `PdfAnnotationSurface`'s `jumpToTarget` does.
+      const cssPerPoint = handle.viewer.currentScale * pdfjs.PixelsPerInch.PDF_TO_CSS_UNITS;
+      const visibleHeight = Math.max(1, handle.container.clientHeight / cssPerPoint);
       // Guard two: don't send a position indistinguishable from the last one.
       if (!viewportChangedEnough(lastSentRef.current, next, visibleHeight)) return;
       lastSentRef.current = next;
@@ -213,6 +217,17 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
       // (docs/PDF.md §9). It is also what makes following usable on a different
       // screen size at all.
       destArray: [viewport.pageIndex, { name: "XYZ" }, viewport.pdfPoint[0], viewport.pdfPoint[1], null],
+      // Without this, pdfjs clamps the computed offset with `Math.max(…, 0)`
+      // and a destination *above* its own page's top edge becomes "put this
+      // page's top edge at the top of the viewport" — a snap forward of up to
+      // half a screen, followed by a dead zone while every further broadcast
+      // clamps to the same 0. A point outside the page is not a malformed
+      // state to be corrected: it is what "the visible region starts in the
+      // page before this one" looks like, and it happens on every page
+      // boundary. The horizontal clamp goes with it, which is also what we
+      // want — a follower zoomed in past the container width should track the
+      // leader's `left`, not jump to it.
+      allowNegativeOffset: true,
     });
 
     // Cleared on the frame after the scroll's own updateviewarea, so the echo
@@ -299,6 +314,65 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
   );
 
   return { readers, leading, setLeading, following, follow, publishSelection };
+}
+
+/**
+ * A safety rail on the two walks in `topmostVisiblePageIndex`, not a real
+ * bound — the walks terminate on geometry, and pdfjs only ever keeps a handful
+ * of pages built either side of the visible ones. It exists so a
+ * `getBoundingClientRect` that reads 0 for every page (a display:none viewer,
+ * mid-teardown) cannot spin.
+ */
+const MAX_PAGE_WALK = 32;
+
+/** The slice of a pdfjs `PDFPageView` this file measures against. Absent once pdfjs evicts the page. */
+type MeasurablePageView = {
+  div?: HTMLElement;
+  viewport?: { convertToPdfPoint: (x: number, y: number) => number[] };
+};
+
+function pageViewAt(handle: PdfViewerHandle, pageIndex: number): MeasurablePageView | undefined {
+  if (pageIndex < 0) return undefined;
+  return handle.viewer.getPageView(pageIndex) as MeasurablePageView | undefined;
+}
+
+/**
+ * The first page the container's top edge has *not* scrolled past — which is
+ * the page the broadcast point belongs in, and is **not** what
+ * `viewer.currentPageNumber` reports.
+ *
+ * pdfjs asks `_getVisiblePages()` with `sortByVisibility: true` and then takes
+ * `visiblePages[0].id`, so `currentPageNumber` is the page covering the *most*
+ * viewport area (the `stillFullyVisible` shortcut needs `percent === 100`,
+ * which page-width on a phone never reaches). It therefore flips to page N+1 at
+ * the area crossover — roughly half a screen before the top edge actually
+ * reaches page N+1 — and measuring against that page yields a point above its
+ * own top edge. pdfjs's own `_updateLocation` avoids this by using
+ * `visible.first`, captured *before* that sort; we have no access to it, so we
+ * walk the DOM instead.
+ *
+ * Both directions, because the top edge can also sit in the gap *between* two
+ * pages, and because a programmatic `#scrollIntoView` sets the page number
+ * before the next `updateviewarea` corrects it. Bounded by pdfjs's page buffer:
+ * `pageViewAt` returns undefined for a page it has evicted, which ends the walk.
+ */
+function topmostVisiblePageIndex(handle: PdfViewerHandle, containerTop: number): number {
+  let index = handle.viewer.currentPageNumber - 1;
+
+  // Back up while the page before this one is still under the top edge.
+  for (let step = 0; step < MAX_PAGE_WALK; step += 1) {
+    const previous = pageViewAt(handle, index - 1);
+    if (!previous?.div || previous.div.getBoundingClientRect().bottom <= containerTop) break;
+    index -= 1;
+  }
+  // Advance while this page has scrolled entirely above the top edge.
+  for (let step = 0; step < MAX_PAGE_WALK; step += 1) {
+    const current = pageViewAt(handle, index);
+    if (!current?.div || current.div.getBoundingClientRect().bottom > containerTop) break;
+    if (!pageViewAt(handle, index + 1)?.div) break;
+    index += 1;
+  }
+  return index;
 }
 
 /** pdfjs reports `currentScaleValue` as a string; the wire format wants a number or a named mode. */

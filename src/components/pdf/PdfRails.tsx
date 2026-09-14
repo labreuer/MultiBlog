@@ -2,7 +2,7 @@
 
 import { SAFE_COLOR } from "@/lib/safe-css";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
-import { documentFraction, thumbIsWorthDrawing, type PageOffsets } from "@/lib/pdf-geometry";
+import { documentFraction, pageHeightAt, thumbIsWorthDrawing, type PageOffsets } from "@/lib/pdf-geometry";
 import type { RemoteReader } from "./use-pdf-presence";
 import styles from "./PdfRails.module.css";
 
@@ -232,12 +232,4 @@ export function PdfFollowBar({
  */
 function railStyle(railHeightPx: number): { height?: number } {
   return railHeightPx > 0 ? { height: railHeightPx } : {};
-}
-
-/** A page's height at scale 1, recovered from the cumulative offset table. */
-function pageHeightAt(offsets: PageOffsets, pageIndex: number): number {
-  const top = offsets.tops[pageIndex];
-  if (top === undefined) return 0;
-  const next = offsets.tops[pageIndex + 1] ?? offsets.total;
-  return next - top;
 }

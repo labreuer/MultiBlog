@@ -221,9 +221,15 @@ export function CheckboxCell({
   );
 }
 
-export function CellError({ message }: { message: string | null }) {
+/**
+ * The one-line message slot under a table. `tone="notice"` is the same slot in
+ * secondary text rather than error red — for an action that *succeeded* but did
+ * something the row alone wouldn't explain (FilesTable's restore, which renames
+ * a file whose url was taken while it was deleted).
+ */
+export function CellError({ message, tone = "error" }: { message: string | null; tone?: "error" | "notice" }) {
   if (!message) return null;
-  return <div className={styles.cellError}>{message}</div>;
+  return <div className={tone === "notice" ? styles.cellNotice : styles.cellError}>{message}</div>;
 }
 
 export function SearchBox({
