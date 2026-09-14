@@ -101,6 +101,18 @@ export function useSelectionPopover({
     setPending(null);
     const target = liveEditor ?? editorRef.current;
     if (target) setPendingAnnotation(target.view, null);
+    // **The browser's selection goes too, not just ours.** The popover is that
+    // selection's whole UI, so leaving the text highlighted behind a dismissed
+    // popover would be odd on its own — but the reason it is here is a bug.
+    // Creating a doc link pushes a decoration that replaces the text node the
+    // selection sits in, and WebKit answers that by *expanding* the selection
+    // to the enclosing paragraph rather than dropping it. ProseMirror reports
+    // the expansion as an ordinary selection update, `capture` runs, and the
+    // popover reopens offering to link the whole paragraph the reader never
+    // chose. Collapsing ProseMirror's own selection here does not help: the
+    // editor is not focused, so nothing writes it to the DOM. Emptying the DOM
+    // selection leaves nothing inside the node for WebKit to expand.
+    window.getSelection()?.removeAllRanges();
   }
 
   function capture(liveEditor: Editor) {
