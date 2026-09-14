@@ -249,6 +249,16 @@ function retryInterruptedNavigations(page: Page): void {
 export const test = base.extend<Fixtures>({
   // Every page records its clipboard writes — see recordClipboardWrites.
   context: async ({ context }, use) => {
+    // **Ask the server, not the browser's cache.** Next serves a prerendered
+    // page as `s-maxage=60, stale-while-revalidate=31535940` with no
+    // `max-age`, so it is stale on arrival and that year-long window then lets
+    // a browser keep serving the stored copy while it revalidates behind the
+    // reader. Firefox implements that in its HTTP cache and chromium does not,
+    // which is the whole of why seven firefox tests read content one publish
+    // behind — on a *hard* navigation, so Next's Router Cache was never the
+    // layer holding it (CACHING.md, 2026-09-14). These tests assert on what
+    // the server has; this header is how they get to ask it.
+    await context.setExtraHTTPHeaders({ "Cache-Control": "no-cache" });
     await recordClipboardWrites(context);
     await use(context);
   },
