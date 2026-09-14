@@ -7,14 +7,23 @@
 // The favicon is fetched by the browser straight from the linked site —
 // the design's whole point, no server-side fetch of a user-supplied URL —
 // so the icon host is intercepted with page.route rather than let out to
-// the network. But Playwright itself aborts every request whose URL ends
-// in /favicon.ico, in every browser, before routes or request events see
-// it (playwright-core's requestStarted, `_isFavicon`; e2e/README.md), so
-// the third-party derivation, <origin>/favicon.ico, cannot be observed
-// here at all: under Playwright every third-party site takes the globe
-// fallback. What is covered instead is the own-site branch, which reads
-// the document's <link rel="icon"> and so can be pointed at a routed URL,
-// and the <img> path end to end behind it.
+// the network. The third-party derivation, <origin>/favicon.ico, cannot be
+// *observed* here: Playwright aborts that path itself, before routes or
+// request events see it (playwright-core's requestStarted, `_isFavicon`;
+// e2e/README.md), so every third-party site takes the globe fallback. It
+// What is covered instead is the own-site branch, which reads the document's
+// <link rel="icon"> and so can be pointed at a routed URL, and the <img> path
+// end to end behind it.
+//
+// **The globe assertion itself is chromium/firefox only.** Those two report an
+// aborted image load as an `error` event, which is what `onError` needs; webkit
+// leaves the <img> at `complete: true, naturalWidth: 0` and fires nothing, so
+// `failedIcon` never gets set and the globe never replaces the broken image.
+// That is a property of the abort, not of a 404 — a real Safari fetching a
+// favicon that isn't there gets a response and fires `error` like anyone else —
+// so it is a hole in what this harness can observe, not a bug to patch around
+// in src/. Routing /favicon.ico to a 404 instead does not help: Playwright's
+// abort happens before routes are consulted, on every engine.
 //
 // Links are created the way an author would — caret in place, Ctrl/⌘-K,
 // type, Enter — rather than seeded as marks, so the popover's own paths are
@@ -180,8 +189,13 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
     // The icon: this site's /favicon.ico is what the bubble asks for, and
     // Playwright aborts exactly that (header comment) — which is the
     // fallback's own trigger. The globe, and no broken <img> beside it.
-    await expect(b.locator("svg.tabler-icon-world")).toBeVisible();
-    await expect(b.locator("img")).toHaveCount(0);
+    // Only where an aborted load is reported as an error; the header says why
+    // webkit cannot see this branch and why that is the harness's limit rather
+    // than the app's.
+    if (test.info().project.name !== "webkit") {
+      await expect(b.locator("svg.tabler-icon-world")).toBeVisible();
+      await expect(b.locator("img")).toHaveCount(0);
+    }
 
     // Under the link's line, hanging from its start (placePopover: a gap
     // below, the anchor's own left edge nudged right by the same gap).
