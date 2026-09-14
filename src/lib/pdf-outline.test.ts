@@ -170,27 +170,48 @@ test("ancestorIdsOf walks outward from the root, excluding the node itself", () 
   assert.deepEqual(ancestorIdsOf("3"), []);
 });
 
-test("a negative /Count is honoured, at the top level too", () => {
+test("the top level opens; deeper parents ship collapsed", () => {
   const expanded = defaultExpanded(flattenSample());
-  // "Chapter one" carries count -2: it ships closed, top level or not.
-  assert.ok(!expanded.has("1"));
-  // Its section carries a positive count and opens on the document's say-so.
-  assert.ok(expanded.has("1.0"));
+  // "Chapter one" is the only parent at depth 0. Its "Section 1.1" is visible
+  // but closed, so "Part 1.1.1" below it is not rendered.
+  assert.deepEqual([...expanded].sort(), ["1"]);
+  assert.ok(isVisible("1.0", expanded));
+  assert.ok(!isVisible("1.0.0", expanded));
   // Leaves are never in the set — there is nothing to open.
   assert.ok(!expanded.has("1.0.0"));
   assert.ok(!expanded.has("0"));
 });
 
-test("a document that ships everything closed opens its top level anyway", () => {
+test("the PDF's own /Count sign is not consulted, in either direction", () => {
   const nodes = flattenOutline(
     [
+      // Ships closed, per the file. Opened anyway: it is a top-level parent.
       { title: "One", dest: null, url: null, count: -1, items: [{ title: "1.1", dest: null, url: null }] },
-      { title: "Two", dest: null, url: null, count: -1, items: [{ title: "2.1", dest: null, url: null }] },
+      {
+        // Ships open all the way down. Level 2 is still collapsed.
+        title: "Two",
+        dest: null,
+        url: null,
+        count: 2,
+        items: [
+          {
+            title: "2.1",
+            dest: null,
+            url: null,
+            count: 1,
+            items: [{ title: "2.1.1", dest: null, url: null, count: 1, items: [{ title: "2.1.1.1", dest: null, url: null }] }],
+          },
+        ],
+      },
     ],
     () => null,
     () => 0,
   );
-  assert.deepEqual([...defaultExpanded(nodes)].sort(), ["0", "1"]);
+  const expanded = defaultExpanded(nodes);
+  assert.deepEqual([...expanded].sort(), ["0", "1"]);
+  // The second level renders — with a twisty — and what hangs off it does not.
+  assert.ok(isVisible("1.0", expanded));
+  assert.ok(!isVisible("1.0.0", expanded));
 });
 
 test("an outline with no children at all expands nothing", () => {
@@ -203,37 +224,6 @@ test("an outline with no children at all expands nothing", () => {
     () => 0,
   );
   assert.equal(defaultExpanded(nodes).size, 0);
-});
-
-test("a nested negative /Count stays closed", () => {
-  const nodes = flattenOutline(
-    [
-      {
-        title: "Chapter",
-        dest: null,
-        url: null,
-        count: 1,
-        items: [
-          {
-            title: "Closed section",
-            dest: null,
-            url: null,
-            count: -3,
-            items: [{ title: "Hidden part", dest: null, url: null }],
-          },
-        ],
-      },
-    ],
-    () => null,
-    () => 0,
-  );
-  const expanded = defaultExpanded(nodes);
-  // The chapter's own count is positive, so it opens; the section inside it
-  // ships closed, so its part is not rendered.
-  assert.ok(expanded.has("0"));
-  assert.ok(!expanded.has("0.0"));
-  assert.ok(isVisible("0.0", expanded));
-  assert.ok(!isVisible("0.0.0", expanded));
 });
 
 test("visibleOrder renders exactly the rows whose every ancestor is open", () => {

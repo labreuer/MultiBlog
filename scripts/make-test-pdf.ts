@@ -76,8 +76,9 @@ export type TestOutlineItem = {
   named?: string;
   /**
    * Whether the subtree ships open. Written as the sign of the entry's /Count
-   * (PDF 32000-1 §12.3.3), which is what `defaultExpanded` reads. Defaults to
-   * open; ignored for a leaf.
+   * (PDF 32000-1 §12.3.3). The Contents pane deliberately does *not* read it
+   * (PLAN.md §19b) — which is exactly why a fixture still needs to write it, so
+   * a spec can prove the hint is ignored. Defaults to open; ignored for a leaf.
    */
   open?: boolean;
   children?: readonly TestOutlineItem[];

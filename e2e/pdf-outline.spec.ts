@@ -27,10 +27,12 @@ const PAGES = [
 ];
 
 /**
- * The fixture's outline. Two shapes on purpose beyond the plain nesting:
+ * The fixture's outline. Three shapes on purpose beyond the plain nesting:
  * "Section 1.2" is reached through a **named** destination rather than an
- * inline array, and "Chapter two" ships **closed** (a negative /Count), which is
- * what the default-expansion rule reads.
+ * inline array; "Part 1.1.1" puts a **third level** in the tree, which is the
+ * first level the pane ships collapsed; and "Chapter two" ships **closed** (a
+ * negative /Count) while the pane opens it anyway, which is how the browser
+ * proves the author's hint is carried and not obeyed (PLAN.md §19b).
  */
 const OUTLINE: TestOutlineItem[] = [
   { title: "Front matter", page: 1 },
@@ -38,7 +40,7 @@ const OUTLINE: TestOutlineItem[] = [
     title: "Chapter one",
     page: 2,
     children: [
-      { title: "Section 1.1", page: 3 },
+      { title: "Section 1.1", page: 3, children: [{ title: "Part 1.1.1", page: 3, y: 600 }] },
       { title: "Section 1.2", page: 4, named: "sectionOneTwo" },
     ],
   },
@@ -114,20 +116,25 @@ test.describe("pdf contents pane", () => {
     await deleteTestFile(file.id);
   });
 
-  test("the outline renders as a tree, honouring the document's own open/closed hints", async ({ page }) => {
+  test("the outline renders as a tree, two levels deep whatever the file asked for", async ({ page }) => {
     await signIn(page, ADMIN_EMAIL);
     await gotoOk(page, `/pdf/${file.slug}`);
     await waitForViewer(page);
     const tree = await openContents(page);
 
     await expect(tree).toBeVisible();
-    // Chapter one ships open, so its sections are rendered…
+    // Both chapters' sections are rendered — including Chapter two's, whose
+    // negative /Count asked for the opposite. The pane opens the top level and
+    // only the top level, so the file's own hint changes nothing here.
     await expect(row(page, "Section 1.1")).toBeVisible();
-    // …and Chapter two ships closed (a negative /Count), so its section is not
-    // in the DOM at all. Hidden rows aren't hidden with CSS — they aren't
-    // rendered — which is what keeps a 500-entry outline cheap.
-    await expect(row(page, "Section 2.1")).toHaveCount(0);
-    await expect(row(page, "Chapter two")).toHaveAttribute("aria-expanded", "false");
+    await expect(row(page, "Section 2.1")).toBeVisible();
+    await expect(row(page, "Chapter two")).toHaveAttribute("aria-expanded", "true");
+
+    // The third level is where it stops: Part 1.1.1 is not in the DOM at all.
+    // Hidden rows aren't hidden with CSS — they aren't rendered — which is what
+    // keeps a 500-entry outline cheap.
+    await expect(row(page, "Part 1.1.1")).toHaveCount(0);
+    await expect(row(page, "Section 1.1")).toHaveAttribute("aria-expanded", "false");
 
     // Depth is carried by aria-level, since the tree renders flat.
     await expect(row(page, "Chapter one")).toHaveAttribute("aria-level", "1");
@@ -148,13 +155,13 @@ test.describe("pdf contents pane", () => {
     // The twisty is not a button — a treeitem may not contain interactive
     // descendants — so this is a click on the glyph, and the assertion is that
     // it opens the subtree *without* also jumping (the row's own click does).
-    await row(page, "Chapter two").locator("span").first().click();
-    await expect(row(page, "Section 2.1")).toBeVisible();
-    await expect(row(page, "Chapter two")).toHaveAttribute("aria-expanded", "true");
+    await row(page, "Section 1.1").locator("span").first().click();
+    await expect(row(page, "Part 1.1.1")).toBeVisible();
+    await expect(row(page, "Section 1.1")).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByLabel("Page number")).toHaveValue("1");
 
-    await row(page, "Chapter two").locator("span").first().click();
-    await expect(row(page, "Section 2.1")).toHaveCount(0);
+    await row(page, "Section 1.1").locator("span").first().click();
+    await expect(row(page, "Part 1.1.1")).toHaveCount(0);
   });
 
   test("clicking an entry moves the viewer to it", async ({ page }) => {
@@ -198,12 +205,12 @@ test.describe("pdf contents pane", () => {
     await waitForViewer(page);
     await openContents(page);
 
-    // Open Chapter two and read its section: the section is what's current.
-    await row(page, "Chapter two").locator("span").first().click();
+    // Chapter two opens by default, so its section is on screen: read it, and
+    // the section is what's current.
     await scrollToPage(page, 6);
     await expect.poll(() => currentRow(page)).toContain("Section 2.1");
 
-    // Collapse it again without moving the document. The reader is still in
+    // Collapse the chapter without moving the document. The reader is still in
     // Section 2.1 — but it isn't on screen, so the chapter carries the mark.
     await row(page, "Chapter two").locator("span").first().click();
     await expect.poll(() => currentRow(page)).toContain("Chapter two");
@@ -220,19 +227,28 @@ test.describe("pdf contents pane", () => {
     await page.keyboard.press("ArrowDown");
     await expect(row(page, "Chapter one")).toBeFocused();
 
-    // Right on a closed row opens it; the second press steps into it.
+    // Right on a closed row opens it; the second press steps into it. Section
+    // 1.1 is the closed one now — the third level is what ships collapsed.
+    await page.keyboard.press("ArrowDown");
+    await expect(row(page, "Section 1.1")).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(row(page, "Section 1.1")).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("ArrowRight");
+    await expect(row(page, "Part 1.1.1")).toBeFocused();
+
+    // Left on a leaf goes to the parent, and End reaches the last *visible*
+    // row — which is now the bottom of the tree rather than the last top-level
+    // entry, since the sections are open.
+    await page.keyboard.press("ArrowLeft");
+    await expect(row(page, "Section 1.1")).toBeFocused();
     await page.keyboard.press("End");
-    await expect(row(page, "Chapter two")).toBeFocused();
-    await page.keyboard.press("ArrowRight");
-    await expect(row(page, "Chapter two")).toHaveAttribute("aria-expanded", "true");
-    await page.keyboard.press("ArrowRight");
     await expect(row(page, "Section 2.1")).toBeFocused();
 
-    // Left on a leaf goes to the parent; Enter jumps.
-    await page.keyboard.press("ArrowLeft");
-    await expect(row(page, "Chapter two")).toBeFocused();
+    // Enter jumps — and it goes last, because the jump takes focus into the
+    // viewer: a further key press would scroll the document rather than move
+    // through the tree, which is a confusing way for this test to fail.
     await page.keyboard.press("Enter");
-    await expect(page.getByLabel("Page number")).toHaveValue("5");
+    await expect(page.getByLabel("Page number")).toHaveValue("6");
   });
 
   test("the tab strip fits the panel it lives in", async ({ page }) => {

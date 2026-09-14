@@ -6835,10 +6835,14 @@ which entry is current — and the pane owns which rows are open.
   viewport rather than a quarter down, because a quote needs the context above it and a
   heading *is* that context. It also leaves the clicked heading just above the reading line,
   so the entry clicked is the entry that lights up.
-- **The PDF's own `/Count` sign decides what starts open**, at the top level too. A chapter
-  that ships closed is how a long document keeps its contents readable. The single override is
-  the document that ships *everything* closed, where the top level opens so the pane isn't a
-  list of rows with no visible way in.
+- **Two levels start visible, by depth alone** (`defaultExpanded`): top-level parents open
+  and nothing below does, so the pane reads as chapters and their sections, with level 3 and
+  below behind a twisty rather than dumped out in full. The PDF's own `/Count` sign — the author saying which subtrees ship open
+  (PDF 32000-1 §12.3.3) — is read through to `OutlineNode` and **deliberately not acted on**:
+  it answers what *one file's* author wanted, where the pane needs the same shape from one
+  file to the next, and following it makes a 400-entry outline that ships open bury its top
+  level and one that ships closed hide that there is anything underneath. That was the rule
+  until 2026-09-11.
 
 **Two things it deliberately does not do**, both recorded in TODO.md rather than left to be
 rediscovered: an outline entry pointing at a **URL** renders as a plain row and does not

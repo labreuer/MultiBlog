@@ -639,7 +639,8 @@ the shipped types matter: `items` is typed `Array<any>`, so the generated `.d.ts
 describe a tree at all (we declare `PdfOutlineItem` in `src/lib/pdf-outline.ts` instead — a
 real pdfjs node satisfies it structurally), and `count` is present only for a parent, where
 **its sign is the author's open/closed choice** (PDF 32000-1 §12.3.3) rather than a
-count of anything we display.
+count of anything we display — we carry it and do not obey it, opening two levels by depth
+instead (PLAN.md §19b).
 
 **`dest` is one of three things**, and conflating any two of them costs every entry its
 position without throwing:
@@ -798,6 +799,33 @@ available without rendering.
   — re-anchor across editions, or treat as unrelated. **Still open**, and note that
   content-addressed storage makes the two *share* bytes when they are identical and stay
   wholly separate when they are not; nothing bridges editions.
+- **The contents pane's expansion is one fixed rule, and is forgotten between visits.** Two
+  things it should grow, in this order:
+  1. **Let the reader choose the default.** Today `defaultExpanded` (`src/lib/pdf-outline.ts`)
+     is a depth rule — top-level parents open, everything below closed — and the choices worth
+     offering beside it are *fully expanded*, *fully collapsed*, and **the PDF's own `/Count`**
+     (§10a; positive means the author shipped that subtree open). The `/Count` arm is why
+     `count` is still parsed onto `OutlineNode` rather than dropped: it was the rule until
+     2026-09-11, and PLAN.md §19b records why it is no longer the *default* — per-file intent
+     is not a shape a reader can predict before the pane renders — which is an argument
+     against defaulting to it, not against offering it. A depth *number* rather than a
+     three-way choice is tempting and probably wrong: "two levels" means something different
+     in a document whose outline is flat than in one nested five deep.
+  2. **Remember what the reader opened and closed**, instead of reseeding from the default on
+     every mount. **IndexedDB** is the right store — it is already where a ydoc's local copy
+     lives (docs/YDOC.md), it needs no schema and no round trip, and an expanded set is
+     per-reader-per-device rather than anything to sync or to show anyone else.
+
+  The keying is the part to get right, and it is decidable rather than a judgement call: the
+  set holds ids like `"1.0.2"` from `flattenOutline`, which are **positions in the outline
+  tree, not identities** — the same id means something else in a different file, and in a
+  re-exported edition of the same document. So key the stored set on the file's `sha256`,
+  which §4 already relies on as a file's identity and which by construction cannot drift. A
+  revised edition is different bytes, hence a different key, hence a fresh default — which is
+  the honest answer rather than a limitation. Note also that `PdfOutlinePanel`'s `TreeState`
+  is keyed on the `nodes` array, so restoring is a matter of seeding that state from the store
+  rather than merging into it, and a stored set whose ids no longer exist costs nothing:
+  `isVisible` and `visibleOrder` only ever ask about ids they were handed.
 
 ---
 

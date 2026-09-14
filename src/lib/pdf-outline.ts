@@ -22,10 +22,11 @@ export type PdfOutlineItem = {
   dest: string | unknown[] | null;
   url: string | null;
   /**
-   * The PDF's own `/Count` for the entry. **Its sign is the author's
-   * open/closed choice** (PDF 32000-1 §12.3.3: negative means the subtree is
-   * closed when the document opens), which is what `defaultExpanded` reads.
-   * Absent for a leaf.
+   * The PDF's own `/Count` for the entry. Its sign is the author's open/closed
+   * choice (PDF 32000-1 §12.3.3: negative means the subtree is closed when the
+   * document opens). Read through to `OutlineNode` but **not acted on** — the
+   * pane opens by depth instead, and `defaultExpanded` says why. Absent for a
+   * leaf.
    */
   count?: number;
   items?: PdfOutlineItem[];
@@ -76,7 +77,7 @@ export type OutlineNode = {
   position: OutlinePosition | null;
   /** 0..1 down the whole document — null exactly when `position` is. */
   fraction: number | null;
-  /** The PDF's own open/closed hint; see `PdfOutlineItem.count`. */
+  /** The PDF's own open/closed hint, carried but not obeyed; see `PdfOutlineItem.count`. */
   count?: number;
   hasChildren: boolean;
 };
@@ -164,31 +165,38 @@ export function levelPositions(nodes: readonly OutlineNode[]): Map<string, { pos
 /**
  * The set of ids expanded when the pane first opens.
  *
- * Honours the PDF's own `/Count` sign throughout — an author who shipped a
- * 400-entry outline collapsed to its parts meant it, and a top-level chapter
- * that ships closed is the ordinary way a long document keeps its contents
- * readable.
+ * **Two levels visible, by depth alone**: every top-level parent opens and
+ * nothing below does, so the reader lands on a contents list of chapters and
+ * their sections, with level 3 and below sitting behind a twisty rather than
+ * dumped out in full.
  *
- * The one override is for the document that ships **everything** closed, where
- * honouring it literally gives a pane of rows with nothing under any of them
- * and no clue that there is more: then the top level opens. Not a general
- * "always expand the first level", which would overrule the far more common
- * deliberate case above.
+ * This deliberately ignores the PDF's own `/Count` sign (PDF 32000-1 §12.3.3),
+ * which is the file's author saying which subtrees ship open. Honouring it was
+ * the earlier rule and it answers a different question — what *this document's*
+ * author wanted — where what the pane needs is a shape that is the same from
+ * one file to the next: a 400-entry outline that ships fully open buries the
+ * top level, and one that ships fully closed hides that there is anything under
+ * it at all. A depth rule is uniform across both, and the reader's first click
+ * takes it from there. `OutlineNode.count` is kept for that reason rather than
+ * deleted — so a future reader can see the hint exists and that not reading it
+ * is a choice.
+ *
+ * A leaf is never in the set: there is nothing to open.
  */
 export function defaultExpanded(nodes: readonly OutlineNode[]): Set<string> {
   const expanded = new Set<string>();
-  let anyParents = false;
   for (const node of nodes) {
-    if (!node.hasChildren) continue;
-    anyParents = true;
-    if ((node.count ?? 0) > 0) expanded.add(node.id);
-  }
-  if (expanded.size > 0 || !anyParents) return expanded;
-  for (const node of nodes) {
-    if (node.depth === 0 && node.hasChildren) expanded.add(node.id);
+    if (node.hasChildren && node.depth < DEFAULT_EXPANDED_DEPTH) expanded.add(node.id);
   }
   return expanded;
 }
+
+/**
+ * How many levels of *parent* open by default — 1, i.e. depth 0 alone, which
+ * makes rows at depths 0 and 1 visible. One more than the levels that open is
+ * what the reader counts on screen.
+ */
+const DEFAULT_EXPANDED_DEPTH = 1;
 
 /**
  * Whether a row is rendered at all: every one of its ancestors is expanded.
