@@ -24,10 +24,14 @@
     "test:unit": "node --import tsx --test \"src/**/*.test.ts\"",
     "check-ports": "tsx scripts/check-ports.ts",
     "e2e": "tsx scripts/e2e.ts prod",
+    "e2e:firefox": "tsx scripts/e2e.ts prod --project=firefox",
+    "e2e:webkit": "tsx scripts/e2e.ts prod --project=webkit",
     "e2e:dev": "tsx scripts/e2e.ts dev",
     "e2e:web": "tsx scripts/prod-web.ts e2e",
     "e2e:ui": "playwright test --ui",
-    "e2e:report": "playwright show-report"
+    "e2e:report": "playwright show-report",
+    "setup:browsers": "playwright install chromium firefox webkit",
+    "setup:webkit-libs": "tsx scripts/webkit-libs.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

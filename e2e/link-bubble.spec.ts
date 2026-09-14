@@ -22,7 +22,7 @@
 // inserts the href as the link's text, which is what makes each link
 // addressable by name below.
 import type { Page } from "@playwright/test";
-import { test as base, expect, bodyEditor, waitForDocCollabReady } from "./fixtures";
+import { test as base, expect, bodyEditor, grantClipboard, waitForDocCollabReady } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createTestDoc,
@@ -226,7 +226,7 @@ test.describe("the link bubble (LinkBubble.tsx)", () => {
 
   test("Copy puts the absolute href on the clipboard and leaves the editor focused", async ({ page, linkDoc }) => {
     void linkDoc;
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await grantClipboard(page.context());
     const href = `${ICON_HOST}/copied`;
     await appendLink(page, "Paragraph one.", href);
     await bodyLink(page, href).click();
@@ -329,7 +329,7 @@ test.describe("a link into this site's docs previews the doc", () => {
 
       // Copy resolves a relative href against the page, so what lands on
       // the clipboard is a URL that works anywhere.
-      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await grantClipboard(page.context());
       await b.getByRole("button", { name: "Copy link" }).click();
       await expect(b.getByRole("button", { name: "Copied" })).toBeVisible();
       const origin = new URL(page.url()).origin;

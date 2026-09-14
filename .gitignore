@@ -101,3 +101,9 @@ etherpad-authors.json
 # dependency, not repository content — same treatment as the generated icons
 # above. `predev`/`prebuild` in package.json make the copy unskippable.
 /public/pdfjs/
+
+# Ubuntu's libicu74 and libjpeg8, staged by `npm run setup:webkit-libs` for
+# Playwright's WebKit build, which Fedora cannot link (scripts/webkit-libs.ts).
+# Third-party binaries fetched per machine — dependency, not repository content,
+# the same treatment as /public/pdfjs/ above.
+/.playwright-libs/

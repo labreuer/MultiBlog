@@ -2,7 +2,7 @@
 //
 // Each fixture owns its own throwaway rows and deletes them afterwards, so
 // specs never share state and can run in any order across workers.
-import { test as base, expect, type Page, type Browser } from "@playwright/test";
+import { test as base, expect, type Page, type Browser, type BrowserContext } from "@playwright/test";
 import {
   ADMIN_EMAIL,
   TEST_PASSWORD,
@@ -81,12 +81,84 @@ type Fixtures = {
   devServer500Watch: void;
 };
 
+/**
+ * Grant clipboard access where the browser has such a permission to grant.
+ *
+ * Only chromium does: `grantPermissions(["clipboard-write"])` throws
+ * "Unknown permission" on WebKit and Firefox, which took out 6 tests in the
+ * webkit project's first run before the call sites went through here. Those
+ * two engines have no permission gate on the clipboard at all — a test that
+ * needs one either works without the grant or fails on its own assertion,
+ * which is the failure worth seeing.
+ */
+export async function grantClipboard(context: BrowserContext): Promise<void> {
+  if (context.browser()?.browserType().name() !== "chromium") return;
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+}
+
 export async function signIn(page: Page, email: string, password = TEST_PASSWORD): Promise<void> {
-  await page.goto("/sign-in");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL("**/dashboard");
+  // **Landing on /dashboard is not the end of signing in**, and everything
+  // below is about the window after it. `SessionRefresh` mounts there and,
+  // once per mount, POSTs /api/auth/session and then calls `router.refresh()`
+  // — so for a few hundred milliseconds the page still has a navigation of
+  // its own coming. A test that navigates inside that window races it, and in
+  // WebKit the race is lost outright: `page.goto` dies with "interrupted by
+  // another navigation", which accounted for 84 of the webkit project's first
+  // 92 failures, across 21 specs. Chromium tolerates it, which is the only
+  // reason it went unnoticed for as long as the suite has existed.
+  //
+  // Worse in the same window: a navigation *aborts* that POST, `update({})`
+  // swallows the fetch error and resolves `null`, and SessionRefresh reads
+  // null as "this session just died" and pushes to /sign-in. So a failing
+  // test's bounce to the sign-in page is real app behaviour rather than a test
+  // artifact — e2e/README.md, "Firefox and WebKit", has what would have to
+  // change in the app. Waiting here is the suite's half of it.
+  //
+  // **A listener rather than two `waitForResponse` calls**, because both
+  // events can land inside the round trip that tells Playwright about the
+  // previous one — arming the second waiter after awaiting the first measured
+  // fine single-worker and then failed 78 tests under the prod suite's eight.
+  // Watching from before the click cannot miss either one. What identifies the
+  // refresh among the half-dozen RSC fetches the dashboard's nav links fire is
+  // the **absent `Next-Router-Prefetch` header**; a matcher without that check
+  // returns on a prefetch, before the refresh exists.
+  let sawSessionPost = false;
+  let refreshSeen!: () => void;
+  const refreshed = new Promise<void>((resolve) => (refreshSeen = resolve));
+  const watch = (response: { url(): string; request(): { method(): string; headers(): Record<string, string> } }) => {
+    const request = response.request();
+    if (request.method() === "POST" && response.url().includes("/api/auth/session")) {
+      sawSessionPost = true;
+      return;
+    }
+    if (!sawSessionPost) return;
+    const url = new URL(response.url());
+    if (url.pathname === "/dashboard" && url.searchParams.has("_rsc") && !request.headers()["next-router-prefetch"]) {
+      refreshSeen();
+    }
+  };
+
+  page.on("response", watch);
+  try {
+    await page.goto("/sign-in");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL("**/dashboard");
+    // Bounded: on the `session === null` branch above there is no refresh to
+    // wait for, and a dead session is a thing tests deliberately create
+    // (e2e/session-refresh.spec.ts).
+    await Promise.race([refreshed, page.waitForTimeout(5_000)]);
+  } finally {
+    page.off("response", watch);
+  }
+
+  // The refresh's *response* is not its *commit* — waiting only for the
+  // response measured 0 of 3 on webkit. `networkidle` covers the gap and
+  // measured 3 of 3, but on a second sign-in in the same page it can take 29 s
+  // (it is what turned files.spec's 3 s into 41 s), so it is capped: by here
+  // the refresh has already been answered, and the cap only bounds the tail.
+  await Promise.race([page.waitForLoadState("networkidle"), page.waitForTimeout(1_500)]);
 }
 
 async function signedInContext(browser: Browser, email: string): Promise<Page> {

@@ -1,4 +1,4 @@
-import { test, expect, gotoOk, selectTextInBody, bodyEditor, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
+import { test, expect, gotoOk, grantClipboard, selectTextInBody, bodyEditor, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   createTestAnchoredLink,
   createTestDoc,
@@ -196,7 +196,7 @@ test.describe("editing an anchored link", () => {
       minted: false,
     });
     try {
-      await creatorPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await grantClipboard(creatorPage.context());
       await gotoOk(creatorPage, `/link/${link.id}?noredirect=1`);
       const edit = creatorPage.getByTestId("edit-link");
       const editButton = edit.getByRole("button", { name: "Edit link" });
@@ -299,7 +299,7 @@ test.describe("editing an anchored link", () => {
     });
     let linkId: string | null = null;
     try {
-      await creatorPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await grantClipboard(creatorPage.context());
       // Minted through the UI: the fixture writes doc parts only, and this
       // test is about a PDF part.
       await gotoOk(creatorPage, `/pdf/${file.slug}`);

@@ -80,6 +80,124 @@ read it. The figure had already been wrong twice before that was made a rule:
 Treat every number here as dated, and re-measure rather than infer. See the
 worker-count note below before raising the parallelism.
 
+## Firefox and WebKit
+
+The suite runs on chromium by default. The other two engines exist as projects
+that only come into being when their env var is set, so a bare
+`playwright test` never picks them up — doubling the wall clock of the
+everyday run buys almost nothing when the job is catching regressions in our
+own logic:
+
+```bash
+npm run e2e:firefox    # or: npm run e2e -- --project=firefox
+npm run e2e:webkit     # or: npm run e2e -- --project=webkit
+```
+
+`scripts/e2e.ts` sets `E2E_FIREFOX` / `E2E_WEBKIT` from the `--project` it was
+handed, so the flag is the whole command. Driving `npx playwright test` by hand
+bypasses that and needs the variable in front, or Playwright reports
+"Project(s) 'webkit' not found" — a flag naming the thing it then denies
+exists. Both take the usual filters: `npm run e2e:firefox -- e2e/doc.spec.ts`.
+
+**What each is for.** Firefox is Gecko, for the differences chromium cannot
+surface — chiefly contenteditable selection and `beforeinput`, where
+ProseMirror diverges most. WebKit is for the one class of bug no amount of
+chromium coverage can reach: the PDF surface runs pdfjs, and pdfjs uses modern
+built-ins WebKit ships late or not at all (two have already bitten an iPad —
+`Map.prototype.getOrInsertComputed` and `ReadableStream`'s async iterator, both
+patched in `src/lib/pdfjs-webkit-polyfills.ts`). Neither is iPadOS Safari:
+Playwright drives its own builds, so the native selection gestures an iPad uses
+are still unreproducible here. What WebKit shares is the JS engine, which is
+where those two bugs live.
+
+### First-time setup
+
+```bash
+npm run setup:browsers      # downloads chromium, firefox and webkit builds
+```
+
+Firefox then runs as downloaded. **WebKit on Fedora needs two more steps**,
+because Playwright ships no Fedora WebKit build and falls back to the Ubuntu
+24.04 one:
+
+```bash
+npm run setup:webkit-libs   # stages Ubuntu's libicu74 + libjpeg8 into .playwright-libs/
+sudo dnf install libmanette # the one dependency Fedora does package
+```
+
+The libraries go **into the WebKit bundle's own `sys/lib`**, which is where
+that bundle already keeps the distro libraries it declines to depend on the
+host for. Nothing is installed system-wide, so no other program on the machine
+ever loads an ICU three majors behind. `LD_LIBRARY_PATH` is the obvious reach
+and is **wrong**: the bundle's launcher assigns the variable rather than
+appending to it, so a value set around the run is gone by the time the ELF
+loader reads it — and it fails late, passing Playwright's own pre-flight check
+(which reads the same variable) and then dying in every single
+`browserType.launch`. `scripts/webkit-libs.ts` has that account in full,
+including why a symlink to the system ICU is not an option.
+
+`playwright install --force webkit`, or a bump that pulls a new webkit
+revision, wipes the staged files; re-run `npm run setup:webkit-libs`, which
+keeps its downloads and so only re-copies.
+
+Playwright's pre-flight `ldd` check asks for a third thing,
+`gstreamer1.0-libav` — really `libx264.so`, which is h.264 playback, dlopen'd
+at need and on no path any spec here takes. On Fedora that means enabling RPM
+Fusion Free for a codec nothing plays, so the config instead sets
+`PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS` — but only once it has confirmed
+the staging *and* libmanette itself, so the check stays on in every state where
+it would have told you something true. `webkitLaunchEnv()` is the whole rule.
+
+### Where each engine stands
+
+Measured 2026-09-14 on the Ryzen 9 9950X / Fedora 44 box, prod target, 8
+workers, servers warm:
+
+| project | passed | failed | wall |
+|---|---|---|---|
+| chromium | 260 | 0 | 76 s |
+| firefox | 242 | 8 | 96 s |
+| webkit | 237 | 13 | 135 s |
+
+**A red in firefox or webkit is not a release blocker** the way a chromium one
+is — it is a finding to triage. The classes standing as of that run:
+
+- **Clipboard, webkit ×6.** `navigator.clipboard` from `page.evaluate` throws
+  `NotAllowedError`: WebKit ties clipboard access to a user gesture and has no
+  permission to grant instead (`grantClipboard` already skips the grant there,
+  which is a different problem — the grant itself threw "Unknown permission").
+  The tests need a real click, or a different way to read what Copy wrote.
+- **Collab readiness, webkit ×3.** `[data-testid="live-doc-synced"]` never
+  attaches on one side-by-side column inside 10 s.
+- **Popover/menu state, webkit ×3, and one missing link-bubble icon.**
+- **Synthetic pinch, webkit ×1.** `TypeError: Illegal constructor` — the touch
+  event the test builds cannot be constructed in WebKit.
+- **ISR/cache timing, firefox ×5** (landing, moderation, publish): content
+  read one revalidation behind.
+- **Navigation races, firefox ×2 (`NS_BINDING_ABORTED`), webkit ×1** — the
+  editor's own redirect, the same *shape* as the sign-in one below but not the
+  same cause.
+
+### The sign-in race, and the app behaviour behind it
+
+Worth reading before writing anything that signs in. `SessionRefresh` mounts on
+/dashboard and, once per mount, POSTs /api/auth/session and then calls
+`router.refresh()`. So **landing on /dashboard is not the end of signing in**:
+for a few hundred milliseconds the page still has a navigation of its own
+coming, and a test that navigates inside that window races it. WebKit loses the
+race outright — `page.goto` dies with "interrupted by another navigation" —
+which was **84 of the webkit project's first 92 failures, across 21 specs**.
+`signIn()` now waits that window out; the comment there records which waits
+were measured and what each cost.
+
+The part that is *not* a test artifact: a navigation aborts that POST,
+`update({})` swallows the fetch error and resolves `null`, and SessionRefresh
+reads null as "this session just died" and pushes to /sign-in. So a signed-in
+reader who clicks a link within a moment of reaching /dashboard — or whose
+network merely drops that one request — is bounced to the sign-in page with a
+perfectly good session. Making a failed refresh distinguishable from a dead
+session is an app change, and has not been made.
+
 ## Fixtures
 
 From `./fixtures` (import `test` and `expect` from there, not from
