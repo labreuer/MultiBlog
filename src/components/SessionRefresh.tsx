@@ -44,16 +44,38 @@ export default function SessionRefresh() {
     // production timing the refresh could race the cookie clearing and
     // re-render a still-authenticated page, leaving a dead session parked on
     // /dashboard (caught by e2e/session-refresh.spec.ts against the prod
-    // target). `update` resolves with the refreshed session, so null is
-    // exactly "this session just died"; this effect only runs from
-    // status === "authenticated", so it can't misfire for a visitor who was
-    // never signed in.
-    void update({}).then((session) => {
-      if (session === null) {
-        router.push("/sign-in");
+    // target). This effect only runs from status === "authenticated", so it
+    // can't misfire for a visitor who was never signed in — but a null
+    // resolution is not proof of the opposite either, which is what the
+    // second request below is for.
+    void update({}).then(async (session) => {
+      if (session !== null) {
+        router.refresh();
         return;
       }
-      router.refresh();
+      // **`null` is not the same as "gone".** `update` resolves null both when
+      // the session really died and when its request merely failed —
+      // next-auth catches the fetch error, logs `ClientFetchError: Load
+      // failed`, and returns null either way. And the commonest cause of that
+      // failure is ordinary: a navigation started while this POST is in
+      // flight aborts it, and this effect runs a few hundred milliseconds
+      // after /dashboard mounts, so following any link that soon does it. The
+      // page would then throw a perfectly good session at /sign-in; a dropped
+      // request on a flaky connection does the same.
+      //
+      // So ask again, directly, and act only on an answer. If this request
+      // fails too — because the navigation that aborted the first is still
+      // under way, which is the whole point — say nothing and let the page
+      // the reader asked for arrive.
+      try {
+        const response = await fetch("/api/auth/session");
+        if (!response.ok) return;
+        // The route answers a bare `null` when there is no session.
+        if ((await response.json()) !== null) return;
+      } catch {
+        return;
+      }
+      router.push("/sign-in");
     });
   }, [status, update, router]);
 

@@ -190,13 +190,13 @@ which was **84 of the webkit project's first 92 failures, across 21 specs**.
 `signIn()` now waits that window out; the comment there records which waits
 were measured and what each cost.
 
-The part that is *not* a test artifact: a navigation aborts that POST,
+The part that was *not* a test artifact: a navigation aborts that POST,
 `update({})` swallows the fetch error and resolves `null`, and SessionRefresh
-reads null as "this session just died" and pushes to /sign-in. So a signed-in
-reader who clicks a link within a moment of reaching /dashboard — or whose
-network merely drops that one request — is bounced to the sign-in page with a
-perfectly good session. Making a failed refresh distinguishable from a dead
-session is an app change, and has not been made.
+read null as "this session just died". A signed-in reader who clicked a link
+within a moment of reaching /dashboard — or whose network merely dropped that
+one request — was bounced to the sign-in page with a perfectly good session.
+SessionRefresh now confirms with a second request before acting, and says
+nothing if that one fails too.
 
 ## Fixtures
 

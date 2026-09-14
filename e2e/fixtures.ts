@@ -154,12 +154,10 @@ export async function signIn(page: Page, email: string, password = TEST_PASSWORD
   // 92 failures, across 21 specs. Chromium tolerates it, which is the only
   // reason it went unnoticed for as long as the suite has existed.
   //
-  // Worse in the same window: a navigation *aborts* that POST, `update({})`
-  // swallows the fetch error and resolves `null`, and SessionRefresh reads
-  // null as "this session just died" and pushes to /sign-in. So a failing
-  // test's bounce to the sign-in page is real app behaviour rather than a test
-  // artifact — e2e/README.md, "Firefox and WebKit", has what would have to
-  // change in the app. Waiting here is the suite's half of it.
+  // A navigation in that window also *aborts* the POST, which used to read as
+  // "this session just died" and bounce the page to /sign-in — real app
+  // behaviour that webkit surfaced, fixed in SessionRefresh.tsx. What is left
+  // for the suite to wait out is the refresh navigation itself.
   //
   // **A listener rather than two `waitForResponse` calls**, because both
   // events can land inside the round trip that tells Playwright about the
