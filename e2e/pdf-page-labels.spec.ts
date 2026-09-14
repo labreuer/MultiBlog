@@ -78,6 +78,12 @@ test.describe("pdf page labels", () => {
     // The sheet number is what the box no longer says, so it moves to the title.
     await expect(box).toHaveAttribute("title", "Sheet 1 of 6");
 
+    // And the total counts in the box's units: this document runs to page 3,
+    // over six sheets. The sheet count survives beside it, in a title of its own.
+    const total = page.getByText("of 3", { exact: true });
+    await expect(total).toBeVisible();
+    await expect(total).toHaveAttribute("title", "6 sheets");
+
     // A label typed in wins over the same text read as a sheet number: "1" is
     // the body's first page (sheet 4), not sheet 1, which is where a reader
     // copying a citation means to land.
@@ -125,6 +131,10 @@ test.describe("pdf page labels", () => {
       await waitForViewer(page);
       await expect(page.getByLabel("Page number")).toHaveValue("1");
       await expect(page.getByLabel("Page number")).not.toHaveAttribute("title", /Sheet/);
+      // Nothing to pair with, so the total goes back to being a sheet count —
+      // and says so by carrying no title.
+      await expect(page.getByText("of 2", { exact: true })).toBeVisible();
+      await expect(page.getByText("of 2", { exact: true })).not.toHaveAttribute("title", /sheets/);
     } finally {
       await deleteTestFile(plain.id);
     }

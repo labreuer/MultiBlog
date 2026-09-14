@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } from "@/lib/pdfjs-client";
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
-import { usablePageLabels } from "@/lib/pdf-page-labels";
+import { pageTotalLabel, usablePageLabels } from "@/lib/pdf-page-labels";
 import { usePdfZoomGestures } from "./use-pdf-zoom-gestures";
 import { usePdfRefit } from "./use-pdf-refit";
 import "pdfjs-dist/web/pdf_viewer.css";
@@ -483,7 +483,14 @@ export default function PdfViewer({
               title={pageLabels ? `Sheet ${pageNumber} of ${pageCount}` : undefined}
             />
           </label>
-          <span className={styles.pageCount}>of {pageCount || "…"}</span>
+          {/* The box's counterpart, so it counts in the same units the box
+              shows — the document's last numbered page, not its sheet count,
+              wherever the two differ (`pageTotalLabel` has the tail rule). The
+              sheet count keeps a home in the title for the same reason it does
+              on the box: it is what the scrollbar is counting in. */}
+          <span className={styles.pageCount} title={pageLabels ? `${pageCount} sheets` : undefined}>
+            of {pageCount ? pageTotalLabel(pageLabels, pageCount) : "…"}
+          </span>
 
           <button type="button" onClick={() => goToPage(pageNumber + 1)} disabled={pageCount > 0 && pageNumber >= pageCount} aria-label="Next page">
             ›

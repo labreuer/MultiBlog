@@ -18,8 +18,10 @@
  *
  * - **Every label is its own ordinary number.** Plenty of files carry a
  *   /PageLabels tree that reproduces 1…N exactly. Using it changes no glyph on
- *   screen and costs "of 350" its meaning as a matching pair with the box
- *   beside it, so it is treated as absent.
+ *   screen — the box would show the same number and {@link pageTotalLabel}
+ *   would land on the same total — while switching on the chrome that exists to
+ *   explain a label: a "Sheet 4 of 6" title on a box already showing 4. So it is
+ *   treated as absent.
  * - **Every label is empty.** A /PageLabels range with no style and no prefix
  *   produces `""` for each of its pages (pdfjs builds the array that way rather
  *   than leaving holes), and a blank page box is worse than a number.
@@ -66,4 +68,43 @@ export function usablePageLabels(
  */
 export function pageLabelFor(labels: readonly string[] | null, pageIndex: number): string {
   return labels?.[pageIndex] ?? String(pageIndex + 1);
+}
+
+/** How far back from the end to look for a number. See `pageTotalLabel`. */
+const TAIL_WINDOW = 5;
+
+/**
+ * What to put after "Page N of" — the document's own last *numbered* page where
+ * it has one, and the sheet count otherwise.
+ *
+ * The box beside it shows a label, so the total should be its counterpart: in a
+ * book with twelve sheets of front matter, "Page 1 of 350" is a pair a reader
+ * can act on and "Page 1 of 362" is not.
+ *
+ * **The last label is not the answer**, though, because the end of a document
+ * is where the labels stop being numbers: an index, a colophon, an appendix
+ * running `A-1`… Reporting "of A-12" names no quantity at all, and it is the
+ * common shape rather than an exotic one. So the last {@link TAIL_WINDOW} pages
+ * are searched from the back for a plain integer, and the first one found wins.
+ * Five because back matter is short — a window wide enough to tunnel through a
+ * whole unnumbered appendix would start answering with a body page number,
+ * which is worse than the sheet count: it reads authoritative and undercounts.
+ *
+ * Nothing integral in that window means the tail is entirely unnumbered, and
+ * the sheet count is the only honest number left. Note that the blanks
+ * {@link usablePageLabels} fills in are ordinary numbers, so a document whose
+ * last pages carry no label at all resolves to the sheet count by that path
+ * too, arriving at the same answer from the other direction.
+ */
+export function pageTotalLabel(labels: readonly string[] | null, pageCount: number): string {
+  // Trusted only where it lines up with the pages, which is the same condition
+  // usablePageLabels enforces on the way in — a labels array of some other
+  // length belongs to a document this one has since been replaced by.
+  if (labels?.length === pageCount) {
+    const stop = Math.max(0, pageCount - TAIL_WINDOW);
+    for (let i = pageCount - 1; i >= stop; i--) {
+      if (/^\d+$/.test(labels[i])) return labels[i];
+    }
+  }
+  return String(pageCount);
 }

@@ -6887,12 +6887,13 @@ toolbar's box. Anything *computed* from a page keeps counting sheets.
 
 **Labels are ignored when they say nothing.** `usablePageLabels` rejects a set whose every
 entry is its own ordinary number — plenty of files ship a `/PageLabels` tree that reproduces
-1…N, and honouring it changes no glyph while costing "of 350" its meaning as the box's
-counterpart — and one that is entirely empty. A *partly* empty set is kept with the blanks
-filled in by the ordinary number, since unlabelled front matter beside a labelled body is
-common and dropping the whole set would throw away the informative half. The filled-in array
-is what goes to `PDFViewer.setPageLabels`, so what we render, what pdfjs puts on
-`data-page-label`, and what `pageLabelToPageNumber` will match are one list.
+1…N, so honouring it changes no glyph on screen while switching on the chrome that exists to
+explain a label, down to a "Sheet 4 of 6" title on a box already showing 4 — and one that is
+entirely empty. A *partly* empty set is kept with the blanks filled in by the ordinary
+number, since unlabelled front matter beside a labelled body is common and dropping the whole
+set would throw away the informative half. The filled-in array is what goes to
+`PDFViewer.setPageLabels`, so what we render, what pdfjs puts on `data-page-label`, and what
+`pageLabelToPageNumber` will match are one list.
 
 **The page box takes a label back.** `submitPage` tries `pageLabelToPageNumber` first and
 falls through to a sheet number, because a reader typing into a box that is *showing* them a
@@ -6902,9 +6903,21 @@ first match wins, as it does in pdfjs. The sheet number moves to the box's `titl
 of 6") rather than disappearing, since it is what the scrollbar and every "page N of M" habit
 are still counting in.
 
+**The total beside the box counts in the box's units too** (`pageTotalLabel`, added
+2026-09-14). A box showing "1" next to "of 362" is a pair that doesn't go together; what the
+reader's copy says the book runs to is 350. **The last label is the wrong answer**, though,
+because the end of a document is where labels stop being numbers — an index, a colophon, an
+appendix running `A-1` — and "of A-12" names no quantity at all. So the last **five** pages are
+searched from the back for a plain integer and the first one found wins, with the sheet count
+as the fallback when the whole tail is unnumbered. Five because back matter is short: a window
+wide enough to tunnel through an entire unnumbered appendix would start answering with a body
+page number, which is worse than the sheet count — it reads authoritative and undercounts. The
+sheet count keeps a home in this element's own `title` ("6 sheets"), as it does on the box.
+
 **Verification.** `src/lib/pdf-page-labels.test.ts` for the "worth showing" rule and its
-rejections; `e2e/pdf-page-labels.spec.ts` for the two surfaces agreeing, a typed label
-navigating, and a 1…N label set correctly ignored. `scripts/make-test-pdf.ts` grew a
+rejections, and for the total's tail window (a clean numbered ending, an index, an appendix
+long enough to give up on); `e2e/pdf-page-labels.spec.ts` for the two surfaces agreeing, a
+typed label navigating, and a 1…N label set correctly ignored. `scripts/make-test-pdf.ts` grew a
 `pageLabels` option — a `/PageLabels` number tree, whose keys are **0-based** page indices,
 the one place in the format that counts from zero.
 
