@@ -347,6 +347,18 @@ export function useLiveDocContent({
       ydoc.on("update", applyUpdate);
       const handleSynced = () => setSynced(true);
       hoistedProvider.on("synced", handleSynced);
+      // **Ask again, because the event may already be gone.** A hoisted
+      // provider is connecting before this hook ever runs, so `synced` can
+      // fire between the lazy initializer above (which read `isSynced` during
+      // render) and this line — and `synced` is a one-shot event, so nothing
+      // ever sets the flag afterwards. The column stays live and editable
+      // with `synced` stuck false forever, which is invisible in the UI and
+      // showed up only as side-by-side's readiness marker never attaching,
+      // intermittently, on whichever column lost the race. The owned branch
+      // below cannot hit this: it constructs the provider inside this effect,
+      // after the handler exists.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- catching up on a missed one-shot event is the one thing a lazy initializer cannot do
+      if (hoistedProvider.isSynced) setSynced(true);
       setAwareness(hoistedProvider.awareness);
       return () => {
         ydoc.off("update", applyUpdate);
