@@ -1,34 +1,9 @@
-// Top-level route segments under src/app/ — a slug matching one of these
-// would be shadowed by the static route and never resolve to /[slug]. Only
-// relevant to post-slug.ts today: author slugs live under the nested
-// /authors/[slug], which has no sibling static routes to collide with.
-export const RESERVED_SLUGS = new Set([
-  "annotations",
-  "api",
-  "authors",
-  "comments",
-  "dashboard",
-  "doc",
-  "docs",
-  "files",
-  "forgot-password",
-  "pdf",
-  "invite",
-  "link",
-  "links",
-  "tag",
-  "tags",
-  "posts",
-  "reset-password",
-  "rss.xml",
-  "search",
-  "side-by-side",
-  "sign-in",
-  "sign-up",
-  "site-settings",
-  "users",
-  "ydoc-debug",
-]);
+// There is deliberately no reserved-slug list here any more. One existed
+// while posts lived at the top-level /[slug], where a post slugged `posts` or
+// `api` would have been shadowed by the static route; PLAN.md §21 moved posts
+// to /yyyy/mm/dd/slug, and every other slugged thing (docs, files, tags,
+// authors) already lived one level down with no sibling static routes to
+// collide with. A slug may now legitimately be `docs`.
 
 // revertPostSlug/revertUserSlug use this: if the slug being abandoned by a
 // revert only went live less than this long ago, nothing external could

@@ -1,6 +1,6 @@
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { slugify, RESERVED_SLUGS, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
+import { slugify, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 
 // A slug counts as "in use" if it's any post's *current* slug, or sitting in
 // any post's history as a redirect source — otherwise a new/renamed post
@@ -31,7 +31,7 @@ async function postSlugInUse(
 // post would get today, ignoring the slug/history rows it already owns.
 export async function uniquePostSlug(title: string, excludePostId?: string): Promise<string> {
   const base = slugify(title);
-  let candidate = RESERVED_SLUGS.has(base) ? `${base}-post` : base;
+  let candidate = base;
   let suffix = 2;
   while (await postSlugInUse(candidate, prismaIncludingDeleted, excludePostId)) {
     candidate = `${base}-${suffix}`;
@@ -41,14 +41,11 @@ export async function uniquePostSlug(title: string, excludePostId?: string): Pro
 }
 
 // Renames a post's slug, recording the old one in PostSlugHistory so
-// existing links/bookmarks can still be resolved (see [slug]/page.tsx's
-// history fallback). No-ops if newSlugInput normalizes to the post's
-// current slug.
+// existing links/bookmarks can still be resolved (see the post page's
+// history fallback, src/app/[year]/[month]/[day]/[slug]/page.tsx). No-ops
+// if newSlugInput normalizes to the post's current slug.
 export async function changePostSlug(postId: string, newSlugInput: string): Promise<string> {
   const newSlug = slugify(newSlugInput);
-  if (RESERVED_SLUGS.has(newSlug)) {
-    throw new Error(`"${newSlug}" is a reserved path and can't be used as a post url.`);
-  }
 
   return prismaIncludingDeleted.$transaction(async (tx) => {
     const post = await tx.post.findUnique({ where: { id: postId }, select: { slug: true } });
