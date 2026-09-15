@@ -1,0 +1,31 @@
+/* The post-preview block STYLE.md's "Layout patterns" once described as
+   "repeated verbatim across home, author, and search listings" — now written
+   once (PLAN.md §21h). Every listing surface renders PostListing, so a change
+   to how a post preview looks is a change here. */
+.article {
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+}
+
+.titleLink {
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.titleLink:hover {
+  text-decoration: underline;
+}
+
+.meta {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.empty {
+  color: var(--text-secondary);
+}

@@ -5133,9 +5133,11 @@ Unchanged markup — the `padding: 1.5rem 0; border-bottom: 1px solid #eee` arti
 STYLE.md documents as repeated across home, author and search listings — plus `take: 10`,
 where the query is currently unbounded.
 
-That bound has no escape hatch yet: `/posts` is the admin table, and there is no public
-archive route. The eleventh-newest post becomes reachable only by search, RSS, or a direct
-link. Recorded in TODO.md rather than solved here.
+That bound had no escape hatch when this was built: `/posts` is the admin table, and there
+was no public archive route, so the eleventh-newest post was reachable only by search, RSS,
+or a direct link. §21h's date archives (2026-09-15) are that route — every byline date links
+to its day, and the day to its month and year — though the landing page itself still links
+to no "older posts" (TODO.md).
 
 ### 17e. Contributors: three new `User` columns, and what they replace
 
@@ -5467,7 +5469,8 @@ so, since the next person to add a page will otherwise read three widths as thre
   **not** appear anywhere on the page, rather than asserting on specific preamble text.
   Production determinism was judged worth more than test convenience; reversing the tie-break
   to newest-wins would swap which of the two is easy.
-- **No public post archive.** §17d's `take: 10` has nothing to link "older posts" to.
+- **No "older posts" link.** §17d's `take: 10` still has nothing on the landing page to
+  link to, though §21h's date archives (2026-09-15) now exist for it to link to.
 - **No self-service profile page.** `/dashboard`'s panel edits the contributor-facing
   fields only; name, slug, color and role remain admin-only, and a user who is not a listed
   contributor has no self-service surface at all.
@@ -7812,3 +7815,60 @@ unchanged (§21c). A stored path column was considered and rejected — it would
 freeze the URL against a later edit of `publishedAt`, but it also introduces a
 second source of truth for something the existing publish logic already keeps
 still.
+
+### 21h. Date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd`
+
+**Built 2026-09-15.** The three prefixes of a post's URL are pages: each lists the posts
+published in that UTC range, newest first, in the same preview block as `/search`. "URL
+hacking" — trimming segments off a post's address — lands somewhere sensible, and the
+byline's date on every surface is a link to its day, so a reader can climb from any post
+to its day, month and year. That is also the public archive §17d and §17m recorded as
+missing: the landing page still shows ten posts and links to no "older", but every post
+now leads to the archives and the archives lead to every post.
+
+**Routing.** `src/app/[year]/page.tsx`, `[year]/[month]/page.tsx` and
+`[year]/[month]/[day]/page.tsx` are one-line wrappers over `src/app/[year]/post-archive.tsx`;
+each carries its own `revalidate = 60` because Next reads segment config from the page
+file, not from what it imports. A static segment still beats a dynamic one at every
+position, so nothing existing is shadowed — but `/[year]` now matches **every** one-segment
+path nothing static claims (`/tag` and `/doc` have no `page.tsx` of their own; a stray
+`/favicon.ico` request that misses `public/`), and its children every two- and
+three-segment one. So `parsePostDatePrefix` (`src/lib/post-path.ts`) runs before the first
+query, the same rule as §21a one level up, and its rejection surface has a unit test. It
+returns a half-open UTC range as well as the label and path, so the date arithmetic — a
+February prefix is `[Feb 1, Mar 1)`, December's `end` is next January — lives in one
+function rather than three route files. A well-formed date with nothing in it is a page
+(200, "No posts published in …"), never a 404; only a malformed one 404s.
+
+**Trailing slashes cost nothing.** `next.config.ts` sets neither `trailingSlash` nor
+`skipTrailingSlashRedirect`, so Next's default 308s `/2026/09/` to `/2026/09` before any
+route runs. Measured on the dev server before building, and asserted by the spec.
+
+**Caching.** ISR with no `generateStaticParams`: a prefix renders on first request and is
+served from the Full Route Cache for 60s after. `revalidatePostArchives`
+(`src/lib/revalidate-post.ts`) invalidates a post's three prefixes and is called from the
+same places that revalidate `/` — `revalidatePublicPaths` on publish and unpublish, and now
+the two slug-change actions, which previously revalidated only the two post pages and left
+every listing to `PostSlugHistory`'s 301. It is deliberately *not* folded into
+`revalidatePostPage`: a comment changes the post's page and nothing a listing shows.
+Same constraint as §21a — no `auth()`/`cookies()`/`headers()` in the render path.
+
+**The listing became a component.** `src/components/PostListing.tsx` is the preview block
+STYLE.md used to describe as "repeated verbatim across home, author, and search listings";
+the archive would have been the fourth copy. It exports `postListingInclude`, which the
+four `findMany`s spread into `include:` so the query and the component's props can't
+drift, and the author page — which had no byline before — now shows one, so a co-authored
+post names its other authors there too. `src/components/PostDate.tsx` is the byline's date:
+label, link to `/yyyy/mm/dd`, and the full timestamp as a native `title` tooltip.
+
+**The tooltip is UTC, and so is everything else on that line.** `postDateTimeLabel` slices
+the ISO string (`2026-09-15 21:03:47 UTC`), no `Intl`, rendered once on the server into ISR
+output. The reader's own zone was considered and not used: the label and the URL are UTC
+by §21b, so a local-time tooltip would say the 14th under a link to `/…/15/…` for a
+western reader — the tooltip's job is to explain the date shown, not to contradict it. If
+a local time is ever wanted it is a second element (`LocalTime`, client-side), not a
+change to this one.
+
+**e2e:** `e2e/date-archive.spec.ts`, over a fixture post dated 2001-02-03 — far enough back
+that no other spec's "published now" post shares the year. `createTestPost` grew a
+`publishedAt` option (ISO string, must be past) for it.

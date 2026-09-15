@@ -1,14 +1,11 @@
-import Link from "next/link";
 import Image from "next/image";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { prisma } from "@/lib/prisma";
-import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
-import { postDateLabel, postPath } from "@/lib/post-path";
 import { getFrontPagePreamble } from "@/lib/front-page";
 import { SITE_BANNER, SITE_BANNER_ASPECT, SITE_BANNER_ALT } from "@/lib/site-banner";
 import { contentExtensions } from "@/lib/tiptap-schema";
-import AuthorByline from "@/components/AuthorByline";
+import PostListing, { postListingInclude } from "@/components/PostListing";
 import ContributorList from "@/components/ContributorList";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
@@ -26,12 +23,7 @@ export default async function Home() {
       where: publishedPostWhere(),
       orderBy: { publishedAt: "desc" },
       take: 10,
-      include: {
-        authors: {
-          orderBy: { bylineOrder: "asc" },
-          include: { user: { select: { name: true, slug: true } } },
-        },
-      },
+      include: postListingInclude,
     }),
     getFrontPagePreamble(),
   ]);
@@ -48,31 +40,7 @@ export default async function Home() {
           {preamble && (
             <div className={`${proseStyles.prose} ${styles.preamble}`}>{renderToReactElement({ content: preamble, extensions: contentExtensions })}</div>
           )}
-          {posts.length === 0 ? (
-            <p>No posts published yet.</p>
-          ) : (
-            posts.map((post) => {
-              const excerpt = post.proseJson ? extractText(post.proseJson).slice(0, 200) : "";
-
-              return (
-                <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
-                  <h2 className={styles.postHeading}>
-                    <Link href={postPath(post)} className={styles.titleLink}>
-                      {post.title}
-                    </Link>
-                  </h2>
-                  <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                    <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
-                    {postDateLabel(post.publishedAt!)}
-                  </p>
-                  <p>
-                    {excerpt}
-                    {excerpt.length === 200 ? "…" : ""}
-                  </p>
-                </article>
-              );
-            })
-          )}
+          <PostListing posts={posts} emptyMessage="No posts published yet." />
         </main>
         <ContributorList />
       </div>

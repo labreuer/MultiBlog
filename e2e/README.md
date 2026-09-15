@@ -5,7 +5,8 @@ flows that otherwise get re-verified by hand every session: publish/unpublish,
 comment moderation, two-author live collaboration, quote anchoring across
 publishes, republishing from an earlier point in a doc's history,
 selecting text on each of the three surfaces that respond to it
-(`text-selection.spec.ts`), and /dashboard's session refresh
+(`text-selection.spec.ts`), the date archives and the byline's date link
+(`date-archive.spec.ts`, PLAN.md §21h), and /dashboard's session refresh
 (`src/app/sign-in/NOTES.md`) — the one flow whose whole point is that a change
 is *not* visible until the right page is visited.
 

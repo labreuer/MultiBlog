@@ -384,3 +384,16 @@ slug, so every `revalidatePath` for a post page goes through `revalidatePostPage
 (`src/lib/revalidate-post.ts`) — a draft is a no-op there, since it has no page to invalidate
 — and `revalidatePublicPaths` (`src/app/actions/posts.ts`) is handed the *post-publish*
 `publishedAt`, because a first publish is the one moment the path comes into existence.
+
+## 2026-09-15 — the date archives are ISR without `generateStaticParams`
+
+`/yyyy`, `/yyyy/mm` and `/yyyy/mm/dd` (PLAN.md §21h) carry `revalidate = 60` and no
+`generateStaticParams`: a prefix is rendered on its first request and served from the Full
+Route Cache for the window after, and `next build` lists them as dynamic (ƒ) rather than
+prerendered, which is correct — there is no finite list of prefixes to prerender. Same
+no-`auth()` constraint as the post page, since the cache is only shared while nothing in the
+render path reads the request. Invalidation is `revalidatePostArchives`
+(`src/lib/revalidate-post.ts`) — the post's three prefixes — called wherever `/` is:
+publish, unpublish and both slug-change actions. Comment actions don't call it, since a
+comment changes nothing a listing shows. In the e2e suite a fixture-dated post is invisible
+to a cached prefix until `freshGoto` posts to `/api/test/revalidate`, exactly as for `/`.

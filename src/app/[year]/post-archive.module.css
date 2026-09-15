@@ -1,0 +1,33 @@
+/* The date archive pages (PLAN.md §21h) — a listing surface, so the 680px
+   column STYLE.md documents for /search and /authors/[slug]. */
+.container {
+  max-width: 680px;
+  margin: 0 auto;
+  font-family: sans-serif;
+}
+
+.main {
+  padding: 1rem;
+}
+
+.breadcrumb {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.breadcrumb ol {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.breadcrumb li + li::before {
+  content: "›";
+  margin-right: 0.35rem;
+}
+
+.title {
+  margin-bottom: 1rem;
+}

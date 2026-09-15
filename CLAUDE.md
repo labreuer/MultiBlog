@@ -396,6 +396,13 @@ working on.
   against the current document on every content change. **Persisting a corrected offset only
   ever happens from a column in *write* mode** — a read column's view is always at least one
   Yjs update behind. PLAN.md §14, §14d.
+- **Every page under `src/app/[year]/` gates on shape before its first query.** `/[year]`
+  matches *any* one-segment path nothing static claims — `/tag`, `/doc`, a stray
+  `/favicon.ico` — and its children any two-, three- or four-segment one, so a new route in
+  that tree runs `parsePostDatePrefix` (or `parsePostDateSegments` for the post page) and
+  404s on null before touching Prisma, or every garbage URL costs a query. A well-formed
+  date with nothing in it is a 200, not a 404. Trailing slashes are Next's default 308 and
+  need no handling. PLAN.md §21a, §21h.
 - **One document stack, one Hocuspocus process, two sub-namespaces within it.** Every
   `documentName` is `ydoc:`-prefixed; `onAuthenticate` rejects anything else outright.
   docs/YDOC.md.

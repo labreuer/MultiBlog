@@ -78,3 +78,80 @@ export function parsePostDateSegments(year: string, month: string, day: string):
   const parts = postDateParts(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
   return parts.year === year && parts.month === month && parts.day === day ? parts : null;
 }
+
+/**
+ * The full timestamp for a publish date's tooltip — `2026-09-15 21:03:47 UTC`
+ * — in the same zone as the URL and the byline, so the three never disagree
+ * about which day a post belongs to. Pure ISO slicing, no `Intl`, for the
+ * same reason `LocalTime`'s fallback avoids it: this is rendered once on the
+ * server into ISR output and must not depend on the box's locale.
+ */
+export function postDateTimeLabel(publishedAt: Date): string {
+  const iso = publishedAt.toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
+}
+
+/**
+ * The three archive pages a published post is listed on (§21h): `/yyyy`,
+ * `/yyyy/mm` and `/yyyy/mm/dd`. Whatever changes which posts a date lists,
+ * or what a listing shows for one, revalidates all three.
+ */
+export function postDateArchivePaths(publishedAt: Date): string[] {
+  const { year, month, day } = postDateParts(publishedAt);
+  return [`/${year}`, `/${year}/${month}`, `/${year}/${month}/${day}`];
+}
+
+export type PostDateRange = {
+  /** Inclusive, UTC. */
+  start: Date;
+  /** Exclusive, UTC. */
+  end: Date;
+  /** `2026`, `2026-09` or `2026-09-15` — the same shape as `postDateLabel`. */
+  label: string;
+  /** `/2026`, `/2026/09` or `/2026/09/15`. */
+  path: string;
+};
+
+/**
+ * The archive routes' shape gate (§21h), the prefix-length sibling of
+ * `parsePostDateSegments`. `/[year]` matches *every* one-segment path nothing
+ * static claims — `/tag`, `/doc`, `/favicon.ico` — and its children every
+ * two- and three-segment one, so each page runs this before touching the
+ * database and 404s on null. Same rule as the full date: four digits, then
+ * zero-padded two-digit month and day, each a real calendar value, written
+ * exactly as `postDateParts` writes it.
+ *
+ * Returns the half-open UTC range the page queries by, so a February prefix
+ * is `[Feb 1, Mar 1)` and a year is `[Jan 1, Jan 1 next year)` — the range
+ * arithmetic lives here rather than in three route files.
+ */
+export function parsePostDatePrefix(year: string, month?: string, day?: string): PostDateRange | null {
+  if (!YEAR_RE.test(year)) return null;
+  if (month !== undefined && !TWO_DIGITS_RE.test(month)) return null;
+  if (day !== undefined && (month === undefined || !TWO_DIGITS_RE.test(day))) return null;
+
+  const y = Number(year);
+  const m = month === undefined ? 1 : Number(month);
+  const d = day === undefined ? 1 : Number(day);
+  // Same round trip as parsePostDateSegments: Date.UTC rolls an out-of-range
+  // month or day forward rather than refusing it, and maps years 0–99 into
+  // the 1900s, so the check is whether the parts come back unchanged.
+  const start = new Date(Date.UTC(y, m - 1, d));
+  const parts = postDateParts(start);
+  if (parts.year !== year || (month !== undefined && parts.month !== month) || (day !== undefined && parts.day !== day)) {
+    return null;
+  }
+
+  if (day !== undefined) {
+    return {
+      start,
+      end: new Date(Date.UTC(y, m - 1, d + 1)),
+      label: `${year}-${month}-${day}`,
+      path: `/${year}/${month}/${day}`,
+    };
+  }
+  if (month !== undefined) {
+    return { start, end: new Date(Date.UTC(y, m, 1)), label: `${year}-${month}`, path: `/${year}/${month}` };
+  }
+  return { start, end: new Date(Date.UTC(y + 1, 0, 1)), label: year, path: `/${year}` };
+}

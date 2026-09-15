@@ -17,11 +17,12 @@ import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { signInPath } from "@/lib/sign-in-redirect";
-import { revalidatePostPage } from "@/lib/revalidate-post";
+import { revalidatePostArchives, revalidatePostPage } from "@/lib/revalidate-post";
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
-// the home page, author pages, and the post's own page are built from — all
-// three need revalidating, not just the admin-facing /posts list. `post` is
+// the home page, author pages, the date archives (§21h) and the post's own
+// page are built from — all of them need revalidating, not just the
+// admin-facing /posts list. `post` is
 // whichever slug/publishedAt pair names the page that needs invalidating:
 // the values *after* a publish (a first publish moves publishedAt from null
 // to a real path), the values before an unpublish (unchanged by it).
@@ -32,6 +33,7 @@ async function revalidatePublicPaths(postId: string, post: { slug: string; publi
   });
   revalidatePath("/");
   revalidatePostPage(post);
+  revalidatePostArchives(post);
   for (const { user } of authors) {
     revalidatePath(`/authors/${user.slug}`);
   }
@@ -333,7 +335,10 @@ export async function updatePostSlug(postId: string, newSlug: string): Promise<{
   revalidatePath(`/posts/${postId}/slug`);
   revalidatePath("/posts");
   revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
-  revalidatePostPage({ slug, publishedAt: post.publishedAt });
+  // Every listing links by slug, so the new one has to reach them too (the
+  // old link would still 301 through PostSlugHistory, but a fresh listing
+  // shouldn't need it).
+  await revalidatePublicPaths(postId, { slug, publishedAt: post.publishedAt });
   return { slug };
 }
 
@@ -355,7 +360,10 @@ export async function revertPostSlug(postId: string): Promise<{ slug: string }> 
   revalidatePath(`/posts/${postId}/slug`);
   revalidatePath("/posts");
   revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
-  revalidatePostPage({ slug, publishedAt: post.publishedAt });
+  // Every listing links by slug, so the new one has to reach them too (the
+  // old link would still 301 through PostSlugHistory, but a fresh listing
+  // shouldn't need it).
+  await revalidatePublicPaths(postId, { slug, publishedAt: post.publishedAt });
   return { slug };
 }
 

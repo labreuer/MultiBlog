@@ -8,8 +8,9 @@ import { extractText } from "@/lib/diff";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { getPostThreadsWithApprovedComments } from "@/lib/comment-data";
 import { publishedPostWhere } from "@/lib/post-status";
-import { parsePostDateSegments, postDateLabel, postDateParts, postPath } from "@/lib/post-path";
+import { parsePostDateSegments, postDateParts, postPath } from "@/lib/post-path";
 import AuthorByline from "@/components/AuthorByline";
+import PostDate from "@/components/PostDate";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
 import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
@@ -142,7 +143,7 @@ export default async function PublicPostPage({ params }: { params: Params }) {
                 <AuthorByline
                   authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
                 />
-                {postDateLabel(post.publishedAt!)}
+                <PostDate publishedAt={post.publishedAt!} />
               </p>
               <AnnotatableArticle
                 postId={post.id}

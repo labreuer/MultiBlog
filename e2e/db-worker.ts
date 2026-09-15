@@ -214,6 +214,14 @@ export async function createTestPost(opts: {
   bodyText?: string;
   policy?: ModerationPolicy;
   publish?: boolean;
+  /**
+   * ISO timestamp for `publishedAt` (a string, since this crosses the JSON
+   * bridge in e2e/db.ts) — for a spec that needs a post on a *known* date,
+   * such as the date archives (PLAN.md §21h). Must be in the past, or the
+   * post is scheduled rather than published and `path` would lie. Defaults
+   * to now.
+   */
+  publishedAt?: string;
 }): Promise<TestPost> {
   const {
     authorEmail,
@@ -221,6 +229,7 @@ export async function createTestPost(opts: {
     bodyText = "The quick brown fox jumps over the lazy dog.",
     policy = "AUTO",
     publish = false,
+    publishedAt: publishedAtIso,
   } = opts;
   assertSafe(authorEmail);
 
@@ -264,7 +273,10 @@ export async function createTestPost(opts: {
         actorId: author.id,
       },
     });
-    const publishedAt = new Date();
+    const publishedAt = publishedAtIso ? new Date(publishedAtIso) : new Date();
+    if (Number.isNaN(publishedAt.getTime()) || publishedAt.getTime() > Date.now()) {
+      throw new Error(`createTestPost: publishedAt must be a valid timestamp in the past, got ${publishedAtIso}`);
+    }
     await prisma.post.update({
       where: { id: post.id },
       data: {
