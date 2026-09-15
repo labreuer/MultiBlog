@@ -30,7 +30,7 @@ type Props = {
   initialThroughUpdateId: string | null;
 };
 
-// PLAN.md §15c — replaces PostEditor as the whole /posts/[id]/edit UI. No
+// PLAN.md §15c — replaces PostEditor as the whole /post/[id]/edit UI. No
 // collaborative editing happens here any more: this page publishes a point
 // in a doc's history, it doesn't edit content. Layout top to bottom: title,
 // source-doc line, publish controls, the snapshot-economy line, a read-only
@@ -223,7 +223,7 @@ export default function PostPublisher({
         {postStatus === "published" && publishedAt && `Published ${publishedAtLocal}. `}
         {postStatus === "scheduled" && publishedAt && `Scheduled for ${publishedAtLocal}. `}
         {postStatus === "draft" && "Not published yet. "}
-        <Link href={`/posts/${postId}/history`}>Publication history</Link>
+        <Link href={`/post/${postId}/history`}>Publication history</Link>
       </p>
 
       <p className={styles.readOnlyLabel}>Doc content at the selected point:</p>

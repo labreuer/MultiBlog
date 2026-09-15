@@ -73,7 +73,7 @@ because marks are resolved from row indices rather than revision numbers.
 
 Same call `scripts/import-legacy.ts` made: the editable, collaboratively-authored,
 revision-bearing thing a pad *is* maps onto a Doc, and publishing is a deliberate
-later act through `/posts/[id]` (PLAN.md §15c) — including from any point in the
+later act through `/post/[id]` (PLAN.md §15c) — including from any point in the
 imported history, which is the whole reason the history is imported rather than
 just the head.
 

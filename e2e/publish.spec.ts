@@ -1,4 +1,4 @@
-// PLAN.md §15 — /posts/[id]/edit no longer edits a post's own content; it
+// PLAN.md §15 — /post/[id]/edit no longer edits a post's own content; it
 // publishes a point in its backing doc's history. Editing happens at
 // /doc/[id]/edit, same as any doc.
 import { test, expect, bodyEditor, gotoOk, visibleText, waitForDocCollabReady } from "./fixtures";
@@ -42,7 +42,7 @@ async function scrubToLatest(page: import("@playwright/test").Page): Promise<voi
 
 test.describe("publish / unpublish", () => {
   test("publishing a draft makes it readable at its public slug", async ({ page, draftPost }) => {
-    await page.goto(`/posts/${draftPost.id}/edit`);
+    await page.goto(`/post/${draftPost.id}/edit`);
     await expect(page.getByText("Not published yet.")).toBeVisible();
     await waitForPublishReady(page);
 
@@ -55,7 +55,7 @@ test.describe("publish / unpublish", () => {
   });
 
   test("edits made after publishing only reach the public page on republish", async ({ page, draftPost }) => {
-    await page.goto(`/posts/${draftPost.id}/edit`);
+    await page.goto(`/post/${draftPost.id}/edit`);
     await waitForPublishReady(page);
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
@@ -71,7 +71,7 @@ test.describe("publish / unpublish", () => {
     await gotoOk(page, await publicPath(draftPost));
     await expect(page.getByText(addition)).toHaveCount(0);
 
-    await page.goto(`/posts/${draftPost.id}/edit`);
+    await page.goto(`/post/${draftPost.id}/edit`);
     await waitForPublishReady(page);
     await scrubToLatest(page);
     // The doc moved on since the last publish, so a fresh snapshot is due.
@@ -84,12 +84,12 @@ test.describe("publish / unpublish", () => {
   });
 
   test("publishing again with no doc edits in between reuses the same snapshot", async ({ page, draftPost }) => {
-    await page.goto(`/posts/${draftPost.id}/edit`);
+    await page.goto(`/post/${draftPost.id}/edit`);
     await waitForPublishReady(page);
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
 
-    await page.goto(`/posts/${draftPost.id}/edit`);
+    await page.goto(`/post/${draftPost.id}/edit`);
     await waitForPublishReady(page);
     await expect(page.getByText(/Publishing will reuse the snapshot/)).toBeVisible();
   });
@@ -126,7 +126,7 @@ test.describe("publish / unpublish", () => {
     await otherPage.keyboard.type(" Second author's sentence.");
     await expect(bodyEditor(page)).toContainText("Second author's sentence.");
 
-    await page.goto(`/posts/${draftPost.id}/edit`);
+    await page.goto(`/post/${draftPost.id}/edit`);
     await waitForPublishReady(page);
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
@@ -136,7 +136,7 @@ test.describe("publish / unpublish", () => {
   });
 
   test("unpublishing takes the post back to a 404", async ({ page, publishedPost }) => {
-    await page.goto(`/posts/${publishedPost.id}/edit`);
+    await page.goto(`/post/${publishedPost.id}/edit`);
     await expect(page.getByRole("button", { name: "Unpublish" })).toBeVisible();
 
     await page.getByRole("button", { name: "Unpublish" }).click();

@@ -15,7 +15,7 @@ export default async function PostSlugPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect(signInPath(`/posts/${id}/slug`));
+    redirect(signInPath(`/post/${id}/slug`));
   }
 
   const post = await prisma.post.findUnique({
@@ -46,7 +46,7 @@ export default async function PostSlugPage({ params }: { params: Promise<{ id: s
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Url: {post.title}</h1>
       <p style={{ marginTop: "1em", marginBottom: "2em" }}>
-        <Link href={`/posts/${post.id}/edit`}>Back to editor</Link>
+        <Link href={`/post/${post.id}/edit`}>Back to editor</Link>
       </p>
       <SlugManager
         entityType="post"

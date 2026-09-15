@@ -57,7 +57,7 @@ sweeps up after itself, and `e2e/.auth/admin.json` need not exist beforehand.
    editor to warm that route's compile and prove the collab server answers —
    `next dev` compiles on first request, and without this every worker hits the
    heaviest route cold at once and can overrun `waitForDocCollabReady`. There's
-   no equivalent warm-up for `/posts/[id]/edit` any more: it has no collab
+   no equivalent warm-up for `/post/[id]/edit` any more: it has no collab
    connection of its own (PLAN.md §15 — it publishes, it doesn't edit).
 3. Every test in the `chromium` project starts from that storage state — already
    signed in, no sign-in cost per test.
@@ -285,7 +285,7 @@ the admin account.
   until the Hocuspocus provider has synced, and typing before then edits a
   `Y.Doc` that's about to be overwritten by the real seed. `🟢 Live` is the
   earliest point at which acting on the editor means anything. On
-  `/posts/[id]/edit` there's a different readiness gate instead: Publish/
+  `/post/[id]/edit` there's a different readiness gate instead: Publish/
   Schedule stay disabled until `PostSnapshotScrubBar` has loaded the backing
   doc's history — `await expect(page.getByRole("button", { name: "Publish",
   exact: true })).toBeEnabled()`.

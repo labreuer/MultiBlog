@@ -7,7 +7,7 @@
 //
 // Editing happens on the *doc* now, not the post (PLAN.md §15) — a case here
 // is always "edit the backing doc, then publish that doc's new head from
-// /posts/[id]/edit".
+// /post/[id]/edit".
 //
 // Worth knowing before adding cases here: **deleting the quoted text is not
 // enough to collapse the range.** `recreateTransform` produces a character-
@@ -48,12 +48,12 @@ async function editDoc(page: Page, docId: string): Promise<void> {
 /**
  * Publishes whatever the doc's current head is, and returns the new event's
  * id. The scrub bar opens on the *presently published* position, not the
- * head (so viewing /posts/[id]/edit shows what's actually live) — so
+ * head (so viewing /post/[id]/edit shows what's actually live) — so
  * publishing the latest edit means explicitly scrubbing to the end first,
  * every time, not just when a case cares about an earlier point on purpose.
  */
 async function republish(page: Page, postId: string): Promise<string> {
-  await page.goto(`/posts/${postId}/edit`);
+  await page.goto(`/post/${postId}/edit`);
   await expect(page.getByLabel("Scrub through the doc's edit history")).toBeVisible({ timeout: 15_000 });
   await scrubToLatest(page);
   await expect(page.getByRole("button", PUBLISH)).toBeEnabled();
@@ -230,7 +230,7 @@ test.describe("quote anchoring across publishes", () => {
     await republish(page, quotedPost.id);
     await expect.poll(async () => (await getThread(quotedPost.threadId))?.status).toBe("DETACHED");
 
-    await page.goto(`/posts/${quotedPost.id}/edit`);
+    await page.goto(`/post/${quotedPost.id}/edit`);
     await expect(page.getByLabel("Scrub through the doc's edit history")).toBeVisible({ timeout: 15_000 });
     await scrubTo(page, 0);
     await expect(page.getByText(/Publishing will reuse the snapshot/)).toBeVisible();

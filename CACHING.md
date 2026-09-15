@@ -74,7 +74,7 @@ Restoring real ISR above (entry directly above) meant `/`, `/[slug]`, and `/auth
 went back to being cached with `revalidate = 60` instead of rendering fresh per request. But
 `publishPost`/`unpublishPost` (`src/app/actions/posts.ts` — the publish action is now
 `publishPostFromDoc`, PLAN.md §15, same `revalidatePublicPaths` call) only ever called
-`revalidatePath` for the *admin* surfaces (`/posts/[id]/edit`, `/posts/[id]/history`,
+`revalidatePath` for the *admin* surfaces (`/post/[id]/edit`, `/post/[id]/history`,
 `/posts`) — never for the
 public pages whose `publishedPostWhere()` query result the action had just changed. A newly
 published post wouldn't appear on `/` or its authors' `/authors/[slug]` pages, and an

@@ -221,7 +221,7 @@ export default function PostSettingsPanel({
             <tr>
               <td className={styles.label}>Url</td>
               <td>
-                <Link href={`/posts/${postId}/slug`}>Change…</Link>
+                <Link href={`/post/${postId}/slug`}>Change…</Link>
               </td>
             </tr>
             <tr>
@@ -236,7 +236,7 @@ export default function PostSettingsPanel({
         </table>
 
         <p>
-          <Link href={`/posts/${postId}/history`}>Publication history…</Link>
+          <Link href={`/post/${postId}/history`}>Publication history…</Link>
         </p>
 
         <button type="button" onClick={handleDeleteToggle} disabled={pending} className={styles.deleteButton}>

@@ -234,6 +234,23 @@ without committing to one now. Item 1 is independent and worth checking on the b
 
 ---
 
+## `/users/[id]/slug` still hangs off the plural table (PLAN.md §3d)
+
+On 2026-09-15 a post's own pages moved from `/posts/[id]/…` to `/post/[id]/…`, and PLAN.md
+§3d now states the rule: a plural path is an admin table and its table-wide actions, a
+singular path is one thing's pages. `/users/[id]/slug` (`src/app/users/[id]/slug/page.tsx`,
+`SlugManager` with `urlPrefix="/authors"`) is the one management page still shaped the old
+way and should become `/user/[id]/slug`. Same recipe as the post move: `git mv` the `[id]`
+directory under a new `src/app/user/`, then rewrite every `/users/${…}` link and
+`revalidatePath` and every `/users/[id]` mention in docs — about ten sites, the `/users`
+table's Slug column among them — and extend §21a's collision list with `/user/…`. Not a
+redirect candidate: the page is ADMIN-only and nothing outside the app links to it. Leave
+`/users` (the table) and `/authors/[slug]` (the public profile) alone. `/files/[slug]`
+(PLAN.md §19) is a separate case — a sign-in landing that inherited the download URL's
+prefix — and is not in scope here.
+
+---
+
 ## Admin table kit: Phase 5 not built
 
 PLAN.md §16h (staging changes in IndexedDB, before they hit the server) was never

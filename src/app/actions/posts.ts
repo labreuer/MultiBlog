@@ -105,7 +105,7 @@ export async function createPostFromDoc(docId: string): Promise<void> {
   });
 
   revalidatePath("/posts");
-  redirect(`/posts/${post.id}/edit`);
+  redirect(`/post/${post.id}/edit`);
 }
 
 export type CreatePostFromDocState = { error?: string };
@@ -191,8 +191,8 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
 
   await remapThreadsToEvent(postId, event.id);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/history`);
   revalidatePath("/posts");
   await revalidatePublicPaths(postId, { slug: post.slug, publishedAt });
   return { eventId: event.id };
@@ -243,8 +243,8 @@ export async function schedulePostFromDoc(
 
   await remapThreadsToEvent(postId, event.id);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/history`);
   revalidatePath("/posts");
   return { eventId: event.id };
 }
@@ -276,8 +276,8 @@ export async function unpublishPost(postId: string): Promise<void> {
     }),
   ]);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/history`);
   revalidatePath("/posts");
   await revalidatePublicPaths(postId, post);
 }
@@ -323,7 +323,7 @@ export async function updatePostModerationPolicy(postId: string, moderationPolic
     throw new Error("Invalid moderation policy.");
   }
   await prisma.post.update({ where: { id: postId }, data: { moderationPolicy } });
-  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/post/${postId}/edit`);
 }
 
 export async function updatePostSlug(postId: string, newSlug: string): Promise<{ slug: string }> {
@@ -331,8 +331,8 @@ export async function updatePostSlug(postId: string, newSlug: string): Promise<{
   const oldSlug = post.slug;
   const slug = await changePostSlug(postId, newSlug);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/slug`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/slug`);
   revalidatePath("/posts");
   revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
   // Every listing links by slug, so the new one has to reach them too (the
@@ -348,7 +348,7 @@ export async function updatePostSlug(postId: string, newSlug: string): Promise<{
 export async function deletePostSlugHistory(postId: string, slug: string): Promise<void> {
   await requireEditableSession(postId);
   await prisma.postSlugHistory.deleteMany({ where: { postId, slug } });
-  revalidatePath(`/posts/${postId}/slug`);
+  revalidatePath(`/post/${postId}/slug`);
 }
 
 export async function revertPostSlug(postId: string): Promise<{ slug: string }> {
@@ -356,8 +356,8 @@ export async function revertPostSlug(postId: string): Promise<{ slug: string }> 
   const oldSlug = post.slug;
   const slug = await revertPostSlugInDb(postId);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/slug`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/slug`);
   revalidatePath("/posts");
   revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
   // Every listing links by slug, so the new one has to reach them too (the
@@ -389,7 +389,7 @@ export async function updatePostAuthor(postId: string, userId: string, included:
     await prisma.postAuthor.delete({ where: { postId_userId: { postId, userId } } }).catch(() => {});
   }
 
-  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/post/${postId}/edit`);
   revalidatePath("/posts");
 }
 
@@ -413,7 +413,7 @@ export async function updatePostAuthorOrder(postId: string, orderedUserIds: stri
     ),
   );
 
-  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/post/${postId}/edit`);
   revalidatePath("/posts");
 }
 

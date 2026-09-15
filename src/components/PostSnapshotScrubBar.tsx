@@ -18,7 +18,7 @@ type Props = {
   onChange: (selection: ScrubSelection | null) => void;
   /**
    * Opens the bar on this update instead of the doc's head — the presently
-   * published post's own snapshot mark, so editing /posts/[id]/edit doesn't
+   * published post's own snapshot mark, so editing /post/[id]/edit doesn't
    * default to publishing whatever the doc has moved on to since. Ignored if
    * the id doesn't appear in this doc's own log (e.g. it belongs to a
    * different doc, after "Change doc…") — see PostPublisher.tsx.

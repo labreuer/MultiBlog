@@ -193,7 +193,7 @@ export async function searchReadableDocsFor(
 
 // canUserEditDoc expressed as a `where` clause — the same relationship
 // readableDocsFor has to canUserReadDoc, above. Backs the doc picker at
-// /posts/new and "Change doc…" on /posts/[id]/edit (PLAN.md §15d): only a doc
+// /posts/new and "Change doc…" on /post/[id]/edit (PLAN.md §15d): only a doc
 // its creator/publisher could open the editor for is offered. ADMIN/EDITOR
 // get every SHARED doc as a candidate; PRIVATE candidates are this user's own
 // byline, for every role.

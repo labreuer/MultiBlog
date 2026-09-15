@@ -44,7 +44,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   // Free — generateMetadata already ran this for the same request.
   const access = await loadPostForEdit(id);
   if (access.status === "signed-out") {
-    redirect(signInPath(`/posts/${id}/edit`));
+    redirect(signInPath(`/post/${id}/edit`));
   }
   if (access.status === "redirect") {
     redirect(access.to);

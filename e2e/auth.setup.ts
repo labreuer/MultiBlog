@@ -31,7 +31,7 @@ setup("create and sign in the shared admin", async ({ page }) => {
   await page.context().storageState({ path: ADMIN_STORAGE_STATE });
 
   // Warm `/doc/[id]/edit` before the workers start, and fail fast if live
-  // editing is unavailable. PLAN.md §15 — /posts/[id]/edit has no collab
+  // editing is unavailable. PLAN.md §15 — /post/[id]/edit has no collab
   // connection at all any more (it publishes, it doesn't edit), so the doc
   // editor is the heaviest route left to compile (TipTap + Yjs + the collab
   // provider) and the one every editing spec now actually depends on.

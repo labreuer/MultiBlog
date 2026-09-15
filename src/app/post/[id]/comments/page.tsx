@@ -13,7 +13,7 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
   const { id } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect(signInPath(`/posts/${id}/comments`));
+    redirect(signInPath(`/post/${id}/comments`));
   }
 
   const post = await prisma.post.findUnique({
@@ -44,7 +44,7 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Moderate comments: {post.title}</h1>
       <p>
-        <Link href={`/posts/${post.id}/edit`}>Back to editor</Link>
+        <Link href={`/post/${post.id}/edit`}>Back to editor</Link>
       </p>
       {pending.length === 0 ? (
         <p>No comments awaiting moderation.</p>

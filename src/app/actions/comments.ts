@@ -265,7 +265,7 @@ function revalidateTouchedPosts(posts: { id: string; slug: string; publishedAt: 
     if (seen.has(post.id)) continue;
     seen.add(post.id);
     revalidatePostPage(post);
-    revalidatePath(`/posts/${post.id}/comments`);
+    revalidatePath(`/post/${post.id}/comments`);
   }
   revalidatePath("/comments");
 }

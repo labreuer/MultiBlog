@@ -208,7 +208,7 @@ Be accurate about what that would have cost, because the tempting wrong answer
 is that these gates are too varied for a matcher. **They aren't. All 24 are
 "is the viewer signed in", with nothing else in them.** That is not obvious from
 reading the six routes that go through `gated()` (`/doc/[slug]`,
-`/doc/[slug]/edit`, `/pdf/[slug]`, `/posts/[id]/edit`,
+`/doc/[slug]/edit`, `/pdf/[slug]`, `/post/[id]/edit`,
 `/side-by-side/[left]/[right]`, `/link/[id]`), which redirect on `access.status ===
 "signed-out"` and look like they are consulting the database — but
 `src/lib/route-access.ts` returns that status **before** it calls the route's

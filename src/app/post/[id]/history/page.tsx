@@ -15,7 +15,7 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
   const { id } = await params;
   const session = await auth();
   if (!session?.user) {
-    redirect(signInPath(`/posts/${id}/history`));
+    redirect(signInPath(`/post/${id}/history`));
   }
 
   const post = await prisma.post.findUnique({
@@ -46,7 +46,7 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>History: {post.title}</h1>
       <p>
-        <Link href={`/posts/${post.id}/edit`}>Back to editor</Link>
+        <Link href={`/post/${post.id}/edit`}>Back to editor</Link>
       </p>
       {post.publicationEvents.length === 0 ? (
         <p style={{ color: "var(--text-secondary)" }}>No publish activity yet.</p>
@@ -55,7 +55,7 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
           {post.publicationEvents.map((event) => (
             <li key={event.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
               {event.proseJson ? (
-                <Link href={`/posts/${post.id}/history/${event.id}`}>
+                <Link href={`/post/${post.id}/history/${event.id}`}>
                   {event.type} — {event.title}
                 </Link>
               ) : (

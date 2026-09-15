@@ -234,7 +234,20 @@ the checkbox was intentionally hiding. Toggling the checkbox by hand calls `rout
 the reveal-on-delete path does not, since the row's own delete action already refreshes the
 table to pick up its new state.
 
-### 3d. The post editor (`/posts/[id]/edit`)
+### 3d. The post editor (`/post/[id]/edit`)
+
+**Moved from `/posts/[id]/…` to `/post/[id]/…` on 2026-09-15**, so that a post's own pages
+(`edit`, `slug`, `comments`, `history`) sit under a singular prefix the way a doc's do under
+`/doc/[slug]/…`. The rule the rename makes uniform: a **plural** path is an admin table
+(`/posts`, `/docs`, `/files`, `/users`, `/tags`, `/links`, `/comments`, `/annotations`, §16)
+and the actions that belong to the table as a whole (`/posts/new`); a **singular** path is one
+thing's pages (`/doc/[slug]`, `/pdf/[slug]`, `/tag/[slug]`, `/link/[id]`, and now
+`/post/[id]`). Until then posts followed `/users/[id]/slug` — management hanging off the table
+by id — while docs followed the reading page, and the two rules disagreed. `/users/[id]/slug`
+and `/files/[slug]` (§19, a sign-in landing that inherited the download URL's prefix) still
+follow the older shape. A published post's *reading* URL is the dated one (§21), so no
+`/post/[id]` page reads a post. No redirect from the old paths: they were never public, and
+every internal link and `revalidatePath` moved with the route.
 
 **Decided:** `PostEditor.tsx` is the single surface for writing, saving, publishing, and
 managing one post. Real-time collaborative editing itself — the CRDT/Yjs transport layer —
@@ -317,7 +330,7 @@ noted in §3a:
   CLAUDE.md gotcha. Stripped (`stripMarkFromDoc`) before anything reaches `revision.doc`;
   `contentExtensions` (the shared editor/seed/render schema) never has to know the mark
   exists.
-- **Live-scrubbable history** (`/posts/[id]/live-history`, `LiveHistoryViewer.tsx`):
+- **Live-scrubbable history** (`/post/[id]/live-history`, `LiveHistoryViewer.tsx`):
   read-only, and stays live-connected rather than being a one-time snapshot. Hocuspocus's
   `onChange` hook (`server/collab.ts`) appends every raw Yjs update to a new
   `post_collab_update` row, reset whenever a revision is saved — bounding it to "since the
@@ -575,7 +588,7 @@ renamed after creation, with the old slug preserved as a redirect source rather 
 - **Reserved top-level slugs** (`RESERVED_SLUGS`, `src/lib/slug.ts`) only apply to post
   slugs — `/[slug]` is a top-level route; author slugs live under the nested `/authors/[slug]`,
   with no sibling static routes to collide with.
-- **Management UI**: `/posts/[id]/slug` and `/users/[id]/slug` (`SlugManager.tsx`, shared by
+- **Management UI**: `/post/[id]/slug` and `/users/[id]/slug` (`SlugManager.tsx`, shared by
   both entity types), linked from `PostSettingsPanel`'s "Url" row and `UsersTable`'s "url"
   column. Saving commits immediately — no confirm/cancel gate; the safety net is a one-click
   **Revert** button on the most recent past-slugs row instead (`revertPostSlug`/
@@ -660,7 +673,7 @@ site-wide too but change only via a deploy, not from the DB.
 commenter. Consider Akismet given anonymous commenting is allowed.
 
 **Cross-post moderation (`/comments`, `CommentsTable.tsx`, built).** The per-post moderation
-queue (`/posts/[id]/comments`) only ever shows one post's `PENDING` comments. `/comments`
+queue (`/post/[id]/comments`) only ever shows one post's `PENDING` comments. `/comments`
 is the site-wide counterpart: every comment across every post the signed-in user can manage
 (all of them for ADMIN/EDITOR, own-authored posts only for AUTHOR — mirrors `/posts`'s own
 `canEditAnyPost` gate), filterable and actionable in bulk.
@@ -800,7 +813,7 @@ Git history carries per-step detail.
    reserved-slug guard so post slugs can't shadow app routes. Rendering uses
    `@tiptap/static-renderer` (`generateHTML` needs a DOM and fails server-side).
 5. **Tree comments** — Disqus-style identity (name+email or session), three-level moderation
-   cascade + trust threshold per §6, moderation queue at `/posts/[id]/comments`. Beyond
+   cascade + trust threshold per §6, moderation queue at `/post/[id]/comments`. Beyond
    plan: `comment` also records submitter IP and who/when last changed its status.
 6. **Quote anchoring** — the article server-renders statically for SEO, then swaps to a
    read-only ProseMirror view after hydration (progressive enhancement). Decoration
@@ -1184,7 +1197,7 @@ Git history carries per-step detail.
   <SessionProvider />` thrown from `CommentForm` during SSR (the root layout does wrap
   `{children}`, and next-auth guards that throw so it cannot fire in production), and server
   actions arriving with truncated bodies — `Unexpected end of JSON input` on
-  `/posts/[id]/edit`, leaving the clicked action silently unapplied. Measured at roughly one
+  `/post/[id]/edit`, leaving the clicked action silently unapplied. Measured at roughly one
   failed run in 3.5 with three Playwright workers versus none in eight with two, at identical
   wall-clock time. Worth knowing beyond the tests: it's a ceiling on how much concurrent
   traffic a dev server can be trusted to serve correctly, and says nothing about production.
@@ -1871,7 +1884,7 @@ exactly as `[slug]/page.tsx` does today (§4a).
 throws `DYNAMIC_SERVER_USAGE` at build, which is what §10 item 17 was. Needs a CACHING.md entry;
 note there that `prose_json` is what keeps a dynamic route cheap, not a Next cache.
 
-**No per-doc annotations page.** §3c's `/posts/[id]/comments` has no doc counterpart; the
+**No per-doc annotations page.** §3c's `/post/[id]/comments` has no doc counterpart; the
 `/annotations?doc=<id>` deep link covers it.
 
 ### 12g. Collab: tokens, read-only readers, and the client `Y.Doc`
@@ -4042,7 +4055,7 @@ cutover.
 **Decided:** a post stops being an independently-edited document and becomes an immutable snapshot
 of a doc at a chosen point in that doc's ydoc history, carrying its own `prose_json` and `title`.
 `revision`, `post_collab`, and `post_collab_update` are dropped; the post-side half of
-`server/collab.ts` is dropped; one editing stack remains. `/posts/[id]/edit` no longer edits — it
+`server/collab.ts` is dropped; one editing stack remains. `/post/[id]/edit` no longer edits — it
 publishes. It shows the publish/schedule/unpublish controls, a read-only view of the doc at a
 selected history point, and a scrub bar over that doc's `ydoc_update` log. Publishing pins the
 selected point as a `ydoc_snapshot` (reusing one if the point is already snapshotted) and copies its
@@ -4123,7 +4136,7 @@ this section: `handleYdocSnapshot` now replays to its own mark rather than encod
 
 ### 15c. The publish surface
 
-`/posts/[id]/edit` (route unchanged) replaces `PostEditor` with `PostPublisher`: a plain title input
+`/post/[id]/edit` (route unchanged) replaces `PostEditor` with `PostPublisher`: a plain title input
 (defaulting to, and offering to reset to, the source doc's title), a line naming the source doc with
 a link to `/doc/[slug]/edit` and a "Change doc…" picker, the publish/schedule/unpublish controls, a
 line stating whether publishing will create a new snapshot or reuse an existing one, a read-only
@@ -4175,14 +4188,14 @@ sub-namespace and the `ydoc:test-` containment guard, and its comments were rewr
 Phase 0 (snapshot machinery) → Phase 1 (schema + migration) → Phase 2 (post creation from a doc,
 transitional — new posts still opened the old editor for one phase) → Phase 3 (the cutover: new
 publish actions and every public read surface switched to `Post.proseJson`/`Post.title` in the same
-commit, since neither can move alone) → Phase 4 (teardown of the old post-editing UI; `/posts/[id]/
+commit, since neither can move alone) → Phase 4 (teardown of the old post-editing UI; `/post/[id]/
 history` rebuilt as a publication-event list + word diff between consecutive published versions) →
 Phase 5 (comments retargeted onto events) → Phase 6 (collab server teardown) → Phase 7 (this
 section, plus CLAUDE.md/CACHING.md/e2e docs).
 
 ### 15g. As built
 
-Deleted: `LiveHistoryViewer.tsx`, `/posts/[id]/live-history`, `/api/posts/[id]/collab-updates`,
+Deleted: `LiveHistoryViewer.tsx`, `/post/[id]/live-history`, `/api/posts/[id]/collab-updates`,
 `RestoreRevisionButton.tsx`, `PostEditBadge.tsx` and its four call sites, `PostEditor.tsx` (+ its
 module CSS), `PostSettingsPanel`'s revisions table, `e2e/restore-revision.spec.ts`,
 `e2e/collab.spec.ts` (after porting its two genuinely doc-side tests — body-edit propagation and the
@@ -7632,7 +7645,7 @@ landed), not a change of mind:
   path (§21f.3): match on slug alone, ignore the date the URL arrived with, redirect to
   `postPath(post)`. `generateMetadata` runs the same shape gate and the same canonical check,
   since it queries too.
-- **`/posts/[id]/slug` gives `SlugManager` the date path as `urlPrefix`** — a scheduled post
+- **`/post/[id]/slug` gives `SlugManager` the date path as `urlPrefix`** — a scheduled post
   shows the path it will have when it goes live; a draft gets the literal `/yyyy/mm/dd` as a
   placeholder, since `""` would render a URL the site no longer serves.
 - **e2e:** `TestPost.path` (null for a draft) replaces hand-built URLs, and the published
@@ -7664,8 +7677,8 @@ or — because it *does* have `generateStaticParams` — it throws
 
 **No route collisions, and not by luck.** Next resolves a static segment ahead
 of a dynamic one at the same position, so every existing route still wins over
-`/[year]/…`: `/posts/…`, `/api/…`, `/authors/…`, `/doc/…`. The deepest routes
-in the app are already four segments (`posts/[id]/history/[eventId]`,
+`/[year]/…`: `/post/…`, `/posts/…`, `/api/…`, `/authors/…`, `/doc/…`. The deepest routes
+in the app are already four segments (`post/[id]/history/[eventId]`,
 `api/avatar/[userId]/[hash]`) and both lead with a static segment, so neither is
 shadowed.
 
@@ -7779,7 +7792,7 @@ than delicate. The list is exhaustive as of 2026-08-05, when this section was fi
   later.
 - **`SlugManager` needs no change at all.** It already takes a `urlPrefix` prop
   (`""` for posts, `/doc` for docs, `/authors` for users) — the prefix simply
-  becomes the post's date path, supplied by `src/app/posts/[id]/slug/page.tsx`.
+  becomes the post's date path, supplied by `src/app/post/[id]/slug/page.tsx`.
 - **The route handler** gains segment validation and a canonical redirect: right
   slug, wrong date → `permanentRedirect` to the real path, reusing the shape of
   the existing `resolveRedirectSlug` fallback rather than a second mechanism.

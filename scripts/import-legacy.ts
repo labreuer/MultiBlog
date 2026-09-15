@@ -21,7 +21,7 @@
 // of a Doc (PLAN.md §15) and live content lives in the generic ydoc stack
 // (§11) keyed by `ydoc:<docId>`. The editable thing a legacy Post actually
 // *was* is therefore a Doc, and that is the only row this import creates for
-// it — publishing is a later, deliberate act through /posts/[id] (§15c), not
+// it — publishing is a later, deliberate act through /post/[id] (§15c), not
 // something a data migration should decide on your behalf. Consequences:
 //
 // - **Doc.id is set to the legacy Post.id.** Nothing requires it, but it makes
