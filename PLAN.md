@@ -6965,10 +6965,14 @@ half-speed, to change by feel and not by arithmetic. Tested the same day on all 
 engines (chromium, firefox, webkit; dev and prod targets): a held-ctrl notch of 240, 100 or 53
 px, ⌘ in place of ctrl, dispatched line and page events, the 2 px pinch frame and the fractional
 carry all behave identically and the page zoom stays at 1 — docs/PDF.md §10c has the table. What
-no engine here could show: Playwright's Firefox sends pixels, so a real Gecko mouse's line-mode
-notch and the read-order shim rest on dispatched events and the getter unit test; macOS trackpad
-feel (`WHEEL_SOFTNESS`), ⌘ on a real Mac, and Windows' lines-per-notch setting are unverified,
-like the iOS half above.
+no engine there could show — Playwright's Firefox sends pixels — was then measured on a **real
+Firefox 155 on a Mac** the same day, with native wheel events (`scripts/native-wheel.c`,
+e2e/MACOS.md): a notch arrives as **one line** (not the three Linux and Windows send), ctrl and ⌘
+each give exactly one ×1.1 step, the browser's own zoom never fires, and the read-order shim is
+real and on a Mac costs a whole notch rather than a mis-sized one — docs/PDF.md §10c has that
+table too. Still unverified: trackpad *feel* (`WHEEL_SOFTNESS`; a pinch is a magnify gesture no
+script can post), Chrome and Safari on real Mac hardware, Windows' lines-per-notch setting, and
+the iOS half above.
 
 **The zoom dropdown had to become a readout as well as a control.** A gesture lands on any
 scale it likes, and a `<select>` whose value matches no option renders *blank* — so

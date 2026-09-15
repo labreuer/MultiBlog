@@ -39,7 +39,7 @@ question needs before asking for one.
 | rung | grant | what it unlocks |
 |---|---|---|
 | none | — | `open -a Safari <url>`; the remote-console eval channel into the app's own pages; AppleScript *reads* of Safari (URL of the current tab, window bounds — Automation for Safari is already granted on this Mac, and prompts once elsewhere). |
-| Accessibility | System Settings → Privacy & Security → Accessibility, for the app hosting the session (VS Code, Terminal) | `cliclick` (`brew install cliclick`): real mouse moves, drags and clicks; System Events clicks. **Granted 2026-09-14.** |
+| Accessibility | System Settings → Privacy & Security → Accessibility, for the app hosting the session (VS Code, Terminal) | `cliclick` (`brew install cliclick`): real mouse moves, drags and clicks; System Events clicks; `scripts/native-wheel.c`: real wheel notches, line or pixel, with ctrl or ⌘. **Granted 2026-09-14.** |
 | Safari setting | Develop menu → Allow JavaScript from Apple Events | AppleScript `do JavaScript` — redundant with the relay, not enabled. |
 | admin password | `safaridriver --enable` in a terminal | WebDriver against Safari (Selenium, WebdriverIO). Not enabled; the relay covers everything it would have, short of a second tab. |
 
@@ -140,6 +140,25 @@ Two traps, each of which cost a misread run:
   recorder is a one-line eval and turns "the popup is still open" from a mystery into
   "the click never arrived".
 
+### Native wheel events with `scripts/native-wheel.c`
+
+cliclick has no wheel verb, and Playwright's `mouse.wheel` is pixel-mode in every engine, so a
+real mouse notch — Gecko's *line*-mode event in particular — comes from CoreGraphics directly.
+`scripts/native-wheel.c` posts one `CGEventCreateScrollWheelEvent` at a screen point with an
+optional ctrl or ⌘ on the event's flags; its header has the build line and the sign convention
+(`delta > 0` scrolls up, so the page sees a negative `deltaY`). Build it with clang: this
+machine's `swiftc` refuses its own SDK, which is a toolchain skew and not something to fix.
+
+The recipe is the Safari one above with two changes. **Firefox** (`open -a Firefox <url>`) is
+just another tab that carries the injected client, and it gives the screen origin of its
+viewport for free: `mozInnerScreenX`/`mozInnerScreenY` plus a `clientX`/`clientY` is the
+screen point, no window-bounds arithmetic. And the listener that records what arrived **must
+read `deltaMode` before `deltaX`/`deltaY`**, or it becomes the thing being tested: Gecko
+converts the event to pixels for every later reader the moment a delta is read first
+(docs/PDF.md §10c). Record in capture phase on `document` and again in bubble phase for
+`defaultPrevented`; read `devicePixelRatio` and `innerWidth` before and after, since Firefox's
+own ctrl-wheel is a *full* zoom that moves those and not `visualViewport.scale`.
+
 Other things that read as failures and are not:
 
 - **A file swap reloads the page under your patch.** Swapping a source file for main's
@@ -148,6 +167,21 @@ Other things that read as failures and are not:
   a few seconds after the swap, and treat an empty log as "rerun", not as a result.
 - The eval that navigates always reports a timeout. Expected.
 - All Safari tabs share one cookie jar, as with the preview pane (docs/BROWSER_PANE.md).
+
+## What was measured: PR #32, 2026-09-14
+
+**Ctrl-wheel on the PDF surface, real Firefox 155.0.1.** The page was the user's own Firefox
+(it already held a session for localhost:3000, so nothing was signed in or replaced), on a
+throwaway SHARED file from `scripts/test-file.ts`, the dev server started with
+`REMOTE_CONSOLE_SRC` in its environment. Eight native events, each read on the app's page:
+a 1-line notch with ctrl is `deltaMode` 1, `deltaY` −1 — **one line on macOS, not the three
+Firefox sends on Linux and Windows** — and one ×1.10 step; down is ×0.91; ⌘ instead of ctrl
+is the same step with `metaKey`; a 3-line event is still one step; 2 px is the pinch curve;
+60 px is one step; a bare notch scrolls and is not prevented. `devicePixelRatio` and
+`innerWidth` never moved, so Firefox's own zoom never fired. Then a `window`-level capture
+listener that read `deltaY` first was armed for one notch: the app's listener saw mode 0,
+`deltaY` −17, and the viewer did not move — the shim is real, and on a Mac it costs the whole
+notch. Table in docs/PDF.md §10c.
 
 ## What was measured: PR #31, 2026-09-14
 

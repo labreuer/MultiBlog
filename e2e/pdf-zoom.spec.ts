@@ -102,7 +102,8 @@ test.describe("pdf zoom gestures", () => {
   // Every shape a wheel event arrives in, and what each is worth. Playwright's
   // own `mouse.wheel` is pixel-mode in all three engines — its Firefox included,
   // so a real Gecko mouse's *line*-mode notch (measured 2026-09-14, docs/PDF.md
-  // §10c) is only reachable by dispatching. These are untrusted events, so the
+  // §10c) is only reachable here by dispatching; on a Mac, `scripts/native-wheel.c`
+  // posts the real thing (e2e/MACOS.md). These are untrusted events, so the
   // page-zoom half is not in question here; what is being checked is the
   // classification in `readWheel` and the carry in `createTickAccumulator`,
   // against the engine's real WheelEvent rather than a plain object.

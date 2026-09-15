@@ -53,7 +53,9 @@
 //
 // Known limits, none of which a bigger implementation would fix:
 //   - It cannot see the screen. Numbers only.
-//   - It cannot produce a *native* gesture. iOS text selection is WebKit's
+//   - It cannot produce a *native* gesture. (On the Mac itself, cliclick and
+//     scripts/native-wheel.c post real mouse and wheel events into whatever
+//     desktop browser is open — e2e/MACOS.md.) iOS text selection is WebKit's
 //     gesture recognizer plus UIKit drag handles above the page, reachable by
 //     no amount of dispatchEvent — the class docs/PDF.md §10 already calls
 //     unreproducible. A synthetic `selectionchange` is not the same evidence.
