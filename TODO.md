@@ -833,3 +833,62 @@ share bytes: `createTestFile` builds the same two pages of fixed text for every 
 the caller passes `pages`, so nearly every test file in the suite is one blob under one sha.
 Either give each test file distinct bytes (the title is already unique — put it in the PDF),
 or never sweep in `deleteTestFile` and leave unreferenced test shas to `cleanup.teardown.ts`.
+
+---
+
+## Three zoom-gesture measurements the Windows pass left open (docs/PDF.md §10c)
+
+**Status:** the Windows half of §10c was measured 2026-09-15 (trackpad, touchscreen and mouse,
+two browsers, three `devicePixelRatio`s) and found one live bug — the fractional page, fixed in
+`readWheel`. These three are what that pass did *not* reach. None is hypothetical: each has a
+concrete prediction, and the first two are places the code is currently relying on an
+assumption rather than a measurement.
+
+**How to take any of them.** `scripts/remote-console.ts` on the app's own `/pdf/[slug]`, with a
+recorder armed through `/eval` — the Windows rows in §10c were all taken that way, and the
+script's header carries the hostname trap that silently costs the first attempt. The wheel
+setting itself is `SPI_SETWHEELSCROLLLINES`, which needs no elevation and takes effect without
+restarting the browser, unlike editing the registry value directly:
+
+```powershell
+Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class Spi { [DllImport("user32.dll", SetLastError=true)]
+  public static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d); }
+"@
+# 3 = the default, 1 = one line, 0xFFFFFFFF = "one screen at a time"; 0x03 = update + broadcast
+[Spi]::SystemParametersInfo(0x0069, 3, [IntPtr]::Zero, 0x03)
+```
+
+**1. One line per notch at 125% page zoom — a predicted bug, two keystrokes from a default
+install.** The CSS delta moves with page zoom and not with display scaling (measured 100.000 px
+at dpr 2.5 and again at 1.5), and the lines setting is a plain multiplier of ~33.3 px per line.
+So at 1 line and 125% zoom a notch should arrive at **26.7 px** — under `PIXELS_PER_TICK`, which
+is 30 — and `createTickAccumulator` would bank 0.89 of a tick and zoom **nothing** on the first
+notch, spending it on the second. Set the wheel to 1 line, press Ctrl+Plus twice, and ctrl-notch
+once. If it reproduces, the fix is not to raise `PIXELS_PER_TICK` (that makes it worse) but to
+let a pixel-mode delta that is a *known notch shape* count as one — or to accept it, since a
+reader at that setting and that zoom gets a step on every second notch rather than none.
+
+**2. Firefox on Windows — the engine that reports lines, on the OS where the lines setting
+lives.** Gecko's line mode has been measured on macOS (a notch is **1** line, not the documented
+3) and is assumed to be 3 on Windows and Linux. Unmeasured on Windows, and two things there are
+now assumptions the code depends on: whether Gecko also switches to `deltaMode` 2 for "one
+screen at a time", and whether it divides by the backing scale the way Blink does. `readWheel`'s
+line branch keeps its fractional-accumulation path *specifically* on the claim that Gecko does
+not divide (§10c's Retina table) — if Windows Gecko does, that branch has the same bug the page
+branch just had. The e2e suite cannot answer it: Playwright's Firefox sends pixels
+(§10c's table), so no run of `npm run e2e:firefox` exercises line mode at all.
+
+**3. The iOS half of §10c.** Whether `touch-action: pan-x pan-y` alone suppresses Safari's own
+pinch zoom, or whether the `gesture*` handlers are what do it. §10c carries the recipe — the
+`window.__pinch` counters through `scripts/remote-console.ts`, with `visualViewport.scale`
+staying 1 as the answer that matters. Unchanged by the Windows work and listed here only so all
+three sit together; PLAN.md §19d has flagged it since the feature was built, and this file
+already records two iOS touch claims that measured false.
+
+**Not on this list, deliberately:** that `TRACKPAD_PINCH_GAIN` is gated on
+`navigator.maxTouchPoints === 0` and so does not apply on a Windows touchscreen laptop, where
+`(pointer: coarse)` is false and would be right. That is measured, recorded in §10c, and
+**decided** in PLAN.md §19d — a feel knob is not re-aimed on a symmetry argument — rather than
+open.
