@@ -2,8 +2,9 @@
 
 import { useEffect, type RefObject } from "react";
 import {
-  clampScaleFactor,
+  TRACKPAD_PINCH_GAIN,
   createTickAccumulator,
+  gestureStepFactor,
   pinchScaleFactor,
   readWheel,
   tickScaleFactor,
@@ -59,6 +60,14 @@ export function usePdfZoomGestures(handleRef: RefObject<PdfViewerHandle | null>,
     if (!ready || !handle) return;
     const container = handle.container;
 
+    // A trackpad pinch zooms faster than the fingers; a touch pinch does not.
+    // Both arrive by the same two paths (Safari's `gesture*` events fire for
+    // a MacBook trackpad and an iPad's screen alike), so the distinction is
+    // the device, decided once: a Mac reports no touch points (measured, Safari
+    // 26.6.1), a phone or tablet reports several. A touch pinch keeps the page
+    // under the fingers, which a gain would break.
+    const pinchGain = navigator.maxTouchPoints === 0 ? TRACKPAD_PINCH_GAIN : 1;
+
     /**
      * Coalesced to one application per frame. A pinch can emit far more moves
      * than there are frames, and each `updateScale` reflows every page box.
@@ -102,7 +111,7 @@ export function usePdfZoomGestures(handleRef: RefObject<PdfViewerHandle | null>,
     const onWheel = (event: WheelEvent) => {
       if (!wheelIsZoom(event)) return;
       event.preventDefault();
-      const intent = readWheel(event);
+      const intent = readWheel(event, pinchGain);
       const origin: [number, number] = [event.clientX, event.clientY];
       if (intent.kind === "pinch") {
         zoomBy(intent.factor, origin);
@@ -117,24 +126,34 @@ export function usePdfZoomGestures(handleRef: RefObject<PdfViewerHandle | null>,
     // Non-standard and WebKit-only (`GestureEvent`), so they are bound by name
     // and typed structurally rather than through the DOM lib. `scale` is
     // cumulative from the start of the gesture, so the *step* is it against the
-    // last one we saw.
+    // last one we saw. On a Mac this is the **only** way a trackpad pinch
+    // arrives — no ctrl-wheel accompanies it (measured, docs/PDF.md §10c).
+    //
+    // The baseline is taken from the start event's own `scale` rather than
+    // assumed to be 1: a real gesture starts at 1.001 or 0.999, and Safari was
+    // seen firing a *second* `gesturestart` in the tail of a pinch carrying
+    // the gesture's final scale (0.84), which a baseline of 1 would have
+    // replayed as one more step out.
     let gestureScale = 1;
     let sawGesture = false;
+    const gestureScaleOf = (event: Event): number => {
+      const scale = (event as Event & { scale?: number }).scale;
+      return typeof scale === "number" && scale > 0 ? scale : 1;
+    };
 
     const onGestureStart = (event: Event) => {
       sawGesture = true;
       event.preventDefault();
-      gestureScale = 1;
+      gestureScale = gestureScaleOf(event);
     };
     const onGestureChange = (event: Event) => {
       event.preventDefault();
-      const gesture = event as Event & { scale?: number; clientX?: number; clientY?: number };
-      const scale = typeof gesture.scale === "number" ? gesture.scale : 1;
-      if (!(scale > 0)) return;
-      const factor = scale / gestureScale;
+      const gesture = event as Event & { clientX?: number; clientY?: number };
+      const scale = gestureScaleOf(event);
+      const factor = gestureStepFactor(gestureScale, scale, pinchGain);
       gestureScale = scale;
       const rect = container.getBoundingClientRect();
-      zoomBy(clampScaleFactor(factor), [
+      zoomBy(factor, [
         gesture.clientX ?? rect.left + rect.width / 2,
         gesture.clientY ?? rect.top + rect.height / 2,
       ]);

@@ -797,7 +797,7 @@ chromium 1234, firefox 1538, webkit 2336; one `mouse.wheel` per row, read on
 |---|---|---|---|
 | `mouse.wheel(0, -240)`, Control held | mode 0, `deltaY` −240, `ctrlKey` | ×1.10 | unchanged |
 | `mouse.wheel(0, -100)` / `(0, -53)`, Control held | mode 0, −100 / −53 | ×1.10 | unchanged |
-| `mouse.wheel(0, -3)`, Control held | mode 0, −3 | ×1.016 (pinch curve) | unchanged |
+| `mouse.wheel(0, -3)`, Control held | mode 0, −3 | ×1.016 (pinch curve, at the then `WHEEL_SOFTNESS` of 200; today exp(3 × `TRACKPAD_PINCH_GAIN` / 100)) | unchanged |
 | `mouse.wheel(0, -240)`, Meta held | mode 0, −240, `metaKey` | ×1.10 | unchanged |
 | dispatched `WheelEvent` 3 lines / 1 page / 53 px, `ctrlKey` | as sent | ×1.10 per event | n/a (untrusted) |
 | dispatched −15 px twice, `ctrlKey` | mode 0 | ×1, then ×1.10 | n/a |
@@ -820,15 +820,37 @@ stayed 1.
 | 1 line down, ctrl | mode 1, +1 | yes | ×0.91 |
 | 1 line up, ⌘ | mode 1, −1, `metaKey` | yes | ×1.10 |
 | 3 lines up, ctrl (the Linux/Windows shape) | mode 1, −3 | yes | ×1.10 |
-| 2 px up, ctrl | mode 0, −2 | yes | ×1.013 (pinch curve) |
+| 2 px up, ctrl | mode 0, −2 | yes | ×1.013 (pinch curve, at the then `WHEEL_SOFTNESS` of 200; today exp(2 × `TRACKPAD_PINCH_GAIN` / 100)) |
 | 60 px up, ctrl | mode 0, −60 | yes | ×1.10 |
 | 1 line up, no modifier | mode 1, −1 | no | ×1, container scrolled |
 | 1 line up, ctrl, after a delta-first listener | mode **0**, −17 | yes | ×1 (0.57 tick carried) |
 
 So a macOS Firefox notch is **one line, not three**, and the read-order trap is not
-theoretical there. Still unmeasured: a real trackpad pinch (a magnify gesture, which no public
-CGEvent creates — `WHEEL_SOFTNESS` is set by feel and stays that way), Chrome and Safari on real
-Mac hardware (the same recipe applies), and Windows with lines-per-notch changed.
+theoretical there. Still unmeasured: a trackpad pinch in Chrome or Firefox on a Mac (a
+magnify gesture, which no public CGEvent creates — the recipe below needs a hand on the
+trackpad), a Chrome or Safari *mouse* on real Mac hardware, and Windows with lines-per-notch
+changed.
+
+**What a real trackpad pinch delivers in Safari, measured** (2026-09-14, Safari 26.6.1 on
+macOS 14.8.9, MacBook trackpad; a capture-phase listener on `window` installed through
+`scripts/remote-console.ts`, recording every `wheel` with ctrl or ⌘ and every `gesture*` event
+with the viewer's `--scale-factor` beside it). A slow spread and a quick pinch, by hand:
+
+| gesture | events | ctrl-wheel events | document scale |
+|---|---|---|---|
+| slow spread, ~2.4 s | `gesturestart` (scale 1.001), 60 × `gesturechange` at 27–50 ms, `gestureend` (2.058) | **0** | 1.72 → 3.52, ratio 2.04 |
+| quick pinch, ~0.5 s | `gesturestart` (0.999), 3 × `gesturechange`, `gestureend` (0.836) | **0** | 3.52 → 2.95, ratio 0.84 |
+| tail of the quick pinch | a **second `gesturestart`** carrying 0.836, then `gestureend` **twice**, all within 2 ms | — | unchanged |
+
+Three findings. **Safari's trackpad pinch is `gesture*` only** — not one ctrl-wheel in 75
+events — so on Safari the whole of `readWheel`, `WHEEL_SOFTNESS` included, is never on the
+path; the user had set the constant to 30 and felt nothing, which is how this was found. The
+scale tracks the cumulative `scale` to within pdfjs's hundredth-rounding, so before the gain
+the gesture path was an exact finger-follow. And the doubled `gesturestart` in the tail is
+why `onGestureStart` now takes its baseline from the event's own `scale` rather than 1:
+with a baseline of 1 and a `gesturechange` after it, the 0.836 would have replayed as one more
+full step out. `navigator.maxTouchPoints` is 0 on this Mac and `(pointer: coarse)` is false,
+which is the discriminator `TRACKPAD_PINCH_GAIN` is gated on.
 
 **`preventDefault` needs a non-passive listener.** `{ passive: true }` (or the default, for
 `wheel`/`touchmove`, in every current engine) silently ignores the call, so the document zooms

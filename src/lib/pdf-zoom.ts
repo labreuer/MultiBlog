@@ -24,13 +24,32 @@ export const MAX_STEP_OUT = 0.8;
 export const WHEEL_TICK_FACTOR = 1.1;
 
 /**
- * Larger is gentler. Tuned so a trackpad pinch tracks the fingers.
+ * How much faster than the fingers a *trackpad* pinch zooms — an exponent on
+ * the per-frame factor, so 1 tracks the fingers exactly, 2 doubles the rate
+ * in log space (a spread that would have been ×2 becomes ×4), 3 triples it.
+ * Set by feel, and **quoted nowhere else**: the e2e bound and the worked
+ * examples in docs/PDF.md compute from this constant rather than naming it,
+ * so changing it here is the whole change.
  *
- * (Firefox encodes a macOS pinch as `-100 * log(1 + magnification)` and Chrome
- * something close, so 100 would reproduce the fingers *exactly*; 200 is a
- * deliberate half-speed. Change it by feel, not by arithmetic.)
+ * The one feel knob for a trackpad, applied on every path a trackpad pinch
+ * can arrive by: Safari's `gesturechange` (`gestureStepFactor`) and the
+ * ctrl-wheel pinch branch of `readWheel` that Chrome and Firefox use. It is
+ * **not** applied to a touch pinch — there the fingers are *on* the page, and
+ * the page should stay under them — which is why the hook passes 1 on a
+ * device with touch points. Measured 2026-09-14 on a MacBook trackpad in
+ * Safari 26.6.1 (docs/PDF.md §10c): the pinch arrives as `gesture*` events
+ * only, never as a ctrl-wheel, so no wheel constant can change its feel.
  */
-const WHEEL_SOFTNESS = 200;
+export const TRACKPAD_PINCH_GAIN = 3;
+
+/**
+ * Larger is gentler. 100 makes a ctrl-wheel pinch frame track the fingers
+ * exactly: Firefox encodes a macOS pinch as `-100 * log(1 + magnification)`
+ * and Chrome something close. Leave the tracking exact here and put any
+ * "faster than the fingers" into `TRACKPAD_PINCH_GAIN`, so Safari's gesture
+ * path and this one stay at the same rate.
+ */
+const WHEEL_SOFTNESS = 100;
 
 /**
  * Below this many pixels a ctrl-wheel is a trackpad pinch, not a notch.
@@ -109,8 +128,11 @@ export type WheelIntent =
  * OS multiplier at all. `pdf-zoom.test.ts` asserts the order with getters.
  *
  * Sign: a positive `deltaY` is a scroll *down*, which is zoom **out**.
+ *
+ * `pinchGain` only touches the pinch branch — a notch is a tick whatever the
+ * device — and defaults to exact finger tracking.
  */
-export function readWheel(event: WheelDeltas): WheelIntent {
+export function readWheel(event: WheelDeltas, pinchGain = 1): WheelIntent {
   const deltaMode = event.deltaMode;
   const deltaY = event.deltaY;
   if (!Number.isFinite(deltaY) || deltaY === 0) return { kind: "none" };
@@ -124,7 +146,8 @@ export function readWheel(event: WheelDeltas): WheelIntent {
 
   const magnitude = Math.abs(deltaY);
   if (magnitude < PINCH_MAX_PIXELS && event.deltaX === 0) {
-    return { kind: "pinch", factor: clampScaleFactor(Math.exp(-deltaY / WHEEL_SOFTNESS)) };
+    const gain = Number.isFinite(pinchGain) && pinchGain > 0 ? pinchGain : 1;
+    return { kind: "pinch", factor: clampScaleFactor(Math.exp((-deltaY * gain) / WHEEL_SOFTNESS)) };
   }
   if (magnitude >= NOTCH_MIN_PIXELS) return { kind: "ticks", ticks: -Math.sign(deltaY) };
   return { kind: "ticks", ticks: -deltaY / PIXELS_PER_TICK };
@@ -169,6 +192,22 @@ export function tickScaleFactor(ticks: number): number {
 export function pinchScaleFactor(previousDistance: number, distance: number): number {
   if (!(previousDistance > 0) || !(distance > 0)) return 1;
   return clampScaleFactor(distance / previousDistance);
+}
+
+/**
+ * The step for one Safari `gesturechange`, whose `scale` is cumulative from
+ * the gesture's start: this frame's against the last one seen, raised to the
+ * gain, clamped like every other continuous step.
+ *
+ * Guards the same way `pinchScaleFactor` does, and for a reason the log
+ * showed: Safari can fire a second `gesturestart` *during* the end of a
+ * gesture carrying the old cumulative scale, so a caller that reset its
+ * baseline to 1 there would compute the whole gesture again as one step.
+ */
+export function gestureStepFactor(previousScale: number, scale: number, gain = 1): number {
+  if (!(previousScale > 0) || !(scale > 0)) return 1;
+  const exponent = Number.isFinite(gain) && gain > 0 ? gain : 1;
+  return clampScaleFactor((scale / previousScale) ** exponent);
 }
 
 /** Distance between two touch points, in whatever space they were given. */

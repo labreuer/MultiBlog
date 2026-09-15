@@ -3,9 +3,11 @@ import { test } from "node:test";
 import {
   MAX_STEP_IN,
   MAX_STEP_OUT,
+  TRACKPAD_PINCH_GAIN,
   WHEEL_TICK_FACTOR,
   clampScaleFactor,
   createTickAccumulator,
+  gestureStepFactor,
   isNamedScale,
   pinchScaleFactor,
   readWheel,
@@ -57,9 +59,35 @@ test("a trackpad pinch's small deltas take the curve, not a step", () => {
   assert.equal(intent.kind, "pinch");
   if (intent.kind !== "pinch") return;
   assert.ok(intent.factor > MAX_STEP_OUT && intent.factor < 1, `expected a gentle zoom out, got ${intent.factor}`);
-  assert.ok(Math.abs(intent.factor - Math.exp(-0.01)) < 1e-12);
+  // 2 px at WHEEL_SOFTNESS 100 and no gain: exp(-2 / 100), the fingers exactly.
+  assert.ok(Math.abs(intent.factor - Math.exp(-0.02)) < 1e-12);
   const zoomIn = wheel(-2);
   assert.ok(zoomIn.kind === "pinch" && zoomIn.factor > 1);
+});
+
+test("the trackpad gain scales the pinch branch in log space and nothing else", () => {
+  const gained = readWheel({ deltaMode: 0, deltaX: 0, deltaY: 2 }, 2);
+  assert.ok(gained.kind === "pinch" && Math.abs(gained.factor - Math.exp(-0.04)) < 1e-12);
+  // A notch is a tick whatever the gain; the band between is untouched too.
+  assert.deepEqual(readWheel({ deltaMode: 0, deltaX: 0, deltaY: -100 }, 2), { kind: "ticks", ticks: 1 });
+  assert.deepEqual(readWheel({ deltaMode: 0, deltaX: 0, deltaY: 15 }, 2), { kind: "ticks", ticks: -0.5 });
+  // A nonsense gain is exact tracking, not a frozen zoom.
+  const bad = readWheel({ deltaMode: 0, deltaX: 0, deltaY: 2 }, Number.NaN);
+  assert.ok(bad.kind === "pinch" && Math.abs(bad.factor - Math.exp(-0.02)) < 1e-12);
+  assert.ok(TRACKPAD_PINCH_GAIN > 1, "a gain of 1 would be no gain — make it a deliberate number");
+});
+
+test("a Safari gesture step is this frame's cumulative scale against the last, to the gain", () => {
+  assert.equal(gestureStepFactor(1, 1.1), 1.1);
+  assert.ok(Math.abs(gestureStepFactor(1.1, 1.21) - 1.1) < 1e-12);
+  assert.ok(Math.abs(gestureStepFactor(1, 1.1, 2) - 1.21) < 1e-12);
+  // Clamped like the other continuous paths, gain included.
+  assert.equal(gestureStepFactor(1, 2, 2), MAX_STEP_IN);
+  assert.equal(gestureStepFactor(2, 1, 2), MAX_STEP_OUT);
+  // The measured tail: a second gesturestart at the old scale, then nothing.
+  assert.equal(gestureStepFactor(0.836, 0.836, 2), 1);
+  assert.equal(gestureStepFactor(0, 1.2), 1);
+  assert.equal(gestureStepFactor(1.2, Number.NaN), 1);
 });
 
 test("a small delta with a horizontal component is a ctrl-scroll, not a pinch", () => {

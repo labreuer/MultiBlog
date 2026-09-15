@@ -1,5 +1,6 @@
 import { test, expect, signIn, gotoOk } from "./fixtures";
 import { ADMIN_EMAIL, createTestFile, deleteTestFile, type TestFile } from "./db";
+import { TRACKPAD_PINCH_GAIN } from "@/lib/pdf-zoom";
 
 // PLAN.md §19d — pinch and ctrl-wheel zoom the document, not the page.
 //
@@ -150,10 +151,14 @@ test.describe("pdf zoom gestures", () => {
     }
 
     // A trackpad pinch frame: a couple of pixels with no sideways component,
-    // on the continuous curve rather than a tick.
+    // on the continuous curve rather than a tick. Headless desktop engines
+    // report no touch points, so the trackpad gain applies. Computed from the
+    // constant so retuning the feel never means retuning this bound; the band
+    // is pdfjs's hundredth-rounding of the scale.
     const pinch = await ratio({ deltaY: -2, deltaMode: 0, ctrlKey: true });
-    expect(pinch).toBeGreaterThan(1.0);
-    expect(pinch).toBeLessThan(1.03);
+    const expectedPinch = Math.exp((2 * TRACKPAD_PINCH_GAIN) / 100);
+    expect(pinch).toBeGreaterThan(Math.max(1.0, expectedPinch - 0.02));
+    expect(pinch).toBeLessThan(expectedPinch + 0.02);
 
     // The band between: fractional ticks that carry until they make a whole
     // one. Three of 10px are a third each.
