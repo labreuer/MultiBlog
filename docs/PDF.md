@@ -765,15 +765,19 @@ sends its `gesture*` events instead, and no wheel at all; both measured below). 
 same reason it takes the pinch.
 
 **A wheel notch has no cross-browser size, so don't measure it — count it.** Chrome and Safari
-report pixels (`deltaMode` 0): a notch is 100 on Windows *multiplied by the OS "lines per notch"
-setting*, about 53 on Linux, a whole screen if Windows is set to scroll by pages, and a few
-accelerated pixels for a macOS mouse. Firefox reports lines (`1`): a notch is 3 on Linux and
+report pixels (`deltaMode` 0): a notch is about 30 px per line of the OS's "lines per notch"
+setting on Windows — 90.909 at the default 3, 30.303 at 1, both measured below, and *not* the
+100-times-the-setting this file claimed before anyone had measured Windows — about 53 on Linux,
+and a few accelerated pixels for a macOS mouse. Set to scroll by screens, Windows sends
+`deltaMode` **2** carrying a *fraction* of a page rather than a pixel count at all (0.364,
+measured below). Firefox reports lines (`1`): a notch is 3 on Linux and
 Windows whatever the OS setting, and **1 on macOS** (measured, below) — so even the line count
 is not a constant, only the *unit* is. Any pixels-per-tick divisor therefore makes one notch worth one, three or thirty steps
 depending on the machine — the shape of mozilla/pdf.js#16325, which pdf.js has left open for
 Chrome since 2023 (its own viewer counts one tick per event in line mode and divides by 30 in
 pixel mode). `readWheel` (`src/lib/pdf-zoom.ts`) instead treats any pixel delta of 40 or more,
-and any line or page event, as **one notch = one tick = ×1.1**, pdfjs's own step. Below about 5
+any page event whatever its magnitude, and any line event of a whole line or more, as **one
+notch = one tick = ×1.1**, pdfjs's own step. Below about 5
 pixels with no `deltaX` is a trackpad pinch and takes the exponential; the band between is
 fractional ticks, carried forward by `createTickAccumulator`. That band holds for a *slow*
 pinch; a quick one sends frames of 12–72 px (measured below), so the band is only how a pinch
@@ -959,6 +963,75 @@ is. PLAN.md §19d records the decision to leave it. Two side findings: Firefox's
 zoom crept to 1.084 under the 60 ms handler — Gecko stops waiting for a slow `preventDefault`
 — which the app's fast handler never triggers; and Safari stops sending `gesture*` events
 after the first one a page fails to prevent.
+
+**What Windows delivers, measured** (2026-09-15, **Vivaldi** on Chromium 152 — see the warning
+below — Windows 11 26200, Dell XPS 15 9510, 275% display scaling so `devicePixelRatio` 2.75,
+both a precision touchpad and a touchscreen; recorded on the app's own `/pdf/[slug]` through
+`scripts/remote-console.ts`, `deltaMode` read first, every listener passive so the app's own
+handler saw an unaltered event). The browser's own zoom never fired in any row:
+`visualViewport.scale` stayed 1 and `innerWidth` 1364 throughout.
+
+| gesture | events | per-frame `deltaY` | Σ `deltaY` | fingers, exp(−Σ/100) | document |
+|---|---|---|---|---|---|
+| trackpad, slow spread, 1.93 s | 87 × `wheel`, mode 0, `ctrlKey`, `deltaX` 0, 7–38 ms apart | −0.16 … −3.61, every one under 5 | −94.26 | 2.5666 | 1.502 → 3.813, **×2.5395** |
+| trackpad, quick pinch, 0.375 s | 17 × the same | +0.14 … **+24.21** | +117.54 | 0.3087 | 3.813 → 1.187, **×0.3112** |
+| touchscreen, slow spread, 1.80 s | 84 × `touchmove` (2 touches), **0 `wheel`, 0 `gesture*`** | — | — | — | 1.187 → 5.00 |
+| touchscreen, quick pinch, 0.56 s | 24 × the same | — | — | — | 5.00 → 0.893 |
+
+| mouse, ctrl + one notch | OS setting | arrives as | read as | document |
+|---|---|---|---|---|
+| up / down | 3 lines (the Windows default) | mode 0, `deltaY` ∓**90.909** | notch (≥ `NOTCH_MIN_PIXELS`) | ×1.1045 / ×0.9054 |
+| up / down | 1 line | mode 0, ∓**30.303** | 1.0101 *fractional* ticks | ×1.1045 / ×0.9054 |
+| up / down | one screen at a time | mode **2**, ∓**0.364** | **0.364 ticks — nothing** | **×1, ×1, ×1, ×1, ×1** |
+| up / down | one screen, page zoom ~91% (dpr 2.5) | mode 2, ∓**0.381** | — | — |
+
+Four findings, and the third was a live bug.
+
+**The trackpad gain is off on Windows, because the discriminator means something else here.**
+`TRACKPAD_PINCH_GAIN` is gated on `navigator.maxTouchPoints === 0` — true on a Mac, where it
+reads as "no touchscreen, so these `gesture*`/ctrl-wheel frames are a trackpad". This machine
+reports `maxTouchPoints` **10** and `(pointer: coarse)` **false**, so the two discriminators
+disagree, and the trackpad took the touch branch: the slow spread moved the document ×2.5395
+against fingers of ×2.5666 — **fingers¹, not fingers³**. Blink encodes the pinch identically to
+the Mac (sub-5 px ctrl-wheel frames at ~60 Hz), so the encoding is not what differs; only the
+gate is. `(pointer: coarse)` is the discriminator that would get both platforms right, and
+`PLAN.md` §19d records why the gain was nonetheless left alone.
+
+**The quick-pinch follow window holds on a third platform.** Frames of up to 24.21 px sit above
+`PINCH_MAX_PIXELS` and below `NOTCH_MIN_PIXELS`; without `PINCH_FOLLOW_MS` they would have gone
+through the `PIXELS_PER_TICK` band as 117.54/30 ≈ 3.9 ticks and zoomed ×0.69 against fingers of
+×0.3087. Measured ×0.3112 — 0.8% off the fingers, inside pdfjs's hundredth-rounding.
+
+**"One screen at a time" sent a *fractional page*, and the document did not move at all.**
+Windows' third wheel setting switches Blink to `deltaMode` 2, and the delta is not 1 page but
+**0.364** — 1/2.75, the display scale. `readWheel` treated a sub-1 line-or-page delta as a
+fraction to accumulate, on the reasoning that "a fractional line is nothing any device is known
+to send", so one 10% step cost three notches; and since `createTickAccumulator` drops its carry
+on a reversal, a reader alternating in and out never reached 1.0 and the scale never changed
+once in five notches. Fixed by reading a page-mode event as one notch at any magnitude — a
+fraction of a screenful is still one wheel click — while a fractional *line* keeps accumulating,
+since Gecko is the only engine that reports lines and does not divide by the backing scale (the
+Retina table above). Verified on the same machine after the fix: ×1.101 in, ×0.911 out, one
+notch each. The zoomed row is why the fix cannot be "round 0.364 up": at ~91% page zoom the same
+notch arrived as 0.381 (1/2.625, near but not equal to 1/dpr), so the magnitude is not a constant
+to special-case.
+
+**A Windows notch is proportional to the lines-per-notch setting, but the base is not 100.**
+90.909 px at 3 lines and 30.303 at 1 — exactly ⅓, so the setting is a multiplier as this file
+said, but of about 30 CSS px per line rather than of 100. Both clear `NOTCH_MIN_PIXELS` only at
+the default: at 1 line a notch is 30.303 px, *below* 40, and reaches one step through the
+`PIXELS_PER_TICK` band instead (30.303/30 = 1.0101 ticks, with 0.0101 carried). Same outcome,
+different rule, and it holds only because 30.303 lands just above `PIXELS_PER_TICK`. On a
+display where the per-line value falls under 30 the first notch would bank a fraction and zoom
+nothing — unmeasured, and the reason `PIXELS_PER_TICK` should not be raised.
+
+> **The browser could not be identified from inside the page.** All of the above was recorded
+> believing it was Chrome: `navigator.userAgent` says `Chrome/152.0.0.0` and
+> `navigator.userAgentData.brands` lists `Google Chrome 152` and `Chromium 152`, with nothing
+> naming Vivaldi. Only the user's own remark — that ctrl-minus steps by 5%, which Chrome does
+> not do — revealed it. Vivaldi is Blink and the page-mode delta is Blink's, but **these rows
+> are unconfirmed in Chrome or Edge**, and a browser name obtained from a UA string is a guess
+> wherever this file states one.
 
 **`preventDefault` needs a non-passive listener.** `{ passive: true }` (or the default, for
 `wheel`/`touchmove`, in every current engine) silently ignores the call, so the document zooms

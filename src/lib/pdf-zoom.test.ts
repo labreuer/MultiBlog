@@ -28,6 +28,12 @@ import {
 const wheel = (deltaY: number, deltaMode = 0, deltaX = 0): WheelIntent =>
   readWheel({ deltaMode, deltaX, deltaY });
 
+/** The tick count of an intent that must be one, so a test reads as arithmetic rather than a cast. */
+const readTicks = (intent: WheelIntent): number => {
+  assert.equal(intent.kind, "ticks");
+  return intent.kind === "ticks" ? intent.ticks : Number.NaN;
+};
+
 test("ctrl and ⌘ both mean zoom; a bare wheel means scroll", () => {
   assert.ok(wheelIsZoom({ ctrlKey: true, metaKey: false }));
   assert.ok(wheelIsZoom({ ctrlKey: false, metaKey: true }));
@@ -43,6 +49,22 @@ test("one notch is one tick, whatever the engine and the OS made of it", () => {
   }
   assert.deepEqual(wheel(-100), { kind: "ticks", ticks: 1 });
   assert.deepEqual(wheel(-3, 1), { kind: "ticks", ticks: 1 });
+});
+
+test("a page-mode event is one notch however small Blink made it", () => {
+  // Measured 2026-09-15, Chromium 152 on Windows 11 set to "one screen at a
+  // time" at 275% display scaling: `deltaMode` 2, `deltaY` ±0.364 — one page
+  // divided by the display scale (docs/PDF.md §10c). Read as a fraction it took
+  // three notches to make a step, and none at all if the reader alternated.
+  assert.deepEqual(wheel(0.364, 2), { kind: "ticks", ticks: -1 });
+  assert.deepEqual(wheel(-0.364, 2), { kind: "ticks", ticks: 1 });
+  // The same event through the accumulator moves the document on the first
+  // notch, and a reversal undoes exactly it rather than banking nothing.
+  const accumulate = createTickAccumulator();
+  assert.equal(accumulate(readTicks(wheel(-0.364, 2))), 1);
+  assert.equal(accumulate(readTicks(wheel(0.364, 2))), -1);
+  // A fractional *line* still accumulates — no engine is known to send one.
+  assert.deepEqual(wheel(0.364, 1), { kind: "ticks", ticks: -0.364 });
 });
 
 test("a tick is pdfjs's own step, in both directions", () => {

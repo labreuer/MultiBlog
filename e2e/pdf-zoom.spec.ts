@@ -146,23 +146,41 @@ test.describe("pdf zoom gestures", () => {
 
     // One notch, in every unit and at every magnitude an engine reports it:
     // Firefox's three lines, a page, Chrome on Linux (53), Windows at the
-    // default setting (100), Windows at six lines per notch (200), and a
-    // wheel that has been flicked (900).
+    // default setting (90.909 at 275% scaling, 100 unscaled), Windows at one
+    // line per notch (30.303), and a wheel that has been flicked (900).
     oneStepIn(await ratio({ deltaY: -3, deltaMode: 1, ctrlKey: true }));
     oneStepOut(await ratio({ deltaY: 3, deltaMode: 1, ctrlKey: true }));
     oneStepIn(await ratio({ deltaY: -1, deltaMode: 2, ctrlKey: true }));
-    for (const px of [53, 100, 200, 900]) {
+
+    // A *fraction* of a page, which is what Windows set to "one screen at a
+    // time" actually sends: Blink divides the page delta by devicePixelRatio,
+    // so at 275% scaling one notch is 0.364 of a page (docs/PDF.md §10c,
+    // measured 2026-09-15). Read as a fraction it took three notches to move
+    // the document and none at all if the reader alternated, which is what
+    // this row would have caught.
+    oneStepIn(await ratio({ deltaY: -0.364, deltaMode: 2, ctrlKey: true }));
+    oneStepOut(await ratio({ deltaY: 0.364, deltaMode: 2, ctrlKey: true }));
+
+    for (const px of [30.303, 53, 90.909, 200, 900]) {
       oneStepIn(await ratio({ deltaY: -px, deltaMode: 0, ctrlKey: true }));
       oneStepOut(await ratio({ deltaY: px, deltaMode: 0, ctrlKey: true }));
     }
 
     // A trackpad pinch frame: a couple of pixels with no sideways component,
-    // on the continuous curve rather than a tick. Headless desktop engines
-    // report no touch points, so the trackpad gain applies. Computed from the
-    // constant so retuning the feel never means retuning this bound; the band
-    // is pdfjs's hundredth-rounding of the scale.
+    // on the continuous curve rather than a tick. Computed from the constant
+    // so retuning the feel never means retuning this bound; the band is
+    // pdfjs's hundredth-rounding of the scale.
+    //
+    // **The gain is asked of the page, not assumed.** It is gated on
+    // `navigator.maxTouchPoints === 0` (use-pdf-zoom-gestures.ts), which is a
+    // fact about the *machine* rather than the engine: this same Chromium
+    // reports 0 on a headless Linux box and 10 on a Windows touchscreen
+    // laptop, where the pinch takes the ungained branch and this assertion
+    // failed on a build with nothing wrong with it (docs/PDF.md §10c,
+    // 2026-09-15).
+    const pinchGain = (await page.evaluate(() => navigator.maxTouchPoints)) === 0 ? TRACKPAD_PINCH_GAIN : 1;
     const pinch = await ratio({ deltaY: -2, deltaMode: 0, ctrlKey: true });
-    const expectedPinch = Math.exp((2 * TRACKPAD_PINCH_GAIN) / 100);
+    const expectedPinch = Math.exp((2 * pinchGain) / 100);
     expect(pinch).toBeGreaterThan(Math.max(1.0, expectedPinch - 0.02));
     expect(pinch).toBeLessThan(expectedPinch + 0.02);
 
@@ -177,7 +195,7 @@ test.describe("pdf zoom gestures", () => {
       { deltaY: -2, deltaMode: 0, ctrlKey: true },
       { deltaY: -72, deltaMode: 0, ctrlKey: true },
     ]);
-    const expectedBurst = expectedPinch * Math.min(MAX_STEP_IN, Math.exp((72 * TRACKPAD_PINCH_GAIN) / 100));
+    const expectedBurst = expectedPinch * Math.min(MAX_STEP_IN, Math.exp((72 * pinchGain) / 100));
     expect(burst).toBeGreaterThan(expectedBurst - 0.03);
     expect(burst).toBeLessThan(expectedBurst + 0.03);
 

@@ -75,13 +75,22 @@ const PINCH_MAX_PIXELS = 5;
  * the OS multiplied it by.
  *
  * This is the rule that gives Chrome and Firefox the same step per notch, and
- * it is the one pdf.js applies only to line mode (docs/PDF.md §10c). Chrome
- * reports a notch as 100 pixels on Windows *times the "lines per notch"
- * setting*, 53 on Linux, and a whole screen when Windows is set to scroll by
- * pages; Firefox reports 3 lines. Dividing any of those by a pixels-per-tick
- * constant makes one notch worth one, three or thirty steps depending on the
- * machine — the bug pdf.js still has open for Chrome (mozilla/pdf.js#16325).
- * A delta this large is a notch; a notch is a tick.
+ * it is the one pdf.js applies only to line mode (docs/PDF.md §10c). Blink
+ * reports a Windows notch as about 30 pixels per line of the OS's "lines per
+ * notch" setting — 90.909 at the default 3 and 30.303 at 1, measured
+ * 2026-09-15 at 275% display scaling — 53 on Linux, and a *fractional page*
+ * in `deltaMode` 2 when Windows is set to scroll by screens; Firefox reports
+ * 3 lines. Dividing any of those by a pixels-per-tick constant makes one
+ * notch worth one, three or thirty steps depending on the machine — the bug
+ * pdf.js still has open for Chrome (mozilla/pdf.js#16325). A delta this large
+ * is a notch; a notch is a tick.
+ *
+ * **Only the default setting clears this threshold.** At 1 line a notch is
+ * 30.303 px and reaches one whole step through `PIXELS_PER_TICK` instead
+ * (30.303/30 = 1.0101 ticks), which is the same outcome by a different rule
+ * and holds only because the two numbers are that close. Raising
+ * `PIXELS_PER_TICK` above 30 would make the first notch at that setting zoom
+ * nothing.
  */
 const NOTCH_MIN_PIXELS = 40;
 
@@ -152,10 +161,26 @@ export function readWheel(event: WheelDeltas, pinchGain = 1, continuingPinch = f
   const deltaY = event.deltaY;
   if (!Number.isFinite(deltaY) || deltaY === 0) return { kind: "none" };
 
-  if (deltaMode === 1 || deltaMode === 2) {
-    // Lines or pages: one notch per event, whatever the OS calls a notch.
-    // A fractional line is nothing any device is known to send; accumulate
-    // rather than round it to a whole step.
+  if (deltaMode === 2) {
+    // A page is one notch at any magnitude, because Blink divides a page-mode
+    // delta by the display scale as it does a pixel one: on Windows set to
+    // "one screen at a time", Chromium 152 sends `deltaMode` 2 with `deltaY`
+    // ±0.364 at 275% scaling — 1/2.75, measured 2026-09-15 (docs/PDF.md §10c,
+    // which also says why the browser there is named Vivaldi and not Chrome).
+    // Accumulated as a fraction that costs three notches per step, and since
+    // `createTickAccumulator` drops its carry on a reversal, a reader who
+    // alternates in and out never reaches one and the document never moves.
+    // No device sends a *meaningfully* fractional page: a fraction of a
+    // screenful is still one wheel click.
+    return { kind: "ticks", ticks: -Math.sign(deltaY) };
+  }
+
+  if (deltaMode === 1) {
+    // Lines: one notch per event, whatever the OS calls a notch. A fractional
+    // *line* is still nothing any device is known to send — Gecko, the only
+    // engine that reports lines, does not divide by the backing scale
+    // (docs/PDF.md §10c's Retina measurement) — so that one accumulates
+    // rather than rounding up to a whole step.
     return { kind: "ticks", ticks: Math.abs(deltaY) >= 1 ? -Math.sign(deltaY) : -deltaY };
   }
 

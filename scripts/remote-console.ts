@@ -36,6 +36,18 @@
 // renders a <script> for it when REMOTE_CONSOLE_SRC is set, dev builds only.
 // Set that and every page of the app carries the console, navigation included.
 //
+// **Use the same hostname the app is served from.** A page on
+// `http://localhost:3000` given a script from `http://127.0.0.1:4322` loads it
+// and then registers nothing: Chromium's local-network rules treat the poll as
+// a cross-origin request into the local address space and drop it, with no
+// error on the page and no request at the relay — it looks exactly like the
+// relay being down, or like the injection not having happened. Measured
+// 2026-09-15 on Chromium 152/Windows: `127.0.0.1:4322` from a `localhost:3000`
+// page never connected across four page loads, and the same page connected
+// within a second once the URL said `localhost:4322`. The banner prints a LAN
+// address because a phone needs one; for a desktop browser on this machine,
+// match the app's own hostname instead.
+//
 // **Security, stated plainly rather than assumed.** This is an arbitrary-code
 // channel into a browser, so:
 //   - `/eval` and `/status` are refused from anything but loopback. Only this
