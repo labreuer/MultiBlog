@@ -15,7 +15,7 @@
 // SDK ("this SDK is not supported by the compiler", a 6.0.3.1.5 vs 6.0.3.1.10
 // toolchain skew that Command Line Tools ships with), while clang is fine.
 //
-//   clang -framework ApplicationServices scripts/native-wheel.c -o /tmp/native-wheel
+//   clang -framework ApplicationServices scripts/macos/native-wheel.c -o /tmp/native-wheel
 //   /tmp/native-wheel <x> <y> <line|pixel> <delta> [ctrl|meta|none]
 //
 // `x`/`y` are screen points (CSS px at any Retina factor). Aim from the page:

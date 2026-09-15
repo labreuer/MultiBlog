@@ -54,7 +54,7 @@
 // Known limits, none of which a bigger implementation would fix:
 //   - It cannot see the screen. Numbers only.
 //   - It cannot produce a *native* gesture. (On the Mac itself, cliclick and
-//     scripts/native-wheel.c post real mouse and wheel events into whatever
+//     scripts/macos/native-wheel.c post real mouse and wheel events into whatever
 //     desktop browser is open — e2e/MACOS.md.) iOS text selection is WebKit's
 //     gesture recognizer plus UIKit drag handles above the page, reachable by
 //     no amount of dispatchEvent — the class docs/PDF.md §10 already calls
@@ -256,8 +256,14 @@ ${RUN_SRC}
   }
 
   function post(path, body) {
+    var text = JSON.stringify(body);
+    // keepalive lets a result outlive the page that produced it (a navigating
+    // eval), but browsers cap keepalive bodies at 64 KB and *silently drop*
+    // anything bigger — the eval then times out with the page still alive and
+    // answering. Above the cap, post normally; a large result never comes from
+    // a navigating page anyway.
     return fetch(base + path + "?token=" + encodeURIComponent(token), {
-      method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify(body), keepalive: true,
+      method: "POST", headers: { "content-type": "text/plain" }, body: text, keepalive: text.length < 60000,
     });
   }
 

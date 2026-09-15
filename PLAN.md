@@ -6966,7 +6966,7 @@ engines (chromium, firefox, webkit; dev and prod targets): a held-ctrl notch of 
 px, ⌘ in place of ctrl, dispatched line and page events, the 2 px pinch frame and the fractional
 carry all behave identically and the page zoom stays at 1 — docs/PDF.md §10c has the table. What
 no engine there could show — Playwright's Firefox sends pixels — was then measured on a **real
-Firefox 155 on a Mac** the same day, with native wheel events (`scripts/native-wheel.c`,
+Firefox 155 on a Mac** the same day, with native wheel events (`scripts/macos/native-wheel.c`,
 e2e/MACOS.md): a notch arrives as **one line** (not the three Linux and Windows send), ctrl and ⌘
 each give exactly one ×1.1 step, the browser's own zoom never fires, and the read-order shim is
 real and on a Mac costs a whole notch rather than a mis-sized one — docs/PDF.md §10c has that
@@ -6991,9 +6991,38 @@ screen, and a *touch* pinch must keep the page under the fingers. The log also c
 firing a second `gesturestart` in the tail of a pinch, carrying the gesture's final scale
 (0.84): the handler used to reset its baseline to 1 on every start, which would have replayed
 the whole gesture as one more step had a `gesturechange` followed, so the baseline is now the
-start event's own `scale`. Still unverified: a trackpad pinch in Chrome or Firefox on a Mac
-(the wheel branch is at parity by arithmetic, not by measurement), Windows' lines-per-notch
-setting, and the iOS half above.
+start event's own `scale`. The wheel branch was then measured the same evening on a real
+Firefox 155 and Playwright's Chromium 151 on the same trackpad (docs/PDF.md §10c): a pinch is
+ctrl-wheel only in both, a slow spread lands every frame in the pinch band and the document
+moves by fingers^gain exactly, so the parity is now measured rather than arithmetic. The same
+run found the gap: a **quick** pinch delivers 12–72 px frames, which `readWheel` read as mouse
+notches, so a fast pinch zoomed *less* than a slow one and the gain never applied. The fix is a
+rule about time, not size, because size is exactly what a large pinch frame shares with a notch:
+`createWheelReader` keeps a frame on the pinch curve while it arrives within `PINCH_FOLLOW_MS`
+of the last pinch frame, and the sub-5 px band becomes only how a pinch *opens*. A wider band
+was rejected because it would hand every accelerated mouse to the exponential; the window's
+cost is a notch rolled within a quarter second of lifting the fingers, which reads as one
+clamped pinch frame instead of one tick. Still unverified: Windows' lines-per-notch setting,
+and the iOS half above.
+
+**Safari's gesture path loses frames under load, and the gain was tuned on it** (2026-09-15). With the follow window in, the user felt Firefox zoom far more than Safari. Measured
+against the OS's own magnify stream (docs/PDF.md §10c; the tap, the poster and the bare page
+are e2e/MACOS.md's), the two wheel encodings are exact and lossless — Gecko and Blink
+coalesce dropped frames by summing — while Safari's `gesturechange` carries only its own
+frame's magnification and WebKit discards the frames a busy main thread could not take. On
+`/pdf/[slug]`, one identical posted pinch moved the document ×3.3 in Firefox and Chromium and
+×1.35 in Safari; on an idle page Safari delivers every frame. So `TRACKPAD_PINCH_GAIN` was set
+by feel against a path that was delivering a fraction of each pinch, and the fraction depends
+on how busy pdfjs is. **Decided: leave it.** The machine it was measured on is a 2019
+two-core MacBook Air, and the loss is that machine's main thread not keeping up with pdfjs at
+trackpad cadence; on hardware that keeps up, Safari delivers every frame (the bare page shows
+it does when the page is cheap) and the three engines agree. The options weighed and not
+taken: a CSS transform on the viewer during the gesture with one real `updateScale` at
+`gestureend`, which is how native pinch-zoom is usually done and would make every frame cheap
+enough for any machine; estimating the lost magnification on Safari from the delivered
+frames' spacing, a velocity guess wrong whenever the fingers change speed; and a per-engine
+gain, which papers over a loss that varies with load. If the transform path is ever wanted,
+the measurement to repeat is the synthetic pinch on the real page, e2e/MACOS.md.
 
 **The zoom dropdown had to become a readout as well as a control.** A gesture lands on any
 scale it likes, and a `<select>` whose value matches no option renders *blank* — so

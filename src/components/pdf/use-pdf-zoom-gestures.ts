@@ -4,9 +4,9 @@ import { useEffect, type RefObject } from "react";
 import {
   TRACKPAD_PINCH_GAIN,
   createTickAccumulator,
+  createWheelReader,
   gestureStepFactor,
   pinchScaleFactor,
-  readWheel,
   tickScaleFactor,
   touchDistance,
   touchMidpoint,
@@ -106,12 +106,15 @@ export function usePdfZoomGestures(handleRef: RefObject<PdfViewerHandle | null>,
     // of notches — and reads the event's properties in the order that keeps
     // Firefox honest (src/lib/pdf-zoom.ts). A notch is one tick, on every
     // engine and whatever the OS multiplied the delta by; fractional ticks
-    // from fine-grained devices are carried until they make a whole one.
+    // from fine-grained devices are carried until they make a whole one. The
+    // reader holds the one piece of state a pinch needs — when its last frame
+    // was — so a quick pinch's large frames stay pinch frames (PINCH_FOLLOW_MS).
+    const readWheelFrame = createWheelReader();
     const accumulateTicks = createTickAccumulator();
     const onWheel = (event: WheelEvent) => {
       if (!wheelIsZoom(event)) return;
       event.preventDefault();
-      const intent = readWheel(event, pinchGain);
+      const intent = readWheelFrame(event, pinchGain);
       const origin: [number, number] = [event.clientX, event.clientY];
       if (intent.kind === "pinch") {
         zoomBy(intent.factor, origin);

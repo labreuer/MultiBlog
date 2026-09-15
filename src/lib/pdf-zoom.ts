@@ -44,10 +44,12 @@ export const TRACKPAD_PINCH_GAIN = 3;
 
 /**
  * Larger is gentler. 100 makes a ctrl-wheel pinch frame track the fingers
- * exactly: Firefox encodes a macOS pinch as `-100 * log(1 + magnification)`
- * and Chrome something close. Leave the tracking exact here and put any
- * "faster than the fingers" into `TRACKPAD_PINCH_GAIN`, so Safari's gesture
- * path and this one stay at the same rate.
+ * exactly: for Apple's per-event magnification M, Gecko sends
+ * `-100 * M` and Blink `-100 * log(1 + M)` — the same to first order, both
+ * verified against the OS's own event stream (docs/PDF.md §10c). Leave the
+ * tracking exact here and put any "faster than the fingers" into
+ * `TRACKPAD_PINCH_GAIN`, so Safari's gesture path and this one stay at the
+ * same rate.
  */
 const WHEEL_SOFTNESS = 100;
 
@@ -58,6 +60,13 @@ const WHEEL_SOFTNESS = 100;
  * puts a pinch frame under about five pixels. No mouse in pixel mode sends
  * less than that per event except a macOS mouse at the bottom of its
  * acceleration curve — which pdf.js accepts too.
+ *
+ * Measured true for a *slow* pinch and false for a quick one (docs/PDF.md
+ * §10c, Firefox 155 and Chromium 151 on a MacBook trackpad): a fast gesture
+ * packs its magnification into a few 12–72 px frames. The band is not
+ * widened for them — that would give every accelerated mouse the
+ * exponential — they are caught by *time* instead: `createWheelReader`
+ * keeps a frame inside a pinch that opened within `PINCH_FOLLOW_MS`.
  */
 const PINCH_MAX_PIXELS = 5;
 
@@ -131,8 +140,14 @@ export type WheelIntent =
  *
  * `pinchGain` only touches the pinch branch — a notch is a tick whatever the
  * device — and defaults to exact finger tracking.
+ *
+ * `continuingPinch` says a pinch is already under way (`createWheelReader`
+ * decides that from timing), in which case a pixel-mode frame of any size
+ * with no sideways component is one more pinch frame rather than a notch —
+ * a quick pinch's frames are 12–72 px. Line and page events are notches
+ * regardless: no trackpad sends those.
  */
-export function readWheel(event: WheelDeltas, pinchGain = 1): WheelIntent {
+export function readWheel(event: WheelDeltas, pinchGain = 1, continuingPinch = false): WheelIntent {
   const deltaMode = event.deltaMode;
   const deltaY = event.deltaY;
   if (!Number.isFinite(deltaY) || deltaY === 0) return { kind: "none" };
@@ -145,12 +160,44 @@ export function readWheel(event: WheelDeltas, pinchGain = 1): WheelIntent {
   }
 
   const magnitude = Math.abs(deltaY);
-  if (magnitude < PINCH_MAX_PIXELS && event.deltaX === 0) {
+  if ((magnitude < PINCH_MAX_PIXELS || continuingPinch) && event.deltaX === 0) {
     const gain = Number.isFinite(pinchGain) && pinchGain > 0 ? pinchGain : 1;
     return { kind: "pinch", factor: clampScaleFactor(Math.exp((-deltaY * gain) / WHEEL_SOFTNESS)) };
   }
   if (magnitude >= NOTCH_MIN_PIXELS) return { kind: "ticks", ticks: -Math.sign(deltaY) };
   return { kind: "ticks", ticks: -deltaY / PIXELS_PER_TICK };
+}
+
+/**
+ * How long after a pinch frame the next pixel-mode frame is still that pinch.
+ *
+ * A quick trackpad pinch packs its magnification into a few large frames —
+ * 12–38 px in Firefox, 72 px in Chromium (docs/PDF.md §10c) — which by size
+ * alone are mouse notches. What separates them is timing: within a gesture
+ * frames arrive 5–79 ms apart, and the gap between gestures was 1.9 s. So a
+ * gesture that *opened* as a pinch (a sub-`PINCH_MAX_PIXELS` frame, which is
+ * how every measured pinch begins) stays one while frames keep coming. The
+ * cost of the window is a mouse notch rolled this soon after lifting the
+ * fingers, which reads as a pinch frame clamped to `MAX_STEP_IN`/`OUT` rather
+ * than one tick — the cheaper mistake by far.
+ */
+export const PINCH_FOLLOW_MS = 250;
+
+/**
+ * `readWheel` with the timing state a pinch needs, one per listener.
+ *
+ * Takes the event's own `timeStamp` rather than the clock, so a dispatched
+ * event and a real one are judged the same way and a test can say when a
+ * frame happened.
+ */
+export function createWheelReader(): (event: WheelDeltas & { readonly timeStamp: number }, pinchGain?: number) => WheelIntent {
+  let lastPinchAt = Number.NEGATIVE_INFINITY;
+  return (event, pinchGain = 1) => {
+    const continuing = event.timeStamp - lastPinchAt < PINCH_FOLLOW_MS;
+    const intent = readWheel(event, pinchGain, continuing);
+    if (intent.kind === "pinch") lastPinchAt = event.timeStamp;
+    return intent;
+  };
 }
 
 /**

@@ -3,10 +3,12 @@ import { test } from "node:test";
 import {
   MAX_STEP_IN,
   MAX_STEP_OUT,
+  PINCH_FOLLOW_MS,
   TRACKPAD_PINCH_GAIN,
   WHEEL_TICK_FACTOR,
   clampScaleFactor,
   createTickAccumulator,
+  createWheelReader,
   gestureStepFactor,
   isNamedScale,
   pinchScaleFactor,
@@ -99,6 +101,39 @@ test("the band between pinch and notch is fractional ticks at pdf.js's rate", ()
   assert.deepEqual(wheel(15), { kind: "ticks", ticks: -0.5 });
   assert.deepEqual(wheel(-30), { kind: "ticks", ticks: 1 });
   assert.deepEqual(wheel(0.25, 1), { kind: "ticks", ticks: -0.25 });
+});
+
+test("a large frame inside a pinch is a pinch frame, clamped; the same frame alone is a notch", () => {
+  // The quick-pinch shape measured on a MacBook trackpad (docs/PDF.md §10c):
+  // Chromium sent +2.1, +15, +72, +12 px at 0, 79, 96, 107 ms. By size the
+  // last three are notches; by timing they are the same gesture.
+  const read = createWheelReader();
+  const frame = (deltaY: number, timeStamp: number, deltaX = 0) => read({ deltaMode: 0, deltaX, deltaY, timeStamp });
+  // A notch with no pinch before it is still a notch: nothing has opened.
+  assert.deepEqual(frame(72, 0), { kind: "ticks", ticks: -1 });
+  const opening = frame(2.1, 1000);
+  assert.equal(opening.kind, "pinch");
+  const mid = frame(15, 1079);
+  assert.ok(mid.kind === "pinch" && Math.abs(mid.factor - Math.exp(-0.15)) < 1e-12, "15 px inside a pinch takes the curve, not half a tick");
+  const big = frame(72, 1096);
+  assert.ok(big.kind === "pinch" && big.factor === MAX_STEP_OUT, "72 px inside a pinch is a pinch frame at the clamp, not one tick");
+  // Each pinch frame extends the window, so a sustained fast pinch never falls out of it.
+  assert.equal(frame(12, 1096 + PINCH_FOLLOW_MS - 1).kind, "pinch");
+  // A sideways component is still a ctrl-scroll, even mid-pinch.
+  assert.deepEqual(frame(15, 1350, 1), { kind: "ticks", ticks: -0.5 });
+  // A tick does not extend the window; after it, the same 72 px is a notch again.
+  assert.deepEqual(frame(72, 1350 + PINCH_FOLLOW_MS), { kind: "ticks", ticks: -1 });
+  // Line and page events are never pinch frames, inside a window or not.
+  frame(2, 5000);
+  assert.deepEqual(read({ deltaMode: 1, deltaX: 0, deltaY: 3, timeStamp: 5010 }), { kind: "ticks", ticks: -1 });
+});
+
+test("the reader passes the gain through and applies it to a continuing frame", () => {
+  const read = createWheelReader();
+  read({ deltaMode: 0, deltaX: 0, deltaY: -2, timeStamp: 0 }, 2);
+  const next = read({ deltaMode: 0, deltaX: 0, deltaY: -8, timeStamp: 20 }, 2);
+  // exp(8 × 2 / 100) = 1.174, under the clamp — the gain, not exact tracking.
+  assert.ok(next.kind === "pinch" && Math.abs(next.factor - Math.exp(0.16)) < 1e-12);
 });
 
 test("deltaMode is read before deltaY — Firefox switches modes on the other order", () => {

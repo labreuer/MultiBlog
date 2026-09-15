@@ -1,6 +1,6 @@
 import { test, expect, signIn, gotoOk } from "./fixtures";
 import { ADMIN_EMAIL, createTestFile, deleteTestFile, type TestFile } from "./db";
-import { TRACKPAD_PINCH_GAIN } from "@/lib/pdf-zoom";
+import { MAX_STEP_IN, PINCH_FOLLOW_MS, TRACKPAD_PINCH_GAIN } from "@/lib/pdf-zoom";
 
 // PLAN.md §19d — pinch and ctrl-wheel zoom the document, not the page.
 //
@@ -103,7 +103,7 @@ test.describe("pdf zoom gestures", () => {
   // Every shape a wheel event arrives in, and what each is worth. Playwright's
   // own `mouse.wheel` is pixel-mode in all three engines — its Firefox included,
   // so a real Gecko mouse's *line*-mode notch (measured 2026-09-14, docs/PDF.md
-  // §10c) is only reachable here by dispatching; on a Mac, `scripts/native-wheel.c`
+  // §10c) is only reachable here by dispatching; on a Mac, `scripts/macos/native-wheel.c`
   // posts the real thing (e2e/MACOS.md). These are untrusted events, so the
   // page-zoom half is not in question here; what is being checked is the
   // classification in `readWheel` and the carry in `createTickAccumulator`,
@@ -115,19 +115,25 @@ test.describe("pdf zoom gestures", () => {
 
     /** The fields our handler reads; narrower than WheelEventInit so it survives `evaluate`'s serialisation types. */
     type Wheel = { deltaY: number; deltaMode: number; ctrlKey?: boolean; metaKey?: boolean };
-    /** Dispatches one ctrl-wheel and returns scale-after over scale-before, once the frame has run. */
-    const ratio = async (init: Wheel) => {
+    /**
+     * Dispatches ctrl-wheels back to back — one evaluate, so they share a
+     * timestamp neighbourhood the way a gesture's frames do — and returns
+     * scale-after over scale-before, once the frame has run.
+     */
+    const ratioOf = async (inits: Wheel[]) => {
       const before = await currentScale(page);
-      await page.evaluate((init) => {
-        document
-          .querySelector("[data-pdf-container]")!
-          .dispatchEvent(new WheelEvent("wheel", { ...init, bubbles: true, cancelable: true, clientX: 400, clientY: 400 }));
+      await page.evaluate((inits) => {
+        const container = document.querySelector("[data-pdf-container]")!;
+        for (const init of inits) {
+          container.dispatchEvent(new WheelEvent("wheel", { ...init, bubbles: true, cancelable: true, clientX: 400, clientY: 400 }));
+        }
         // The handler coalesces into one requestAnimationFrame; two frames is
         // past it, whether or not it changed anything.
         return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      }, init);
+      }, inits);
       return (await currentScale(page)) / before;
     };
+    const ratio = (init: Wheel) => ratioOf([init]);
     // pdfjs rounds the scale to a hundredth, hence bands rather than 1.1 and 1/1.1.
     const oneStepIn = (r: number) => {
       expect(r).toBeGreaterThan(1.08);
@@ -160,8 +166,25 @@ test.describe("pdf zoom gestures", () => {
     expect(pinch).toBeGreaterThan(Math.max(1.0, expectedPinch - 0.02));
     expect(pinch).toBeLessThan(expectedPinch + 0.02);
 
+    // A quick pinch's frames are big — a real Chromium sent 72 px in one
+    // (docs/PDF.md §10c) — and by size alone that is a notch. Inside the
+    // follow window it is a pinch frame at the clamp instead, so a pinch
+    // frame and a 72 px frame in one burst multiply: the curve, then the
+    // clamp. The wait first puts the previous pinch frame out of the window,
+    // so the burst's own opening frame is what opens it.
+    await page.waitForTimeout(PINCH_FOLLOW_MS * 2);
+    const burst = await ratioOf([
+      { deltaY: -2, deltaMode: 0, ctrlKey: true },
+      { deltaY: -72, deltaMode: 0, ctrlKey: true },
+    ]);
+    const expectedBurst = expectedPinch * Math.min(MAX_STEP_IN, Math.exp((72 * TRACKPAD_PINCH_GAIN) / 100));
+    expect(burst).toBeGreaterThan(expectedBurst - 0.03);
+    expect(burst).toBeLessThan(expectedBurst + 0.03);
+
     // The band between: fractional ticks that carry until they make a whole
-    // one. Three of 10px are a third each.
+    // one. Three of 10px are a third each. After the window, or a 10 px frame
+    // this soon after a pinch frame would still be the pinch.
+    await page.waitForTimeout(PINCH_FOLLOW_MS * 2);
     expect(await ratio({ deltaY: -10, deltaMode: 0, ctrlKey: true })).toBe(1);
     expect(await ratio({ deltaY: -10, deltaMode: 0, ctrlKey: true })).toBe(1);
     oneStepIn(await ratio({ deltaY: -10, deltaMode: 0, ctrlKey: true }));
