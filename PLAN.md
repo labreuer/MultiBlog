@@ -7592,3 +7592,184 @@ old fields are `filter`s over the new one.
 the tagger and `/tag/[slug]` instead of a seventh visibility tier. The four arc legs are
 all live in the action and authz layer, including annotations, though only three have chip UI;
 the fourth is one `canUserTagTarget` branch rather than a hole to fill in later.
+
+## 21. Dated post URLs (`/yyyy/mm/dd/slug`)
+
+A published post lives at `/[slug]` — a flat, top-level namespace. This section
+moves it to `/yyyy/mm/dd/slug`.
+
+**Nothing needs preserving.** No URL from this app has been published anywhere,
+so there is no external link, bookmark, feed entry or search index to keep
+working. That removes what would normally be the expensive half of this change
+and is worth stating explicitly, because most of the design below would be
+different if it weren't true — in particular there is no need for the flat
+`/[slug]` route to survive as a redirect shim.
+
+### 21a. What actually moves
+
+```
+src/app/[slug]/            →  src/app/[year]/[month]/[day]/[slug]/
+  page.tsx                      the same file, reading four params
+  page.module.css               unchanged
+```
+
+`generateStaticParams` returns `{ year, month, day, slug }` instead of
+`{ slug }`. `revalidate = 60` carries over, and so does the constraint that
+makes it meaningful: this route must not call `auth()`/`cookies()`/`headers()`,
+or — because it *does* have `generateStaticParams` — it throws
+`DYNAMIC_SERVER_USAGE` at build rather than degrading to per-request rendering
+(CACHING.md's 2026-07-23 entry, which is the production crash that taught this).
+
+**No route collisions, and not by luck.** Next resolves a static segment ahead
+of a dynamic one at the same position, so every existing route still wins over
+`/[year]/…`: `/posts/…`, `/api/…`, `/authors/…`, `/doc/…`. The deepest routes
+in the app are already four segments (`posts/[id]/history/[eventId]`,
+`api/avatar/[userId]/[hash]`) and both lead with a static segment, so neither is
+shadowed.
+
+The corollary is that `/[year]/[month]/[day]/[slug]` matches **any** four-segment
+path that isn't claimed by something static — `/a/b/c/d` included. The handler
+therefore has to validate the shape (four digits, two digits, two digits) and
+404 before touching the database, or every garbage four-segment URL costs a
+query.
+
+### 21b. Which date, and in which timezone
+
+**The date is `Post.publishedAt`, and the hard half of keeping it stable is
+already built.** `publishPostFromDoc` (`src/app/actions/posts.ts`) pins it
+across an unpublish/republish:
+
+```ts
+const publishedAt = post.publishedAt && post.publishedAt <= now ? post.publishedAt : now;
+```
+
+and `schedulePostFromDoc` refuses to run while a post is actually live, so a
+live post's date cannot be pushed forward. `unpublishPost` leaves `publishedAt`
+untouched — the comment there already calls it inert. A post that goes live,
+comes down, and goes back up keeps its original URL without anything new being
+written for this section.
+
+**Timezone is the trap, and it is not cosmetic.** `publishedAt` is a
+`timestamp(3)` stored in UTC, but the byline currently renders it with
+`toLocaleDateString()` — *server* local time. If the URL derived from local time
+too, then:
+
+- deploying to a box in a different timezone silently moves the canonical URL of
+  every post published near midnight, with no migration and no error; and
+- `generateStaticParams` (build machine) could disagree with the request handler
+  (runtime) about what a post's path is, which presents as a 404 on a page that
+  demonstrably exists.
+
+So the URL is derived in **UTC, always**. That leaves one visible seam: a post
+published at 21:00 EDT is the 5th in UTC while the byline says the 4th. The fix
+is not to special-case the byline but to make both read from one helper, so they
+cannot disagree:
+
+```ts
+// src/lib/post-path.ts — the single place the post URL shape is written down,
+// the same "one module owns the URL" pattern as src/lib/avatar-url.ts (§17n).
+export function postDateParts(publishedAt: Date): { year: string; month: string; day: string };
+export function postPath(post: { slug: string; publishedAt: Date }): string;
+```
+
+The byline switches to `postDateParts` too. Displaying a UTC date under a UTC
+URL is a real (small) behavior change for readers in western timezones, and is
+the price of a URL that doesn't depend on where the server is.
+
+A **site timezone** setting was considered and rejected for now: it turns a
+derived value into configuration, and configuration that silently rewrites
+every canonical URL when changed is worse than a fixed rule. If it is ever
+wanted, `postDateParts` is the one function it has to reach.
+
+### 21c. Slug uniqueness stays global (for now)
+
+Dated paths make it *possible* to scope slug uniqueness per date, so
+`/2025/01/01/new-year` and `/2026/01/01/new-year` could both keep the clean
+slug. That is genuinely the appeal of dated permalinks — and it is deliberately
+**not** part of this change.
+
+Keeping `Post.slug @unique` global means every piece of existing slug machinery
+survives untouched: `postSlugInUse`, `changePostSlug`, `revertPostSlug`,
+`PostSlugHistory.slug @unique`, `SlugManager`, and the whole
+`REVERT_DISCARD_WINDOW_MS` rule. Going per-date means a composite unique
+constraint, a rewritten `postSlugInUse`, dropping the unique on the history
+table, and rethinking what a history row means when a slug is only unique within
+a day. That is a second change wearing the first one's clothes.
+
+The cost of deferring is that a repeated title still gets a `-2` suffix even
+though the dates would have disambiguated it. That is a cosmetic wart on a rare
+case, and the migration to per-date uniqueness stays available afterwards.
+
+### 21d. What this deletes
+
+`RESERVED_SLUGS` (`src/lib/slug.ts`) exists for exactly one reason: `/[slug]` is
+a top-level catch-all, so a post slugged `posts` or `api` would be shadowed by
+the static route and never resolve. Move posts four segments deep and **that
+entire class of constraint stops existing for posts** — the guard drops out of
+both `uniquePostSlug` and `changePostSlug`, and a post may legitimately be
+slugged `docs`.
+
+It does not become dead code, though, and the file's own comment is wrong about
+why. `src/lib/doc-slug.ts` also imports `RESERVED_SLUGS`, while `slug.ts`'s
+header claims it is "only relevant to post-slug.ts today". Docs live at
+`/doc/[slug]` — nested, with no sibling static routes — so that use looks
+already unnecessary, on the same reasoning the comment gives for author slugs.
+Resolving that (either drop it from `doc-slug.ts` as well, or correct the
+comment) belongs in this pass rather than being inherited as a contradiction
+nobody wants to be the one to touch.
+
+### 21e. Blast radius
+
+Every call site funnels through `postPath`, so the churn is mechanical rather
+than delicate. The list is exhaustive as of 2026-08-05, when this section was first drafted:
+
+- **URL construction — 3 sites.** `src/app/page.tsx` (landing list),
+  `src/app/search/page.tsx`, `src/components/PostsTable.tsx` (the published-date
+  cell links to the public page).
+- **`revalidatePath` — 5 sites.** `src/app/actions/posts.ts` ×3,
+  `src/app/actions/comments.ts` ×2. These are the ones that need more than a
+  find-and-replace: they currently have only `slug` in hand, so
+  `revalidatePublicPaths(postId, slug)` and both comment actions have to fetch
+  `publishedAt` as well.
+- **RSS.** `src/app/rss.xml/route.ts`'s `<link>` and `<guid>`. Changing a `guid`
+  normally re-shows every item in subscribers' readers; here there are no
+  subscribers, which is the whole reason this is cheap to do now rather than
+  later.
+- **`SlugManager` needs no change at all.** It already takes a `urlPrefix` prop
+  (`""` for posts, `/doc` for docs, `/authors` for users) — the prefix simply
+  becomes the post's date path, supplied by `src/app/posts/[id]/slug/page.tsx`.
+- **The route handler** gains segment validation and a canonical redirect: right
+  slug, wrong date → `permanentRedirect` to the real path, reusing the shape of
+  the existing `resolveRedirectSlug` fallback rather than a second mechanism.
+- **e2e — ~13 `page.goto()` sites** across `moderation.spec.ts`,
+  `publish.spec.ts` and `quote-anchoring.spec.ts`. The clean fix is to expose
+  `path` on the `TestPost` fixture (`e2e/db-worker.ts`) so specs stop building
+  URLs by hand — after which most of the diff is `post.slug` → `post.path`.
+
+### 21f. Edge cases to settle before building
+
+1. **Unpublish, then schedule for a future date.** The one path that moves a
+   previously-live post's URL, since `publishedAt` is overwritten with the new
+   `scheduledFor`. Either forbid scheduling a post that has ever been live, or
+   accept that the URL moves. Accepting it is fine today (nothing links in) and
+   the canonical redirect in §21e covers a reader who kept the old tab open.
+2. **Drafts and scheduled posts have no `publishedAt`,** so they have no path at
+   all — which matches the current behavior of 404ing at `/[slug]`. It is not a
+   regression, but `publish.spec.ts` asserts against a draft's URL and therefore
+   needs reshaping rather than a mechanical rename.
+3. **`PostSlugHistory` narrows in meaning.** It records slug changes; a stale
+   *date* is a different kind of miss. Matching on slug alone and ignoring the
+   date segments handles both with one lookup, which is why the canonical
+   redirect and the history fallback should be the same code path.
+
+### 21g. Sizing
+
+Roughly half a day: one new lib module, one route directory move, ~10 mechanical
+call-site edits, the e2e fixture change, and the `RESERVED_SLUGS` cleanup.
+
+**No database migration.** The date is derived from `publishedAt`, which already
+exists and is already stabilized across republish (§21b); slug uniqueness is
+unchanged (§21c). A stored path column was considered and rejected — it would
+freeze the URL against a later edit of `publishedAt`, but it also introduces a
+second source of truth for something the existing publish logic already keeps
+still.
