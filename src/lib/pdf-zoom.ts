@@ -76,21 +76,21 @@ const PINCH_MAX_PIXELS = 5;
  *
  * This is the rule that gives Chrome and Firefox the same step per notch, and
  * it is the one pdf.js applies only to line mode (docs/PDF.md §10c). Blink
- * reports a Windows notch as about 30 pixels per line of the OS's "lines per
- * notch" setting — 90.909 at the default 3 and 30.303 at 1, measured
- * 2026-09-15 at 275% display scaling — 53 on Linux, and a *fractional page*
- * in `deltaMode` 2 when Windows is set to scroll by screens; Firefox reports
- * 3 lines. Dividing any of those by a pixels-per-tick constant makes one
- * notch worth one, three or thirty steps depending on the machine — the bug
- * pdf.js still has open for Chrome (mozilla/pdf.js#16325). A delta this large
- * is a notch; a notch is a tick.
+ * reports a Windows notch as **100 px at the default three-lines setting**,
+ * about 33.3 per line — measured 2026-09-15 at two display scalings, which it
+ * is independent of, and divided by the *page* zoom — 53 on Linux, and a
+ * *fractional page* in `deltaMode` 2 when Windows is set to scroll by
+ * screens; Firefox reports 3 lines. Dividing any of those by a
+ * pixels-per-tick constant makes one notch worth one, three or thirty steps
+ * depending on the machine — the bug pdf.js still has open for Chrome
+ * (mozilla/pdf.js#16325). A delta this large is a notch; a notch is a tick.
  *
  * **Only the default setting clears this threshold.** At 1 line a notch is
- * 30.303 px and reaches one whole step through `PIXELS_PER_TICK` instead
- * (30.303/30 = 1.0101 ticks), which is the same outcome by a different rule
- * and holds only because the two numbers are that close. Raising
- * `PIXELS_PER_TICK` above 30 would make the first notch at that setting zoom
- * nothing.
+ * 33.3 px and reaches one whole step through `PIXELS_PER_TICK` instead (1.11
+ * ticks), which is the same outcome by a different rule and holds only while
+ * the number stays above 30 — at 1 line and 125% page zoom it is 26.7 px,
+ * and the first notch would bank 0.89 of a tick and zoom nothing. So
+ * `PIXELS_PER_TICK` must not be raised.
  */
 const NOTCH_MIN_PIXELS = 40;
 
@@ -162,11 +162,12 @@ export function readWheel(event: WheelDeltas, pinchGain = 1, continuingPinch = f
   if (!Number.isFinite(deltaY) || deltaY === 0) return { kind: "none" };
 
   if (deltaMode === 2) {
-    // A page is one notch at any magnitude, because Blink divides a page-mode
-    // delta by the display scale as it does a pixel one: on Windows set to
-    // "one screen at a time", Chromium 152 sends `deltaMode` 2 with `deltaY`
-    // ±0.364 at 275% scaling — 1/2.75, measured 2026-09-15 (docs/PDF.md §10c,
-    // which also says why the browser there is named Vivaldi and not Chrome).
+    // A page is one notch at any magnitude, because Blink sends a page-mode
+    // delta of **1/`devicePixelRatio`** rather than 1: on Windows set to "one
+    // screen at a time", Chrome 152 sent ±0.667 at a dpr of 1.5 and ±0.364 at
+    // 2.75, each the exact reciprocal (measured 2026-09-15, docs/PDF.md
+    // §10c). Rounding the magnitude up as a special case is therefore not
+    // available: it moves with the monitor and the page zoom.
     // Accumulated as a fraction that costs three notches per step, and since
     // `createTickAccumulator` drops its carry on a reversal, a reader who
     // alternates in and out never reaches one and the document never moves.

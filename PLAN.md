@@ -7025,24 +7025,39 @@ gain, which papers over a loss that varies with load. If the transform path is e
 the measurement to repeat is the synthetic pinch on the real page, e2e/MACOS.md.
 
 **Windows measured, and its third wheel setting was a real bug** (2026-09-15). The Windows
-lines-per-notch case left unverified above was measured on a Dell XPS 15 9510 at 275% display
-scaling — trackpad, touchscreen and mouse, on the app's own page through
-`scripts/remote-console.ts`; docs/PDF.md §10c has every table. Three of the four paths were
-already right: a slow trackpad spread tracked the fingers, a quick one stayed on the pinch
-curve through `PINCH_FOLLOW_MS` (×0.3112 against fingers of ×0.3087, a third platform for that
-fix), a touchscreen pinch went through `touchmove` alone with no `gesture*` and no `wheel`, and
-a mouse notch was one 10% step at both the default three-lines setting and at one line. The
+lines-per-notch case left unverified above was measured on a Dell XPS 15 9510 — trackpad,
+touchscreen and mouse, on the app's own page through `scripts/remote-console.ts`, in two
+browsers and at three `devicePixelRatio`s; docs/PDF.md §10c has every table. Three of the four
+paths were already right: a slow trackpad spread tracked the fingers, a quick one stayed on the
+pinch curve through `PINCH_FOLLOW_MS` (×0.3112 against fingers of ×0.3087, a third platform for
+that fix), a touchscreen pinch went through `touchmove` alone with no `gesture*` and no `wheel`,
+and a mouse notch was one 10% step at both the default three-lines setting and at one line. The
 fourth was not. **Set to "one screen at a time", Windows switches Blink to `deltaMode` 2 and
-sends 0.364 of a page** — 1/2.75, the display scale — and `readWheel`'s guard for a fractional
-line, written on the reasoning that no device sends one, turned that into 0.364 of a tick: three
-notches per step, and none at all for a reader who alternates, since `createTickAccumulator`
-drops its carry on a reversal. Five ctrl-notches moved the document zero times. **Decided: a
-page-mode event is one notch at any magnitude** (a fraction of a screenful is still one wheel
-click), while a fractional *line* keeps accumulating — Gecko alone reports lines and does not
-divide by the backing scale. Rounding the 0.364 up as a special case was rejected by the same
-measurement: under page zoom the identical notch arrives as 0.381, so the magnitude is not a
-constant. The commit that claimed "one 10% step on every browser and OS setting" was one OS
-setting short, and it is the setting no Mac has.
+sends 1/`devicePixelRatio` of a page** — 0.364, 0.381 and 0.667 at the three measured, never 1
+— and `readWheel`'s guard for a fractional line, written on the reasoning that no device sends
+one, turned that into a fraction of a tick: three notches per step, and none at all for a reader
+who alternates, since `createTickAccumulator` drops its carry on a reversal. Five ctrl-notches
+moved the document zero times. **Decided: a page-mode event is one notch at any magnitude** (a
+fraction of a screenful is still one wheel click), while a fractional *line* keeps accumulating
+— Gecko alone reports lines and does not divide by the backing scale. Rounding the magnitude up
+as a special case was rejected by the same measurement: it is the reciprocal of a number that
+moves with the monitor and the page zoom, so there is nothing to match against. The commit that
+claimed "one 10% step on every browser and OS setting" was one OS setting short, and it is the
+setting no Mac has.
+
+**Two corrections the second browser forced, which is why there was a second browser.** The
+first pass ran in Vivaldi, whose UA and `userAgentData` both say Google Chrome and nothing else;
+it was taken for Chrome until the user remarked that ctrl-minus steps by 5%. Re-measured in real
+Chrome, the fractional page and the ungained trackpad reproduced exactly — but the notch size
+did not. Vivaldi had been sitting at 110% page zoom, which had made a notch read 90.909 px and
+produced a confident "about 30 px per line, not 100" correction to docs/PDF.md that was simply
+the true 33.3 divided by 1.1. Chrome sends **100.000 px at the default setting at a dpr of 2.5
+and again at 1.5**, so the file's original ~100 was right all along; what is wrong in it is only
+"*multiplied by* the lines setting", since the default is already the multiplied value. The
+second finding is worth more than the first: **page zoom, not display scaling, is what moves the
+CSS delta**, so at one line per notch and 125% zoom a notch is 26.7 px — under `PIXELS_PER_TICK`
+— and the first notch of a gesture would zoom nothing. That is two keystrokes away from a
+default install, and it is the argument against ever raising that constant.
 
 **The trackpad gain does not apply on a Windows touchscreen laptop, and is left that way.**
 `TRACKPAD_PINCH_GAIN` is gated on `navigator.maxTouchPoints === 0`, which on a Mac means "not a

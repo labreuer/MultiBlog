@@ -52,12 +52,15 @@ test("one notch is one tick, whatever the engine and the OS made of it", () => {
 });
 
 test("a page-mode event is one notch however small Blink made it", () => {
-  // Measured 2026-09-15, Chromium 152 on Windows 11 set to "one screen at a
-  // time" at 275% display scaling: `deltaMode` 2, `deltaY` ±0.364 — one page
-  // divided by the display scale (docs/PDF.md §10c). Read as a fraction it took
-  // three notches to make a step, and none at all if the reader alternated.
+  // Measured 2026-09-15, Chrome 152 on Windows 11 set to "one screen at a
+  // time": `deltaMode` 2 with `deltaY` ±0.364 at a dpr of 2.75 and ±0.667 at
+  // 1.5 — one page over devicePixelRatio, never 1 (docs/PDF.md §10c). Read as
+  // a fraction it took three notches to make a step, and none at all if the
+  // reader alternated.
   assert.deepEqual(wheel(0.364, 2), { kind: "ticks", ticks: -1 });
   assert.deepEqual(wheel(-0.364, 2), { kind: "ticks", ticks: 1 });
+  assert.deepEqual(wheel(0.667, 2), { kind: "ticks", ticks: -1 });
+  assert.deepEqual(wheel(-0.667, 2), { kind: "ticks", ticks: 1 });
   // The same event through the accumulator moves the document on the first
   // notch, and a reversal undoes exactly it rather than banking nothing.
   const accumulate = createTickAccumulator();

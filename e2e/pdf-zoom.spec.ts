@@ -146,22 +146,22 @@ test.describe("pdf zoom gestures", () => {
 
     // One notch, in every unit and at every magnitude an engine reports it:
     // Firefox's three lines, a page, Chrome on Linux (53), Windows at the
-    // default setting (90.909 at 275% scaling, 100 unscaled), Windows at one
-    // line per notch (30.303), and a wheel that has been flicked (900).
+    // default setting (100, measured at two display scalings), Windows at one
+    // line per notch (33.3), and a wheel that has been flicked (900).
     oneStepIn(await ratio({ deltaY: -3, deltaMode: 1, ctrlKey: true }));
     oneStepOut(await ratio({ deltaY: 3, deltaMode: 1, ctrlKey: true }));
     oneStepIn(await ratio({ deltaY: -1, deltaMode: 2, ctrlKey: true }));
 
     // A *fraction* of a page, which is what Windows set to "one screen at a
-    // time" actually sends: Blink divides the page delta by devicePixelRatio,
-    // so at 275% scaling one notch is 0.364 of a page (docs/PDF.md §10c,
-    // measured 2026-09-15). Read as a fraction it took three notches to move
-    // the document and none at all if the reader alternated, which is what
-    // this row would have caught.
-    oneStepIn(await ratio({ deltaY: -0.364, deltaMode: 2, ctrlKey: true }));
+    // time" actually sends: Blink's page delta is 1/devicePixelRatio, so one
+    // notch is 0.667 of a page at a dpr of 1.5 and 0.364 at 2.75 — both
+    // measured, docs/PDF.md §10c. Read as a fraction it took three notches to
+    // move the document and none at all if the reader alternated, which is
+    // what these rows would have caught.
+    oneStepIn(await ratio({ deltaY: -0.667, deltaMode: 2, ctrlKey: true }));
     oneStepOut(await ratio({ deltaY: 0.364, deltaMode: 2, ctrlKey: true }));
 
-    for (const px of [30.303, 53, 90.909, 200, 900]) {
+    for (const px of [33.333, 53, 100, 200, 900]) {
       oneStepIn(await ratio({ deltaY: -px, deltaMode: 0, ctrlKey: true }));
       oneStepOut(await ratio({ deltaY: px, deltaMode: 0, ctrlKey: true }));
     }
