@@ -6950,6 +6950,129 @@ takes `touch-action: pan-x pan-y` and never `none` — are docs/PDF.md §10c's, 
 there. The decision here is only *which* element the gesture belongs to: the document, not the
 page.
 
+**A mouse notch is one step of 10%, on every browser and every OS setting** (2026-09-14).
+The first version ran notch and pinch through one exponential and clamped it, so every notch
+in every browser landed on the clamp — 25% in, 20% out — and the constant meant as a guard
+had become the step size. There is no cross-browser *size* for a notch to normalise
+(docs/PDF.md §10c: Chrome's pixel count carries the OS lines-per-notch multiplier, Firefox's
+line count doesn't), so the decision is not to measure one: a delta big enough to be a physical
+notch is one tick, a tick is pdfjs's `DEFAULT_SCALE_DELTA` of 1.1, and only the sub-5-pixel
+band that is demonstrably a pinch keeps the curve. This is the parity pdf.js's own viewer has
+for line mode and never extended to pixel mode. Ctrl and ⌘ are both zoom modifiers
+(`wheelIsZoom`), ⌘ because Cmd-scroll is macOS's own page zoom. `WHEEL_SOFTNESS` was left at
+200 that morning — Firefox's pinch encoding says 100 tracks the fingers exactly, so 200 was a
+deliberate half-speed. Tested the same day on all three Playwright
+engines (chromium, firefox, webkit; dev and prod targets): a held-ctrl notch of 240, 100 or 53
+px, ⌘ in place of ctrl, dispatched line and page events, the 2 px pinch frame and the fractional
+carry all behave identically and the page zoom stays at 1 — docs/PDF.md §10c has the table. What
+no engine there could show — Playwright's Firefox sends pixels — was then measured on a **real
+Firefox 155 on a Mac** the same day, with native wheel events (`scripts/macos/native-wheel.c`,
+e2e/MACOS.md): a notch arrives as **one line** (not the three Linux and Windows send), ctrl and ⌘
+each give exactly one ×1.1 step, the browser's own zoom never fires, and the read-order shim is
+real and on a Mac costs a whole notch rather than a mis-sized one — docs/PDF.md §10c has that
+table too.
+
+**A trackpad pinch has its own gain, and on Safari the wheel constants never see it**
+(2026-09-14, afternoon). Asked to double the trackpad zoom rate, the first move was to halve
+`WHEEL_SOFTNESS`; the user then set it to 30 and felt no difference at all, which is the tell
+that the constant is not on the path. Measured on the MacBook's trackpad in Safari 26.6.1, with
+a capture listener recording every event on the page (docs/PDF.md §10c): a pinch arrives as
+`gesturestart` / 69 × `gesturechange` / `gestureend` and **zero** ctrl-wheel events, and the
+document scale tracks the gesture's cumulative `scale` one to one. So the rate lives in the
+gesture path, and the decision is one knob for the trackpad, `TRACKPAD_PINCH_GAIN` — an
+exponent on the per-frame factor, applied by `gestureStepFactor` on Safari's path *and* to the
+ctrl-wheel pinch branch Chrome and Firefox use (`WHEEL_SOFTNESS` goes to 100, exact tracking,
+so both paths are at the same rate and there is one number to change by feel). Its value is
+quoted nowhere but its own declaration: `e2e/pdf-zoom.spec.ts` imports the constant for its
+bound and docs/PDF.md's worked examples are written as formulas in it, so retuning is a
+one-line change with nothing to chase. It is
+gated on `navigator.maxTouchPoints === 0`, because the same `gesture*` events fire for an iPad's
+screen, and a *touch* pinch must keep the page under the fingers. The log also caught Safari
+firing a second `gesturestart` in the tail of a pinch, carrying the gesture's final scale
+(0.84): the handler used to reset its baseline to 1 on every start, which would have replayed
+the whole gesture as one more step had a `gesturechange` followed, so the baseline is now the
+start event's own `scale`. The wheel branch was then measured the same evening on a real
+Firefox 155 and Playwright's Chromium 151 on the same trackpad (docs/PDF.md §10c): a pinch is
+ctrl-wheel only in both, a slow spread lands every frame in the pinch band and the document
+moves by fingers^gain exactly, so the parity is now measured rather than arithmetic. The same
+run found the gap: a **quick** pinch delivers 12–72 px frames, which `readWheel` read as mouse
+notches, so a fast pinch zoomed *less* than a slow one and the gain never applied. The fix is a
+rule about time, not size, because size is exactly what a large pinch frame shares with a notch:
+`createWheelReader` keeps a frame on the pinch curve while it arrives within `PINCH_FOLLOW_MS`
+of the last pinch frame, and the sub-5 px band becomes only how a pinch *opens*. A wider band
+was rejected because it would hand every accelerated mouse to the exponential; the window's
+cost is a notch rolled within a quarter second of lifting the fingers, which reads as one
+clamped pinch frame instead of one tick. Measured on Windows the next day, where it found a bug — below.
+Still unverified: the iOS half above.
+
+**Safari's gesture path loses frames under load, and the gain was tuned on it** (2026-09-15). With the follow window in, the user felt Firefox zoom far more than Safari. Measured
+against the OS's own magnify stream (docs/PDF.md §10c; the tap, the poster and the bare page
+are e2e/MACOS.md's), the two wheel encodings are exact and lossless — Gecko and Blink
+coalesce dropped frames by summing — while Safari's `gesturechange` carries only its own
+frame's magnification and WebKit discards the frames a busy main thread could not take. On
+`/pdf/[slug]`, one identical posted pinch moved the document ×3.3 in Firefox and Chromium and
+×1.35 in Safari; on an idle page Safari delivers every frame. So `TRACKPAD_PINCH_GAIN` was set
+by feel against a path that was delivering a fraction of each pinch, and the fraction depends
+on how busy pdfjs is. **Decided: leave it.** The machine it was measured on is a 2019
+two-core MacBook Air, and the loss is that machine's main thread not keeping up with pdfjs at
+trackpad cadence; on hardware that keeps up, Safari delivers every frame (the bare page shows
+it does when the page is cheap) and the three engines agree. The options weighed and not
+taken: a CSS transform on the viewer during the gesture with one real `updateScale` at
+`gestureend`, which is how native pinch-zoom is usually done and would make every frame cheap
+enough for any machine; estimating the lost magnification on Safari from the delivered
+frames' spacing, a velocity guess wrong whenever the fingers change speed; and a per-engine
+gain, which papers over a loss that varies with load. If the transform path is ever wanted,
+the measurement to repeat is the synthetic pinch on the real page, e2e/MACOS.md.
+
+**Windows measured, and its third wheel setting was a real bug** (2026-09-15). The Windows
+lines-per-notch case left unverified above was measured on a Dell XPS 15 9510 — trackpad,
+touchscreen and mouse, on the app's own page through `scripts/remote-console.ts`, in two
+browsers and at three `devicePixelRatio`s; docs/PDF.md §10c has every table. Three of the four
+paths were already right: a slow trackpad spread tracked the fingers, a quick one stayed on the
+pinch curve through `PINCH_FOLLOW_MS` (×0.3112 against fingers of ×0.3087, a third platform for
+that fix), a touchscreen pinch went through `touchmove` alone with no `gesture*` and no `wheel`,
+and a mouse notch was one 10% step at both the default three-lines setting and at one line. The
+fourth was not. **Set to "one screen at a time", Windows switches Blink to `deltaMode` 2 and
+sends 1/`devicePixelRatio` of a page** — 0.364, 0.381 and 0.667 at the three measured, never 1
+— and `readWheel`'s guard for a fractional line, written on the reasoning that no device sends
+one, turned that into a fraction of a tick: three notches per step, and none at all for a reader
+who alternates, since `createTickAccumulator` drops its carry on a reversal. Five ctrl-notches
+moved the document zero times. **Decided: a page-mode event is one notch at any magnitude** (a
+fraction of a screenful is still one wheel click), while a fractional *line* keeps accumulating
+— Gecko alone reports lines and does not divide by the backing scale. Rounding the magnitude up
+as a special case was rejected by the same measurement: it is the reciprocal of a number that
+moves with the monitor and the page zoom, so there is nothing to match against. The commit that
+claimed "one 10% step on every browser and OS setting" was one OS setting short, and it is the
+setting no Mac has.
+
+**Two corrections the second browser forced, which is why there was a second browser.** The
+first pass ran in Vivaldi, whose UA and `userAgentData` both say Google Chrome and nothing else;
+it was taken for Chrome until the user remarked that ctrl-minus steps by 5%. Re-measured in real
+Chrome, the fractional page and the ungained trackpad reproduced exactly — but the notch size
+did not. Vivaldi had been sitting at 110% page zoom, which had made a notch read 90.909 px and
+produced a confident "about 30 px per line, not 100" correction to docs/PDF.md that was simply
+the true 33.3 divided by 1.1. Chrome sends **100.000 px at the default setting at a dpr of 2.5
+and again at 1.5**, so the file's original ~100 was right all along; what is wrong in it is only
+"*multiplied by* the lines setting", since the default is already the multiplied value. The
+second finding is worth more than the first: **page zoom, not display scaling, is what moves the
+CSS delta**, so at one line per notch and 125% zoom a notch is 26.7 px — under `PIXELS_PER_TICK`
+— and the first notch of a gesture would zoom nothing. That is two keystrokes away from a
+default install, and it is the argument against ever raising that constant.
+
+**The trackpad gain does not apply on a Windows touchscreen laptop, and is left that way.**
+`TRACKPAD_PINCH_GAIN` is gated on `navigator.maxTouchPoints === 0`, which on a Mac means "not a
+touchscreen, so this is the trackpad". The XPS reports `maxTouchPoints` 10 and
+`(pointer: coarse)` **false** — the two discriminators disagree on hardware that has both — so
+the trackpad took the touch branch and the slow spread moved the document ×2.5395 against
+fingers of ×2.5666, fingers¹ rather than fingers³. `(pointer: coarse)` would get both platforms
+right and is a one-line change. **Not made**: the gain is a feel knob, it was tuned by feel on a
+Mac against a *lossy* Safari path (the paragraph above), and the user's verdict on the Windows
+machine with no gain at all was that it felt right. Changing the gate would triple the rate on
+every Windows trackpad on the strength of a symmetry argument rather than a preference, and the
+preference is the whole content of the constant. The disagreement is recorded in docs/PDF.md
+§10c so the next person to touch the gain knows the gate is wrong on one platform rather than
+discovering it as a feel regression.
+
 **The zoom dropdown had to become a readout as well as a control.** A gesture lands on any
 scale it likes, and a `<select>` whose value matches no option renders *blank* — so
 `scalechanging` now feeds it, and a non-preset scale gets an option of its own showing the

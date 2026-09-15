@@ -1,0 +1,28 @@
+<!doctype html>
+<!--
+  A page with nothing on it but a pinch recorder, for measuring what an engine
+  delivers when the page itself costs nothing — the control for docs/PDF.md
+  §10c's finding that Safari drops gesture frames a busy page can't take.
+  Serve from scripts/macos/ (`python3 -m http.server 4323 --bind 127.0.0.1`), open
+  it in the browser under test, then post pinches with scripts/macos/native-magnify.c
+  and read `window.__summary()` through the relay. The relay client is included
+  with the token pinned in e2e/MACOS.md's recipe; change it if yours differs.
+    ?prevent=0   passive listeners, no preventDefault — the engine keeps the pinch
+    ?busy=60     sixty synchronous milliseconds per event, a stand-in for pdfjs
+-->
+<meta charset="utf-8"><title>pinch test</title>
+<style>body{margin:0;background:#eee}#box{position:fixed;inset:0;background:#cde}</style>
+<div id="box"></div>
+<script src="http://localhost:4322/client.js?token=pinch3"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const prevent = q.get("prevent") !== "0";       // non-passive + preventDefault unless ?prevent=0
+  const busyMs = Number(q.get("busy") || 0);       // synchronous work per event, to simulate a heavy page
+  const L = window.__L = [];
+  const t0 = performance.now();
+  const rec = (e, extra) => { L.push({ ev: e.type, t: Math.round(performance.now() - t0), scale: e.scale, deltaY: e.deltaY, deltaMode: e.deltaMode, ctrl: e.ctrlKey, ...extra }); if (busyMs) { const end = performance.now() + busyMs; while (performance.now() < end) {} } if (prevent) e.preventDefault(); };
+  for (const n of ["gesturestart", "gesturechange", "gestureend"]) document.getElementById("box").addEventListener(n, rec, { passive: !prevent });
+  document.getElementById("box").addEventListener("wheel", (e) => { if (e.ctrlKey || e.metaKey) rec(e); }, { passive: !prevent });
+  window.__summary = () => { const g = L.filter(e => e.ev === "gesturechange"); const w = L.filter(e => e.ev === "wheel"); const last = L.filter(e => e.scale != null).slice(-1)[0];
+    return JSON.stringify({ prevent, busyMs, gestureChanges: g.length, lastScale: last ? +last.scale.toFixed(4) : null, wheels: w.length, impliedFromWheel: +Math.exp(-w.reduce((s, e) => s + e.deltaY, 0) / 100).toFixed(4), pageZoom: +visualViewport.scale.toFixed(3), dpr: devicePixelRatio, span: L.length ? L[L.length-1].t - L[0].t : 0 }); };
+</script>
