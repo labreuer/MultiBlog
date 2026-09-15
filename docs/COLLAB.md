@@ -84,7 +84,7 @@ something and wrong for deciding *where*.
 
 ## 1. Post comments — stored offsets, remapped on publish
 
-**Surface:** `/[slug]`, the published post. **Code:** `comment_thread` columns,
+**Surface:** `/yyyy/mm/dd/slug`, the published post. **Code:** `comment_thread` columns,
 `src/lib/anchor-remap.ts`, `src/lib/quote-highlight-extension.ts`. **Design:** PLAN.md §5, §15.
 
 A published post is an immutable snapshot, so absolute offsets into it are stable by

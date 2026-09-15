@@ -13,7 +13,7 @@ test.describe("comment moderation", () => {
       status: "PENDING",
     });
 
-    await page.goto(`/${publishedPost.slug}`);
+    await page.goto(publishedPost.path);
     await expect(page.getByText(body)).toHaveCount(0);
 
     // The deep-link filter (?post=) narrows the queue to this post, so parallel
@@ -25,7 +25,7 @@ test.describe("comment moderation", () => {
 
     await expect.poll(() => getCommentStatus(commentId)).toBe("APPROVED");
 
-    await page.goto(`/${publishedPost.slug}`);
+    await page.goto(publishedPost.path);
     await expect(page.getByText(body)).toBeVisible();
   });
 
@@ -40,14 +40,14 @@ test.describe("comment moderation", () => {
       status: "APPROVED",
     });
 
-    await page.goto(`/${publishedPost.slug}`);
+    await page.goto(publishedPost.path);
     await expect(page.getByText(body)).toBeVisible();
 
     await page.goto(`/comments?post=${publishedPost.id}`);
     await page.getByRole("row").filter({ hasText: body }).getByRole("button", { name: "Spam" }).click();
     await expect.poll(() => getCommentStatus(commentId)).toBe("SPAM");
 
-    await page.goto(`/${publishedPost.slug}`);
+    await page.goto(publishedPost.path);
     await expect(page.getByText(body)).toHaveCount(0);
   });
 });
@@ -59,7 +59,7 @@ test.describe("comment submission (signed out)", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
   test("an untrusted visitor's comment lands in moderation", async ({ page, publishedModeratedPost }) => {
-    await page.goto(`/${publishedModeratedPost.slug}`);
+    await page.goto(publishedModeratedPost.path);
 
     // No links in the body — src/lib/spam-check.ts would score it as SPAM
     // rather than PENDING, which is a different assertion than this test's.

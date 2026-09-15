@@ -685,7 +685,7 @@ Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
 - Sign in as the seeded admin — confirms auth + `trustHost` + DB.
 - Open a post editor, type — confirms the collab WebSocket (`wss://`) connects (status line
   goes 🟢 Live). If it stays 🟡/🔴, check the collab unit logs and nginx upgrade headers.
-- Publish a post and load its public `/[slug]` — **do this specifically**, not just the home
+- Publish a post and load its public `/yyyy/mm/dd/slug` — **do this specifically**, not just the home
   page: it's the statically-generated (SSG) page class, and the one most likely to expose a
   build/runtime split issue that `next dev` never showed. A server exception here renders a
   *generic* error page while the service stays `active`, so a 500 is easy to miss — if the

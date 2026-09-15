@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postDateLabel, postPath } from "@/lib/post-path";
 import AuthorByline from "@/components/AuthorByline";
 
 // No gate to repeat, unlike the doc and post surfaces — the results are
@@ -72,11 +73,11 @@ export default async function SearchPage({
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
                 <h2>
-                  <Link href={`/${post.slug}`}>{post.title}</Link>
+                  <Link href={postPath(post)}>{post.title}</Link>
                 </h2>
                 <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                   <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
-                  {post.publishedAt?.toLocaleDateString()}
+                  {postDateLabel(post.publishedAt!)}
                 </p>
                 <p>
                   {excerpt}

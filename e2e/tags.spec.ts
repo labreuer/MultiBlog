@@ -163,7 +163,7 @@ test.describe("tags", () => {
     // the prod target the Full Route Cache may still be serving a render
     // without it (fixtures.ts's freshGoto comment). Exactly the hazard that
     // comes with keeping this route statically generated.
-    await freshGoto(anonPage, `/${publishedPost.slug}`);
+    await freshGoto(anonPage, publishedPost.path);
     await expect(anonPage.getByRole("link", { name: tag.name })).toBeVisible();
     // …and no tagger, since applying a tag needs an AUTHORIZED account.
     await expect(anonPage.getByText("+ tag")).toHaveCount(0);

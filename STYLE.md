@@ -57,7 +57,7 @@ lump every table-adjacent style into one file:
 |---|---|
 | `PostEditor.module.css` | `:hover` (toolbar/quote menu), `@media` (mobile toolbar) |
 | `styles/prose.module.css` | shared across editor + public rendering; `.quote-highlight.pulse` keyframe animation; reads the per-thread `--thread-color` custom property (see Color palette) |
-| `app/page.module.css`, `app/authors/[id]/page.module.css`, `app/[slug]/page.module.css` | `:hover`-only underline on post-title links |
+| `app/page.module.css`, `app/authors/[id]/page.module.css`, `app/[year]/[month]/[day]/[slug]/page.module.css` | `:hover`-only underline on post-title links |
 | `components/CommentSection.module.css`, `CommentNode.module.css`, `CommentForm.module.css` | none needed a pseudo-class directly, but were pulled into modules alongside `QuoteThreadHeader` for consistency when that pass happened (see git history 2026-07-20) |
 | `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values; `.arrowActive`/`.barActive` also read `--thread-color` |
 | `components/PostSettingsPanel.module.css` | same state-dependent-class rationale as `QuoteThreadHeader` — `.draggableRow`/`.dragOver` toggle on drag state, `.checkboxRow` conditionally combines them; no pseudo-class/media-query is used, but juggling three conditional classes per row as inline `style` objects would be worse than the module |
@@ -221,7 +221,7 @@ Two competing font stacks are in play, both deliberate:
 
 - **Reading surfaces** (article body, comments heading): serif —
   `Georgia, "Iowan Old Style", "Palatino Linotype", serif` — set on `.prose` (shared
-  editor/render typography, `prose.module.css`), the post `<h1>` (`[slug]/page.module.css`
+  editor/render typography, `prose.module.css`), the post `<h1>` (`[year]/[month]/[day]/[slug]/page.module.css`
   `.title`), and the comments `<h2>` (`CommentSection.module.css` `.heading`). Chosen for
   reading comfort; `.prose` also sets `font-size: 1.125rem; line-height: 1.5`.
 - **UI chrome** (nav, forms, byline metadata): system sans-serif —
@@ -237,7 +237,7 @@ by design, not by accident.
 
 - **Centered reading column**: `max-width: ...px; margin: 0 auto;` — not yet a shared
   component/class; each page repeats it. Three widths, kept deliberately separate:
-  - `800px` on pages showing full post text — `[slug]/page.module.css` (public post
+  - `800px` on pages showing full post text — `[year]/[month]/[day]/[slug]/page.module.css` (public post
     display) and `PostEditor.module.css` (editor).
   - `680px` on listing/excerpt pages — `authors/[id]/page.tsx`, `search/page.tsx`. These
     show post previews, not full text, so they weren't widened alongside the two

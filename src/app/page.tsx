@@ -4,6 +4,7 @@ import { renderToReactElement } from "@tiptap/static-renderer";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postDateLabel, postPath } from "@/lib/post-path";
 import { getFrontPagePreamble } from "@/lib/front-page";
 import { SITE_BANNER, SITE_BANNER_ASPECT, SITE_BANNER_ALT } from "@/lib/site-banner";
 import { contentExtensions } from "@/lib/tiptap-schema";
@@ -56,13 +57,13 @@ export default async function Home() {
               return (
                 <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
                   <h2 className={styles.postHeading}>
-                    <Link href={`/${post.slug}`} className={styles.titleLink}>
+                    <Link href={postPath(post)} className={styles.titleLink}>
                       {post.title}
                     </Link>
                   </h2>
                   <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                     <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
-                    {post.publishedAt?.toLocaleDateString()}
+                    {postDateLabel(post.publishedAt!)}
                   </p>
                   <p>
                     {excerpt}

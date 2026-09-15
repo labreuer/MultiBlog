@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postDateLabel, postPath } from "@/lib/post-path";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
 import Avatar from "@/components/Avatar";
 import styles from "./page.module.css";
@@ -93,11 +94,11 @@ export default async function AuthorPage({ params }: { params: Promise<{ slug: s
             return (
               <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
                 <h2 className={styles.postHeading}>
-                  <Link href={`/${post.slug}`} className={styles.titleLink}>
+                  <Link href={postPath(post)} className={styles.titleLink}>
                     {post.title}
                   </Link>
                 </h2>
-                <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>{post.publishedAt?.toLocaleDateString()}</p>
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>{postDateLabel(post.publishedAt!)}</p>
                 <p>
                   {excerpt}
                   {excerpt.length === 200 ? "…" : ""}

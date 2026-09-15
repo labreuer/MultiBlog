@@ -35,7 +35,7 @@ test.describe("text selection offers somewhere to respond", () => {
   // an immutable published snapshot, so there is no live document to wait
   // on: the editor being mounted is the whole readiness condition.
   test("a post's reading view offers to comment on the selection", async ({ page, publishedPost }) => {
-    await page.goto(`/${publishedPost.slug}`);
+    await page.goto(publishedPost.path);
     // Not just "attached": AnnotatableArticle keeps the SSR'd static copy in
     // the DOM and swaps which of the two is display:none once `ready`
     // (onCreate) fires. Selecting before that swap targets a copy

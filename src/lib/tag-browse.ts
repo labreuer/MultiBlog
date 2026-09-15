@@ -2,6 +2,7 @@ import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { canViewDocs, canManageDocs, canViewFiles, canManageFiles } from "@/lib/role-checks";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postPath } from "@/lib/post-path";
 
 // PLAN.md §20d — what /tag/[slug] lists, as **per-type sections**.
 //
@@ -104,11 +105,11 @@ async function listDocs(tagId: string, userId: string | null, role: Role | null)
 async function listPosts(tagId: string): Promise<TagHit[]> {
   const rows = await prisma.post.findMany({
     where: { ...publishedPostWhere(), tagAnchors: taggedWith(tagId) },
-    select: { id: true, slug: true, title: true },
+    select: { id: true, slug: true, title: true, publishedAt: true },
     orderBy: { publishedAt: "desc" },
     take: PAGE_CAP,
   });
-  return rows.map((p) => ({ id: p.id, slug: p.slug, title: p.title, href: `/${p.slug}` }));
+  return rows.map((p) => ({ id: p.id, slug: p.slug, title: p.title, href: postPath(p) }));
 }
 
 // canUserReadFile as a `where` clause — `readableFilesFor`'s predicate, ANDed

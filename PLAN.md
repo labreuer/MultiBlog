@@ -7598,6 +7598,45 @@ the fourth is one `canUserTagTarget` branch rather than a hole to fill in later.
 A published post lives at `/[slug]` — a flat, top-level namespace. This section
 moves it to `/yyyy/mm/dd/slug`.
 
+**Built 2026-09-15**, as designed, with these deviations from the sections below —
+each a place where the tree had moved on since this was drafted (2026-08-05, before §20
+landed), not a change of mind:
+
+- **`src/lib/post-path.ts`** is the one module (§21b), browser-safe so `PostsTable` can use
+  it; it also owns `postDateLabel` (the byline, `yyyy-mm-dd`, from the same UTC parts as the
+  URL) and `parsePostDateSegments` (§21a's shape gate, with a unit test for its rejection
+  surface — a real calendar date, zero-padded, or nothing). The server half is
+  `src/lib/revalidate-post.ts`: `revalidatePostPage` takes `{ slug, publishedAt }` and is a
+  no-op for a draft, so every action can call it without first asking whether the post has a
+  page. `postPath` itself throws on a null `publishedAt` rather than inventing a path.
+- **§21e undercounted.** URL construction was six sites, not three — `/authors/[slug]` and
+  the two §20 sites (`pathForTarget` in `actions/tags.ts`, `listPosts` in `tag-browse.ts`).
+  `revalidatePath` was seven — `updatePostSlug` and `revertPostSlug` each invalidate the old
+  and new slug's page too. And `toLocaleDateString()` on `publishedAt` was in four Server
+  Components (post page, landing, author page, search), so all four now render
+  `postDateLabel`; otherwise the landing list would say the 4th beside a link to `/…/05/…`.
+  The e2e change touched 18 `goto` sites across six specs, not ~13 across three.
+- **`revalidatePublicPaths` is handed the post-publish `publishedAt`**, not the pre-update
+  row: a first publish is the moment the path comes into existence, and the pre-update row
+  has no date to name it with.
+- **§21d: `RESERVED_SLUGS` is gone, not corrected.** `file-slug.ts` and `tag-slug.ts` imported
+  it too, and their own comments already said the reservation was about posts; with posts
+  four segments deep, no consumer had a reason left. The `-post`/`-doc`/`-file`/`-tag`
+  fallbacks and the four `changeXSlug` throws went with it; `slug.ts` keeps a note saying why
+  there is no list.
+- **§21f.1 resolved as "accept that the URL moves"** — nothing links in, and the canonical
+  redirect covers a stale tab. The redirect and the `PostSlugHistory` fallback are one code
+  path (§21f.3): match on slug alone, ignore the date the URL arrived with, redirect to
+  `postPath(post)`. `generateMetadata` runs the same shape gate and the same canonical check,
+  since it queries too.
+- **`/posts/[id]/slug` gives `SlugManager` the date path as `urlPrefix`** — a scheduled post
+  shows the path it will have when it goes live; a draft gets the literal `/yyyy/mm/dd` as a
+  placeholder, since `""` would render a URL the site no longer serves.
+- **e2e:** `TestPost.path` (null for a draft) replaces hand-built URLs, and the published
+  fixtures are typed `PublishedTestPost` so `path` is a string there. `publish.spec.ts`'s
+  draft flows read the path back through a new `getPostPath(postId)` worker handler after the
+  browser publishes — never "today", which crosses midnight in UTC eventually.
+
 **Nothing needs preserving.** No URL from this app has been published anywhere,
 so there is no external link, bookmark, feed entry or search index to keep
 working. That removes what would normally be the expensive half of this change

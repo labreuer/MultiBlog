@@ -249,7 +249,7 @@ From `./fixtures` (import `test` and `expect` from there, not from
 | Fixture | What you get |
 | --- | --- |
 | `draftPost` | An unpublished post by the shared admin, backed by its own throwaway doc with real body text |
-| `publishedPost` | Same, already published, so `/[slug]` and comments work |
+| `publishedPost` | Same, already published, so its public page (`post.path`, `/yyyy/mm/dd/slug`) and comments work |
 | `publishedModeratedPost` | Published with `moderationPolicy: ALWAYS` |
 | `quotedPost` | Published with `QUOTED_BODY` and one ACTIVE quote thread |
 | `draftDoc` | A PRIVATE doc by the shared admin, empty |
@@ -259,6 +259,12 @@ From `./fixtures` (import `test` and `expect` from there, not from
 A `TestPost` (PLAN.md §15) carries `docId` alongside `id`/`slug`/`title` —
 editing its content means navigating to `/doc/${post.docId}/edit`, not the
 post's own edit page, which only publishes.
+
+It also carries `path`, the public page (`/yyyy/mm/dd/slug`, PLAN.md §21) — a string on the
+published fixtures, null on `draftPost`. The date segment *is* `publishedAt`, so a post the
+*browser* publishes has no knowable path until afterwards: read it back with
+`getPostPath(post.id)` (`publish.spec.ts`'s `publicPath`), never by formatting "today" — that
+crosses midnight in UTC eventually and reads exactly like a regression.
 
 Plus helpers: `bodyEditor(page)`, `titleEditor(page)`, `statusLine(page)`,
 `visibleText(page, text)`, `deleteTextInBody(page, needle)`,

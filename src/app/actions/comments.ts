@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidatePostPage } from "@/lib/revalidate-post";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost, isAdmin } from "@/lib/authz";
@@ -174,14 +175,14 @@ export async function submitComment(
     });
   }
 
-  revalidatePath(`/${post.slug}`);
+  revalidatePostPage(post);
   return { status };
 }
 
 async function moderateOne(userId: string, role: Role, commentId: string, action: "approve" | "spam" | "pend") {
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
-    include: { thread: { include: { post: { select: { id: true, slug: true } } } } },
+    include: { thread: { include: { post: { select: { id: true, slug: true, publishedAt: true } } } } },
   });
   if (!comment) {
     throw new Error("Comment not found.");
@@ -213,7 +214,7 @@ async function deleteOne(userId: string, role: Role, commentId: string) {
     where: { id: commentId },
     include: {
       commenter: { select: { userId: true } },
-      thread: { select: { post: { select: { id: true, slug: true } } } },
+      thread: { select: { post: { select: { id: true, slug: true, publishedAt: true } } } },
     },
   });
   if (!comment) {
@@ -236,7 +237,7 @@ async function deleteOne(userId: string, role: Role, commentId: string) {
 async function restoreOne(userId: string, role: Role, commentId: string) {
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
-    include: { thread: { select: { post: { select: { id: true, slug: true } } } } },
+    include: { thread: { select: { post: { select: { id: true, slug: true, publishedAt: true } } } } },
   });
   if (!comment) {
     throw new Error("Comment not found.");
@@ -258,12 +259,12 @@ async function restoreOne(userId: string, role: Role, commentId: string) {
 // Revalidates the public post page (comment visibility) and its per-post
 // moderation queue for every distinct post touched by a batch — a bulk
 // action can span comments from several posts at once.
-function revalidateTouchedPosts(posts: { id: string; slug: string }[]) {
+function revalidateTouchedPosts(posts: { id: string; slug: string; publishedAt: Date | null }[]) {
   const seen = new Set<string>();
   for (const post of posts) {
     if (seen.has(post.id)) continue;
     seen.add(post.id);
-    revalidatePath(`/${post.slug}`);
+    revalidatePostPage(post);
     revalidatePath(`/posts/${post.id}/comments`);
   }
   revalidatePath("/comments");

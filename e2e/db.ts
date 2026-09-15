@@ -138,6 +138,8 @@ export const deleteTestUser = (...args: Parameters<DbHandlers["deleteTestUser"]>
 export const createTestPost = (...args: Parameters<DbHandlers["createTestPost"]>): Promise<TestPost> =>
   call("createTestPost", ...args);
 
+export const getPostPath = (...args: Parameters<DbHandlers["getPostPath"]>): Promise<string | null> =>
+  call("getPostPath", ...args);
 export const deleteTestPost = (...args: Parameters<DbHandlers["deleteTestPost"]>): Promise<void> =>
   call("deleteTestPost", ...args);
 

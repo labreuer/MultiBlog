@@ -111,7 +111,7 @@ test.describe("quote anchoring across publishes", () => {
     });
 
     // Still highlighted inline, at its new home.
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
     await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
   });
@@ -140,7 +140,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     // No inline highlight any more, but the thread is still listed, showing
     // the quote as it was written.
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
@@ -174,7 +174,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     // The quoted words are gone from the article body entirely, yet the thread
     // still renders its quote and notice.
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
@@ -201,7 +201,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
     await expect(visibleText(page, DETACHED_NOTICE)).toBeVisible();
   });
@@ -246,7 +246,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
     await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
   });

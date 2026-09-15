@@ -128,7 +128,7 @@ different staleness windows:
 3. **`useAuthorColors`'s per-mount cache** — each author id fetched once per
    editor mount into a ref, never re-validated; someone else's color change
    repaints your open editor only on reload. Seeds "self" from layer 1.
-4. **Static post pages** — `/[slug]` (`revalidate = 60`) bakes thread colors
+4. **Static post pages** — `/yyyy/mm/dd/slug` (`revalidate = 60`) bakes thread colors
    into the HTML: the opener's live `User.color`, or `colorForSeed(email)`
    for anonymous commenters (a pure hash, stored nowhere, stable by
    construction). Up to 60s stale.

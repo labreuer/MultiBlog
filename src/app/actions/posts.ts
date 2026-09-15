@@ -17,17 +17,21 @@ import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { signInPath } from "@/lib/sign-in-redirect";
+import { revalidatePostPage } from "@/lib/revalidate-post";
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
 // the home page, author pages, and the post's own page are built from — all
-// three need revalidating, not just the admin-facing /posts list.
-async function revalidatePublicPaths(postId: string, slug: string) {
+// three need revalidating, not just the admin-facing /posts list. `post` is
+// whichever slug/publishedAt pair names the page that needs invalidating:
+// the values *after* a publish (a first publish moves publishedAt from null
+// to a real path), the values before an unpublish (unchanged by it).
+async function revalidatePublicPaths(postId: string, post: { slug: string; publishedAt: Date | null }) {
   const authors = await prisma.postAuthor.findMany({
     where: { postId },
     select: { user: { select: { slug: true } } },
   });
   revalidatePath("/");
-  revalidatePath(`/${slug}`);
+  revalidatePostPage(post);
   for (const { user } of authors) {
     revalidatePath(`/authors/${user.slug}`);
   }
@@ -188,7 +192,7 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
-  await revalidatePublicPaths(postId, post.slug);
+  await revalidatePublicPaths(postId, { slug: post.slug, publishedAt });
   return { eventId: event.id };
 }
 
@@ -273,7 +277,7 @@ export async function unpublishPost(postId: string): Promise<void> {
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/history`);
   revalidatePath("/posts");
-  await revalidatePublicPaths(postId, post.slug);
+  await revalidatePublicPaths(postId, post);
 }
 
 // Soft delete/restore double as each other's undo — no confirmation dialog;
@@ -328,8 +332,8 @@ export async function updatePostSlug(postId: string, newSlug: string): Promise<{
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/slug`);
   revalidatePath("/posts");
-  revalidatePath(`/${oldSlug}`);
-  revalidatePath(`/${slug}`);
+  revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
+  revalidatePostPage({ slug, publishedAt: post.publishedAt });
   return { slug };
 }
 
@@ -350,8 +354,8 @@ export async function revertPostSlug(postId: string): Promise<{ slug: string }> 
   revalidatePath(`/posts/${postId}/edit`);
   revalidatePath(`/posts/${postId}/slug`);
   revalidatePath("/posts");
-  revalidatePath(`/${oldSlug}`);
-  revalidatePath(`/${slug}`);
+  revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
+  revalidatePostPage({ slug, publishedAt: post.publishedAt });
   return { slug };
 }
 

@@ -2,10 +2,19 @@
 // publishes a point in its backing doc's history. Editing happens at
 // /doc/[id]/edit, same as any doc.
 import { test, expect, bodyEditor, gotoOk, visibleText, waitForDocCollabReady } from "./fixtures";
-import { addTestDocAuthor } from "./db";
+import { addTestDocAuthor, getPostPath, type TestPost } from "./db";
 
 // "Publish" without `exact` also matches "Publish as blog post" elsewhere.
 const PUBLISH = { name: "Publish", exact: true } as const;
+
+// A draft's `path` is null until something publishes it, and here the browser
+// does: the date segment is the publish's own `publishedAt` (PLAN.md §21), so
+// the spec reads the path back instead of guessing "today" in UTC.
+async function publicPath(post: TestPost): Promise<string> {
+  const path = await getPostPath(post.id);
+  if (!path) throw new Error(`Post ${post.id} is not published.`);
+  return path;
+}
 
 async function waitForPublishReady(page: import("@playwright/test").Page): Promise<void> {
   // The scrub bar loads the doc's history asynchronously (PostSnapshotScrubBar)
@@ -40,7 +49,7 @@ test.describe("publish / unpublish", () => {
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
 
-    await gotoOk(page, `/${draftPost.slug}`);
+    await gotoOk(page, await publicPath(draftPost));
     await expect(page.getByRole("heading", { level: 1 })).toContainText(draftPost.title);
     await expect(visibleText(page, draftPost.bodyText)).toBeVisible();
   });
@@ -59,7 +68,7 @@ test.describe("publish / unpublish", () => {
     await page.keyboard.type(` ${addition}`);
     await expect(bodyEditor(page)).toContainText(addition);
 
-    await gotoOk(page, `/${draftPost.slug}`);
+    await gotoOk(page, await publicPath(draftPost));
     await expect(page.getByText(addition)).toHaveCount(0);
 
     await page.goto(`/posts/${draftPost.id}/edit`);
@@ -70,7 +79,7 @@ test.describe("publish / unpublish", () => {
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
 
-    await gotoOk(page, `/${draftPost.slug}`);
+    await gotoOk(page, await publicPath(draftPost));
     await expect(visibleText(page, addition)).toBeVisible();
   });
 
@@ -122,7 +131,7 @@ test.describe("publish / unpublish", () => {
     await page.getByRole("button", PUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
 
-    await gotoOk(page, `/${draftPost.slug}`);
+    await gotoOk(page, await publicPath(draftPost));
     await expect(visibleText(page, "Second author's sentence.")).toBeVisible();
   });
 
@@ -134,7 +143,7 @@ test.describe("publish / unpublish", () => {
     await expect(page.getByText("Unpublished.")).toBeVisible();
     await expect(page.getByText("Not published yet.")).toBeVisible();
 
-    const response = await page.goto(`/${publishedPost.slug}`);
+    const response = await page.goto(publishedPost.path);
     expect(response?.status()).toBe(404);
   });
 });

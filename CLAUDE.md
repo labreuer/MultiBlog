@@ -89,8 +89,8 @@ before changing the behavior it describes.
 - **A tag chip is exactly as private as the thing it is on, structurally.** `TagChips`
   renders only from inside a page that has already run its own gate and takes a resolved
   `AnchorTarget` rather than a slug, so it can't be mounted on an ungated surface; it
-  deliberately adds no second check. It also reads **no session** — `/[slug]` is statically
-  generated, and a dynamic API there throws at build (§12f) — so everything viewer-shaped
+  deliberately adds no second check. It also reads **no session** — the post page
+  (`/yyyy/mm/dd/slug`, §21) is statically generated, and a dynamic API there throws at build (§12f) — so everything viewer-shaped
   lives in a client island that asks the server on open. `/tag/[slug]` is three per-type
   queries wearing three existing predicates, never one UNION. PLAN.md §20d, docs/PERMISSIONS.md.
 - **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,

@@ -372,3 +372,15 @@ written **straight to the database** (a fixture, a `scripts/test-tag.ts` run) is
 to the Full Route Cache, so a post page cached by an earlier visit keeps serving chips without
 it for up to the revalidate window. A tag applied through the real action is fine — its own
 `revalidatePath` is exactly what the direct write bypasses.
+
+## 2026-09-15 — the post page moved to `/yyyy/mm/dd/slug`
+
+Every entry above that says `/[slug]` or `src/app/[slug]/page.tsx` means the published-post
+page, which PLAN.md §21 moved to `src/app/[year]/[month]/[day]/[slug]/page.tsx`. Nothing in
+its caching story changed: still `generateStaticParams` + `revalidate = 60`, still no
+`auth()`/`cookies()`/`headers()` in its render path, and `next build` still shows it
+prerendered. What did change is that a path now needs the post's `publishedAt` as well as its
+slug, so every `revalidatePath` for a post page goes through `revalidatePostPage`
+(`src/lib/revalidate-post.ts`) — a draft is a no-op there, since it has no page to invalidate
+— and `revalidatePublicPaths` (`src/app/actions/posts.ts`) is handed the *post-publish*
+`publishedAt`, because a first publish is the one moment the path comes into existence.

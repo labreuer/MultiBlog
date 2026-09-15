@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
+import { postPath } from "@/lib/post-path";
 import { canApplyTags, canCurateTags } from "@/lib/role-checks";
 import { canUserRemoveAssignment, canUserTagTarget } from "@/lib/tag-authz";
 import { tagNameInUse, uniqueTagSlug } from "@/lib/tag-slug";
@@ -77,8 +78,9 @@ async function pathForTarget(target: AnchorTarget): Promise<string | null> {
       return doc ? `/doc/${doc.slug}` : null;
     }
     case "post": {
-      const post = await prisma.post.findUnique({ where: { id: target.id }, select: { slug: true } });
-      return post ? `/${post.slug}` : null;
+      // A draft has no public page to revalidate (§21): null, same as a miss.
+      const post = await prisma.post.findUnique({ where: { id: target.id }, select: { slug: true, publishedAt: true } });
+      return post?.publishedAt ? postPath(post) : null;
     }
     case "file": {
       const file = await prisma.storedFile.findUnique({ where: { id: target.id }, select: { slug: true } });

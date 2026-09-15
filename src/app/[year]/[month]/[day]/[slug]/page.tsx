@@ -8,6 +8,7 @@ import { extractText } from "@/lib/diff";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { getPostThreadsWithApprovedComments } from "@/lib/comment-data";
 import { publishedPostWhere } from "@/lib/post-status";
+import { parsePostDateSegments, postDateLabel, postDateParts, postPath } from "@/lib/post-path";
 import AuthorByline from "@/components/AuthorByline";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
@@ -17,6 +18,12 @@ import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
 export const revalidate = 60;
+
+// PLAN.md §21 — a published post lives at /yyyy/mm/dd/slug, the date being
+// Post.publishedAt in UTC (src/lib/post-path.ts owns that rule). This route
+// matches *any* four-segment path nothing static claims, so every entry point
+// below runs parsePostDateSegments before its first query.
+type Params = Promise<{ year: string; month: string; day: string; slug: string }>;
 
 // PLAN.md §15 — a published post's content is its own proseJson/title
 // columns, not a joined Revision. No collab/PostEditBadge staleness signal
@@ -38,19 +45,18 @@ async function getPublishedPost(slug: string) {
 export async function generateStaticParams() {
   const posts = await prisma.post.findMany({
     where: publishedPostWhere(),
-    select: { slug: true },
+    select: { slug: true, publishedAt: true },
   });
-  return posts.map((post) => ({ slug: post.slug }));
+  return posts.map((post) => ({ ...postDateParts(post.publishedAt!), slug: post.slug }));
 }
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}): Promise<Metadata> {
-  const { slug } = await params;
+export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
+  const { year, month, day, slug } = await params;
+  if (!parsePostDateSegments(year, month, day)) {
+    return {};
+  }
   const post = await getPublishedPost(slug);
-  if (!post?.proseJson) {
+  if (!post?.proseJson || postPath(post) !== `/${year}/${month}/${day}/${slug}`) {
     return {};
   }
   return {
@@ -63,27 +69,38 @@ export async function generateMetadata({
 // old links/bookmarks 301 to wherever that post lives now instead of 404ing.
 // Only redirects to a post that's actually published; a history entry for a
 // since-unpublished (or soft-deleted) post falls through to notFound() same
-// as today.
-async function resolveRedirectSlug(slug: string): Promise<string | null> {
+// as today. Matches on the slug alone and ignores the date segments the URL
+// arrived with: a stale *date* (§21f, the unpublish-then-schedule case) is
+// the same kind of miss as a stale slug, and the canonical redirect below
+// handles both with one lookup.
+async function resolveRedirectPath(slug: string): Promise<string | null> {
   // Relation filters on a nested Post aren't covered by src/lib/prisma.ts's
   // soft-delete extension (that only wraps top-level post/user operations),
   // so deletedByUserId is checked explicitly here alongside publishedPostWhere.
   const entry = await prisma.postSlugHistory.findFirst({
     where: { slug, post: { ...publishedPostWhere(), deletedByUserId: null } },
-    select: { post: { select: { slug: true } } },
+    select: { post: { select: { slug: true, publishedAt: true } } },
   });
-  return entry?.post.slug ?? null;
+  return entry ? postPath(entry.post) : null;
 }
 
-export default async function PublicPostPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+export default async function PublicPostPage({ params }: { params: Params }) {
+  const { year, month, day, slug } = await params;
+  if (!parsePostDateSegments(year, month, day)) {
+    notFound();
+  }
   const post = await getPublishedPost(slug);
   if (!post?.proseJson) {
-    const redirectSlug = await resolveRedirectSlug(slug);
-    if (redirectSlug) {
-      permanentRedirect(`/${redirectSlug}`);
+    const redirectPath = await resolveRedirectPath(slug);
+    if (redirectPath) {
+      permanentRedirect(redirectPath);
     }
     notFound();
+  }
+  // Right slug, wrong date — the canonical URL wins (§21e).
+  const canonicalPath = postPath(post);
+  if (canonicalPath !== `/${year}/${month}/${day}/${slug}`) {
+    permanentRedirect(canonicalPath);
   }
 
   const doc = post.proseJson as JSONContent;
@@ -125,7 +142,7 @@ export default async function PublicPostPage({ params }: { params: Promise<{ slu
                 <AuthorByline
                   authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
                 />
-                {post.publishedAt?.toLocaleDateString()}
+                {postDateLabel(post.publishedAt!)}
               </p>
               <AnnotatableArticle
                 postId={post.id}
