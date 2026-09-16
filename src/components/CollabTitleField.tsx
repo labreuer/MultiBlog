@@ -43,7 +43,7 @@ const SingleLine = Extension.create({
 // The post title, as a collaborative field rather than a plain <input>: it's a
 // second Yjs fragment ("title") of the *same* Y.Doc the body uses, so it rides
 // the existing Hocuspocus connection, PostCollab.ydoc persistence, and
-// PostCollabUpdate replay log — which is what lets /posts/[id]/live-history
+// PostCollabUpdate replay log — which is what lets /post/[id]/live-history
 // scrub through title changes, colored per author, for free.
 //
 // Deliberately no CollaborationCaret: the extension has no per-field awareness

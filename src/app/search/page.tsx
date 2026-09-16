@@ -1,9 +1,8 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
-import AuthorByline from "@/components/AuthorByline";
+import PostListing, { postListingInclude } from "@/components/PostListing";
 
 // No gate to repeat, unlike the doc and post surfaces — the results are
 // publishedPostWhere() only, and the query came from the viewer's own URL.
@@ -29,21 +28,18 @@ export default async function SearchPage({
     ? await prisma.post.findMany({
         where: publishedPostWhere(),
         orderBy: { publishedAt: "desc" },
-        include: {
-          authors: {
-            orderBy: { bylineOrder: "asc" },
-            include: { user: { select: { name: true, slug: true } } },
-          },
-        },
+        include: postListingInclude,
       })
     : [];
 
   // Hobby-scale substring search over title + body text — no search index,
   // fine for the post counts this site is built for (§9, "small/hobby scale").
   const needle = query.toLowerCase();
-  const results = posts
-    .map((post) => ({ post, text: post.proseJson ? extractText(post.proseJson) : "" }))
-    .filter(({ post, text }) => post.title.toLowerCase().includes(needle) || text.toLowerCase().includes(needle));
+  const results = posts.filter(
+    (post) =>
+      post.title.toLowerCase().includes(needle) ||
+      (post.proseJson ? extractText(post.proseJson).toLowerCase().includes(needle) : false),
+  );
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", fontFamily: "sans-serif" }}>
@@ -61,30 +57,8 @@ export default async function SearchPage({
 
         {!query ? (
           <p style={{ color: "var(--text-secondary)" }}>Enter a search term above.</p>
-        ) : results.length === 0 ? (
-          <p style={{ color: "var(--text-secondary)" }}>
-            No posts match &ldquo;{query}&rdquo;.
-          </p>
         ) : (
-          results.map(({ post, text }) => {
-            const excerpt = text.slice(0, 200);
-
-            return (
-              <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
-                <h2>
-                  <Link href={`/${post.slug}`}>{post.title}</Link>
-                </h2>
-                <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                  <AuthorByline authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))} />
-                  {post.publishedAt?.toLocaleDateString()}
-                </p>
-                <p>
-                  {excerpt}
-                  {excerpt.length === 200 ? "…" : ""}
-                </p>
-              </article>
-            );
-          })
+          <PostListing posts={results} emptyMessage={`No posts match “${query}”.`} />
         )}
       </main>
     </div>

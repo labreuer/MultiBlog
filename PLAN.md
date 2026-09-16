@@ -234,7 +234,20 @@ the checkbox was intentionally hiding. Toggling the checkbox by hand calls `rout
 the reveal-on-delete path does not, since the row's own delete action already refreshes the
 table to pick up its new state.
 
-### 3d. The post editor (`/posts/[id]/edit`)
+### 3d. The post editor (`/post/[id]/edit`)
+
+**Moved from `/posts/[id]/…` to `/post/[id]/…` on 2026-09-15**, so that a post's own pages
+(`edit`, `slug`, `comments`, `history`) sit under a singular prefix the way a doc's do under
+`/doc/[slug]/…`. The rule the rename makes uniform: a **plural** path is an admin table
+(`/posts`, `/docs`, `/files`, `/users`, `/tags`, `/links`, `/comments`, `/annotations`, §16)
+and the actions that belong to the table as a whole (`/posts/new`); a **singular** path is one
+thing's pages (`/doc/[slug]`, `/pdf/[slug]`, `/tag/[slug]`, `/link/[id]`, and now
+`/post/[id]`). Until then posts followed `/users/[id]/slug` — management hanging off the table
+by id — while docs followed the reading page, and the two rules disagreed. `/users/[id]/slug`
+and `/files/[slug]` (§19, a sign-in landing that inherited the download URL's prefix) still
+follow the older shape. A published post's *reading* URL is the dated one (§21), so no
+`/post/[id]` page reads a post. No redirect from the old paths: they were never public, and
+every internal link and `revalidatePath` moved with the route.
 
 **Decided:** `PostEditor.tsx` is the single surface for writing, saving, publishing, and
 managing one post. Real-time collaborative editing itself — the CRDT/Yjs transport layer —
@@ -317,7 +330,7 @@ noted in §3a:
   CLAUDE.md gotcha. Stripped (`stripMarkFromDoc`) before anything reaches `revision.doc`;
   `contentExtensions` (the shared editor/seed/render schema) never has to know the mark
   exists.
-- **Live-scrubbable history** (`/posts/[id]/live-history`, `LiveHistoryViewer.tsx`):
+- **Live-scrubbable history** (`/post/[id]/live-history`, `LiveHistoryViewer.tsx`):
   read-only, and stays live-connected rather than being a one-time snapshot. Hocuspocus's
   `onChange` hook (`server/collab.ts`) appends every raw Yjs update to a new
   `post_collab_update` row, reset whenever a revision is saved — bounding it to "since the
@@ -575,7 +588,7 @@ renamed after creation, with the old slug preserved as a redirect source rather 
 - **Reserved top-level slugs** (`RESERVED_SLUGS`, `src/lib/slug.ts`) only apply to post
   slugs — `/[slug]` is a top-level route; author slugs live under the nested `/authors/[slug]`,
   with no sibling static routes to collide with.
-- **Management UI**: `/posts/[id]/slug` and `/users/[id]/slug` (`SlugManager.tsx`, shared by
+- **Management UI**: `/post/[id]/slug` and `/users/[id]/slug` (`SlugManager.tsx`, shared by
   both entity types), linked from `PostSettingsPanel`'s "Url" row and `UsersTable`'s "url"
   column. Saving commits immediately — no confirm/cancel gate; the safety net is a one-click
   **Revert** button on the most recent past-slugs row instead (`revertPostSlug`/
@@ -660,7 +673,7 @@ site-wide too but change only via a deploy, not from the DB.
 commenter. Consider Akismet given anonymous commenting is allowed.
 
 **Cross-post moderation (`/comments`, `CommentsTable.tsx`, built).** The per-post moderation
-queue (`/posts/[id]/comments`) only ever shows one post's `PENDING` comments. `/comments`
+queue (`/post/[id]/comments`) only ever shows one post's `PENDING` comments. `/comments`
 is the site-wide counterpart: every comment across every post the signed-in user can manage
 (all of them for ADMIN/EDITOR, own-authored posts only for AUTHOR — mirrors `/posts`'s own
 `canEditAnyPost` gate), filterable and actionable in bulk.
@@ -800,7 +813,7 @@ Git history carries per-step detail.
    reserved-slug guard so post slugs can't shadow app routes. Rendering uses
    `@tiptap/static-renderer` (`generateHTML` needs a DOM and fails server-side).
 5. **Tree comments** — Disqus-style identity (name+email or session), three-level moderation
-   cascade + trust threshold per §6, moderation queue at `/posts/[id]/comments`. Beyond
+   cascade + trust threshold per §6, moderation queue at `/post/[id]/comments`. Beyond
    plan: `comment` also records submitter IP and who/when last changed its status.
 6. **Quote anchoring** — the article server-renders statically for SEO, then swaps to a
    read-only ProseMirror view after hydration (progressive enhancement). Decoration
@@ -1184,7 +1197,7 @@ Git history carries per-step detail.
   <SessionProvider />` thrown from `CommentForm` during SSR (the root layout does wrap
   `{children}`, and next-auth guards that throw so it cannot fire in production), and server
   actions arriving with truncated bodies — `Unexpected end of JSON input` on
-  `/posts/[id]/edit`, leaving the clicked action silently unapplied. Measured at roughly one
+  `/post/[id]/edit`, leaving the clicked action silently unapplied. Measured at roughly one
   failed run in 3.5 with three Playwright workers versus none in eight with two, at identical
   wall-clock time. Worth knowing beyond the tests: it's a ceiling on how much concurrent
   traffic a dev server can be trusted to serve correctly, and says nothing about production.
@@ -1871,7 +1884,7 @@ exactly as `[slug]/page.tsx` does today (§4a).
 throws `DYNAMIC_SERVER_USAGE` at build, which is what §10 item 17 was. Needs a CACHING.md entry;
 note there that `prose_json` is what keeps a dynamic route cheap, not a Next cache.
 
-**No per-doc annotations page.** §3c's `/posts/[id]/comments` has no doc counterpart; the
+**No per-doc annotations page.** §3c's `/post/[id]/comments` has no doc counterpart; the
 `/annotations?doc=<id>` deep link covers it.
 
 ### 12g. Collab: tokens, read-only readers, and the client `Y.Doc`
@@ -3378,9 +3391,9 @@ class rather than this instance.
 **Authorization is per doc.** Each id resolves through `resolveDocParam` (id or slug, as everywhere
 else), then `canUserReadDoc(userId, role, { id, visibility })` per column, and `canUserEditDoc` per
 column for the write toggle. If *either* doc is unreadable the whole page is forbidden rather than
-rendering one column beside a placeholder: the page's only purpose is comparison, and the "Compare
-with…" picker (§14k) only ever offers docs the viewer can read, so the sole way to arrive here is a
-URL shared between people with different access. See §14n.
+rendering one column beside a placeholder: the page's only purpose is comparison, and the one
+in-app way here (`/link/[id]`, §14k) resolves per viewer, so the sole way to arrive is a URL
+shared between people with different access. See §14n.
 
 ### 14d. Anchor drift and repair
 
@@ -3782,16 +3795,15 @@ link while only the quoted-text preview updated.
 
 ### 14k. Getting there
 
-A **"Link to…"** control on `/doc/[slug]`, near the byline, listing other docs the viewer can
-read and navigating to `/side-by-side/<thisDoc>/<thatDoc>`. Chosen over a two-checkbox control on
-`/docs` because `/docs` is gated on `canManageDocs`, and an `AUTHORIZED` reader — the role §12e
-exists for — never sees it.
+`/doc/[slug]` carries no picker for this surface: its byline is the post line (§21i). The in-app
+way to a pair is `/link/[id]` (docs/ANCHORED_LINKS.md), which resolves an anchored link across two
+docs to `/side-by-side/<a>/<b>` for a viewer who may read both; otherwise it is a URL.
 
-Backed by a new `readableDocsFor(userId, role)` in `src/lib/doc-authz.ts`, placed directly beside
-`canUserReadDoc` with a comment tying the two together: it is the same predicate expressed as a
-`where` clause instead of per-row, and the only thing keeping them honest is proximity plus that
-comment. ADMIN/EDITOR get every non-deleted doc; everyone else gets `SHARED` plus their own
-byline-authored `PRIVATE` docs.
+`readableDocsFor(userId, role)` in `src/lib/doc-authz.ts` sits directly beside `canUserReadDoc`
+with a comment tying the two together: it is the same predicate expressed as a `where` clause
+instead of per-row, and the only thing keeping them honest is proximity plus that comment.
+ADMIN/EDITOR get every non-deleted doc; everyone else gets `SHARED` plus their own
+byline-authored `PRIVATE` docs. Tag browsing and file authorization read it.
 
 ### 14l. Build order
 
@@ -3887,11 +3899,6 @@ Three deliberate deviations from the text above:
 - **`DocLinkPopover`'s Cancel button shows in both create and edit mode**, not just "when new" as
   §14i's composer description reads. Edit mode's only other way to dismiss without saving was the
   outside-click handler; keeping Cancel visible there too is a usability call, not an oversight.
-- **The entry point is a `<select>`** (`CompareWithPicker.tsx`), not the bare "control... listing
-  other docs" §14k leaves unspecified in shape. Chosen over a list of links because
-  `readableDocsFor` can return every doc a reader has access to, and a picker degrades better
-  than a wall of links at that size; renders nothing when the list is empty rather than an
-  always-visible disabled control.
 
 Designed above but **not built**, each marked in place and collected here:
 
@@ -4042,7 +4049,7 @@ cutover.
 **Decided:** a post stops being an independently-edited document and becomes an immutable snapshot
 of a doc at a chosen point in that doc's ydoc history, carrying its own `prose_json` and `title`.
 `revision`, `post_collab`, and `post_collab_update` are dropped; the post-side half of
-`server/collab.ts` is dropped; one editing stack remains. `/posts/[id]/edit` no longer edits — it
+`server/collab.ts` is dropped; one editing stack remains. `/post/[id]/edit` no longer edits — it
 publishes. It shows the publish/schedule/unpublish controls, a read-only view of the doc at a
 selected history point, and a scrub bar over that doc's `ydoc_update` log. Publishing pins the
 selected point as a `ydoc_snapshot` (reusing one if the point is already snapshotted) and copies its
@@ -4123,11 +4130,43 @@ this section: `handleYdocSnapshot` now replays to its own mark rather than encod
 
 ### 15c. The publish surface
 
-`/posts/[id]/edit` (route unchanged) replaces `PostEditor` with `PostPublisher`: a plain title input
+`/post/[id]/edit` (route unchanged) replaces `PostEditor` with `PostPublisher`: a plain title input
 (defaulting to, and offering to reset to, the source doc's title), a line naming the source doc with
 a link to `/doc/[slug]/edit` and a "Change doc…" picker, the publish/schedule/unpublish controls, a
 line stating whether publishing will create a new snapshot or reuse an existing one, a read-only
 render of the doc at the selected point, and a scrub bar pinned at the bottom.
+
+**§15i amends this layout for a viewer who cannot edit the source doc**: no scrub bar, the post's
+own stored content in place of the replay, a note saying why, and the source-doc line linking only
+as far as that viewer may go. Everything above describes the case where they can.
+
+**The publish button** (built 2026-09-16). Its label follows `derivePostStatus`: "Publish"
+on a draft, "Publish Now" on a scheduled post (the same action, but the change it makes is
+`publishedAt` moving to now), "Republish" on a live one. On a live post it is **disabled when
+publishing would change nothing** — same doc, same update as the live event's snapshot
+(`initialThroughUpdateId` against the bar's `throughUpdateId`, one id sequence), and the
+resolved title equal to `Post.title` — with the tooltip "Already published at this version
+with the present title" on a wrapper span, since a disabled button shows no title of its
+own. That is the affordance; `publishPostFromDoc` refuses the same case with that message,
+comparing the live event's `docId` and `ydocSnapshotId` (equal update ⇒ equal snapshot,
+because `ensureYdocSnapshotAt` reuses) and `Post.title`. `schedulePostFromDoc` has no such
+guard: a reschedule at the same content is a real change to the date.
+
+**Two notes on the status line** (built 2026-09-16). "Published <date>, **updated** <date>"
+when the live event was created after the publication date — which is exactly a republish,
+since `publishPostFromDoc` preserves the original go-live date. It writes the event's
+`createdAt` as the same `now` as `publishedAt`, so a first publish compares equal by
+construction; the client tolerates a second of skew for rows whose `createdAt` came from the
+database default. A scheduled post's event predates its date and never reads as
+updated; an unpublish followed by an identical republish does, which is rare and arguably
+true. The second line, "**The doc has changed since this version**, last edit <date>", shows
+when the doc's head is past the live version's mark — read off the scrub bar's replay
+(`ScrubSelection.head`), which already holds every update with its timestamp and opens at
+that mark, so no second query and nothing for the bar to disagree with. It is about the head,
+not the slider, so scrubbing doesn't move it; a draft, having no version, gets neither note.
+Not built: a "scrub to latest" control on that line, and any of this on the public page
+(§15's decision that a published post is silent about its doc moving on stands; an "updated"
+date there would be a separate call).
 
 The read-only view needs no TipTap editor instance — `useReplayScrub`'s `renderResult` already
 carries a rendered `body`; this is `ReplayContent` (`YdocDebug.tsx`) minus the perf line and clients
@@ -4152,10 +4191,13 @@ original go-live-date-preservation rule across an unpublish/republish cycle carr
 `unpublishPost` is unchanged in shape. `derivePostStatus`/`publishedPostWhere` swap
 `publishRevisionId` for `publishEventId`.
 
-A post can be created from a doc two ways: a picker at `/posts/new` (replacing the old title-only
-form) and a "Publish as blog post" button on `/doc/[slug]`, both landing on the same
-`createPostFromDoc(docId)` action, gated on `canUserEditDoc` and seeding the post's authors from the
-doc's `doc_author` rows.
+A post can be created from a doc two ways: a picker at `/posts/new` and a "Publish as blog post"
+button on `/doc/[slug]` while the doc has no post (once it has any, the byline lists them
+instead — `DocPostsLine`, §21i), both landing on the same `createPostFromDoc(docId)` action,
+gated on `canUserEditDoc` and seeding the post's authors from the doc's `doc_author` rows.
+
+The doc's **tags** are deliberately *not* seeded the same way — they are offered on
+`/post/[id]/edit` instead, one click each. §20m has why the two metadata lists diverge here.
 
 ### 15e. The collab server after posts leave it
 
@@ -4175,14 +4217,14 @@ sub-namespace and the `ydoc:test-` containment guard, and its comments were rewr
 Phase 0 (snapshot machinery) → Phase 1 (schema + migration) → Phase 2 (post creation from a doc,
 transitional — new posts still opened the old editor for one phase) → Phase 3 (the cutover: new
 publish actions and every public read surface switched to `Post.proseJson`/`Post.title` in the same
-commit, since neither can move alone) → Phase 4 (teardown of the old post-editing UI; `/posts/[id]/
+commit, since neither can move alone) → Phase 4 (teardown of the old post-editing UI; `/post/[id]/
 history` rebuilt as a publication-event list + word diff between consecutive published versions) →
 Phase 5 (comments retargeted onto events) → Phase 6 (collab server teardown) → Phase 7 (this
 section, plus CLAUDE.md/CACHING.md/e2e docs).
 
 ### 15g. As built
 
-Deleted: `LiveHistoryViewer.tsx`, `/posts/[id]/live-history`, `/api/posts/[id]/collab-updates`,
+Deleted: `LiveHistoryViewer.tsx`, `/post/[id]/live-history`, `/api/posts/[id]/collab-updates`,
 `RestoreRevisionButton.tsx`, `PostEditBadge.tsx` and its four call sites, `PostEditor.tsx` (+ its
 module CSS), `PostSettingsPanel`'s revisions table, `e2e/restore-revision.spec.ts`,
 `e2e/collab.spec.ts` (after porting its two genuinely doc-side tests — body-edit propagation and the
@@ -4211,6 +4253,74 @@ deletion.
   comments) was deleted rather than backfilled into a doc — there was nothing worth preserving, and
   a backfill script would have had to get byline order, the title fragment, and a synthetic
   publication event right for a single throwaway row.
+
+### 15i. The post editor without doc-edit rights (2026-09-16)
+
+**Built 2026-09-16.** §15d makes a post's byline and its doc's byline independent lists —
+seeded alike at creation, edited separately from then on — and `updatePostAuthor` will add
+any ADMIN/EDITOR/AUTHOR to a post with no reference to the doc at all. That is right, and the
+reasons are worth writing down because the shape it produces looked like a bug:
+
+- **Credit is not authorship of the text.** The doc byline is who works the prose; the post
+  byline is whose name is on the published piece. Someone who supplied the argument, the
+  data, the translation, the interview or the illustrations belongs on the second and has no
+  business in the first.
+- **One doc can source several posts** (§21i's `DocPostsLine`) — a series split out of one
+  document, each part credited differently. Coupled bylines would put every contributor on
+  every part.
+- **The lists drift apart over time without anyone deciding to.** Someone comes off a doc's
+  byline and must not thereby lose credit for what was already published; someone joins after
+  the text is finished and should get credit without edit rights to a doc other posts are
+  also snapshots of.
+- **It is least privilege in the right direction.** Publishing, unpublishing, retitling and
+  setting moderation policy administer a *publication*. Doing them without being able to
+  rewrite the source is a narrower power, not a broken one — and "fixing" it by adding the
+  person to the doc's byline would be a privilege escalation, granting read access §12e
+  reserves to a PRIVATE doc's listed authors.
+
+**What that costs, and what this section pays.** `GET /api/doc/[id]/replay` is
+`canUserEditDoc`-gated, and `publishPostFromDoc` requires the same (§15d). So for a post
+author without those rights the editor used to render a scrub bar that 403'd, a content pane
+that never arrived, and a Publish button greyed for a reason nothing stated — two independent
+blocks producing a page that read as breakage. The page now tells the truth instead:
+
+- **The post's own stored `proseJson` replaces the replay**, rendered on the server exactly
+  as the public post page renders it, under a label that follows the post's *state* rather
+  than its content — `proseJson` survives an unpublish, so calling it "published" on a post
+  that has been taken down would be a lie. A post that has never published says so.
+- **The scrub bar is not mounted at all**, rather than mounted and showing its error line.
+  Its only possible contribution here is a 403 under a control that could not have worked.
+- **One note says why**, beside the controls it explains, and says what *is* still available:
+  title, byline, tags, settings, and unpublishing. Styled as a notice rather than an error,
+  because this is a configuration and not a failure.
+- **The "From doc:" line links as far as the viewer may go and no further** — the doc editor,
+  the reading view, or plain text for a PRIVATE doc they are not on. A link that 403s reads
+  as breakage; its absence reads as the fact.
+
+**Two pre-existing defects fell out of the same root and are fixed here.** The post's own doc
+need not be in `editableDocs` — `editableDocsFor` returns own-byline PRIVATE docs plus, for
+ADMIN/EDITOR, SHARED ones, so a PRIVATE doc nobody here authors is simply absent. The old
+comment on that call said the opposite. Consequently `PostPublisher`'s `currentDoc` fell back
+to using the **doc id as a slug**, rendering "Untitled" behind a link to a route that does
+not exist; and the "Change doc…" `<select>` held a `value` matching no `<option>`, so it
+displayed some *other* doc as chosen. The page now hands over `sourceDocTitle`/`sourceDocSlug`
+directly, and the select lists the current doc as a disabled "(no edit access)" option.
+
+**Switching docs restores everything**, and should. `editableDocsFor` is exactly the set this
+viewer may publish from, so a doc chosen from the select is editable by construction — the
+post's own doc is the only one that might not be. Hence `selectedEditable` is
+`selectedDocId !== docId || canEditSourceDoc` rather than a flat capability: pointing the post
+at a doc you own brings the scrub bar and the publish controls back, which the server already
+permits.
+
+**The alternative, rejected.** The other coherent position is that a post byline *is* the set
+of people who publish it — `updatePostAuthor` would then refuse anyone who cannot edit the
+doc, and the eligible list would be filtered. That collapses credit into authority and loses
+every case above; it is also the larger change. Recorded so the choice reads as one.
+
+**Unchanged on purpose:** `unpublishPost` needs only `canUserEditPost`, so Unpublish and
+Cancel schedule stay live for these viewers; and nothing about the server gates moved. §15i
+is a page telling the truth about permissions it did not alter.
 
 ## 16. Admin tables become one kit
 
@@ -5133,9 +5243,11 @@ Unchanged markup — the `padding: 1.5rem 0; border-bottom: 1px solid #eee` arti
 STYLE.md documents as repeated across home, author and search listings — plus `take: 10`,
 where the query is currently unbounded.
 
-That bound has no escape hatch yet: `/posts` is the admin table, and there is no public
-archive route. The eleventh-newest post becomes reachable only by search, RSS, or a direct
-link. Recorded in TODO.md rather than solved here.
+That bound had no escape hatch when this was built: `/posts` is the admin table, and there
+was no public archive route, so the eleventh-newest post was reachable only by search, RSS,
+or a direct link. §21h's date archives (2026-09-15) are that route — every byline date links
+to its day, and the day to its month and year — though the landing page itself still links
+to no "older posts" (TODO.md).
 
 ### 17e. Contributors: three new `User` columns, and what they replace
 
@@ -5467,7 +5579,8 @@ so, since the next person to add a page will otherwise read three widths as thre
   **not** appear anywhere on the page, rather than asserting on specific preamble text.
   Production determinism was judged worth more than test convenience; reversing the tie-break
   to newest-wins would swap which of the two is easy.
-- **No public post archive.** §17d's `take: 10` has nothing to link "older posts" to.
+- **No "older posts" link.** §17d's `take: 10` still has nothing on the landing page to
+  link to, though §21h's date archives (2026-09-15) now exist for it to link to.
 - **No self-service profile page.** `/dashboard`'s panel edits the contributor-facing
   fields only; name, slug, color and role remain admin-only, and a user who is not a listed
   contributor has no self-service surface at all.
@@ -7310,8 +7423,8 @@ model TagAssignment {
   private as the doc.
 - **`/tag/[slug]`** — the browse page, as **per-type sections** (docs tagged K, posts
   tagged K, files tagged K), each an indexed, SQL-paginated query wearing that type's
-  existing permission predicate (`publishedPostWhere`, doc visibility + `DocAuthor`,
-  `file-authz`). Deliberately not an interleaved single timeline: that is a UNION view that
+  existing permission predicate (`readablePostWhere` — `publishedPostWhere` as built,
+  widened in §20l; doc visibility + `DocAuthor`; `file-authz`). Deliberately not an interleaved single timeline: that is a UNION view that
   would re-implement four permission models in one place — the easiest leak to write and the
   hardest to see. Counts shown here come from the filtered queries, never from the view
   below, for the same reason.
@@ -7592,3 +7705,462 @@ old fields are `filter`s over the new one.
 the tagger and `/tag/[slug]` instead of a seventh visibility tier. The four arc legs are
 all live in the action and authz layer, including annotations, though only three have chip UI;
 the fourth is one `canUserTagTarget` branch rather than a hole to fill in later.
+
+### 20l. Tagging an unpublished post (2026-09-16)
+
+**Built 2026-09-16.** PR 1 made a post taggable only once it was live:
+`canUserTagTarget`'s post branch wore `publishedPostWhere()`, and the comment beside it named
+the reason — a tag on a draft would be a title `/tag/[slug]` could show to a stranger. That
+reason was sound and the remedy was aimed at the wrong end. Tagging is most useful *while*
+something is being written; what must not leak is the browse page, not the act.
+
+So the containment moved to the surface that does the leaking:
+
+- **`readablePostWhere(userId, role)`** (`src/lib/post-status.ts`) — `publishedPostWhere()`
+  ORed with the unpublished posts this viewer may edit. It is `canUserEditPost` written as a
+  `where` clause, with the same caveat `listDocs` records about Prisma being unable to share a
+  predicate between a per-row check and a query filter, and the same
+  `role === "AUTHOR"` narrowing that function has (a byline survives a demotion; the
+  permission does not).
+- **`canUserTagTarget`'s post branch and `tag-browse.ts`'s `listPosts` both call it**, which
+  is the whole point of it being a function: the gate that lets a tag land and the page that
+  lists what was tagged cannot drift into disagreeing about who may see a draft.
+- **An unpublished row links into the editor, not to a public URL.** `postPath` throws on a
+  null `publishedAt` by design, and a scheduled post's `/yyyy/mm/dd/slug` does not answer
+  until its date arrives — so both get `/post/[id]/edit`, plus a `draft`/`scheduled` chip on
+  the row. `TagHit` gained a `note` field for it. Without that the same list quietly means
+  different things to different viewers, which is the kind of per-viewer page that is worth
+  admitting to being one.
+- **Nothing public moved.** The landing page, the archives, RSS, search and
+  `/yyyy/mm/dd/slug` stay on `publishedPostWhere()`; `readablePostWhere` is only for surfaces
+  that were already viewer-shaped. `/tag/[slug]` is `force-dynamic` already, so there is no
+  shared cache entry to leak through.
+
+Two things needed no change, both because they had already decided this question the other
+way and said so. `tag_metrics` deliberately does not filter publication state — its migration
+comment reads "a draft post is real content an editor is curating" — and `/tags`, where those
+counts surface, is AUTHOR-and-up with no per-viewer row scoping because a *term* carries no
+visibility. And `pathForTarget` already returned null for a post with no `publishedAt`, so
+tagging a draft revalidates nothing public.
+
+**Also in the same change: the post editor grows a tag strip.** `/post/[id]/edit` renders
+`TagChips` above the rule that separates the post's own metadata from the read-only render of
+the doc — the same gap §20k closed on the doc side, and the surface that made the draft
+restriction impossible to miss. `TagChips` is an async Server Component and `PostPublisher` is
+`"use client"`, so it crosses as a keyed prop, the way `/pdf/[slug]` hands one to its viewer.
+
+### 20m. Carrying a doc's tags onto its post (2026-09-16)
+
+**Built 2026-09-16.** A post is a snapshot of a doc (§15), and the two are tagged
+independently — so the terms you filed the doc under while writing it were, until now, terms
+you had to find again by hand on the post. The remedy is an **offer**, not a copy.
+
+**`/post/[id]/edit` grows a source-doc tag offer**, directly under the post's own tag strip
+(§20l put that strip there): the source doc's terms that are not yet on the post, as dashed
+one-click chips, plus an "Add all *n*" when there is more than one.
+
+- **It copies; the doc keeps its tags.** Applying a term here creates a fresh
+  `tag_assignment` by this viewer on the post. The doc is still about that subject after
+  publication, and `/tag/[slug]`'s Docs section should keep saying so; retracting the doc
+  side would also mean retracting *someone else's* act of tagging, which
+  `canUserRemoveAssignment` makes a moderation power rather than a publishing one. Move
+  semantics stay available as a later opt-in (§20i's list) if doc tags turn out to be purely
+  a staging area, which they are not today.
+- **Deliberately not the byline's behaviour**, and this is the asymmetry worth naming.
+  `createPostFromDoc` seeds `post_author` from the doc's byline automatically (§15d); tags
+  are offered instead. A doc's tags are a working filing system and a post's are public
+  taxonomy, and they are not the same list often enough for a silent copy to be right.
+- **No creation-time step was needed.** `createPostFromDoc` already redirects to
+  `/post/[id]/edit`, so the offer is waiting on arrival — and unlike a one-shot prompt at
+  creation, terms added to the doc *later* are still offered whenever the editor is next
+  opened.
+- **Its label is `Doc "<title>"`, deliberately not "From doc …".** `PostPublisher`'s
+  status line already says the latter, about `selectedDocId` — and this row is about
+  `post.docId`, so the two disagree the moment "Change doc…" is touched. Wording them alike
+  would read as one fact stated twice and be wrong half the time. The row carries
+  `data-doc-tag-offer` as its test handle for the same reason the label is not one: the
+  e2e case first written against the label matched the status line instead, which is how
+  the duplication was noticed at all.
+- **The row empties itself.** `tagsNotYetOn` subtracts what is already on the post — by
+  anyone, not just this viewer, the same rule the tagger's picker wears when it disables an
+  option as "Already applied here". An untagged doc, and a doc whose terms have all come
+  across, render nothing at all rather than an empty label.
+
+**The gate is the doc's, not the page's — the one place in §20 where that is true.**
+docs/PERMISSIONS.md's rule is that a chip is as private as the thing it is on,
+*structurally*: `TagChips` renders only from inside a page that has already gated, and takes
+a resolved target so it cannot be mounted anywhere else. This row breaks the premise rather
+than the rule — it shows **one object's tags on another object's page** — and a post author
+need not be an author of the doc the post was made from, so `/post/[id]/edit`'s own gate
+(ownership or `canEditAnyPost`) is precisely the wrong one to inherit. The page therefore
+runs `canUserReadDoc` as a second, narrower check and renders an empty offer when it fails.
+That resolves §20i's deferred "cross-container visibility needs a decision, and conjunctive
+is the safe default" for the display case, in favour of conjunctive.
+
+Applying a term needs no doc-read: `canUserTagTarget(post)` alone, unchanged, because a
+*term* carries no visibility (`listTagOptions` is unfiltered site-wide). Doc-read gates the
+**disclosure of which terms are on that doc**, and nothing else.
+
+**One new action, and one new writer under it.** `tagObjectMany(tagIds, kind, id)` — one
+permission check, one transaction, one `revalidatePath`. The client-side alternative (n
+calls to `tagObject`) is n round trips, n gate queries, and a half-filled strip if the fourth
+fails. Deliberately **not** `settleBulk`: that shape is for an admin table acting on rows a
+user selected independently, where one failure must not stop the rest; this is one act with
+several terms in it. `tagObject` and `tagObjectMany` both write through a non-exported
+`writeWholeObjectTags`, so the shape PR 1 is allowed to write (§20h: every part column
+unset) is stated once — and PR 2's part-tagging adds rows to that transaction rather than a
+second concept beside it.
+
+The two differ in one respect, on purpose: **a term that has vanished between the render and
+the click throws from `tagObject` and is skipped by `tagObjectMany`.** A single deliberate
+click is a question about *that* term, so "it isn't there any more" is the answer to it; "Add
+all" is a question about whatever is still available, where one binned term must not fail the
+rest.
+
+**"Change doc…" is not the source.** `PostPublisher`'s select moves only what the scrub bar
+previews; the post's own `docId` moves when it is published from a different doc. The offer
+is server-rendered from `post.docId` and so is right by construction, and the
+`router.refresh()` after a publish re-renders it against the new source. Wiring it to
+`selectedDocId` would show terms from a doc the post is not from.
+
+**Two small shape notes.** `tagsNotYetOn` returns `TagOption`, not `TagChip`:
+`ownAssignmentId` and `taggerCount` describe the *source*, and rendering either beside a
+control that writes to the *target* would be a number answering a question nobody asked. And
+`DocTagOffer` crosses into `PostPublisher` as **plain data** rather than as a rendered
+element — it is a client component, so `PostPublisher` imports it directly and §20l's keyed-
+lazy-chunk hazard (which `tags={<TagChips key="tags" …/>}` still carries) does not arise.
+
+`tagsForTarget(post)` consequently runs twice on this page — once inside `TagChips`, once
+inside `tagsNotYetOn`. Accepted rather than hoisted: hoisting means feeding `TagStrip`
+directly and giving up the property that `TagChips` always does its own read from a resolved
+target, which is the thing that makes it un-mountable on an ungated surface. One extra
+indexed query on a gated editor page is the cheaper side of that trade.
+
+**Deferred, named.** The reverse push (tagging the doc from the post, or "also tag the post"
+from the doc editor) — a doc can source several posts, so that is a picker rather than a row,
+and a different design. Move semantics, above. And generalising the offer to any related pair
+(file → post, annotation → doc): one prop away from what is built, and not built.
+
+**A pre-existing gap this made visible, not introduced.** A post author who cannot *edit* the
+source doc reaches `/post/[id]/edit` and gets a 403 from `/api/doc/[id]/replay`, so the
+read-only render below the controls never arrives. That predates this section and is
+untouched by it; the e2e case here asserts only that such a viewer sees the post's own
+strip and not the doc's terms.
+
+## 21. Dated post URLs (`/yyyy/mm/dd/slug`)
+
+A published post lives at `/[slug]` — a flat, top-level namespace. This section
+moves it to `/yyyy/mm/dd/slug`.
+
+**Built 2026-09-15**, as designed, with these deviations from the sections below —
+each a place where the tree had moved on since this was drafted (2026-08-05, before §20
+landed), not a change of mind:
+
+- **`src/lib/post-path.ts`** is the one module (§21b), browser-safe so `PostsTable` can use
+  it; it also owns `postDateLabel` (the byline, `yyyy-mm-dd`, from the same UTC parts as the
+  URL) and `parsePostDateSegments` (§21a's shape gate, with a unit test for its rejection
+  surface — a real calendar date, zero-padded, or nothing). The server half is
+  `src/lib/revalidate-post.ts`: `revalidatePostPage` takes `{ slug, publishedAt }` and is a
+  no-op for a draft, so every action can call it without first asking whether the post has a
+  page. `postPath` itself throws on a null `publishedAt` rather than inventing a path.
+- **§21e undercounted.** URL construction was six sites, not three — `/authors/[slug]` and
+  the two §20 sites (`pathForTarget` in `actions/tags.ts`, `listPosts` in `tag-browse.ts`).
+  `revalidatePath` was seven — `updatePostSlug` and `revertPostSlug` each invalidate the old
+  and new slug's page too. And `toLocaleDateString()` on `publishedAt` was in four Server
+  Components (post page, landing, author page, search), so all four now render
+  `postDateLabel`; otherwise the landing list would say the 4th beside a link to `/…/05/…`.
+  The e2e change touched 18 `goto` sites across six specs, not ~13 across three.
+- **`revalidatePublicPaths` is handed the post-publish `publishedAt`**, not the pre-update
+  row: a first publish is the moment the path comes into existence, and the pre-update row
+  has no date to name it with.
+- **§21d: `RESERVED_SLUGS` is gone, not corrected.** `file-slug.ts` and `tag-slug.ts` imported
+  it too, and their own comments already said the reservation was about posts; with posts
+  four segments deep, no consumer had a reason left. The `-post`/`-doc`/`-file`/`-tag`
+  fallbacks and the four `changeXSlug` throws went with it; `slug.ts` keeps a note saying why
+  there is no list.
+- **§21f.1 resolved as "accept that the URL moves"** — nothing links in, and the canonical
+  redirect covers a stale tab. The redirect and the `PostSlugHistory` fallback are one code
+  path (§21f.3): match on slug alone, ignore the date the URL arrived with, redirect to
+  `postPath(post)`. `generateMetadata` runs the same shape gate and the same canonical check,
+  since it queries too.
+- **`/post/[id]/slug` gives `SlugManager` the date path as `urlPrefix`** — a scheduled post
+  shows the path it will have when it goes live; a draft gets the literal `/yyyy/mm/dd` as a
+  placeholder, since `""` would render a URL the site no longer serves.
+- **e2e:** `TestPost.path` (null for a draft) replaces hand-built URLs, and the published
+  fixtures are typed `PublishedTestPost` so `path` is a string there. `publish.spec.ts`'s
+  draft flows read the path back through a new `getPostPath(postId)` worker handler after the
+  browser publishes — never "today", which crosses midnight in UTC eventually.
+
+**Nothing needs preserving.** No URL from this app has been published anywhere,
+so there is no external link, bookmark, feed entry or search index to keep
+working. That removes what would normally be the expensive half of this change
+and is worth stating explicitly, because most of the design below would be
+different if it weren't true — in particular there is no need for the flat
+`/[slug]` route to survive as a redirect shim.
+
+### 21a. What actually moves
+
+```
+src/app/[slug]/            →  src/app/[year]/[month]/[day]/[slug]/
+  page.tsx                      the same file, reading four params
+  page.module.css               unchanged
+```
+
+`generateStaticParams` returns `{ year, month, day, slug }` instead of
+`{ slug }`. `revalidate = 60` carries over, and so does the constraint that
+makes it meaningful: this route must not call `auth()`/`cookies()`/`headers()`,
+or — because it *does* have `generateStaticParams` — it throws
+`DYNAMIC_SERVER_USAGE` at build rather than degrading to per-request rendering
+(CACHING.md's 2026-07-23 entry, which is the production crash that taught this).
+
+**No route collisions, and not by luck.** Next resolves a static segment ahead
+of a dynamic one at the same position, so every existing route still wins over
+`/[year]/…`: `/post/…`, `/posts/…`, `/api/…`, `/authors/…`, `/doc/…`. The deepest routes
+in the app are already four segments (`post/[id]/history/[eventId]`,
+`api/avatar/[userId]/[hash]`) and both lead with a static segment, so neither is
+shadowed.
+
+The corollary is that `/[year]/[month]/[day]/[slug]` matches **any** four-segment
+path that isn't claimed by something static — `/a/b/c/d` included. The handler
+therefore has to validate the shape (four digits, two digits, two digits) and
+404 before touching the database, or every garbage four-segment URL costs a
+query.
+
+### 21b. Which date, and in which timezone
+
+**The date is `Post.publishedAt`, and the hard half of keeping it stable is
+already built.** `publishPostFromDoc` (`src/app/actions/posts.ts`) pins it
+across an unpublish/republish:
+
+```ts
+const publishedAt = post.publishedAt && post.publishedAt <= now ? post.publishedAt : now;
+```
+
+and `schedulePostFromDoc` refuses to run while a post is actually live, so a
+live post's date cannot be pushed forward. `unpublishPost` leaves `publishedAt`
+untouched — the comment there already calls it inert. A post that goes live,
+comes down, and goes back up keeps its original URL without anything new being
+written for this section.
+
+**Timezone is the trap, and it is not cosmetic.** `publishedAt` is a
+`timestamp(3)` stored in UTC, but the byline currently renders it with
+`toLocaleDateString()` — *server* local time. If the URL derived from local time
+too, then:
+
+- deploying to a box in a different timezone silently moves the canonical URL of
+  every post published near midnight, with no migration and no error; and
+- `generateStaticParams` (build machine) could disagree with the request handler
+  (runtime) about what a post's path is, which presents as a 404 on a page that
+  demonstrably exists.
+
+So the URL is derived in **UTC, always**. That leaves one visible seam: a post
+published at 21:00 EDT is the 5th in UTC while the byline says the 4th. The fix
+is not to special-case the byline but to make both read from one helper, so they
+cannot disagree:
+
+```ts
+// src/lib/post-path.ts — the single place the post URL shape is written down,
+// the same "one module owns the URL" pattern as src/lib/avatar-url.ts (§17n).
+export function postDateParts(publishedAt: Date): { year: string; month: string; day: string };
+export function postPath(post: { slug: string; publishedAt: Date }): string;
+```
+
+The byline switches to `postDateParts` too. Displaying a UTC date under a UTC
+URL is a real (small) behavior change for readers in western timezones, and is
+the price of a URL that doesn't depend on where the server is.
+
+A **site timezone** setting was considered and rejected for now: it turns a
+derived value into configuration, and configuration that silently rewrites
+every canonical URL when changed is worse than a fixed rule. If it is ever
+wanted, `postDateParts` is the one function it has to reach.
+
+### 21c. Slug uniqueness stays global (for now)
+
+Dated paths make it *possible* to scope slug uniqueness per date, so
+`/2025/01/01/new-year` and `/2026/01/01/new-year` could both keep the clean
+slug. That is genuinely the appeal of dated permalinks — and it is deliberately
+**not** part of this change.
+
+Keeping `Post.slug @unique` global means every piece of existing slug machinery
+survives untouched: `postSlugInUse`, `changePostSlug`, `revertPostSlug`,
+`PostSlugHistory.slug @unique`, `SlugManager`, and the whole
+`REVERT_DISCARD_WINDOW_MS` rule. Going per-date means a composite unique
+constraint, a rewritten `postSlugInUse`, dropping the unique on the history
+table, and rethinking what a history row means when a slug is only unique within
+a day. That is a second change wearing the first one's clothes.
+
+The cost of deferring is that a repeated title still gets a `-2` suffix even
+though the dates would have disambiguated it. That is a cosmetic wart on a rare
+case, and the migration to per-date uniqueness stays available afterwards.
+
+### 21d. What this deletes
+
+`RESERVED_SLUGS` (`src/lib/slug.ts`) exists for exactly one reason: `/[slug]` is
+a top-level catch-all, so a post slugged `posts` or `api` would be shadowed by
+the static route and never resolve. Move posts four segments deep and **that
+entire class of constraint stops existing for posts** — the guard drops out of
+both `uniquePostSlug` and `changePostSlug`, and a post may legitimately be
+slugged `docs`.
+
+It does not become dead code, though, and the file's own comment is wrong about
+why. `src/lib/doc-slug.ts` also imports `RESERVED_SLUGS`, while `slug.ts`'s
+header claims it is "only relevant to post-slug.ts today". Docs live at
+`/doc/[slug]` — nested, with no sibling static routes — so that use looks
+already unnecessary, on the same reasoning the comment gives for author slugs.
+Resolving that (either drop it from `doc-slug.ts` as well, or correct the
+comment) belongs in this pass rather than being inherited as a contradiction
+nobody wants to be the one to touch.
+
+### 21e. Blast radius
+
+Every call site funnels through `postPath`, so the churn is mechanical rather
+than delicate. The list is exhaustive as of 2026-08-05, when this section was first drafted:
+
+- **URL construction — 3 sites.** `src/app/page.tsx` (landing list),
+  `src/app/search/page.tsx`, `src/components/PostsTable.tsx` (the published-date
+  cell links to the public page).
+- **`revalidatePath` — 5 sites.** `src/app/actions/posts.ts` ×3,
+  `src/app/actions/comments.ts` ×2. These are the ones that need more than a
+  find-and-replace: they currently have only `slug` in hand, so
+  `revalidatePublicPaths(postId, slug)` and both comment actions have to fetch
+  `publishedAt` as well.
+- **RSS.** `src/app/rss.xml/route.ts`'s `<link>` and `<guid>`. Changing a `guid`
+  normally re-shows every item in subscribers' readers; here there are no
+  subscribers, which is the whole reason this is cheap to do now rather than
+  later.
+- **`SlugManager` needs no change at all.** It already takes a `urlPrefix` prop
+  (`""` for posts, `/doc` for docs, `/authors` for users) — the prefix simply
+  becomes the post's date path, supplied by `src/app/post/[id]/slug/page.tsx`.
+- **The route handler** gains segment validation and a canonical redirect: right
+  slug, wrong date → `permanentRedirect` to the real path, reusing the shape of
+  the existing `resolveRedirectSlug` fallback rather than a second mechanism.
+- **e2e — ~13 `page.goto()` sites** across `moderation.spec.ts`,
+  `publish.spec.ts` and `quote-anchoring.spec.ts`. The clean fix is to expose
+  `path` on the `TestPost` fixture (`e2e/db-worker.ts`) so specs stop building
+  URLs by hand — after which most of the diff is `post.slug` → `post.path`.
+
+### 21f. Edge cases to settle before building
+
+1. **Unpublish, then schedule for a future date.** The one path that moves a
+   previously-live post's URL, since `publishedAt` is overwritten with the new
+   `scheduledFor`. Either forbid scheduling a post that has ever been live, or
+   accept that the URL moves. Accepting it is fine today (nothing links in) and
+   the canonical redirect in §21e covers a reader who kept the old tab open.
+2. **Drafts and scheduled posts have no `publishedAt`,** so they have no path at
+   all — which matches the current behavior of 404ing at `/[slug]`. It is not a
+   regression, but `publish.spec.ts` asserts against a draft's URL and therefore
+   needs reshaping rather than a mechanical rename.
+3. **`PostSlugHistory` narrows in meaning.** It records slug changes; a stale
+   *date* is a different kind of miss. Matching on slug alone and ignoring the
+   date segments handles both with one lookup, which is why the canonical
+   redirect and the history fallback should be the same code path.
+
+### 21g. Sizing
+
+Roughly half a day: one new lib module, one route directory move, ~10 mechanical
+call-site edits, the e2e fixture change, and the `RESERVED_SLUGS` cleanup.
+
+**No database migration.** The date is derived from `publishedAt`, which already
+exists and is already stabilized across republish (§21b); slug uniqueness is
+unchanged (§21c). A stored path column was considered and rejected — it would
+freeze the URL against a later edit of `publishedAt`, but it also introduces a
+second source of truth for something the existing publish logic already keeps
+still.
+
+### 21h. Date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd`
+
+**Built 2026-09-15.** The three prefixes of a post's URL are pages: each lists the posts
+published in that UTC range, newest first, in the same preview block as `/search`. "URL
+hacking" — trimming segments off a post's address — lands somewhere sensible, and the
+byline's date on every surface is a link to its day, so a reader can climb from any post
+to its day, month and year. That is also the public archive §17d and §17m recorded as
+missing: the landing page still shows ten posts and links to no "older", but every post
+now leads to the archives and the archives lead to every post.
+
+**Routing.** `src/app/[year]/page.tsx`, `[year]/[month]/page.tsx` and
+`[year]/[month]/[day]/page.tsx` are one-line wrappers over `src/app/[year]/post-archive.tsx`;
+each carries its own `revalidate = 60` because Next reads segment config from the page
+file, not from what it imports. A static segment still beats a dynamic one at every
+position, so nothing existing is shadowed — but `/[year]` now matches **every** one-segment
+path nothing static claims (`/tag` and `/doc` have no `page.tsx` of their own; a stray
+`/favicon.ico` request that misses `public/`), and its children every two- and
+three-segment one. So `parsePostDatePrefix` (`src/lib/post-path.ts`) runs before the first
+query, the same rule as §21a one level up, and its rejection surface has a unit test. It
+returns a half-open UTC range as well as the label and path, so the date arithmetic — a
+February prefix is `[Feb 1, Mar 1)`, December's `end` is next January — lives in one
+function rather than three route files. A well-formed date with nothing in it is a page
+(200, "No posts published in …"), never a 404; only a malformed one 404s.
+
+**Trailing slashes cost nothing.** `next.config.ts` sets neither `trailingSlash` nor
+`skipTrailingSlashRedirect`, so Next's default 308s `/2026/09/` to `/2026/09` before any
+route runs. Measured on the dev server before building, and asserted by the spec.
+
+**Caching.** ISR with no `generateStaticParams`: a prefix renders on first request and is
+served from the Full Route Cache for 60s after. `revalidatePostArchives`
+(`src/lib/revalidate-post.ts`) invalidates a post's three prefixes and is called from the
+same places that revalidate `/` — `revalidatePublicPaths` on publish and unpublish, and now
+the two slug-change actions, which previously revalidated only the two post pages and left
+every listing to `PostSlugHistory`'s 301. It is deliberately *not* folded into
+`revalidatePostPage`: a comment changes the post's page and nothing a listing shows.
+Same constraint as §21a — no `auth()`/`cookies()`/`headers()` in the render path.
+
+**The listing became a component.** `src/components/PostListing.tsx` is the preview block
+STYLE.md used to describe as "repeated verbatim across home, author, and search listings";
+the archive would have been the fourth copy. It exports `postListingInclude`, which the
+four `findMany`s spread into `include:` so the query and the component's props can't
+drift, and the author page — which had no byline before — now shows one, so a co-authored
+post names its other authors there too. `src/components/PostDate.tsx` is the byline's date:
+label, link to `/yyyy/mm/dd`, and the full timestamp as a native `title` tooltip.
+
+**The tooltip is UTC, and so is everything else on that line.** `postDateTimeLabel` slices
+the ISO string (`2026-09-15 21:03:47 UTC`), no `Intl`, rendered once on the server into ISR
+output. The reader's own zone was considered and not used: the label and the URL are UTC
+by §21b, so a local-time tooltip would say the 14th under a link to `/…/15/…` for a
+western reader — the tooltip's job is to explain the date shown, not to contradict it. If
+a local time is ever wanted it is a second element (`LocalTime`, client-side), not a
+change to this one.
+
+**e2e:** `e2e/date-archive.spec.ts`, over a fixture post dated 2001-02-03 — far enough back
+that no other spec's "published now" post shares the year. `createTestPost` grew a
+`publishedAt` option (ISO string, must be past) for it.
+
+### 21i. Getting between a post's pages
+
+**Built 2026-09-16.** A post has three pages — its doc (`/doc/[slug]`), its editor
+(`/post/[id]/edit`, §3d) and its public URL (§21). Three links tie them together, chosen so the
+public page still looks, to a logged-in author, like it does to everyone else:
+
+- **The public page carries one link.** `PostEditLink` renders `· configure post` after the byline's
+  date, linking to the editor, for a viewer who may edit the post — ADMIN/EDITOR, or an
+  AUTHOR on the byline, mirroring `canUserEditPost` as an affordance while the route keeps
+  the gate. It is a client island reading `useSession()` (the `TagStrip` shape), which is
+  what lets the page keep `generateStaticParams` and `revalidate` (§12f): SSR emits nothing,
+  so a signed-out reader's HTML is unchanged, and the link appears after hydration at the end
+  of the line where it reflows nothing. In the ordinary link color, not the byline's — it
+  is a control, and the one thing on that line that is. The byline's author ids ride along as a prop for the AUTHOR case; the
+  session has no slug to match on instead. Alternatives weighed and not built: the title as
+  the edit link (as `DocView` does — a whole `<h1>` island, and link styling on the title for
+  authors); a slot in `SiteHeader` (the header sits above the page in the root layout and has
+  no way to learn the post id short of a store); a keyboard shortcut alone (undiscoverable).
+- **The editor links out to the live post.** `PostPublisher`'s "Published <date>" is a link
+  to `postPath`, which is why the page passes it the slug, followed by "(publication
+  history)"; "From doc: <title>" links to the doc editor.
+- **The doc's byline names its posts.** `DocPostsLine` is the post line in `/doc/[slug]`'s
+  byline. With no post it *is* the "Publish as blog post" button (§15d); with posts it lists
+  them, `|`-separated: "Published on
+  <yyyy-mm-dd>" linking to the public URL plus "(configure)" to the editor; "Scheduled for
+  <UTC timestamp> (in N days, N hours, N minutes)" linking to the editor; and — a judgment
+  call beyond the ask — "Draft (configure)" for a post row that exists but was never
+  published, since a row the button would only duplicate needs somewhere to be found from.
+  "as <post title>" is added whenever `Post.title` has diverged from the doc's. Shown under
+  the same `canEdit` gate the button had: a schedule is not public information. Dates are
+  UTC by §21b's rule, sliced from the ISO string and rendered once on the server; the
+  countdown (`src/lib/duration.ts`) is computed at request time on this per-viewer dynamic
+  page and simply goes stale if a tab sits, which a reload fixes. The doc page's select
+  includes a `posts` relation, filtered on `deletedByUserId` by hand because `resolveDocParam`
+  reads through `prismaIncludingDeleted`. `e2e/publish.spec.ts` drives all three entry
+  kinds and both link surfaces.
+
+Not built: a bare `/post/[id]` page. §3d's rule stands — no `/post/[id]` page reads a post —
+and the slug-history redirect already keeps old public links alive. Every "configure" link
+above goes to `/post/[id]/edit`.

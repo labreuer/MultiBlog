@@ -6,15 +6,14 @@ import * as Y from "yjs";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { gated, titleWhenOk } from "@/lib/route-access";
-import { canUserReadDoc, canUserEditDoc, readableDocsFor } from "@/lib/doc-authz";
+import { canUserReadDoc, canUserEditDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
-import { createPostFromDoc } from "@/app/actions/posts";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { renderYdocDoc } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
-import CompareWithPicker from "@/components/CompareWithPicker";
+import DocPostsLine from "@/components/DocPostsLine";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
@@ -49,6 +48,15 @@ const DOC_SELECT = {
   authors: {
     orderBy: { bylineOrder: "asc" },
     select: { userId: true, user: { select: { slug: true, name: true } } },
+  },
+  // The posts made from this doc (PLAN.md §15d), for the byline's post
+  // line (§21i). deletedByUserId filtered by hand: resolveDocParam reads
+  // through prismaIncludingDeleted, and the soft-delete extension never
+  // reaches a nested relation anyway.
+  posts: {
+    where: { deletedByUserId: null },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, slug: true, title: true, publishedAt: true, publishEventId: true },
   },
 } as const;
 
@@ -114,7 +122,6 @@ export default async function PublicDocPage({
   const { value: doc, user } = access;
 
   const canEdit = await canUserEditDoc(user.id, user.role, doc.id);
-  const otherDocs = (await readableDocsFor(user.id, user.role)).filter((d) => d.id !== doc.id);
 
   // PLAN.md §13o — fetched here rather than inside AnnotationSection because
   // the body needs them too: a column-anchored annotation's highlight is a
@@ -239,16 +246,14 @@ export default async function PublicDocPage({
                             §12k), so "last edited" is the only date that means anything.
                             Short date visible, full timestamp on hover. */}
                         <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
-                        <CompareWithPicker docId={doc.id} otherDocs={otherDocs} />
-                        {/* PLAN.md §15d — the doc-page entry point into post
-                            creation, alongside the /posts/new picker. Bound with the
-                            extra leading arg the way any parameterized form action
-                            is; createPostFromDoc redirects to the new post's editor
-                            on success. */}
+                        {/* PLAN.md §21i — "Publish as blog post" while the doc has
+                            no post (§15d's entry point into post creation), the
+                            doc's posts once it has any. Gated on canEdit, as the
+                            button always was: a scheduled post is not public
+                            information. The key is load-bearing for the same
+                            reason TagChips' below is. */}
                         {canEdit && (
-                          <form action={createPostFromDoc.bind(null, doc.id)} style={{ display: "inline" }}>
-                            <button type="submit">Publish as blog post</button>
-                          </form>
+                          <DocPostsLine key="posts" docId={doc.id} docTitle={doc.title} posts={doc.posts} />
                         )}
                         {/* PLAN.md §20k — a second line of the byline rather
                             than a block below the text, and "bare" is what

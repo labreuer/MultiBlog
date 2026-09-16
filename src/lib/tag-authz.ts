@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { canApplyTags, canCurateTags } from "@/lib/role-checks";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
-import { publishedPostWhere } from "@/lib/post-status";
+import { readablePostWhere } from "@/lib/post-status";
 import type { AnchorTarget } from "@/lib/anchors";
 
 export { canApplyTags, canCurateTags } from "@/lib/role-checks";
@@ -62,12 +62,20 @@ export async function canUserTagTarget(userId: string, role: Role, target: Ancho
       return file !== null && (await canUserReadFile(userId, role, file));
     }
     case "post": {
-      // publishedPostWhere rather than a bare existence check, for the reason
-      // it exists at all: a scheduled post already carries publishEventId, so
-      // checking that alone would let a tag land on something not yet live —
-      // and /tag/[slug] would then be the surface that leaked it.
+      // readablePostWhere, not publishedPostWhere: a draft or scheduled post
+      // is exactly where tagging is most useful — you file a piece as you
+      // write it, not after it goes live — so the rule here is the same "you
+      // may tag what you may read" every other arc leg wears, with an
+      // unpublished post readable by whoever may edit it.
+      //
+      // What that costs is a containment obligation, not a looser gate: an
+      // unpublished post now carries chips whose term links to /tag/[slug],
+      // so *that* page is the surface that must not list it to a stranger.
+      // It wears the same predicate per row (tag-browse.ts's listPosts), which
+      // is why the widening happens in one function both call rather than in
+      // two `where`s that could drift apart.
       const post = await prisma.post.findFirst({
-        where: { id: target.id, ...publishedPostWhere() },
+        where: { id: target.id, ...readablePostWhere(userId, role) },
         select: { id: true },
       });
       return post !== null;

@@ -32,17 +32,3 @@
 .preamble {
   margin-bottom: 2rem;
 }
-
-.postHeading {
-  display: flex;
-  align-items: center;
-}
-
-.titleLink {
-  color: var(--foreground);
-  text-decoration: none;
-}
-
-.titleLink:hover {
-  text-decoration: underline;
-}

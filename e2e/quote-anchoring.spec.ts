@@ -7,7 +7,7 @@
 //
 // Editing happens on the *doc* now, not the post (PLAN.md §15) — a case here
 // is always "edit the backing doc, then publish that doc's new head from
-// /posts/[id]/edit".
+// /post/[id]/edit".
 //
 // Worth knowing before adding cases here: **deleting the quoted text is not
 // enough to collapse the range.** `recreateTransform` produces a character-
@@ -37,7 +37,8 @@ import {
 } from "./fixtures";
 import { getThread, getPublicationEvents, getPostContentText } from "./db";
 
-const PUBLISH = { name: "Publish", exact: true } as const;
+// quotedPost is live from the fixture, so its button reads "Republish" (PLAN.md §15c).
+const REPUBLISH = { name: "Republish", exact: true } as const;
 const DETACHED_NOTICE = "This quote was edited or removed in a later revision of the article.";
 
 async function editDoc(page: Page, docId: string): Promise<void> {
@@ -48,16 +49,16 @@ async function editDoc(page: Page, docId: string): Promise<void> {
 /**
  * Publishes whatever the doc's current head is, and returns the new event's
  * id. The scrub bar opens on the *presently published* position, not the
- * head (so viewing /posts/[id]/edit shows what's actually live) — so
+ * head (so viewing /post/[id]/edit shows what's actually live) — so
  * publishing the latest edit means explicitly scrubbing to the end first,
  * every time, not just when a case cares about an earlier point on purpose.
  */
 async function republish(page: Page, postId: string): Promise<string> {
-  await page.goto(`/posts/${postId}/edit`);
+  await page.goto(`/post/${postId}/edit`);
   await expect(page.getByLabel("Scrub through the doc's edit history")).toBeVisible({ timeout: 15_000 });
   await scrubToLatest(page);
-  await expect(page.getByRole("button", PUBLISH)).toBeEnabled();
-  await page.getByRole("button", PUBLISH).click();
+  await expect(page.getByRole("button", REPUBLISH)).toBeEnabled();
+  await page.getByRole("button", REPUBLISH).click();
   await expect(page.getByText("Published.")).toBeVisible();
   const events = await getPublicationEvents(postId);
   return events[events.length - 1].id;
@@ -111,7 +112,7 @@ test.describe("quote anchoring across publishes", () => {
     });
 
     // Still highlighted inline, at its new home.
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
     await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
   });
@@ -140,7 +141,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     // No inline highlight any more, but the thread is still listed, showing
     // the quote as it was written.
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
@@ -174,7 +175,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     // The quoted words are gone from the article body entirely, yet the thread
     // still renders its quote and notice.
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
@@ -201,7 +202,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
     await expect(visibleText(page, DETACHED_NOTICE)).toBeVisible();
   });
@@ -230,12 +231,12 @@ test.describe("quote anchoring across publishes", () => {
     await republish(page, quotedPost.id);
     await expect.poll(async () => (await getThread(quotedPost.threadId))?.status).toBe("DETACHED");
 
-    await page.goto(`/posts/${quotedPost.id}/edit`);
+    await page.goto(`/post/${quotedPost.id}/edit`);
     await expect(page.getByLabel("Scrub through the doc's edit history")).toBeVisible({ timeout: 15_000 });
     await scrubTo(page, 0);
     await expect(page.getByText(/Publishing will reuse the snapshot/)).toBeVisible();
-    await expect(page.getByRole("button", PUBLISH)).toBeEnabled();
-    await page.getByRole("button", PUBLISH).click();
+    await expect(page.getByRole("button", REPUBLISH)).toBeEnabled();
+    await page.getByRole("button", REPUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
 
     await expect.poll(() => getPostContentText(quotedPost.id)).toContain(QUOTED_BODY);
@@ -246,7 +247,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(`/${quotedPost.slug}`);
+    await page.goto(quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
     await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
   });

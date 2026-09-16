@@ -22,7 +22,7 @@ import {
 } from "./db";
 
 // /ydoc-debug pulls in the same TipTap+Yjs+collab bundle as the post editor,
-// and (unlike /posts/[id]/edit) isn't warmed up by auth.setup.ts — so the
+// and (unlike /post/[id]/edit) isn't warmed up by auth.setup.ts — so the
 // first test to hit it in a cold `next dev` can take a while to compile.
 const LIVE_TIMEOUT = 90_000;
 

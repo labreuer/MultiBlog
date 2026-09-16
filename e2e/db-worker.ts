@@ -26,6 +26,8 @@ import { extractText } from "@/lib/diff";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
+import { postPath } from "@/lib/post-path";
+import { derivePostStatus } from "@/lib/post-status";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { uniqueFileSlug } from "@/lib/file-slug";
 import { uniqueTagSlug } from "@/lib/tag-slug";
@@ -190,6 +192,13 @@ export type TestPost = {
   docId: string;
   /** null unless `publish` was requested. */
   eventId: string | null;
+  /**
+   * The public page, `/yyyy/mm/dd/slug` (PLAN.md §21) — null unless
+   * `publish` was requested, since a draft has no date yet. Specs navigate
+   * here rather than building the URL by hand; for a post the *browser*
+   * publishes, `getPostPath` reads the path back afterwards.
+   */
+  path: string | null;
   bodyText: string;
 };
 
@@ -205,6 +214,14 @@ export async function createTestPost(opts: {
   bodyText?: string;
   policy?: ModerationPolicy;
   publish?: boolean;
+  /**
+   * ISO timestamp for `publishedAt` (a string, since this crosses the JSON
+   * bridge in e2e/db.ts) — for a spec that needs a post on a *known* date,
+   * such as the date archives (PLAN.md §21h). Must be in the past, or the
+   * post is scheduled rather than published and `path` would lie. Defaults
+   * to now.
+   */
+  publishedAt?: string;
 }): Promise<TestPost> {
   const {
     authorEmail,
@@ -212,6 +229,7 @@ export async function createTestPost(opts: {
     bodyText = "The quick brown fox jumps over the lazy dog.",
     policy = "AUTO",
     publish = false,
+    publishedAt: publishedAtIso,
   } = opts;
   assertSafe(authorEmail);
 
@@ -231,6 +249,7 @@ export async function createTestPost(opts: {
   });
 
   let eventId: string | null = null;
+  let path: string | null = null;
   if (publish) {
     const throughUpdateId = await ydocStore.maxUpdateId(ydocIdForDoc(doc.id));
     if (throughUpdateId === null) throw new Error(`Test doc ${doc.id} has no update history to publish.`);
@@ -242,6 +261,10 @@ export async function createTestPost(opts: {
     const { proseJson, title: docTitle } = postContentFromYdoc(materialized);
     materialized.destroy();
     const publishedTitle = title || docTitle || "Untitled";
+    const publishedAt = publishedAtIso ? new Date(publishedAtIso) : new Date();
+    if (Number.isNaN(publishedAt.getTime()) || publishedAt.getTime() > Date.now()) {
+      throw new Error(`createTestPost: publishedAt must be a valid timestamp in the past, got ${publishedAtIso}`);
+    }
 
     const event = await prisma.postPublicationEvent.create({
       data: {
@@ -252,6 +275,10 @@ export async function createTestPost(opts: {
         title: publishedTitle,
         proseJson: proseJson as Prisma.InputJsonValue,
         actorId: author.id,
+        // What publishPostFromDoc writes: a first publish's event is the
+        // same instant as publishedAt, so a fixture post dated 2001 is not
+        // "updated" today on its editor (PLAN.md §15c).
+        createdAt: publishedAt,
       },
     });
     await prisma.post.update({
@@ -260,13 +287,30 @@ export async function createTestPost(opts: {
         title: publishedTitle,
         proseJson: proseJson as Prisma.InputJsonValue,
         publishEventId: event.id,
-        publishedAt: new Date(),
+        publishedAt,
       },
     });
     eventId = event.id;
+    path = postPath({ slug: post.slug, publishedAt });
   }
 
-  return { id: post.id, slug: post.slug, title: post.title, docId: doc.id, eventId, bodyText };
+  return { id: post.id, slug: post.slug, title: post.title, docId: doc.id, eventId, path, bodyText };
+}
+
+/**
+ * Where the post is publicly readable *now* — null for a draft or a
+ * scheduled post. The fixture can't know a draft's path up front (the date is
+ * `publishedAt`, set by the publish itself), so a spec that publishes through
+ * the browser asks here rather than guessing "today", which would cross
+ * midnight in UTC at some point and read exactly like a regression.
+ */
+export async function getPostPath(postId: string): Promise<string | null> {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    select: { slug: true, publishedAt: true, publishEventId: true },
+  });
+  if (!post || derivePostStatus(post) !== "published") return null;
+  return postPath(post);
 }
 
 export async function deleteTestPost(idOrSlug: string): Promise<void> {
@@ -1663,6 +1707,7 @@ const handlers = {
   deleteTestUser,
   createTestPost,
   deleteTestPost,
+  getPostPath,
   createTestDoc,
   addTestDocAuthor,
   getDocAuthorEmails,

@@ -160,6 +160,37 @@ or the annotation's own author — and never consults the doc, which is why that
 identically in all four tables and why an ADMIN retains it even where the doc is otherwise
 invisible to them (the † in table 2).
 
+## A post's byline is not its doc's (PLAN.md §15d, §15i)
+
+**Being credited on a post says nothing about rights over the doc it was published from, and
+that is deliberate.** `createPostFromDoc` seeds the post's authors from the doc's byline; from
+then on the two lists are edited independently, and `updatePostAuthor` will add any
+ADMIN/EDITOR/AUTHOR to a post without consulting the doc at all. Credit for a published piece
+is not authority over its text: a contributor may have supplied the argument, the data or the
+translation; one doc may source a whole series with a different name on each part; and a
+person coming off a doc's byline must not thereby lose credit for what is already published.
+
+| On `/post/[id]/edit`, a post author who **cannot** edit the source doc | |
+|---|---|
+| Edit the title, byline, tags, moderation policy; delete/restore | ✅ |
+| Unpublish / cancel schedule | ✅ (`unpublishPost` takes `canUserEditPost` only) |
+| See the post's published content | ✅ (its stored `proseJson`, server-rendered) |
+| Scrub the doc's history | ❌ `/api/doc/[id]/replay` is `canUserEditDoc`-gated |
+| Publish / republish / schedule | ❌ `publishPostFromDoc` requires `canUserEditDoc` too |
+| See the doc's tags offered for carrying across | only if `canUserReadDoc` (see Tags, below) |
+| Reach the doc itself | as far as `canUserReadDoc` allows, and no further |
+
+The two doc-side questions are **separate and both get asked**: `canUserReadDoc` decides what
+may be *shown* about the doc (its title as a link, its tags in §20m's offer), and
+`canUserEditDoc` decides what may be *done* with it (scrub, publish). A PRIVATE doc answers
+no to both for anyone off its byline, ADMIN and EDITOR included (§12e); a SHARED doc answers
+yes to the first for anyone with `canViewDocs`, which is why a post author usually does see
+the tag offer and usually does not see the scrub bar.
+
+**Rejected:** making the post byline *mean* "may publish this", by filtering
+`updatePostAuthor`'s eligible set to the doc's editors. That collapses credit into authority
+and loses every case above. PLAN.md §15i records it.
+
 ## Two known inconsistencies
 
 Both are live decisions rather than bugs, recorded so the tables aren't mistaken for a
@@ -246,9 +277,24 @@ it.
 
 **Chips are as private as the thing they are on, structurally.** `TagChips` is rendered
 from inside a page that has already run its own gate — `canUserReadDoc`, `canUserReadFile`,
-`publishedPostWhere` — and takes a resolved target rather than a slug, so there is no way to
+`publishedPostWhere` on the public post page, ownership-or-`canEditAnyPost` on
+`/post/[id]/edit` — and takes a resolved target rather than a slug, so there is no way to
 mount it on a surface that hasn't gated first. It deliberately runs no second check of its
 own: a second gate is a second thing that can disagree with the first.
+
+**One surface shows one object's tags on *another* object's page, and it needs a second,
+narrower gate** (PLAN.md §20m). `/post/[id]/edit`'s source-doc tag offer lists the doc's
+terms for carrying across, and the paragraph above does not cover it: the premise
+there is that the page's own gate is the right one, and here it is not. A post author need
+not be an author of the doc the post was made from, so inheriting ownership-or-
+`canEditAnyPost` would disclose a PRIVATE doc's terms to whoever holds the post's byline.
+The page runs `canUserReadDoc` as well, and renders an empty offer when it fails — the
+**conjunction** of the two objects' read rules, which is how PLAN.md §20i said cross-container
+visibility should resolve when it first came up.
+
+*Applying* one of those terms needs no doc-read at all: `canUserTagTarget(post)` alone, since
+a term carries no visibility of its own and the picker already offers every term site-wide.
+What the doc's gate protects is the disclosure of **which** terms are on that doc.
 
 **One surface reaches the chips by a different path, and it is gated differently.** The doc
 editor's Settings panel (`/doc/[slug]/edit`) renders `TagStrip` directly, fed by
@@ -265,6 +311,24 @@ re-implementing three permission models in one query — the easiest leak to wri
 hardest to see, since a wrong answer looks exactly like a right one. The counts each section
 shows come from those filtered queries and **never** from the `tag_metrics` view, which
 counts everything live and has no viewer.
+
+**An unpublished post is taggable, and `/tag/[slug]` is what contains it** (PLAN.md §20l).
+A draft or scheduled post may be tagged by whoever may edit it, because tagging is most
+useful while a piece is being written. What that would leak is the *browse* page, so that is
+where the filtering lives: `readablePostWhere(userId, role)` in `src/lib/post-status.ts` is
+`publishedPostWhere()` ORed with the unpublished posts this viewer may edit, and both the tag
+gate (`canUserTagTarget`) and the post section of `/tag/[slug]` call it, so they cannot drift.
+A signed-out reader still sees published posts only. Rows that are not published link into
+`/post/[id]/edit` and carry a `draft`/`scheduled` marker, since neither has a public URL that
+answers. Nothing else moved onto this predicate — the landing page, the archives, RSS, search
+and `/yyyy/mm/dd/slug` stay on `publishedPostWhere()`, which is what keeps "published"
+meaning one thing.
+
+| Permission | ADMIN | EDITOR | AUTHOR (on the byline) | AUTHOR (not on it) | AUTHORIZED | signed out |
+|---|---|---|---|---|---|---|
+| Tag a **published** post | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Tag a **draft/scheduled** post | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| See it listed on `/tag/[slug]` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 
 **Tagging requires a signed-in AUTHORIZED account on every surface — including posts.** §20d
 frames the rule as "applying a tag follows the permission to annotate that surface", and read
@@ -434,6 +498,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Doc links | `src/app/actions/doc-links.ts` |
 | Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |
 | Who may tag which object; who may retract an assignment | `src/lib/tag-authz.ts` |
+| Which posts a viewer may see at all (published + own unpublished) | `src/lib/post-status.ts` |
 | Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts` |
 | `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
 | `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |
@@ -444,6 +509,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Anchored-link edit (creator-only reopen/close; add/remove/reorder on the open link; last-part rule) | `src/app/actions/anchored-links.ts`; the Edit affordance's four states in `src/lib/anchored-link-editing.ts` |
 | `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
+| Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |
+| What the post editor shows when only one of those holds | `src/app/post/[id]/edit/page.tsx`'s two doc gates, rendered by `PostPublisher`'s `selectedEditable` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader

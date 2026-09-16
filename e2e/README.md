@@ -5,7 +5,8 @@ flows that otherwise get re-verified by hand every session: publish/unpublish,
 comment moderation, two-author live collaboration, quote anchoring across
 publishes, republishing from an earlier point in a doc's history,
 selecting text on each of the three surfaces that respond to it
-(`text-selection.spec.ts`), and /dashboard's session refresh
+(`text-selection.spec.ts`), the date archives and the byline's date link
+(`date-archive.spec.ts`, PLAN.md §21h), and /dashboard's session refresh
 (`src/app/sign-in/NOTES.md`) — the one flow whose whole point is that a change
 is *not* visible until the right page is visited.
 
@@ -56,7 +57,7 @@ sweeps up after itself, and `e2e/.auth/admin.json` need not exist beforehand.
    editor to warm that route's compile and prove the collab server answers —
    `next dev` compiles on first request, and without this every worker hits the
    heaviest route cold at once and can overrun `waitForDocCollabReady`. There's
-   no equivalent warm-up for `/posts/[id]/edit` any more: it has no collab
+   no equivalent warm-up for `/post/[id]/edit` any more: it has no collab
    connection of its own (PLAN.md §15 — it publishes, it doesn't edit).
 3. Every test in the `chromium` project starts from that storage state — already
    signed in, no sign-in cost per test.
@@ -249,7 +250,7 @@ From `./fixtures` (import `test` and `expect` from there, not from
 | Fixture | What you get |
 | --- | --- |
 | `draftPost` | An unpublished post by the shared admin, backed by its own throwaway doc with real body text |
-| `publishedPost` | Same, already published, so `/[slug]` and comments work |
+| `publishedPost` | Same, already published, so its public page (`post.path`, `/yyyy/mm/dd/slug`) and comments work |
 | `publishedModeratedPost` | Published with `moderationPolicy: ALWAYS` |
 | `quotedPost` | Published with `QUOTED_BODY` and one ACTIVE quote thread |
 | `draftDoc` | A PRIVATE doc by the shared admin, empty |
@@ -259,6 +260,12 @@ From `./fixtures` (import `test` and `expect` from there, not from
 A `TestPost` (PLAN.md §15) carries `docId` alongside `id`/`slug`/`title` —
 editing its content means navigating to `/doc/${post.docId}/edit`, not the
 post's own edit page, which only publishes.
+
+It also carries `path`, the public page (`/yyyy/mm/dd/slug`, PLAN.md §21) — a string on the
+published fixtures, null on `draftPost`. The date segment *is* `publishedAt`, so a post the
+*browser* publishes has no knowable path until afterwards: read it back with
+`getPostPath(post.id)` (`publish.spec.ts`'s `publicPath`), never by formatting "today" — that
+crosses midnight in UTC eventually and reads exactly like a regression.
 
 Plus helpers: `bodyEditor(page)`, `titleEditor(page)`, `statusLine(page)`,
 `visibleText(page, text)`, `deleteTextInBody(page, needle)`,
@@ -278,10 +285,15 @@ the admin account.
   until the Hocuspocus provider has synced, and typing before then edits a
   `Y.Doc` that's about to be overwritten by the real seed. `🟢 Live` is the
   earliest point at which acting on the editor means anything. On
-  `/posts/[id]/edit` there's a different readiness gate instead: Publish/
+  `/post/[id]/edit` there's a different readiness gate instead: Publish/
   Schedule stay disabled until `PostSnapshotScrubBar` has loaded the backing
   doc's history — `await expect(page.getByRole("button", { name: "Publish",
-  exact: true })).toBeEnabled()`.
+  exact: true })).toBeEnabled()`. **That gate never opens for a viewer without
+  edit access to the backing doc** (PLAN.md §15i): the bar is not mounted at
+  all, so a spec driving such a user must wait on the post's stored content
+  instead — `publish.spec.ts`'s "a post author with no edit access to the
+  source doc…" is the worked example. A post's byline and its doc's byline are
+  independent, so this is an ordinary fixture setup, not an exotic one.
 - **`waitForDocCollabReady` cannot be used in the doc editor's phone-landscape
   focus mode.** It waits for the connection badge to be *visible*, and that
   badge is one of the things the mode hides (STYLE.md's fourth breakpoint), so

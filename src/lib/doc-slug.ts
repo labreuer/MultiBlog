@@ -1,6 +1,6 @@
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { slugify, RESERVED_SLUGS, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
+import { slugify, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 
 // Doc slugs are unique among docs only (PLAN.md §12c) — a separate /doc/*
 // namespace with no shared catch-all against post slugs, so a doc and a post
@@ -27,7 +27,7 @@ async function docSlugInUse(
 
 export async function uniqueDocSlug(title: string, excludeDocId?: string): Promise<string> {
   const base = slugify(title, "doc");
-  let candidate = RESERVED_SLUGS.has(base) ? `${base}-doc` : base;
+  let candidate = base;
   let suffix = 2;
   while (await docSlugInUse(candidate, prismaIncludingDeleted, excludeDocId)) {
     candidate = `${base}-${suffix}`;
@@ -45,9 +45,6 @@ export async function uniqueDocSlug(title: string, excludeDocId?: string): Promi
 // note above updateDocVisibility (src/app/actions/docs.ts).
 export async function changeDocSlug(docId: string, newSlugInput: string, updatedByUserId: string): Promise<string> {
   const newSlug = slugify(newSlugInput, "doc");
-  if (RESERVED_SLUGS.has(newSlug)) {
-    throw new Error(`"${newSlug}" is a reserved path and can't be used as a doc url.`);
-  }
 
   return prismaIncludingDeleted.$transaction(async (tx) => {
     const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true } });

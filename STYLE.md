@@ -57,7 +57,9 @@ lump every table-adjacent style into one file:
 |---|---|
 | `PostEditor.module.css` | `:hover` (toolbar/quote menu), `@media` (mobile toolbar) |
 | `styles/prose.module.css` | shared across editor + public rendering; `.quote-highlight.pulse` keyframe animation; reads the per-thread `--thread-color` custom property (see Color palette) |
-| `app/page.module.css`, `app/authors/[id]/page.module.css`, `app/[slug]/page.module.css` | `:hover`-only underline on post-title links |
+| `components/PostListing.module.css`, `components/PostDate.module.css` | `:hover`-only underline on post-title links and on the byline's date link (PLAN.md §21h). `PostListing` is the one post-preview block every listing surface renders — `app/page.module.css` and `app/authors/[slug]/page.module.css` used to carry their own copies of `.postHeading`/`.titleLink` and don't any more |
+| `components/DocPostsLine.module.css` | the doc byline's post line (PLAN.md §21i), whose one class also dresses a `<form>` as `inline` so the "Publish as blog post" button sits on the byline's line. The public post page's "configure post" link beside it in §21i deliberately has no module: it is a plain link in the default link color |
+| `app/[year]/post-archive.module.css` | the date archive pages (PLAN.md §21h): the 680px listing column, and the breadcrumb's `li + li::before` separator, which inline `style` can't express |
 | `components/CommentSection.module.css`, `CommentNode.module.css`, `CommentForm.module.css` | none needed a pseudo-class directly, but were pulled into modules alongside `QuoteThreadHeader` for consistency when that pass happened (see git history 2026-07-20) |
 | `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values; `.arrowActive`/`.barActive` also read `--thread-color` |
 | `components/PostSettingsPanel.module.css` | same state-dependent-class rationale as `QuoteThreadHeader` — `.draggableRow`/`.dragOver` toggle on drag state, `.checkboxRow` conditionally combines them; no pseudo-class/media-query is used, but juggling three conditional classes per row as inline `style` objects would be worse than the module |
@@ -221,7 +223,7 @@ Two competing font stacks are in play, both deliberate:
 
 - **Reading surfaces** (article body, comments heading): serif —
   `Georgia, "Iowan Old Style", "Palatino Linotype", serif` — set on `.prose` (shared
-  editor/render typography, `prose.module.css`), the post `<h1>` (`[slug]/page.module.css`
+  editor/render typography, `prose.module.css`), the post `<h1>` (`[year]/[month]/[day]/[slug]/page.module.css`
   `.title`), and the comments `<h2>` (`CommentSection.module.css` `.heading`). Chosen for
   reading comfort; `.prose` also sets `font-size: 1.125rem; line-height: 1.5`.
 - **UI chrome** (nav, forms, byline metadata): system sans-serif —
@@ -237,19 +239,22 @@ by design, not by accident.
 
 - **Centered reading column**: `max-width: ...px; margin: 0 auto;` — not yet a shared
   component/class; each page repeats it. Three widths, kept deliberately separate:
-  - `800px` on pages showing full post text — `[slug]/page.module.css` (public post
+  - `800px` on pages showing full post text — `[year]/[month]/[day]/[slug]/page.module.css` (public post
     display) and `PostEditor.module.css` (editor).
-  - `680px` on listing/excerpt pages — `authors/[id]/page.tsx`, `search/page.tsx`. These
-    show post previews, not full text, so they weren't widened alongside the two
-    full-text surfaces above.
+  - `680px` on listing/excerpt pages — `authors/[slug]/page.tsx`, `search/page.tsx`, and
+    the date archives (`[year]/post-archive.module.css`, PLAN.md §21h). These show post
+    previews, not full text, so they weren't widened alongside the two full-text surfaces
+    above.
   - `1040px` on the landing page (`page.module.css` `.layout`, PLAN.md §17l) — not a
     fourth, drifted number: it's a two-column CSS grid (`minmax(0, 1fr) 280px`) built
     for the contributor sidebar, and the main column inside it still lands at roughly
     680px; the extra width is the 280px sidebar plus its `2.5rem` gap. Collapses to a
     single column under 900px, with the sidebar (second in DOM order) simply flowing
     below the post list rather than needing an `order` override.
-- **Post-listing article block**: `padding: 1.5rem 0; border-bottom: 1px solid #eee;`
-  — repeated verbatim across home, author, and search listings.
+- **Post-listing article block**: `padding: 1.5rem 0; border-bottom: 1px solid
+  var(--border-subtle);` — once repeated verbatim across home, author, and search listings,
+  now written once in `components/PostListing.module.css` and rendered by all of them plus
+  the date archives (PLAN.md §21h).
 - **Avatar with a generic-standin fallback** (`ContributorCard.module.css` `.avatarFallback`,
   PLAN.md §17e): when `User.image` is unset, a 40px circle filled with `User.color`
   (already `#rrggbb`-validated on write) showing `User.adminInitials` — no separate

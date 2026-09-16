@@ -28,7 +28,7 @@
 // A post here is an immutable snapshot of a doc at a chosen point in that doc's
 // history (§15). The editable, collaboratively-authored, revision-bearing thing
 // an Etherpad pad actually IS therefore maps onto a Doc, and publishing is a
-// later deliberate act through /posts/[id] (§15c) — including publishing from
+// later deliberate act through /post/[id] (§15c) — including publishing from
 // any point in the imported history, which is the whole reason the history is
 // imported rather than just the final text.
 //

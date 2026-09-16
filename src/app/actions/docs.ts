@@ -86,8 +86,8 @@ function isSlugTaken(err: unknown): boolean {
 //
 // A title that slugifies to nothing — punctuation only, or a script with no
 // ASCII in it at all — falls back to the cuid rather than to slugify's own
-// "doc" placeholder, which RESERVED_SLUGS would then push to `doc-doc`,
-// `doc-2`, ... A meaningless-but-unique slug beats a misleadingly generic one.
+// "doc" placeholder, which uniqueDocSlug would then push to `doc`, `doc-2`,
+// ... A meaningless-but-unique slug beats a misleadingly generic one.
 async function insertDocRow(userId: string, title: string) {
   if (!title || !slugify(title, "")) {
     return insertDocRowSluggedById(userId, title);

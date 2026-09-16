@@ -75,6 +75,12 @@ export default async function TagPage({ params }: { params: Promise<{ slug: stri
 // Each section's count is this viewer's own filtered result, never a number
 // read off tag_metrics (§20d) — the view counts everything live, which is
 // a different question and the wrong one to answer here.
+//
+// A row's `note` is the post section's "draft"/"scheduled" marker: those rows
+// are here because this viewer may edit them, and they link into the editor
+// rather than to a public URL that doesn't answer yet (tag-browse.ts). Saying
+// so on the page is what keeps "this list is per-viewer" visible to the
+// viewer it differs for.
 function Section({ title, hits }: { title: string; hits: TagHit[] }) {
   if (hits.length === 0) return null;
   return (
@@ -86,6 +92,7 @@ function Section({ title, hits }: { title: string; hits: TagHit[] }) {
         {hits.map((hit) => (
           <li key={hit.id}>
             <Link href={hit.href}>{hit.title}</Link>
+            {hit.note && <span className={styles.note}>{hit.note}</span>}
           </li>
         ))}
       </ul>

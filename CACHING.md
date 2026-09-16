@@ -74,7 +74,7 @@ Restoring real ISR above (entry directly above) meant `/`, `/[slug]`, and `/auth
 went back to being cached with `revalidate = 60` instead of rendering fresh per request. But
 `publishPost`/`unpublishPost` (`src/app/actions/posts.ts` — the publish action is now
 `publishPostFromDoc`, PLAN.md §15, same `revalidatePublicPaths` call) only ever called
-`revalidatePath` for the *admin* surfaces (`/posts/[id]/edit`, `/posts/[id]/history`,
+`revalidatePath` for the *admin* surfaces (`/post/[id]/edit`, `/post/[id]/history`,
 `/posts`) — never for the
 public pages whose `publishedPostWhere()` query result the action had just changed. A newly
 published post wouldn't appear on `/` or its authors' `/authors/[slug]` pages, and an
@@ -372,3 +372,28 @@ written **straight to the database** (a fixture, a `scripts/test-tag.ts` run) is
 to the Full Route Cache, so a post page cached by an earlier visit keeps serving chips without
 it for up to the revalidate window. A tag applied through the real action is fine — its own
 `revalidatePath` is exactly what the direct write bypasses.
+
+## 2026-09-15 — the post page moved to `/yyyy/mm/dd/slug`
+
+Every entry above that says `/[slug]` or `src/app/[slug]/page.tsx` means the published-post
+page, which PLAN.md §21 moved to `src/app/[year]/[month]/[day]/[slug]/page.tsx`. Nothing in
+its caching story changed: still `generateStaticParams` + `revalidate = 60`, still no
+`auth()`/`cookies()`/`headers()` in its render path, and `next build` still shows it
+prerendered. What did change is that a path now needs the post's `publishedAt` as well as its
+slug, so every `revalidatePath` for a post page goes through `revalidatePostPage`
+(`src/lib/revalidate-post.ts`) — a draft is a no-op there, since it has no page to invalidate
+— and `revalidatePublicPaths` (`src/app/actions/posts.ts`) is handed the *post-publish*
+`publishedAt`, because a first publish is the one moment the path comes into existence.
+
+## 2026-09-15 — the date archives are ISR without `generateStaticParams`
+
+`/yyyy`, `/yyyy/mm` and `/yyyy/mm/dd` (PLAN.md §21h) carry `revalidate = 60` and no
+`generateStaticParams`: a prefix is rendered on its first request and served from the Full
+Route Cache for the window after, and `next build` lists them as dynamic (ƒ) rather than
+prerendered, which is correct — there is no finite list of prefixes to prerender. Same
+no-`auth()` constraint as the post page, since the cache is only shared while nothing in the
+render path reads the request. Invalidation is `revalidatePostArchives`
+(`src/lib/revalidate-post.ts`) — the post's three prefixes — called wherever `/` is:
+publish, unpublish and both slug-change actions. Comment actions don't call it, since a
+comment changes nothing a listing shows. In the e2e suite a fixture-dated post is invisible
+to a cached prefix until `freshGoto` posts to `/api/test/revalidate`, exactly as for `/`.

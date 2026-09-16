@@ -42,19 +42,26 @@ export const QUOTE_FROM = QUOTED_BODY.indexOf(QUOTED_TEXT) + 1;
 export const QUOTE_TO = QUOTE_FROM + QUOTED_TEXT.length;
 
 /** A published post carrying one ACTIVE quote-anchored thread over QUOTED_TEXT. */
-export type QuotedPost = TestPost & { threadId: string };
+/** A TestPost created with `publish: true`, so `path` is known. */
+export type PublishedTestPost = TestPost & { path: string };
+export type QuotedPost = PublishedTestPost & { threadId: string };
+
+function published(post: TestPost): PublishedTestPost {
+  if (post.path === null) throw new Error(`Post ${post.id} was created without publish: true.`);
+  return { ...post, path: post.path };
+}
 
 type Fixtures = {
   /** A draft post authored by the shared admin, with real body text. */
   draftPost: TestPost;
   /** Same, already published — so the public page and comments work. */
-  publishedPost: TestPost;
+  publishedPost: PublishedTestPost;
   /**
    * Published with moderationPolicy ALWAYS, so an untrusted commenter's
    * submission is reliably PENDING. The default AUTO would approve it on the
    * spot and test nothing.
    */
-  publishedModeratedPost: TestPost;
+  publishedModeratedPost: PublishedTestPost;
   /** Published, body `QUOTED_BODY`, with one ACTIVE thread over `QUOTED_TEXT`. */
   quotedPost: QuotedPost;
   /** A PRIVATE doc authored by the shared admin, empty. */
@@ -319,21 +326,21 @@ export const test = base.extend<Fixtures>({
   },
 
   publishedPost: async ({ page }, use) => {
-    const post = await createTestPost({ authorEmail: ADMIN_EMAIL, publish: true });
+    const post = published(await createTestPost({ authorEmail: ADMIN_EMAIL, publish: true }));
     await use(post);
     await page.goto("about:blank").catch(() => {});
     await deleteTestPost(post.id);
   },
 
   publishedModeratedPost: async ({ page }, use) => {
-    const post = await createTestPost({ authorEmail: ADMIN_EMAIL, publish: true, policy: "ALWAYS" });
+    const post = published(await createTestPost({ authorEmail: ADMIN_EMAIL, publish: true, policy: "ALWAYS" }));
     await use(post);
     await page.goto("about:blank").catch(() => {});
     await deleteTestPost(post.id);
   },
 
   quotedPost: async ({ page }, use) => {
-    const post = await createTestPost({ authorEmail: ADMIN_EMAIL, bodyText: QUOTED_BODY, publish: true });
+    const post = published(await createTestPost({ authorEmail: ADMIN_EMAIL, bodyText: QUOTED_BODY, publish: true }));
     const { threadId } = await createQuoteThread({
       postId: post.id,
       anchoredEventId: post.eventId!,

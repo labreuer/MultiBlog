@@ -1,6 +1,6 @@
 import { prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { slugify, RESERVED_SLUGS, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
+import { slugify, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 
 // PLAN.md §19 — file slugs, the same shape doc slugs have (src/lib/doc-slug.ts)
 // with its own uniqueness namespace: a file, a doc and a post may all carry the
@@ -27,12 +27,6 @@ import { slugify, RESERVED_SLUGS, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 // and this answer must not depend on which one arrived. The upload route's
 // transaction is the extended one and used to rely on that filter by accident
 // — which is how a re-upload became a raw P2002 rather than a `-2`.
-//
-// `files` and `pdf` were added to RESERVED_SLUGS (src/lib/slug.ts) when this
-// landed: those are new top-level route segments, so a *post* slug matching
-// either would be shadowed by the static route. That reservation is about
-// posts, not about files — a file slug can't collide with its own route
-// segment because it lives one level down.
 async function fileSlugInUse(
   slug: string,
   client: Prisma.TransactionClient | TransactionClient = prismaIncludingDeleted,
@@ -65,7 +59,7 @@ async function nextFreeFileSlug(
   client: Prisma.TransactionClient | TransactionClient,
   excludeFileId?: string,
 ): Promise<string> {
-  let candidate = RESERVED_SLUGS.has(base) ? `${base}-file` : base;
+  let candidate = base;
   let suffix = 2;
   while (await fileSlugInUse(candidate, client, excludeFileId)) {
     candidate = `${base}-${suffix}`;
@@ -136,9 +130,6 @@ async function clearDeadHistoryRow(tx: Prisma.TransactionClient | TransactionCli
 /** Renames a file's slug, recording the old one in FileSlugHistory. No-ops if unchanged. */
 export async function changeFileSlug(fileId: string, newSlugInput: string, updatedByUserId: string): Promise<string> {
   const newSlug = slugify(newSlugInput, "file");
-  if (RESERVED_SLUGS.has(newSlug)) {
-    throw new Error(`"${newSlug}" is a reserved path and can't be used as a file url.`);
-  }
 
   return prismaIncludingDeleted.$transaction(async (tx) => {
     const file = await tx.storedFile.findUnique({ where: { id: fileId }, select: { slug: true } });

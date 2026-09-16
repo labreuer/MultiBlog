@@ -52,3 +52,17 @@
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* The per-row "draft"/"scheduled" marker — see the Section comment. Quiet
+   enough not to compete with the title, loud enough that the row doesn't
+   read as an ordinary published post. */
+.note {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

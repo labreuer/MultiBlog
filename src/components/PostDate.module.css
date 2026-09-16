@@ -1,0 +1,12 @@
+/* A publish date is a link to its day's archive (PLAN.md §21h), styled to
+   sit inside a secondary-colored byline rather than read as a blue link —
+   the same inherit-then-underline-on-hover treatment PostListing gives a
+   title. */
+.date {
+  color: inherit;
+  text-decoration: none;
+}
+
+.date:hover {
+  text-decoration: underline;
+}

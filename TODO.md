@@ -234,6 +234,23 @@ without committing to one now. Item 1 is independent and worth checking on the b
 
 ---
 
+## `/users/[id]/slug` still hangs off the plural table (PLAN.md §3d)
+
+On 2026-09-15 a post's own pages moved from `/posts/[id]/…` to `/post/[id]/…`, and PLAN.md
+§3d now states the rule: a plural path is an admin table and its table-wide actions, a
+singular path is one thing's pages. `/users/[id]/slug` (`src/app/users/[id]/slug/page.tsx`,
+`SlugManager` with `urlPrefix="/authors"`) is the one management page still shaped the old
+way and should become `/user/[id]/slug`. Same recipe as the post move: `git mv` the `[id]`
+directory under a new `src/app/user/`, then rewrite every `/users/${…}` link and
+`revalidatePath` and every `/users/[id]` mention in docs — about ten sites, the `/users`
+table's Slug column among them — and extend §21a's collision list with `/user/…`. Not a
+redirect candidate: the page is ADMIN-only and nothing outside the app links to it. Leave
+`/users` (the table) and `/authors/[slug]` (the public profile) alone. `/files/[slug]`
+(PLAN.md §19) is a separate case — a sign-in landing that inherited the download URL's
+prefix — and is not in scope here.
+
+---
+
 ## Admin table kit: Phase 5 not built
 
 PLAN.md §16h (staging changes in IndexedDB, before they hit the server) was never
@@ -242,14 +259,85 @@ order) and §16m (site-wide defaults) both shipped without it.
 
 ---
 
-## No public archive of older posts (PLAN.md §17d/§17m)
+## No "older posts" link from the landing page (PLAN.md §17d/§17m/§21h)
 
-The landing page now shows only the 10 most recent published posts (`take: 10`, added
-alongside the rest of §17). Before that it was unbounded, so this is a real behavior change:
-the 11th-newest post and everything older is reachable only via search, RSS, or a direct
-link — nothing on the site links to "older posts" from here. `/posts` is the admin table and
-isn't a public substitute. Worth a `/archive` (or paginated `/`) if this ever needs to be
-browsable rather than just searchable.
+The landing page shows only the 10 most recent published posts (`take: 10`, added alongside
+the rest of §17). Since 2026-09-15 the date archives (`/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd`,
+PLAN.md §21h) make everything older browsable — every byline date links to its day, and the
+breadcrumbs climb to the year — but nothing on the landing page itself points at them, so a
+reader who arrives at `/` and wants the eleventh post has to go through a post's date or
+`/search`. The missing piece is small: a "Browse by year" line under the list (one query for
+`DISTINCT date_trunc('year', published_at)`), or "older posts" linking to the current year.
+Unpaginated: a year page lists every post in it, which is fine at the post counts this site
+is built for and worth a `take` + cursor if that ever changes.
+
+## Past hobby scale: what the dated URLs and date archives (PLAN.md §21, §21h) assume
+
+Everything in this branch was sized to §9's "small/hobby scale" and says so where it cheats.
+None of it is wrong at that scale; each item below is the specific line that stops being fine
+once the post count or the request rate grows, in the order they would bite. Scoped to this
+branch's work only — `/search`'s full-table substring scan predates it and has its own note
+in `src/app/search/page.tsx`.
+
+1. **The archive queries have no index to use.** `post` is indexed on `doc_id` only, so
+   `/yyyy`, `/yyyy/mm` and `/yyyy/mm/dd`'s `publishedAt BETWEEN … ORDER BY publishedAt DESC`
+   is a sequential scan and a sort — and so is the landing page's `take: 10`, which the
+   archives merely joined. One `@@index([publishedAt])` on `Post` covers the range, the
+   sort and `publishedPostWhere()`'s `lte: now()` in one go. Cheap enough to do before it
+   hurts; listed first because it is the only item that is a one-line migration.
+
+2. **A year page is unbounded.** `post-archive.tsx` has no `take` — a year lists every post
+   in it, and a month every post in that month. At a few posts a week that is a few hundred
+   rows on the year page, each with an excerpt. The fix is `take` + a `publishedAt` cursor,
+   and the cursor keeps the page ISR-cacheable where `?page=N` would too — either works
+   with the 60s window, since every variant is its own cache entry. Below the year page
+   the month and day are naturally bounded and can stay unpaginated for longer.
+
+3. **Every listing row parses the post's whole body for a 200-character excerpt.**
+   `PostListing` calls `extractText(proseJson)` per row — the full TipTap JSON walk, for
+   every post on the landing page, an author page, a search result and now every archive
+   page, on every uncached render. With item 2 bounding the row count this is a constant,
+   but the constant is the size of the longest posts. The pattern already used for
+   `/docs`' Length (a stored, trigger-maintained `Doc.proseJsonLength`, CLAUDE.md) applies
+   directly: an `excerpt` column written at publish time by `publishPostFromDoc`, or a
+   trigger on `post.prose_json`, and `postListingInclude` selects it instead of the body.
+   That also stops the listings from dragging the full `prose_json` of every listed post
+   over the wire from Postgres just to throw all but 200 characters away.
+
+4. **`generateStaticParams` on the post page prerenders every published post at build.**
+   §21a kept it, and it was right to: a prerendered post page is the cheapest thing the
+   site serves. But `next build` time grows linearly with the post count, and a deploy that
+   rebuilds on every push pays it every time. Past a few thousand posts the usual move is to
+   return only the most recent N (or `[]`) from `generateStaticParams` and let
+   `dynamicParams` render the rest on first request into the same ISR cache — the page's
+   code does not change, only its build-time list. Watch the build time, not the post count.
+
+5. **`/[year]` turned every unmatched one-segment URL into a render.** Before §21h a
+   request for `/wp-login.php` or `/.env` hit Next's static 404; now it matches `[year]`,
+   runs `parsePostDatePrefix`, and renders `notFound()` — no query, but a React render per
+   request, uncached. At hobby traffic that is nothing. Under bot traffic it is a render per
+   probe, and the mitigation is a `proxy.ts`/middleware regex that rewrites any one-,
+   two- or three-segment path whose segments are not `\d{4}(/\d{2}){0,2}` straight to a
+   static 404 before routing — which reintroduces the middleware the app deliberately does
+   not have (`src/app/sign-in/NOTES.md`). Measure first: `next start`'s access log will
+   show whether the probes are there at all.
+
+6. **`revalidatePath` fans out further per publish.** A publish now invalidates `/`, the
+   post page, three archive pages and one page per author — seven or eight paths where it
+   was four. Each call is O(1) on a single box, so this is not a cost, but it is a *list*,
+   and it is maintained by hand in `revalidatePublicPaths`: a future listing surface (a
+   tag's post list, an "older posts" page) has to remember to add itself. When that list
+   reaches double digits, `revalidateTag` with one `posts` tag on every listing query is
+   the way to stop enumerating — at which point the per-post pages stay path-based and the
+   listings become tag-based. Not before: today the explicit list is the documentation.
+
+7. **ISR revalidation is per process.** Not new to this branch — every `revalidate = 60`
+   page has it — but the archives add three more pages to the set that goes stale for up to
+   a minute on any second instance, since `revalidatePath` only reaches the process that
+   ran the action. DEPLOY.md's single-box deployment makes this moot; a second box needs
+   either a shared cache handler (`cacheHandler` in `next.config.ts`) or the acceptance that
+   a listing can lag by its window. The archives are the pages where a minute's lag matters
+   least, so this is a note, not a task.
 
 ---
 

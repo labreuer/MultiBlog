@@ -1,0 +1,8 @@
+/* The byline's post line on /doc/[slug] (DocPostsLine.tsx): a step in from
+   the last-edited date, in the byline's own secondary color (inherited).
+   `inline` because the same class dresses a <form> when the doc has no post
+   yet, and a form is block by default. */
+.line {
+  display: inline;
+  margin-left: 1rem;
+}

@@ -160,3 +160,54 @@
   color: var(--error);
   font-size: 0.8rem;
 }
+
+/* --- the "From the doc" offer (PLAN.md §20m, DocTagOffer.tsx) --- */
+
+/* Sits directly under the post's own strip, so it needs less room above than
+   a strip standing alone — and a little below, since the rule separating the
+   post's metadata from the doc render follows it. */
+.offer {
+  margin: 0.15rem 0 0.75rem;
+}
+
+/* Dashed, like .taggerSummary and for the same reason: the border is what
+   distinguishes a control from a chip. A solid chip in this row is a term
+   already on the post; a dashed one is an offer to put it there. */
+.offerChip {
+  padding: 0.1rem 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.offerChip:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+.offerChip:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.offerAll {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--accent-wash);
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.offerAll:disabled {
+  cursor: default;
+  opacity: 0.45;
+}

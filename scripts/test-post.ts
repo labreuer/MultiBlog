@@ -132,7 +132,7 @@ async function create(authorEmail: string, docRef: string | null, title: string,
   console.log(
     `Created ${publish ? "published " : ""}post "${postTitle}" (id=${post.id}, slug=${post.slug}) by ${authorEmail}, doc=${doc.id}, moderationPolicy=${policy}`,
   );
-  console.log(publish ? `View: http://localhost:3000/${slug}` : `Edit: http://localhost:3000/posts/${post.id}/edit`);
+  console.log(publish ? `View: http://localhost:3000/${slug}` : `Edit: http://localhost:3000/post/${post.id}/edit`);
 }
 
 async function del(slugOrId: string) {

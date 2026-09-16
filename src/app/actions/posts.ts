@@ -17,17 +17,23 @@ import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { signInPath } from "@/lib/sign-in-redirect";
+import { revalidatePostArchives, revalidatePostPage } from "@/lib/revalidate-post";
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
-// the home page, author pages, and the post's own page are built from — all
-// three need revalidating, not just the admin-facing /posts list.
-async function revalidatePublicPaths(postId: string, slug: string) {
+// the home page, author pages, the date archives (§21h) and the post's own
+// page are built from — all of them need revalidating, not just the
+// admin-facing /posts list. `post` is
+// whichever slug/publishedAt pair names the page that needs invalidating:
+// the values *after* a publish (a first publish moves publishedAt from null
+// to a real path), the values before an unpublish (unchanged by it).
+async function revalidatePublicPaths(postId: string, post: { slug: string; publishedAt: Date | null }) {
   const authors = await prisma.postAuthor.findMany({
     where: { postId },
     select: { user: { select: { slug: true } } },
   });
   revalidatePath("/");
-  revalidatePath(`/${slug}`);
+  revalidatePostPage(post);
+  revalidatePostArchives(post);
   for (const { user } of authors) {
     revalidatePath(`/authors/${user.slug}`);
   }
@@ -99,7 +105,7 @@ export async function createPostFromDoc(docId: string): Promise<void> {
   });
 
   revalidatePath("/posts");
-  redirect(`/posts/${post.id}/edit`);
+  redirect(`/post/${post.id}/edit`);
 }
 
 export type CreatePostFromDocState = { error?: string };
@@ -157,6 +163,26 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
   }
 
   const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id);
+
+  // PLAN.md §15c — a republish that changes nothing is refused rather than
+  // minting a PostPublicationEvent that says nothing. PostPublisher
+  // disables the button on the same three inputs; this
+  // is for the stale tab that didn't. Only a live post can be at a no-op:
+  // from a scheduled one the same content going live *now* is the change.
+  // The snapshot compares by id because ensureYdocSnapshotAt reuses an
+  // existing snapshot at the same update, so equal update ⇒ equal id —
+  // and the live event's snapshot exists by construction, so nothing above
+  // was created on the way to this refusal.
+  if (derivePostStatus(post) === "published" && post.publishEventId) {
+    const live = await prisma.postPublicationEvent.findUnique({
+      where: { id: post.publishEventId },
+      select: { docId: true, ydocSnapshotId: true },
+    });
+    if (live && live.docId === opts.docId && live.ydocSnapshotId === snapshotId && post.title === title) {
+      throw new Error("Already published at this version with the present title.");
+    }
+  }
+
   const now = new Date();
   // Preserve the original go-live date across an unpublish/republish with no
   // reschedule in between (post.publishedAt already in the past); otherwise
@@ -174,6 +200,12 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
         title,
         proseJson,
         actorId: session.user.id,
+        // The same instant as publishedAt on a first publish, rather than
+        // the database clock a few milliseconds later — so "the live
+        // version is a later edit" (PLAN.md §15c) is createdAt > publishedAt
+        // by construction, not by tolerance. On a republish publishedAt is
+        // the preserved original and this is genuinely later.
+        createdAt: now,
       },
     });
     await tx.post.update({
@@ -185,10 +217,10 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
 
   await remapThreadsToEvent(postId, event.id);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/history`);
   revalidatePath("/posts");
-  await revalidatePublicPaths(postId, post.slug);
+  await revalidatePublicPaths(postId, { slug: post.slug, publishedAt });
   return { eventId: event.id };
 }
 
@@ -237,8 +269,8 @@ export async function schedulePostFromDoc(
 
   await remapThreadsToEvent(postId, event.id);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/history`);
   revalidatePath("/posts");
   return { eventId: event.id };
 }
@@ -270,10 +302,10 @@ export async function unpublishPost(postId: string): Promise<void> {
     }),
   ]);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/history`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/history`);
   revalidatePath("/posts");
-  await revalidatePublicPaths(postId, post.slug);
+  await revalidatePublicPaths(postId, post);
 }
 
 // Soft delete/restore double as each other's undo — no confirmation dialog;
@@ -317,7 +349,7 @@ export async function updatePostModerationPolicy(postId: string, moderationPolic
     throw new Error("Invalid moderation policy.");
   }
   await prisma.post.update({ where: { id: postId }, data: { moderationPolicy } });
-  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/post/${postId}/edit`);
 }
 
 export async function updatePostSlug(postId: string, newSlug: string): Promise<{ slug: string }> {
@@ -325,11 +357,14 @@ export async function updatePostSlug(postId: string, newSlug: string): Promise<{
   const oldSlug = post.slug;
   const slug = await changePostSlug(postId, newSlug);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/slug`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/slug`);
   revalidatePath("/posts");
-  revalidatePath(`/${oldSlug}`);
-  revalidatePath(`/${slug}`);
+  revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
+  // Every listing links by slug, so the new one has to reach them too (the
+  // old link would still 301 through PostSlugHistory, but a fresh listing
+  // shouldn't need it).
+  await revalidatePublicPaths(postId, { slug, publishedAt: post.publishedAt });
   return { slug };
 }
 
@@ -339,7 +374,7 @@ export async function updatePostSlug(postId: string, newSlug: string): Promise<{
 export async function deletePostSlugHistory(postId: string, slug: string): Promise<void> {
   await requireEditableSession(postId);
   await prisma.postSlugHistory.deleteMany({ where: { postId, slug } });
-  revalidatePath(`/posts/${postId}/slug`);
+  revalidatePath(`/post/${postId}/slug`);
 }
 
 export async function revertPostSlug(postId: string): Promise<{ slug: string }> {
@@ -347,11 +382,14 @@ export async function revertPostSlug(postId: string): Promise<{ slug: string }> 
   const oldSlug = post.slug;
   const slug = await revertPostSlugInDb(postId);
 
-  revalidatePath(`/posts/${postId}/edit`);
-  revalidatePath(`/posts/${postId}/slug`);
+  revalidatePath(`/post/${postId}/edit`);
+  revalidatePath(`/post/${postId}/slug`);
   revalidatePath("/posts");
-  revalidatePath(`/${oldSlug}`);
-  revalidatePath(`/${slug}`);
+  revalidatePostPage({ slug: oldSlug, publishedAt: post.publishedAt });
+  // Every listing links by slug, so the new one has to reach them too (the
+  // old link would still 301 through PostSlugHistory, but a fresh listing
+  // shouldn't need it).
+  await revalidatePublicPaths(postId, { slug, publishedAt: post.publishedAt });
   return { slug };
 }
 
@@ -377,7 +415,7 @@ export async function updatePostAuthor(postId: string, userId: string, included:
     await prisma.postAuthor.delete({ where: { postId_userId: { postId, userId } } }).catch(() => {});
   }
 
-  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/post/${postId}/edit`);
   revalidatePath("/posts");
 }
 
@@ -401,7 +439,7 @@ export async function updatePostAuthorOrder(postId: string, orderedUserIds: stri
     ),
   );
 
-  revalidatePath(`/posts/${postId}/edit`);
+  revalidatePath(`/post/${postId}/edit`);
   revalidatePath("/posts");
 }
 

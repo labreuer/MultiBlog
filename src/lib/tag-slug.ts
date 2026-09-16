@@ -1,16 +1,10 @@
 import { prismaIncludingDeleted } from "@/lib/prisma";
-import { slugify, RESERVED_SLUGS } from "@/lib/slug";
+import { slugify } from "@/lib/slug";
 
 // PLAN.md §20c — tag slugs, with **their own uniqueness namespace**: a
 // tag, a doc, a file and a post may all carry the same slug and resolve to
-// four different URLs, since /tag/*, /doc/*, /pdf/* and the post catch-all
-// can't collide. So `tagSlugInUse` checks `tag` and nothing else.
-//
-// `tag` and `tags` were added to RESERVED_SLUGS (src/lib/slug.ts) when
-// this landed: those are new top-level route segments, so a *post* slug
-// matching either would be shadowed by the static route. That reservation is
-// about posts, not about tags — a tag slug can't collide with its own
-// route segment because it lives one level down.
+// four different URLs, since /tag/*, /doc/*, /pdf/* and /yyyy/mm/dd/* can't
+// collide. So `tagSlugInUse` checks `tag` and nothing else.
 //
 // **No slug history table in v1**, deliberately (§20i). Docs, posts, files and
 // users each have one because their URLs are shared outward and a rename must
@@ -38,7 +32,7 @@ async function tagSlugInUse(slug: string, excludeTagId?: string): Promise<boolea
 
 export async function uniqueTagSlug(name: string, excludeTagId?: string): Promise<string> {
   const base = slugify(name, "tag");
-  let candidate = RESERVED_SLUGS.has(base) ? `${base}-tag` : base;
+  let candidate = base;
   let suffix = 2;
   while (await tagSlugInUse(candidate, excludeTagId)) {
     candidate = `${base}-${suffix}`;

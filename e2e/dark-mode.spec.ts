@@ -90,7 +90,7 @@ test.describe("dark theme", () => {
   }
 
   test("post title and body text stay legible against their background", async ({ publishedPost, page }) => {
-    await page.goto(`/${publishedPost.slug}`);
+    await page.goto(publishedPost.path);
     const results = await page.evaluate(() => {
       function relLum(r: number, g: number, b: number): number {
         const c = (v: number) => {

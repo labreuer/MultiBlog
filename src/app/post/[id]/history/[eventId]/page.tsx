@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Diff" };
 // event (by createdAt) that actually carried content, the direct successor
 // to the old revision-vs-revision diff. No restore button: re-publishing
 // from an earlier point in the doc's own history (the scrub bar on
-// /posts/[id]/edit) is what "restore" means now.
+// /post/[id]/edit) is what "restore" means now.
 export default async function EventDiffPage({
   params,
 }: {
@@ -24,7 +24,7 @@ export default async function EventDiffPage({
 
   const session = await auth();
   if (!session?.user) {
-    redirect(signInPath(`/posts/${id}/history/${eventId}`));
+    redirect(signInPath(`/post/${id}/history/${eventId}`));
   }
 
   const post = await prisma.post.findUnique({
@@ -65,7 +65,7 @@ export default async function EventDiffPage({
         {post.title} — {target.title}
       </h1>
       <p>
-        <Link href={`/posts/${post.id}/history`}>Back to history</Link>
+        <Link href={`/post/${post.id}/history`}>Back to history</Link>
       </p>
       <p style={{ color: "var(--text-secondary)" }}>
         {target.createdAt.toLocaleString()} · Diff against{" "}

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { deletePost, restorePost, bulkDeletePosts, bulkRestorePosts } from "@/app/actions/posts";
 import type { ModerationPolicy } from "@/generated/prisma/enums";
 import { type DateFormat, formatDate } from "@/lib/format-date";
+import { postPath } from "@/lib/post-path";
 import { type PostsFilters, buildPostsQueryString } from "@/lib/posts-query";
 import { sameCols, type TablePrefs } from "@/lib/table-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
@@ -188,7 +189,7 @@ export default function PostsTable({
       header: "Title",
       sortKey: "title",
       thRef: titleThRef,
-      cell: (row) => <Link href={`/posts/${row.id}/edit`}>{row.title}</Link>,
+      cell: (row) => <Link href={`/post/${row.id}/edit`}>{row.title}</Link>,
     },
     { key: "authors", header: "Author(s)", sortKey: "authors", cell: (row) => row.authors },
     {
@@ -198,7 +199,7 @@ export default function PostsTable({
       nowrap: true,
       cell: (row) =>
         row.status === "published" && row.publishedAt ? (
-          <Link href={`/${row.slug}`}>{formatDate(row.publishedAt, dateFormat)}</Link>
+          <Link href={postPath(row)}>{formatDate(row.publishedAt, dateFormat)}</Link>
         ) : row.status === "scheduled" && row.publishedAt ? (
           <span style={{ color: "var(--text-secondary)" }} title={`Scheduled: ${formatCountdown(row.publishedAt)}`}>
             {formatDate(row.publishedAt, dateFormat)}
@@ -217,7 +218,7 @@ export default function PostsTable({
           {row.pending > 0 && (
             <>
               {" "}
-              <Link href={`/posts/${row.id}/comments`}>({row.pending})</Link>
+              <Link href={`/post/${row.id}/comments`}>({row.pending})</Link>
             </>
           )}
         </>
@@ -227,7 +228,7 @@ export default function PostsTable({
       key: "events",
       header: "History",
       sortKey: "events",
-      cell: (row) => <Link href={`/posts/${row.id}/history`}>{row.eventCount === 0 ? "none" : row.eventCount}</Link>,
+      cell: (row) => <Link href={`/post/${row.id}/history`}>{row.eventCount === 0 ? "none" : row.eventCount}</Link>,
     },
     { key: "editor", header: "Last edit by", sortKey: "editor", nowrap: true, cell: (row) => row.lastEditorName },
     {

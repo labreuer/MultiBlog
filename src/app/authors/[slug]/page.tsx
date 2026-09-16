@@ -1,11 +1,10 @@
-import Link from "next/link";
 import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
-import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
 import Avatar from "@/components/Avatar";
+import PostListing, { postListingInclude } from "@/components/PostListing";
 import styles from "./page.module.css";
 
 export const revalidate = 60;
@@ -31,6 +30,9 @@ async function getAuthorWithPosts(slug: string) {
   const posts = await prisma.post.findMany({
     where: { ...publishedPostWhere(), authors: { some: { userId: user.id } } },
     orderBy: { publishedAt: "desc" },
+    // The shared listing shows a byline, so a co-authored post now names its
+    // other authors here too (PLAN.md §21h) — before, this page had none.
+    include: postListingInclude,
   });
 
   return { user, posts };
@@ -85,27 +87,7 @@ export default async function AuthorPage({ params }: { params: Promise<{ slug: s
           />
           <h1>{author.user.name ?? "Author"}</h1>
         </div>
-        {author.posts.length === 0 ? (
-          <p style={{ color: "var(--text-secondary)" }}>No published posts yet.</p>
-        ) : (
-          author.posts.map((post) => {
-            const excerpt = post.proseJson ? extractText(post.proseJson).slice(0, 200) : "";
-            return (
-              <article key={post.id} style={{ padding: "1.5rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
-                <h2 className={styles.postHeading}>
-                  <Link href={`/${post.slug}`} className={styles.titleLink}>
-                    {post.title}
-                  </Link>
-                </h2>
-                <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>{post.publishedAt?.toLocaleDateString()}</p>
-                <p>
-                  {excerpt}
-                  {excerpt.length === 200 ? "…" : ""}
-                </p>
-              </article>
-            );
-          })
-        )}
+        <PostListing posts={author.posts} emptyMessage="No published posts yet." />
       </main>
     </div>
   );

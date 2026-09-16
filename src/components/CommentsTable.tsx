@@ -246,7 +246,7 @@ export default function CommentsTable({
       header: "Post",
       sortKey: "post",
       headerClassName: styles.postColumn,
-      cell: (row) => <Link href={`/posts/${row.postId}/comments`}>{row.postTitle}</Link>,
+      cell: (row) => <Link href={`/post/${row.postId}/comments`}>{row.postTitle}</Link>,
     },
     {
       key: "commenter",

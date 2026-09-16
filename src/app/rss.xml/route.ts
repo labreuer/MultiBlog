@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postPath } from "@/lib/post-path";
 import { SITE_TITLE } from "@/lib/site-config";
 
 export const revalidate = 60;
@@ -26,7 +27,7 @@ export async function GET() {
   const items = posts
     .map((post) => {
       const title = post.title;
-      const link = `${baseUrl}/${post.slug}`;
+      const link = `${baseUrl}${postPath(post)}`;
       const description = post.proseJson ? extractText(post.proseJson).slice(0, 300) : "";
       const pubDate = (post.publishedAt ?? post.createdAt).toUTCString();
       return `  <item>
