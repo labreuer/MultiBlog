@@ -23,7 +23,11 @@ auth on every connection at all — and the other hooks call straight into `ydoc
 `isYdocDocument` / `YDOC_PREFIX` (`src/lib/ydoc-names.ts`) still exist, but their job
 changed. Not routing away from a legacy path any more, just carving out two things:
 
-- **`ydoc:annotation:<id>`** — one ydoc per annotation body (PLAN.md §13a).
+- **`ydoc:annotation:<id>`** — one ydoc per annotation body (PLAN.md §13a). Its
+  `ydoc_snapshot` rows are the body's **versions** (PLAN.md §22e), written only by the settle
+  paths; `/ydoc-debug`'s Snapshot button and
+  `/admin/ydoc-snapshot` refuse this namespace, because a snapshot here would list as an edit
+  nobody made.
 - **`ydoc:test-*`** — the containment guard for `scripts/test-ydoc.ts`.
 
 A `ydoc:` name nobody has explicitly created — via `scripts/test-ydoc.ts`,

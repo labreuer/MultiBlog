@@ -7,6 +7,7 @@ import {
   ANNOTATION_MARK_PATH,
   ANNOTATION_UNMARK_PATH,
   ANNOTATION_FLUSH_PATH,
+  ANNOTATION_REPLACE_PATH,
 } from "./ydoc-names";
 
 // Server-to-server channel from the Next app to the Hocuspocus server for
@@ -123,42 +124,96 @@ export async function removeAnnotationMark(opts: { docId: string; userId: string
 }
 
 /**
- * Forces server/annotation-cache.ts's proseJson/bodyText write for
- * `annotationId` immediately rather than waiting for the next store
- * debounce (PLAN.md §13j Phase 3) — called from postAnnotation right before
- * flipping DRAFT to LIVE, so a reader who opens the annotation the instant
- * it becomes visible sees what was actually typed, not whatever the cache
- * still held as of the last debounce (for a brand-new annotation, that's
- * its creation-time empty paragraph).
+ * Asks the collab server for the drained tail of `annotationId`'s own update
+ * log — the mark a settle materialises, validates and snapshots at (PLAN.md
+ * §22e) — and, unless `writeCache` is false, has it write
+ * server/annotation-cache.ts's proseJson/bodyText from the live document at
+ * the same time rather than waiting for the next store debounce (§13j
+ * Phase 3, what `saveDraftAnnotation` wants).
  *
- * Best-effort: a failure here just means the reader briefly sees stale
- * (empty) content until the next real edit's debounce catches up — not
- * worth blocking Post over, so this never throws.
+ * The settle paths pass `writeCache: false` and write the cache themselves,
+ * from the body they validated, in the same transaction as the snapshot.
  *
- * "Not worth blocking Post over" understates the consequence, though, which
- * is why every failure path below logs. postAnnotation reads bodyText back
- * immediately after calling this and rejects an empty one with "Annotation
- * can't be empty." — so when this silently does nothing, a user who posts
- * within the store debounce (~2s of their last keystroke) is refused
- * outright, with nothing anywhere saying why. That was the production
+ * Returns `null` on any failure. Never throws: the caller can still read the
+ * log's tail from the database itself, and a keystroke that had not landed by
+ * then is what its bounded retry is for. Every failure path logs, because
+ * "the flush silently did nothing" once surfaced as *"Annotation can't be
+ * empty."* on every post made within the store debounce — the production
  * symptom of the NEXT_PUBLIC_COLLAB_URL misrouting (PLAN.md §13m).
  */
-export async function flushAnnotationCache(opts: { userId: string; role: Role; annotationId: string }): Promise<void> {
+export async function flushAnnotationCache(opts: {
+  userId: string;
+  role: Role;
+  annotationId: string;
+  writeCache?: boolean;
+}): Promise<bigint | null> {
   const { userId, role, annotationId } = opts;
   const documentName = ydocIdForAnnotation(annotationId);
   const token = await signYdocToken({ sub: userId, documentName, role });
 
+  let response: Response;
   try {
-    const response = await fetch(`${collabHttpOrigin()}${ANNOTATION_FLUSH_PATH}`, {
+    response = await fetch(`${collabHttpOrigin()}${ANNOTATION_FLUSH_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, documentName }),
+      body: JSON.stringify({ token, documentName, ...(opts.writeCache === false ? { writeCache: false } : {}) }),
+    });
+  } catch (err) {
+    console.error(`[annotation-admin] annotation-flush unreachable for ${documentName}:`, err);
+    return null;
+  }
+  if (!response.ok) {
+    console.error(`[annotation-admin] annotation-flush returned ${response.status} for ${documentName}`);
+    return null;
+  }
+  // Same guard as applyAnnotationMark's: a misrouted request gets Hocuspocus's
+  // plain-text "Welcome to Hocuspocus!" 200, and a parse that threw here would
+  // surface as a generic 500 from the action rather than the log line that
+  // makes it findable.
+  try {
+    const { lastUpdateId } = (await response.json()) as { lastUpdateId: string | null };
+    return lastUpdateId === null ? null : BigInt(lastUpdateId);
+  } catch (err) {
+    console.error(`[annotation-admin] annotation-flush answered non-JSON for ${documentName} — is the endpoint routed correctly?`, err);
+    return null;
+  }
+}
+
+/**
+ * Puts `proseJson` back as an annotation body's whole content, through the
+ * collab server so every connected client sees it (PLAN.md §22e).
+ *
+ * Cancel on an edit session is the only caller. **Not best-effort**, unlike
+ * its neighbours here: a failed mark leaves an annotation document-level,
+ * which the system already renders sensibly, but a failed restore leaves the
+ * *abandoned draft* as the live body while the row says the session was
+ * cancelled. So this reports failure and `cancelAnnotationEdit` keeps the
+ * session open rather than pretending it rolled back.
+ */
+export async function replaceAnnotationBody(opts: {
+  userId: string;
+  role: Role;
+  annotationId: string;
+  proseJson: unknown;
+}): Promise<{ replaced: boolean; updateId: string | null }> {
+  const { userId, role, annotationId, proseJson } = opts;
+  const documentName = ydocIdForAnnotation(annotationId);
+  const token = await signYdocToken({ sub: userId, documentName, role });
+
+  try {
+    const response = await fetch(`${collabHttpOrigin()}${ANNOTATION_REPLACE_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, documentName, proseJson }),
     });
     if (!response.ok) {
-      console.error(`[annotation-admin] annotation-flush returned ${response.status} for ${documentName}`);
+      console.error(`[annotation-admin] annotation-replace returned ${response.status} for ${documentName}`);
+      return { replaced: false, updateId: null };
     }
+    const { updateId } = (await response.json()) as { updateId: string | null };
+    return { replaced: true, updateId };
   } catch (err) {
-    // Best-effort — see the doc comment above.
-    console.error(`[annotation-admin] annotation-flush unreachable for ${documentName}:`, err);
+    console.error(`[annotation-admin] annotation-replace unreachable for ${documentName}:`, err);
+    return { replaced: false, updateId: null };
   }
 }

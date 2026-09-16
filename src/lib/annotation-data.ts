@@ -2,6 +2,8 @@ import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
 import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
+import { isVersionQuoted, isVisiblyEdited, STALE_EDIT_SESSION_MS, withSupersededAt } from "@/lib/edit-grace";
+import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 
 // PLAN.md §13c — the doc-side view-model, un-shared from comment-data.ts's
 // ThreadWithComments (§12i's original decision) now that an annotation body
@@ -42,6 +44,28 @@ export type AnnotationComment = {
   // postAnnotation writes it, so null for a DRAFT and for anything posted
   // before this column existed.
   ydocUpdateId: string | null;
+  // PLAN.md §22b/§22e — whether this body's edits are ones readers are told
+  // about, resolved server-side from every version's timestamp. `editedAt`
+  // rides along only when the answer is yes, so a silent edit leaves no trace
+  // in the payload.
+  visiblyEdited: boolean;
+  editedAt: string | null;
+  // PLAN.md §22e — non-null while an edit session is open on this body. What
+  // it drives in the UI is one line of text ("being edited…") and the absence
+  // of an Edit control for anyone else; what it drives in the *data* is that
+  // `proseJson` above is the last settled state rather than live text, which
+  // is why it is carried rather than inferred.
+  editingSince: string | null;
+  // PLAN.md §22e — whether that session has been open long enough to be
+  // treated as abandoned (a closed tab), which is what turns "being edited"
+  // into Resume/Discard.
+  //
+  // **Decided here, against the server's clock**, not in the browser: reading
+  // the clock during render is impure and, on a server-rendered component,
+  // produces a different answer on each side of hydration. The cost is that
+  // the answer ages in a tab left open, which a reload fixes — the same trade
+  // DocPostsLine's countdown makes (PLAN.md §21i).
+  editSessionStale: boolean;
 };
 
 export type AnnotationThread = {
@@ -103,9 +127,12 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
     prisma.annotation.findMany({
       where: { docId, status: { not: "DRAFT" } },
       orderBy: { createdAt: "asc" },
-      include: { user: { select: { name: true, email: true, color: true } } },
+      include: {
+        user: { select: { name: true, email: true, color: true } },
+      },
     }),
   ]);
+  const versions = await versionContextFor(annotations);
 
   const proseJson = doc?.proseJson as JSONContent | null;
   const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
@@ -154,27 +181,11 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
       color: root.user.color,
       // Always null here: a doc annotation has no PDF to point into.
       pdfTarget: null,
-      comments: members.map((a) => ({
-        id: a.id,
-        parentAnnotationId: a.parentAnnotationId,
-        displayName: a.user.name ?? a.user.email,
-        bodyText: a.bodyText,
-        proseJson: a.proseJson as JSONContent | null,
-        createdAt: a.createdAt.toISOString(),
-        deletedByUserId: a.deletedByUserId,
-        commenterUserId: a.userId,
-        // PLAN.md §13p — only a *reply* anchors into a body, so a root's
-        // columns are deliberately dropped here rather than passed on: they
-        // are the thread's anchor into the doc, already carried by
-        // `anchorFrom`/`anchorTo`/`quotedText` on the thread above, and
-        // repeating them per-comment would invite something to draw a root's
-        // doc quote as a highlight inside its own body.
-        anchorFrom: a.parentAnnotationId !== null ? a.anchorFrom : null,
-        anchorTo: a.parentAnnotationId !== null ? a.anchorTo : null,
-        quotedText: a.parentAnnotationId !== null ? a.quotedText : "",
-        color: a.user.color,
-        ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
-      })),
+      // `toComment` rather than a second copy of the same mapping, which is
+      // what this was — the two had been identical field for field since
+      // files arrived, and §22 would have added three more fields to keep in
+      // step by hand.
+      comments: members.map((a) => toComment(a, versions)),
     });
   }
 
@@ -221,8 +232,11 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
   const annotations = await prisma.annotation.findMany({
     where: { fileId, status: { not: "DRAFT" } },
     orderBy: { createdAt: "asc" },
-    include: { user: { select: { name: true, email: true, color: true } } },
+    include: {
+      user: { select: { name: true, email: true, color: true } },
+    },
   });
+  const versions = await versionContextFor(annotations);
 
   const threads: AnnotationThread[] = [];
   for (const [rootId, members] of groupByRoot(annotations)) {
@@ -242,7 +256,7 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
       quotedText: root.quotedText,
       color: root.user.color,
       pdfTarget,
-      comments: members.map(toComment),
+      comments: members.map((a) => toComment(a, versions)),
     });
   }
 
@@ -271,8 +285,65 @@ type AnnotationRow = {
   anchorTo: number | null;
   quotedText: string;
   ydocUpdateId: bigint | null;
+  editingSince?: Date | null;
+  // PLAN.md §22e — the DRAFT -> LIVE moment, where the grace window starts.
+  postedAt?: Date | null;
   user: { name: string | null; email: string; color: string };
 };
+
+/**
+ * What the §22 fields need beyond the row: each body's versions as marks and
+ * timestamps — never the bytes, which `getAnnotationHistory` decodes on demand
+ * under its own gate — and, per parent, the stamps of the anchored replies
+ * that quote it.
+ */
+type VersionContext = {
+  versions: Map<string, { mark: bigint; createdAt: Date }[]>;
+  replyStamps: Map<string, bigint[]>;
+};
+
+/**
+ * One query for a whole page's versions (PLAN.md §22e), never one per
+ * annotation. There is no Prisma relation from `annotation` to `ydoc` — the
+ * ydoc id is a function of the annotation id (`ydocIdForAnnotation`), by
+ * design — so the join is done here, served by `ydoc_snapshot`'s
+ * `[ydocId, lastYdocUpdateId]` index and grouped in memory.
+ *
+ * The reply stamps come from the rows already in hand: only an *anchored*
+ * reply stamps its parent's log (an anchorless one stamps the doc's,
+ * docs/ANNOTATIONS.md "The version stamp"), and a deleted reply quotes
+ * nothing anyone can see.
+ */
+async function versionContextFor(annotations: AnnotationRow[]): Promise<VersionContext> {
+  const versions = new Map<string, { mark: bigint; createdAt: Date }[]>();
+  if (annotations.length > 0) {
+    const rows = await prisma.ydocSnapshot.findMany({
+      where: { ydocId: { in: annotations.map((a) => ydocIdForAnnotation(a.id)) } },
+      orderBy: { lastYdocUpdateId: "asc" },
+      select: { ydocId: true, lastYdocUpdateId: true, createdAt: true },
+    });
+    const byYdocId = new Map(annotations.map((a) => [ydocIdForAnnotation(a.id), a.id]));
+    for (const row of rows) {
+      const annotationId = byYdocId.get(row.ydocId);
+      if (annotationId === undefined) continue;
+      const list = versions.get(annotationId) ?? [];
+      list.push({ mark: row.lastYdocUpdateId, createdAt: row.createdAt });
+      versions.set(annotationId, list);
+    }
+  }
+
+  const replyStamps = new Map<string, bigint[]>();
+  for (const a of annotations) {
+    if (a.parentAnnotationId === null || a.anchorFrom === null || a.ydocUpdateId === null || a.deletedByUserId !== null) {
+      continue;
+    }
+    const list = replyStamps.get(a.parentAnnotationId) ?? [];
+    list.push(a.ydocUpdateId);
+    replyStamps.set(a.parentAnnotationId, list);
+  }
+
+  return { versions, replyStamps };
+}
 
 /**
  * Groups a flat annotation list into threads by walking each row up to its
@@ -306,7 +377,7 @@ function groupByRoot<T extends AnnotationRow>(annotations: T[]): Map<string, T[]
 }
 
 /** One annotation row as a comment in a thread. Identical for both containers. */
-function toComment(a: AnnotationRow): AnnotationComment {
+function toComment(a: AnnotationRow, context: VersionContext): AnnotationComment {
   return {
     id: a.id,
     parentAnnotationId: a.parentAnnotationId,
@@ -325,5 +396,49 @@ function toComment(a: AnnotationRow): AnnotationComment {
     quotedText: a.parentAnnotationId !== null ? a.quotedText : "",
     color: a.user.color,
     ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
+    ...editState(a, context),
+  };
+}
+
+/**
+ * The three §22 fields, derived once for both containers.
+ *
+ * `postedAt` is the DRAFT -> LIVE transition, which is where postAnnotation
+ * writes it — and not `createdAt`, because a draft is visible to nobody: the
+ * grace window starts when readers could first have seen the text. A row with
+ * no `postedAt` or no versions at all (a DRAFT, or one the backfill never
+ * reached) is simply never visibly edited, which is the honest answer.
+ *
+ * A version an anchored reply quoted stays visible inside the window
+ * (`isVersionQuoted`): silence is only honest while nobody has acted on what
+ * was said.
+ */
+function editState(
+  a: AnnotationRow,
+  context: VersionContext,
+): {
+  visiblyEdited: boolean;
+  editedAt: string | null;
+  editingSince: string | null;
+  editSessionStale: boolean;
+} {
+  const versions = context.versions.get(a.id) ?? [];
+  const marks = versions.map((v) => v.mark);
+  const stamps = context.replyStamps.get(a.id) ?? [];
+  const postedAt = a.postedAt ?? undefined;
+  const visiblyEdited =
+    postedAt !== undefined &&
+    isVisiblyEdited(
+      withSupersededAt(versions, (_row, index) => isVersionQuoted(marks, stamps, index)),
+      postedAt,
+    );
+  return {
+    visiblyEdited,
+    editedAt: visiblyEdited ? (a.editedAt?.toISOString() ?? null) : null,
+    editingSince: a.editingSince?.toISOString() ?? null,
+    editSessionStale:
+      a.editingSince !== null &&
+      a.editingSince !== undefined &&
+      Date.now() - a.editingSince.getTime() > STALE_EDIT_SESSION_MS,
   };
 }

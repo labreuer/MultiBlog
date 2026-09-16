@@ -1,20 +1,13 @@
-import { getPostThreadsWithApprovedComments, getDetachedThreadContext } from "@/lib/comment-data";
+import { getPostThreadsWithApprovedComments, getDetachedThreadContext, type ThreadComment } from "@/lib/comment-data";
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
 import { type CommentNodeData } from "./CommentNode";
 import styles from "./CommentSection.module.css";
 
-function buildTree(
-  flat: {
-    id: string;
-    parentCommentId: string | null;
-    displayName: string;
-    bodyText: string;
-    createdAt: string;
-    deletedByUserId: string | null;
-    commenterUserId: string | null;
-  }[],
-): CommentNodeData[] {
+// The loader's row shape, not a copy of it: a field added to ThreadComment
+// (§22b's visiblyEdited/editedAt were the first) then flows into
+// CommentNodeData through the spread below with nothing to keep in step.
+function buildTree(flat: ThreadComment[]): CommentNodeData[] {
   const byId = new Map<string, CommentNodeData>();
   for (const c of flat) {
     byId.set(c.id, { ...c, replies: [] });

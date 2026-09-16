@@ -143,6 +143,7 @@ model User {
   passwordResetTokens    PasswordResetToken[]
   commentStatusChanges   Comment[]              @relation("CommentStatusChangedBy")
   commentDeletions       Comment[]              @relation("CommentDeletedBy")
+  commentRevisions       CommentRevision[]      @relation("CommentRevisionAuthor")
   publicationEvents      PostPublicationEvent[] @relation("PublicationEventActor")
   deletedBy              User?                  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
   deletedUsers           User[]                 @relation("UserDeletedBy")
@@ -550,26 +551,83 @@ model Comment {
   threadId          String        @map("thread_id")
   parentCommentId   String?       @map("parent_comment_id")
   commenterId       String        @map("commenter_id")
+  // PLAN.md §22c — the current text, `{ text }` (plain, not ProseMirror:
+  // §6's rich-comment hardening is a separate decision and editing was
+  // deliberately not the occasion to take it, §22h).
+  //
+  // **Since §22c this is a cache of the newest `comment_revision` row**, the
+  // same relationship `Doc.proseJson` has to its ydoc — and, unlike that one,
+  // with no staleness window at all: both are written in one transaction by
+  // `submitComment`/`editComment`, and
+  // `scripts/integrity/check-comment-revisions.ts` is the standing guard.
+  // It stays the column every reader path reads, which is why adding history
+  // changed no query anywhere.
   body              Json
   status            CommentStatus @default(PENDING)
   ipAddress         String?       @map("ip_address")
   statusChangedById String?       @map("status_changed_by_id")
   statusChangedAt   DateTime?     @map("status_changed_at")
   createdAt         DateTime      @default(now()) @map("created_at")
+  // PLAN.md §22b — stamped on **every** edit, silent or not. Nothing
+  // reader-facing keys off it: whether a reader is told about an edit is
+  // §22b's two-part silence rule over `comment_revision`, which this column
+  // cannot express. What it is for is the people who moderate — /comments'
+  // Edited-at column, which sorted on an always-empty column until §22c gave
+  // it a writer.
   editedAt          DateTime?     @map("edited_at")
   deletedByUserId   String?       @map("deleted_by_user_id")
   deletedAt         DateTime?     @map("deleted_at")
 
-  thread          CommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  parent          Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
-  replies         Comment[]     @relation("CommentReplies")
-  commenter       Commenter     @relation(fields: [commenterId], references: [id])
-  statusChangedBy User?         @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
-  deletedBy       User?         @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
+  thread          CommentThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  parent          Comment?          @relation("CommentReplies", fields: [parentCommentId], references: [id])
+  replies         Comment[]         @relation("CommentReplies")
+  commenter       Commenter         @relation(fields: [commenterId], references: [id])
+  statusChangedBy User?             @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
+  deletedBy       User?             @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
+  revisions       CommentRevision[]
 
   // The other half of post_metrics' count path — see CommentThread.postId.
   @@index([threadId])
   @@map("comment")
+}
+
+// PLAN.md §22c — one row per version of a comment's body, including the
+// first. `Comment.body` above is the newest one's text.
+//
+// **Every version is stored, including the ones no reader is ever told
+// about.** §22's three-minute window is a *display* rule (§22b): an edit
+// inside it shows no marker and no history entry, but it is still a row here.
+// That is what keeps three other things honest — a moderator can see what an
+// approved comment said before it changed, an integrity check has something
+// to verify, and a quotation taken during the silent window still has an
+// immutable version to pin to (§22d). Storing it was the cheaper half of the
+// decision either way: a comment body is at most 5000 characters.
+//
+// `revisionNo` is dense and 1-based rather than a timestamp ordering, because
+// the silence rule reasons about *adjacent* versions ("what superseded r, and
+// when") and a dense integer makes that a subtraction instead of a window
+// function.
+//
+// No `supersededAt` column: it is the next revision's `createdAt`, which is
+// always in hand wherever the question is asked, and a stored copy would be a
+// second place for the same fact to be wrong.
+model CommentRevision {
+  id           String   @id @default(cuid())
+  commentId    String   @map("comment_id")
+  revisionNo   Int      @map("revision_no")
+  body         Json
+  // Who wrote *this version*: the commenter's own user, or the moderator who
+  // edited it (§22c — an edit by someone with canUserEditPost is allowed and
+  // is attributed to them, which is why this is not simply the commenter).
+  // Null for an anonymous original, the one case with no user to name.
+  authorUserId String?  @map("author_user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author  User?   @relation("CommentRevisionAuthor", fields: [authorUserId], references: [id])
+
+  @@unique([commentId, revisionNo])
+  @@map("comment_revision")
 }
 
 // A living document — PLAN.md §12 — read as its current Yjs state (Doc ↔
@@ -754,19 +812,52 @@ model Annotation {
   bodyText           String           @default("") @map("body_text")
   // PLAN.md §13q — the annotation-body counterpart of Doc.proseJsonUpdateId:
   // which update of *this annotation's own* ydoc the two columns above are
-  // the content of, written by server/annotation-cache.ts's debounce.
+  // the content of. Written by server/annotation-cache.ts's debounce, and by
+  // the settle transaction (§22e) from the same decoded document it snapshots,
+  // so after a post or a Done the checkpoint and the newest `ydoc_snapshot`
+  // name the same mark by construction.
   //
-  // Inert while a posted annotation has no edit UI, since nothing moves after
-  // the composer closes. It is here for the case where that changes
-  // (docs/COLLAB.md's 2026-08-13 entry): a reply anchored into a body needs
-  // that body's own rolling checkpoint for the same reason a doc annotation
-  // needs the doc's, and building the seam now costs one column rather than a
-  // migration under live data later.
+  // The cache's own checkpoint and nothing more. Nothing anchors off it: an
+  // anchored reply stamps its parent's newest *snapshot* mark, because the
+  // fact a replier read is "the last settled body" and the snapshot is the
+  // record of that — this column can trail it (the flush endpoint writes
+  // content without it, and the debounce skips a body under edit).
   proseJsonUpdateId  BigInt?          @map("prose_json_update_id")
   status             AnnotationStatus @default(DRAFT)
+  // PLAN.md §22e — non-null exactly while an edit session on this body is
+  // open, and the reason `proseJson` above is safe to keep reading everywhere.
+  //
+  // `server/annotation-cache.ts`'s store debounce **skips its write while this
+  // is set**, so the two columns above mean "the last settled body" rather
+  // than "whatever was typed two seconds ago". That is what let mutable
+  // bodies arrive without touching a single reader path: every rail, list and
+  // admin table still renders from the cache, and none of them can catch a
+  // half-typed sentence. It also retires the staleness hazard docs/COLLAB.md's
+  // 2026-08-13 entry named as the second-hardest part of this feature.
+  //
+  // The flush endpoint is deliberately *not* guarded by it — a flush is an
+  // authenticated "write it now", and `finishAnnotationEdit` is what asks.
+  //
+  // A session left open (a closed tab) is settled by the author's next visit
+  // rather than by a cron: the card offers Resume or Discard once this is
+  // older than STALE_EDIT_SESSION_MS.
+  editingSince       DateTime?        @map("editing_since")
+  // PLAN.md §22e — the DRAFT -> LIVE/RAISED moment, which is when readers
+  // could first have seen the text and so where §22b's grace window is
+  // measured from. Null for a DRAFT. Its own column rather than the first
+  // version's `created_at`, because it is a fact about the annotation and not
+  // about a version: `createdAt` below is when the composer was opened, and
+  // nothing measures from that.
+  postedAt           DateTime?        @map("posted_at")
   raisedAt           DateTime?        @map("raised_at")
   resolvedAt         DateTime?        @map("resolved_at")
   createdAt          DateTime         @default(now()) @map("created_at")
+  // PLAN.md §22e — when the newest version settled (the newest
+  // `ydoc_snapshot` on this body's own ydoc). Stamped on every edit session
+  // that changed anything, silent or not; whether a reader is *told* is §22b's
+  // rule over the snapshot rows, which this column cannot express.
+  // /annotations' Edited column sorted on it while nothing wrote it (§12o's
+  // known gap); §22e is its writer.
   editedAt           DateTime?        @map("edited_at")
   deletedByUserId    String?          @map("deleted_by_user_id")
   deletedAt          DateTime?        @map("deleted_at")
@@ -1455,6 +1546,28 @@ model YdocUpdate {
   @@map("ydoc_update")
 }
 
+// PLAN.md §11b — a **deliberate** settled state of a ydoc: full bytes at
+// `lastYdocUpdateId`, replay base for everything at or after that mark
+// (invariant 2; `loadReplaySlice` takes the newest one at or below the mark
+// it is asked for). Never created implicitly, which is what the rolling
+// checkpoint `Ydoc.lastUpdateId` exists to keep true.
+//
+// What one *means* depends on whose ydoc it is on:
+//
+//   - On a doc's, a publication (§15): `ensureYdocSnapshotAt` finds or creates
+//     one at the version a post was published from, and the /ydoc-debug
+//     Snapshot button can make one anywhere.
+//   - On an annotation body's, **a version** (§22e): one at DRAFT -> LIVE, one
+//     per Done that changed anything, written in the settle transaction from
+//     the same decoded document that fills the cache columns. There is no
+//     text copy anywhere — a version is decoded from these bytes on demand —
+//     and nothing but the settle paths may create one here: the debug button
+//     and the collab endpoint behind it refuse an annotation ydoc, because on
+//     this namespace a snapshot *is* a version and a stray one would be
+//     listed as an edit nobody made.
+//
+// `userId` is who settled it, `createdAt` when; §22b's grace window pairs each
+// row with its successor's `createdAt` to decide what a reader is told.
 model YdocSnapshot {
   id               String   @id @default(cuid())
   ydocId           String   @map("ydoc_id")

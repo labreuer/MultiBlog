@@ -1,5 +1,9 @@
 # Integrity checks
 
+Five scripts — three about the doc/ydoc chain, one about the PDF side, one about the schema
+itself, plus the two §22 revision checks described at the bottom. The count in the next
+sentence is the original three.
+
 Three scripts. Two verify one link each in the chain that turns an append-only
 log into the columns the app reads; the third verifies a claim made *about* a
 point in that log:
@@ -145,3 +149,41 @@ draft must be refused, as must a reopened link beside a draft and `reopened_at` 
 second link for a user whose first is *minted* must go in, as must a reopened link once the
 slot is free), and the not-blank CHECK on `name` (a whitespace-only name must be refused; a
 real one must go in — docs/ANCHORED_LINKS.md, "Naming a link").
+
+## `check-comment-revisions.ts` and `check-annotation-snapshots.ts` (PLAN.md §22)
+
+The two edit-history checks. Both verify that a cache still equals the newest stored version,
+and they differ in what a version *is* — a `comment_revision` row holding text, or a
+`ydoc_snapshot` on an annotation body's own ydoc holding a settled state — which is why they
+are separate scripts rather than one with a branch.
+
+`comment.body` and its newest `comment_revision` are written in a single transaction, so there
+is no legitimate staleness window at all and any divergence is a fault. An annotation's cache
+and its newest snapshot are written in one transaction too, from one decoded document, so
+`settled-cache` on that side is a fault as well; what can still produce one is a body written
+to by something other than a settle while no session was open, and the message names the
+repair — open and close an edit session, which settles what is there now. It also has a
+`stale-session` WARN for a session someone abandoned, which is not a fault at all.
+
+Between them they also check what the *history view* needs to be trustworthy, none of which
+Postgres can state:
+
+- dense, 1-based `revision_no` on the comment side, and strictly increasing marks with
+  non-decreasing timestamps on the annotation side (`monotone`), because §22b's silence rule
+  pairs each version with its successor and a pair out of order turns a visible edit silent or
+  the reverse;
+- the posting moment the grace window is measured from — the comment's own `created_at` on one
+  side, `annotation.posted_at` with at least one snapshot on the other (`posted-snapshot`).
+
+Whether each annotation snapshot's *bytes* equal a replay of the body's log to its mark is
+`check-ydoc-integrity.ts`'s check 4, which already covers every ydoc, annotation bodies
+included; the annotation checker does not repeat it.
+
+```
+npx tsx scripts/integrity/check-comment-revisions.ts [--post <id>] [--verbose]
+npx tsx scripts/integrity/check-annotation-snapshots.ts [--doc <id>] [--verbose]
+```
+
+Run the annotation one after `check-ydoc-integrity.ts`, for this folder's usual reason: it
+decodes snapshots, so a corrupt one makes it report cache faults that are really one ydoc fault
+wearing several hats. The comment one touches no ydoc and can run any time.

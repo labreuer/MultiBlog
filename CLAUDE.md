@@ -108,6 +108,31 @@ before changing the behavior it describes.
   `selectedEditable` (a per-*selection* predicate: "Change doc…" only ever offers docs this
   viewer can publish from, so switching to one restores everything). PLAN.md §15i,
   docs/PERMISSIONS.md's "A post's byline is not its doc's".
+- **Every version of every comment and annotation body is stored; the three-minute window is a
+  *display* rule.** An edit within `EDIT_GRACE_MS` of posting shows readers nothing — no marker,
+  no history entry — but it is still a `comment_revision` row or a `ydoc_snapshot` on the
+  annotation body's own ydoc, and `editedAt` is still stamped. `src/lib/edit-grace.ts` holds the
+  constant and the two predicates, and is the only place that rule exists for both kinds; a
+  quotation of a version cancels its silence. Don't reimplement the comparison at a call site,
+  and don't ship version timestamps to the browser to apply it there — the existence of a silent
+  edit is the thing being withheld, so both loaders resolve it server-side. An annotation's
+  versions are decoded from their snapshots on demand — there is no text copy and no revision
+  table — and only the settle paths may write one there (the debug button refuses the
+  namespace). PLAN.md §22b, §22e.
+- **`Comment.body` is a cache of the newest `comment_revision`, and is never written alone.**
+  One transaction writes both, in `submitComment` and `editComment`; there is no legitimate
+  staleness window, so any divergence is a fault —
+  `scripts/integrity/check-comment-revisions.ts` is the standing guard. Every reader path still
+  reads the column, which is why adding history changed no query. PLAN.md §22c.
+- **`Annotation.proseJson` is the last *settled* body, not the live text** — the
+  store-debounce cache skips its write while `Annotation.editingSince` is set, which is what
+  lets a posted body be editable without a single reader path changing, and a settle (post,
+  Done) writes it from the snapshot it records, in the same transaction, so the cache and the
+  newest version agree by construction. So the rule below about `Doc.proseJson` does *not*
+  transfer to this column: positioning off it is fine, because it cannot be mid-sentence. The
+  flush endpoint deliberately ignores the guard (a flush is an explicit "write it now" and
+  `saveDraftAnnotation` is what asks); a settle asks it for the mark only (`writeCache: false`)
+  and validates before anything is written. PLAN.md §22e.
 - **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,
   stale by seconds while anyone is typing. Fine as the *seed* for which cards start in the
   rail, and nothing more.

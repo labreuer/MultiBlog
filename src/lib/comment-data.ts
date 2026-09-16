@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { pmSchema } from "@/lib/tiptap-schema";
 import { colorForSeed } from "@/lib/author-colors";
+import { isVisiblyEdited, withSupersededAt } from "@/lib/edit-grace";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 
 export type ThreadComment = {
@@ -11,6 +12,14 @@ export type ThreadComment = {
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
+  // PLAN.md §22b — whether this comment's edits are ones readers are told
+  // about. Resolved here, on the server, rather than shipping timestamps for
+  // the browser to apply the rule to: a silent edit's existence is itself the
+  // thing being withheld, and a client-side rule would put the answer in the
+  // payload. `editedAt` rides along only when the answer is yes, so a silent
+  // edit leaves no trace in the RSC payload at all.
+  visiblyEdited: boolean;
+  editedAt: string | null;
 };
 
 export type ThreadWithComments = {
@@ -68,6 +77,11 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         orderBy: { createdAt: "asc" },
         include: {
           commenter: { select: { userId: true, displayName: true, email: true, user: { select: { color: true } } } },
+          // PLAN.md §22c — timestamps only, never the bodies. This runs for
+          // every comment on the page, and all the silence rule needs is when
+          // each version was replaced; the text of a superseded version is
+          // fetched on demand by getCommentHistory, under its own gate.
+          revisions: { orderBy: { revisionNo: "asc" }, select: { createdAt: true } },
         },
       },
     },
@@ -91,15 +105,25 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         status: thread.status,
         anchoredEventId: thread.anchoredEventId,
         color,
-        comments: thread.comments.map((c) => ({
-          id: c.id,
-          parentCommentId: c.parentCommentId,
-          displayName: c.commenter.displayName,
-          bodyText: (c.body as { text?: string } | null)?.text ?? "",
-          createdAt: c.createdAt.toISOString(),
-          deletedByUserId: c.deletedByUserId,
-          commenterUserId: c.commenter.userId,
-        })),
+        comments: thread.comments.map((c) => {
+          const visiblyEdited = isVisiblyEdited(
+            // `quoted` is always false until something can point at a comment
+            // revision; the one line to change is here.
+            withSupersededAt(c.revisions, () => false),
+            c.createdAt,
+          );
+          return {
+            id: c.id,
+            parentCommentId: c.parentCommentId,
+            displayName: c.commenter.displayName,
+            bodyText: (c.body as { text?: string } | null)?.text ?? "",
+            createdAt: c.createdAt.toISOString(),
+            deletedByUserId: c.deletedByUserId,
+            commenterUserId: c.commenter.userId,
+            visiblyEdited,
+            editedAt: visiblyEdited ? (c.editedAt?.toISOString() ?? null) : null,
+          };
+        }),
       };
     });
 }

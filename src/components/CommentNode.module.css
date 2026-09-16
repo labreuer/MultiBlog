@@ -100,3 +100,48 @@
   color: var(--error);
   font-size: 0.85rem;
 }
+
+/* PLAN.md §22c — editing a posted comment in place. Deliberately the same
+   quiet underlined-text treatment as Reply and Delete: it is one of three
+   things you can do to a comment, not a mode switch worth a real button. */
+.editButton {
+  font-size: 0.85rem;
+  margin-top: 4px;
+  margin-left: 8px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* CommentForm.module.css's .field, restated rather than imported: it is the
+   same field in a different place, and a shared class across two modules
+   would couple a comment's display to the form's layout. Colors are left to
+   the browser's own light-dark defaults exactly as .field does — the one
+   thing that would look wrong here is a second, differently-tinted box. */
+.editTextarea {
+  width: 100%;
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.editActions {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.historyLine {
+  margin-top: 2px;
+}

@@ -79,6 +79,12 @@ it: **`Doc.proseJson` is a store-debounce cache, not the document** (PLAN.md §1
 live ydoc by seconds whenever anyone is typing. It is fine for deciding *whether* to draw
 something and wrong for deciding *where*.
 
+`Annotation.proseJson` was the same kind of cache and is no longer, which is worth knowing
+because the two columns now behave differently. Since PLAN.md §22e it holds the last
+**settled** body: the debounce skips it while `Annotation.editingSince` is set, so it never
+shows a half-typed sentence and every reader path renders from it safely. The 2026-08-13 entry
+below predicted the hazard spreading there; the guard is what stopped it.
+
 ---
 
 # Present strategies
@@ -1032,6 +1038,53 @@ Materializing a 500-character annotation ydoc is nothing. So mutable annotations
 inherit the weaker text-search repair — they are the case where the strong version finally becomes
 affordable, and where the version stamp already stored on every row starts earning its keep
 instead of only recording intent.
+
+## 2026-09-16 — Mutable bodies, built (PLAN.md §22)
+
+The 2026-08-13 entry below asked what changes if annotation bodies become mutable, and answered:
+the re-anchoring generalizes for free, the freeze does less than it appears to, and the hard part
+is not anchoring. All three held. What they turned into:
+
+**The permission was the real gate, exactly as that entry said.** It shipped first and alone
+(§22e PR 1). `/api/annotation/[id]/token` had been minting an unconditionally *writable* token
+for anyone who could read the container — harmless while no UI opened one, and "any reader can
+rewrite any annotation" the moment one did. It now carries `readOnly: true` for anyone but the
+author or an ADMIN, and `e2e/annotation-readonly.spec.ts` asserts the collab server actually
+drops their writes. That spec connects from Node rather than driving the page, because the hole
+was never reachable from the UI and a UI test would pass against a broken gate.
+
+**The staleness hazard was closed rather than accepted.** That entry's item 2 expected
+`Annotation.proseJson` to join `Doc.proseJson` as a thing you must not position off.
+`Annotation.editingSince` made it unnecessary: the store debounce skips the cache while a
+session is open, so the column means "the last settled body" and every reader path — the rails,
+`annotation-entries.ts`, `/annotations` — kept reading it unchanged. Nobody sees anybody else's
+keystrokes, which is also why the entry's awareness-driven mounting scheme was not needed. It
+stays available and is still the right answer if live co-editing of one body is ever wanted.
+
+**The `ydoc_update_id` overload got thinner in the way item 3 predicted, and the fix was a
+row that already existed.** An anchored reply needs "which version of the parent body was I
+reading", and a version *is* a `ydoc_snapshot` on the body's own ydoc — the boundary where a
+settle ended, which is exactly what a reader of a body sees — so the reply stamps the parent's
+newest snapshot mark. No second `anchor_update_id` was added, and no client-side capture was
+needed (the client has no live connection to a parent body to capture from).
+`Annotation.proseJsonUpdateId`, declared as a seam for exactly this while citing this entry,
+stays the cache's own checkpoint and nothing anchors off it: it can trail a Done, since the
+flush writes content without an id and the debounce skips a body under edit.
+
+**Tier 3's sticky detachment was relaxed for bodies**, as the entry recommended, behind a
+`retryDetached` option that only `AnnotationBodyReader` sets. A reply now re-attaches live as
+its parent is edited back toward the words it quoted.
+
+**And §7's materialize half is built, for bodies only** — the upside that entry named last.
+`getQuotedParentVersion` replays a parent body to the reply's own stamp and shows the reader the
+text that was quoted; a 500-character ydoc makes that a few milliseconds, which is the whole
+reason it is affordable here and not on a 50k-character doc. The **diff** half is still unbuilt:
+this shows what was quoted, it does not repair the anchor. §7's banner stands.
+
+The post-comment side got the same feature by a completely different mechanism — immutable
+revision rows, `comment_revision` — and that asymmetry is the file's thesis in miniature: a
+comment's text exists only in its revisions, an annotation's exists in its ydoc, so "keep every
+version" means storing text in one case and marking a boundary — a snapshot — in the other.
 
 ## 2026-08-13 — How a client names the version it annotated against
 

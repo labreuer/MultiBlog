@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { isAdmin } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { snapshotYdoc } from "@/lib/ydoc-admin";
+import { annotationIdFromYdocId } from "@/lib/ydoc-names";
 
 // Proxies /ydoc-debug's Snapshot button to the running collab server — a
 // snapshot has to be taken there, not from the stored blob here, because the
@@ -20,6 +21,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const exists = await prisma.ydoc.findUnique({ where: { id }, select: { id: true } });
   if (!exists) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+  // PLAN.md §22e — on an annotation body's ydoc a snapshot *is* a version, and
+  // only the settle paths may write one; a stray snapshot here would be listed
+  // as an edit nobody made. The collab handler refuses too (this route is what
+  // the button calls; that handler is the writer).
+  if (annotationIdFromYdocId(id)) {
+    return NextResponse.json(
+      { error: "An annotation body's snapshots are its versions; settle it from the annotation instead." },
+      { status: 409 },
+    );
   }
 
   try {

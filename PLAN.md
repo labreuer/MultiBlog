@@ -2357,9 +2357,11 @@ above might read.
   nothing reads it: there is no resolve/unresolve control anywhere, and
   `getDocAnnotationsAsThreads` hard-codes `status: "ACTIVE"`. The column is schema-only until
   a resolve UI exists.
-- **`Annotation.editedAt` is displayed but never written.** `/annotations` has an Edited
-  column and sorts on it, and it is always empty — there is no edit-an-annotation action.
-  (`CommentNode` offers Reply and Delete, not Edit, on both the post and doc sides.)
+- ~~**`Annotation.editedAt` is displayed but never written.**~~ **Closed 2026-09-16 by §22e**,
+  which gave a posted annotation body an edit session and both `editedAt` columns a writer.
+  `CommentNode` and `AnnotationNode` now offer Edit beside Reply and Delete. What the column
+  means is deliberately *not* "readers were told about this": that is §22b's rule over the
+  versions, and `editedAt` is stamped on every edit including a silent one.
 - **There is no reader-facing doc index.** `/docs` is `canManageDocs`-gated management; a
   reader with `canViewDocs` can open any `SHARED` doc they have a link to but has no route
   that lists them, and no nav entry. §12f's route table never specified one, so this isn't a
@@ -2530,6 +2532,14 @@ A new sibling tree, `src/components/annotation/`, takes over doc-side rendering:
 live ydoc editor), `AnnotationPopover.tsx` (the inline version), and `src/lib/annotation-data.ts`
 for the loader `comment-data.ts` loses. `AnnotationColorStyles.tsx` moves under it unchanged — it
 never depended on the shared components, only on thread ids and colors.
+
+**One component went back the other way.** `src/components/EditHistory.tsx` (§22c) is shared
+by `CommentNode` and `AnnotationNode`, which is the sharing this section undid — and it is
+sharing of a different kind, which is why it does not reopen the argument. What was un-shared
+here was the *rendering of a body*, where the two sides stopped having the same problem. When
+an edit becomes visible, and how versions are listed, is one rule for both (§22b); the body's
+type is the only difference, and it arrives as a `renderBody` prop. A second copy of the
+silence rule would be a second place for it to drift.
 
 ### 13d. Lifecycle: DRAFT → LIVE → RAISED
 
@@ -3097,6 +3107,14 @@ against." An **anchorless** annotation — including the anchorless reply the pl
 still produces — stamps the doc's log exactly as every row did before, since with no offsets to
 be a coordinate system for, the column means only §13n's "what was I looking at," and that is
 the doc.
+
+> **Sharpened 2026-09-16 by §22e.** An anchored reply is now stamped with the mark of its
+> parent body's **newest snapshot** — its last settled version — rather than that log's tail.
+> The two coincided while nothing could edit a posted body; once something can, the tail names
+> text the replier may never have seen and the snapshot names exactly what they read, since a
+> reader of a body sees settled text and nothing else. Not `Annotation.proseJsonUpdateId`,
+> which its comment had declared as the seam for this: the cache checkpoint can trail a Done.
+> The tail remains the fallback for a body with no snapshot.
 
 The cost of that overload is §13n's "at this revision" control, which seeks the doc's scrub bar:
 for an anchored reply it now names a position in a different log. Weighed and accepted rather
@@ -8169,17 +8187,11 @@ above goes to `/post/[id]/edit`.
 
 ## 22. Editing comments and annotations after posting
 
-**Built 2026-09-16, then parked. Only PR 1 is on this branch.**
-
-PRs 2, 3 and 4 live on **`reference/comment-edit-history`**, unmerged, as three commits; the
-three migrations they added have been reverted out of the local database, so this branch's
-schema is §21's. §22j records what was built differently from the plan below, and §23l says why
-the work sits there rather than here.
-
-So **read everything below as a design, not as a description of this branch's code.** What is
-built *here* is PR 1 alone: `/api/annotation/[id]/token` no longer hands every reader of a
-container a writable token for every annotation in it (§22e's first paragraph, and the one part
-of §22 that is a security fix rather than a feature).
+**Built 2026-09-16 on `annotations-and-comments`. §22b, §22c and §22e are on this branch**
+(cherry-picked back from `reference/comment-edit-history` as §23j's Phase 0, after a day parked
+there — §23l has the history); **§22d is not, and never will be** — §23 supersedes it. §22j
+records what was built differently from the plan below; read it before trusting any sentence
+here as a description of the code.
 
 > **§22d is superseded by §23** — quotation became a first-class anchor over five kinds of
 > target, which needed comment bodies to be rich. §22b's grace window and §22e's annotation edit
@@ -8641,10 +8653,9 @@ Each PR ends at `npm run check`; the specs above run under `npm run e2e` per the
 
 ### 22i. Docs to update when each PR lands
 
-**Done on `reference/comment-edit-history`, and deliberately not here.** Every line in this
-list describes built behaviour — an invariant about a column, a permissions row, a gotcha — and
-on this branch that behaviour does not exist. Docs that state it would be false. They come back
-with the code, or they are rewritten by §23, which supersedes several of them.
+**All done 2026-09-16**, as the branch went in; the list is kept because it is the map of where
+§22's rules actually live now — this section is not one of the places that states them. (They
+left with the parking and came back with the cherry-pick; §22d's rows never came back.)
 
 - PLAN.md §12o: strike the "displayed but never written" gap; §13n/§13p: note that an
   anchored reply's stamp is its parent's newest snapshot mark. §13c's tree gains `EditHistory`.
@@ -8661,9 +8672,9 @@ with the code, or they are rewritten by §23, which supersedes several of them.
 
 ### 22j. As built — deviations, and what is not built
 
-What follows describes the code on `reference/comment-edit-history`. Four things were built
-differently from the plan above, each because the plan was wrong about a detail rather than
-about the shape:
+What follows describes the code on this branch, minus §22d's, which stayed parked. Four things
+were built differently from the plan above, each because the plan was wrong about a detail
+rather than about the shape:
 
 - **An anchored reply's stamp is the parent's newest snapshot mark, not a client snapshot.**
   §22e said the reply branch of `postAnnotation` would "take §13q's snapshot from
