@@ -8164,3 +8164,1026 @@ public page still looks, to a logged-in author, like it does to everyone else:
 Not built: a bare `/post/[id]` page. §3d's rule stands — no `/post/[id]` page reads a post —
 and the slug-history redirect already keeps old public links alive. Every "configure" link
 above goes to `/post/[id]/edit`.
+
+---
+
+## 22. Editing comments and annotations after posting
+
+**Built 2026-09-16, then parked. Only PR 1 is on this branch.**
+
+PRs 2, 3 and 4 live on **`reference/comment-edit-history`**, unmerged, as three commits; the
+three migrations they added have been reverted out of the local database, so this branch's
+schema is §21's. §22j records what was built differently from the plan below, and §23l says why
+the work sits there rather than here.
+
+So **read everything below as a design, not as a description of this branch's code.** What is
+built *here* is PR 1 alone: `/api/annotation/[id]/token` no longer hands every reader of a
+container a writable token for every annotation in it (§22e's first paragraph, and the one part
+of §22 that is a security fix rather than a feature).
+
+> **§22d is superseded by §23** — quotation became a first-class anchor over five kinds of
+> target, which needed comment bodies to be rich. §22b's grace window and §22e's annotation edit
+> sessions are untouched by that; §23i is the line-by-line account of which is which.
+
+**Planned 2026-09-16 on the same branch.** Today neither a
+post comment nor a doc/PDF annotation can be edited once posted: `CommentNode` offers Reply and
+Delete, `Comment.editedAt` and `Annotation.editedAt` are displayed by the admin tables and
+written by nothing (§12o), and docs/COLLAB.md's 2026-08-13 entry worked out what mutable
+annotation bodies would cost without deciding to pay it. This section decides.
+
+The ask, verbatim in spirit: both become editable. For comments, **an edit within three
+minutes of posting shows nothing** — no "edited" marker, no history. Past that, readers can see
+previous versions, and **a quotation of a comment stays connected to the version it quoted**.
+
+### 22a. The decisions
+
+- **Every version is kept, always. The three-minute rule is a display rule, not a storage
+  rule.** A silent edit is one the *reader* is not told about; it is not one the database
+  forgot. Storing every version costs nothing (a comment is ≤5000 characters, an annotation
+  body is 100–5000), and it is what makes the rest honest: a moderator can see what an
+  approved comment said before it was changed, an integrity script has something to check,
+  and a quote taken during the silent window still has a version to point at.
+- **A comment's versions are rows in a new `comment_revision` table**, one per version
+  including the first, written at `submitComment` time from now on and backfilled for every
+  existing comment. `Comment.body` stays exactly what it is — the current text — so no reader
+  path changes; it becomes a *cache of the newest revision*, the same relationship
+  `Doc.proseJson` has to the ydoc, with an integrity check to say so.
+- **A quotation of a comment pins to a revision id** (the mechanism moved to §23c; the pin
+  itself is unchanged), plus absolute offsets and the quoted
+  text — the post-comment shape §5 chose (immutable snapshot + offsets), which is the
+  strongest row in COLLAB.md's table because the target *cannot* move. There are no
+  quotations of comments today (a reply inherits its parent's thread and quotes nothing —
+  `submitComment` deliberately ignores anchor fields on a reply), so §22d adds the one
+  consumer the requirement needs: a reply that quotes a passage of its parent comment, the
+  comment-side twin of §13p.
+- **An annotation's body stays a ydoc; a version is a *settled* state, recorded as a
+  `ydoc_snapshot` on the body's own ydoc.** The update log is continuous and already never
+  truncated, so history needs no second copy of the text — only a mark saying "this is where
+  an edit ended", and `ydoc_snapshot` is already that mark for a doc (a publication, §15): a
+  deliberate settled state with its bytes, its position in the log, who made it and when. One
+  at post time, one at the end of each edit session that changed anything; the text of a
+  version is decoded from the snapshot on demand. No new table. Readers see settled state
+  only; the store-debounce cache stops flowing into `Annotation.proseJson` while an edit
+  session is open (§22e), which is what keeps every reader path unchanged and retires the
+  staleness hazard COLLAB.md named as the second-hardest part.
+- **The grace window is three minutes from posting, for both kinds, and it closes early the
+  moment anything quotes the text.** Silence is only honest while nobody has acted on what
+  was said. One constant, `EDIT_GRACE_MS`, in one place. (Judgment call: the ask named the
+  window for comments only; annotations get the same rule rather than a second one to
+  explain — §22h.)
+- **Permissions.** A comment is editable by the signed-in user its `Commenter` row is keyed
+  to, and by anyone who may moderate it (`canUserEditPost` on the thread's post — the gate
+  `moderateOne` already uses). An annotation is editable by its author or an ADMIN —
+  `requireOwnOrAdmin`, the delete gate, and no doc-level bypass. **Everyone else's connection
+  to a posted annotation's ydoc becomes read-only**, closing the hole COLLAB.md called the
+  real gate on this feature (§22e, PR 1).
+- **An edit re-runs the spam check and otherwise leaves moderation state alone** (§22c). An
+  anonymous commenter cannot edit, because there is no identity to prove (§22h).
+
+### 22b. The grace window, precisely
+
+Let `posted` be the moment readers could first have seen the text: `Comment.createdAt` for a
+comment, `Annotation.postedAt` (the DRAFT → LIVE/RAISED transition, its own column) for an
+annotation. Every edit writes a new version — a `comment_revision` row, or a `ydoc_snapshot` on
+the annotation body's own ydoc — stamped `createdAt = now` and stamps `editedAt = now` on the
+parent row. So a *superseded* version `r` has a well-defined `supersededAt` — the next
+version's `createdAt` — without a column of its own.
+
+A superseded revision is **silent** iff
+
+    r.supersededAt ≤ posted + EDIT_GRACE_MS   and   nothing quotes r
+
+and a comment or annotation is **visibly edited** iff at least one of its superseded revisions
+is not silent. Everything reader-facing follows from those two definitions:
+
+- The "edited" marker (`CommentNode`, `AnnotationNode`) renders iff visibly edited.
+- The history view lists the non-silent superseded revisions plus the current one. A silent
+  revision is collapsed *into* the one that superseded it, so a comment edited at 0:01 and
+  again at 0:10 shows "original" = the 0:01 text. That is the meaning of silent: the reader's
+  record starts from the text as it stood when the window closed.
+- `editedAt` is stamped on **every** edit, silent or not, and `/comments`' and
+  `/annotations`' Edited columns show it. Those tables are for people who moderate; they get
+  the truth. Nothing reader-facing keys off `editedAt` alone.
+
+**Why the window is measured from `posted` and not from the last edit.** Measured from the
+last edit, a chain of edits each under three minutes apart would stay silent forever. The
+ask is "a short window to fix a typo after posting", and that is a property of posting.
+
+**Why a quote closes it.** A reply that quotes "the sky is green" is a reply to those words.
+If the author silently changes them to "the sky is blue" a minute later, the reply reads as a
+non-sequitur with no explanation available to anyone. So a quote taken during the window
+makes the revision it pins to non-silent — the reader sees "edited", opens history, and finds
+the version the reply was answering. "Nothing quotes r" is a cheap existence check (§22d's
+`quotedRevisionId`, §22e's `ydocUpdateId` falling inside the revision's span); it is never a
+reason to refuse the edit.
+
+**Why a constant and not a `site_settings` column.** No one has asked for a second value.
+`/site-settings` can grow one later without a migration of meaning; `EDIT_GRACE_MS` lives in
+`src/lib/edit-grace.ts` beside the two predicates above so there is exactly one place to
+convert.
+
+### 22c. Comment revisions
+
+```
+model CommentRevision {
+  id             String   @id @default(cuid())
+  commentId      String   @map("comment_id")
+  revisionNo     Int      @map("revision_no")      // 1 = as posted; dense per comment
+  body           Json                               // { text } — same envelope as Comment.body
+  authorUserId   String?  @map("author_user_id")   // who wrote THIS version: the commenter's
+                                                   // user, or the moderator who edited it;
+                                                   // null for an anonymous original
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  comment  Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author   User?   @relation("CommentRevisionAuthor", fields: [authorUserId], references: [id])
+  quotedBy Comment[] @relation("CommentQuotedRevision")   // §22d
+
+  @@unique([commentId, revisionNo])
+  @@map("comment_revision")
+}
+```
+
+- **Invariant: `Comment.body` equals the newest revision's `body`.** Both are written in one
+  transaction by `editComment`; `submitComment` writes revision 1 in the same transaction as
+  the comment. `scripts/integrity/check-comment-revisions.ts` verifies it, plus dense
+  `revisionNo`s and revision 1's `createdAt` equalling the comment's. Same standing-guard
+  pattern as `check-annotation-anchors.ts`.
+- **Backfill** is part of the migration: one `INSERT … SELECT` giving every existing comment
+  a revision 1 with its current body and `createdAt`, `authorUserId` from `commenter.user_id`.
+  Nothing has ever edited a comment, so "current body = as posted" is exactly true. Deleted
+  comments are backfilled too — soft delete is a status, and a restored comment needs its row.
+- **`editComment(commentId, body)`** in `src/app/actions/comments.ts`: gate (§22a); same
+  validation as `submitComment` (trim, non-empty, `MAX_BODY_LENGTH`); `isCommentRateLimited`
+  with the same key; `checkSpam` unless the editor is an ADMIN. A no-op edit (identical text)
+  returns without writing anything, so a Save with nothing changed cannot close the grace
+  window. Then, in one transaction: insert revision `n+1`, update `body` and `editedAt`. If the
+  spam check trips, `status` becomes SPAM with `statusChangedById` = the editor and the edit is
+  still recorded — a moderator reversing the status should see what was written. Otherwise
+  **status is unchanged**: an approved comment stays approved. The alternative — re-running
+  `resolveCommentStatus` and sending an untrusted commenter's edit back to PENDING, hiding the
+  comment until re-approved — is honest but needs per-revision status to avoid the comment
+  vanishing, and is deferred with that design (§22h). `revalidatePostPage` as `submitComment`
+  does.
+- **Delete and restore are untouched.** Revisions cascade with the comment row and are
+  otherwise inert under soft delete.
+- **The edit UI** is an Edit control on `CommentNode` beside Reply and Delete, shown under the
+  §22a gate, that swaps the `<p>` for a textarea pre-filled with the current text, Save/Cancel.
+  Plain text in, plain text out: comment bodies stay the `{ text }` envelope, and this section
+  does not make them rich (§22h).
+- **The history UI** is one client island shared with annotations
+  (`src/components/EditHistory.tsx`): the "edited <LocalTime>" marker is a button; opening it
+  calls `getCommentHistory(commentId)` (or the annotation twin) and lists the non-silent
+  versions newest-first with author and time, each rendered as the live comment is. It fetches
+  on open rather than shipping revisions in the page for the same reason `TagChips` does: the
+  post page is statically generated (§21) and must not touch a dynamic API at build. The
+  action applies §22b's silence rule server-side; the island never sees a silent revision.
+  A moderator-made edit shows the moderator's name on that version, which is the honest thing
+  and needs no extra column.
+- **`/comments`** already has an Edited-at column; it starts being non-empty. A "Versions"
+  count column is cheap through the kit (a `comment_metrics`-style view, or a `_count`) but not
+  needed to ship.
+
+### 22d. Quoting a comment in a reply
+
+> **Superseded by §23 before it was merged.** Everything below was built and works; what it
+> cannot do is what the ask turned out to be — quote *several* things, of *five* kinds, *inside*
+> the reply's prose. §23c replaces these four columns with a row on §20a's anchor envelope, and
+> §23i lists exactly which files go with them. Two things here survive the replacement and are
+> worth reading for: **the quote is derived server-side against the version it pins, never taken
+> as sent**, and **a quotation that cannot be verified posts unquoted rather than refusing the
+> comment**. Both carry over verbatim.
+>
+> The rest is kept because the commit that built it, on `reference/comment-edit-history`
+> (§23l), is the reference for why the envelope was needed — and because the reasoning about
+> *pinning* — a revision is immutable, so the quote is true of it forever — is the design's
+> foundation rather than a casualty of it.
+
+The comment-side twin of §13p: selecting text inside a comment offers a reply quoting that
+passage. Same shape, different substrate — and a *stronger* anchor than §13p's, because a
+revision is immutable where an annotation body is a live ydoc.
+
+- **Four columns on `Comment`**, all null or all non-null (a hand-written CHECK, as
+  `annotation_one_container_check` is): `quotedRevisionId` (FK → `comment_revision`,
+  `onDelete: Restrict` — a revision that is quoted is not deletable, and revisions are never
+  deleted anyway), `quoteFrom`, `quoteTo`, `quotedText`. Offsets are UTF-16 code-unit indices
+  into `body.text` — the same string readers render — so `text.slice(from, to) === quotedText`
+  is the definition and the integrity check.
+- **`quotedText` is derived server-side against the pinned revision**, never taken from the
+  client, exactly as §13o insists for annotations: the client sends offsets and its reading of
+  the text; the server verifies the offsets against the revision it is about to pin (the
+  *current* revision at post time — a client cannot name an older one), corrects them by a
+  unique-occurrence search if the text moved under it, and stores its own slice. If neither
+  verifies, the reply is posted **unquoted** rather than refused, with the form told why.
+- **The target is a property of the row, not the request** (§13p's rule): a reply quotes its
+  parent comment and nothing else. `submitComment` picks `quotedRevisionId` from the parent's
+  newest revision; there is no argument that could point it elsewhere.
+- **Rendering.** The reply shows its quote as a blockquote above its body — as captured,
+  forever. In the *parent*, the quoted span is highlighted when it still resolves against the
+  current text: exact offsets if the parent is at the pinned revision, else a unique-occurrence
+  search of `quotedText` in the current text (a plain-string cousin of `findQuoteOccurrences`;
+  no ProseMirror node here). When it does not resolve, the reply's blockquote gains a "quoted
+  an earlier version" link that opens §22c's history island at the pinned revision. That link
+  is the whole of "connectable to previous versions": the pin is a row id, the history view
+  can show it, and nothing depends on the text still being there.
+- **Threads are unchanged.** A quoting reply still inherits its parent's `threadId`; the quote
+  is a per-comment relation between two comments, not a second kind of thread. The
+  post-anchored `CommentThread` mechanism (§5) and this one never meet.
+- **Where this stands with §20's envelope.** §20a's rule is that a new targetable *object*
+  kind is a migration on each anchor table, and `comment` is deliberately not one of the four
+  FKs on `tag_anchor`/`anchored_link_anchor`. This section does not add it: a reply's quote is
+  the reply's own columns, the way a reply annotation's anchor is its own columns today, and
+  §20e (PR 2 of the tags work, unbuilt) is the point at which both kinds of self-owned anchor
+  would move onto per-consumer tables together. What §20 would need from this section if a tag
+  or link ever targets a comment is the same thing §22e needs for annotations: **any anchor
+  into a mutable body carries a version stamp** — here a revision id. COLLAB.md gets that
+  sentence.
+- **Composer.** Selecting inside a comment's body shows a small "Quote in reply" affordance
+  (the reading-view `AnnotationPopover` pattern, minus the editor); it opens the existing reply
+  form with the quote shown above the textarea and the offsets in hidden fields. Selection
+  settles on `selectionchange` with `pointerup` short-circuiting it, per CLAUDE.md's gotcha.
+
+### 22e. Annotation edit sessions
+
+An annotation body is already a collaborative editor with a never-truncated log, a rolling
+checkpoint (`Ydoc.lastUpdateId`), a materializer (`materializeYdocAt`), a snapshot table that
+records a deliberate settled state of any ydoc (`ydoc_snapshot`, §11b, §15), and replies whose
+anchors carry a version stamp into that log (`ydocUpdateId`, §13p). Nearly everything this
+needs exists; what is missing is a gate, a notion of "settled", and a UI.
+
+**PR 1 — close the writable-token hole first, on its own.** `/api/annotation/[id]/token`
+mints a writable token for anyone `canUserAccessAnnotationYdoc` admits, which for any non-DRAFT
+annotation is every reader of the container. `AnnotationBodyReader` never connects, so nothing
+exploits it — but it means a reader with a browser console can rewrite anyone's annotation
+today. The route learns to set `readOnly: true` unless the caller is the author or an ADMIN
+(`server/ydoc-hooks.ts` already honours the flag, §12g); `AnnotationBody` reads the flag off
+the token and sets `editable` from it. Independent of everything below and worth shipping
+before it.
+
+**A settled state is a snapshot.** A version of a body is a `ydoc_snapshot` row on the body's
+own ydoc (`ydoc:annotation:<id>`): full bytes at `lastYdocUpdateId`, `userId` = who settled it,
+`createdAt` = when. Version 1 is the snapshot written at DRAFT → LIVE/RAISED; each Done that
+changed anything writes another. Nothing else may create a snapshot on an annotation ydoc —
+`/ydoc-debug`'s Snapshot button and `/admin/ydoc-snapshot` refuse the namespace with a 409,
+since a stray one would be listed as an edit nobody made. `YdocSnapshot` gets the model comment
+it has never had: what a snapshot is for a doc (a publication), what it is for a body (a
+version), and that rule.
+
+```
+model Annotation {
+  ...
+  postedAt   DateTime? @map("posted_at")   // DRAFT -> LIVE/RAISED; null for a DRAFT.
+                                           // Its own column: a fact about the annotation,
+                                           // not about a version, and the grace window
+                                           // reads it directly.
+  // editingSince below; editedAt and proseJsonUpdateId reworded, unchanged in shape.
+}
+```
+
+Why not a table of revisions holding the text, the shape §22c uses for comments and the obvious
+one here: **the copy would be redundant and the boundary is not.** A body is 100–5,000
+characters and the log is never truncated, so any state is reconstructible in a few
+milliseconds (`getQuotedParentVersion` already does exactly that per request); what the log
+cannot say is *where an edit session ended*, because it has no idea which keystroke was the
+last one — and annotation readers see a step function of settled states, never keystrokes, so
+every feature phrased in versions (the marker, the history, a window that hides a whole session
+rather than half of one, Cancel) needs the step positions. A snapshot is that record, and one
+the codebase already verifies: `check-ydoc-integrity.ts`'s check 4 holds every snapshot's bytes
+to a replay of the log to its mark, and `loadReplaySlice` takes the newest one at or below a
+mark as its replay base — so materialising *at* a version is a snapshot load with zero deltas.
+A revision table would have been a second, unverified copy of a record that exists. Two
+consequences follow and are what settle it: the cache is written **from** the snapshot, in the
+snapshot's transaction, so cache and newest version agree by construction; and a reply's stamp
+is a snapshot mark, which names a state that provably reproduces its quote.
+
+**Backfill:** `posted_at = created_at` for every existing LIVE/RAISED row in the migration (the
+DRAFT → LIVE moment was never recorded; in practice it is seconds after the row's creation, and
+the window opening slightly early is the whole consequence), and a one-shot
+`scripts/backfill-annotation-snapshots.ts` — dry run by default, `--apply`, idempotent — that
+gives every posted body with no snapshot a version 1 at its log's tail with its author and
+`posted_at`, which is exactly true because nothing has edited a posted body. SQL cannot
+materialise a snapshot, which is why the script is separate from the migration.
+
+**`Annotation.editingSince DateTime?`** — set by `beginAnnotationEdit`, cleared by
+`finishAnnotationEdit`/`cancelAnnotationEdit`. `server/annotation-cache.ts` **skips its write
+while it is set**. That one guard is what makes `Annotation.proseJson` mean "the last settled
+body" instead of "whatever was typed 2s ago": every reader path (`annotation-entries.ts`, the
+rails, `/annotations`, `getDocAnnotationsAsThreads`) keeps reading the column and none of them
+can render a half-typed sentence. It also means readers do not need a live editor mounted for
+an annotation someone else is editing, so COLLAB.md's awareness-as-mount-trigger design is not
+needed in v1 — a reader sees the settled text until the session ends, then the next load
+(or `AnnotationReloadContext` where a surface has one) shows the new one. The author's own
+surface is the live editor and never reads the cache.
+
+**The flush endpoint learns two things.** `/admin/annotation-flush` drains the body's append
+queue (`drainAppends`) and answers `{ lastUpdateId }` from the database's tail after the drain
+— not from `drainAppends`' own return, which is empty after a collab restart until the first
+append lands — because a settle materialises and snapshots *at* that mark, and the in-memory id
+lags the content by however long an insert takes (`appendUpdate`'s comment). And it takes
+`writeCache` (default `true`): the settle paths pass `false` and write the cache themselves,
+below; `saveDraftAnnotation` keeps the default, since a draft has no snapshot to write its cache
+from. `flushAnnotationCache` returns the id, `null` on failure.
+
+**Settling.** One helper, `settleAnnotationBody`, replaces "flush, then read the cache back":
+the drained mark from the flush (falling back to `ydocStore.maxUpdateId` if the collab server
+is unreachable) → `materializeYdocAt(ydocId, mark)` → decode with **the one function the cache
+writer also uses** (factored out of `server/annotation-cache.ts`, so the two cannot disagree
+about what a body's text is) → validate non-empty and ≤5000 *on that* → return `{ mark,
+snapshot bytes, proseJson, bodyText, unchanged }` or an error, with `postAnnotation`'s bounded
+retry for a keystroke that outran the click. It returns data, and every caller writes inside
+its own transaction: the snapshot at `mark` (`userId` = the acting user, the ADMIN when an
+ADMIN edited — §22f), and the annotation's `proseJson`/`bodyText`/`proseJsonUpdateId` from the
+same decoded document, plus per caller `status`/`raisedAt`/`postedAt` at post and
+`editingSince: null`/`editedAt` at Done. Snapshot `createdAt` and `postedAt`/`editedAt` are one
+instant. A failed validation writes nothing — which is the point of validating the
+materialised body rather than the flushed cache: a Done on an emptied body must not dirty the
+column every reader renders from and then fail.
+
+**The session.** An Edit control on `AnnotationNode` (author or ADMIN — `requireOwnOrAdmin`)
+calls `beginAnnotationEdit`, which stamps `editingSince` and returns; the node then mounts
+`AnnotationBody` with a provider in place of `AnnotationBodyReader` — the composer's live
+editor, on a posted row. Done calls `finishAnnotationEdit`: settle, and if the text is the
+cached (last settled) text, write nothing and clear the flag — opening and closing the editor
+cannot close the grace window. Cancel calls `cancelAnnotationEdit`: decode the newest snapshot
+and have the collab process replace the body's content with it (the
+`/admin/annotation-unmark`-style privileged path, already how the collab process edits on the
+server's behalf), then clear the flag. Yjs has no un-apply, so a cancel is new log rows that
+restore the old text — the log stays append-only and the versions stay a strictly increasing
+sequence of marks. **Restoring an older version** is the same operation with a different source
+snapshot followed by a normal settle, for both kinds: a comment restore is a new
+`comment_revision` with the old body. History never rewrites.
+
+A session left open — tab closed — is settled by the next `beginAnnotationEdit` or by the
+author's next visit (`editingSince` older than an hour → the node offers Resume/Discard). Not a
+cron.
+
+**Reading versions.** `getAnnotationHistory` lists the body's snapshots in mark order,
+`withSupersededAt` → `visibleVersions(…, postedAt)`, and decodes each *visible* row's bytes
+(`Y.applyUpdate` on a fresh `Y.Doc`, then the transformer pair `getQuotedParentVersion` uses)
+into the `AnnotationVersion` shape; `revisionNo` is the row's index in mark order and
+`EditHistory` uses it only as a key. The thread loaders need each annotation's version
+timestamps and `postedAt` for the "edited" marker; there is no Prisma relation from
+`annotation` to `ydoc` (the id is derived by `ydocIdForAnnotation`), so each loader fetches the
+page's snapshots in **one** query — `where: { ydocId: { in: ids.map(ydocIdForAnnotation) } }`,
+marks and `createdAt` only, served by the `[ydocId, lastYdocUpdateId]` index — and groups in
+memory. Never per annotation.
+
+**Reply anchors under a moving parent.** `AnnotationHighlight`'s three re-resolve tiers are
+registered on `AnnotationBodyReader` and have never executed, because no live tap pushes
+content into a body (COLLAB.md 2026-08-13). They still don't need to in v1: the reader renders
+the settled `proseJson` and resolves each reply's stored triple against that node *at render*,
+which is tier 1–3 run once per load rather than per keystroke. Two refinements from that
+entry are taken: tier 3's sticky detachment is **relaxed for annotation bodies** (a full scan of
+≤5000 characters is nothing, so a reply re-attaches the moment the parent is edited back
+toward what it quoted), and a reply that does not resolve shows a "quoting an earlier version"
+link — its `ydocUpdateId` already names exactly the state it quoted, and `materializeYdocAt` on
+a body that size is a few milliseconds (a snapshot load, when the stamp is a version's mark),
+so the history island can show *that* state. That is §13q's stamp finally earning its keep, and
+COLLAB.md §7's "materialize" half built for the one case where it is affordable; the "diff"
+half stays unbuilt.
+
+The reply branch of `postAnnotation` currently skips client-side version capture with the
+comment "nothing edits a posted annotation body today". That stops being true here, so the
+branch takes §13q's snapshot from `LiveAnnotationComposer` the way the doc branch does. Small,
+and the comment already says where.
+
+**What editing does not touch.** The annotation's own anchor into the *doc* — mark or
+columns — and a PDF root's `pdfTarget`. Editing is about the body. `ydocUpdateId` keeps §13n's
+meaning. `status` is unchanged: a RAISED annotation stays RAISED and re-notifies nobody.
+
+**Grace.** §22b verbatim, with `posted` = `postedAt`. "Nothing quotes r" is: no non-deleted
+*anchored* reply (only those stamp the parent's log; an anchorless one stamps the doc's) whose
+`ydocUpdateId` falls in `(r-1.mark, r.mark]` of this annotation's own log — or `≤ r.mark` for
+the first version — i.e. was written against the text r settled. In the history action that is
+one query for the replies' stamps; in the thread loaders the replies are already in hand.
+
+**Integrity.** `scripts/integrity/check-annotation-snapshots.ts`: `posted-snapshot` (non-DRAFT
+⇒ `posted_at` and ≥1 snapshot; DRAFT ⇒ neither), `monotone` (marks strictly increase, and
+`created_at` never goes backwards along them), `settled-cache` (no session open ⇒ the cache is
+the decoded newest snapshot; the repair is to open and close a session) and a `stale-session`
+WARN. Whether each snapshot's bytes are right is check-ydoc-integrity's check 4 already, and is
+not repeated. Run after it.
+
+### 22f. Permissions, for docs/PERMISSIONS.md
+
+| Action | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER | signed out |
+|---|---|---|---|---|---|---|
+| Edit own comment (Commenter keyed to this user) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Edit any comment on a post | ✅ | ✅ | own posts | ❌ | ❌ | ❌ |
+| See a comment's history | anyone who can see the comment (silent revisions excluded for all, `/comments` shows `editedAt` regardless) |
+| Edit own annotation | ✅ | ✅ | ✅ | ✅ | — | — |
+| Edit another's annotation | ✅ | ❌ | ❌ | ❌ | — | — |
+| Writable ydoc connection to a posted annotation | author or ADMIN; everyone else `readOnly` (PR 1) |
+| See an annotation's history | anyone who can read the container (same gate as the annotation) |
+
+"Edit any comment on a post" is `canUserEditPost`, deliberately the moderation gate and not a
+new predicate: someone who may approve, spam and delete a comment may also fix it. The
+annotation rows are `requireOwnOrAdmin`, deliberately the delete gate; an EDITOR who can read a
+doc cannot rewrite its annotations, for the same reason a PRIVATE doc has no EDITOR bypass.
+
+### 22g. Build order
+
+1. **PR 1 — read-only tokens for posted annotations.** Token route + `AnnotationBody`
+   honouring the flag. A spec that opens a second identity's connection to a LIVE annotation
+   and asserts a typed character never lands (`e2e/annotation-readonly.spec.ts`). Ship alone.
+2. **PR 2 — comment revisions and editing.** Migration with backfill; `editComment`;
+   `src/lib/edit-grace.ts`; Edit control and inline editor on `CommentNode`; `EditHistory`
+   island and `getCommentHistory`; integrity script; `/comments` unchanged but truthful.
+   `e2e/comment-editing.spec.ts`: edit inside the window shows no marker and one version;
+   `page.clock` past the window shows the marker and two; a moderator's edit names the
+   moderator; an anonymous comment has no Edit control.
+3. **PR 3 — annotation edit sessions.** Migration (`editingSince`, `postedAt`, backfill) and
+   `scripts/backfill-annotation-snapshots.ts`; the flush endpoint's drain, `lastUpdateId` and
+   `writeCache`; the settle helper and its transaction from `postAnnotation`/
+   `postFileAnnotation`/`finishAnnotationEdit`; the cache guard; the three actions;
+   Edit/Done/Cancel on `AnnotationNode`; `getAnnotationHistory` over snapshots and the
+   loaders' one-query version fetch; the debug-button guard; tier-3 relaxation and the
+   "earlier version" link on replies; the reply branch's snapshot capture.
+   `e2e/annotation-editing.spec.ts` on a doc and on a PDF: a reader sees the settled text
+   mid-session; a reply anchored to text that is then edited away shows the link and reopens
+   the quoted state, and keeps the parent's edit visible inside the window; Cancel restores;
+   Done on an emptied body is refused with the cache untouched.
+4. **PR 4 — quote a comment in a reply.** Columns + CHECK; server-side derivation; the
+   affordance; blockquote and highlight; the "earlier version" link; grace-closing check.
+   `e2e/comment-quoting.spec.ts`.
+5. **Later, if wanted:** a word-level diff between two versions (plain text for comments,
+   `bodyText` for annotations — no ProseMirror diff needed for a first cut); per-revision
+   moderation status; a `site_settings` knob for the window; email-token editing for
+   anonymous commenters (docs/EMAIL.md's seam).
+
+Each PR ends at `npm run check`; the specs above run under `npm run e2e` per the Conventions.
+
+### 22h. Judgment calls and what was not decided
+
+- **"Quotations of comments" have no existing consumer**, so this section builds one (§22d)
+  rather than only the pin. If replies quoting parents is not wanted, PR 4 is droppable and
+  the revision id from PR 2 still stands ready for whatever quotes a comment later (a tag or
+  link target, §20). Either way the pin is a revision, never the live comment.
+- **The window is measured from posting, not from the last edit** (§22b), and **applies to
+  annotations too**. Both are the plainer reading; both are one line to change.
+- **Silent edits are stored.** The ask says nothing *visible*; this reads that as the reader's
+  view and keeps moderators and integrity honest. If "nothing" was meant to include the
+  database, §22c's action would skip the revision insert inside the window — but then a quote
+  taken inside the window has nothing to pin to, and §22b's early-close rule is the only thing
+  keeping that case coherent.
+- **Anonymous commenters cannot edit.** A `Commenter` with no `userId` has no way to prove
+  they are the same person; the moderation gate covers fixing their typos on request. The
+  honest self-service path is an emailed edit link, deferred to docs/EMAIL.md's list.
+- **Moderation state survives an edit** except a spam hit (§22c). Re-queueing untrusted
+  edits is the stricter policy and is deferred with its prerequisite named.
+- ~~**Comment bodies stay plain text.**~~ **Reversed by §23**, and the reason is exactly the one
+  this bullet gave: it *was* a separate decision, and the thing that forced it was not editing
+  but *inline* quotation, which is structure inside the body by definition. §6's safe-schema
+  item stopped being deferrable at that moment; §23b is what it turned into.
+- **Readers do not see live typing in an annotation under edit** (§22e's cache guard). The
+  alternative — mount live editors via awareness, COLLAB.md's design — is compatible and can
+  come later; nothing here forecloses it.
+
+### 22i. Docs to update when each PR lands
+
+**Done on `reference/comment-edit-history`, and deliberately not here.** Every line in this
+list describes built behaviour — an invariant about a column, a permissions row, a gotcha — and
+on this branch that behaviour does not exist. Docs that state it would be false. They come back
+with the code, or they are rewritten by §23, which supersedes several of them.
+
+- PLAN.md §12o: strike the "displayed but never written" gap; §13n/§13p: note that an
+  anchored reply's stamp is its parent's newest snapshot mark. §13c's tree gains `EditHistory`.
+- docs/COLLAB.md: a dated entry closing the 2026-08-13 question, plus one rule in the
+  cross-cutting hazards: **any anchor into a mutable body carries a version stamp** — a
+  revision id for a comment, an own-log update id for an annotation.
+- docs/PERMISSIONS.md: §22f's rows; the writable-token note under Annotations.
+- CLAUDE.md invariants, two lines: `Comment.body` is a cache of the newest `comment_revision`
+  and is never written alone; `Annotation.proseJson` is the last *settled* body and the cache
+  skips writes while `editingSince` is set.
+- scripts/integrity/README.md: the two new checks.
+- e2e/README.md: the fixtures that gained a version (`createComment`, `createTestAnnotation`)
+  and the two backdating helpers, plus why the grace window is not tested with `page.clock`.
+
+### 22j. As built — deviations, and what is not built
+
+What follows describes the code on `reference/comment-edit-history`. Four things were built
+differently from the plan above, each because the plan was wrong about a detail rather than
+about the shape:
+
+- **An anchored reply's stamp is the parent's newest snapshot mark, not a client snapshot.**
+  §22e said the reply branch of `postAnnotation` would "take §13q's snapshot from
+  `LiveAnnotationComposer` the way the doc branch does". It cannot: §13q's capture needs a live
+  `Y.Doc`, and a client reading an annotation body has none — the body renders from
+  `proseJson`, with no Hocuspocus tap. But a reader of a body sees the last *settled* body, and
+  the newest snapshot is the record of exactly that — so its mark is "the version the replier
+  was reading", *exactly* and with no round trip (`parentSettledMark`; the log's tail is the
+  fallback for a parent with no snapshot). Not `Annotation.proseJsonUpdateId`, though its own
+  comment declared it as a seam for this: the cache checkpoint can trail a Done (the flush
+  writes content without an id; the debounce skips a body under edit), so a reply stamped from
+  it could name a state its quote does not reproduce. It is strictly better than the plan's
+  version in the case that matters: while a session is open the tail names text nobody has
+  seen, and the snapshot names what the replier saw.
+- **The rate limiter for edits counts revisions, not comments.** §22c said `editComment` would
+  call `isCommentRateLimited` "with the same key". That function counts `comment` rows, so it
+  bounds posting and is blind to editing — a commenter who had posted nothing in ten minutes
+  could rewrite old comments without limit. `isCommentEditRateLimited` counts
+  `comment_revision` rows by the acting user in the same window at the same ceiling.
+- **The "edited" marker's condition is computed by the loaders, not per comment.** §22c implied
+  a per-comment question; asking it per comment is an N+1 on a page of comments. Both loaders
+  (`comment-data.ts`, `annotation-data.ts`) include each row's revision *timestamps* — never
+  the bodies — and resolve §22b's rule server-side, which is also what keeps a silent edit's
+  existence out of the payload entirely.
+- **Annotation staleness is decided on the server.** §22e's "editingSince older than an hour →
+  Resume/Discard" was written as a client-side comparison. Reading the clock during render is
+  impure (ESLint's `react-hooks` rules reject it outright) and produces different answers either
+  side of hydration, so `editSessionStale` is a loader field. The cost is that the answer ages
+  in a tab left open, which a reload fixes — the same trade §21i's countdown makes.
+
+Two additions the plan did not name, both small and both load-bearing:
+
+- **`POST /admin/annotation-replace`** (`ANNOTATION_REPLACE_PATH`), the collab-server endpoint
+  Cancel calls to write the last settled version back. §22e said "the server applies one
+  transaction to the ydoc"; it did not say through what. It goes through the collab process for
+  the reason `annotation-mark` does — the live document lives there, and a second writer editing
+  the stored blob behind its back is overwritten by the next debounce.
+- **`useAnnotationProvider`**, the connection lifecycle factored out of
+  `LiveAnnotationComposer` so the composer and the edit session share one copy of the
+  connect/destroy/token-refresh dance.
+
+**Known gaps, deliberate:**
+
+- **A *file* annotation reply's quote is still client-supplied.** The doc side derives a reply's
+  offsets and quote server-side against the stamped state (`captureAnchorInYdoc`);
+  `postFileAnnotation` stores what the client sent, as it did before §22. So a PDF reply's stored
+  triple is not self-consistent by construction the way a doc reply's is. Pre-existing (§19), not
+  introduced here, and left alone rather than fixed in passing: changing it touches the PDF
+  surface's own anchor path. What §22e *did* add there is the version stamp, so the "earlier
+  version" link works on a PDF too.
+- **The history panel shows no diff.** Versions are listed whole. A word-level diff is §22g
+  item 5, and plain text makes it cheap when wanted.
+- **Comment history is plain text.** Bodies are plain text (§22h), so nothing is lost today; an
+  annotation's history *is* rendered richly (`AnnotationVersionBody`).
+- **Per-revision moderation status** is still absent, so §22c's "an edit keeps its status
+  except on a spam hit" stands as the policy rather than as a stopgap.
+- **Nothing runs the integrity checks automatically**, as with every other script in that
+  folder (TODO.md, "No CI").
+
+---
+
+## 23. Rich comment bodies, and quotation as a first-class anchor
+
+**Planned 2026-09-16 on `annotations-and-comments`, replacing §22d before it was merged.**
+§22d built a quotation as four columns on the reply and a blockquote above its body: one
+quotation, of the parent comment, outside the reply's text. The ask that arrived after it was
+built is larger in every dimension, and the difference is not a refinement — it is a different
+mechanism.
+
+What is wanted: a comment may quote **any comment on the page, any part of the blog post, any
+other comment or post, and part of a PDF**; a quotation may sit **inline or as a block**, in
+the replier's own prose; **most styling** is available in a comment; and an unsent comment is
+kept in **IndexedDB** rather than as a server-side draft.
+
+Each of those, on its own, is affordable. Together they force one decision §22h deliberately
+deferred and one §22d deliberately avoided, and those two decisions are what this section is
+mostly about.
+
+### 23a. The two decisions this forces
+
+**1. Comment bodies become rich, which means §6's safe schema is now a prerequisite rather
+than a deferred nicety.** A quotation that can be *inline* is structure inside the body, and
+"most styling" is structure by definition. There is no version of this that keeps
+`{ text: string }`. So the hardening item §6 has carried since the beginning — "restrict the
+comment editor to a safe schema (no raw HTML/scripts; links get `rel="nofollow noopener"`)" —
+stops being something to do later. It is the same write path as before, accepting input from
+**anonymous, unauthenticated people**, and it now accepts a document.
+
+The precedent for doing this safely already exists and is not an HTML allowlist:
+`contributorBlurb` (§17f) is TipTap JSON validated on write by
+`pmBlurbSchema.nodeFromJSON`, and `tiptap-schema.ts` states the rule outright — **the schema
+*is* the validation**. A node or mark the schema does not define throws. That is the whole
+model, and it is stronger than sanitizing HTML because there is never any HTML to sanitize:
+the stored value is a parsed-and-re-serialized ProseMirror document, and the render path is
+`renderToReactElement`, never `dangerouslySetInnerHTML`.
+
+**2. A quotation stops being text with a pin and becomes an anchor row.** §22d's four columns
+answer "which passage of my parent does this reply quote". They cannot answer "which passage
+of which of five kinds of object does this *span* of my body quote", and widening them would
+mean a fifth and sixth nullable column set on `comment` with a CHECK nobody could read.
+
+That shape already exists in this codebase, deliberately, for exactly this: §20a's anchor
+envelope. `tag_anchor` and `anchored_link_anchor` are four nullable target FKs with exactly
+one non-null, a nullable `selector_kind` plus `selector` blob, `anchor_from`/`anchor_to`/
+`quoted_text`, two version stamps, and a `part_order` for a part-set. A comment's quotations
+are a part-set over that envelope, and `src/lib/anchors/` is the compiler that keeps the
+tables honest. So this section's anchor work is **a third consumer of an existing library**,
+not a new mechanism — which is the single largest reason the ask is affordable at all.
+
+**The thing that does not generalize is still the selector**, and COLLAB.md's "there is no
+universal anchor" is unchanged by any of this. §23d is the table of five substrates.
+
+### 23b. The comment schema
+
+A new pair in `tiptap-schema.ts`, stated independently rather than delegating to the doc or
+annotation sets — the same decision `canManageDocs` vs. `canManagePosts` records, for the same
+reason: a delegation preserves exactly the coupling the separation exists to break, and "what
+a stranger may put in a comment" must be able to diverge from "what an author may put in a
+doc" without anybody noticing at the wrong moment.
+
+```
+commentContentExtensions = [Document, Paragraph, Text, Bold, Italic, Strike, Code,
+                            Blockquote, BulletList, OrderedList, ListItem, HardBreak,
+                            Link (EDITOR_LINK_OPTIONS + rel), Quotation, Quote]
+pmCommentContentSchema   = getSchema(commentContentExtensions)
+```
+
+**In, and why:** the inline marks people actually use in prose; lists and blockquote, because
+`globals.css`'s reset already strips them and `prose.module.css` already restores them for
+every other surface; hard breaks, because `VirtualKeyboardEnter` exists; links, because a
+comment without them is worse than one with them hardened.
+
+**Out, and why each:**
+
+- **Images.** A `src` a stranger supplies is a request our readers' browsers make to a host
+  the stranger chose: a tracking pixel at best, and the same SSRF-shaped objection §17n
+  records for "avatar from URL" — where the answer was that there is deliberately *no* such
+  path. An uploaded image is a different feature with a storage quota and a moderation
+  question, and §19's file stack is where it would live.
+- **Headings.** A comment is not a document with sections, and a stranger's `<h1>` competes
+  with the article's own outline and with the page's heading structure for screen readers.
+- **Tables, code blocks, horizontal rules.** No demand, each is a layout surface, and every
+  one of them is additive later.
+- **Raw HTML, in any form.** There is no extension for it, which is the point: the schema
+  cannot express it, so no sanitizer has to catch it.
+
+**Links get `rel="nofollow noopener"` unconditionally**, and `target="_blank"` — §6's
+requirement, and not conditional on who wrote the comment. A trusted commenter's link is
+still a link to somewhere we do not control.
+
+**Two hard caps, server-side.** `extractText(body).length` against `MAX_BODY_LENGTH`, as the
+textarea's `maxLength` used to do; and a cap on nesting depth, because a document is a tree
+and a stranger's tree can be deep. `blurbExtensions`' trick of constraining `content` at the
+`Document` level is the model for anything structural.
+
+**The null-prototype trap is real on this path.** ProseMirror builds every non-empty `attrs`
+via `Object.create(null)`, and React's server-action encoder replaces such an object with an
+inert placeholder that throws when Prisma tries to serialize it — `tiptap-schema.ts`'s
+`toPlainJSON` exists for exactly this and its comment has the full account. A quotation node
+*always* has attrs, so every comment carrying one hits it. `toPlainJSON` before the action
+boundary, then `nodeFromJSON` on the far side.
+
+### 23c. A quotation is an anchor row
+
+```
+model CommentQuoteAnchor {
+  id                String @id @default(cuid())
+  commentId         String            // the *quoting* comment; Cascade
+  partOrder         Int               // §20b's part-set ordering
+
+  // The object arc — §20a's four, plus the fifth this section adds.
+  docId, postId, fileId, targetAnnotationId, targetCommentId
+
+  selectorKind      SelectorKind?
+  anchorFrom, anchorTo, quotedText, selector
+
+  // The version stamp, one per substrate (§23d) — at most one non-null.
+  ydocUpdateId      BigInt?           // doc body, annotation body
+  anchoredEventId   String?           // post publication event
+  quotedRevisionId  String?           // comment revision
+}
+```
+
+**A fifth targetable kind is a migration, and that is the price §20a took on deliberately**
+(CLAUDE.md's invariant states it): one column, one index, one CHECK edit, **per anchor table**.
+So `target_comment_id` lands on `tag_anchor` and `anchored_link_anchor` too, unused on both,
+because the alternative is three tables that no longer share a shape and a compiler that
+cannot hold them to one. `AnchorTarget` gains a `comment` member, and every `switch` over it
+fails to compile until handled — which is the other half of the price, working as intended.
+
+**Why the anchor is outside the body**, when an annotation's is a mark *inside* its document:
+§14a's argument, unchanged. A mark lives in exactly one document; a quotation joins a comment
+to a *different* object, and no single document can hold that. The body carries an `anchorId`
+and nothing else. This is also what makes a quotation survive its target being deleted.
+
+**Why not reuse `anchored_link_anchor`.** A quotation and an anchored link have nearly the
+same envelope and completely different lives: a link is a navigational object with its own id,
+a landing page, a creator's tray and a one-open-at-a-time rule; a quotation is a part of a
+comment that never exists on its own. Sharing the *table* would mean one row shape serving two
+lifecycles, which is the thing §20a's per-consumer tables exist to avoid.
+
+### 23d. Five substrates, four version stamps
+
+The envelope unifies the object arc. Every column below the arc follows the target's
+mutability, and this table is the whole reason the selector is not unified:
+
+| Target | Substrate | Anchored against | Stamp | Resolution |
+|---|---|---|---|---|
+| A comment | ProseMirror JSON in an immutable `comment_revision` | that revision | `quoted_revision_id` | exact, by construction, forever |
+| The host post, or another post | an immutable `post_publication_event.prose_json` | that event | `anchored_event_id` | exact against the event; best-effort in the live article |
+| A PDF | bytes, identified by `sha256` | nothing; bytes are identity | none | exact, and cannot drift (docs/PDF.md §4) |
+| A doc body | a living ydoc | an update in its log | `ydoc_update_id` | verify, then unique-occurrence search |
+| An annotation body | a living ydoc | an update in *its own* log | `ydoc_update_id` | same, and §22e made it mutable |
+
+**Three of the five are immutable, which is new.** §22d's post-comment quote was the first
+anchor in this codebase whose target could not move, and it is now the common case rather than
+the exception. That is worth stating because it inverts the usual worry: for a comment, a post
+or a PDF the stored triple is true forever, and the only interesting question is whether the
+passage *also* still appears in the current version — a display question with an honest answer
+either way.
+
+**`POST_RANGE` is not added, and `DOC_RANGE` is redefined instead.** §20b reserved the name and
+deferred it until "part-anchors join `comment_thread`'s publish-time remap (§5)". Two things
+have changed. First, a quotation does not need the remap at all: it pins the event it was taken
+against and reproduces that text forever, where a *thread* needs remapping because it must stay
+attached to the live article to be highlighted in it. Second, `DOC_RANGE`'s blob
+(`before`/`after`/`blocks`) and its three columns already describe "offsets into a ProseMirror
+document with enough context to re-find them", and that is exactly what a post range is — the
+kind names the **mechanism**, and the target arc plus the stamp name the **substrate**. §20e
+already relies on that reading, using `DOC_RANGE` against an annotation body rather than a doc.
+A `POST_RANGE` differing from `DOC_RANGE` in no field would be an enum value carrying no
+information. **Deviation from §20b, recorded here**; `SELECTOR_KINDS` stays two long.
+
+**If a quotation's highlight should survive publishes**, extending `remapThreadsToEvent` to
+carry post-targeted quote anchors forward is additive and is the upgrade path. Deferred: the
+best-effort re-resolve gives the same answer whenever the text survived, and an honest "quoted
+an earlier version of this post" whenever it did not.
+
+### 23e. The audience rule — the one genuinely new permission
+
+Every gate in this codebase asks *may this viewer read X*. A quotation needs a different
+question, and getting it wrong publishes private text.
+
+> **You may quote into a comment only what everyone who can see that comment may already
+> read.**
+
+Not "what the quoter may read". A signed-in AUTHOR can read a `SHARED` doc; the readers of a
+published post's comments cannot. A quotation copies the quoted words into the comment body
+and renders them to that whole audience, so quoting a `SHARED` doc into a public comment
+*publishes* it. The gate is on the **host surface's audience**, and today the only host surface
+is a published post's comment thread, whose audience is the public.
+
+What that admits, and what it refuses:
+
+| Target | Admitted into a public post's comments? |
+|---|---|
+| The host post; any other **published** post | ✅ |
+| A comment that is `APPROVED` and not deleted, on a published post | ✅ |
+| A `PENDING` or `SPAM` or deleted comment | ❌ — it is not public yet, or no longer is |
+| A `StoredFile` | ❌ **until §19 grows a publicly-readable tier** (§23k) |
+| A doc, `PRIVATE` or `SHARED` | ❌ — there is no public doc tier at all (§12e) |
+| An annotation body | ❌ — it lives on a doc or a file, and inherits the above |
+
+`canQuoteTargetInto(target, host)` in `src/lib/comment-quote-authz.ts`, and it is **load-bearing
+rather than belt-and-braces** — the §20m precedent, where a second narrower check earns its
+place by asking a genuinely different question from the page's own gate. It runs at post time,
+on the server, against the resolved target; the composer's picker filters by the same predicate
+so the refusal is rare and explained rather than surprising.
+
+**Three consequences worth stating.**
+
+- **The doc and annotation arms of the arc will have no writer**, exactly as `post_id` and
+  `target_annotation_id` ship inert on the two existing anchor tables (§20h). The columns exist
+  because the envelope is shared; the gate is what keeps them empty.
+- **A target that stops being public does not retract the quotation.** The words were public
+  when they were quoted, and they are in the quoting comment's own body. What stops is the
+  citation resolving: the label degrades to "a comment that is no longer available" and the link
+  goes away. Recorded rather than fixed, because unpublishing a post cannot claw back what
+  people already read.
+- **The rule generalizes if comments ever appear somewhere non-public.** It is written in terms
+  of the host's audience precisely so that a comment thread on a `SHARED` doc would admit that
+  doc's readers' content and no more.
+
+### 23f. Inline, block, and where the quoted text lives
+
+Two schema members, both carrying nothing but an id:
+
+- **`Quotation`** — a block node, `attrs: { anchorId }`, `content: "block+"`, which **excludes
+  itself**: a quotation inside a quotation is an unbounded nesting game with no use case.
+  Renders as a `<blockquote>` with a citation line.
+- **`Quote`** — an inline mark, `attrs: { anchorId }`, self-excluding (unlike the `annotation`
+  mark's deliberate `excludes: ""`, because overlapping quotations of different things over one
+  span means nothing). Renders as `<q>` with a hover citation.
+
+**The quoted words are real content in the comment's body**, not a placeholder resolved from the
+anchor row at render time. Three reasons: the body renders with no joins and no per-quote
+permission filter on the read path; the comment survives its target being deleted with its
+meaning intact; and what the reader sees is what the replier actually put there.
+
+**And the server rewrites them at post time.** The anchor row's `quoted_text` is derived
+server-side against the pinned version — §12i's rule, which every anchor here follows — and
+then the body's quoted span is *replaced* with that derivation before storage. So the two copies
+cannot disagree, and "a quotation shows what was actually said" is true by construction rather
+than by the client's good behaviour. `prosemirror-model`'s `Transform` does the replacement; the
+integrity check verifies the pair.
+
+**A quotation that cannot be derived degrades rather than refusing the comment.** The node keeps
+its text and loses its `anchorId`, becoming an ordinary blockquote; the mark is dropped and the
+text stays. §22d's rule, and the same reasoning: someone editing the target between the
+selection and the click is not a reason to throw away what the replier wrote.
+
+**Caps.** A per-quotation character cap and a per-comment quotation count, both server-side,
+both because a comment that can embed a whole post is a way to republish one.
+
+### 23g. Drafts in IndexedDB, not as rows
+
+An unsent comment lives in the browser: `src/lib/comment-draft-store.ts`, one IndexedDB
+database, one object store, keyed by which composer it belongs to
+(`post:<id>`, `thread:<id>`, `reply:<commentId>`).
+
+**Why not the annotation side's DRAFT row plus ydoc.** Every argument for that arrangement
+fails here, which is worth walking because the two features otherwise rhyme:
+
+- **There is no second author.** An annotation draft has a ydoc because §13a wanted co-authoring
+  and presence in it. A comment has exactly one writer, so a CRDT buys nothing and costs a
+  connection, a row, a cache and a namespace.
+- **Most commenters have no row to hang a draft on.** Commenting is open to anonymous people
+  (§6); a server-side draft would need an identity they do not have, or a cookie-keyed orphan
+  table.
+- **A draft row would acquire a moderation question.** Everything in `comment` has a
+  `CommentStatus` and appears in `/comments`; a draft is not a comment and must not be
+  moderated, counted, or rate-limited.
+- **`saveDraftAnnotation` exists because a DRAFT is *shareable later*.** A comment draft is
+  private until posted, full stop.
+
+**What that costs, stated plainly:** a draft is per-browser and per-origin, is lost when site
+data is cleared, does not follow the author to another device, and is invisible to the server.
+All four are correct for an unsent comment and would be wrong for a saved annotation.
+
+**Rules, because IndexedDB is the one browser API that fails in ways a local test never sees.**
+Every read and write in `try`/`catch` — private windows, cleared data and browsers configured to
+block site data can each make the accessor itself throw — and a failure means *no drafts*, never
+a broken composer. Debounced save on editor update. Silent restore on mount plus a visible
+"Draft restored · discard" line, because a silently restored draft the author had forgotten is
+how a stale paragraph gets posted. A prune of entries older than thirty days on open. And
+deliberately **not** `y-indexeddb`: `src/lib/ydoc-persistence.ts` exists to work around two real
+bugs in that library's interaction with Yjs documents, and none of that applies to a plain JSON
+value.
+
+**Pending quotations ride in the draft.** A quotation captured while composing is not a row yet
+— the rows are written at post time — so the draft holds the body JSON plus the pending targets
+and selections, keyed by the same `anchorId` the body uses. That is also what makes "select,
+wander off, come back tomorrow, post" work.
+
+### 23h. The composer, and the quote gesture
+
+The textarea becomes a TipTap editor over `commentContentExtensions`, with `EditorToolbar`'s
+reduced-set pattern (`ANNOTATION_TOOLS` is the precedent, and comments get their own list).
+`AnnotationBody.tsx` is the shape to copy, minus the collaboration extensions — no
+`Collaboration`, no `CollaborationCaret`, no provider, no `AuthorHighlight`.
+
+**Quoting on the page** is the gesture that already exists twice. Selecting text in the article
+opens the comment popover (§5); selecting text in a comment opens "Quote in reply" (§22d, and
+its offsets change from string indices to ProseMirror positions). Either now inserts a
+`Quotation` node or a `Quote` mark at the cursor of the open composer, with a pending anchor.
+Selection settles on `selectionchange` with `pointerup` short-circuiting it, per CLAUDE.md's
+rule, and for its stated reason.
+
+**Quoting something not on the page** needs a picker, and that is the one genuinely new surface:
+a search over publicly-readable posts and comments, then a passage chosen inside the chosen
+object. §14's doc-link picker and the `[[` doc-ref menu are the precedents. This is Phase 4 and
+the largest UI item in the section; Phases 1 to 3 are deliberately shaped so that it is
+additive.
+
+**The citation line** is resolved server-side per anchor row —
+`describeQuoteTarget(anchor)` returning a label and an href, filtered by §23e's predicate at
+render as well as at write, since a target can stop being public after the fact. An edited
+target is worth saying so about: when a comment quote's pinned revision is not the newest, the
+citation reads "quoted an earlier version", which is §22d's link surviving into the new design.
+
+### 23i. What the §22 work becomes
+
+§22 is built and parked on `reference/comment-edit-history` (§23l). Most of it is untouched by
+this section and can be cherry-picked as it stands; one part of it is replaced, which is why it
+is parked rather than merged.
+
+**Untouched:**
+
+- **§22b, the grace window** (`src/lib/edit-grace.ts` and its unit tests) — not one line. Its
+  "nothing quotes this revision" clause changes *which table it asks*, from a `quotedBy` count
+  on `comment_revision` to a count of `comment_quote_anchor` rows pinning it. Same question.
+- **§22e, annotation edit sessions** — entirely unaffected. Different substrate, different
+  mechanism, and it is the half of §22 this section leans on hardest (a mutable annotation body
+  is what made `proseJsonUpdateId` load-bearing).
+- **PR 1's read-only tokens** — already on this branch, and the only part of §22 that is.
+
+**Changed in type, not in design:**
+
+- **§22c, comment revisions.** `comment_revision.body` and `comment.body` both become ProseMirror
+  JSON. The migration is a pure function applied once to both tables:
+  `{text} → {type:"doc",content:[{type:"paragraph",content:[{type:"text",text}]}]}`, skipping the
+  empty case. Everything else about the table stands.
+- **A derived `comment.body_text`** joins it, plain and maintained by the writers, mirroring
+  `Annotation.bodyText`. `/comments`' free-text filter is currently a jsonb path query on
+  `body.text` and has no equivalent over a document; the Body column and every excerpt want the
+  same string anyway.
+
+**Superseded:**
+
+- **§22d's four columns on `comment`** (`quoted_revision_id`, `quote_from`, `quote_to`,
+  `quoted_text`), the `comment_quote_all_or_nothing_check` and `comment_quote_range_check`
+  constraints, and the partial index. Replaced by §23c's table. Phase 2's migration drops them;
+  they were never merged, so nothing has ever depended on them.
+- **`src/lib/text-quote.ts` and `src/lib/text-selection-offsets.ts`**, with their unit tests.
+  Both exist because a comment body was a plain string: one re-finds a quote in a string, the
+  other turns a DOM selection into string offsets. A ProseMirror document answers both questions
+  natively, through `resolveAnchorInDoc` and `state.selection`, and reusing the shared library is
+  the point — `resolveTextQuote`'s two tiers are a re-derivation of `resolveAnchorInDoc`'s first
+  and third.
+- **`CommentNode`'s segment rendering** of `quoteSegments`. Highlighting a reply's quotation
+  inside the parent becomes a decoration over a ProseMirror document, which is
+  `quote-highlight-extension.ts`'s existing job for a thread's quote of the article.
+
+**Where all of it currently sits** is §23l.
+
+### 23j. Build order
+
+1. **Rich bodies, and drafts.** `commentContentExtensions`/`pmCommentContentSchema`; the
+   validated-JSON write path (`nodeFromJSON`, `toPlainJSON`, the two caps, the link `rel`); the
+   `{text}` → document migration across both tables plus the derived `body_text` column;
+   `CommentForm` and `CommentNode`'s inline editor become TipTap; the read path becomes
+   `renderToReactElement`; `/comments` switches its filter and excerpt to `body_text`;
+   `comment-draft-store.ts` and the restore line. **No quotations at all in this phase** — it is
+   the security-relevant one, and it wants reviewing on its own.
+2. **The anchor table, with no writer.** `comment_quote_anchor`; `target_comment_id` on all three
+   anchor tables with its CHECK edit; `AnchorTarget`'s fifth member and the compile errors it
+   causes; `Quotation`/`Quote` in the schema; `describeQuoteTarget` and the citation render;
+   §22d's columns and helpers dropped. §20h's pattern exactly: the shape and the readers ship
+   before the writers, so the writers land into a surface that already renders them.
+3. **Quoting what is on the page.** The host post and any comment on it: the capture path, the
+   audience gate, the server-side derive-and-rewrite, inline and block, the highlight in the
+   quoted comment, and the "quoted an earlier version" degradation. This is the phase that makes
+   the feature real, and it reuses §5 and §22d's gestures.
+4. **Quoting what is not on the page.** Another published post, a comment on another post: the
+   picker, and the same gate and capture path.
+5. **PDFs, behind the tier they need.** `PDF_TEXT` parts via `capturePdfTextAnchor`, which
+   already writes `tag_anchor`'s PDF parts; the gate refuses every file until §19 grows a
+   publicly-readable tier, and the e2e case asserts the refusal rather than the capability.
+
+Each phase ends at `npm run check`. `scripts/integrity/check-comment-quotes.ts` arrives with
+Phase 3 and verifies the pair §23f rests on: the body's quoted span equals the anchor row's
+`quoted_text`, which equals the target's text at the pinned version.
+
+### 23k. Judgment calls, and what is deferred
+
+- **`POST_RANGE` is not added** and `DOC_RANGE` is redefined as "offsets into a ProseMirror
+  document". §23d has the argument. This is a deviation from §20b's reservation and the only
+  place this section overrules an earlier one.
+- **PDF quoting needs a public file tier that does not exist.** `DocVisibility` is
+  `PRIVATE`/`SHARED` with role gating underneath, and §12e's "no unlisted tier" reasoning
+  applies to files too. A public tier is a §19 decision with its own blast radius: it is the
+  first time file *bytes* would be served to anonymous readers. Phase 5 builds the mechanism and
+  leaves the gate shut, which is the honest order given the ask says "that will be added".
+- **Anonymous commenters may quote.** The audience rule makes a leak structurally impossible, and
+  the existing rate limit and moderation cascade already govern abuse.
+- **A quotation of a comment does not follow that comment's edits.** It pins a revision, which is
+  the entire point; the citation says the target has changed since.
+- **The article does not highlight a comment's quotation of it.** §5's decorations could show
+  "three people quoted this sentence", and that is a genuinely nice feature with its own
+  packing and colour questions. Deferred, additive, and it needs no schema it does not have.
+- **Images stay out**, and §23b says why in more detail than the rest of the exclusions.
+- **Comment bodies becoming rich does not make annotations and comments one component again.**
+  §13c un-shared them because the two had stopped having the same rendering problem; they now
+  have similar ones, which is not the same as the same one — an annotation body is a live ydoc
+  with presence and a mark-free schema, a comment body is a validated JSON column with
+  quotations in it. `EditHistory` stays shared (§22c), for the reason recorded there.
+
+### 23l. Where §22's built work went, and why
+
+**`reference/comment-edit-history`**, unmerged, three commits, with the three migrations
+reverted out of the local database. `annotations-and-comments` carries PR 1 and this plan and
+nothing else.
+
+The three commits, oldest first:
+
+| | |
+|---|---|
+| `Comments and annotations become editable…` | §22b's grace window, §22c's `comment_revision`, §22e's annotation edit sessions, both integrity checks, and every doc update they earned |
+| `Quote a passage of a comment in a reply` | §22d, the design this section replaces |
+| `Plan quotation as a first-class anchor…` | an earlier draft of §22's supersession notes and of this section, describing the arrangement that was replaced by this one |
+
+Each of the first two passes `npm run check` on its own, which cost some surgery: six files
+carried both PR 2's and PR 4's changes, so the split is by hand rather than by file.
+
+**Why a parked branch rather than add-then-drop in this one.** The first arrangement kept all
+three commits here and let Phase 2's migration drop what PR 4 added, on the grounds that
+add-then-drop is linear and needs no database surgery. That is true and it was the wrong call:
+it leaves this branch carrying a replaced mechanism, two superseded string helpers and a
+migration whose only purpose is to be undone — all of it read by anyone who opens these files
+next, and all of it merged if the branch merges before §23 is built. The cost of the honest
+version is a one-time database revert on a single developer machine, which is the cheapest
+destructive operation this repo has.
+
+**What the revert did**, recorded because docs/DATABASE.md is emphatic about not doing this
+casually and this is the exception rather than a precedent: a `pg_dump` into `.db-backups/`
+first, then one transaction dropping `comment_revision`, `annotation.editing_since`,
+`annotation.posted_at`, every `ydoc_snapshot` on an annotation ydoc (§22e's versions) and §22d's
+four columns with their two CHECKs and partial index, then `DELETE` of the three rows from
+`_prisma_migrations`. `prisma migrate status` reports no drift
+afterwards, which is the check that matters: the branch's migration folder and the database now
+agree, so `migrate dev` will not offer a reset.
+
+Fifteen rows were lost and none of them were data: every `comment_revision` row and every
+annotation-body snapshot was either a backfill derived from a column that still exists, or
+test content this session created. That is the property that made the revert safe, and it is
+worth stating because it will not be true a second time — once §23's Phase 1 has run against
+real comments, a revision row is the only record of what an earlier version said.
+
+**Bringing any of it back** is a cherry-pick plus `prisma migrate dev`. The two pieces most
+likely to be wanted verbatim are `src/lib/edit-grace.ts` with its unit tests, which §23 does not
+change at all, and §22e's annotation edit sessions, which §23 does not touch either. Both are in
+the first commit, which also carries §22c — so a cherry-pick brings comment revisions along, and
+§23's Phase 1 would then be a migration of `body` rather than a new table.
