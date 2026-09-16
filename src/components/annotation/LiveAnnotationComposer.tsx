@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import * as Y from "yjs";
-import { HocuspocusProvider } from "@hocuspocus/provider";
 import AnnotationBody from "./AnnotationBody";
-import { getCollabUrl } from "@/lib/collab-url";
+import { useAnnotationProvider } from "./use-annotation-provider";
 import { useDocPresence } from "./doc-presence-context";
 import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import type { AnnotationTarget } from "@/lib/annotation-container";
@@ -107,7 +105,10 @@ export default function LiveAnnotationComposer({
   const router = useRouter();
   const { data: session } = useSession();
   const { awareness } = useDocPresence();
-  const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
+  // A composer only ever opens on this viewer's own DRAFT, so `readOnly`
+  // cannot come back true here — it is threaded through rather than assumed
+  // so that the one place deciding `editable` is the token, on both surfaces.
+  const { provider, ydoc, readOnly, error: connectionError } = useAnnotationProvider(annotationId);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<Visibility>("post");
@@ -130,53 +131,6 @@ export default function LiveAnnotationComposer({
       awareness.setLocalStateField("annotationEditing", null);
     };
   }, [awareness, userId, userDisplayName, userColor, visibility, annotationId]);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const ydoc = useMemo(() => new Y.Doc(), [annotationId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let instance: HocuspocusProvider | null = null;
-
-    let firstToken: string | null = null;
-    async function fetchToken(): Promise<string> {
-      if (firstToken !== null) {
-        const t = firstToken;
-        firstToken = null;
-        return t;
-      }
-      const res = await fetch(`/api/annotation/${annotationId}/token`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to authenticate.");
-      const { token } = (await res.json()) as { token: string };
-      return token;
-    }
-
-    (async () => {
-      try {
-        const res = await fetch(`/api/annotation/${annotationId}/token`, { method: "POST" });
-        if (!res.ok) throw new Error("Failed to authenticate.");
-        const { token, documentName } = (await res.json()) as { token: string; documentName: string };
-        if (cancelled) return;
-        firstToken = token;
-
-        instance = new HocuspocusProvider({
-          url: getCollabUrl(),
-          name: documentName,
-          document: ydoc,
-          token: fetchToken,
-        });
-        setProvider(instance);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to connect.");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      instance?.destroy();
-      ydoc.destroy();
-    };
-  }, [annotationId, ydoc]);
 
   // Covers all three outcomes: posted LIVE, posted RAISED, or saved
   // privately (still DRAFT). All three end the same way from the parent's
@@ -225,7 +179,7 @@ export default function LiveAnnotationComposer({
   }
 
   if (!provider || !session?.user) {
-    return <p className={styles.status}>{error ?? "Connecting…"}</p>;
+    return <p className={styles.status}>{error ?? connectionError ?? "Connecting…"}</p>;
   }
 
   // One verb on /pdf/[slug], because the select beside it already says what
@@ -254,7 +208,7 @@ export default function LiveAnnotationComposer({
         userId={session.user.id}
         userName={session.user.name ?? session.user.email ?? "Anonymous"}
         userColor={session.user.color}
-        editable
+        editable={readOnly !== true}
       />
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.buttonRow}>
