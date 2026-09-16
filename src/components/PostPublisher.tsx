@@ -7,6 +7,8 @@ import { publishPostFromDoc, schedulePostFromDoc, unpublishPost } from "@/app/ac
 import { useLocalTime } from "./LocalTime";
 import PostSnapshotScrubBar, { type ScrubSelection } from "./PostSnapshotScrubBar";
 import PostSettingsPanel, { type EligibleUser } from "./PostSettingsPanel";
+import DocTagOffer from "./tags/DocTagOffer";
+import type { TagOption } from "@/lib/tag-data";
 import type { ModerationPolicy } from "@/generated/prisma/enums";
 import type { PostStatus } from "@/lib/post-status";
 import { postPath } from "@/lib/post-path";
@@ -38,6 +40,16 @@ type Props = {
    * §20d) — TagChips queries Postgres, which this client component can't.
    */
   tags: ReactNode;
+  /**
+   * PLAN.md §20m — the source doc's terms that aren't on this post yet, for
+   * the offer below the strip. Already gated on the *doc's* read rule by the
+   * page (see its comment); empty means either nothing to offer or a viewer
+   * who may not see the doc's tags, and the two are deliberately the same
+   * rendering.
+   */
+  docTagOffer: TagOption[];
+  /** The title of `docId`'s doc, for that offer to name its source. */
+  sourceDocTitle: string;
 };
 
 // PLAN.md §15c — replaces PostEditor as the whole /post/[id]/edit UI. No
@@ -62,6 +74,8 @@ export default function PostPublisher({
   initialThroughUpdateId,
   liveEventAt,
   tags,
+  docTagOffer,
+  sourceDocTitle,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -302,6 +316,13 @@ export default function PostPublisher({
           below. The gate is this page's: loadPostForEdit already required
           ownership or canEditAnyPost. */}
       {tags}
+
+      {/* PLAN.md §20m — and immediately under it, whatever the source doc is
+          tagged with that this post isn't. It names `sourceDocTitle` rather
+          than `currentDoc.title`: "Change doc…" moves the *preview*, and the
+          post's own doc only moves when it is published from another one.
+          Renders nothing when there is nothing to carry across. */}
+      <DocTagOffer postId={postId} docTitle={sourceDocTitle} tags={docTagOffer} />
 
       <p className={styles.readOnlyLabel}>Doc content at the selected point:</p>
       <div className={`${styles.readOnlyView} ${proseStyles.prose}`}>

@@ -251,6 +251,20 @@ from inside a page that has already run its own gate — `canUserReadDoc`, `canU
 mount it on a surface that hasn't gated first. It deliberately runs no second check of its
 own: a second gate is a second thing that can disagree with the first.
 
+**One surface shows one object's tags on *another* object's page, and it needs a second,
+narrower gate** (PLAN.md §20m). `/post/[id]/edit`'s source-doc tag offer lists the doc's
+terms for carrying across, and the paragraph above does not cover it: the premise
+there is that the page's own gate is the right one, and here it is not. A post author need
+not be an author of the doc the post was made from, so inheriting ownership-or-
+`canEditAnyPost` would disclose a PRIVATE doc's terms to whoever holds the post's byline.
+The page runs `canUserReadDoc` as well, and renders an empty offer when it fails — the
+**conjunction** of the two objects' read rules, which is how PLAN.md §20i said cross-container
+visibility should resolve when it first came up.
+
+*Applying* one of those terms needs no doc-read at all: `canUserTagTarget(post)` alone, since
+a term carries no visibility of its own and the picker already offers every term site-wide.
+What the doc's gate protects is the disclosure of **which** terms are on that doc.
+
 **One surface reaches the chips by a different path, and it is gated differently.** The doc
 editor's Settings panel (`/doc/[slug]/edit`) renders `TagStrip` directly, fed by
 `loadTaggerState` rather than by `TagChips`' server-side read — so its chips are gated by

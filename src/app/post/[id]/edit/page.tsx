@@ -4,7 +4,9 @@ import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import { derivePostStatus } from "@/lib/post-status";
-import { editableDocsFor } from "@/lib/doc-authz";
+import { canUserReadDoc, editableDocsFor } from "@/lib/doc-authz";
+import { tagsNotYetOn } from "@/lib/tag-data";
+import { docTitleOrFallback } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
 import PostPublisher from "@/components/PostPublisher";
 import TagChips from "@/components/tags/TagChips";
@@ -17,7 +19,10 @@ const loadPostForEdit = gated(async (user, id: string) => {
     where: { id },
     include: {
       authors: { select: { userId: true }, orderBy: { bylineOrder: "asc" } },
-      doc: { select: { id: true, slug: true, title: true } },
+      // `visibility` is for the §20m tag offer below, not for this page
+      // gate: the offer shows the *doc's* terms, so it owes the doc's own
+      // read rule on top of the post gate this function already applies.
+      doc: { select: { id: true, slug: true, title: true, visibility: true } },
       publishEvent: { select: { createdAt: true, ydocSnapshot: { select: { lastYdocUpdateId: true } } } },
     },
   });
@@ -77,6 +82,24 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   // editableDocsFor already returns every doc for those roles.
   const editableDocs = await editableDocsFor(user.id, user.role);
 
+  // PLAN.md §20m — the source doc's terms that haven't come across yet, for
+  // the "From the doc" offer under the post's own strip.
+  //
+  // **Gated on `canUserReadDoc`, not on this page's gate.** A post author need
+  // not be an author of the doc it was made from, so a PRIVATE doc's terms
+  // would otherwise be disclosed to whoever holds the post's byline. This is
+  // the one surface that renders one object's tags on another object's page,
+  // which is why it is also the one that needs a second check rather than
+  // inheriting its container's — docs/PERMISSIONS.md's Tags section states it.
+  //
+  // `post.doc` is the post's *actual* source doc. PostPublisher's "Change
+  // doc…" select changes only what the scrub bar previews; the post's doc
+  // moves when it is published from a different one, and the refresh that
+  // follows re-renders this against the new source.
+  const docTagOffer = (await canUserReadDoc(user.id, user.role, post.doc))
+    ? await tagsNotYetOn({ kind: "doc", id: post.doc.id }, { kind: "post", id: post.id })
+    : [];
+
   // The scrub bar should open on the point this post is actually live from,
   // not the doc's head — a bigint can't cross the RSC boundary (same reason
   // publishPostFromDoc's throughUpdateId is a string), so it's stringified
@@ -114,6 +137,11 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       // resolved form the client reconciler then checks for a key.
       // CLAUDE.md's Gotchas has why.
       tags={<TagChips key="tags" target={{ kind: "post", id: post.id }} />}
+      // Plain data rather than a rendered element, unlike `tags` above:
+      // DocTagOffer is a client component, so PostPublisher can import it
+      // directly and the keyed-lazy-chunk hazard doesn't arise at all.
+      docTagOffer={docTagOffer}
+      sourceDocTitle={docTitleOrFallback(post.doc.title)}
     />
   );
 }

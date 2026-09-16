@@ -116,3 +116,35 @@ export async function tagBySlug(slug: string) {
     select: { id: true, slug: true, name: true, description: true },
   });
 }
+
+/**
+ * The terms on `source` that aren't on `target` yet — PLAN.md §20m, behind the
+ * post editor's "From the doc" offer.
+ *
+ * **Returns `TagOption`, not `TagChip`, and that is the point.** A chip's
+ * `ownAssignmentId` and `taggerCount` describe the *source* object, and
+ * rendering either beside a control that writes to the *target* would be a
+ * number answering a question nobody asked. What carries across is the term
+ * and nothing else: applying one here is a fresh act of tagging by this
+ * viewer, not a copy of someone else's.
+ *
+ * Subtracts every term already on the target, by anyone — not just this
+ * viewer's. The same rule the tagger's picker wears when it disables an
+ * option as "Already applied here": a chip appears once per object however
+ * many people reached for it, so offering it again would offer to change
+ * nothing visible.
+ *
+ * **It does no permission work**, like everything else in this file — but the
+ * gate its caller owes is a *different* one from the usual. Every other read
+ * here is called from the page of the object being read, so the page's own
+ * check covers it. This one discloses one object's tags on another object's
+ * page, so the caller must run the **source's** read gate as well
+ * (`canUserReadDoc` in /post/[id]/edit's case) — docs/PERMISSIONS.md's Tags
+ * section states it, and §20i's "cross-container visibility is conjunctive
+ * when it comes up" is what it resolves.
+ */
+export async function tagsNotYetOn(source: AnchorTarget, target: AnchorTarget): Promise<TagOption[]> {
+  const [onSource, onTarget] = await Promise.all([tagsForTarget(source), tagsForTarget(target)]);
+  const here = new Set(onTarget.map((chip) => chip.id));
+  return onSource.filter((chip) => !here.has(chip.id)).map(({ id, slug, name }) => ({ id, slug, name }));
+}

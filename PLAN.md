@@ -4192,6 +4192,9 @@ button on `/doc/[slug]` while the doc has no post (once it has any, the byline l
 instead — `DocPostsLine`, §21i), both landing on the same `createPostFromDoc(docId)` action,
 gated on `canUserEditDoc` and seeding the post's authors from the doc's `doc_author` rows.
 
+The doc's **tags** are deliberately *not* seeded the same way — they are offered on
+`/post/[id]/edit` instead, one click each. §20m has why the two metadata lists diverge here.
+
 ### 15e. The collab server after posts leave it
 
 `server/collab.ts` keeps only the ydoc-hooks dispatch. The `isYdocDocument` guard becomes an
@@ -7673,6 +7676,104 @@ tagging a draft revalidates nothing public.
 the doc — the same gap §20k closed on the doc side, and the surface that made the draft
 restriction impossible to miss. `TagChips` is an async Server Component and `PostPublisher` is
 `"use client"`, so it crosses as a keyed prop, the way `/pdf/[slug]` hands one to its viewer.
+
+### 20m. Carrying a doc's tags onto its post (2026-09-16)
+
+**Built 2026-09-16.** A post is a snapshot of a doc (§15), and the two are tagged
+independently — so the terms you filed the doc under while writing it were, until now, terms
+you had to find again by hand on the post. The remedy is an **offer**, not a copy.
+
+**`/post/[id]/edit` grows a source-doc tag offer**, directly under the post's own tag strip
+(§20l put that strip there): the source doc's terms that are not yet on the post, as dashed
+one-click chips, plus an "Add all *n*" when there is more than one.
+
+- **It copies; the doc keeps its tags.** Applying a term here creates a fresh
+  `tag_assignment` by this viewer on the post. The doc is still about that subject after
+  publication, and `/tag/[slug]`'s Docs section should keep saying so; retracting the doc
+  side would also mean retracting *someone else's* act of tagging, which
+  `canUserRemoveAssignment` makes a moderation power rather than a publishing one. Move
+  semantics stay available as a later opt-in (§20i's list) if doc tags turn out to be purely
+  a staging area, which they are not today.
+- **Deliberately not the byline's behaviour**, and this is the asymmetry worth naming.
+  `createPostFromDoc` seeds `post_author` from the doc's byline automatically (§15d); tags
+  are offered instead. A doc's tags are a working filing system and a post's are public
+  taxonomy, and they are not the same list often enough for a silent copy to be right.
+- **No creation-time step was needed.** `createPostFromDoc` already redirects to
+  `/post/[id]/edit`, so the offer is waiting on arrival — and unlike a one-shot prompt at
+  creation, terms added to the doc *later* are still offered whenever the editor is next
+  opened.
+- **Its label is `Doc "<title>"`, deliberately not "From doc …".** `PostPublisher`'s
+  status line already says the latter, about `selectedDocId` — and this row is about
+  `post.docId`, so the two disagree the moment "Change doc…" is touched. Wording them alike
+  would read as one fact stated twice and be wrong half the time. The row carries
+  `data-doc-tag-offer` as its test handle for the same reason the label is not one: the
+  e2e case first written against the label matched the status line instead, which is how
+  the duplication was noticed at all.
+- **The row empties itself.** `tagsNotYetOn` subtracts what is already on the post — by
+  anyone, not just this viewer, the same rule the tagger's picker wears when it disables an
+  option as "Already applied here". An untagged doc, and a doc whose terms have all come
+  across, render nothing at all rather than an empty label.
+
+**The gate is the doc's, not the page's — the one place in §20 where that is true.**
+docs/PERMISSIONS.md's rule is that a chip is as private as the thing it is on,
+*structurally*: `TagChips` renders only from inside a page that has already gated, and takes
+a resolved target so it cannot be mounted anywhere else. This row breaks the premise rather
+than the rule — it shows **one object's tags on another object's page** — and a post author
+need not be an author of the doc the post was made from, so `/post/[id]/edit`'s own gate
+(ownership or `canEditAnyPost`) is precisely the wrong one to inherit. The page therefore
+runs `canUserReadDoc` as a second, narrower check and renders an empty offer when it fails.
+That resolves §20i's deferred "cross-container visibility needs a decision, and conjunctive
+is the safe default" for the display case, in favour of conjunctive.
+
+Applying a term needs no doc-read: `canUserTagTarget(post)` alone, unchanged, because a
+*term* carries no visibility (`listTagOptions` is unfiltered site-wide). Doc-read gates the
+**disclosure of which terms are on that doc**, and nothing else.
+
+**One new action, and one new writer under it.** `tagObjectMany(tagIds, kind, id)` — one
+permission check, one transaction, one `revalidatePath`. The client-side alternative (n
+calls to `tagObject`) is n round trips, n gate queries, and a half-filled strip if the fourth
+fails. Deliberately **not** `settleBulk`: that shape is for an admin table acting on rows a
+user selected independently, where one failure must not stop the rest; this is one act with
+several terms in it. `tagObject` and `tagObjectMany` both write through a non-exported
+`writeWholeObjectTags`, so the shape PR 1 is allowed to write (§20h: every part column
+unset) is stated once — and PR 2's part-tagging adds rows to that transaction rather than a
+second concept beside it.
+
+The two differ in one respect, on purpose: **a term that has vanished between the render and
+the click throws from `tagObject` and is skipped by `tagObjectMany`.** A single deliberate
+click is a question about *that* term, so "it isn't there any more" is the answer to it; "Add
+all" is a question about whatever is still available, where one binned term must not fail the
+rest.
+
+**"Change doc…" is not the source.** `PostPublisher`'s select moves only what the scrub bar
+previews; the post's own `docId` moves when it is published from a different doc. The offer
+is server-rendered from `post.docId` and so is right by construction, and the
+`router.refresh()` after a publish re-renders it against the new source. Wiring it to
+`selectedDocId` would show terms from a doc the post is not from.
+
+**Two small shape notes.** `tagsNotYetOn` returns `TagOption`, not `TagChip`:
+`ownAssignmentId` and `taggerCount` describe the *source*, and rendering either beside a
+control that writes to the *target* would be a number answering a question nobody asked. And
+`DocTagOffer` crosses into `PostPublisher` as **plain data** rather than as a rendered
+element — it is a client component, so `PostPublisher` imports it directly and §20l's keyed-
+lazy-chunk hazard (which `tags={<TagChips key="tags" …/>}` still carries) does not arise.
+
+`tagsForTarget(post)` consequently runs twice on this page — once inside `TagChips`, once
+inside `tagsNotYetOn`. Accepted rather than hoisted: hoisting means feeding `TagStrip`
+directly and giving up the property that `TagChips` always does its own read from a resolved
+target, which is the thing that makes it un-mountable on an ungated surface. One extra
+indexed query on a gated editor page is the cheaper side of that trade.
+
+**Deferred, named.** The reverse push (tagging the doc from the post, or "also tag the post"
+from the doc editor) — a doc can source several posts, so that is a picker rather than a row,
+and a different design. Move semantics, above. And generalising the offer to any related pair
+(file → post, annotation → doc): one prop away from what is built, and not built.
+
+**A pre-existing gap this made visible, not introduced.** A post author who cannot *edit* the
+source doc reaches `/post/[id]/edit` and gets a 403 from `/api/doc/[id]/replay`, so the
+read-only render below the controls never arrives. That predates this section and is
+untouched by it; the e2e case here asserts only that such a viewer sees the post's own
+strip and not the doc's terms.
 
 ## 21. Dated post URLs (`/yyyy/mm/dd/slug`)
 

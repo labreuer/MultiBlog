@@ -180,19 +180,67 @@ export async function createTag(nameInput: string, descriptionInput?: string): P
 }
 
 /**
+ * Writes the assignment+anchor pairs for a set of terms on one object.
+ *
+ * **The one writer of whole-object anchors.** Both exports below reach the
+ * database through here, so the shape PR 1 is allowed to write (§20h: every
+ * part column unset) is stated once rather than once per entry point — and
+ * PR 2's part-tagging adds rows to this transaction rather than a second
+ * concept beside it.
+ *
+ * Callers have already run `canUserTagTarget`; this does no gating of its own.
+ *
+ * **Dedup is app-level find-first** (§20c): same tag, same object, same user
+ * means no second assignment, and re-tagging is a no-op rather than an error.
+ * The DB-enforced version needs `tag_id` denormalised onto the anchor for a
+ * partial unique index, and is deferred until concurrent tagging of one object
+ * by one person is a thing that happens (§20i) — today the losing race just
+ * leaves a duplicate chip, which `tagsForTarget` collapses anyway.
+ */
+async function writeWholeObjectTags(target: AnchorTarget, userId: string, tagIds: string[]): Promise<void> {
+  const columns = targetToColumns(target);
+  const already = await prisma.tagAnchor.findMany({
+    where: {
+      ...columns,
+      assignment: { tagId: { in: tagIds }, userId, deletedAt: null },
+    },
+    select: { assignment: { select: { tagId: true } } },
+  });
+  const done = new Set(already.map((a) => a.assignment.tagId));
+  const pending = tagIds.filter((id) => !done.has(id));
+  if (pending.length === 0) return;
+
+  // **One transaction for the whole gesture** (§20g), which is what makes
+  // "Add all" all-or-nothing rather than a row-at-a-time bulk with a partial
+  // result to report. Deliberately not `settleBulk`: that shape is for an
+  // admin table acting on rows a user selected independently, where one
+  // failure must not stop the rest. This is one act with several terms in it.
+  await prisma.$transaction(async (tx) => {
+    for (const tagId of pending) {
+      const assignment = await tx.tagAssignment.create({
+        data: { tagId, userId },
+        select: { id: true },
+      });
+      await tx.tagAnchor.create({
+        // Every part column left unset — this is the whole-object row, and the
+        // only shape PR 1 writes.
+        data: { assignmentId: assignment.id, ...columns },
+      });
+    }
+  });
+
+  const path = await pathForTarget(target);
+  if (path) revalidatePath(path);
+  revalidatePath("/tags");
+}
+
+/**
  * Applies `tagId` to one whole object, as one act of tagging.
  *
- * **Dedup is app-level find-first** (§20c): same tag, same object, same
- * user means no second assignment, and re-tagging is a no-op rather than an
- * error. The DB-enforced version needs `tag_id` denormalised onto the
- * anchor for a partial unique index, and is deferred until concurrent tagging
- * of one object by one person is a thing that happens (§20i) — today the
- * losing race just leaves a duplicate chip, which `tagsForTarget`
- * collapses anyway.
- *
- * The write is **one transaction**: owner row plus its anchors (§20g). One
- * anchor here; PR 2's part-tagging adds rows to the same transaction, not a
- * second concept.
+ * Throws when the term has gone — unlike `tagObjectMany`, which skips it.
+ * A single deliberate click is a question about *that* term, so "it isn't
+ * there any more" is the answer to it; the bulk path is a question about
+ * whatever is still available, where one binned term must not fail the rest.
  */
 export async function tagObject(tagId: string, targetKind: string, targetId: string): Promise<void> {
   const session = await requireTagger();
@@ -207,31 +255,38 @@ export async function tagObject(tagId: string, targetKind: string, targetId: str
     throw new Error("Tag not found.");
   }
 
-  const columns = targetToColumns(target);
-  const already = await prisma.tagAnchor.findFirst({
-    where: {
-      ...columns,
-      assignment: { tagId, userId: session.user.id, deletedAt: null },
-    },
-    select: { id: true },
-  });
-  if (already) return;
+  await writeWholeObjectTags(target, session.user.id, [tagId]);
+}
 
-  await prisma.$transaction(async (tx) => {
-    const assignment = await tx.tagAssignment.create({
-      data: { tagId, userId: session.user.id },
-      select: { id: true },
-    });
-    await tx.tagAnchor.create({
-      // Every part column left unset — this is the whole-object row, and the
-      // only shape PR 1 writes.
-      data: { assignmentId: assignment.id, ...columns },
-    });
-  });
+/**
+ * Applies several terms to one object in a single gesture — PLAN.md §20m's
+ * "Add all", and each individual chip in that offer.
+ *
+ * **One gate, one transaction, one revalidation.** The alternative — the
+ * client calling `tagObject` n times — is n round trips, n permission
+ * queries, and a half-applied strip if the fourth one fails.
+ *
+ * **A term that has vanished is skipped, not thrown on.** The offer this backs
+ * is rendered from a server snapshot, so a term soft-deleted in between is an
+ * ordinary race rather than an error; failing the whole gesture over one of
+ * them would be the wrong answer to "add the rest". What actually landed is
+ * visible immediately, because the caller refreshes.
+ */
+export async function tagObjectMany(tagIds: string[], targetKind: string, targetId: string): Promise<void> {
+  const session = await requireTagger();
+  const target = toTarget(targetKind, targetId);
 
-  const path = await pathForTarget(target);
-  if (path) revalidatePath(path);
-  revalidatePath("/tags");
+  if (!(await canUserTagTarget(session.user.id, session.user.role, target))) {
+    throw new Error("You don't have permission to tag this.");
+  }
+
+  const wanted = [...new Set(tagIds)].filter((id) => typeof id === "string" && id !== "");
+  if (wanted.length === 0) return;
+
+  const terms = await prisma.tag.findMany({ where: { id: { in: wanted } }, select: { id: true } });
+  if (terms.length === 0) return;
+
+  await writeWholeObjectTags(target, session.user.id, terms.map((t) => t.id));
 }
 
 /**
