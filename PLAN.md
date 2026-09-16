@@ -4136,6 +4136,10 @@ a link to `/doc/[slug]/edit` and a "Change doc…" picker, the publish/schedule/
 line stating whether publishing will create a new snapshot or reuse an existing one, a read-only
 render of the doc at the selected point, and a scrub bar pinned at the bottom.
 
+**§15i amends this layout for a viewer who cannot edit the source doc**: no scrub bar, the post's
+own stored content in place of the replay, a note saying why, and the source-doc line linking only
+as far as that viewer may go. Everything above describes the case where they can.
+
 **The publish button** (built 2026-09-16). Its label follows `derivePostStatus`: "Publish"
 on a draft, "Publish Now" on a scheduled post (the same action, but the change it makes is
 `publishedAt` moving to now), "Republish" on a live one. On a live post it is **disabled when

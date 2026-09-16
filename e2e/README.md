@@ -288,7 +288,12 @@ the admin account.
   `/post/[id]/edit` there's a different readiness gate instead: Publish/
   Schedule stay disabled until `PostSnapshotScrubBar` has loaded the backing
   doc's history — `await expect(page.getByRole("button", { name: "Publish",
-  exact: true })).toBeEnabled()`.
+  exact: true })).toBeEnabled()`. **That gate never opens for a viewer without
+  edit access to the backing doc** (PLAN.md §15i): the bar is not mounted at
+  all, so a spec driving such a user must wait on the post's stored content
+  instead — `publish.spec.ts`'s "a post author with no edit access to the
+  source doc…" is the worked example. A post's byline and its doc's byline are
+  independent, so this is an ordinary fixture setup, not an exotic one.
 - **`waitForDocCollabReady` cannot be used in the doc editor's phone-landscape
   focus mode.** It waits for the connection badge to be *visible*, and that
   badge is one of the things the mode hides (STYLE.md's fourth breakpoint), so

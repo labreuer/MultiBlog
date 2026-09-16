@@ -92,7 +92,22 @@ before changing the behavior it describes.
   deliberately adds no second check. It also reads **no session** — the post page
   (`/yyyy/mm/dd/slug`, §21) is statically generated, and a dynamic API there throws at build (§12f) — so everything viewer-shaped
   lives in a client island that asks the server on open. `/tag/[slug]` is three per-type
-  queries wearing three existing predicates, never one UNION. PLAN.md §20d, docs/PERMISSIONS.md.
+  queries wearing three existing predicates, never one UNION. **The exception is a surface
+  showing one object's tags on *another* object's page** — `/post/[id]/edit`'s source-doc
+  tag offer (§20m) is the only one, and it breaks the premise rather than the rule: the
+  page's own gate is about the post, and a post author need not be an author of the doc it
+  was made from. That one runs `canUserReadDoc` as a second, narrower check, and the check
+  is load-bearing rather than belt-and-braces. PLAN.md §20d, §20m, docs/PERMISSIONS.md.
+- **A post's byline is not its doc's, and being on the first grants nothing over the
+  second.** The two are seeded alike at creation and edited independently from then on
+  (§15d), because credit for a published piece is not authority over its text. So
+  `/post/[id]/edit` asks two separate doc questions — `canUserReadDoc` for what may be
+  *shown* about the doc, `canUserEditDoc` for what may be *done* with it — and a viewer who
+  fails the second gets the post's stored `proseJson` instead of the scrub bar's replay, no
+  bar at all, and a note saying so. Don't collapse the pair, and don't collapse
+  `selectedEditable` (a per-*selection* predicate: "Change doc…" only ever offers docs this
+  viewer can publish from, so switching to one restores everything). PLAN.md §15i,
+  docs/PERMISSIONS.md's "A post's byline is not its doc's".
 - **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,
   stale by seconds while anyone is typing. Fine as the *seed* for which cards start in the
   rail, and nothing more.
