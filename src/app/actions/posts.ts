@@ -163,6 +163,26 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
   }
 
   const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id);
+
+  // PLAN.md §15c — a republish that changes nothing is refused rather than
+  // minting a PostPublicationEvent that says nothing. PostPublisher
+  // disables the button on the same three inputs; this
+  // is for the stale tab that didn't. Only a live post can be at a no-op:
+  // from a scheduled one the same content going live *now* is the change.
+  // The snapshot compares by id because ensureYdocSnapshotAt reuses an
+  // existing snapshot at the same update, so equal update ⇒ equal id —
+  // and the live event's snapshot exists by construction, so nothing above
+  // was created on the way to this refusal.
+  if (derivePostStatus(post) === "published" && post.publishEventId) {
+    const live = await prisma.postPublicationEvent.findUnique({
+      where: { id: post.publishEventId },
+      select: { docId: true, ydocSnapshotId: true },
+    });
+    if (live && live.docId === opts.docId && live.ydocSnapshotId === snapshotId && post.title === title) {
+      throw new Error("Already published at this version with the present title.");
+    }
+  }
+
   const now = new Date();
   // Preserve the original go-live date across an unpublish/republish with no
   // reschedule in between (post.publishedAt already in the past); otherwise
@@ -180,6 +200,12 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
         title,
         proseJson,
         actorId: session.user.id,
+        // The same instant as publishedAt on a first publish, rather than
+        // the database clock a few milliseconds later — so "the live
+        // version is a later edit" (PLAN.md §15c) is createdAt > publishedAt
+        // by construction, not by tolerance. On a republish publishedAt is
+        // the preserved original and this is genuinely later.
+        createdAt: now,
       },
     });
     await tx.post.update({

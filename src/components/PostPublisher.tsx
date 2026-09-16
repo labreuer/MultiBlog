@@ -9,6 +9,7 @@ import PostSnapshotScrubBar, { type ScrubSelection } from "./PostSnapshotScrubBa
 import PostSettingsPanel, { type EligibleUser } from "./PostSettingsPanel";
 import type { ModerationPolicy } from "@/generated/prisma/enums";
 import type { PostStatus } from "@/lib/post-status";
+import { postPath } from "@/lib/post-path";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./PostPublisher.module.css";
 
@@ -16,6 +17,8 @@ export type EditableDoc = { id: string; slug: string; title: string };
 
 type Props = {
   postId: string;
+  /** For the live URL behind "Published …" (PLAN.md §21i). */
+  slug: string;
   postTitle: string;
   docId: string;
   editableDocs: EditableDoc[];
@@ -28,6 +31,8 @@ type Props = {
   initialDeleted: boolean;
   /** The presently published/scheduled version's own snapshot mark — see PostSnapshotScrubBar. */
   initialThroughUpdateId: string | null;
+  /** When the live version went live — the live event's createdAt (PLAN.md §15c). */
+  liveEventAt: Date | null;
 };
 
 // PLAN.md §15c — replaces PostEditor as the whole /post/[id]/edit UI. No
@@ -38,6 +43,7 @@ type Props = {
 // itself pinned to the viewport bottom (PostSnapshotScrubBar.module.css).
 export default function PostPublisher({
   postId,
+  slug,
   postTitle,
   docId,
   editableDocs,
@@ -49,6 +55,7 @@ export default function PostPublisher({
   eligibleUsers,
   initialDeleted,
   initialThroughUpdateId,
+  liveEventAt,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -64,6 +71,28 @@ export default function PostPublisher({
   // and a hook can't be. useLocalTime returns "" for a null value, which is
   // exactly the case those branches already guard against anyway.
   const publishedAtLocal = useLocalTime(publishedAt);
+
+  // PLAN.md §15c — two notes about how the live version relates to time.
+  //
+  // "updated": the live event was created after the publication date, which
+  // is exactly a republish — publishPostFromDoc preserves the original
+  // go-live date and writes the event's createdAt as the same `now` as a
+  // first publish's publishedAt. The second of tolerance is for rows whose
+  // createdAt came from the database default instead, a few milliseconds
+  // after publishedAt. A scheduled post's event predates its publishedAt,
+  // so it never reads as updated.
+  const updatedAt =
+    postStatus === "published" && publishedAt && liveEventAt && liveEventAt.getTime() - publishedAt.getTime() > 1_000
+      ? liveEventAt
+      : null;
+  const updatedAtLocal = useLocalTime(updatedAt);
+  // "the doc has changed": its head is past the live version's mark. Read
+  // off the scrub bar's replay rather than a second server query, so it
+  // can't disagree with the bar; it is about the head, not the slider, so
+  // scrubbing doesn't move it. Moot for a draft, which has no version.
+  const docChangedAt =
+    postStatus !== "draft" && selection && selection.head.updatesSincePublished > 0 ? selection.head.lastEditedAt : null;
+  const docChangedAtLocal = useLocalTime(docChangedAt);
 
   const currentDoc = useMemo(
     () => editableDocs.find((d) => d.id === selectedDocId) ?? { id: selectedDocId, slug: selectedDocId, title: "" },
@@ -134,6 +163,24 @@ export default function PostPublisher({
   const docTitleForDefault = selection?.title || currentDoc.title || "Untitled";
   const titleMatchesDoc = title.trim() === docTitleForDefault.trim();
 
+  // PLAN.md §15c — Republish is a no-op when the live post already came
+  // from this doc at this update with this title, so the button is disabled
+  // and says why. Same three inputs publishPostFromDoc compares on the
+  // server, which is the real guard; this is the affordance. The title is
+  // resolved the way resolvePublishContent resolves a blank one (the doc's
+  // title at the selected point, then "Untitled"), and the update ids are
+  // one sequence: initialThroughUpdateId is the live event's snapshot mark,
+  // and the bar reports the id of the update it sits on. Only a *published*
+  // post can be at a no-op — from scheduled, Publish Now moves publishedAt.
+  const alreadyPublished =
+    postStatus === "published" &&
+    selection !== null &&
+    selectedDocId === docId &&
+    initialThroughUpdateId !== null &&
+    selection.throughUpdateId === initialThroughUpdateId &&
+    (title.trim() || docTitleForDefault) === postTitle;
+  const publishLabel = postStatus === "published" ? "Republish" : postStatus === "scheduled" ? "Publish Now" : "Publish";
+
   return (
     <div className={styles.container}>
       <input
@@ -157,7 +204,7 @@ export default function PostPublisher({
       )}
 
       <p className={styles.statusLine}>
-        From doc: <Link href={`/doc/${currentDoc.slug}/edit`}>{currentDoc.title || "Untitled"} (edit)</Link>
+        From doc: <Link href={`/doc/${currentDoc.slug}/edit`}>{currentDoc.title || "Untitled"}</Link>
         {editableDocs.length > 1 && (
           <>
             {" "}
@@ -182,14 +229,19 @@ export default function PostPublisher({
       </p>
 
       <div className={styles.actionsRow}>
-        <button
-          type="button"
-          className={styles.actionButton}
-          onClick={handlePublish}
-          disabled={pending || !selection || deleted}
-        >
-          Publish
-        </button>
+        {/* The tooltip sits on a wrapper: a disabled button fires no mouse
+            events in every engine, so a title on the button itself would
+            be the one thing a disabled button can't show. */}
+        <span title={alreadyPublished ? "Already published at this version with the present title" : undefined}>
+          <button
+            type="button"
+            className={styles.actionButton}
+            onClick={handlePublish}
+            disabled={pending || !selection || deleted || alreadyPublished}
+          >
+            {publishLabel}
+          </button>
+        </span>
         {postStatus !== "draft" && (
           <button type="button" className={styles.actionButton} onClick={handleUnpublish} disabled={pending || deleted}>
             {postStatus === "scheduled" ? "Cancel schedule" : "Unpublish"}
@@ -220,11 +272,24 @@ export default function PostPublisher({
       {error && <p className={styles.errorMessage}>{error}</p>}
 
       <p className={styles.revisionNote}>
-        {postStatus === "published" && publishedAt && `Published ${publishedAtLocal}. `}
-        {postStatus === "scheduled" && publishedAt && `Scheduled for ${publishedAtLocal}. `}
-        {postStatus === "draft" && "Not published yet. "}
-        <Link href={`/post/${postId}/history`}>Publication history</Link>
+        {/* PLAN.md §21i — the editor's one link out to the post as readers
+            see it. publishedAt is a Date across the RSC boundary, so postPath
+            takes it as is. */}
+        {postStatus === "published" && publishedAt && (
+          <>
+            <Link href={postPath({ slug, publishedAt })}>Published {publishedAtLocal}</Link>
+            {updatedAt && `, updated ${updatedAtLocal}`}
+          </>
+        )}
+        {postStatus === "scheduled" && publishedAt && `Scheduled for ${publishedAtLocal}`}
+        {postStatus === "draft" && "Not published yet"}
+        {" ("}
+        <Link href={`/post/${postId}/history`}>publication history</Link>
+        {")"}
       </p>
+      {docChangedAt && (
+        <p className={styles.revisionNote}>The doc has changed since this version, last edit {docChangedAtLocal}.</p>
+      )}
 
       <p className={styles.readOnlyLabel}>Doc content at the selected point:</p>
       <div className={`${styles.readOnlyView} ${proseStyles.prose}`}>

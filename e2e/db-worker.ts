@@ -261,6 +261,10 @@ export async function createTestPost(opts: {
     const { proseJson, title: docTitle } = postContentFromYdoc(materialized);
     materialized.destroy();
     const publishedTitle = title || docTitle || "Untitled";
+    const publishedAt = publishedAtIso ? new Date(publishedAtIso) : new Date();
+    if (Number.isNaN(publishedAt.getTime()) || publishedAt.getTime() > Date.now()) {
+      throw new Error(`createTestPost: publishedAt must be a valid timestamp in the past, got ${publishedAtIso}`);
+    }
 
     const event = await prisma.postPublicationEvent.create({
       data: {
@@ -271,12 +275,12 @@ export async function createTestPost(opts: {
         title: publishedTitle,
         proseJson: proseJson as Prisma.InputJsonValue,
         actorId: author.id,
+        // What publishPostFromDoc writes: a first publish's event is the
+        // same instant as publishedAt, so a fixture post dated 2001 is not
+        // "updated" today on its editor (PLAN.md §15c).
+        createdAt: publishedAt,
       },
     });
-    const publishedAt = publishedAtIso ? new Date(publishedAtIso) : new Date();
-    if (Number.isNaN(publishedAt.getTime()) || publishedAt.getTime() > Date.now()) {
-      throw new Error(`createTestPost: publishedAt must be a valid timestamp in the past, got ${publishedAtIso}`);
-    }
     await prisma.post.update({
       where: { id: post.id },
       data: {

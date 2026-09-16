@@ -11,6 +11,7 @@ import { publishedPostWhere } from "@/lib/post-status";
 import { parsePostDateSegments, postDateParts, postPath } from "@/lib/post-path";
 import AuthorByline from "@/components/AuthorByline";
 import PostDate from "@/components/PostDate";
+import PostEditLink from "@/components/PostEditLink";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
 import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
@@ -144,6 +145,10 @@ export default async function PublicPostPage({ params }: { params: Params }) {
                   authors={post.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
                 />
                 <PostDate publishedAt={post.publishedAt!} />
+                {/* PLAN.md §21i — renders nothing for a signed-out reader (and
+                    nothing in the static HTML at all); a client island so this
+                    page keeps generateStaticParams and `revalidate` (§12f). */}
+                <PostEditLink postId={post.id} authorIds={post.authors.map((a) => a.userId)} />
               </p>
               <AnnotatableArticle
                 postId={post.id}

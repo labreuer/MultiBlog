@@ -17,7 +17,7 @@ const loadPostForEdit = gated(async (user, id: string) => {
     include: {
       authors: { select: { userId: true }, orderBy: { bylineOrder: "asc" } },
       doc: { select: { id: true, slug: true, title: true } },
-      publishEvent: { select: { ydocSnapshot: { select: { lastYdocUpdateId: true } } } },
+      publishEvent: { select: { createdAt: true, ydocSnapshot: { select: { lastYdocUpdateId: true } } } },
     },
   });
   if (!post) {
@@ -88,6 +88,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   return (
     <PostPublisher
       postId={post.id}
+      slug={post.slug}
       postTitle={post.title}
       docId={post.doc.id}
       editableDocs={editableDocs}
@@ -99,6 +100,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       eligibleUsers={eligibleUsers}
       initialDeleted={post.deletedByUserId !== null}
       initialThroughUpdateId={initialThroughUpdateId}
+      liveEventAt={post.publishEvent?.createdAt ?? null}
     />
   );
 }

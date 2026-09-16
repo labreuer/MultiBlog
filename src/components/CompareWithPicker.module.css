@@ -1,8 +1,0 @@
-.picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 1rem;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}

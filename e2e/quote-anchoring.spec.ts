@@ -37,7 +37,8 @@ import {
 } from "./fixtures";
 import { getThread, getPublicationEvents, getPostContentText } from "./db";
 
-const PUBLISH = { name: "Publish", exact: true } as const;
+// quotedPost is live from the fixture, so its button reads "Republish" (PLAN.md §15c).
+const REPUBLISH = { name: "Republish", exact: true } as const;
 const DETACHED_NOTICE = "This quote was edited or removed in a later revision of the article.";
 
 async function editDoc(page: Page, docId: string): Promise<void> {
@@ -56,8 +57,8 @@ async function republish(page: Page, postId: string): Promise<string> {
   await page.goto(`/post/${postId}/edit`);
   await expect(page.getByLabel("Scrub through the doc's edit history")).toBeVisible({ timeout: 15_000 });
   await scrubToLatest(page);
-  await expect(page.getByRole("button", PUBLISH)).toBeEnabled();
-  await page.getByRole("button", PUBLISH).click();
+  await expect(page.getByRole("button", REPUBLISH)).toBeEnabled();
+  await page.getByRole("button", REPUBLISH).click();
   await expect(page.getByText("Published.")).toBeVisible();
   const events = await getPublicationEvents(postId);
   return events[events.length - 1].id;
@@ -234,8 +235,8 @@ test.describe("quote anchoring across publishes", () => {
     await expect(page.getByLabel("Scrub through the doc's edit history")).toBeVisible({ timeout: 15_000 });
     await scrubTo(page, 0);
     await expect(page.getByText(/Publishing will reuse the snapshot/)).toBeVisible();
-    await expect(page.getByRole("button", PUBLISH)).toBeEnabled();
-    await page.getByRole("button", PUBLISH).click();
+    await expect(page.getByRole("button", REPUBLISH)).toBeEnabled();
+    await page.getByRole("button", REPUBLISH).click();
     await expect(page.getByText("Published.")).toBeVisible();
 
     await expect.poll(() => getPostContentText(quotedPost.id)).toContain(QUOTED_BODY);

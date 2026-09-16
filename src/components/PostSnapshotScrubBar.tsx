@@ -11,6 +11,14 @@ export type ScrubSelection = {
   willCreateSnapshot: boolean;
   title: string;
   render: Extract<YdocRenderResult, { ok: true }>;
+  /**
+   * PLAN.md §15c — the doc's head relative to the position the bar opened
+   * on (initialThroughUpdateId, the live version's mark): how many updates
+   * the doc has gained since, and when the last landed (ISO). Independent
+   * of where the slider is now; 0 when the bar opened at the head, or on a
+   * doc the live version isn't from.
+   */
+  head: { updatesSincePublished: number; lastEditedAt: string };
 };
 
 type Props = {
@@ -99,16 +107,24 @@ function LoadedScrubBar({
       return;
     }
     if (!renderResult?.ok) return;
+    const head = replay.updates[total - 1];
     onChange({
       throughUpdateId: current.id.toString(),
       willCreateSnapshot: !atSnapshot,
       title: renderResult.titleJSON ? extractText(renderResult.titleJSON) : "",
       render: renderResult,
+      head: {
+        updatesSincePublished: initialIndex === -1 ? 0 : total - 1 - initialIndex,
+        lastEditedAt: head.createdAt,
+      },
     });
     // atSnapshot is derived from snapshots+index, both already dependencies
     // via current/renderResult changing together on every seek.
+    // initialIndex is here for `head`: after a republish, router.refresh()
+    // hands this mounted bar the new live mark, and the "doc has changed
+    // since this version" note has to stand down without a remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, renderResult, atSnapshot, total]);
+  }, [current, renderResult, atSnapshot, total, initialIndex]);
 
   if (total === 0) {
     return (

@@ -3391,9 +3391,9 @@ class rather than this instance.
 **Authorization is per doc.** Each id resolves through `resolveDocParam` (id or slug, as everywhere
 else), then `canUserReadDoc(userId, role, { id, visibility })` per column, and `canUserEditDoc` per
 column for the write toggle. If *either* doc is unreadable the whole page is forbidden rather than
-rendering one column beside a placeholder: the page's only purpose is comparison, and the "Compare
-with…" picker (§14k) only ever offers docs the viewer can read, so the sole way to arrive here is a
-URL shared between people with different access. See §14n.
+rendering one column beside a placeholder: the page's only purpose is comparison, and the one
+in-app way here (`/link/[id]`, §14k) resolves per viewer, so the sole way to arrive is a URL
+shared between people with different access. See §14n.
 
 ### 14d. Anchor drift and repair
 
@@ -3795,16 +3795,15 @@ link while only the quoted-text preview updated.
 
 ### 14k. Getting there
 
-A **"Link to…"** control on `/doc/[slug]`, near the byline, listing other docs the viewer can
-read and navigating to `/side-by-side/<thisDoc>/<thatDoc>`. Chosen over a two-checkbox control on
-`/docs` because `/docs` is gated on `canManageDocs`, and an `AUTHORIZED` reader — the role §12e
-exists for — never sees it.
+`/doc/[slug]` carries no picker for this surface: its byline is the post line (§21i). The in-app
+way to a pair is `/link/[id]` (docs/ANCHORED_LINKS.md), which resolves an anchored link across two
+docs to `/side-by-side/<a>/<b>` for a viewer who may read both; otherwise it is a URL.
 
-Backed by a new `readableDocsFor(userId, role)` in `src/lib/doc-authz.ts`, placed directly beside
-`canUserReadDoc` with a comment tying the two together: it is the same predicate expressed as a
-`where` clause instead of per-row, and the only thing keeping them honest is proximity plus that
-comment. ADMIN/EDITOR get every non-deleted doc; everyone else gets `SHARED` plus their own
-byline-authored `PRIVATE` docs.
+`readableDocsFor(userId, role)` in `src/lib/doc-authz.ts` sits directly beside `canUserReadDoc`
+with a comment tying the two together: it is the same predicate expressed as a `where` clause
+instead of per-row, and the only thing keeping them honest is proximity plus that comment.
+ADMIN/EDITOR get every non-deleted doc; everyone else gets `SHARED` plus their own
+byline-authored `PRIVATE` docs. Tag browsing and file authorization read it.
 
 ### 14l. Build order
 
@@ -3900,11 +3899,6 @@ Three deliberate deviations from the text above:
 - **`DocLinkPopover`'s Cancel button shows in both create and edit mode**, not just "when new" as
   §14i's composer description reads. Edit mode's only other way to dismiss without saving was the
   outside-click handler; keeping Cancel visible there too is a usability call, not an oversight.
-- **The entry point is a `<select>`** (`CompareWithPicker.tsx`), not the bare "control... listing
-  other docs" §14k leaves unspecified in shape. Chosen over a list of links because
-  `readableDocsFor` can return every doc a reader has access to, and a picker degrades better
-  than a wall of links at that size; renders nothing when the list is empty rather than an
-  always-visible disabled control.
 
 Designed above but **not built**, each marked in place and collected here:
 
@@ -4142,6 +4136,34 @@ a link to `/doc/[slug]/edit` and a "Change doc…" picker, the publish/schedule/
 line stating whether publishing will create a new snapshot or reuse an existing one, a read-only
 render of the doc at the selected point, and a scrub bar pinned at the bottom.
 
+**The publish button** (built 2026-09-16). Its label follows `derivePostStatus`: "Publish"
+on a draft, "Publish Now" on a scheduled post (the same action, but the change it makes is
+`publishedAt` moving to now), "Republish" on a live one. On a live post it is **disabled when
+publishing would change nothing** — same doc, same update as the live event's snapshot
+(`initialThroughUpdateId` against the bar's `throughUpdateId`, one id sequence), and the
+resolved title equal to `Post.title` — with the tooltip "Already published at this version
+with the present title" on a wrapper span, since a disabled button shows no title of its
+own. That is the affordance; `publishPostFromDoc` refuses the same case with that message,
+comparing the live event's `docId` and `ydocSnapshotId` (equal update ⇒ equal snapshot,
+because `ensureYdocSnapshotAt` reuses) and `Post.title`. `schedulePostFromDoc` has no such
+guard: a reschedule at the same content is a real change to the date.
+
+**Two notes on the status line** (built 2026-09-16). "Published <date>, **updated** <date>"
+when the live event was created after the publication date — which is exactly a republish,
+since `publishPostFromDoc` preserves the original go-live date. It writes the event's
+`createdAt` as the same `now` as `publishedAt`, so a first publish compares equal by
+construction; the client tolerates a second of skew for rows whose `createdAt` came from the
+database default. A scheduled post's event predates its date and never reads as
+updated; an unpublish followed by an identical republish does, which is rare and arguably
+true. The second line, "**The doc has changed since this version**, last edit <date>", shows
+when the doc's head is past the live version's mark — read off the scrub bar's replay
+(`ScrubSelection.head`), which already holds every update with its timestamp and opens at
+that mark, so no second query and nothing for the bar to disagree with. It is about the head,
+not the slider, so scrubbing doesn't move it; a draft, having no version, gets neither note.
+Not built: a "scrub to latest" control on that line, and any of this on the public page
+(§15's decision that a published post is silent about its doc moving on stands; an "updated"
+date there would be a separate call).
+
 The read-only view needs no TipTap editor instance — `useReplayScrub`'s `renderResult` already
 carries a rendered `body`; this is `ReplayContent` (`YdocDebug.tsx`) minus the perf line and clients
 table, rendered inside `.prose` per the `globals.css` reset. It uses `docContentExtensions`, since
@@ -4165,10 +4187,10 @@ original go-live-date-preservation rule across an unpublish/republish cycle carr
 `unpublishPost` is unchanged in shape. `derivePostStatus`/`publishedPostWhere` swap
 `publishRevisionId` for `publishEventId`.
 
-A post can be created from a doc two ways: a picker at `/posts/new` (replacing the old title-only
-form) and a "Publish as blog post" button on `/doc/[slug]`, both landing on the same
-`createPostFromDoc(docId)` action, gated on `canUserEditDoc` and seeding the post's authors from the
-doc's `doc_author` rows.
+A post can be created from a doc two ways: a picker at `/posts/new` and a "Publish as blog post"
+button on `/doc/[slug]` while the doc has no post (once it has any, the byline lists them
+instead — `DocPostsLine`, §21i), both landing on the same `createPostFromDoc(docId)` action,
+gated on `canUserEditDoc` and seeding the post's authors from the doc's `doc_author` rows.
 
 ### 15e. The collab server after posts leave it
 
@@ -7885,3 +7907,44 @@ change to this one.
 **e2e:** `e2e/date-archive.spec.ts`, over a fixture post dated 2001-02-03 — far enough back
 that no other spec's "published now" post shares the year. `createTestPost` grew a
 `publishedAt` option (ISO string, must be past) for it.
+
+### 21i. Getting between a post's pages
+
+**Built 2026-09-16.** A post has three pages — its doc (`/doc/[slug]`), its editor
+(`/post/[id]/edit`, §3d) and its public URL (§21). Three links tie them together, chosen so the
+public page still looks, to a logged-in author, like it does to everyone else:
+
+- **The public page carries one link.** `PostEditLink` renders `· configure post` after the byline's
+  date, linking to the editor, for a viewer who may edit the post — ADMIN/EDITOR, or an
+  AUTHOR on the byline, mirroring `canUserEditPost` as an affordance while the route keeps
+  the gate. It is a client island reading `useSession()` (the `TagStrip` shape), which is
+  what lets the page keep `generateStaticParams` and `revalidate` (§12f): SSR emits nothing,
+  so a signed-out reader's HTML is unchanged, and the link appears after hydration at the end
+  of the line where it reflows nothing. In the ordinary link color, not the byline's — it
+  is a control, and the one thing on that line that is. The byline's author ids ride along as a prop for the AUTHOR case; the
+  session has no slug to match on instead. Alternatives weighed and not built: the title as
+  the edit link (as `DocView` does — a whole `<h1>` island, and link styling on the title for
+  authors); a slot in `SiteHeader` (the header sits above the page in the root layout and has
+  no way to learn the post id short of a store); a keyboard shortcut alone (undiscoverable).
+- **The editor links out to the live post.** `PostPublisher`'s "Published <date>" is a link
+  to `postPath`, which is why the page passes it the slug, followed by "(publication
+  history)"; "From doc: <title>" links to the doc editor.
+- **The doc's byline names its posts.** `DocPostsLine` is the post line in `/doc/[slug]`'s
+  byline. With no post it *is* the "Publish as blog post" button (§15d); with posts it lists
+  them, `|`-separated: "Published on
+  <yyyy-mm-dd>" linking to the public URL plus "(configure)" to the editor; "Scheduled for
+  <UTC timestamp> (in N days, N hours, N minutes)" linking to the editor; and — a judgment
+  call beyond the ask — "Draft (configure)" for a post row that exists but was never
+  published, since a row the button would only duplicate needs somewhere to be found from.
+  "as <post title>" is added whenever `Post.title` has diverged from the doc's. Shown under
+  the same `canEdit` gate the button had: a schedule is not public information. Dates are
+  UTC by §21b's rule, sliced from the ISO string and rendered once on the server; the
+  countdown (`src/lib/duration.ts`) is computed at request time on this per-viewer dynamic
+  page and simply goes stale if a tab sits, which a reload fixes. The doc page's select
+  includes a `posts` relation, filtered on `deletedByUserId` by hand because `resolveDocParam`
+  reads through `prismaIncludingDeleted`. `e2e/publish.spec.ts` drives all three entry
+  kinds and both link surfaces.
+
+Not built: a bare `/post/[id]` page. §3d's rule stands — no `/post/[id]` page reads a post —
+and the slug-history redirect already keeps old public links alive. Every "configure" link
+above goes to `/post/[id]/edit`.
