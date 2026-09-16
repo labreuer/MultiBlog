@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { publishPostFromDoc, schedulePostFromDoc, unpublishPost } from "@/app/actions/posts";
@@ -33,6 +33,11 @@ type Props = {
   initialThroughUpdateId: string | null;
   /** When the live version went live — the live event's createdAt (PLAN.md §15c). */
   liveEventAt: Date | null;
+  /**
+   * The post's tag strip, rendered on the server and handed across (PLAN.md
+   * §20d) — TagChips queries Postgres, which this client component can't.
+   */
+  tags: ReactNode;
 };
 
 // PLAN.md §15c — replaces PostEditor as the whole /post/[id]/edit UI. No
@@ -56,6 +61,7 @@ export default function PostPublisher({
   initialDeleted,
   initialThroughUpdateId,
   liveEventAt,
+  tags,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -290,6 +296,12 @@ export default function PostPublisher({
       {docChangedAt && (
         <p className={styles.revisionNote}>The doc has changed since this version, last edit {docChangedAtLocal}.</p>
       )}
+
+      {/* PLAN.md §20d — the keyword chips sit with the post's own metadata,
+          above the rule that separates it from the read-only doc render
+          below. The gate is this page's: loadPostForEdit already required
+          ownership or canEditAnyPost. */}
+      {tags}
 
       <p className={styles.readOnlyLabel}>Doc content at the selected point:</p>
       <div className={`${styles.readOnlyView} ${proseStyles.prose}`}>

@@ -199,6 +199,65 @@ test.describe("tags", () => {
     await expect(editorPage.getByRole("link", { name: draftDoc.title })).toHaveCount(0);
   });
 
+  test("an unpublished post is taggable, and only its editors see it under the term", async ({
+    page,
+    browser,
+    draftPost,
+    secondUser,
+  }) => {
+    // PLAN.md §20l. The act and its containment are one rule, so they are one
+    // spec: tagging a draft has to *work*, and the browse page has to be what
+    // keeps the draft's title away from everyone else. Proving either alone
+    // would pass in the world where the other is broken — and the broken
+    // version of the second is a leak that looks exactly like a feature.
+
+    // Through the tagger rather than tagWithTestTag, unlike the specs above:
+    // the DB helper writes past `canUserTagTarget` entirely, and that gate is
+    // half of what is being asserted. Before §20l this click failed with
+    // "You don't have permission to tag this".
+    await gotoOk(page, `/post/${draftPost.id}/edit`);
+    await tagger(page).click();
+    await page.getByLabel("Find or add a tag").fill(tag.name);
+    await page.getByRole("button", { name: tag.name, exact: true }).click();
+    await expect(page.getByRole("link", { name: tag.name })).toBeVisible();
+
+    const tagged = await getTagFacts(tag.id);
+    expect(tagged?.targets).toEqual([{ kind: "post", id: draftPost.id }]);
+
+    // The admin who authors it sees the draft under the term — marked as one,
+    // and pointing at the editor rather than at a dated URL that does not
+    // exist: postPath throws on a null publishedAt by design.
+    await gotoOk(page, `/tag/${tag.slug}`);
+    const row = page.getByRole("listitem").filter({ hasText: draftPost.title });
+    await expect(row.getByRole("link", { name: draftPost.title })).toHaveAttribute(
+      "href",
+      `/post/${draftPost.id}/edit`,
+    );
+    await expect(row.getByText("draft")).toBeVisible();
+
+    // An AUTHOR with no byline on it does not — `readablePostWhere` widens by
+    // "may you edit this", and AUTHOR is the role where that turns on the
+    // byline rather than on the role alone. An EDITOR would be the wrong
+    // second user here: canEditAnyPost means they *should* see it.
+    const { page: authorPage } = await secondUser({ role: "AUTHOR" });
+    await authorPage.goto(`/tag/${tag.slug}`);
+    await expect(authorPage.getByRole("heading", { name: tag.name, level: 1 })).toBeVisible();
+    await expect(authorPage.getByText(draftPost.title)).toHaveCount(0);
+    // Nothing else is tagged with this term, so the whole page is the empty
+    // state for them. Asserted because the absence above would also pass if
+    // the page had failed to render its sections at all.
+    await expect(authorPage.getByText("Nothing you can see carries this tag yet.")).toBeVisible();
+
+    // And a signed-out reader, for whom the predicate is unchanged from what
+    // PR 1 shipped: published posts only.
+    const anon = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const anonPage = await anon.newPage();
+    await anonPage.goto(`/tag/${tag.slug}`);
+    await expect(anonPage.getByRole("heading", { name: tag.name, level: 1 })).toBeVisible();
+    await expect(anonPage.getByText(draftPost.title)).toHaveCount(0);
+    await anon.close();
+  });
+
   test("/tags sorts through the tag_metrics view", async ({ page, sharedDoc, publishedPost }) => {
     // Two terms, differing usage: one on a doc and a post, one on nothing.
     const unused = await createTestTag({ creatorEmail: ADMIN_EMAIL, name: uniqueTitle("tag-unused") });

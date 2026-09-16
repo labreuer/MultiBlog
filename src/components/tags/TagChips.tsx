@@ -2,17 +2,15 @@ import { tagsForTarget } from "@/lib/tag-data";
 import type { AnchorTarget } from "@/lib/anchors";
 import TagStrip, { type TagStripVariant } from "./TagStrip";
 
-// PLAN.md §20d — the tag strip on an object page: /doc/[slug], a post
-// page, /pdf/[slug].
+// PLAN.md §20d — the tag strip on an object page.
 //
 // **The gate is the page's, not this component's.** By the time this renders,
-// its caller has already run that page's own access check — canUserReadDoc,
-// canUserReadFile, publishedPostWhere — so a PRIVATE doc's chips are exactly as
-// private as the doc, by construction rather than by a second gate that could
-// disagree with the first. It takes a resolved `AnchorTarget` rather than a
-// slug specifically so it cannot be dropped onto an ungated surface by
-// accident: there is no way to call it without having already resolved the
-// object.
+// its caller has already run that page's own access check — so a PRIVATE doc's
+// chips are exactly as private as the doc, by construction rather than by a
+// second gate that could disagree with the first. It takes a resolved
+// `AnchorTarget` rather than a slug specifically so it cannot be dropped onto
+// an ungated surface by accident: there is no way to call it without having
+// already resolved the object.
 //
 // **It deliberately reads no session.** The public post page carries
 // `generateStaticParams` and `revalidate = 60`, and a route eligible for static

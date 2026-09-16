@@ -1,7 +1,7 @@
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { canViewDocs, canManageDocs, canViewFiles, canManageFiles } from "@/lib/role-checks";
-import { publishedPostWhere } from "@/lib/post-status";
+import { derivePostStatus, readablePostWhere } from "@/lib/post-status";
 import { postPath } from "@/lib/post-path";
 
 // PLAN.md §20d — what /tag/[slug] lists, as **per-type sections**.
@@ -13,7 +13,7 @@ import { postPath } from "@/lib/post-path";
 // doc shows up in a stranger's list. Three separate queries, each wearing the
 // predicate that already governs its own type, cannot make that mistake: the
 // doc query is `readableDocsFor`'s predicate, the post query is
-// `publishedPostWhere`, the file query is `readableFilesFor`'s.
+// `readablePostWhere`, the file query is `readableFilesFor`'s.
 //
 // Each is one indexed `tag_anchor` lookup joined to its type's table, so
 // the page costs three queries regardless of how much is tagged (§20g).
@@ -28,7 +28,23 @@ import { postPath } from "@/lib/post-path";
 // them would need a container-relative deep link this page has no reason to
 // invent yet.
 
-export type TagHit = { id: string; slug: string; title: string; href: string };
+export type TagHit = {
+  id: string;
+  slug: string;
+  title: string;
+  href: string;
+  /**
+   * A word about why this row is here at all, or null for the ordinary case.
+   *
+   * Only the post section uses it, and only for the two rows a *stranger*
+   * would not have got: a draft and a scheduled post are listed to whoever
+   * may edit them, and they link into the editor rather than to a public URL
+   * that does not exist yet. Saying which is what keeps the widening
+   * legible — otherwise the same list means different things to different
+   * people with nothing on the page admitting it.
+   */
+  note: string | null;
+};
 
 export type TagBrowse = {
   docs: TagHit[];
@@ -64,7 +80,7 @@ function taggedWith(tagId: string) {
 export async function browseTag(tagId: string, userId: string | null, role: Role | null): Promise<TagBrowse> {
   const [docs, posts, files] = await Promise.all([
     listDocs(tagId, userId, role),
-    listPosts(tagId),
+    listPosts(tagId, userId, role),
     listFiles(tagId, userId, role),
   ]);
   return {
@@ -95,21 +111,39 @@ async function listDocs(tagId: string, userId: string | null, role: Role | null)
     orderBy: { updatedAt: "desc" },
     take: PAGE_CAP,
   });
-  return rows.map((d) => ({ id: d.id, slug: d.slug, title: d.title, href: `/doc/${d.slug}` }));
+  return rows.map((d) => ({ id: d.id, slug: d.slug, title: d.title, href: `/doc/${d.slug}`, note: null }));
 }
 
 // A published post is readable by anyone, signed in or not — so this section
-// needs no viewer at all, and is the one part of this page a signed-out reader
-// sees. publishedPostWhere rather than a bare publishEventId check, for the
-// reason it exists: a scheduled post already carries one.
-async function listPosts(tagId: string): Promise<TagHit[]> {
+// is the one part of this page a signed-out reader sees anything in, and it
+// is still `publishedPostWhere` for them. A *signed-in* viewer additionally
+// sees the unpublished posts they may edit, because those are taggable
+// (tag-authz.ts's post branch) and a tag you cannot then browse by is a tag
+// that does nothing. `readablePostWhere` is the one place that widening is
+// written, so this page and the tag gate cannot drift into disagreeing about
+// who may see a draft.
+//
+// `nulls: "last"` is stated rather than left to the default, which for a DESC
+// sort in Postgres is NULLS *first* — so a draft would otherwise lead the
+// section it is the least public member of. A scheduled post sorts by its
+// future date and does lead, which is fine: it is a real date, and the note
+// beside it says what it means.
+async function listPosts(tagId: string, userId: string | null, role: Role | null): Promise<TagHit[]> {
   const rows = await prisma.post.findMany({
-    where: { ...publishedPostWhere(), tagAnchors: taggedWith(tagId) },
-    select: { id: true, slug: true, title: true, publishedAt: true },
-    orderBy: { publishedAt: "desc" },
+    where: { ...readablePostWhere(userId, role), tagAnchors: taggedWith(tagId) },
+    select: { id: true, slug: true, title: true, publishedAt: true, publishEventId: true },
+    orderBy: { publishedAt: { sort: "desc", nulls: "last" } },
     take: PAGE_CAP,
   });
-  return rows.map((p) => ({ id: p.id, slug: p.slug, title: p.title, href: postPath(p) }));
+  return rows.map((p) => {
+    const status = derivePostStatus(p);
+    // postPath throws on a null publishedAt by design, and a scheduled post's
+    // /yyyy/mm/dd/slug does not answer until its date arrives — so neither
+    // links to the public URL. The editor is the page both actually have.
+    return status === "published"
+      ? { id: p.id, slug: p.slug, title: p.title, href: postPath(p), note: null }
+      : { id: p.id, slug: p.slug, title: p.title, href: `/post/${p.id}/edit`, note: status };
+  });
 }
 
 // canUserReadFile as a `where` clause — `readableFilesFor`'s predicate, ANDed
@@ -127,5 +161,5 @@ async function listFiles(tagId: string, userId: string | null, role: Role | null
     orderBy: { createdAt: "desc" },
     take: PAGE_CAP,
   });
-  return rows.map((f) => ({ id: f.id, slug: f.slug, title: f.title, href: `/pdf/${f.slug}` }));
+  return rows.map((f) => ({ id: f.id, slug: f.slug, title: f.title, href: `/pdf/${f.slug}`, note: null }));
 }

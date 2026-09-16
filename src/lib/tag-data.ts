@@ -5,17 +5,15 @@ import { targetToColumns, type AnchorTarget } from "@/lib/anchors";
 //
 // **One indexed `tag_anchor` lookup per object page**, by the arc column
 // that object's kind uses, joined through live assignments to live terms. That
-// is the whole cost the doc/post/PDF pages pay for chips: a constant query
-// count, no N+1, on tables sized like `annotation` (§20g).
+// is the whole cost a page pays for chips: a constant query count, no N+1, on
+// tables sized like `annotation` (§20g).
 //
 // **These do no permission work of their own, on purpose.** Each caller has
-// already passed its page's own access check before it gets here — the doc
-// page through canUserReadDoc, the PDF page through canUserReadFile, the post
-// page through publishedPostWhere — so a PRIVATE doc's chips are as private as
-// the doc, by construction rather than by a second gate that could disagree
-// with the first. The one thing that would break that is calling these from a
-// surface that *hasn't* gated yet, which is why they take a resolved
-// `AnchorTarget` rather than a slug.
+// already passed its page's own access check before it gets here — so a
+// PRIVATE doc's chips are as private as the doc, by construction rather than
+// by a second gate that could disagree with the first. The one thing that
+// would break that is calling these from a surface that *hasn't* gated yet,
+// which is why they take a resolved `AnchorTarget` rather than a slug.
 
 export type TagChip = {
   /** The tag, not the assignment — what the chip links to. */

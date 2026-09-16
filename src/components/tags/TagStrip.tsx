@@ -11,11 +11,12 @@ import styles from "./TagChips.module.css";
 // PLAN.md §20d — the strip itself: server-fetched chips, plus a tagger for
 // whoever may use one.
 //
-// A client component so it can read `useSession()`, which is what lets the
-// public post page stay statically generated (see TagChips' header). The
-// chips still server-render — a client component's first paint is SSR'd like
-// any other — so a reader with JavaScript off, or a crawler, sees the same
-// links; only the tagger needs the browser.
+// A client component so it can read `useSession()`, which is what keeps the
+// session out of the server tree and lets a statically generated consumer stay
+// that way (TagChips' header has the full reason). The chips still
+// server-render — a client component's first paint is SSR'd like any other —
+// so a reader with JavaScript off, or a crawler, sees the same links; only the
+// tagger needs the browser.
 //
 // The role check here is an **affordance, not a gate**: it decides whether to
 // draw the control. Every action re-asks on the server, and the per-*object*
@@ -25,10 +26,9 @@ import styles from "./TagChips.module.css";
 /**
  * Whether the strip has to name itself.
  *
- * `"section"` carries a "Tags" label, for a container that says nothing
- * about what the row is — under a post, or in the PDF viewer's Metadata tab.
- * `"bare"` drops the label and the room above it, for one that already says so
- * — /doc/[slug]'s byline block, the doc editor's Settings fieldset.
+ * `"section"` carries a "Tags" label, for a container that says nothing about
+ * what the row is. `"bare"` drops the label and the room above it, for one
+ * that already says so — a byline, a labelled fieldset.
  *
  * One prop rather than two knobs, because it is one decision. PLAN.md §20k.
  */

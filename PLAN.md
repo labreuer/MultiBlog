@@ -7348,8 +7348,8 @@ model TagAssignment {
   private as the doc.
 - **`/tag/[slug]`** — the browse page, as **per-type sections** (docs tagged K, posts
   tagged K, files tagged K), each an indexed, SQL-paginated query wearing that type's
-  existing permission predicate (`publishedPostWhere`, doc visibility + `DocAuthor`,
-  `file-authz`). Deliberately not an interleaved single timeline: that is a UNION view that
+  existing permission predicate (`readablePostWhere` — `publishedPostWhere` as built,
+  widened in §20l; doc visibility + `DocAuthor`; `file-authz`). Deliberately not an interleaved single timeline: that is a UNION view that
   would re-implement four permission models in one place — the easiest leak to write and the
   hardest to see. Counts shown here come from the filtered queries, never from the view
   below, for the same reason.
@@ -7630,6 +7630,49 @@ old fields are `filter`s over the new one.
 the tagger and `/tag/[slug]` instead of a seventh visibility tier. The four arc legs are
 all live in the action and authz layer, including annotations, though only three have chip UI;
 the fourth is one `canUserTagTarget` branch rather than a hole to fill in later.
+
+### 20l. Tagging an unpublished post (2026-09-16)
+
+**Built 2026-09-16.** PR 1 made a post taggable only once it was live:
+`canUserTagTarget`'s post branch wore `publishedPostWhere()`, and the comment beside it named
+the reason — a tag on a draft would be a title `/tag/[slug]` could show to a stranger. That
+reason was sound and the remedy was aimed at the wrong end. Tagging is most useful *while*
+something is being written; what must not leak is the browse page, not the act.
+
+So the containment moved to the surface that does the leaking:
+
+- **`readablePostWhere(userId, role)`** (`src/lib/post-status.ts`) — `publishedPostWhere()`
+  ORed with the unpublished posts this viewer may edit. It is `canUserEditPost` written as a
+  `where` clause, with the same caveat `listDocs` records about Prisma being unable to share a
+  predicate between a per-row check and a query filter, and the same
+  `role === "AUTHOR"` narrowing that function has (a byline survives a demotion; the
+  permission does not).
+- **`canUserTagTarget`'s post branch and `tag-browse.ts`'s `listPosts` both call it**, which
+  is the whole point of it being a function: the gate that lets a tag land and the page that
+  lists what was tagged cannot drift into disagreeing about who may see a draft.
+- **An unpublished row links into the editor, not to a public URL.** `postPath` throws on a
+  null `publishedAt` by design, and a scheduled post's `/yyyy/mm/dd/slug` does not answer
+  until its date arrives — so both get `/post/[id]/edit`, plus a `draft`/`scheduled` chip on
+  the row. `TagHit` gained a `note` field for it. Without that the same list quietly means
+  different things to different viewers, which is the kind of per-viewer page that is worth
+  admitting to being one.
+- **Nothing public moved.** The landing page, the archives, RSS, search and
+  `/yyyy/mm/dd/slug` stay on `publishedPostWhere()`; `readablePostWhere` is only for surfaces
+  that were already viewer-shaped. `/tag/[slug]` is `force-dynamic` already, so there is no
+  shared cache entry to leak through.
+
+Two things needed no change, both because they had already decided this question the other
+way and said so. `tag_metrics` deliberately does not filter publication state — its migration
+comment reads "a draft post is real content an editor is curating" — and `/tags`, where those
+counts surface, is AUTHOR-and-up with no per-viewer row scoping because a *term* carries no
+visibility. And `pathForTarget` already returned null for a post with no `publishedAt`, so
+tagging a draft revalidates nothing public.
+
+**Also in the same change: the post editor grows a tag strip.** `/post/[id]/edit` renders
+`TagChips` above the rule that separates the post's own metadata from the read-only render of
+the doc — the same gap §20k closed on the doc side, and the surface that made the draft
+restriction impossible to miss. `TagChips` is an async Server Component and `PostPublisher` is
+`"use client"`, so it crosses as a keyed prop, the way `/pdf/[slug]` hands one to its viewer.
 
 ## 21. Dated post URLs (`/yyyy/mm/dd/slug`)
 

@@ -246,7 +246,8 @@ it.
 
 **Chips are as private as the thing they are on, structurally.** `TagChips` is rendered
 from inside a page that has already run its own gate — `canUserReadDoc`, `canUserReadFile`,
-`publishedPostWhere` — and takes a resolved target rather than a slug, so there is no way to
+`publishedPostWhere` on the public post page, ownership-or-`canEditAnyPost` on
+`/post/[id]/edit` — and takes a resolved target rather than a slug, so there is no way to
 mount it on a surface that hasn't gated first. It deliberately runs no second check of its
 own: a second gate is a second thing that can disagree with the first.
 
@@ -265,6 +266,24 @@ re-implementing three permission models in one query — the easiest leak to wri
 hardest to see, since a wrong answer looks exactly like a right one. The counts each section
 shows come from those filtered queries and **never** from the `tag_metrics` view, which
 counts everything live and has no viewer.
+
+**An unpublished post is taggable, and `/tag/[slug]` is what contains it** (PLAN.md §20l).
+A draft or scheduled post may be tagged by whoever may edit it, because tagging is most
+useful while a piece is being written. What that would leak is the *browse* page, so that is
+where the filtering lives: `readablePostWhere(userId, role)` in `src/lib/post-status.ts` is
+`publishedPostWhere()` ORed with the unpublished posts this viewer may edit, and both the tag
+gate (`canUserTagTarget`) and the post section of `/tag/[slug]` call it, so they cannot drift.
+A signed-out reader still sees published posts only. Rows that are not published link into
+`/post/[id]/edit` and carry a `draft`/`scheduled` marker, since neither has a public URL that
+answers. Nothing else moved onto this predicate — the landing page, the archives, RSS, search
+and `/yyyy/mm/dd/slug` stay on `publishedPostWhere()`, which is what keeps "published"
+meaning one thing.
+
+| Permission | ADMIN | EDITOR | AUTHOR (on the byline) | AUTHOR (not on it) | AUTHORIZED | signed out |
+|---|---|---|---|---|---|---|
+| Tag a **published** post | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Tag a **draft/scheduled** post | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| See it listed on `/tag/[slug]` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 
 **Tagging requires a signed-in AUTHORIZED account on every surface — including posts.** §20d
 frames the rule as "applying a tag follows the permission to annotate that surface", and read
@@ -434,6 +453,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Doc links | `src/app/actions/doc-links.ts` |
 | Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |
 | Who may tag which object; who may retract an assignment | `src/lib/tag-authz.ts` |
+| Which posts a viewer may see at all (published + own unpublished) | `src/lib/post-status.ts` |
 | Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts` |
 | `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
 | `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |

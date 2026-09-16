@@ -7,6 +7,7 @@ import { derivePostStatus } from "@/lib/post-status";
 import { editableDocsFor } from "@/lib/doc-authz";
 import { signInPath } from "@/lib/sign-in-redirect";
 import PostPublisher from "@/components/PostPublisher";
+import TagChips from "@/components/tags/TagChips";
 
 // prismaIncludingDeleted rather than the soft-delete-filtered prisma — a
 // soft-deleted post must still load here so its Settings panel can offer
@@ -101,6 +102,18 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       initialDeleted={post.deletedByUserId !== null}
       initialThroughUpdateId={initialThroughUpdateId}
       liveEventAt={post.publishEvent?.createdAt ?? null}
+      // PLAN.md §20d — TagChips is an async Server Component, so it can't be
+      // imported by PostPublisher ("use client"); it crosses as a prop
+      // instead, the way /pdf/[slug] hands one to its viewer. The gate is
+      // this page's own loadPostForEdit, which already required ownership or
+      // canEditAnyPost — the strip adds no second check.
+      //
+      // The `key` is load-bearing and this is not a list: PostPublisher
+      // renders it among siblings, and while a tagged post's chips are still
+      // awaiting, the RSC stream hands the element over as a lazy chunk whose
+      // resolved form the client reconciler then checks for a key.
+      // CLAUDE.md's Gotchas has why.
+      tags={<TagChips key="tags" target={{ kind: "post", id: post.id }} />}
     />
   );
 }
