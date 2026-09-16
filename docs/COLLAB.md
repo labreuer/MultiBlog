@@ -25,6 +25,7 @@ a restart does and does not do, and the IndexedDB rules — is [YDOC.md](YDOC.md
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
   (including [showing an annotation at its own revision](#showing-an-annotation-at-its-own-revision--built-one-way-with-a-better-one-available),
   the one part of §8 that is partly built)
+- Planned: [comment quotations — text search into an immutable target, verified](#9-comment-quotations--text-search-into-an-immutable-target-verified)
 - [Comparison](#comparison) · [Choosing](#choosing) · [Log](#log)
 
 ---
@@ -432,6 +433,10 @@ prosemirror-model internals.
 The direction that does not have this problem is [§5](#5-yjs-relative-positions): stop naming
 the position with text at all.
 
+**One place the flatten-and-map technique *is* used, and why that is not a contradiction:**
+[§9](#9-comment-quotations--text-search-into-an-immutable-target-verified). The difference is
+not the algorithm but what depends on its output.
+
 ## 5. Yjs relative positions
 
 **What it is.** `Y.RelativePosition` names a specific CRDT item — which client inserted this run
@@ -823,6 +828,53 @@ starts to hurt.
 
 ---
 
+## 9. Comment quotations — text search into an immutable target, verified
+
+**Surface:** a post's comment thread. **Code (planned):** `src/lib/comment-quote-match.ts`,
+`src/lib/comment-quote-capture.ts`, `comment_quote_anchor`. **Design:** PLAN.md §23f, §23n.
+
+A comment quotes a passage of the post or of another comment, inline or as a block, and the
+quotation is a row on §20a's anchor envelope pinning an immutable version — a publication event
+or a comment revision. What is new is how the range is *found*: the commenter may have typed
+the quote by hand in a Markdown box, so there may be no selection to verify, only words.
+
+**The technique is the one §4 rejected.** Flatten the target once into a string, keeping each
+character's ProseMirror position; normalize both the string and the query (quotes, dashes,
+whitespace, NFKC) with an index map back; search with `indexOf`; map the hit back to a range.
+This matches across block boundaries, which `findQuoteOccurrences` cannot, and is O(target)
+rather than O(target × quote).
+
+**Why it is safe here and was not there.** §4's rewrite was rejected because every caller
+downstream depended on `textBetween(from, to) === quotedText` holding for the ranges it
+returned, with `quotedText` being the *input* — so a flattening mistake at a block boundary
+produced a range that silently named the wrong text, and only a property test caught it. Here
+three things differ, and together they invert the failure mode:
+
+1. **The target is immutable and the search runs once, server-side, at post time.** There is
+   no per-keystroke re-resolution and no transient decoration to keep alive.
+2. **Every hit is verified after mapping back** — `normalize(textBetween(from, to, " "))` must
+   equal the normalized query (or share its prefix and suffix, for the one fuzzy tier). A range
+   the flattening got wrong fails this and is discarded.
+3. **The stored `quoted_text` is derived from the verified range by `textBetween`**, never
+   taken from the query, and the comment body's quoted span is rewritten to that derivation
+   (§23f). So the invariant §4 needed — stored text equals `textBetween` at the stored range —
+   holds by construction, and a flattening mistake costs a *missed match*, never a wrong anchor.
+
+**Tiers**, first hit wins: the rich composer's own selection offsets when it has them (the
+`resolveAnchorInDoc` shape, tier 1); exact normalized substring across candidates in priority
+order (parent comment, host post, thread, page); a prefix-and-suffix match with a length bound,
+for a typo in a hand-typed quote, which the rewrite then corrects; and finally no anchor, with
+the blockquote or the text left exactly as typed.
+
+**Ambiguity is resolved, not refused** — a deliberate departure from `resolveAnchorInDoc`'s
+exactly-one rule. Several occurrences of the quote inside one immutable object are the same
+words by the same author, so the citation and the stored text are correct whichever is chosen;
+the one thing that could be wrong is a highlight position, and nothing draws one in the article
+yet. Nearest the thread's own passage anchor if there is one, else the first.
+
+**Cost.** One flatten per candidate per submission, lazily in priority order; most quotes hit
+the first or second candidate. Nothing at read time.
+
 ## Comparison
 
 | | Anchor lives | Survives edit *before* | Survives edit *inside* | Needs collab server | Durable | Per-resolution cost |
@@ -836,6 +888,7 @@ starts to hurt.
 | 6. Awareness anchors | Awareness channel | Yes | Yes | Yes | No, by design | O(1)-ish |
 | 7. Scrub-state anchor | Columns + a version stamp | Yes | Yes | Yes (materialize) | Yes | Materialize + diff |
 | 8. Log-derived | Columns + the update log | Yes | Yes | Yes | Yes | Materialize + resolve |
+| 9. Comment quotations (planned) | Columns, vs. an immutable version | Yes (the version cannot move) | Yes (same) | No | Yes | Zero at read; one flatten per candidate at post |
 
 ## Choosing
 

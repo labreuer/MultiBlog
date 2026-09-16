@@ -8727,7 +8727,9 @@ Two additions the plan did not name, both small and both load-bearing:
 
 ## 23. Rich comment bodies, and quotation as a first-class anchor
 
-**Planned 2026-09-16 on `annotations-and-comments`, replacing §22d before it was merged.**
+**Planned 2026-09-16 on `annotations-and-comments`, replacing §22d before it was merged.
+Amended the same day, before any of it was built, for a plain-Markdown front door (§23m) and
+the text-matching it needs (§23n); the amendments are marked where they land.**
 §22d built a quotation as four columns on the reply and a blockquote above its body: one
 quotation, of the parent comment, outside the reply's text. The ask that arrived after it was
 built is larger in every dimension, and the difference is not a refinement — it is a different
@@ -8818,6 +8820,10 @@ still a link to somewhere we do not control.
 textarea's `maxLength` used to do; and a cap on nesting depth, because a document is a tree
 and a stranger's tree can be deep. `blurbExtensions`' trick of constraining `content` at the
 `Document` level is the model for anything structural.
+
+**The schema does not restrict a Markdown parse; a conform pass does.** §23m has the
+measurement — `@tiptap/markdown`'s fallback emits a `heading` node whether or not `Heading` is
+registered, and silently drops a fence or a table — and the shim table that answers it.
 
 **The null-prototype trap is real on this path.** ProseMirror builds every non-empty `attrs`
 via `Object.create(null)`, and React's server-action encoder replaces such an object with an
@@ -8949,11 +8955,19 @@ so the refusal is rare and explained rather than surprising.
 
 ### 23f. Inline, block, and where the quoted text lives
 
-Two schema members, both carrying nothing but an id:
+Two schema members, both carrying nothing but an id — **amended the same day, when the
+Markdown front door (§23m) arrived**: the block form is an attribute on `blockquote`, not a node
+of its own.
 
-- **`Quotation`** — a block node, `attrs: { anchorId }`, `content: "block+"`, which **excludes
-  itself**: a quotation inside a quotation is an unbounded nesting game with no use case.
-  Renders as a `<blockquote>` with a citation line.
+- **`blockquote` gains `attrs: { anchorId: string | null }`.** Markdown parses to
+  `blockquote`, so promoting a matched one is an attribute write, and "degrades to an ordinary
+  blockquote" below is `anchorId: null` rather than a node-type swap through `Transform`. The
+  first draft had a separate `Quotation` node whose content expression excluded itself; that
+  exclusion is a server rule instead — the matcher considers only *outermost* blockquotes, and
+  an anchored blockquote's descendants are never anchored — which is the one thing the
+  attribute form cannot say structurally. A null `anchorId` is exactly what the toolbar's
+  quote button produces, so plain and anchored quotes are one node with one renderer. Renders
+  as `<blockquote>`, plus a citation line when anchored.
 - **`Quote`** — an inline mark, `attrs: { anchorId }`, self-excluding (unlike the `annotation`
   mark's deliberate `excludes: ""`, because overlapping quotations of different things over one
   span means nothing). Renders as `<q>` with a hover citation.
@@ -8967,8 +8981,11 @@ meaning intact; and what the reader sees is what the replier actually put there.
 server-side against the pinned version — §12i's rule, which every anchor here follows — and
 then the body's quoted span is *replaced* with that derivation before storage. So the two copies
 cannot disagree, and "a quotation shows what was actually said" is true by construction rather
-than by the client's good behaviour. `prosemirror-model`'s `Transform` does the replacement; the
-integrity check verifies the pair.
+than by the client's good behaviour. The replacement is a walk over the body's JSON — one plain
+paragraph per source textblock in the range for a block quote, the derived text under the mark
+for an inline one — and the integrity check verifies the pair. **This rewrite is also what
+makes §23n's fuzzy tier safe at all**: the typed words are only ever a query, and the stored
+words are the target's, so a matcher that accepts a typo corrects it rather than storing it.
 
 **A quotation that cannot be derived degrades rather than refusing the comment.** The node keeps
 its text and loses its `anchorId`, becoming an ordinary blockquote; the mark is dropped and the
@@ -9016,19 +9033,24 @@ value.
 **Pending quotations ride in the draft.** A quotation captured while composing is not a row yet
 — the rows are written at post time — so the draft holds the body JSON plus the pending targets
 and selections, keyed by the same `anchorId` the body uses. That is also what makes "select,
-wander off, come back tomorrow, post" work.
+wander off, come back tomorrow, post" work. **That is the rich mode's draft.** A Markdown draft
+(§23m) is a string and carries no pending anchors: the server re-finds every quote from the
+text, which is the whole point of §23n.
 
 ### 23h. The composer, and the quote gesture
 
-The textarea becomes a TipTap editor over `commentContentExtensions`, with `EditorToolbar`'s
+The textarea becomes **one of two front doors**. In rich mode it is a TipTap editor over
+`commentContentExtensions`, with `EditorToolbar`'s
 reduced-set pattern (`ANNOTATION_TOOLS` is the precedent, and comments get their own list).
 `AnnotationBody.tsx` is the shape to copy, minus the collaboration extensions — no
-`Collaboration`, no `CollaborationCaret`, no provider, no `AuthorHighlight`.
+`Collaboration`, no `CollaborationCaret`, no provider, no `AuthorHighlight`. In Markdown
+mode it is the textarea it already is, and §23m is the account of what that costs.
 
 **Quoting on the page** is the gesture that already exists twice. Selecting text in the article
 opens the comment popover (§5); selecting text in a comment opens "Quote in reply" (§22d, and
-its offsets change from string indices to ProseMirror positions). Either now inserts a
-`Quotation` node or a `Quote` mark at the cursor of the open composer, with a pending anchor.
+its offsets change from string indices to ProseMirror positions). Either now inserts an
+anchored `blockquote` or a `Quote` mark at the cursor of the open composer, with a pending
+anchor — or, in Markdown mode, a `> ` line at the caret and nothing else.
 Selection settles on `selectionchange` with `pointerup` short-circuiting it, per CLAUDE.md's
 rule, and for its stated reason.
 
@@ -9091,20 +9113,25 @@ is parked rather than merged.
 
 ### 23j. Build order
 
-1. **Rich bodies, and drafts.** `commentContentExtensions`/`pmCommentContentSchema`; the
+0. **Bring §22b, §22c and §22e back.** A cherry-pick of `reference/comment-edit-history`'s
+   first commit plus `prisma migrate dev` (§23l's last paragraph). Phase 1's migration is then
+   a change of `body`'s type across two tables, which is how §23i describes it.
+1. **Rich bodies, drafts, and the Markdown front door.** `commentContentExtensions`/`pmCommentContentSchema`; the
    validated-JSON write path (`nodeFromJSON`, `toPlainJSON`, the two caps, the link `rel`); the
    `{text}` → document migration across both tables plus the derived `body_text` column;
    `CommentForm` and `CommentNode`'s inline editor become TipTap; the read path becomes
    `renderToReactElement`; `/comments` switches its filter and excerpt to `body_text`;
-   `comment-draft-store.ts` and the restore line. **No quotations at all in this phase** — it is
+   `comment-draft-store.ts` and the restore line; `markdownToCommentContent` with its conform
+   pass and its unit table (§23m). **No quotations at all in this phase** — it is
    the security-relevant one, and it wants reviewing on its own.
 2. **The anchor table, with no writer.** `comment_quote_anchor`; `target_comment_id` on all three
    anchor tables with its CHECK edit; `AnchorTarget`'s fifth member and the compile errors it
-   causes; `Quotation`/`Quote` in the schema; `describeQuoteTarget` and the citation render;
+   causes; `blockquote.anchorId` and `Quote` in the schema; `describeQuoteTarget` and the
+   citation render;
    §22d's columns and helpers dropped. §20h's pattern exactly: the shape and the readers ship
    before the writers, so the writers land into a surface that already renders them.
-3. **Quoting what is on the page.** The host post and any comment on it: the capture path, the
-   audience gate, the server-side derive-and-rewrite, inline and block, the highlight in the
+3. **Quoting what is on the page.** The host post and any comment on it: the matcher (§23n),
+   shared by both front doors with the rich mode's selection as an optional hint; the audience gate, the server-side derive-and-rewrite, inline and block, the highlight in the
    quoted comment, and the "quoted an earlier version" degradation. This is the phase that makes
    the feature real, and it reuses §5 and §22d's gestures.
 4. **Quoting what is not on the page.** Another published post, a comment on another post: the
@@ -9135,6 +9162,18 @@ Phase 3 and verifies the pair §23f rests on: the body's quoted span equals the 
   "three people quoted this sentence", and that is a genuinely nice feature with its own
   packing and colour questions. Deferred, additive, and it needs no schema it does not have.
 - **Images stay out**, and §23b says why in more detail than the rest of the exclusions.
+- **A quotation of the host post is not a thread anchor.** A `>` block that matches the article
+  from the general-discussion composer creates a `comment_quote_anchor` row and leaves the
+  comment in the general thread. A thread's passage anchor (§5) and a comment's quote anchor
+  can name the same passage and are two mechanisms on purpose: the first says what a
+  discussion is *about* and is remapped on publish so the article can highlight it; the second
+  says what a body *quotes* and pins an event. Promoting a matched quote into a passage thread
+  is a plausible later gesture, not a default.
+- **Code fences will be the commonest out-of-schema input** once there is a Markdown box on a
+  technical blog. §23m degrades a fence to `code`-marked lines rather than dropping it; adding
+  `CodeBlock` to §23b is the cheaper fix if that reads badly, and it is additive.
+- **Within one target, several occurrences of the quote pick the nearest or the first**, not
+  none — a deliberate departure from `resolveAnchorInDoc`'s exactly-one rule, argued in §23n.
 - **Comment bodies becoming rich does not make annotations and comments one component again.**
   §13c un-shared them because the two had stopped having the same rendering problem; they now
   have similar ones, which is not the same as the same one — an annotation body is a live ydoc
@@ -9187,3 +9226,127 @@ likely to be wanted verbatim are `src/lib/edit-grace.ts` with its unit tests, wh
 change at all, and §22e's annotation edit sessions, which §23 does not touch either. Both are in
 the first commit, which also carries §22c — so a cherry-pick brings comment revisions along, and
 §23's Phase 1 would then be a migration of `body` rather than a new table.
+
+### 23m. The Markdown front door
+
+**Amended in the same day, before any of §23 was built.** A commenter may write plain
+Markdown in the textarea instead of using the rich editor, and the two are one write path with
+two front doors: both produce a validated ProseMirror document over `commentContentExtensions`,
+and both run the same quote matcher (§23n) before the same derive-rewrite-store.
+
+**Parse.** `markdownToCommentContent` beside `markdownToDocContent` in `markdown-import.ts`,
+over a second `MarkdownManager` built once per process. Server-side and headless, which is
+what turns raw HTML into literal text — docs/DOC_IMPORT.md §3's safety argument, applying
+harder here because the author is anonymous. The entity decode is reused.
+
+**The schema does not restrict the parser; a conform pass does.** Measured on
+`@tiptap/markdown@3.29` with §23b's extension list: a `#` line emits a `heading` node and
+`nodeFromJSON` throws, which would reject the whole comment for one character; a code fence and
+a table are silently deleted, so a commenter's code sample vanishes. An image keeps its alt text
+as plain text, a rule is dropped, raw HTML stays literal, and a soft line break arrives as a
+newline *inside* a text node — all acceptable except the last, which the editor renders as a
+break and the static renderer collapses, so it becomes a space. The fix for the first two is
+shim extensions on the *parse* list only: a bare `Extension` named after the token type with
+a `parseMarkdown` is dispatched by name and adds nothing to `getSchema`, verified. The table:
+
+| Token | Becomes |
+|---|---|
+| `heading` | a paragraph, bold |
+| `code` (a fence) | a paragraph of `code`-marked lines joined by `hardBreak` |
+| `table` | its raw source, literal, in one paragraph |
+| `hr` | dropped |
+| `image` | its alt text (the parser's own fallback, kept) |
+| `html` | literal text (the parser's own headless fallback, kept) |
+
+Then `pmCommentContentSchema.nodeFromJSON` as the final validation, which after the conform
+should throw only on a bug. This inverts docs/DOC_IMPORT.md §2's "parse list equals encode
+list" rule into "parse list is a superset that emits only schema nodes", and that file says
+so.
+
+**Caps.** `MAX_BODY_LENGTH` on the source string before parsing, then §23b's two caps on the
+result. The depth cap does real work here: `> > > > >` and indented lists nest without limit
+from a textarea.
+
+**Links** arrive from the parse with no `rel` and no `target`; the write path overwrites both
+in either mode, so the guarantee does not depend on which door the link came through.
+
+**The form.** A mode toggle on `CommentForm`, remembered per browser in `localStorage`. In
+Markdown mode, "Quote in reply" and the article's selection popover insert `> text` at the
+caret as a plain string, with no hidden fields — the matcher finds it again. No preview in the
+first cut: a browser-side parse turns HTML tokens into real nodes, the opposite of the server's
+behaviour, so an honest preview is a server round trip and is deferred.
+
+**Editing later, with no second stored form.** The stored JSON is serialized back to Markdown
+for the edit box; `blockquote` already renders, and the `Quote` mark renders as straight
+double quotes. On save the matcher runs again, with the revisions this comment's existing
+anchor rows already pin searched *first*, so editing the quoting comment does not silently
+re-pin a quotation to a newer version of its target.
+
+### 23n. The quote matcher
+
+One function, two front doors, hints optional. Rich mode supplies a target and a range per
+pending quotation and the matcher tries those first; Markdown mode supplies nothing and the
+matcher searches. Every hit goes through the same verify and the same rewrite (§23f), so the
+integrity check has one pair to test regardless of door.
+
+**Candidates**, all immutable, all admissible under §23e on a public post, in priority order
+and built lazily: the parent comment's newest revision when replying; the host post's current
+publication event; approved, undeleted comments in the same thread, newest first; then the rest
+of the page's approved comments. Capped. Each is flattened once per submission.
+
+**Extraction** from the parsed body. Every *outermost* `blockquote` is a block candidate, its
+text being its textblocks joined by a newline. Inline candidates are runs inside straight or
+curly double quotes within one textblock, not crossing a hard break, not under the `code` mark,
+and at least `MIN_INLINE_QUOTE_CHARS` long so a quoted "yes" is not hunted through the post;
+below that they stay typed text.
+
+**Normalization**, applied to both sides, with an index map back to the original: NFKC, curly
+quotes and apostrophes to straight, dashes to a hyphen, an ellipsis to three dots, whitespace
+runs to one space, trimmed. Not case-folded and not punctuation-stripped — copy-paste preserves
+both, and folding widens false positives more than it recovers.
+
+**Flatten with a position map.** Walk the target node: each text node appends its characters
+with their ProseMirror positions, each inline leaf appends nothing and skips its one position,
+each textblock boundary appends a newline. Normalize on top with a second map. A hit is a
+string `indexOf`, mapped back to a range. This crosses block boundaries, which
+`findQuoteOccurrences` cannot, and runs once per submission, so the per-keystroke cost that
+shaped that function does not apply.
+
+**Verify, always.** After mapping back, the normalized `textBetween` at the range must equal the
+normalized query (exact tiers) or share its prefix and suffix (the fuzzy tier). The stored
+`quoted_text` is `textBetween` at the verified range, never the query. **This clause is what
+answers docs/COLLAB.md §4's "rejected fix worth not repeating"**: that rewrite was rejected
+because live callers depended on the returned range reproducing the *input* text; here a
+flattening mistake costs a missed match and never a wrong anchor, and COLLAB.md §9 records the
+distinction.
+
+**Tiers**, stopping at the first hit:
+
+1. Hinted offsets, rich mode only — the client's range in its named target, verified. The
+   `resolveAnchorInDoc` shape.
+2. Exact normalized substring, candidates in priority order.
+3. Ends: the first and last `END_CHARS` normalized characters both found in one candidate, in
+   order, with the span between within a fifth of the query's length. Catches a typo or a
+   dropped word in a hand-typed quote, and the rewrite then corrects it. The one fuzzy tier
+   worth shipping.
+4. No match: the blockquote keeps a null `anchorId`; inline text keeps its typed quote marks.
+   Never an error, per §23f.
+
+An elided quote — two pieces around a dotted gap, matched as a multi-part anchor over
+`part_order` — is a natural fifth tier and the first real use of the part-set, in
+docs/research/multi-anchoring.md's terms an *aggregation* with the collective reading. Deferred.
+
+**Ambiguity.** Across candidates, priority wins: a reply quoting words that appear in both the
+parent and the post is quoting the parent. Within one candidate with several occurrences,
+prefer the one nearest the thread's own passage anchor if the thread has one, else the first.
+This departs from `resolveAnchorInDoc`'s exactly-one rule on purpose: identical text in one
+immutable object is the same words by the same author, so the citation and the stored text are
+right whichever twin is chosen, and nothing highlights the position in the article yet (§23k).
+
+**Output.** Per hit, an anchor row with the target, its stamp, the range, `quoted_text` derived
+with `textBetween`'s space separator like every other anchor, and a `DOC_RANGE` selector from
+`deriveDocRangeSelector`, which already takes a plain node. Then §23f's rewrite.
+
+**Where.** `src/lib/comment-quote-match.ts`, pure and browser-safe, with the unit table; and
+`src/lib/comment-quote-capture.ts`, server-side, loading candidates through Prisma — the split
+`src/lib/anchors/` already makes.
