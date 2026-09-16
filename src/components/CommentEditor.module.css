@@ -1,0 +1,34 @@
+/* The rich comment composer's frame — AnnotationBody.module.css's shape,
+   restated here because the two surfaces are deliberately not one component
+   (PLAN.md §23k). */
+.frame {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.content {
+  padding: 8px 10px;
+  min-height: 4em;
+  display: flex;
+  flex-direction: column;
+  /* Same resize: both as CommentForm.module.css's .textarea, and for the same
+     reason overflow-y is set: `resize` is inert on an overflow: visible box. */
+  resize: both;
+  overflow-y: auto;
+}
+
+/* Without flex: 1 1 auto the contenteditable is only as tall as its text,
+   leaving dead space in an empty 4em box that looks editable and isn't. */
+.content :global(.tiptap) {
+  flex: 1 1 auto;
+  outline: none;
+}
+
+/* Reserves the frame's footprint for the tick before useEditor has an editor
+   (immediatelyRender: false), so the form doesn't jump on mount. */
+.placeholder {
+  min-height: calc(4em + 53px);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

@@ -1,4 +1,4 @@
-import { test, expect, annotationEditor, selectTextInAnnotation, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
+import { test, expect, annotationEditor, selectTextInAnnotation, visibleText, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   ADMIN_EMAIL,
   backdateAnnotationPosting,
@@ -297,6 +297,9 @@ test.describe("editing a posted annotation", () => {
     // The materialized parent state at the reply's own stamp — the state the
     // replier was reading, reconstructed from the body's update log.
     await expect(page.getByText("The annotation as it read when this reply quoted it:")).toBeVisible();
-    await expect(page.getByText("zebrafish", { exact: false }).first()).toBeVisible();
+    // visibleText, not a bare getByText: the reply's own card is portaled
+    // into the margin rail above 1180px and its below-article copy is
+    // hidden, so `.first()` on a bare match lands on the hidden one.
+    await expect(visibleText(page, "zebrafish").first()).toBeVisible();
   });
 });

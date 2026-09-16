@@ -40,7 +40,7 @@ function buildFilterWhere(filters: ReturnType<typeof parseCommentsFilters>): Pri
   if (!filters.deleted) where.deletedByUserId = null;
   if (filters.q) {
     where.OR = [
-      { body: { path: ["text"], string_contains: filters.q, mode: "insensitive" } },
+      { bodyText: { contains: filters.q, mode: "insensitive" } },
       { commenter: { displayName: { contains: filters.q, mode: "insensitive" } } },
       { commenter: { email: { contains: filters.q, mode: "insensitive" } } },
     ];
@@ -175,7 +175,7 @@ export default async function CommentsPage({
       commenterId: comment.commenterId,
       commenterName: comment.commenter.displayName,
       commenterEmail: comment.commenter.email,
-      bodyText: (comment.body as { text?: string } | null)?.text ?? "",
+      bodyText: comment.bodyText,
       status: comment.status,
       threadStatus: comment.thread.status,
       createdAt: comment.createdAt,

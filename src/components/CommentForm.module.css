@@ -59,3 +59,21 @@
   color: var(--background);
   cursor: pointer;
 }
+
+/* PLAN.md §23g — the line that says a draft came back from IndexedDB. Not
+   silent on purpose: a restored paragraph the author had forgotten is how a
+   stale comment gets posted. */
+.draftLine {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.draftDiscard {
+  font: inherit;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}

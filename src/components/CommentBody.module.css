@@ -1,0 +1,39 @@
+/* A comment body wears .prose for its list/blockquote restoration
+   (prose.module.css, CLAUDE.md) but not its article typography: a comment
+   sits in the page's own font, at the page's own size, next to a meta line
+   set the same way. Two declarations override exactly the two .prose sets. */
+.body {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* .prose gives every paragraph a bottom margin for article rhythm; the last
+   block of a comment sits directly above its Reply/Edit row, which supplies
+   its own spacing. */
+.body > :last-child {
+  margin-bottom: 0;
+}
+
+.body :global(p) {
+  margin-bottom: 0.75em;
+}
+
+.body :global(blockquote) {
+  margin-bottom: 0.75em;
+}
+
+.body :global(ul),
+.body :global(ol) {
+  margin-bottom: 0.75em;
+}
+
+.body :global(code) {
+  font-size: 0.9em;
+  padding: 0 0.25em;
+  border-radius: 3px;
+  background: var(--surface-hover);
+}
+
+.body :global(q) {
+  font-style: italic;
+}

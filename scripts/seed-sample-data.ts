@@ -51,6 +51,7 @@ import { uniqueDocSlug } from "../src/lib/doc-slug";
 import { uniquePostSlug } from "../src/lib/post-slug";
 import { contentExtensions, titleExtensions, pmDocContentSchema, pmBlurbSchema } from "../src/lib/tiptap-schema";
 import { normalizeOrcid, normalizeWebsite } from "../src/lib/contributor-links";
+import { commentDocFromText } from "../src/lib/comment-body";
 import { storeAvatar } from "../src/lib/avatar";
 import { findQuoteOccurrences } from "../src/lib/quote-occurrences";
 import { postContentFromYdoc } from "../src/lib/post-content";
@@ -316,7 +317,8 @@ async function addComment(opts: {
     data: {
       threadId: thread.id,
       commenterId: commenter.id,
-      body: { text: opts.body },
+      body: commentDocFromText(opts.body),
+      bodyText: opts.body,
       status: opts.status,
       statusChangedAt: opts.status === "PENDING" ? null : new Date(),
     },

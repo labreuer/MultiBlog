@@ -119,6 +119,17 @@ before changing the behavior it describes.
   versions are decoded from their snapshots on demand — there is no text copy and no revision
   table — and only the settle paths may write one there (the debug button refuses the
   namespace). PLAN.md §22b, §22e.
+- **A comment body is ProseMirror JSON that `parseCommentBody` has accepted, and nothing
+  else.** The schema (`pmCommentContentSchema`) *is* the validation — there is no HTML
+  anywhere between commenter and reader, and no sanitizer to keep in step. Two things
+  are easy to undo by accident: the Markdown box's parse list is a **superset** of the
+  schema (three parse-only shims, docs/DOC_IMPORT.md §11) because `@tiptap/markdown`'s
+  fallback emits a `heading` node and deletes fences whatever is registered, so never
+  store a parse result without `parseCommentBody` after it; and the parse runs on the
+  **server** because headless, raw HTML becomes literal text, where a browser-side parse
+  would make real nodes of it — so no client-side preview or conversion, ever
+  (`convertCommentBody` is a round trip on purpose). `Comment.bodyText` is derived by the
+  same writers, never a trigger. PLAN.md §23b, §23m.
 - **`Comment.body` is a cache of the newest `comment_revision`, and is never written alone.**
   One transaction writes both, in `submitComment` and `editComment`; there is no legitimate
   staleness window, so any divergence is a fault —

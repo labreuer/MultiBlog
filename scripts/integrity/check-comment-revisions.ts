@@ -42,14 +42,18 @@
 
 import "dotenv/config";
 import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
+import { commentBodyTextFromJSON } from "../../src/lib/comment-body";
 
 const args = process.argv.slice(2);
 const verbose = args.includes("--verbose");
 const postIndex = args.indexOf("--post");
 const postId = postIndex >= 0 ? args[postIndex + 1] : null;
 
+// PLAN.md §23b — a body is ProseMirror JSON now; its text is derived the way
+// every writer derives `body_text`, so the two comparisons below are about
+// the same string.
 function bodyTextOf(body: unknown): string {
-  return (body as { text?: string } | null)?.text ?? "";
+  return commentBodyTextFromJSON(body);
 }
 
 type Finding = { commentId: string; check: string; detail: string };
@@ -61,6 +65,7 @@ async function main() {
     select: {
       id: true,
       body: true,
+      bodyText: true,
       createdAt: true,
       editedAt: true,
       revisions: { orderBy: { revisionNo: "asc" }, select: { revisionNo: true, body: true, createdAt: true } },
@@ -92,6 +97,17 @@ async function main() {
         detail:
           `comment.body is not revision ${newest.revisionNo}'s text — ` +
           `column ${JSON.stringify(cached.slice(0, 60))} vs. revision ${JSON.stringify(stored.slice(0, 60))}`,
+      });
+    }
+
+    // 1b. body_text is body's text (PLAN.md §23i) — written by the same
+    // writers in the same statement, so a divergence is a fault, and one
+    // /comments' filter would silently search the wrong words over.
+    if (comment.bodyText !== cached) {
+      findings.push({
+        commentId: comment.id,
+        check: "body-text",
+        detail: `comment.body_text ${JSON.stringify(comment.bodyText.slice(0, 60))} is not body's text ${JSON.stringify(cached.slice(0, 60))}`,
       });
     }
 

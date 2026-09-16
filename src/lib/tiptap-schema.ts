@@ -4,6 +4,12 @@ import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import Bold from "@tiptap/extension-bold";
 import Italic from "@tiptap/extension-italic";
+import Strike from "@tiptap/extension-strike";
+import Code from "@tiptap/extension-code";
+import Blockquote from "@tiptap/extension-blockquote";
+import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
+import HardBreak from "@tiptap/extension-hard-break";
+import Link from "@tiptap/extension-link";
 import { getSchema, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
@@ -117,6 +123,51 @@ export const blurbExtensions = [Document.extend({ content: "paragraph" }), Parag
 // doesn't define, which is the whole of this column's write-side validation
 // (PLAN.md §17f: the schema *is* the validation, not an HTML allowlist).
 export const pmBlurbSchema = getSchema(blurbExtensions);
+
+// PLAN.md §23b — what a stranger may put in a comment. Stated as its own list
+// rather than derived from contentExtensions or annotationContentExtensions,
+// the same decision canManageDocs vs. canManagePosts records: a delegation
+// preserves exactly the coupling the separation exists to break, and "what an
+// anonymous commenter may write" has to be able to diverge from "what an author
+// may put in a doc" without anyone noticing at the wrong moment. Not
+// StarterKit.configure({...: false}) either — a StarterKit release that adds a
+// node would widen the one schema here that accepts unauthenticated input.
+//
+// In: the inline marks people use in prose; lists and blockquote, which
+// prose.module.css already restores from globals.css's reset; hard breaks,
+// because VirtualKeyboardEnter exists; links, hardened below. Out, and why,
+// is §23b's list: images (a stranger-chosen src is a request every reader's
+// browser makes), headings, code blocks, tables, rules, and raw HTML — which
+// has no extension, so the schema cannot express it and no sanitizer has to
+// catch it. `nodeFromJSON` over pmCommentContentSchema is the write-side
+// validation, as pmBlurbSchema is for a blurb.
+//
+// Every link renders with `rel="nofollow noopener"` and `target="_blank"`
+// (§6), unconditionally — a trusted commenter's link is still a link to
+// somewhere we don't control. The HTMLAttributes here cover the renderer; the
+// stored mark's own attrs are overwritten to match by `hardenCommentLinks`
+// (comment-body.ts) on every write, so neither depends on the other.
+export const COMMENT_LINK_REL = "nofollow noopener";
+export const COMMENT_LINK_TARGET = "_blank";
+export const commentContentExtensions = [
+  Document,
+  Paragraph,
+  Text,
+  Bold,
+  Italic,
+  Strike,
+  Code,
+  Blockquote,
+  BulletList,
+  OrderedList,
+  ListItem,
+  HardBreak,
+  Link.configure({
+    ...EDITOR_LINK_OPTIONS,
+    HTMLAttributes: { rel: COMMENT_LINK_REL, target: COMMENT_LINK_TARGET },
+  }),
+];
+export const pmCommentContentSchema = getSchema(commentContentExtensions);
 
 // ProseMirror builds every non-empty node/mark `attrs` object via
 // `Object.create(null)` (computeAttrs, prosemirror-model), and Node/Mark#toJSON

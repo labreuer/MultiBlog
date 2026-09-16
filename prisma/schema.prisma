@@ -551,9 +551,11 @@ model Comment {
   threadId          String        @map("thread_id")
   parentCommentId   String?       @map("parent_comment_id")
   commenterId       String        @map("commenter_id")
-  // PLAN.md §22c — the current text, `{ text }` (plain, not ProseMirror:
-  // §6's rich-comment hardening is a separate decision and editing was
-  // deliberately not the occasion to take it, §22h).
+  // PLAN.md §23b — the current body as ProseMirror JSON over
+  // `pmCommentContentSchema` (tiptap-schema.ts), validated on write by
+  // `nodeFromJSON`: the schema *is* the validation, and there is never any
+  // HTML to sanitize. Was `{ text }` until §23's Phase 1; the
+  // rich_comment_bodies migration rewrote every row and every revision.
   //
   // **Since §22c this is a cache of the newest `comment_revision` row**, the
   // same relationship `Doc.proseJson` has to its ydoc — and, unlike that one,
@@ -563,6 +565,13 @@ model Comment {
   // It stays the column every reader path reads, which is why adding history
   // changed no query anywhere.
   body              Json
+  // PLAN.md §23i — the body's plain text, derived by `commentBodyText` and
+  // written beside `body` by the same writers, never by a trigger: /comments'
+  // free-text filter was a jsonb path query on `body.text` and has no
+  // equivalent over a document, and every excerpt wants the same string.
+  // Mirrors `Annotation.bodyText`. Not on `comment_revision`, which nothing
+  // filters.
+  bodyText          String        @default("") @map("body_text")
   status            CommentStatus @default(PENDING)
   ipAddress         String?       @map("ip_address")
   statusChangedById String?       @map("status_changed_by_id")

@@ -4,8 +4,8 @@
 
 import { MarkdownManager } from "@tiptap/markdown";
 import { decodeHTML } from "entities";
-import type { JSONContent } from "@tiptap/core";
-import { contentExtensions } from "./tiptap-schema";
+import { Extension, type JSONContent, type MarkdownParseHelpers, type MarkdownToken } from "@tiptap/core";
+import { commentContentExtensions, contentExtensions } from "./tiptap-schema";
 
 // contentExtensions, and specifically the same exported value the caller
 // encodes the ydoc with — a node type registered here but missing there is
@@ -41,7 +41,7 @@ export type MarkdownImport = {
 // Link destinations ARE decoded (docs/DOC_IMPORT.md §5): CommonMark decodes
 // entity references there too, so a URL imported with `&amp;` as its query
 // separator is wrong, not merely ugly.
-function decodeNodeEntities(node: JSONContent): JSONContent {
+export function decodeNodeEntities(node: JSONContent): JSONContent {
   if (node.type === "codeBlock") {
     return node;
   }
@@ -109,4 +109,114 @@ export function markdownToDocContent(markdown: string): MarkdownImport {
     title,
     body: { type: "doc", content: blocks.length > 0 ? blocks : [{ type: "paragraph" }] },
   };
+}
+
+// ---------------------------------------------------------------------------
+// PLAN.md §23m — the second consumer: a comment typed as Markdown.
+//
+// **The schema does not restrict the parser; these shims do.** Measured on
+// @tiptap/markdown 3.29 (docs/DOC_IMPORT.md §11): the manager's fallback emits
+// a `heading` node whether or not Heading is registered — so one `#` line
+// would make nodeFromJSON throw and the whole comment be refused — and returns
+// nothing at all for a fenced code block or a table, silently deleting a
+// commenter's code sample. Each shim is a bare `Extension` whose
+// `markdownTokenName` is the token the fallback mishandles and whose
+// `parseMarkdown` returns something the comment schema *does* define. The
+// manager dispatches by token name, and an Extension contributes nothing to
+// getSchema, so the shims live on the parse list only.
+//
+// That inverts DOC_IMPORT.md §2's "parse list equals encode list" rule into
+// "parse list is a superset that emits only schema nodes" — which is why
+// `parseCommentBody` still runs nodeFromJSON on the result afterwards: after
+// the conform pass it should throw only on a bug in this file.
+
+function boldAll(nodes: JSONContent[]): JSONContent[] {
+  return nodes.map((node) =>
+    node.type === "text" ? { ...node, marks: [...(node.marks ?? []), { type: "bold" }] } : node,
+  );
+}
+
+const commentMarkdownShims = [
+  // `# Title` → a bold paragraph. The commenter wanted emphasis on a line; a
+  // heading competes with the article's outline (§23b), bold does not.
+  Extension.create({
+    name: "commentHeadingShim",
+    markdownTokenName: "heading",
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers) =>
+      helpers.createNode("paragraph", undefined, boldAll(helpers.parseInline(token.tokens ?? []))),
+  }),
+  // A fence → one paragraph of `code`-marked lines joined by hard breaks.
+  // Monospace, line structure kept, no codeBlock node needed; adding
+  // CodeBlock to §23b is the cheaper fix if this reads badly (§23k).
+  Extension.create({
+    name: "commentFenceShim",
+    markdownTokenName: "code",
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers) => {
+      const lines = String(token.text ?? "").replace(/\r\n?/g, "\n").split("\n");
+      const content: JSONContent[] = [];
+      lines.forEach((line, index) => {
+        if (index > 0) content.push({ type: "hardBreak" });
+        if (line !== "") content.push({ type: "text", text: line, marks: [{ type: "code" }] });
+      });
+      return helpers.createNode("paragraph", undefined, content);
+    },
+  }),
+  // A table → its raw source, literal, one row per line joined by hard
+  // breaks (a newline inside the text would be collapsed below). Not a layout
+  // surface a comment has (§23b), and the honest reading of what was typed.
+  Extension.create({
+    name: "commentTableShim",
+    markdownTokenName: "table",
+    parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers) => {
+      const lines = String(token.raw ?? "").replace(/\s+$/, "").replace(/\r\n?/g, "\n").split("\n");
+      const content: JSONContent[] = [];
+      lines.forEach((line, index) => {
+        if (index > 0) content.push({ type: "hardBreak" });
+        if (line !== "") content.push({ type: "text", text: line });
+      });
+      return helpers.createNode("paragraph", undefined, content);
+    },
+  }),
+];
+
+const commentMarkdownManager = new MarkdownManager({
+  extensions: [...commentContentExtensions, ...commentMarkdownShims],
+});
+
+// A soft line break arrives from marked as a newline *inside* a text node,
+// which the editor renders as a break (ProseMirror's `white-space: pre-wrap`)
+// and the static renderer collapses — two readings of one stored value. A
+// single space is what CommonMark means by it. Code-marked runs are exempt
+// only in form: the fence shim above never leaves a newline inside one.
+function collapseSoftBreaks(node: JSONContent): JSONContent {
+  let out = node;
+  if (typeof out.text === "string" && /\r?\n/.test(out.text)) {
+    out = { ...out, text: out.text.replace(/\r?\n/g, " ") };
+  }
+  if (out.content) {
+    out = { ...out, content: out.content.map(collapseSoftBreaks) };
+  }
+  return out;
+}
+
+/**
+ * Markdown → a comment document over `commentContentExtensions`, ready for
+ * `parseCommentBody`. Always a `doc` with at least one block, like the doc
+ * importer, and for the same reason. Raw HTML in the source stays literal
+ * text (headless, DOC_IMPORT.md §3) — the safe reading of what an anonymous
+ * person typed, and the whole reason this runs on the server.
+ */
+export function markdownToCommentContent(markdown: string): JSONContent {
+  const parsed = collapseSoftBreaks(decodeNodeEntities(commentMarkdownManager.parse(markdown)));
+  const blocks = Array.isArray(parsed.content) ? parsed.content : [];
+  return { type: "doc", content: blocks.length > 0 ? blocks : [{ type: "paragraph" }] };
+}
+
+/**
+ * The reverse, for the Markdown edit box (§23m: no second stored form — the
+ * stored JSON is serialized back on demand). Runs over the same manager, so
+ * a body parsed from Markdown and serialized again re-parses to itself.
+ */
+export function commentContentToMarkdown(json: JSONContent): string {
+  return commentMarkdownManager.serialize(json);
 }
