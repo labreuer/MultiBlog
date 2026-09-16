@@ -4,7 +4,10 @@ import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import { derivePostStatus } from "@/lib/post-status";
-import { canUserReadDoc, editableDocsFor } from "@/lib/doc-authz";
+import type { JSONContent } from "@tiptap/react";
+import { renderToReactElement } from "@tiptap/static-renderer";
+import { contentExtensions } from "@/lib/tiptap-schema";
+import { canUserEditDoc, canUserReadDoc, editableDocsFor } from "@/lib/doc-authz";
 import { tagsNotYetOn } from "@/lib/tag-data";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
@@ -19,9 +22,10 @@ const loadPostForEdit = gated(async (user, id: string) => {
     where: { id },
     include: {
       authors: { select: { userId: true }, orderBy: { bylineOrder: "asc" } },
-      // `visibility` is for the §20m tag offer below, not for this page
-      // gate: the offer shows the *doc's* terms, so it owes the doc's own
-      // read rule on top of the post gate this function already applies.
+      // `visibility` is for the two doc-side checks below, not for this page
+      // gate: §20m's tag offer owes the doc's *read* rule and §15i's publish
+      // controls owe its *edit* rule, both on top of the post gate this
+      // function already applies.
       doc: { select: { id: true, slug: true, title: true, visibility: true } },
       publishEvent: { select: { createdAt: true, ydocSnapshot: { select: { lastYdocUpdateId: true } } } },
     },
@@ -77,13 +81,24 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   });
 
   // PLAN.md §15d — "Change doc…" only ever offers a doc this user could
-  // actually publish from; the post's own current doc is always included
-  // even for an ADMIN/EDITOR browsing someone else's byline-only doc, since
-  // editableDocsFor already returns every doc for those roles.
+  // actually publish from. **The post's own doc need not be in it**: a
+  // PRIVATE doc is its listed authors' alone, ADMIN and EDITOR included
+  // (§12e), so editableDocsFor omits it for everyone else. That is why
+  // PostPublisher is handed `sourceDocTitle`/`sourceDocSlug` separately
+  // rather than looking the current doc up in this list (§15i).
   const editableDocs = await editableDocsFor(user.id, user.role);
 
+  // PLAN.md §15i — the two doc-side questions this page asks about its viewer.
+  // They are different questions with different answers, and the whole of §15i
+  // is the consequence of that: a post's byline and its doc's byline are
+  // independent lists (§15d), so being on the first says nothing about either.
+  const [canReadSourceDoc, canEditSourceDoc] = await Promise.all([
+    canUserReadDoc(user.id, user.role, post.doc),
+    canUserEditDoc(user.id, user.role, post.doc.id),
+  ]);
+
   // PLAN.md §20m — the source doc's terms that haven't come across yet, for
-  // the "From the doc" offer under the post's own strip.
+  // the tag offer under the post's own strip.
   //
   // **Gated on `canUserReadDoc`, not on this page's gate.** A post author need
   // not be an author of the doc it was made from, so a PRIVATE doc's terms
@@ -96,9 +111,24 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
   // doc…" select changes only what the scrub bar previews; the post's doc
   // moves when it is published from a different one, and the refresh that
   // follows re-renders this against the new source.
-  const docTagOffer = (await canUserReadDoc(user.id, user.role, post.doc))
+  const docTagOffer = canReadSourceDoc
     ? await tagsNotYetOn({ kind: "doc", id: post.doc.id }, { kind: "post", id: post.id })
     : [];
+
+  // PLAN.md §15i — the post's stored content, for a viewer who cannot reach
+  // the doc's history. Without doc-edit rights `/api/doc/[id]/replay` 403s and
+  // `publishPostFromDoc` refuses, so the scrub bar has nothing to offer and
+  // the stored `proseJson` is the only version of this post that can honestly
+  // be shown. Rendered on the server, exactly as the public post page renders
+  // the same JSON — what crosses is a finished tree, not a renderer.
+  //
+  // Only computed when it will be used: a viewer who *can* scrub gets the
+  // replayed version instead, and paying `renderToReactElement` on every
+  // ordinary editor load for a tree nobody renders would be waste.
+  const storedBody =
+    !canEditSourceDoc && post.proseJson
+      ? renderToReactElement({ content: post.proseJson as JSONContent, extensions: contentExtensions })
+      : null;
 
   // The scrub bar should open on the point this post is actually live from,
   // not the doc's head — a bigint can't cross the RSC boundary (same reason
@@ -141,7 +171,16 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       // DocTagOffer is a client component, so PostPublisher can import it
       // directly and the keyed-lazy-chunk hazard doesn't arise at all.
       docTagOffer={docTagOffer}
+      // PLAN.md §15i — the source doc's own title and slug, rather than
+      // leaving PostPublisher to find them in `editableDocs`: a PRIVATE doc
+      // this viewer is not on the byline of is absent from that list, and the
+      // old fallback rendered "Untitled" behind a link to a route built from
+      // the doc's *id* where its slug belongs.
       sourceDocTitle={docTitleOrFallback(post.doc.title)}
+      sourceDocSlug={post.doc.slug}
+      canReadSourceDoc={canReadSourceDoc}
+      canEditSourceDoc={canEditSourceDoc}
+      storedBody={storedBody}
     />
   );
 }

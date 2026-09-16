@@ -160,6 +160,37 @@ or the annotation's own author — and never consults the doc, which is why that
 identically in all four tables and why an ADMIN retains it even where the doc is otherwise
 invisible to them (the † in table 2).
 
+## A post's byline is not its doc's (PLAN.md §15d, §15i)
+
+**Being credited on a post says nothing about rights over the doc it was published from, and
+that is deliberate.** `createPostFromDoc` seeds the post's authors from the doc's byline; from
+then on the two lists are edited independently, and `updatePostAuthor` will add any
+ADMIN/EDITOR/AUTHOR to a post without consulting the doc at all. Credit for a published piece
+is not authority over its text: a contributor may have supplied the argument, the data or the
+translation; one doc may source a whole series with a different name on each part; and a
+person coming off a doc's byline must not thereby lose credit for what is already published.
+
+| On `/post/[id]/edit`, a post author who **cannot** edit the source doc | |
+|---|---|
+| Edit the title, byline, tags, moderation policy; delete/restore | ✅ |
+| Unpublish / cancel schedule | ✅ (`unpublishPost` takes `canUserEditPost` only) |
+| See the post's published content | ✅ (its stored `proseJson`, server-rendered) |
+| Scrub the doc's history | ❌ `/api/doc/[id]/replay` is `canUserEditDoc`-gated |
+| Publish / republish / schedule | ❌ `publishPostFromDoc` requires `canUserEditDoc` too |
+| See the doc's tags offered for carrying across | only if `canUserReadDoc` (see Tags, below) |
+| Reach the doc itself | as far as `canUserReadDoc` allows, and no further |
+
+The two doc-side questions are **separate and both get asked**: `canUserReadDoc` decides what
+may be *shown* about the doc (its title as a link, its tags in §20m's offer), and
+`canUserEditDoc` decides what may be *done* with it (scrub, publish). A PRIVATE doc answers
+no to both for anyone off its byline, ADMIN and EDITOR included (§12e); a SHARED doc answers
+yes to the first for anyone with `canViewDocs`, which is why a post author usually does see
+the tag offer and usually does not see the scrub bar.
+
+**Rejected:** making the post byline *mean* "may publish this", by filtering
+`updatePostAuthor`'s eligible set to the doc's editors. That collapses credit into authority
+and loses every case above. PLAN.md §15i records it.
+
 ## Two known inconsistencies
 
 Both are live decisions rather than bugs, recorded so the tables aren't mistaken for a
@@ -478,6 +509,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Anchored-link edit (creator-only reopen/close; add/remove/reorder on the open link; last-part rule) | `src/app/actions/anchored-links.ts`; the Edit affordance's four states in `src/lib/anchored-link-editing.ts` |
 | `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
+| Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |
+| What the post editor shows when only one of those holds | `src/app/post/[id]/edit/page.tsx`'s two doc gates, rendered by `PostPublisher`'s `selectedEditable` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader

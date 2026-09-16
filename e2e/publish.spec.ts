@@ -2,7 +2,7 @@
 // publishes a point in its backing doc's history. Editing happens at
 // /doc/[id]/edit, same as any doc.
 import { test, expect, bodyEditor, gotoOk, freshGoto, visibleText, waitForDocCollabReady } from "./fixtures";
-import { addTestDocAuthor, getPostPath, type TestPost } from "./db";
+import { addTestDocAuthor, addTestPostAuthor, getPostPath, type TestPost } from "./db";
 
 // "Publish" without `exact` also matches "Publish as blog post" elsewhere.
 // The button reads "Publish" on a draft and "Republish" once the post is
@@ -266,6 +266,61 @@ test.describe("publish / unpublish", () => {
     } finally {
       await anon.close();
     }
+  });
+
+  test("a post author with no edit access to the source doc gets the publication, not a broken page", async ({
+    page,
+    publishedPost,
+    secondUser,
+  }) => {
+    // PLAN.md §15i. A post's byline and its doc's byline are independent lists
+    // (§15d) — credit for a published piece is not authority over its text —
+    // and createTestPost's backing doc is PRIVATE, which §12e makes its listed
+    // authors' alone with no ADMIN/EDITOR bypass. So this configuration is
+    // ordinary, and before §15i the page it produced was not: the scrub bar
+    // 403'd, the content pane never arrived, and Publish sat greyed with
+    // nothing saying why.
+
+    // The control: the admin authors both, and still gets the scrub bar.
+    await gotoOk(page, `/post/${publishedPost.id}/edit`);
+    await waitForPublishReady(page);
+
+    const { user, page: authorPage } = await secondUser({ role: "AUTHOR" });
+    await addTestPostAuthor(publishedPost.id, user.email);
+    await authorPage.goto(`/post/${publishedPost.id}/edit`);
+
+    // The publication itself is shown — the post's stored proseJson, rendered
+    // on the server, standing in for a replay that cannot load. This is the
+    // assertion that would have failed loudest before: the pane was empty.
+    await expect(authorPage.getByText(publishedPost.bodyText)).toBeVisible();
+    await expect(authorPage.getByText("Published content:")).toBeVisible();
+
+    // …and no scrub bar at all, rather than one showing its error line. The
+    // bar's route is canUserEditDoc-gated, so mounting it could only ever
+    // produce a 403 under a control that couldn't have worked anyway.
+    await expect(authorPage.getByLabel("Scrub through the doc's edit history")).toHaveCount(0);
+
+    // Republish is inert, and says why on the wrapper the tooltip has to live
+    // on (a disabled button fires no mouse events in any engine).
+    const republish = authorPage.getByRole("button", REPUBLISH);
+    await expect(republish).toBeDisabled();
+    await expect(authorPage.locator("span", { has: republish })).toHaveAttribute(
+      "title",
+      "Publishing needs edit access to this post's source doc.",
+    );
+
+    // The source doc is named but not linked: a PRIVATE doc they are not on
+    // the byline of. A link that 403s reads as breakage; its absence is the
+    // fact itself.
+    await expect(authorPage.getByText("From doc:")).toBeVisible();
+    await expect(authorPage.locator(`a[href^="/doc/"]`)).toHaveCount(0);
+
+    // And everything that belongs to the *publication* rather than to the text
+    // is still theirs — which is the whole claim §15i makes about what a post
+    // byline means.
+    await expect(authorPage.getByLabel("Post title")).toBeEnabled();
+    await expect(authorPage.getByRole("button", { name: "Unpublish", exact: true })).toBeEnabled();
+    await expect(authorPage.getByLabel("Add or remove tags")).toBeVisible();
   });
 
   test("unpublishing takes the post back to a 404", async ({ page, publishedPost }) => {

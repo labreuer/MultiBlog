@@ -4250,6 +4250,74 @@ deletion.
   a backfill script would have had to get byline order, the title fragment, and a synthetic
   publication event right for a single throwaway row.
 
+### 15i. The post editor without doc-edit rights (2026-09-16)
+
+**Built 2026-09-16.** §15d makes a post's byline and its doc's byline independent lists —
+seeded alike at creation, edited separately from then on — and `updatePostAuthor` will add
+any ADMIN/EDITOR/AUTHOR to a post with no reference to the doc at all. That is right, and the
+reasons are worth writing down because the shape it produces looked like a bug:
+
+- **Credit is not authorship of the text.** The doc byline is who works the prose; the post
+  byline is whose name is on the published piece. Someone who supplied the argument, the
+  data, the translation, the interview or the illustrations belongs on the second and has no
+  business in the first.
+- **One doc can source several posts** (§21i's `DocPostsLine`) — a series split out of one
+  document, each part credited differently. Coupled bylines would put every contributor on
+  every part.
+- **The lists drift apart over time without anyone deciding to.** Someone comes off a doc's
+  byline and must not thereby lose credit for what was already published; someone joins after
+  the text is finished and should get credit without edit rights to a doc other posts are
+  also snapshots of.
+- **It is least privilege in the right direction.** Publishing, unpublishing, retitling and
+  setting moderation policy administer a *publication*. Doing them without being able to
+  rewrite the source is a narrower power, not a broken one — and "fixing" it by adding the
+  person to the doc's byline would be a privilege escalation, granting read access §12e
+  reserves to a PRIVATE doc's listed authors.
+
+**What that costs, and what this section pays.** `GET /api/doc/[id]/replay` is
+`canUserEditDoc`-gated, and `publishPostFromDoc` requires the same (§15d). So for a post
+author without those rights the editor used to render a scrub bar that 403'd, a content pane
+that never arrived, and a Publish button greyed for a reason nothing stated — two independent
+blocks producing a page that read as breakage. The page now tells the truth instead:
+
+- **The post's own stored `proseJson` replaces the replay**, rendered on the server exactly
+  as the public post page renders it, under a label that follows the post's *state* rather
+  than its content — `proseJson` survives an unpublish, so calling it "published" on a post
+  that has been taken down would be a lie. A post that has never published says so.
+- **The scrub bar is not mounted at all**, rather than mounted and showing its error line.
+  Its only possible contribution here is a 403 under a control that could not have worked.
+- **One note says why**, beside the controls it explains, and says what *is* still available:
+  title, byline, tags, settings, and unpublishing. Styled as a notice rather than an error,
+  because this is a configuration and not a failure.
+- **The "From doc:" line links as far as the viewer may go and no further** — the doc editor,
+  the reading view, or plain text for a PRIVATE doc they are not on. A link that 403s reads
+  as breakage; its absence reads as the fact.
+
+**Two pre-existing defects fell out of the same root and are fixed here.** The post's own doc
+need not be in `editableDocs` — `editableDocsFor` returns own-byline PRIVATE docs plus, for
+ADMIN/EDITOR, SHARED ones, so a PRIVATE doc nobody here authors is simply absent. The old
+comment on that call said the opposite. Consequently `PostPublisher`'s `currentDoc` fell back
+to using the **doc id as a slug**, rendering "Untitled" behind a link to a route that does
+not exist; and the "Change doc…" `<select>` held a `value` matching no `<option>`, so it
+displayed some *other* doc as chosen. The page now hands over `sourceDocTitle`/`sourceDocSlug`
+directly, and the select lists the current doc as a disabled "(no edit access)" option.
+
+**Switching docs restores everything**, and should. `editableDocsFor` is exactly the set this
+viewer may publish from, so a doc chosen from the select is editable by construction — the
+post's own doc is the only one that might not be. Hence `selectedEditable` is
+`selectedDocId !== docId || canEditSourceDoc` rather than a flat capability: pointing the post
+at a doc you own brings the scrub bar and the publish controls back, which the server already
+permits.
+
+**The alternative, rejected.** The other coherent position is that a post byline *is* the set
+of people who publish it — `updatePostAuthor` would then refuse anyone who cannot edit the
+doc, and the eligible list would be filtered. That collapses credit into authority and loses
+every case above; it is also the larger change. Recorded so the choice reads as one.
+
+**Unchanged on purpose:** `unpublishPost` needs only `canUserEditPost`, so Unpublish and
+Cancel schedule stay live for these viewers; and nothing about the server gates moved. §15i
+is a page telling the truth about permissions it did not alter.
+
 ## 16. Admin tables become one kit
 
 Six surfaces render a table of rows an admin acts on: `/posts`, `/docs`, `/users`, `/comments`,

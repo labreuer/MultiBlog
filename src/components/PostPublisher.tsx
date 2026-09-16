@@ -50,6 +50,21 @@ type Props = {
   docTagOffer: TagOption[];
   /** The title of `docId`'s doc, for that offer to name its source. */
   sourceDocTitle: string;
+  /**
+   * PLAN.md §15i — `docId`'s doc's own slug and this viewer's rights over it.
+   * Passed rather than looked up in `editableDocs`, which omits a PRIVATE doc
+   * this viewer is not on the byline of.
+   */
+  sourceDocSlug: string;
+  canReadSourceDoc: boolean;
+  canEditSourceDoc: boolean;
+  /**
+   * PLAN.md §15i — the post's stored content, rendered on the server. Non-null
+   * only when `canEditSourceDoc` is false and the post has published something:
+   * it stands in for the scrub bar's replay, which cannot load without
+   * doc-edit rights.
+   */
+  storedBody: ReactNode;
 };
 
 // PLAN.md §15c — replaces PostEditor as the whole /post/[id]/edit UI. No
@@ -76,6 +91,10 @@ export default function PostPublisher({
   tags,
   docTagOffer,
   sourceDocTitle,
+  sourceDocSlug,
+  canReadSourceDoc,
+  canEditSourceDoc,
+  storedBody,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -115,9 +134,27 @@ export default function PostPublisher({
   const docChangedAtLocal = useLocalTime(docChangedAt);
 
   const currentDoc = useMemo(
-    () => editableDocs.find((d) => d.id === selectedDocId) ?? { id: selectedDocId, slug: selectedDocId, title: "" },
-    [editableDocs, selectedDocId],
+    () =>
+      editableDocs.find((d) => d.id === selectedDocId) ??
+      // PLAN.md §15i — the post's own doc is the one that can be missing from
+      // editableDocs, and it is the one we have real values for. The old
+      // fallback used the id as a slug, which rendered "Untitled" behind a
+      // link to a route that does not exist. Anything *else* missing from the
+      // list is unreachable — the select only ever offers what is in it.
+      (selectedDocId === docId
+        ? { id: docId, slug: sourceDocSlug, title: sourceDocTitle }
+        : { id: selectedDocId, slug: selectedDocId, title: "" }),
+    [editableDocs, selectedDocId, docId, sourceDocSlug, sourceDocTitle],
   );
+
+  // PLAN.md §15i — what this viewer may do with the doc *currently selected*.
+  // `editableDocsFor` is exactly the set they may publish from, so anything
+  // chosen from the select is editable by construction; the post's own doc is
+  // the only one that might not be. Switching to an editable doc therefore
+  // restores the scrub bar and the publish controls, which is right: they may
+  // genuinely publish this post from a doc they own.
+  const selectedEditable = selectedDocId !== docId || canEditSourceDoc;
+  const selectedReadable = selectedDocId !== docId || canReadSourceDoc;
 
   function handleDocChange(newDocId: string) {
     setSelectedDocId(newDocId);
@@ -201,6 +238,25 @@ export default function PostPublisher({
     (title.trim() || docTitleForDefault) === postTitle;
   const publishLabel = postStatus === "published" ? "Republish" : postStatus === "scheduled" ? "Publish Now" : "Publish";
 
+  // PLAN.md §15i — why the button is disabled, in the order the reasons
+  // actually bite. Without doc-edit rights there is no selection to publish
+  // and the server would refuse anyway, so that reason outranks the no-op one.
+  const publishBlockedReason = !selectedEditable
+    ? "Publishing needs edit access to this post's source doc."
+    : alreadyPublished
+      ? "Already published at this version with the present title"
+      : undefined;
+
+  // PLAN.md §15i — what the stored content *is*, which depends on the post's
+  // state rather than on the content. `proseJson` survives an unpublish, so
+  // calling it "published" on a post that has been taken down would be a lie.
+  const storedBodyLabel =
+    postStatus === "published"
+      ? "Published content:"
+      : postStatus === "scheduled"
+        ? "Content scheduled to go live:"
+        : "Content from the last publication — no longer live:";
+
   return (
     <div className={styles.container}>
       <input
@@ -224,7 +280,19 @@ export default function PostPublisher({
       )}
 
       <p className={styles.statusLine}>
-        From doc: <Link href={`/doc/${currentDoc.slug}/edit`}>{currentDoc.title || "Untitled"}</Link>
+        From doc:{" "}
+        {/* PLAN.md §15i — the link goes as far as this viewer may go and no
+            further: the editor when they may edit it, the reading view when
+            they may only read it, and plain text when the doc is a PRIVATE one
+            they are not on the byline of. A link that 403s reads as breakage;
+            its absence reads as the fact it is. */}
+        {selectedEditable ? (
+          <Link href={`/doc/${currentDoc.slug}/edit`}>{currentDoc.title || "Untitled"}</Link>
+        ) : selectedReadable ? (
+          <Link href={`/doc/${currentDoc.slug}`}>{currentDoc.title || "Untitled"}</Link>
+        ) : (
+          <span>{currentDoc.title || "Untitled"}</span>
+        )}
         {editableDocs.length > 1 && (
           <>
             {" "}
@@ -237,6 +305,16 @@ export default function PostPublisher({
                 disabled={pending || deleted}
                 onChange={(e) => handleDocChange(e.target.value)}
               >
+                {/* PLAN.md §15i — the post's own doc need not be in
+                    editableDocs, and a <select> whose value matches no option
+                    displays some *other* doc as chosen. Listed disabled, so
+                    the control says what the post is actually from and still
+                    offers the docs this viewer could move it to. */}
+                {!editableDocs.some((d) => d.id === selectedDocId) && (
+                  <option value={selectedDocId} disabled>
+                    {currentDoc.title || "Untitled"} (no edit access)
+                  </option>
+                )}
                 {editableDocs.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.title || "Untitled"}
@@ -252,7 +330,7 @@ export default function PostPublisher({
         {/* The tooltip sits on a wrapper: a disabled button fires no mouse
             events in every engine, so a title on the button itself would
             be the one thing a disabled button can't show. */}
-        <span title={alreadyPublished ? "Already published at this version with the present title" : undefined}>
+        <span title={publishBlockedReason}>
           <button
             type="button"
             className={styles.actionButton}
@@ -291,6 +369,20 @@ export default function PostPublisher({
       {status && <p className={styles.statusMessage}>{status}</p>}
       {error && <p className={styles.errorMessage}>{error}</p>}
 
+      {/* PLAN.md §15i — said once, where the controls it explains are, rather
+          than left for the reader to infer from a greyed-out button and a
+          content pane that never loads. A post's byline and its doc's byline
+          are independent lists (§15d), so this is an ordinary configuration
+          and not an error: everything that belongs to the *publication* is
+          still available, and only authority over the text is missing. */}
+      {!selectedEditable && (
+        <p className={styles.sourceDocNote}>
+          You don&apos;t have edit access to this post&apos;s source doc, so you can&apos;t choose or publish a
+          version of it here. Everything else about the post — its title, byline, tags and settings
+          {postStatus !== "draft" && ", and unpublishing it"} — is yours to edit.
+        </p>
+      )}
+
       <p className={styles.revisionNote}>
         {/* PLAN.md §21i — the editor's one link out to the post as readers
             see it. publishedAt is a Date across the RSC boundary, so postPath
@@ -324,10 +416,26 @@ export default function PostPublisher({
           Renders nothing when there is nothing to carry across. */}
       <DocTagOffer postId={postId} docTitle={sourceDocTitle} tags={docTagOffer} />
 
-      <p className={styles.readOnlyLabel}>Doc content at the selected point:</p>
-      <div className={`${styles.readOnlyView} ${proseStyles.prose}`}>
-        {selection?.render.body ?? <p>Loading…</p>}
-      </div>
+      {/* PLAN.md §15i — the scrub bar's replay when there is one, and the
+          post's own stored content when there isn't. Not an empty pane and not
+          an error: without doc-edit rights `/api/doc/[id]/replay` 403s, so the
+          bar below is never mounted and this is the only version of the post
+          that can honestly be shown. */}
+      {selectedEditable ? (
+        <>
+          <p className={styles.readOnlyLabel}>Doc content at the selected point:</p>
+          <div className={`${styles.readOnlyView} ${proseStyles.prose}`}>
+            {selection?.render.body ?? <p>Loading…</p>}
+          </div>
+        </>
+      ) : storedBody ? (
+        <>
+          <p className={styles.readOnlyLabel}>{storedBodyLabel}</p>
+          <div className={`${styles.readOnlyView} ${proseStyles.prose}`}>{storedBody}</div>
+        </>
+      ) : (
+        <p className={styles.readOnlyLabel}>Nothing has been published from this post yet.</p>
+      )}
 
       <PostSettingsPanel
         postId={postId}
@@ -340,12 +448,18 @@ export default function PostPublisher({
         onDeletedChange={setDeleted}
       />
 
-      <PostSnapshotScrubBar
-        key={selectedDocId}
-        docId={selectedDocId}
-        onChange={setSelection}
-        initialThroughUpdateId={initialThroughUpdateId}
-      />
+      {/* Mounted only when its own data route would answer. It is gated on
+          canUserEditDoc, so for a viewer without those rights the bar's only
+          possible contribution is a 403 and an error line under a control
+          that could not have worked anyway (PLAN.md §15i). */}
+      {selectedEditable && (
+        <PostSnapshotScrubBar
+          key={selectedDocId}
+          docId={selectedDocId}
+          onChange={setSelection}
+          initialThroughUpdateId={initialThroughUpdateId}
+        />
+      )}
     </div>
   );
 }
