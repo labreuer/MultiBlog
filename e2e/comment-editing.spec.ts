@@ -15,6 +15,16 @@ import { EDIT_GRACE_MS } from "../src/lib/edit-grace";
 // actually stored. They are deliberately different questions here — a silent
 // edit still writes a revision row, so "no marker appeared" alone would pass
 // just as well against an implementation that had thrown the old version away.
+//
+// **Every navigation to the post page here is a `freshGoto`, including the
+// first one of a test.** `createComment` writes straight to the database, so
+// nothing revalidates the post page — and against the prod target that page
+// is ISR (`revalidate = 60`), which serves whatever render is already cached
+// for that path. Any earlier request fills it: a landing page in another
+// worker lists this post and Next prefetches the link. The failure is a page
+// that says "No comments yet." and a test that waits out its timeout for a
+// card which is never coming, and it reads as a broken loader rather than a
+// stale cache. Seen once for real (comment-markdown.spec.ts, 2026-09-17).
 
 const PAST_THE_WINDOW = EDIT_GRACE_MS + 60_000;
 
@@ -51,7 +61,7 @@ test.describe("editing a comment", () => {
       status: "APPROVED",
     });
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await expect(visibleText(page, original)).toBeVisible();
 
     await editTo(page, commentId, corrected);
@@ -82,13 +92,14 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await editTo(page, commentId, corrected);
 
-    // The marker only renders from a fresh server render — `visiblyEdited` is
-    // resolved by the loader, not in the browser. freshGoto rather than
-    // reload() because the post page is ISR against the prod target, and the
-    // action's own revalidatePath is not the thing under test here.
+    // This one is a freshGoto for a second reason on top of the header's: the
+    // marker only renders from a fresh server render — `visiblyEdited` is
+    // resolved by the loader, not in the browser — and reload() would leave
+    // the action's own revalidatePath deciding a race that is not the thing
+    // under test here.
     await freshGoto(page, publishedPost.path);
     const marker = card(page, commentId).getByRole("button", { name: /earlier versions/ });
     await expect(marker).toBeVisible();
@@ -117,7 +128,7 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await editTo(page, commentId, corrected);
 
     const facts = await getCommentFacts(commentId);
@@ -142,7 +153,7 @@ test.describe("editing a comment", () => {
     const anonymous = await page.context().browser()!.newContext({ storageState: { cookies: [], origins: [] } });
     const anonymousPage = await anonymous.newPage();
     try {
-      await anonymousPage.goto(publishedPost.path);
+      await freshGoto(anonymousPage, publishedPost.path);
       await expect(visibleText(anonymousPage, original)).toBeVisible();
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Edit" })).toHaveCount(0);
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Reply" })).toBeVisible();
@@ -166,7 +177,7 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await editTo(page, commentId, original);
 
     // The point of the no-op branch: a Save with nothing changed must not

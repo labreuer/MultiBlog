@@ -202,7 +202,10 @@ test.describe("quoting into a comment", () => {
       body: parentText,
       status: "APPROVED",
     });
-    await page.goto(publishedPost.path);
+    // freshGoto: that comment went straight into the database, so the post
+    // page's ISR entry knows nothing about it, and the selection below has
+    // nothing to land in.
+    await freshGoto(page, publishedPost.path);
     // Rich mode, remembered for this context, so the reply form opens rich
     // and the gesture inserts an anchored blockquote with a pending hint.
     await page.getByRole("button", { name: "Rich text" }).click();

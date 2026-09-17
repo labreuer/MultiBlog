@@ -134,7 +134,11 @@ test.describe("comment bodies", () => {
       body: "E2E comment that was already on the page.",
       status: "APPROVED",
     });
-    await page.goto(publishedPost.path);
+    // freshGoto, because that seeded comment is a *precondition* rather than
+    // scenery: served a cached render from before the insert, this test would
+    // still pass and would no longer be testing anything — the stray save it
+    // guards against is only scheduled on a page that has a comment on it.
+    await freshGoto(page, publishedPost.path);
     await page.getByRole("button", { name: "Rich text" }).click();
     const editor = page.getByRole("textbox", { name: "Comment body" });
     await expect(editor).toBeVisible();
