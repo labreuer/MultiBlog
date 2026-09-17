@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState, useSyncExternalStore } from "react";
+import { useActionState, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
@@ -71,9 +71,20 @@ export default function CommentForm(props: Props) {
   const composerKey = draftKey(props);
   const draft = useCommentDraft(composerKey, value, setValue);
 
+  // Once per action result, never once per render. `state` is a new object
+  // only when the action returns, so it is the right identity to key on:
+  // the general form stays mounted after approval (rendering null), the
+  // refresh below re-renders it, and an effect keyed on anything that
+  // changes identity per render — the draft hook's return object did, and a
+  // caller's inline `onPosted` does — re-fires and refreshes again, a full
+  // reload loop at the rate the page can render (seen 2026-09-17, ~7/s).
+  const handled = useRef<SubmitCommentState | null>(null);
+  const { clear } = draft;
   useEffect(() => {
+    if (handled.current === state) return;
+    handled.current = state;
     if (state.status === "APPROVED" || state.status === "PENDING") {
-      draft.clear();
+      clear();
     }
     if (state.status === "APPROVED") {
       onPosted?.();
@@ -82,7 +93,7 @@ export default function CommentForm(props: Props) {
       // manual reload. Same call CommentNode makes after an edit or delete.
       router.refresh();
     }
-  }, [state.status, onPosted, draft, router]);
+  }, [state, onPosted, clear, router]);
 
   if (state.status === "APPROVED") {
     return null;

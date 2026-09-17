@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteCommentDraft,
   loadCommentDraft,
@@ -94,5 +94,8 @@ export function useCommentDraft(
     setValue(valueRef.current.mode === "markdown" ? { mode: "markdown", markdown: "" } : { mode: "rich", json: null });
   }, [clear, setValue]);
 
-  return { restored, discard, clear };
+  // A stable object, so a caller may list it as an effect dependency. A
+  // fresh literal here once re-fired CommentForm's post-approval effect on
+  // every render, and that effect calls `router.refresh()`.
+  return useMemo(() => ({ restored, discard, clear }), [restored, discard, clear]);
 }
