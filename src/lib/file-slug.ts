@@ -2,6 +2,24 @@ import { prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { slugify, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 
+// `client` parameters below are typed as the *base* `Prisma.TransactionClient`
+// alone, as doc-slug.ts and post-slug.ts type theirs, and an extended
+// transaction (`TransactionClient`, the upload route's and restoreFile's) is
+// converted at the boundary by `asBaseTx`. This file once took the union of
+// the two, and `next build`'s type check began refusing it as "excessive
+// stack depth" once the StoredFile and Comment models grew their PLAN.md §23c
+// relation lists: a call through a union of two Prisma clients compares
+// their generated argument types member by member. Nor is the extended
+// client simply assignable to the base one under that checker (plain `tsc
+// --noEmit` accepts both; the limit is sensitive to check order). The cast is
+// honest: both clients expose the same delegate API, and the comment above
+// says why the answer must not depend on which one arrived — the predicate
+// is written out, so the extended client's soft-delete filter has nothing to
+// add or remove here.
+function asBaseTx(tx: TransactionClient | Prisma.TransactionClient): Prisma.TransactionClient {
+  return tx as unknown as Prisma.TransactionClient;
+}
+
 // PLAN.md §19 — file slugs, the same shape doc slugs have (src/lib/doc-slug.ts)
 // with its own uniqueness namespace: a file, a doc and a post may all carry the
 // same slug and resolve to three different URLs, since /pdf/*, /doc/* and the
@@ -29,7 +47,7 @@ import { slugify, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 // — which is how a re-upload became a raw P2002 rather than a `-2`.
 async function fileSlugInUse(
   slug: string,
-  client: Prisma.TransactionClient | TransactionClient = prismaIncludingDeleted,
+  client: Prisma.TransactionClient = prismaIncludingDeleted,
   excludeFileId?: string,
 ): Promise<boolean> {
   const [live, historic] = await Promise.all([
@@ -56,7 +74,7 @@ async function fileSlugInUse(
 /** `base`, or the first `base-N` that no live file and no live redirect holds. */
 async function nextFreeFileSlug(
   base: string,
-  client: Prisma.TransactionClient | TransactionClient,
+  client: Prisma.TransactionClient,
   excludeFileId?: string,
 ): Promise<string> {
   let candidate = base;
@@ -89,7 +107,7 @@ export async function uniqueFileSlug(title: string, excludeFileId?: string): Pro
  * unique index with a raw P2002 instead of becoming `report-2`.
  */
 export async function claimFileSlug(tx: TransactionClient, title: string): Promise<string> {
-  return nextFreeFileSlug(slugify(title, "file"), tx);
+  return nextFreeFileSlug(slugify(title, "file"), asBaseTx(tx));
 }
 
 /**
@@ -101,16 +119,17 @@ export async function claimFileSlug(tx: TransactionClient, title: string): Promi
  * is the one another live file is currently answering on.
  */
 export async function freeFileSlugFor(
-  tx: Prisma.TransactionClient | TransactionClient,
+  tx: TransactionClient | Prisma.TransactionClient,
   fileId: string,
   currentSlug: string,
 ): Promise<string> {
-  if (!(await fileSlugInUse(currentSlug, tx, fileId))) {
+  const client = asBaseTx(tx);
+  if (!(await fileSlugInUse(currentSlug, client, fileId))) {
     return currentSlug;
   }
   // Suffixed from the slug rather than re-derived from the title: a file whose
   // url was edited by hand keeps the url it had, not the one its name implies.
-  return nextFreeFileSlug(currentSlug, tx, fileId);
+  return nextFreeFileSlug(currentSlug, client, fileId);
 }
 
 /**
@@ -123,7 +142,7 @@ export async function freeFileSlugFor(
  * is exactly one row wide, and this is it: the row is a redirect to a file no
  * reader may open, so the live file's claim on the name wins.
  */
-async function clearDeadHistoryRow(tx: Prisma.TransactionClient | TransactionClient, slug: string): Promise<void> {
+async function clearDeadHistoryRow(tx: Prisma.TransactionClient, slug: string): Promise<void> {
   await tx.fileSlugHistory.deleteMany({ where: { slug, file: { deletedByUserId: { not: null } } } });
 }
 

@@ -282,7 +282,14 @@ export default async function LinksPage({
           // [partOrder, id] — removals leave gaps and nothing renumbers,
           // the order every reader of this table uses.
           orderBy: [{ partOrder: "asc" }, { id: "asc" }],
-          select: { docId: true, postId: true, fileId: true, targetAnnotationId: true, quotedText: true },
+          select: {
+            docId: true,
+            postId: true,
+            fileId: true,
+            targetAnnotationId: true,
+            targetCommentId: true,
+            quotedText: true,
+          },
         },
       },
     }),

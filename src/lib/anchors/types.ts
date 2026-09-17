@@ -30,15 +30,21 @@ export type AnchorRange = { from: number; to: number };
 // migration** — one column, one index, one CHECK edit, per anchor table. This
 // union is the other half of that cost, and deliberately so: adding a member
 // here makes every `switch` over it fail to compile until it is handled.
+//
+// `comment` is the fifth member (PLAN.md §23c) — the first paid instance of
+// that cost: one column, one index, one CHECK edit on each of the three
+// anchor tables, and this line, which made every switch below fail to compile
+// until it said what a comment target means there.
 export type AnchorTarget =
   | { kind: "doc"; id: string }
   | { kind: "post"; id: string }
   | { kind: "file"; id: string }
-  | { kind: "annotation"; id: string };
+  | { kind: "annotation"; id: string }
+  | { kind: "comment"; id: string };
 
 export type AnchorTargetKind = AnchorTarget["kind"];
 
-export const ANCHOR_TARGET_KINDS: readonly AnchorTargetKind[] = ["doc", "post", "file", "annotation"];
+export const ANCHOR_TARGET_KINDS: readonly AnchorTargetKind[] = ["doc", "post", "file", "annotation", "comment"];
 
 // The part selector's kind — `null` on a row means the anchor names the
 // *whole* object, which is the only thing PR 1 writes (§20h). Mirrors the

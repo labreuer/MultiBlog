@@ -74,13 +74,15 @@ before changing the behavior it describes.
   thing being removed, not an implementation detail. `resolveAnnotationRanges`
   (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
   jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
-- **One anchor row shape, per-consumer tables.** `tag_anchor` and `anchored_link_anchor`
-  (docs/ANCHORED_LINKS.md — and, from PR 2, `annotation_anchor`) share a column shape by
+- **One anchor row shape, per-consumer tables.** `tag_anchor`, `anchored_link_anchor` and
+  `comment_quote_anchor` (docs/ANCHORED_LINKS.md, PLAN.md §23c — and, from §20's PR 2,
+  `annotation_anchor`) share a column shape by
   *compiler*, not by convention:
   `src/lib/anchors/` holds the target arc as a discriminated union, `parseSelector`, and the
-  capture/resolve pair, and every consumer goes through it. The object side is four nullable
+  capture/resolve pair, and every consumer goes through it. The object side is five nullable
   FKs with exactly one non-null, enforced by a hand-written CHECK — so **a new targetable kind
-  is a migration** (one column, one index, one CHECK edit, per anchor table), which is the
+  is a migration** (one column, one index, one CHECK edit, per anchor table; `comment` was
+  the first paid instance, migration `comment_quote_anchors`), which is the
   cost §20a took on deliberately over an `anchor` table with an owner arc or one W3C-style
   supertable. What is unified is the *envelope*, never the selector: each mechanism keeps its
   own physics, and COLLAB.md's "there is no universal anchor" is unchanged. `src/lib/anchors/`

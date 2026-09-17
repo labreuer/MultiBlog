@@ -88,6 +88,15 @@ async function pathForTarget(target: AnchorTarget): Promise<string | null> {
     }
     case "annotation":
       return null;
+    case "comment": {
+      // A comment's page is its post's (PLAN.md §23c); no chip UI targets a
+      // comment yet, so this is the arm the union demands, not a live path.
+      const comment = await prisma.comment.findUnique({
+        where: { id: target.id },
+        select: { thread: { select: { post: { select: { slug: true, publishedAt: true } } } } },
+      });
+      return comment?.thread.post.publishedAt ? postPath(comment.thread.post) : null;
+    }
   }
 }
 
@@ -304,7 +313,10 @@ export async function untagObject(assignmentId: string): Promise<void> {
     where: { id: assignmentId, deletedAt: null },
     select: {
       userId: true,
-      anchors: { select: { docId: true, postId: true, fileId: true, targetAnnotationId: true }, take: 1 },
+      anchors: {
+        select: { docId: true, postId: true, fileId: true, targetAnnotationId: true, targetCommentId: true },
+        take: 1,
+      },
     },
   });
   if (!assignment) {

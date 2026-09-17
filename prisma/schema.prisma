@@ -357,6 +357,7 @@ model Post {
   slugHistory         PostSlugHistory[]
   tagAnchors          TagAnchor[]            @relation("TagAnchorPost")
   anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorPost")
+  commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorPost")
   activity            PostActivity?
   metrics             PostMetrics?
 
@@ -496,6 +497,7 @@ model PostPublicationEvent {
   // ability to re-derive, not the row that pointed at it.
   tagAnchors          TagAnchor[]          @relation("TagAnchorEvent")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorEvent")
+  commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorEvent")
 
   @@index([postId, createdAt])
   @@map("post_publication_event")
@@ -587,13 +589,19 @@ model Comment {
   deletedByUserId   String?       @map("deleted_by_user_id")
   deletedAt         DateTime?     @map("deleted_at")
 
-  thread          CommentThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  parent          Comment?          @relation("CommentReplies", fields: [parentCommentId], references: [id])
-  replies         Comment[]         @relation("CommentReplies")
-  commenter       Commenter         @relation(fields: [commenterId], references: [id])
-  statusChangedBy User?             @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
-  deletedBy       User?             @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
-  revisions       CommentRevision[]
+  thread              CommentThread        @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  parent              Comment?             @relation("CommentReplies", fields: [parentCommentId], references: [id])
+  replies             Comment[]            @relation("CommentReplies")
+  commenter           Commenter            @relation(fields: [commenterId], references: [id])
+  statusChangedBy     User?                @relation("CommentStatusChangedBy", fields: [statusChangedById], references: [id])
+  deletedBy           User?                @relation("CommentDeletedBy", fields: [deletedByUserId], references: [id])
+  revisions           CommentRevision[]
+  // PLAN.md §23c — the quotations *in* this comment's body, and the anchors
+  // (of any consumer) that name this comment as their target.
+  quoteAnchors        CommentQuoteAnchor[] @relation("CommentQuoteAnchorComment")
+  quotedByAnchors     CommentQuoteAnchor[] @relation("CommentQuoteAnchorTargetComment")
+  tagAnchors          TagAnchor[]          @relation("TagAnchorComment")
+  anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorComment")
 
   // The other half of post_metrics' count path — see CommentThread.postId.
   @@index([threadId])
@@ -632,11 +640,81 @@ model CommentRevision {
   authorUserId String?  @map("author_user_id")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  author  User?   @relation("CommentRevisionAuthor", fields: [authorUserId], references: [id])
+  comment  Comment              @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author   User?                @relation("CommentRevisionAuthor", fields: [authorUserId], references: [id])
+  // PLAN.md §23c/§22b — the quotations pinned to exactly this version. A
+  // non-empty list is what cancels the version's silence (edit-grace.ts).
+  quotedBy CommentQuoteAnchor[]
 
   @@unique([commentId, revisionNo])
   @@map("comment_revision")
+}
+
+// PLAN.md §23c — a quotation inside a comment's body, as a row on §20a's
+// anchor envelope: the third consumer table after tag_anchor and
+// anchored_link_anchor, and the reason the whole ask was affordable.
+//
+// `commentId` is the *quoting* comment (Cascade: a quotation never exists
+// without its comment); the five-way arc names what is quoted, exactly one
+// non-null under the same hand-written CHECK the other two tables carry. The
+// body refers to a row by `anchorId` on a `blockquote` or a `quote` mark and
+// carries the quoted words itself (§23f), so a body renders with no join;
+// this row is the citation and the pin.
+//
+// Three stamps, at most one non-null (CHECK), one per substrate (§23d):
+// `ydocUpdateId` for a doc or annotation body, `anchoredEventId` for a post,
+// `quotedRevisionId` for a comment. A PDF has none — its sha256 is its
+// identity. Three of the five substrates are immutable, so for a post, a
+// comment or a PDF the stored triple is true forever and re-resolution is only
+// ever a display question.
+//
+// `quotedText` is derived server-side against the pinned version, never
+// taken from the client (§12i's rule), and the body's quoted span is
+// rewritten to it (§23f) — `scripts/integrity/check-comment-quotes.ts`
+// verifies the pair once Phase 3 gives this table a writer. Phase 2 ships
+// the shape and the readers with no writer, §20h's pattern.
+model CommentQuoteAnchor {
+  id        String @id @default(cuid())
+  commentId String @map("comment_id")
+  /// Position within the comment's part-set (§20b); readers order by [partOrder, id].
+  partOrder Int    @default(0) @map("part_order")
+
+  // The object arc — exactly one non-null (CHECK in the migration).
+  docId              String? @map("doc_id")
+  postId             String? @map("post_id")
+  fileId             String? @map("file_id")
+  targetAnnotationId String? @map("target_annotation_id")
+  targetCommentId    String? @map("target_comment_id")
+
+  selectorKind SelectorKind? @map("selector_kind")
+  anchorFrom   Int?          @map("anchor_from")
+  anchorTo     Int?          @map("anchor_to")
+  quotedText   String        @default("") @map("quoted_text")
+  selector     Json?
+
+  ydocUpdateId     BigInt? @map("ydoc_update_id")
+  anchoredEventId  String? @map("anchored_event_id")
+  quotedRevisionId String? @map("quoted_revision_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  comment          Comment               @relation("CommentQuoteAnchorComment", fields: [commentId], references: [id], onDelete: Cascade)
+  doc              Doc?                  @relation("CommentQuoteAnchorDoc", fields: [docId], references: [id], onDelete: Cascade)
+  post             Post?                 @relation("CommentQuoteAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
+  file             StoredFile?           @relation("CommentQuoteAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
+  targetAnnotation Annotation?           @relation("CommentQuoteAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
+  targetComment    Comment?              @relation("CommentQuoteAnchorTargetComment", fields: [targetCommentId], references: [id], onDelete: Cascade)
+  anchoredEvent    PostPublicationEvent? @relation("CommentQuoteAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
+  quotedRevision   CommentRevision?      @relation(fields: [quotedRevisionId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([docId])
+  @@index([postId])
+  @@index([fileId])
+  @@index([targetAnnotationId])
+  @@index([targetCommentId])
+  @@index([quotedRevisionId])
+  @@map("comment_quote_anchor")
 }
 
 // A living document — PLAN.md §12 — read as its current Yjs state (Doc ↔
@@ -701,6 +779,7 @@ model Doc {
   metrics             DocMetrics?
   tagAnchors          TagAnchor[]            @relation("TagAnchorDoc")
   anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorDoc")
+  commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
 
   @@map("doc")
 }
@@ -947,6 +1026,7 @@ model Annotation {
   // until PR 2 moves them onto `annotation_anchor` (§20e).
   tagAnchors          TagAnchor[]          @relation("TagAnchorAnnotation")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorAnnotation")
+  commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorAnnotation")
 
   @@index([docId])
   @@index([fileId])
@@ -1091,6 +1171,7 @@ model StoredFile {
   metrics             FileMetrics?
   tagAnchors          TagAnchor[]          @relation("TagAnchorFile")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorFile")
+  commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorFile")
   updatedBy           User?                @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
   deletedBy           User?                @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
 
@@ -1302,6 +1383,11 @@ model TagAnchor {
   postId             String? @map("post_id")
   fileId             String? @map("file_id")
   targetAnnotationId String? @map("target_annotation_id")
+  // PLAN.md §23c — the fifth arc leg, added for comment_quote_anchor and
+  // landing here too because the three tables share a shape by *compiler*
+  // (CLAUDE.md's "one anchor row shape"): unused on this table, and the CHECK
+  // counts it all the same.
+  targetCommentId    String? @map("target_comment_id")
 
   // The part selector — **all null means the whole object**, which is every
   // row PR 1 writes. A second hand-written CHECK keeps them null *together*:
@@ -1352,6 +1438,7 @@ model TagAnchor {
   post             Post?                 @relation("TagAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
   file             StoredFile?           @relation("TagAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
   targetAnnotation Annotation?           @relation("TagAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
+  targetComment    Comment?              @relation("TagAnchorComment", fields: [targetCommentId], references: [id], onDelete: Cascade)
   anchoredEvent    PostPublicationEvent? @relation("TagAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
 
   @@index([assignmentId])
@@ -1359,6 +1446,7 @@ model TagAnchor {
   @@index([postId])
   @@index([fileId])
   @@index([targetAnnotationId])
+  @@index([targetCommentId])
   @@map("tag_anchor")
 }
 
@@ -1475,6 +1563,8 @@ model AnchoredLinkAnchor {
   postId             String? @map("post_id")
   fileId             String? @map("file_id")
   targetAnnotationId String? @map("target_annotation_id")
+  // PLAN.md §23c — shared-shape leg, inert here (see TagAnchor's).
+  targetCommentId    String? @map("target_comment_id")
 
   selectorKind SelectorKind? @map("selector_kind")
   anchorFrom   Int?          @map("anchor_from")
@@ -1494,6 +1584,7 @@ model AnchoredLinkAnchor {
   post             Post?                 @relation("AnchoredLinkAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
   file             StoredFile?           @relation("AnchoredLinkAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
   targetAnnotation Annotation?           @relation("AnchoredLinkAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
+  targetComment    Comment?              @relation("AnchoredLinkAnchorComment", fields: [targetCommentId], references: [id], onDelete: Cascade)
   anchoredEvent    PostPublicationEvent? @relation("AnchoredLinkAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
 
   @@index([linkId])
@@ -1501,6 +1592,7 @@ model AnchoredLinkAnchor {
   @@index([postId])
   @@index([fileId])
   @@index([targetAnnotationId])
+  @@index([targetCommentId])
   @@map("anchored_link_anchor")
 }
 

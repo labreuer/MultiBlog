@@ -26,6 +26,7 @@ import {
   type CommentBodyValue,
 } from "@/lib/comment-body-value";
 import type { JSONContent } from "@tiptap/core";
+import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
 import styles from "./CommentNode.module.css";
 
 export type CommentNodeData = {
@@ -35,6 +36,8 @@ export type CommentNodeData = {
   // the same words plain, for the fallback and for anything text-shaped.
   body: unknown;
   bodyText: string;
+  // PLAN.md §23h — resolved server-side by the loader; keyed by anchor id.
+  citations: CommentQuoteCitations;
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
@@ -229,7 +232,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
               </span>
             </div>
           ) : (
-            <CommentBody body={body} bodyText={bodyText} />
+            <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
           )}
           {comment.visiblyEdited && (
             <p className={styles.historyLine}>
@@ -237,7 +240,9 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
                 what="comment"
                 editedAt={comment.editedAt}
                 load={() => getCommentHistory(comment.id)}
-                renderBody={(version: CommentVersion) => <CommentBody body={version.body} bodyText={version.bodyText} />}
+                renderBody={(version: CommentVersion) => (
+                  <CommentBody body={version.body} bodyText={version.bodyText} citations={comment.citations} />
+                )}
               />
             </p>
           )}

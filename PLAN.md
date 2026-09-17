@@ -8872,6 +8872,16 @@ because the alternative is three tables that no longer share a shape and a compi
 cannot hold them to one. `AnchorTarget` gains a `comment` member, and every `switch` over it
 fails to compile until handled — which is the other half of the price, working as intended.
 
+**As built (Phase 2, 2026-09-16).** Migration `comment_quote_anchors`: the table above with
+three hand-written CHECKs (one target of five, selector columns all-or-nothing, at most one
+stamp), and the fifth column with its index and rewritten one-target CHECK on the two
+existing tables. Adding the member to `AnchorTarget` made eleven call sites fail to compile —
+every select feeding `targetFromColumns`, the two `switch`es (`canUserTagTarget`,
+`pathForTarget`), the anchored-link action's refusal list, the tag script's resolver — and
+each now says what a comment target means there. `canUserReadComment`
+(`src/lib/comment-authz.ts`) is the read predicate the `comment` arm wears, shared with the
+comment actions. No writer exists yet; `check-tag-constraints.ts` probes the new CHECKs.
+
 **Why the anchor is outside the body**, when an annotation's is a mark *inside* its document:
 §14a's argument, unchanged. A mark lives in exactly one document; a quotation joins a comment
 to a *different* object, and no single document can hold that. The body carries an `anchorId`
@@ -8945,7 +8955,8 @@ What that admits, and what it refuses:
 | A doc, `PRIVATE` or `SHARED` | ❌ — there is no public doc tier at all (§12e) |
 | An annotation body | ❌ — it lives on a doc or a file, and inherits the above |
 
-`canQuoteTargetInto(target, host)` in `src/lib/comment-quote-authz.ts`, and it is **load-bearing
+`canQuoteTargetInto(target, host)` in `src/lib/comment-quote-authz.ts` (built in Phase 2, ahead
+of its first caller, because the citation render below filters by it), and it is **load-bearing
 rather than belt-and-braces** — the §20m precedent, where a second narrower check earns its
 place by asking a genuinely different question from the page's own gate. It runs at post time,
 on the server, against the resolved target; the composer's picker filters by the same predicate
@@ -9077,6 +9088,16 @@ additive.
 render as well as at write, since a target can stop being public after the fact. An edited
 target is worth saying so about: when a comment quote's pinned revision is not the newest, the
 citation reads "quoted an earlier version", which is §22d's link surviving into the new design.
+
+*As built (Phase 2):* `src/lib/comment-quote-data.ts` — `loadCommentQuoteCitations` is one
+query for every comment on a page, keyed by quoting comment then by anchor id; `CommentBody`
+takes the map and renders a `<footer>` citation under an anchored blockquote and wraps an
+anchored `<q>` in the link, via the static renderer's `nodeMapping`/`markMapping`. A comment
+target's href is the post path plus the comment's permalink fragment
+(`commentAnchorName`, extracted from `CommentNode` so the two cannot drift). A row whose target
+is no longer public renders "a source that is no longer available" with no link. The
+`quotedBy` clause of §22b's grace rule is wired in both loaders — a version a row pins is never
+silent — and answers `false` for every row today, since nothing writes one.
 
 ### 23i. What the §22 work becomes
 

@@ -118,7 +118,11 @@ at all, so its findings are never downstream of a bad blob.
 Every other script here verifies **stored data**. This one verifies the **schema**: that
 `add_tags`' two hand-written CHECK constraints and its `lower(name)` unique index actually
 reject what their comments claim, by attempting each violation inside a transaction it always
-rolls back.
+rolls back. It has grown with every anchor table since: `add_anchored_links`' CHECKs and
+partial index, and `comment_quote_anchors`' three CHECKs (PLAN.md §23c) plus the one probe
+that matters most there — a `tag_anchor` with both a doc and a comment target must be refused,
+which proves the rewritten one-target CHECK *counts* the fifth arc column rather than merely
+tolerating it.
 
 It exists because nothing else can reach them. `npx tsc --noEmit` sees TypeScript, and every
 violation is well-typed. `npm run e2e` drives the UI, and the UI never attempts one — the

@@ -477,7 +477,7 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
       thread: { select: { post: { select: { id: true } } } },
       revisions: {
         orderBy: { revisionNo: "asc" },
-        include: { author: { select: { name: true, email: true } } },
+        include: { author: { select: { name: true, email: true } }, quotedBy: { select: { id: true }, take: 1 } },
       },
     },
   });
@@ -494,10 +494,9 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
     return [];
   }
 
-  // `quoted` is always false until something exists that can point at a
-  // comment revision. Written as a call rather than a literal so the one line
-  // to change is here.
-  const versions = withSupersededAt(comment.revisions, () => false);
+  // §22b's other clause: a version a comment_quote_anchor pins is never
+  // silent, so the reader of the quote has something to find.
+  const versions = withSupersededAt(comment.revisions, (revision) => revision.quotedBy.length > 0);
   const visible = visibleVersions(versions, comment.createdAt);
   const newestNo = versions[versions.length - 1]?.revisionNo;
 

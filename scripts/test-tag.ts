@@ -65,7 +65,7 @@ async function tagByRef(ref: string) {
 async function resolveTarget(kindInput: string, ref: string): Promise<AnchorTarget> {
   const kind = parseAnchorTargetKind(kindInput);
   if (!kind) {
-    throw new Error(`"${kindInput}" is not a target kind — use doc, post, file or annotation.`);
+    throw new Error(`"${kindInput}" is not a target kind — use doc, post, file, annotation or comment.`);
   }
   switch (kind) {
     case "doc": {
@@ -90,6 +90,12 @@ async function resolveTarget(kindInput: string, ref: string): Promise<AnchorTarg
       // No slug to fall back on — an annotation is only ever addressed by id.
       const row = await prisma.annotation.findUnique({ where: { id: ref }, select: { id: true } });
       if (!row) throw new Error(`No annotation with id "${ref}".`);
+      return { kind, id: row.id };
+    }
+    case "comment": {
+      // Id only, like an annotation (PLAN.md §23c's fifth arc leg).
+      const row = await prisma.comment.findUnique({ where: { id: ref }, select: { id: true } });
+      if (!row) throw new Error(`No comment with id "${ref}".`);
       return { kind, id: row.id };
     }
   }

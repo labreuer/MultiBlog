@@ -402,6 +402,40 @@ while the record of who applied it to what survives for a restore to bring back.
 *object* instead cascades its anchors away outright — an anchor pointing at a deleted doc is
 unreachable, not merely stale.
 
+## Quoting into a comment (PLAN.md §23e)
+
+Every other gate in this file asks *may this viewer read X*. A quotation needs a different
+question, because it copies the quoted words into a comment body that renders to everyone who
+can see the comment:
+
+> **You may quote into a comment only what everyone who can see that comment may already
+> read.**
+
+Not "what the quoter may read". The gate is on the **host surface's audience**, and today the
+only host is a published post's comment thread, whose audience is the public — so the rule is
+"is the target public", asked of the resolved target by `canQuoteTargetInto` in
+`src/lib/comment-quote-authz.ts`, at post time and again at render (a target can stop being
+public after it was quoted; the words stay, the citation degrades).
+
+| Target | Admitted into a public post's comments? |
+|---|---|
+| The host post; any other **published** post | ✅ |
+| A comment that is `APPROVED` and not deleted, on a published post | ✅ |
+| A `PENDING` or `SPAM` or deleted comment | ❌ — not public yet, or no longer |
+| A `StoredFile` | ❌ until §19 grows a publicly-readable tier |
+| A doc, `PRIVATE` or `SHARED` | ❌ — there is no public doc tier (§12e) |
+| An annotation body | ❌ — it lives on a doc or a file, and inherits the above |
+
+Two consequences. The doc, file and annotation arms of `comment_quote_anchor`'s arc have no
+writer — the columns exist because the envelope is shared, the gate keeps them empty. And
+**anonymous commenters may quote**: the audience rule makes a leak structurally impossible,
+and the existing rate limit and moderation cascade govern abuse.
+
+**A comment as an anchor *target*** (the fifth arc leg, on all three anchor tables) reads by
+`canUserReadComment` in `src/lib/comment-authz.ts`: public when `APPROVED`, undeleted and on a
+live post; otherwise its own author's and the post's moderators'. `canUserTagTarget` wears it
+for the `comment` arm; nothing tags a comment yet.
+
 ## Anchored links (docs/ANCHORED_LINKS.md)
 
 **A link is one person's act of pointing, and pointing claims nothing about the target.**
