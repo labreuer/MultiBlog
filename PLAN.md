@@ -9156,8 +9156,9 @@ is parked rather than merged.
 
 - **§22d's four columns on `comment`** (`quoted_revision_id`, `quote_from`, `quote_to`,
   `quoted_text`), the `comment_quote_all_or_nothing_check` and `comment_quote_range_check`
-  constraints, and the partial index. Replaced by §23c's table. Phase 2's migration drops them;
-  they were never merged, so nothing has ever depended on them.
+  constraints, and the partial index. Replaced by §23c's table. They never reached this branch
+  (§23l), so Phase 2's migration had nothing to drop, and the two string helpers below never
+  came back either.
 - **`src/lib/text-quote.ts` and `src/lib/text-selection-offsets.ts`**, with their unit tests.
   Both exist because a comment body was a plain string: one re-finds a quote in a string, the
   other turns a DOM selection into string offsets. A ProseMirror document answers both questions
@@ -9297,6 +9298,12 @@ likely to be wanted verbatim are `src/lib/edit-grace.ts` with its unit tests, wh
 change at all, and §22e's annotation edit sessions, which §23 does not touch either. Both are in
 the first commit, which also carries §22c — so a cherry-pick brings comment revisions along, and
 §23's Phase 1 would then be a migration of `body` rather than a new table.
+
+**Done, 2026-09-16, as §23j's Phase 0**: the first commit was cherry-picked onto this branch
+(`e2d3a15`), its two migrations applied, and Phase 1's migration was indeed a rewrite of `body`
+across `comment` and `comment_revision`. The other two commits stay on the reference branch as
+the record of the design §23 replaced; nothing on this branch depends on them, and the branch
+can be deleted whenever that record stops being worth keeping.
 
 ### 23m. The Markdown front door
 

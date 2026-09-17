@@ -1040,6 +1040,28 @@ inherit the weaker text-search repair — they are the case where the strong ver
 affordable, and where the version stamp already stored on every row starts earning its keep
 instead of only recording intent.
 
+## 2026-09-16 — Comment quotations, built (PLAN.md §23)
+
+The same day as the entry below, and the ninth strategy: [§9](#9-comment-quotations--text-search-into-an-immutable-target-verified).
+A comment quotes a passage of the post, of any comment on the page, or of a post or comment
+elsewhere, and the row pins an immutable version. Two things this file's earlier entries
+predicted came true and one they refused came back under a condition:
+
+- **"There is no universal anchor" held again.** The envelope is §20a's, the selector is
+  `DOC_RANGE` for a post or a comment and `PDF_TEXT` for a file, and the stamps differ per
+  substrate (§23d). Nothing was unified but the row shape.
+- **Immutable targets made offsets trivial, as §1 always said**, and made the interesting question
+  "does the passage also still appear in the current version" — a display question, answered by
+  the citation line ("quoted an earlier version") rather than by re-anchoring.
+- **The flatten-and-map search §4 rejected is used**, on the condition §9 states: the target
+  never moves, the search runs once at post time, every hit is verified against `quotedTextAt`,
+  and the stored text is derived from the verified range rather than taken from the query. A
+  flattening mistake is a missed match, never a wrong anchor. Don't lift it into a live surface.
+
+Not built, recorded in PLAN.md §23k/§23n: the article does not highlight comment quotations of
+it, and a quoted comment's card does not highlight the quoted span — both static renders with
+no decoration layer; the citation link is the connection.
+
 ## 2026-09-16 — Mutable bodies, built (PLAN.md §22)
 
 The 2026-08-13 entry below asked what changes if annotation bodies become mutable, and answered:
