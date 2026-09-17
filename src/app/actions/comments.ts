@@ -21,9 +21,14 @@ import { resolveCommentBody } from "@/lib/comment-body-resolve";
 import type { CommentBodyInput } from "@/lib/comment-body-value";
 import { commentContentToMarkdown } from "@/lib/markdown-import";
 import { docsEqual } from "@/lib/diff";
+import { commentAnchorName } from "@/lib/comment-anchor-name";
 import { captureCommentQuotes, type CommentQuoteAnchorInput } from "@/lib/comment-quote-capture";
 import { parsePendingQuoteHints } from "@/lib/comment-quote-pending";
 import { targetFromColumns, targetToColumns } from "@/lib/anchors";
+import { publishedPostWhere } from "@/lib/post-status";
+import { postPath } from "@/lib/post-path";
+import { extractText } from "@/lib/diff";
+import { canQuoteTargetInto } from "@/lib/comment-quote-authz";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -670,4 +675,93 @@ export async function bulkRestoreComments(commentIds: string[]): Promise<BulkRes
   const { failed, fulfilled } = await settleBulk(commentIds, (id) => restoreOne(userId, role, id));
   revalidateTouchedPosts(fulfilled);
   return { failed };
+}
+
+// PLAN.md §23h (Phase 4) — the off-page picker's two halves. Both are
+// public reads: the audience rule (§23e) is that a quotation may carry only
+// what everyone can already read, so the picker offers only published posts
+// and public comments, and needs no session.
+
+export type QuotableTargetHit =
+  | { kind: "post"; id: string; title: string; path: string; excerpt: string }
+  | { kind: "comment"; id: string; author: string; postTitle: string; path: string; excerpt: string };
+
+const PICKER_LIMIT = 8;
+
+/** Published posts by title or body, and public comments by body, matching `query`. */
+export async function searchQuotableTargets(query: string, excludePostId?: string): Promise<QuotableTargetHit[]> {
+  const needle = query.trim().slice(0, 200).toLowerCase();
+  if (!needle) return [];
+
+  // The same hobby-scale substring search /search runs (§9): no index, a
+  // published-post count this site is built for.
+  const posts = await prisma.post.findMany({
+    where: publishedPostWhere(),
+    orderBy: { publishedAt: "desc" },
+    select: { id: true, title: true, slug: true, publishedAt: true, proseJson: true },
+  });
+  const postHits: QuotableTargetHit[] = [];
+  for (const post of posts) {
+    if (post.id === excludePostId) continue;
+    const text = post.proseJson ? extractText(post.proseJson) : "";
+    if (!post.title.toLowerCase().includes(needle) && !text.toLowerCase().includes(needle)) continue;
+    postHits.push({ kind: "post", id: post.id, title: post.title, path: postPath(post), excerpt: text.slice(0, 140) });
+    if (postHits.length >= PICKER_LIMIT) break;
+  }
+
+  const comments = await prisma.comment.findMany({
+    where: {
+      status: "APPROVED",
+      deletedAt: null,
+      bodyText: { contains: needle, mode: "insensitive" },
+      thread: { post: { ...publishedPostWhere(), ...(excludePostId ? { id: { not: excludePostId } } : {}) } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: PICKER_LIMIT,
+    select: {
+      id: true,
+      bodyText: true,
+      createdAt: true,
+      commenter: { select: { displayName: true } },
+      thread: { select: { post: { select: { title: true, slug: true, publishedAt: true } } } },
+    },
+  });
+  const commentHits: QuotableTargetHit[] = comments.map((comment) => ({
+    kind: "comment",
+    id: comment.id,
+    author: comment.commenter.displayName,
+    postTitle: comment.thread.post.title,
+    path: `${postPath(comment.thread.post)}#${commentAnchorName(comment.commenter.displayName, comment.createdAt)}`,
+    excerpt: comment.bodyText.slice(0, 140),
+  }));
+
+  return [...postHits, ...commentHits];
+}
+
+export type QuotableTargetBody = {
+  kind: "post" | "comment";
+  id: string;
+  label: string;
+  /** ProseMirror JSON over the post schema (a post) or the comment schema (a comment). */
+  body: JSONContent;
+};
+
+/** One target's body for the picker's passage selection, or null if it is not public. */
+export async function loadQuotableTarget(kind: "post" | "comment", id: string): Promise<QuotableTargetBody | null> {
+  if (typeof id !== "string" || !id) return null;
+  if (!(await canQuoteTargetInto({ kind, id }, { kind: "post-comments", postId: "" }))) return null;
+  if (kind === "post") {
+    const post = await prisma.post.findUnique({
+      where: { id },
+      select: { title: true, publishEvent: { select: { proseJson: true } } },
+    });
+    if (!post?.publishEvent?.proseJson) return null;
+    return { kind, id, label: post.title, body: post.publishEvent.proseJson as JSONContent };
+  }
+  const comment = await prisma.comment.findUnique({
+    where: { id },
+    select: { body: true, commenter: { select: { displayName: true } } },
+  });
+  if (!comment) return null;
+  return { kind, id, label: `${comment.commenter.displayName}'s comment`, body: comment.body as JSONContent };
 }

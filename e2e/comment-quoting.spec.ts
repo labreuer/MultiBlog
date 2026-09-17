@@ -1,6 +1,15 @@
 import type { Page } from "@playwright/test";
 import { test, expect, freshGoto, selectTextInBody } from "./fixtures";
-import { ADMIN_EMAIL, createComment, createCommentWithQuotes, getCommentFacts, getCommentQuoteFacts, uniqueEmail } from "./db";
+import {
+  ADMIN_EMAIL,
+  createComment,
+  createCommentWithQuotes,
+  createTestPost,
+  deleteTestPost,
+  getCommentFacts,
+  getCommentQuoteFacts,
+  uniqueEmail,
+} from "./db";
 
 // PLAN.md §23n / §23f / §23h — a comment quoting what is on the page.
 //
@@ -253,5 +262,104 @@ test.describe("quoting into a comment", () => {
     expect(facts[0].targetKind).toBe("comment");
     expect(facts[0].targetId).toBe(parentId);
     expect(facts[0].quotedText).toBe("offer to quote it");
+  });
+});
+
+// PLAN.md §23h, Phase 4 — quoting what is *not* on the page. The picker
+// searches published posts and public comments, shows the chosen body for a
+// passage selection, and hands the composer a quote with the target named;
+// the server loads that target as a match candidate because the hint says
+// to, and nothing else on the page would have found it.
+test.describe("quoting from elsewhere", () => {
+  const OTHER_BODY = "An entirely separate article about migratory birds and their long journeys south.";
+
+  test("a seeded quote of another post resolves through its hint and cites that post", async ({
+    page,
+    publishedPost,
+  }) => {
+    const other = await createTestPost({ authorEmail: ADMIN_EMAIL, bodyText: OTHER_BODY, publish: true });
+    try {
+      const { id } = await createCommentWithQuotes({
+        postId: publishedPost.id,
+        email: uniqueEmail("quoter"),
+        displayName: "Quoter",
+        markdown: `> migratory birds and their long journeys south\n\nFrom the other piece.`,
+        pending: [{ target: { kind: "post", id: other.id }, text: "migratory birds and their long journeys south" }],
+      });
+      await freshGoto(page, publishedPost.path);
+      const quote = card(page, id).locator("blockquote[data-anchor-id]");
+      await expect(quote).toContainText("migratory birds");
+      await expect(quote.locator("footer a")).toHaveAttribute("href", other.path!);
+      await expect(quote.locator("footer")).toContainText(other.title);
+      const facts = await getCommentQuoteFacts(id);
+      expect(facts[0].targetKind).toBe("post");
+      expect(facts[0].targetId).toBe(other.id);
+    } finally {
+      await deleteTestPost(other.id);
+    }
+  });
+
+  test("without the hint, the same quote matches nothing on the page", async ({ page, publishedPost }) => {
+    const other = await createTestPost({ authorEmail: ADMIN_EMAIL, bodyText: OTHER_BODY, publish: true });
+    try {
+      const { id } = await createCommentWithQuotes({
+        postId: publishedPost.id,
+        email: uniqueEmail("quoter"),
+        displayName: "Quoter",
+        markdown: `> migratory birds and their long journeys south\n\nFrom the other piece.`,
+      });
+      await freshGoto(page, publishedPost.path);
+      await expect(card(page, id).locator("blockquote")).toContainText("migratory birds");
+      expect(await getCommentQuoteFacts(id)).toHaveLength(0);
+    } finally {
+      await deleteTestPost(other.id);
+    }
+  });
+
+  test("the picker finds another post, and a selection in it lands in the box with the target named", async ({
+    page,
+    publishedPost,
+  }) => {
+    const other = await createTestPost({ authorEmail: ADMIN_EMAIL, bodyText: OTHER_BODY, publish: true });
+    try {
+      await page.goto(publishedPost.path);
+      await page.getByRole("button", { name: "Quote from elsewhere…" }).click();
+      const picker = page.getByTestId("quote-picker");
+      await picker.getByRole("searchbox", { name: "Search for something to quote" }).fill("migratory birds");
+      await picker.getByRole("button", { name: other.title }).click();
+      const body = page.getByTestId("quote-picker-body");
+      await expect(body).toContainText("migratory birds");
+
+      await page.evaluate((needle) => {
+        const root = document.querySelector('[data-testid="quote-picker-body"]');
+        if (!root) throw new Error("no picker body");
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const index = node.textContent?.indexOf(needle) ?? -1;
+          if (index === -1) continue;
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + needle.length);
+          const selection = window.getSelection()!;
+          selection.removeAllRanges();
+          selection.addRange(range);
+          document.dispatchEvent(new Event("selectionchange"));
+          document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+          return;
+        }
+        throw new Error("needle not found");
+      }, "long journeys south");
+      const quoteButton = picker.getByRole("button", { name: "Quote selection" });
+      await expect(quoteButton).toBeEnabled();
+      await quoteButton.click();
+
+      await expect(picker).toHaveCount(0);
+      await expect(page.getByRole("textbox", { name: "Comment body" })).toHaveValue(/^> long journeys south\n\n$/);
+      const pending = await page.locator('input[name="pendingQuotes"]').inputValue();
+      expect(JSON.parse(pending)).toEqual([{ id: null, target: { kind: "post", id: other.id }, text: "long journeys south" }]);
+    } finally {
+      await deleteTestPost(other.id);
+    }
   });
 });

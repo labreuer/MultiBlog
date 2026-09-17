@@ -138,11 +138,18 @@ const COMMENT_CANDIDATE_SELECT = {
 /**
  * The candidates for one submission, in §23n's priority order: the parent
  * comment, the host post, then the page's other public comments newest
- * first. A pinned version an existing row or a hint names comes ahead of
- * its newest. Every comment candidate is on this post and public; the host
- * post is published, or it would not be accepting comments.
+ * first. A pinned version an existing row names comes ahead of its newest,
+ * and a target a hint names — the off-page picker's post or comment (Phase
+ * 4), which is nowhere in the page's own set — comes right after those,
+ * gated by §23e exactly as an on-page candidate is (published, or public).
+ * Every comment candidate is public; the host post is published, or it
+ * would not be accepting comments.
  */
-async function loadCandidates(host: CommentQuoteHost, existing: ExistingQuoteAnchor[]): Promise<Candidate[]> {
+async function loadCandidates(
+  host: CommentQuoteHost,
+  existing: ExistingQuoteAnchor[],
+  hints: PendingQuoteHint[],
+): Promise<Candidate[]> {
   const ordered: Candidate[] = [];
   const seen = new Set<string>();
   const push = (candidate: Candidate | null) => {
@@ -174,6 +181,20 @@ async function loadCandidates(host: CommentQuoteHost, existing: ExistingQuoteAnc
         select: { id: true, proseJson: true },
       });
       push(candidateFromEvent(host.postId, event, host.threadAnchorFrom, true));
+    }
+  }
+
+  // Hinted targets, wherever they are — §23e is the load itself.
+  for (const hint of hints) {
+    if (hint.target.kind === "post" && hint.target.id !== host.postId) {
+      const other = await prisma.post.findUnique({
+        where: { id: hint.target.id },
+        select: { id: true, publishedAt: true, publishEvent: { select: { id: true, proseJson: true } } },
+      });
+      if (other?.publishedAt && other.publishedAt <= new Date()) push(candidateFromEvent(other.id, other.publishEvent, null));
+    } else if (hint.target.kind === "comment") {
+      const other = await prisma.comment.findUnique({ where: { id: hint.target.id }, select: COMMENT_CANDIDATE_SELECT });
+      if (other && isCommentPublic(other)) push(candidateFromComment(other));
     }
   }
 
@@ -221,8 +242,8 @@ export async function captureCommentQuotes(opts: {
     return unchanged();
   }
 
-  const targets = await loadCandidates(host, existing);
-  const hintsById = new Map(hints.map((hint) => [hint.id, hint]));
+  const targets = await loadCandidates(host, existing, hints);
+  const hintsById = new Map(hints.filter((hint) => hint.id !== null).map((hint) => [hint.id, hint]));
   const existingById = new Map(existing.map((row) => [row.id, row]));
 
   const resolutions: QuoteResolution[] = [];

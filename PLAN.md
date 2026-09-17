@@ -8740,9 +8740,9 @@ Two additions the plan did not name, both small and both load-bearing:
 
 **Planned 2026-09-16 on `annotations-and-comments`, replacing §22d before it was merged.
 Amended the same day, before any of it was built, for a plain-Markdown front door (§23m) and
-the text-matching it needs (§23n); the amendments are marked where they land. Phases 0 to 3
+the text-matching it needs (§23n); the amendments are marked where they land. Phases 0 to 4
 of §23j built the same day — the "as built" paragraphs in §23c, §23h, §23m and §23n are the
-account; Phases 4 and 5 are not built.**
+account; Phase 5's gate is shut by construction (§23k).**
 §22d built a quotation as four columns on the reply and a blockquote above its body: one
 quotation, of the parent comment, outside the reply's text. The ask that arrived after it was
 built is larger in every dimension, and the difference is not a refinement — it is a different
@@ -9095,6 +9095,19 @@ object. §14's doc-link picker and the `[[` doc-ref menu are the precedents. Thi
 the largest UI item in the section; Phases 1 to 3 are deliberately shaped so that it is
 additive.
 
+*As built (Phase 4, 2026-09-16):* `CommentQuotePicker`, a panel under the composer ("Quote from
+elsewhere…" at the end of the mode row) rather than a floating menu — a body to select text in
+needs room a menu does not have. `searchQuotableTargets` runs /search's hobby-scale substring
+search over published posts plus a `body_text` search over public comments, both without a
+session, since §23e's admitted set *is* the public set; `loadQuotableTarget` returns the chosen
+body, gated by `canQuoteTargetInto`, and the panel renders it statically for a selection.
+"Quote selection" hands the composer a request naming the target, and that is the part that
+matters: the server cannot find an off-page target by text alone, so the hint is what makes it
+a candidate — `loadCandidates` loads every hinted post or comment, gated exactly as an on-page
+one. **A hint may be unbound** (`id: null`): the Markdown box has no placeholder ids, so its
+hints name a target to search without saying which `> ` block is which, and the matcher sorts
+that out. Unbound hints ride in the Markdown value and its draft too.
+
 **The citation line** is resolved server-side per anchor row —
 `describeQuoteTarget(anchor)` returning a label and an href, filtered by §23e's predicate at
 render as well as at write, since a target can stop being public after the fact. An edited
@@ -9179,7 +9192,7 @@ is parked rather than merged.
    shared by both front doors with the rich mode's selection as an optional hint; the audience gate, the server-side derive-and-rewrite, inline and block, the highlight in the
    quoted comment, and the "quoted an earlier version" degradation. This is the phase that makes
    the feature real, and it reuses §5 and §22d's gestures.
-4. **Quoting what is not on the page.** Another published post, a comment on another post: the
+4. **Quoting what is not on the page** (built). Another published post, a comment on another post: the
    picker, and the same gate and capture path.
 5. **PDFs, behind the tier they need.** `PDF_TEXT` parts via `capturePdfTextAnchor`, which
    already writes `tag_anchor`'s PDF parts; the gate refuses every file until §19 grows a

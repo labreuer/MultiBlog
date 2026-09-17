@@ -49,6 +49,11 @@
   cursor: default;
 }
 
+/* The picker's opener sits at the row's far end, away from the two modes. */
+.pickerButton {
+  margin-left: auto;
+}
+
 .modeNote {
   color: var(--text-muted);
   font-style: italic;

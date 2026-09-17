@@ -15,6 +15,7 @@ import {
   type CommentBodyValue,
 } from "@/lib/comment-body-value";
 import CommentEditor from "./CommentEditor";
+import CommentQuotePicker from "./CommentQuotePicker";
 import styles from "./CommentBodyInput.module.css";
 
 type Props = {
@@ -67,6 +68,8 @@ export default function CommentBodyInput({
 }: Props) {
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [switching, startSwitch] = useTransition();
+  // PLAN.md §23h (Phase 4) — the off-page picker, a panel under this composer.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const quoteContext = useCommentQuote();
   const editorRef = useRef<Editor | null>(null);
   // A quote delivered to a rich composer whose editor has not been created
@@ -93,9 +96,15 @@ export default function CommentBodyInput({
     const current = valueRef.current;
     if (current.mode === "markdown") {
       const existing = current.markdown.replace(/\s+$/, "");
+      // An *unbound* hint: the box has no ids to bind one to, but the
+      // matcher must still be told which target to load when it is not on
+      // the page (the picker's). For an on-page target it merely repeats a
+      // candidate the capture already has.
+      const hint: PendingQuoteHint = { id: null, target: request.target, text: request.text };
       onChangeRef.current({
         mode: "markdown",
         markdown: `${existing ? `${existing}\n\n` : ""}${markdownQuote(request.text)}\n\n`,
+        pending: [...(current.pending ?? []), hint],
       });
       return;
     }
@@ -228,7 +237,20 @@ export default function CommentBodyInput({
         </button>
         {switching && <span className={styles.modeNote}>Converting…</span>}
         {switchError && <span className={styles.modeError}>{switchError}</span>}
+        {quoteContext && composerKey && !pickerOpen && (
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            disabled={disabled}
+            className={`${styles.modeButton} ${styles.pickerButton}`}
+          >
+            Quote from elsewhere…
+          </button>
+        )}
       </div>
+      {pickerOpen && quoteContext && (
+        <CommentQuotePicker hostPostId={quoteContext.postId} onQuote={insertQuote} onClose={() => setPickerOpen(false)} />
+      )}
     </div>
   );
 }

@@ -12,8 +12,14 @@ export const PENDING_ANCHOR_PREFIX = "pending:";
 export type PendingQuoteTarget = { kind: "post" | "comment"; id: string };
 
 export type PendingQuoteHint = {
-  /** The placeholder in the body: `pending:<random>`. */
-  id: string;
+  /**
+   * The placeholder in the body: `pending:<random>` — or null for an
+   * *unbound* hint, which names a target to search without saying which
+   * span it belongs to. The Markdown box has no ids to bind to, and the
+   * off-page picker (PLAN.md §23h, Phase 4) must still tell the matcher
+   * which post or comment to load, since it is not on the page.
+   */
+  id: string | null;
   target: PendingQuoteTarget;
   /** The selection's ProseMirror offsets in the target, when the composer had them (the article's editor); absent for a DOM selection in a comment card. */
   from?: number;
@@ -57,11 +63,15 @@ export function parsePendingQuoteHints(raw: unknown): PendingQuoteHint[] {
     if (!entry || typeof entry !== "object") continue;
     const e = entry as Record<string, unknown>;
     const target = e.target as Record<string, unknown> | undefined;
-    if (!isPendingAnchorId(e.id) || typeof e.text !== "string" || !e.text.trim()) continue;
+    if ((e.id !== null && !isPendingAnchorId(e.id)) || typeof e.text !== "string" || !e.text.trim()) continue;
     if (!target || (target.kind !== "post" && target.kind !== "comment") || typeof target.id !== "string" || !target.id) {
       continue;
     }
-    const hint: PendingQuoteHint = { id: e.id, target: { kind: target.kind, id: target.id }, text: e.text };
+    const hint: PendingQuoteHint = {
+      id: isPendingAnchorId(e.id) ? e.id : null,
+      target: { kind: target.kind, id: target.id },
+      text: e.text,
+    };
     if (Number.isInteger(e.from) && Number.isInteger(e.to) && (e.to as number) > (e.from as number) && (e.from as number) >= 0) {
       hint.from = e.from as number;
       hint.to = e.to as number;

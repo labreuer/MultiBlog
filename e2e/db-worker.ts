@@ -1440,6 +1440,8 @@ export async function createCommentWithQuotes(opts: {
   displayName: string;
   markdown: string;
   parentCommentId?: string;
+  /** Unbound hints (PLAN.md §23h, Phase 4) — an off-page target for the matcher to load. */
+  pending?: { target: { kind: "post" | "comment"; id: string }; text: string }[];
 }): Promise<{ id: string }> {
   const { postId, email, displayName, markdown, parentCommentId } = opts;
   assertSafe(email);
@@ -1470,7 +1472,7 @@ export async function createCommentWithQuotes(opts: {
   const captured = await captureCommentQuotes({
     node: parsed.node,
     host: { postId, parentCommentId: parentCommentId ?? null, threadAnchorFrom: thread.anchorFrom > 0 ? thread.anchorFrom : null },
-    hints: [],
+    hints: (opts.pending ?? []).map((hint) => ({ id: null, ...hint })),
   });
   const comment = await prisma.comment.create({
     data: {
