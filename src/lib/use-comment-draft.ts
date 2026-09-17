@@ -40,6 +40,20 @@ export function useCommentDraft(
   const [restored, setRestored] = useState(false);
   // Whether the mount-time restore has run; saves before it would race it.
   const loaded = useRef(false);
+  // The debounced save in flight, and whether this composer has been cleared.
+  // Both exist for the same moment: posting. A submission changes the value
+  // one last time — the rich composer's `disabled` flip reaches TipTap as
+  // `setEditable`, which emits an `update` unasked — so a save is scheduled
+  // *just* before the action returns, and `clear()`'s delete then lands
+  // between that schedule and its write. The draft came back ~400ms after
+  // being deleted, and the author's next visit was greeted with "Draft
+  // restored" for the comment they had already posted. Cancelling the timer
+  // handles the save already scheduled; the flag handles any scheduled after,
+  // since a posted composer never accepts another keystroke. `discard()`
+  // clears too, but its own `setValue` to an empty body lifts the flag below,
+  // so a composer the author emptied by hand goes on saving normally.
+  const timer = useRef<number | null>(null);
+  const cleared = useRef(false);
   // The latest value, for the two callbacks below that must read it after an
   // await or from a stable identity. Synced in an effect (never during
   // render), declared first so it runs before the restore effect's.
@@ -70,7 +84,10 @@ export function useCommentDraft(
 
   useEffect(() => {
     if (!enabled || !loaded.current) return;
-    const timer = window.setTimeout(() => {
+    if (isCommentBodyValueEmpty(value)) cleared.current = false;
+    if (cleared.current) return;
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
       if (isCommentBodyValueEmpty(value)) {
         void deleteCommentDraft(key);
       } else {
@@ -81,10 +98,18 @@ export function useCommentDraft(
         );
       }
     }, SAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = null;
+    };
   }, [key, value, enabled]);
 
   const clear = useCallback(() => {
+    cleared.current = true;
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
     setRestored(false);
     void deleteCommentDraft(key);
   }, [key]);

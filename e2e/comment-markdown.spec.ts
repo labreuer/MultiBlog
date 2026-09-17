@@ -82,11 +82,32 @@ test.describe("comment bodies", () => {
     await expect(link).toHaveAttribute("target", "_blank");
   });
 
-  test("rich mode posts through the same write path, and the mode is remembered", async ({
+  // The draft half of this is the other end of the test below: a draft's
+  // *end*. Posting deletes it — and the submission itself schedules one last
+  // save, because the rich composer's `disabled` flip reaches TipTap as
+  // `setEditable`, which emits an `update` unasked. The delete and that write
+  // were in flight together, the write landed ~400ms second, and the author's
+  // next visit was greeted with "Draft restored" for the comment they had
+  // just posted. It rides here rather than in a test of its own because a
+  // second real submission would spend one of the five this IP is allowed per
+  // ten minutes (the header above), and this one already posts in rich mode.
+  test("rich mode posts through the same write path, and leaves no draft behind", async ({
     publishedPost,
     secondUser,
   }) => {
-    const { page } = await secondUser({ role: "ADMIN" });
+    const { page, user } = await secondUser({ role: "ADMIN" });
+    // A comment already on the page: with an empty thread the post-approval
+    // render never reaches the editor and the stray save is not scheduled, so
+    // this is what makes the draft half reproduce rather than pass silently.
+    // Seeded rather than posted, for the same rate limit.
+    await createComment({
+      postId: publishedPost.id,
+      anchoredEventId: publishedPost.eventId!,
+      email: user.email,
+      displayName: "Second Admin",
+      body: "E2E comment that was already on the page.",
+      status: "APPROVED",
+    });
     await page.goto(publishedPost.path);
     await page.getByRole("button", { name: "Rich text" }).click();
     const editor = page.getByRole("textbox", { name: "Comment body" });
@@ -100,11 +121,21 @@ test.describe("comment bodies", () => {
     await page.keyboard.type("emphasis");
     await expect(editor.locator("strong", { hasText: "emphasis" })).toBeVisible();
     await post(page);
+    // Outlast the save the submission scheduled, in the page that scheduled
+    // it: navigating away would cancel the very write this is about, and the
+    // assertions below would pass on a broken build.
+    await page.waitForTimeout(1200);
 
     await freshGoto(page, publishedPost.path);
     const card = cardContaining(page, "E2E rich comment");
     await expect(card).toBeVisible();
     await expect(card.locator("strong", { hasText: "emphasis" })).toBeVisible();
+
+    // The restore is an IndexedDB read on mount, so "no draft" is an absence
+    // that needs time to be wrong in: give it the grace the save got.
+    await page.waitForTimeout(1000);
+    await expect(page.getByText("Draft restored")).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Comment body" })).toHaveText("");
 
     // The choice persists per browser: the next form opens in rich mode.
     await expect(page.getByRole("button", { name: "Rich text" })).toHaveAttribute("aria-pressed", "true");

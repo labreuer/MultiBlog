@@ -9055,6 +9055,16 @@ deliberately **not** `y-indexeddb`: `src/lib/ydoc-persistence.ts` exists to work
 bugs in that library's interaction with Yjs documents, and none of that applies to a plain JSON
 value.
 
+**A draft's end is `clear()`, and it cancels rather than deletes.** Posting is the one moment
+a save is in flight for a body that no longer exists, because the submission itself changes the
+value one last time — `disabled={pending}` reaches TipTap as `setEditable`, which emits an
+`update` unasked (docs/TIPTAP.md). Deleting the row is not enough: the scheduled write lands
+after the delete and restores the draft of a comment already posted. So `clear()` cancels the
+debounce timer *and* latches the composer closed, and only an empty body lifts that latch —
+which is what keeps `discard()` (clear, then empty the box) saving normally afterwards. The
+e2e proof is in `comment-markdown.spec.ts`'s rich-mode test, and it needs a comment already on
+the page to reproduce.
+
 **Pending quotations ride in the draft.** A quotation captured while composing is not a row yet
 — the rows are written at post time — so the draft holds the body JSON plus the pending targets
 and selections, keyed by the same `anchorId` the body uses. That is also what makes "select,
