@@ -36,6 +36,32 @@ async function post(page: Page) {
   await expect(page.locator("form").getByText(/too quickly|too long|can't be empty|Malformed/)).toHaveCount(0);
 }
 
+/**
+ * Delays the draft store's one read — `loadCommentDraft`'s `store.get` — by
+ * `ms`, leaving every write path alone. The real request still runs; what is
+ * held back is the resolution the hook awaits, which is the ordering under
+ * test. Nothing else on a post page touches IndexedDB.
+ */
+async function delayDraftLoad(page: Page, ms: number) {
+  await page.addInitScript((delay: number) => {
+    const realGet = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (this: IDBObjectStore, query: IDBValidKey | IDBKeyRange) {
+      const real = realGet.call(this, query);
+      const fake: { result: unknown; onsuccess: null | (() => void); onerror: null | (() => void) } = {
+        result: undefined,
+        onsuccess: null,
+        onerror: null,
+      };
+      real.onsuccess = () => {
+        fake.result = real.result;
+        window.setTimeout(() => fake.onsuccess?.(), delay);
+      };
+      real.onerror = () => window.setTimeout(() => fake.onerror?.(), delay);
+      return fake as unknown as IDBRequest;
+    };
+  }, ms);
+}
+
 test.describe("comment bodies", () => {
   test("Markdown renders as schema nodes, and out-of-schema syntax degrades rather than vanishing", async ({
     publishedPost,
@@ -162,6 +188,33 @@ test.describe("comment bodies", () => {
     await expect(page.getByRole("textbox", { name: "Comment body" })).toHaveValue("");
   });
 
+  // The other side of that restore: until the read lands, the composer must
+  // not save over a draft it has not seen yet — and that gate used to be a
+  // ref, which no effect can watch. A body that arrived while the read was in
+  // flight was therefore never saved at all, and a body that arrived in a
+  // single change (a paste, a restored quote) had no later keystroke to
+  // rescue it. Slowing the read down is what turns that race into a test.
+  test("a body typed before the store answers is saved anyway", async ({ page, publishedPost }) => {
+    await delayDraftLoad(page, 2500);
+    await page.goto(publishedPost.path);
+    const box = page.getByRole("textbox", { name: "Comment body" });
+    // The placeholder names the commenter once the session lands: proof the
+    // client is live, so the fill below reaches React rather than a form
+    // still waiting to hydrate.
+    await expect(box).toHaveAttribute("placeholder", /Commenting as/);
+    await box.fill("E2E draft typed before the store answered");
+    // Past the delayed read, and past the save it releases.
+    await page.waitForTimeout(3500);
+
+    await page.reload();
+    await expect(page.getByRole("textbox", { name: "Comment body" })).toHaveValue(
+      "E2E draft typed before the store answered",
+    );
+    // Leave the shared context as it was found: this draft outlives its post.
+    await page.getByRole("button", { name: "discard" }).click();
+    await page.waitForTimeout(800);
+  });
+
   test("editing serializes the stored body to Markdown and back", async ({ publishedPost, secondUser }) => {
     const { page, user } = await secondUser({ role: "ADMIN" });
     const { id: commentId } = await createComment({
@@ -172,7 +225,12 @@ test.describe("comment bodies", () => {
       body: "E2E comment to be edited into shape.",
       status: "APPROVED",
     });
-    await page.goto(publishedPost.path);
+    // freshGoto, not goto: the row went straight into the database, so the
+    // page's ISR entry — which another worker's landing-page prefetch may
+    // already have filled — knows nothing about it. The failure is a page
+    // reading "No comments yet." and a 60s wait for a card that is never
+    // coming.
+    await freshGoto(page, publishedPost.path);
     const card = page.locator(`[data-comment-id="${commentId}"]`);
     await card.getByRole("button", { name: "Edit" }).click();
     const box = card.getByRole("textbox", { name: "Edit comment" });

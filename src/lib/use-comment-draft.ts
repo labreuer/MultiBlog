@@ -39,7 +39,16 @@ export function useCommentDraft(
 ): { restored: boolean; discard: () => void; clear: () => void } {
   const [restored, setRestored] = useState(false);
   // Whether the mount-time restore has run; saves before it would race it.
-  const loaded = useRef(false);
+  //
+  // **State rather than a ref, and that is the whole of a second bug.** The
+  // save below runs on value changes, so a body typed *before* IndexedDB
+  // answered found the gate shut and was never saved: setting a ref
+  // re-renders nothing, so the effect had no reason to run again, and the
+  // text sat there until the next keystroke — or forever, for a body that
+  // arrived in one change (a paste, a restored quote, `fill()` in a test).
+  // The one thing that makes the gate opening visible to an effect is a
+  // dependency, which a ref cannot be.
+  const [loaded, setLoaded] = useState(false);
   // The debounced save in flight, and whether this composer has been cleared.
   // Both exist for the same moment: posting. A submission changes the value
   // one last time — the rich composer's `disabled` flip reaches TipTap as
@@ -69,7 +78,7 @@ export function useCommentDraft(
       await pruneCommentDrafts();
       const draft = await loadCommentDraft(key);
       if (cancelled) return;
-      loaded.current = true;
+      setLoaded(true);
       if (draft && isCommentBodyValueEmpty(valueRef.current) && !isCommentBodyValueEmpty(draftToValue(draft))) {
         setValue(draftToValue(draft));
         setRestored(true);
@@ -83,7 +92,7 @@ export function useCommentDraft(
   }, [key, enabled]);
 
   useEffect(() => {
-    if (!enabled || !loaded.current) return;
+    if (!enabled || !loaded) return;
     if (isCommentBodyValueEmpty(value)) cleared.current = false;
     if (cleared.current) return;
     timer.current = window.setTimeout(() => {
@@ -102,7 +111,9 @@ export function useCommentDraft(
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = null;
     };
-  }, [key, value, enabled]);
+    // `loaded` earns its place here: the run it triggers is the one that
+    // saves whatever was typed while the load was still in flight.
+  }, [key, value, enabled, loaded]);
 
   const clear = useCallback(() => {
     cleared.current = true;

@@ -9055,6 +9055,12 @@ deliberately **not** `y-indexeddb`: `src/lib/ydoc-persistence.ts` exists to work
 bugs in that library's interaction with Yjs documents, and none of that applies to a plain JSON
 value.
 
+**The restore gate is state, not a ref.** Nothing may be saved before the mount-time read has
+answered, or a composer would overwrite a draft it has not seen yet — but the gate opening has
+to be something the save effect can *watch*. Held in a ref it was not: a body that arrived
+while the read was in flight (a paste, a restored quote, the first burst of typing on a slow
+page) found the gate shut and was never saved, with no later change to rescue it.
+
 **A draft's end is `clear()`, and it cancels rather than deletes.** Posting is the one moment
 a save is in flight for a body that no longer exists, because the submission itself changes the
 value one last time — `disabled={pending}` reaches TipTap as `setEditable`, which emits an
