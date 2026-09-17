@@ -5,3 +5,49 @@
 .body :global(.tiptap) {
   outline: none;
 }
+
+/* An annotation body wears .prose for its list/blockquote restoration and its
+   decorations (see AnnotationBodyReader.tsx) but not its article typography:
+   an annotation sits in the page's own font, at the page's own size, next to
+   a meta line set the same way — CommentBody.module.css's `.body`, which this
+   is deliberately a copy of rather than a shared file, since the two surfaces
+   are not one component (PLAN.md §23k).
+   Exported from the *reader's* module and worn by the composer too
+   (AnnotationBody.tsx), the way CommentEditor wears CommentBody's `.body`:
+   the posted body and the box you edit it in must be the same size, or
+   clicking Edit reflows the text under the pointer.
+   Each rule ties with the .prose rule it overrides on specificity — (0,1,0)
+   for the element, (0,2,0) for the descendants — so this module must load
+   after prose.module.css. It does, the same way and for the same reason
+   CommentBody.module.css does. */
+.type {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.type :global(p) {
+  margin-bottom: 0.75em;
+}
+
+.type :global(blockquote) {
+  margin-bottom: 0.75em;
+}
+
+.type :global(ul),
+.type :global(ol) {
+  margin-bottom: 0.75em;
+}
+
+/* .prose gives every paragraph, list and blockquote a bottom margin for
+   article rhythm; the last block of an annotation sits directly above its
+   Reply row, which supplies its own spacing — the same cancellation
+   CommentBody.module.css makes, arrived at here later. Two selectors because
+   this surface renders the body twice: the static copy's blocks are the
+   copy's own children, while the editor copy's are another two levels down,
+   inside EditorContent's wrapper and ProseMirror's `.tiptap` node. The first
+   selector therefore hits that wrapper div on the editor copy, where it is a
+   no-op. */
+.copy > :last-child,
+.copy :global(.tiptap) > :last-child {
+  margin-bottom: 0;
+}
