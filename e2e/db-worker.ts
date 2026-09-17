@@ -1440,8 +1440,8 @@ export async function createCommentWithQuotes(opts: {
   displayName: string;
   markdown: string;
   parentCommentId?: string;
-  /** Unbound hints (PLAN.md §23h, Phase 4) — an off-page target for the matcher to load. */
-  pending?: { target: { kind: "post" | "comment"; id: string }; text: string }[];
+  /** Unbound hints (PLAN.md §23h, Phase 4) — an off-page target for the matcher to load; a file (Phase 5) is refused. */
+  pending?: { id?: string | null; target: { kind: "post" | "comment" | "file"; id: string }; text: string }[];
 }): Promise<{ id: string }> {
   const { postId, email, displayName, markdown, parentCommentId } = opts;
   assertSafe(email);
@@ -1487,7 +1487,7 @@ export async function createCommentWithQuotes(opts: {
           id: anchor.id,
           partOrder: anchor.partOrder,
           ...targetToColumns(anchor.target),
-          selectorKind: "DOC_RANGE" as const,
+          selectorKind: anchor.selectorKind,
           anchorFrom: anchor.anchorFrom,
           anchorTo: anchor.anchorTo,
           quotedText: anchor.quotedText,

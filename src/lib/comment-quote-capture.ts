@@ -3,12 +3,21 @@ import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { prisma } from "./prisma";
 import { pmCommentContentSchema, pmSchema, toPlainJSON } from "./tiptap-schema";
-import { deriveDocRangeSelector, targetKey, type AnchorTarget, type DocRangeSelector } from "./anchors";
+import { deriveDocRangeSelector, targetKey, type AnchorTarget, type DocRangeSelector, type SelectorKind } from "./anchors";
+import { capturePdfTextAnchor } from "./anchors/capture";
+import type { PdfTarget } from "./pdf-anchor";
 import { commentBodyText } from "./comment-body";
 import { flattenForMatch, matchQuoteAcross, type FlatTarget, type QuoteRange } from "./comment-quote-match";
-import { applyQuoteResolutions, clearUnassignedAnchorIds, extractQuoteCandidates, type QuoteResolution } from "./comment-quote-extract";
+import {
+  applyQuoteResolutions,
+  clearUnassignedAnchorIds,
+  extractQuoteCandidates,
+  paragraphTextsIn,
+  type QuoteResolution,
+} from "./comment-quote-extract";
 import { isPendingAnchorId, type PendingQuoteHint } from "./comment-quote-pending";
 import { isCommentPublic } from "./comment-authz";
+import { canQuoteTargetInto } from "./comment-quote-authz";
 
 // PLAN.md §23n — the server half of the matcher: load the immutable targets
 // a comment on this page may quote (§23e's audience rule is the load itself
@@ -55,10 +64,12 @@ export type CommentQuoteAnchorInput = {
   id: string;
   partOrder: number;
   target: AnchorTarget;
-  anchorFrom: number;
-  anchorTo: number;
+  selectorKind: SelectorKind;
+  /** ProseMirror offsets for DOC_RANGE; the page-text offsets for PDF_TEXT, or null for a rectangle selection. */
+  anchorFrom: number | null;
+  anchorTo: number | null;
   quotedText: string;
-  selector: DocRangeSelector;
+  selector: DocRangeSelector | PdfTarget;
   anchoredEventId: string | null;
   quotedRevisionId: string | null;
 };
@@ -255,6 +266,40 @@ export async function captureCommentQuotes(opts: {
       continue;
     }
 
+    // PLAN.md §23j Phase 5 — a PDF part. Bytes are identity (docs/PDF.md §4),
+    // so there is nothing to search: the viewer's own PdfTarget is parsed and
+    // its quote derived by `capturePdfTextAnchor`, the same writer
+    // `tag_anchor`'s PDF parts use. **The gate is shut**: `canQuoteTargetInto`
+    // refuses every file until §19 grows a publicly-readable tier (§23k), so
+    // this branch degrades every time today — the mechanism exists behind the
+    // rule, and the e2e case asserts the refusal rather than the capability.
+    const pendingFile = span.anchorId && isPendingAnchorId(span.anchorId) ? hintsById.get(span.anchorId) : undefined;
+    if (pendingFile?.target.kind === "file") {
+      const fileId = pendingFile.target.id;
+      const captured = (await canQuoteTargetInto({ kind: "file", id: fileId }, { kind: "post-comments", postId: host.postId }))
+        ? await capturePdfTextAnchor({ fileId, rawTarget: pendingFile.target.pdfTarget })
+        : null;
+      if (!captured || !captured.quotedText) {
+        resolutions.push({ candidate: span, anchorId: null });
+        continue;
+      }
+      const anchorId = randomUUID();
+      resolutions.push({ candidate: span, anchorId, quotedText: captured.quotedText, paragraphs: [captured.quotedText] });
+      anchors.push({
+        id: anchorId,
+        partOrder: anchors.length,
+        target: { kind: "file", id: fileId },
+        selectorKind: "PDF_TEXT",
+        anchorFrom: captured.target.position?.start ?? null,
+        anchorTo: captured.target.position?.end ?? null,
+        quotedText: captured.quotedText,
+        selector: captured.target,
+        anchoredEventId: null,
+        quotedRevisionId: null,
+      });
+      continue;
+    }
+
     // What the body already says about this span, as a hint for the matcher.
     let hint: { key: string; range?: QuoteRange } | undefined;
     if (span.anchorId && isPendingAnchorId(span.anchorId)) {
@@ -288,15 +333,14 @@ export async function captureCommentQuotes(opts: {
     resolutions.push({
       candidate: span,
       anchorId,
-      source: winner.flat.node,
-      from: found.match.from,
-      to: found.match.to,
       quotedText: found.match.quotedText,
+      paragraphs: paragraphTextsIn(winner.flat.node, found.match.from, found.match.to),
     });
     anchors.push({
       id: anchorId,
       partOrder: anchors.length,
       target: winner.target,
+      selectorKind: "DOC_RANGE",
       anchorFrom: found.match.from,
       anchorTo: found.match.to,
       quotedText: found.match.quotedText,

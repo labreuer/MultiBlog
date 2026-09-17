@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pmCommentContentSchema, pmSchema } from "./tiptap-schema";
-import { applyQuoteResolutions, clearUnassignedAnchorIds, extractQuoteCandidates, MIN_INLINE_QUOTE_CHARS } from "./comment-quote-extract";
+import {
+  applyQuoteResolutions,
+  clearUnassignedAnchorIds,
+  extractQuoteCandidates,
+  MIN_INLINE_QUOTE_CHARS,
+  paragraphTextsIn,
+} from "./comment-quote-extract";
 import { commentBodyText } from "./comment-body";
 
 // PLAN.md §23n — which spans are candidates, and §23f — what the rewrite
@@ -60,7 +66,7 @@ test("a matched block is rewritten to the source's paragraphs and gets its ancho
   const from = 1;
   const to = source.content.size - 1;
   const rewritten = applyQuoteResolutions(doc, [
-    { candidate, anchorId: "row1", source, from, to, quotedText: source.textBetween(from, to, " ") },
+    { candidate, anchorId: "row1", quotedText: source.textBetween(from, to, " "), paragraphs: paragraphTextsIn(source, from, to) },
   ]);
   const quote = rewritten.child(1);
   assert.equal(quote.type.name, "blockquote");
@@ -86,7 +92,7 @@ test("a matched typed quote becomes the derived text under the quote mark, quote
   const from = source.textContent.indexOf("quick") + 1;
   const to = from + "quick brown fox jumps".length;
   const rewritten = applyQuoteResolutions(doc, [
-    { candidate, anchorId: "row2", source, from, to, quotedText: "quick brown fox jumps" },
+    { candidate, anchorId: "row2", quotedText: "quick brown fox jumps", paragraphs: paragraphTextsIn(source, from, to) },
   ]);
   const paragraph = rewritten.child(0);
   assert.equal(paragraph.textContent, "I liked quick brown fox jumps a lot.");
@@ -109,8 +115,8 @@ test("several resolutions apply last-first so earlier positions stay valid", () 
   const doc = body(bq({ anchorId: null }, para(text("Alpha beta gamma"))), para(text("x")), bq({ anchorId: null }, para(text("delta epsilon zeta."))));
   const [first, second] = extractQuoteCandidates(doc);
   const rewritten = applyQuoteResolutions(doc, [
-    { candidate: first, anchorId: "a", source, from: 1, to: 17, quotedText: "Alpha beta gamma" },
-    { candidate: second, anchorId: "b", source, from: 18, to: 37, quotedText: "delta epsilon zeta." },
+    { candidate: first, anchorId: "a", quotedText: "Alpha beta gamma", paragraphs: paragraphTextsIn(source, 1, 17) },
+    { candidate: second, anchorId: "b", quotedText: "delta epsilon zeta.", paragraphs: paragraphTextsIn(source, 18, 37) },
   ]);
   assert.equal(rewritten.child(0).attrs.anchorId, "a");
   assert.equal(rewritten.child(2).attrs.anchorId, "b");

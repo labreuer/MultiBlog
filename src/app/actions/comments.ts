@@ -344,7 +344,7 @@ function quoteAnchorRow(anchor: CommentQuoteAnchorInput) {
     id: anchor.id,
     partOrder: anchor.partOrder,
     ...targetToColumns(anchor.target),
-    selectorKind: "DOC_RANGE" as const,
+    selectorKind: anchor.selectorKind,
     anchorFrom: anchor.anchorFrom,
     anchorTo: anchor.anchorTo,
     quotedText: anchor.quotedText,

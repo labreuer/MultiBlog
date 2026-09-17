@@ -9,7 +9,13 @@
 
 export const PENDING_ANCHOR_PREFIX = "pending:";
 
-export type PendingQuoteTarget = { kind: "post" | "comment"; id: string };
+// `file` (PLAN.md §23j Phase 5) carries the PDF viewer's own anchor blob, the
+// same `PdfTarget` an annotation or a tag part sends; the gate refuses every
+// file until §19 grows a public tier (§23k), so today the kind exists to be
+// refused honestly rather than to be unrepresentable.
+export type PendingQuoteTarget =
+  | { kind: "post" | "comment"; id: string }
+  | { kind: "file"; id: string; pdfTarget?: unknown };
 
 export type PendingQuoteHint = {
   /**
@@ -64,12 +70,20 @@ export function parsePendingQuoteHints(raw: unknown): PendingQuoteHint[] {
     const e = entry as Record<string, unknown>;
     const target = e.target as Record<string, unknown> | undefined;
     if ((e.id !== null && !isPendingAnchorId(e.id)) || typeof e.text !== "string" || !e.text.trim()) continue;
-    if (!target || (target.kind !== "post" && target.kind !== "comment") || typeof target.id !== "string" || !target.id) {
+    if (
+      !target ||
+      (target.kind !== "post" && target.kind !== "comment" && target.kind !== "file") ||
+      typeof target.id !== "string" ||
+      !target.id
+    ) {
       continue;
     }
     const hint: PendingQuoteHint = {
       id: isPendingAnchorId(e.id) ? e.id : null,
-      target: { kind: target.kind, id: target.id },
+      target:
+        target.kind === "file"
+          ? { kind: "file", id: target.id, ...(target.pdfTarget && typeof target.pdfTarget === "object" ? { pdfTarget: target.pdfTarget } : {}) }
+          : { kind: target.kind, id: target.id },
       text: e.text,
     };
     if (Number.isInteger(e.from) && Number.isInteger(e.to) && (e.to as number) > (e.from as number) && (e.from as number) >= 0) {

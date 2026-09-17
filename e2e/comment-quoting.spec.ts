@@ -4,7 +4,9 @@ import {
   ADMIN_EMAIL,
   createComment,
   createCommentWithQuotes,
+  createTestFile,
   createTestPost,
+  deleteTestFile,
   deleteTestPost,
   getCommentFacts,
   getCommentQuoteFacts,
@@ -360,6 +362,36 @@ test.describe("quoting from elsewhere", () => {
       expect(JSON.parse(pending)).toEqual([{ id: null, target: { kind: "post", id: other.id }, text: "long journeys south" }]);
     } finally {
       await deleteTestPost(other.id);
+    }
+  });
+});
+
+// PLAN.md §23j Phase 5 — a PDF part behind the gate §23k leaves shut. The
+// mechanism (a `file` hint carrying the viewer's PdfTarget, resolved by
+// `capturePdfTextAnchor`) exists in the capture; `canQuoteTargetInto` refuses
+// every file until §19 grows a publicly-readable tier, so what there is to
+// assert is the refusal: the block stays a plain quote and no row is written.
+test.describe("quoting a PDF", () => {
+  test("is refused while no public file tier exists: a plain blockquote, no anchor row", async ({
+    page,
+    publishedPost,
+  }) => {
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: [["Page one of a throwaway PDF."]] });
+    try {
+      const { id } = await createCommentWithQuotes({
+        postId: publishedPost.id,
+        email: uniqueEmail("quoter"),
+        displayName: "Quoter",
+        markdown: `> Page one of a throwaway PDF.\n\nFrom a file nobody may quote yet.`,
+        pending: [{ id: "pending:file-probe", target: { kind: "file", id: file.id }, text: "Page one of a throwaway PDF." }],
+      });
+      await freshGoto(page, publishedPost.path);
+      const quote = card(page, id).locator("blockquote");
+      await expect(quote).toContainText("Page one of a throwaway PDF.");
+      await expect(quote).not.toHaveAttribute("data-anchor-id", /.+/);
+      expect(await getCommentQuoteFacts(id)).toHaveLength(0);
+    } finally {
+      await deleteTestFile(file.id);
     }
   });
 });

@@ -147,11 +147,14 @@ export type QuoteResolution =
       candidate: QuoteCandidateSpan;
       /** The real anchor row id the body will carry. */
       anchorId: string;
-      /** The target document the words were found in, and where. */
-      source: PMNode;
-      from: number;
-      to: number;
+      /** `quotedTextAt` the verified range — what an inline run becomes, and the row's `quoted_text`. */
       quotedText: string;
+      /**
+       * What a block becomes: one plain paragraph per source textblock in the
+       * range (`paragraphTextsIn`), or a single paragraph of the quoted text
+       * for a source with no ProseMirror structure — a PDF page.
+       */
+      paragraphs: string[];
     }
   | { candidate: QuoteCandidateSpan; anchorId: null };
 
@@ -160,7 +163,7 @@ function candidateStart(candidate: QuoteCandidateSpan): number {
 }
 
 /** The plain paragraphs a matched range of `source` becomes inside the quoting comment. */
-function paragraphTextsIn(source: PMNode, from: number, to: number): string[] {
+export function paragraphTextsIn(source: PMNode, from: number, to: number): string[] {
   const texts: string[] = [];
   source.nodesBetween(from, to, (node, pos) => {
     if (!node.isTextblock) return true;
@@ -195,7 +198,7 @@ export function applyQuoteResolutions(doc: PMNode, resolutions: QuoteResolution[
         }
         continue;
       }
-      const texts = paragraphTextsIn(resolution.source, resolution.from, resolution.to);
+      const texts = resolution.paragraphs.filter((text) => text.trim());
       const paragraphs = (texts.length > 0 ? texts : [resolution.quotedText]).map((text) =>
         schema.nodes.paragraph.create(null, schema.text(text)),
       );

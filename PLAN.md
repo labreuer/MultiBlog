@@ -8740,9 +8740,10 @@ Two additions the plan did not name, both small and both load-bearing:
 
 **Planned 2026-09-16 on `annotations-and-comments`, replacing §22d before it was merged.
 Amended the same day, before any of it was built, for a plain-Markdown front door (§23m) and
-the text-matching it needs (§23n); the amendments are marked where they land. Phases 0 to 4
-of §23j built the same day — the "as built" paragraphs in §23c, §23h, §23m and §23n are the
-account; Phase 5's gate is shut by construction (§23k).**
+the text-matching it needs (§23n); the amendments are marked where they land. All five phases
+of §23j built the same day — the "as built" paragraphs in §23c, §23h, §23j, §23m and §23n are
+the account; Phase 5's gate is shut by construction (§23k), so PDF quoting exists as a
+refusal until §19 grows a public file tier.**
 §22d built a quotation as four columns on the reply and a blockquote above its body: one
 quotation, of the parent comment, outside the reply's text. The ask that arrived after it was
 built is larger in every dimension, and the difference is not a refinement — it is a different
@@ -9194,9 +9195,21 @@ is parked rather than merged.
    the feature real, and it reuses §5 and §22d's gestures.
 4. **Quoting what is not on the page** (built). Another published post, a comment on another post: the
    picker, and the same gate and capture path.
-5. **PDFs, behind the tier they need.** `PDF_TEXT` parts via `capturePdfTextAnchor`, which
+5. **PDFs, behind the tier they need** (built, gate shut). `PDF_TEXT` parts via `capturePdfTextAnchor`, which
    already writes `tag_anchor`'s PDF parts; the gate refuses every file until §19 grows a
    publicly-readable tier, and the e2e case asserts the refusal rather than the capability.
+
+   *As built (2026-09-16):* a `file` hint kind carrying the viewer's `PdfTarget` blob
+   (`comment-quote-pending.ts`); in `captureCommentQuotes`, a span bound to one goes through
+   `canQuoteTargetInto` and, if admitted, `capturePdfTextAnchor` — a `PDF_TEXT` row with the
+   page-text offsets and the blob, no stamp, the block rewritten to the derived quote. The gate
+   admits nothing, so that branch degrades every time and `comment-quoting.spec.ts` asserts a
+   plain blockquote and no row for a SHARED file. **No PDF-side gesture is built**: a comment
+   composer lives on a post page and the PDF viewer does not, so a "Quote in comment" there
+   would have to carry the selection across pages through the draft — a Phase 4-shaped picker
+   over files is the natural form, once there is a file a stranger may read. The rewrite's input
+   was generalized for this (a resolution carries its paragraphs, not a source document and
+   range), which is the one change the phase made outside the gate.
 
 Each phase ends at `npm run check`. `scripts/integrity/check-comment-quotes.ts` arrives with
 Phase 3 and verifies the pair §23f rests on: the body's quoted span equals the anchor row's
