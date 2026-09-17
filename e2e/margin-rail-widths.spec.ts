@@ -27,6 +27,8 @@ import {
   selectTextInBody,
   waitForDocCollabReady,
   QUOTED_TEXT,
+  QUOTE_FROM,
+  QUOTE_TO,
 } from "./fixtures";
 import { createTestAnnotation, createTestDoc, deleteTestDoc, getAnnotationStates } from "./db";
 import { EDITOR_SCROLL_ATTRIBUTE } from "../src/components/editor-scroll";
@@ -44,6 +46,23 @@ const NARROW = { width: 1024, height: 768 };
 // rail otherwise demands — which is the whole point of the mode having a
 // query of its own rather than a lower number in the shared one.
 const PHONE_LANDSCAPE = { width: 844, height: 390 };
+
+// Two widths past the threshold, for the rail's own size rather than its
+// existence. It was a fixed 340px until 2026-09-17 and is now
+// `clamp(340px, calc(100% - 800px - 2.5rem), 680px)` — whatever the window has
+// past the 800px reading measure, up to twice the old width (PLAN.md §18's
+// Known gaps, STYLE.md's centred-column widths). Every other assertion in this
+// file passes identically against the fixed version, so without these the
+// growth has no coverage at all.
+//
+// WIDE is past the containers' own maximum and MIDWAY is not, which is what
+// makes one of them assertable to the pixel and the other only to a range: at
+// 1600 the ceiling holds whether or not a classic scrollbar has taken 15px of
+// the viewport, whereas at 1400 the rail's width *is* the leftover and a
+// scrollbar moves it. The floor is scrollbar-proof for the opposite reason —
+// below its own minimum `clamp()` returns the minimum either way.
+const MIDWAY = { width: 1400, height: 900 };
+const WIDE = { width: 1600, height: 900 };
 
 // Geometry rather than class names, for the reason admin-table.spec.ts asserts
 // its row borders by computed colour: `.anchored` is toggled from JS and the
@@ -118,6 +137,50 @@ test.describe("the margin rail across the breakpoint", () => {
     // breakpoint rather than about a rail that might be unconditional.
     await page.setViewportSize(NARROW);
     await expect.poll(() => belowBy(page), { timeout: 10_000 }).toBeGreaterThan(0);
+  });
+
+  test("the rail grows with the window, between a 340px floor and a 680px ceiling", async ({
+    page,
+    sharedDoc,
+  }) => {
+    // Seeded rather than made through the UI: this test is about geometry at
+    // three viewport sizes, and the posting gesture is already covered above.
+    await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: "How much room does this card get?",
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+    });
+
+    await page.setViewportSize(IPAD_LANDSCAPE);
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    const card = page.locator("[data-margin-note-id]").first();
+    await expect(card).toBeVisible();
+    await expect.poll(() => besideBy(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(0);
+
+    const railWidth = async () => Math.round((await card.boundingBox())?.width ?? Number.NaN);
+    const articleWidth = async () =>
+      Math.round((await bodyEditor(page).boundingBox())?.width ?? Number.NaN);
+
+    // The floor. An iPad in landscape has nothing spare past the reading
+    // measure, so the rail is exactly what it has always been — which is also
+    // what keeps every other spec in the suite honest about the old value.
+    await expect.poll(railWidth, { timeout: 10_000 }).toBe(340);
+
+    // Between the two: neither bound, which is the part a second breakpoint
+    // would fail. A step from 340 to 680 passes both assertions below on their
+    // own and neither of them here.
+    await page.setViewportSize(MIDWAY);
+    await expect.poll(railWidth, { timeout: 10_000 }).toBeGreaterThan(340);
+    expect(await railWidth()).toBeLessThan(680);
+    const midwayArticle = await articleWidth();
+
+    // The ceiling — and the reading column untouched across the whole climb,
+    // which is the thing the `clamp()` is there to guarantee and the thing a
+    // `minmax(340px, 680px)` track would quietly give away.
+    await page.setViewportSize(WIDE);
+    await expect.poll(railWidth, { timeout: 10_000 }).toBe(680);
+    expect(await articleWidth()).toBe(midwayArticle);
   });
 
   test("the doc editor's rail appears at iPad-landscape width and is absent below it", async ({ page, sharedDoc }) => {

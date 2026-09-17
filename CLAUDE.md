@@ -63,9 +63,14 @@ before changing the behavior it describes.
   vertical alignment** — don't move the column layout into JS to "simplify", that split is
   what keeps the rail server-rendered in the right place. The `.anchored` class is toggled
   from JS, never from a `@media` block. 1180 is a *composed* width (800 + 2.5rem + 340) and
-  moves when the layout does, so it is never a round number to round off; the doc *editor*'s
-  rail matches a second clause besides it (phone landscape), where its cards are a queue
-  rather than aligned. PLAN.md §18, §18c.
+  moves when the layout does, so it is never a round number to round off. The rail's
+  *width* is composed the same way and is a range, not a number —
+  `clamp(340px, calc(100% - 800px - 2.5rem), 680px)`, and **never a `minmax()`**, which
+  grid's free-space distribution fills before the prose (STYLE.md's centred-column
+  widths). Growing it needs no JS: `MARGIN_NOTES_MEDIA_QUERY` answers only whether there
+  *is* a rail. The doc *editor*'s rail matches a second clause besides that threshold
+  (phone landscape), where its cards are a queue rather than aligned and so keep the
+  340px floor. PLAN.md §18, §18c.
 - **An annotation's mechanism follows the surface, never the permission.** The doc *editor*
   writes an `annotation` mark into the doc's ydoc and leaves `anchorFrom`/`anchorTo`/
   `quotedText` null; either *reading* view writes those three columns and never touches the

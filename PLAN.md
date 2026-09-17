@@ -5859,7 +5859,9 @@ scroll. Above 1180px there is room not to ask, so each card is positioned level 
 own quote. (1200px as built, and 1180 since an iPad measured 1194 in landscape — six
 pixels short of a threshold whose layout had twenty to spare. The threshold now *is* the
 composed width, 800 + 2.5rem + 340; STYLE.md's centred-column widths carry that arithmetic,
-and `src/lib/margin-notes-layout.ts` is the one place JS writes it.)
+and `src/lib/margin-notes-layout.ts` is the one place JS writes it. 340 is the rail's floor
+rather than its width since 2026-09-17 — see this section's Known gaps — but the threshold
+is still composed from it, because the floor is what has to fit for the rail to engage.)
 
 **Only the anchored cards move.** `CommentSection` and `AnnotationSection` stay exactly
 where they were, below the article, and keep everything that isn't a placeable card: the
@@ -6115,8 +6117,15 @@ of which this section prejudges:
   spec can assert on (`boundingBox()` per card versus per highlight) and exactly what a
   reviewer cannot check by reading. `packMarginNotes` being pure is half of that debt
   already paid; nothing exercises it yet.
-- **340px is fixed.** The rail doesn't grow on a very wide viewport, so a 2560px screen
-  gets more whitespace rather than roomier cards.
+- ~~**340px is fixed.**~~ Fixed 2026-09-17: the rail is
+  `clamp(340px, calc(100% - 800px - 2.5rem), 680px)` on all three surfaces, so it takes
+  whatever the window has past the 800px reading measure and tops out at twice its old
+  width. Pure CSS — the threshold is still one breakpoint, `MARGIN_NOTES_MEDIA_QUERY` is
+  still the only thing JS mirrors, and `useMarginNotesLayout` re-packs off the `resize`
+  listener and per-card `ResizeObserver` it already had, since a wider card that re-wraps
+  is just a shorter one. The doc editor's phone-landscape queue (§18c) stays at the 340px
+  floor, having no passage to align with. STYLE.md's centred-column widths carry the
+  arithmetic and the reason the track is a `clamp()` rather than a `minmax()`.
 
 ### 18f. Annotating from the doc editor
 

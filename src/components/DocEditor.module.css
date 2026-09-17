@@ -38,15 +38,30 @@
 }
 
 @media (min-width: 1180px) {
+  /* The reading views' 1520px ceiling plus this container's own 1rem of
+     padding each side, so the row inside it composes the same way theirs do
+     (STYLE.md, "Breakpoints and centred-column widths"). */
   .container {
-    max-width: 1180px;
+    max-width: calc(1520px + 2rem);
     gap: 2.5rem;
   }
 
   .rail {
     display: block;
     position: relative;
-    flex: 0 0 340px;
+    /* Grows with the window between 340px and 680px, like the reading views'
+       rail — the percentage is of this flex container's content box, so what
+       is left after the document's 800px and the gap goes here. A flex basis
+       rather than the grid `clamp()` the reading views use, but the same
+       shape and the same priority: the text column is `flex: 1 1 auto` and
+       therefore takes the remainder, which holds it at 800px right up to the
+       ceiling instead of letting the rail eat into it. At the breakpoint
+       itself there is nothing spare — 1180px of window is a 1148px content
+       box — so the floor applies and the split is the 340/768 this surface
+       had before the rail could grow at all; the document reaches its full
+       800px at about 1212px of window, and every pixel past that is the
+       rail's. */
+    flex: 0 0 clamp(340px, calc(100% - 800px - 2.5rem), 680px);
     min-height: 0;
     overflow: hidden;
   }
@@ -120,8 +135,15 @@
     flex: 0 0 calc(100% - 116px);
   }
 
-  /* Its full desktop width, since the row scrolls to it — so a card here is
-     the same card, wrapped the same way, rather than a squeezed variant.
+  /* The desktop rail's *floor*, since the row scrolls to it — so a card here
+     is the same card, wrapped the same way, rather than a squeezed variant.
+     It was "its full desktop width" until that width became a 340–680px
+     range; a queue has no passage to sit level with and every card is listed,
+     so there is nothing here for the extra width to buy. That makes the
+     cascade load-bearing where it used not to be: a window matching both this
+     query and `min-width: 1180px` (a desktop one dragged short and wide) takes
+     this 340px because the block is later in the file, and the two used to
+     agree so it never showed.
      And its own vertical scroller, because in this mode the rail is a queue
      in document order rather than a window onto the visible text
      (EditorAnnotationRail): every annotation is listed, including ones whose
