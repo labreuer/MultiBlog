@@ -25,7 +25,7 @@ a restart does and does not do, and the IndexedDB rules — is [YDOC.md](YDOC.md
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
   (including [showing an annotation at its own revision](#showing-an-annotation-at-its-own-revision--built-one-way-with-a-better-one-available),
   the one part of §8 that is partly built)
-- Planned: [comment quotations — text search into an immutable target, verified](#9-comment-quotations--text-search-into-an-immutable-target-verified)
+- [comment quotations — text search into an immutable target, verified](#9-comment-quotations--text-search-into-an-immutable-target-verified)
 - [Comparison](#comparison) · [Choosing](#choosing) · [Log](#log)
 
 ---
@@ -836,8 +836,9 @@ starts to hurt.
 
 ## 9. Comment quotations — text search into an immutable target, verified
 
-**Surface:** a post's comment thread. **Code (planned):** `src/lib/comment-quote-match.ts`,
-`src/lib/comment-quote-capture.ts`, `comment_quote_anchor`. **Design:** PLAN.md §23f, §23n.
+**Surface:** a post's comment thread. **Code:** `src/lib/comment-quote-match.ts`,
+`src/lib/comment-quote-extract.ts`, `src/lib/comment-quote-capture.ts`, `comment_quote_anchor`,
+`scripts/integrity/check-comment-quotes.ts`. **Design:** PLAN.md §23f, §23n. Built 2026-09-16.
 
 A comment quotes a passage of the post or of another comment, inline or as a block, and the
 quotation is a row on §20a's anchor envelope pinning an immutable version — a publication event
@@ -894,7 +895,7 @@ the first or second candidate. Nothing at read time.
 | 6. Awareness anchors | Awareness channel | Yes | Yes | Yes | No, by design | O(1)-ish |
 | 7. Scrub-state anchor | Columns + a version stamp | Yes | Yes | Yes (materialize) | Yes | Materialize + diff |
 | 8. Log-derived | Columns + the update log | Yes | Yes | Yes | Yes | Materialize + resolve |
-| 9. Comment quotations (planned) | Columns, vs. an immutable version | Yes (the version cannot move) | Yes (same) | No | Yes | Zero at read; one flatten per candidate at post |
+| 9. Comment quotations | Columns, vs. an immutable version | Yes (the version cannot move) | Yes (same) | No | Yes | Zero at read; one flatten per candidate at post |
 
 ## Choosing
 

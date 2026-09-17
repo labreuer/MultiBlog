@@ -132,6 +132,15 @@ before changing the behavior it describes.
   would make real nodes of it — so no client-side preview or conversion, ever
   (`convertCommentBody` is a round trip on purpose). `Comment.bodyText` is derived by the
   same writers, never a trigger. PLAN.md §23b, §23m.
+- **A comment's quotation is found by text and stored from the target, never from the
+  query.** `captureCommentQuotes` (PLAN.md §23n) flattens each immutable target once, matches
+  the typed words, *verifies* every hit against `quotedTextAt` the range, and rewrites the body's
+  span to that derivation before anything is stored — so the typed words are only ever a query,
+  and a flattening mistake costs a missed match, never a wrong anchor. That verify-then-derive
+  step is what makes this the one place docs/COLLAB.md §4's rejected flatten-and-map technique
+  is used (COLLAB.md §9); don't lift the search out of it into a live surface, and don't store a
+  client's `pendingQuotes` hint as an answer. `check-comment-quotes.ts` holds the three copies
+  (body span, row, pinned version) to one string.
 - **`Comment.body` is a cache of the newest `comment_revision`, and is never written alone.**
   One transaction writes both, in `submitComment` and `editComment`; there is no legitimate
   staleness window, so any divergence is a fault —

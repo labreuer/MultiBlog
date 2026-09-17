@@ -34,6 +34,7 @@ import type {
   TestAnchoredLink,
   CommentFacts,
   AnnotationEditFacts,
+  CommentQuoteFacts,
 } from "./db-worker";
 
 export type {
@@ -61,6 +62,7 @@ export type {
   CommentRevisionFacts,
   AnnotationEditFacts,
   AnnotationVersionFacts,
+  CommentQuoteFacts,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
@@ -298,6 +300,11 @@ export const countDocYdocSnapshots = (...args: Parameters<DbHandlers["countDocYd
 // why this is not page.clock).
 export const getCommentFacts = (...args: Parameters<DbHandlers["getCommentFacts"]>): Promise<CommentFacts | null> =>
   call("getCommentFacts", ...args);
+export const createCommentWithQuotes = (
+  ...args: Parameters<DbHandlers["createCommentWithQuotes"]>
+): Promise<{ id: string }> => call("createCommentWithQuotes", ...args);
+export const getCommentQuoteFacts = (...args: Parameters<DbHandlers["getCommentQuoteFacts"]>): Promise<CommentQuoteFacts[]> =>
+  call("getCommentQuoteFacts", ...args);
 
 export const backdateComment = (...args: Parameters<DbHandlers["backdateComment"]>): Promise<void> =>
   call("backdateComment", ...args);

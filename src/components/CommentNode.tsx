@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 // Aliased because the local `isAdmin` below is the resolved boolean for this
@@ -20,11 +20,13 @@ import {
   type CommentVersion,
 } from "@/app/actions/comments";
 import {
+  commentBodyValuePendingJSON,
   commentBodyValueToInput,
   isCommentBodyValueEmpty,
   rememberedCommentBodyMode,
   type CommentBodyValue,
 } from "@/lib/comment-body-value";
+import { useCommentQuote } from "./comment-quote-context";
 import type { JSONContent } from "@tiptap/core";
 import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
 import styles from "./CommentNode.module.css";
@@ -83,6 +85,13 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   const isAdmin = !!session?.user && isAdminRole(session.user.role);
   const [replying, setReplying] = useState(false);
   const [posted, setPosted] = useState(false);
+  // PLAN.md §23h — "Quote in reply" on a closed reply form: the page's quote
+  // context asks this card to open it, and delivers once the form registers.
+  const quoteContext = useCommentQuote();
+  useEffect(() => {
+    if (!quoteContext) return;
+    return quoteContext.registerOpener(`reply:${comment.id}`, () => setReplying(true));
+  }, [quoteContext, comment.id]);
   const [editing, setEditing] = useState(false);
   // The edit box's value in either mode (PLAN.md §23m). Null while the
   // Markdown serialization is being fetched — the stored form is JSON, and
@@ -154,7 +163,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
     if (!draft || isCommentBodyValueEmpty(draft)) return;
     setEditError(null);
     startEditTransition(async () => {
-      const result = await editComment(comment.id, commentBodyValueToInput(draft));
+      const result = await editComment(comment.id, commentBodyValueToInput(draft), commentBodyValuePendingJSON(draft));
       if (result.error) {
         setEditError(result.error);
         return;
@@ -203,7 +212,15 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
           {editing ? (
             <div className={styles.editForm}>
               {draft ? (
-                <CommentBodyInput value={draft} onChange={setDraft} ariaLabel="Edit comment" disabled={editPending} rows={4} autoFocus />
+                <CommentBodyInput
+                  value={draft}
+                  onChange={setDraft}
+                  ariaLabel="Edit comment"
+                  disabled={editPending}
+                  rows={4}
+                  autoFocus
+                  composerKey={`edit:${comment.id}`}
+                />
               ) : (
                 <p className={styles.editLoading}>Loading…</p>
               )}
@@ -232,7 +249,9 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
               </span>
             </div>
           ) : (
-            <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
+            <div data-comment-body>
+              <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
+            </div>
           )}
           {comment.visiblyEdited && (
             <p className={styles.historyLine}>
@@ -287,7 +306,9 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
         </div>
       )}
       {replying && !posted && (
-        <CommentForm postId={postId} parentCommentId={comment.id} onPosted={() => setPosted(true)} />
+        <div data-reply-form={comment.id}>
+          <CommentForm postId={postId} parentCommentId={comment.id} onPosted={() => setPosted(true)} />
+        </div>
       )}
       {comment.replies.map((reply) => (
         <CommentNode key={reply.id} comment={reply} postId={postId} depth={depth + 1} />

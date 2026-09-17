@@ -8,6 +8,7 @@ import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
 import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import CommentForm from "./CommentForm";
+import { useCommentQuote } from "./comment-quote-context";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 
@@ -30,6 +31,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const quoteContext = useCommentQuote();
 
   const editor = useEditor({
     extensions: [
@@ -142,6 +144,39 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
             Commenting on: “
             {pending.quotedText.length > 80 ? `${pending.quotedText.slice(0, 80)}…` : pending.quotedText}”
           </p>
+          {/* PLAN.md §23h — the other thing a selection in the article can
+              become: a quotation inside whichever composer is open (the
+              general form by default), rather than a passage thread. Carries
+              the editor's own offsets as the matcher's hint. */}
+          {quoteContext && (
+            <p style={{ marginBottom: 6 }}>
+              <button
+                type="button"
+                data-testid="quote-in-comment"
+                onClick={() => {
+                  quoteContext.quoteInto({
+                    target: { kind: "post", id: postId },
+                    text: pending.quotedText,
+                    from: pending.from,
+                    to: pending.to,
+                  });
+                  setPending(null);
+                }}
+                style={{
+                  font: "inherit",
+                  fontSize: "0.85rem",
+                  border: "none",
+                  background: "none",
+                  color: "var(--link)",
+                  padding: 0,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Quote in comment instead
+              </button>
+            </p>
+          )}
           <CommentForm
             postId={postId}
             anchorFrom={pending.from}

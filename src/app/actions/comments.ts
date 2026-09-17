@@ -21,6 +21,9 @@ import { resolveCommentBody } from "@/lib/comment-body-resolve";
 import type { CommentBodyInput } from "@/lib/comment-body-value";
 import { commentContentToMarkdown } from "@/lib/markdown-import";
 import { docsEqual } from "@/lib/diff";
+import { captureCommentQuotes, type CommentQuoteAnchorInput } from "@/lib/comment-quote-capture";
+import { parsePendingQuoteHints } from "@/lib/comment-quote-pending";
+import { targetFromColumns, targetToColumns } from "@/lib/anchors";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -34,6 +37,7 @@ export async function submitComment(
   const parentCommentId = formData.get("parentCommentId");
   const body = formData.get("body");
   const bodyFormat = formData.get("bodyFormat");
+  const pendingQuotesRaw = formData.get("pendingQuotes");
   const anchorFromRaw = formData.get("anchorFrom");
   const anchorToRaw = formData.get("anchorTo");
   const quotedText = formData.get("quotedText");
@@ -105,20 +109,20 @@ export async function submitComment(
   }
 
   let parentId: string | null = null;
-  let thread: { id: string };
+  let thread: { id: string; anchorFrom: number };
 
   if (typeof parentCommentId === "string" && parentCommentId) {
     // A reply always belongs to its parent's existing thread — never
     // creates a new one, even if anchor fields were also submitted.
     const parent = await prisma.comment.findUnique({
       where: { id: parentCommentId },
-      include: { thread: { select: { postId: true } } },
+      include: { thread: { select: { postId: true, anchorFrom: true } } },
     });
     if (!parent || parent.thread.postId !== postId) {
       return { error: "Invalid reply target." };
     }
     parentId = parent.id;
-    thread = { id: parent.threadId };
+    thread = { id: parent.threadId, anchorFrom: parent.thread.anchorFrom };
   } else if (typeof anchorFromRaw === "string" && typeof anchorToRaw === "string" && typeof quotedText === "string") {
     const anchorFrom = Number(anchorFromRaw);
     const anchorTo = Number(anchorToRaw);
@@ -152,8 +156,19 @@ export async function submitComment(
       }));
   }
 
+  // PLAN.md §23n — find every quotation in the body, rewrite it to the
+  // target's own words (§23f) and get the anchor rows to write beside it.
+  // The thread's passage anchor is the nearest-occurrence hint when quoting
+  // the host post; the general thread's is 0, which hints nothing useful and
+  // is harmless.
+  const captured = await captureCommentQuotes({
+    node: parsedBody.node,
+    host: { postId, parentCommentId: parentId, threadAnchorFrom: thread.anchorFrom > 0 ? thread.anchorFrom : null },
+    hints: parsePendingQuoteHints(pendingQuotesRaw),
+  });
+
   const commenterIsAdmin = !!session?.user && isAdmin(session.user.role);
-  const isSpam = !commenterIsAdmin && (await checkSpam({ body: parsedBody.text, displayName, email, ipAddress }));
+  const isSpam = !commenterIsAdmin && (await checkSpam({ body: captured.text, displayName, email, ipAddress }));
 
   const siteSettings = await getSiteSettings();
   const status: CommentStatus = isSpam
@@ -178,14 +193,17 @@ export async function submitComment(
       threadId: thread.id,
       parentCommentId: parentId,
       commenterId: commenter.id,
-      body: parsedBody.json as Prisma.InputJsonValue,
-      bodyText: parsedBody.text,
+      body: captured.json as Prisma.InputJsonValue,
+      bodyText: captured.text,
       status,
       ipAddress,
+      // The quotations' rows, in the same statement as the comment and its
+      // revision 1: the body names their ids, so the three land together.
+      quoteAnchors: { create: captured.anchors.map(quoteAnchorRow) },
       revisions: {
         create: {
           revisionNo: 1,
-          body: parsedBody.json as Prisma.InputJsonValue,
+          body: captured.json as Prisma.InputJsonValue,
           // The commenter's user when they are signed in, null when they are
           // not — an anonymous original is the one version with nobody to
           // name, and `commenter.userId` is already exactly that distinction.
@@ -314,7 +332,28 @@ export type EditCommentResult = {
   bodyText?: string;
 };
 
-export async function editComment(commentId: string, input: CommentBodyInput): Promise<EditCommentResult> {
+// A `comment_quote_anchor` row from the capture's output — the arc through
+// targetToColumns, the part columns, and whichever stamp the substrate has.
+function quoteAnchorRow(anchor: CommentQuoteAnchorInput) {
+  return {
+    id: anchor.id,
+    partOrder: anchor.partOrder,
+    ...targetToColumns(anchor.target),
+    selectorKind: "DOC_RANGE" as const,
+    anchorFrom: anchor.anchorFrom,
+    anchorTo: anchor.anchorTo,
+    quotedText: anchor.quotedText,
+    selector: anchor.selector as Prisma.InputJsonValue,
+    anchoredEventId: anchor.anchoredEventId,
+    quotedRevisionId: anchor.quotedRevisionId,
+  };
+}
+
+export async function editComment(
+  commentId: string,
+  input: CommentBodyInput,
+  pendingQuotesRaw?: string,
+): Promise<EditCommentResult> {
   const session = await auth();
   if (!session?.user) {
     return { error: "You must be signed in to edit a comment." };
@@ -330,10 +369,26 @@ export async function editComment(commentId: string, input: CommentBodyInput): P
     where: { id: commentId },
     include: {
       commenter: { select: { id: true, userId: true, displayName: true, email: true } },
-      thread: { select: { post: { select: { id: true, slug: true, publishedAt: true } } } },
+      thread: { select: { anchorFrom: true, post: { select: { id: true, slug: true, publishedAt: true } } } },
       // The tail alone, not the whole history: all an edit needs is the
       // number to follow and the text to compare against.
       revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { revisionNo: true, body: true } },
+      // PLAN.md §23m — the versions this comment's quotations already pin are
+      // searched first on re-match, so an edit does not silently re-pin.
+      quoteAnchors: {
+        select: {
+          id: true,
+          docId: true,
+          postId: true,
+          fileId: true,
+          targetAnnotationId: true,
+          targetCommentId: true,
+          anchorFrom: true,
+          anchorTo: true,
+          anchoredEventId: true,
+          quotedRevisionId: true,
+        },
+      },
     },
   });
   if (!comment) {
@@ -349,10 +404,27 @@ export async function editComment(commentId: string, input: CommentBodyInput): P
     return { error: "You don't have permission to edit this comment." };
   }
 
+  const captured = await captureCommentQuotes({
+    node: parsedBody.node,
+    host: {
+      postId: comment.thread.post.id,
+      parentCommentId: comment.parentCommentId,
+      threadAnchorFrom: comment.thread.anchorFrom > 0 ? comment.thread.anchorFrom : null,
+      editingCommentId: commentId,
+    },
+    hints: parsePendingQuoteHints(pendingQuotesRaw),
+    existing: comment.quoteAnchors.flatMap((row) => {
+      const target = targetFromColumns(row);
+      return target ? [{ ...row, target }] : [];
+    }),
+  });
+
   // docsEqual rather than string equality: jsonb does not preserve key order
   // on read-back, so a byte comparison would call every unchanged save a
   // change. Deliberately not an error: nothing is wrong, and nothing happened.
-  if (docsEqual(parsedBody.json, comment.body)) {
+  // Compared after the rewrite, so re-saving a body whose quotations resolve
+  // to exactly what they already were is the no-op it looks like.
+  if (docsEqual(captured.json, comment.body)) {
     return {};
   }
 
@@ -363,7 +435,7 @@ export async function editComment(commentId: string, input: CommentBodyInput): P
   const isSpam =
     !isAdmin(role) &&
     (await checkSpam({
-      body: parsedBody.text,
+      body: captured.text,
       displayName: comment.commenter.displayName,
       email: comment.commenter.email,
       ipAddress: comment.ipAddress,
@@ -380,7 +452,7 @@ export async function editComment(commentId: string, input: CommentBodyInput): P
       data: {
         commentId,
         revisionNo: nextRevisionNo,
-        body: parsedBody.json as Prisma.InputJsonValue,
+        body: captured.json as Prisma.InputJsonValue,
         // Who wrote *this version* — the moderator when a moderator edited it,
         // which is why this is the acting user and not `commenter.userId`.
         authorUserId: userId,
@@ -389,8 +461,10 @@ export async function editComment(commentId: string, input: CommentBodyInput): P
     prisma.comment.update({
       where: { id: commentId },
       data: {
-        body: parsedBody.json as Prisma.InputJsonValue,
-        bodyText: parsedBody.text,
+        body: captured.json as Prisma.InputJsonValue,
+        bodyText: captured.text,
+        // The new body names new rows; the old ones go with the old body.
+        quoteAnchors: { deleteMany: {}, create: captured.anchors.map(quoteAnchorRow) },
         editedAt: new Date(),
         ...(isSpam ? { status: "SPAM" as CommentStatus, statusChangedById: userId, statusChangedAt: new Date() } : {}),
       },
@@ -398,7 +472,7 @@ export async function editComment(commentId: string, input: CommentBodyInput): P
   ]);
 
   revalidateTouchedPosts([comment.thread.post]);
-  return { status: isSpam ? "SPAM" : comment.status, body: parsedBody.json, bodyText: parsedBody.text };
+  return { status: isSpam ? "SPAM" : comment.status, body: captured.json, bodyText: captured.text };
 }
 
 // Whether this viewer may read a comment at all — the rule getCommentHistory

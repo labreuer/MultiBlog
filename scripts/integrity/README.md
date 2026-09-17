@@ -154,6 +154,23 @@ second link for a user whose first is *minted* must go in, as must a reopened li
 slot is free), and the not-blank CHECK on `name` (a whitespace-only name must be refused; a
 real one must go in — docs/ANCHORED_LINKS.md, "Naming a link").
 
+## `check-comment-quotes.ts` (PLAN.md §23)
+
+The pair §23f rests on, checked for every `comment_quote_anchor` row: the quoting body's span
+that names the row carries exactly `quoted_text`, and `quoted_text` is exactly the target's
+words at the pinned version — a publication event's `prose_json` for a post, a
+`comment_revision`'s body for a comment, both immutable, so "exact, forever" is the standard.
+Three copies of one string, written once from a verified match; a divergence is a fault in
+the write path or a body rewritten without re-running the capture, and nothing on the read
+path would notice — the body renders its own words with no join, by design.
+
+```
+npx tsx scripts/integrity/check-comment-quotes.ts [--post <id>] [--verbose]
+```
+
+Touches no ydoc; run any time. A doc, file or annotation target is a WARN: none has a writer
+(§23e), so a row with one came from somewhere else.
+
 ## `check-comment-revisions.ts` and `check-annotation-snapshots.ts` (PLAN.md §22)
 
 The two edit-history checks. Both verify that a cache still equals the newest stored version,

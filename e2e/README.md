@@ -310,8 +310,12 @@ the admin account.
   behind the "Rich text" button with the same accessible name. The mode is remembered in
   `localStorage`, which a fresh test context does not carry over, so a spec that switches to
   rich mode does not change the next spec's form. The inline edit box is
-  `{ name: "Edit comment" }` in either mode. `comment-markdown.spec.ts` submits three real
-  comments through the form, which counts against the rate limit below.
+  `{ name: "Edit comment" }` in either mode. `comment-markdown.spec.ts` submits two real
+  comments through the form and `comment-quoting.spec.ts` two more, which count against the
+  rate limit below; everything else those specs need is seeded. **`createCommentWithQuotes()`**
+  runs the real parse → match → rewrite path (PLAN.md §23n) without the form, so a comment
+  that quotes the post or another comment can exist without spending a submission;
+  `getCommentQuoteFacts()` reads the anchor rows it wrote.
 - **Comments are rate-limited to 5 per IP per 10 minutes**
   (`src/lib/rate-limit.ts`), and every worker shares 127.0.0.1. Create comments
   with `createComment()` (straight to the DB) unless the test is *about* the
