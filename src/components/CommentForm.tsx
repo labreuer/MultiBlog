@@ -46,7 +46,19 @@ function draftKey(props: Props): string {
 export default function CommentForm(props: Props) {
   const { postId, parentCommentId, anchorFrom, anchorTo, quotedText, onPosted, onCancel } = props;
   const router = useRouter();
-  const { data: session } = useSession();
+  // **`status` is load-bearing here, not decoration.** The post page is
+  // statically generated (§21), so no session can be in its HTML: every
+  // reader gets the signed-out render first, and `useSession` corrects it
+  // once /api/auth/session answers. Guessing "anonymous" during that window
+  // is a guess with teeth, because the identity fields it renders are
+  // `required` — a submit made before the answer arrives fails *constraint
+  // validation* instead of posting. The browser fires `invalid` on two
+  // fields that are about to disappear, dispatches no submit event at all,
+  // and the reader's click does nothing, with nothing to show for it: no
+  // request, no error, no pending state. So the fields wait for the answer,
+  // and the button waits with them.
+  const { data: session, status } = useSession();
+  const identityKnown = status !== "loading";
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
@@ -116,7 +128,7 @@ export default function CommentForm(props: Props) {
           <input type="hidden" name="quotedText" value={quotedText} />
         </>
       )}
-      {!userName && (
+      {identityKnown && !userName && (
         <>
           <input name="name" type="text" placeholder="Name" required className={styles.field} />
           <input name="email" type="email" placeholder="Email" required className={styles.field} />
@@ -154,7 +166,7 @@ export default function CommentForm(props: Props) {
       <div className={styles.buttonRow}>
         <button
           type="submit"
-          disabled={pending || empty}
+          disabled={pending || empty || !identityKnown}
           className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
         >
           {pending ? "Posting..." : "Post comment"}

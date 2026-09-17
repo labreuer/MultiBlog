@@ -395,6 +395,15 @@ working on.
   check**, including `npm run e2e` and `web-prod`: locally the dev server and the browser are
   one machine and so always agree. Same reason PLAN.md §13m's collab bug survived to
   production.
+- **On a statically generated page, anything rendered before `useSession` answers is a
+  guess — and a `required` guess swallows the submit.** The HTML has no session, so the
+  first render is the signed-out one; a form that renders `required` identity fields on that
+  guess fails *constraint validation* if it is submitted before the answer arrives, which
+  dispatches no submit event and leaves nothing behind: no request, no error, no pending
+  state, no console line. Gate such fields on `status !== "loading"` and disable the submit
+  with them (`CommentForm`, PLAN.md §6). Local checks never see it — the session answers in
+  milliseconds on this machine — and it surfaced only as an e2e click that produced no POST
+  under a loaded suite.
 - **No hex or named color literal anywhere in `src/`** outside `src/app/globals.css`,
   `src/lib/author-colors.ts`, and the handful named in STYLE.md's Dark theme section. Every
   color is one of `globals.css`'s tokens — `style={{ color: "var(--text-secondary)" }}` is the

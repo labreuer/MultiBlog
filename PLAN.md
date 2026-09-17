@@ -635,6 +635,19 @@ logging in to an account is also allowed (and a logged-in commenter is the same 
 record keyed by `user_id`). Email lets us tie anonymous comments to a stable identity for
 the trust model; optional double opt-in verification can come later.
 
+**The identity fields wait for `useSession`'s answer, and the submit button waits with
+them.** A post page is statically generated (§21), so no session can be in its HTML: the
+signed-out render is what every reader gets first, and `useSession` corrects it once
+/api/auth/session answers. Rendering the name/email pair on that guess is a guess with
+teeth, because they are `required` — a submit made in that window fails **constraint
+validation** rather than posting. The browser fires `invalid` on two fields that are about
+to disappear, dispatches no submit event at all, and the click does nothing: no request, no
+error, no pending state, nothing in a log. `CommentForm` therefore renders the pair only
+once `status !== "loading"`, and disables the button until then. Found from the outside, as
+a Playwright click on an enabled "Post comment" that produced no POST, on a suite run heavy
+enough to slow the session fetch past the typing — which is the only way it ever shows,
+since a local reader's session answers long before they have finished a sentence.
+
 **Moderation policy — three-level cascade (decided).** Each comment's required policy is
 resolved as **post override → author override → site default**, where each level is one of
 `always` (queue for approval), `auto` (publish immediately), or `inherit` (defer to the
