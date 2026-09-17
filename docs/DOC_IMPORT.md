@@ -291,7 +291,7 @@ The size-cap test pastes 800 KB — above our cap, below Next's — and asserts 
 appears. That gap is the whole point of §6, so the test fails if the two numbers are ever
 brought together.
 
-## 11. The second consumer: a comment typed as Markdown (PLAN.md §23m)
+## 11. The second consumer: a comment typed as Markdown (PLAN.md §23m; docs/COMMENTS.md)
 
 `markdownToCommentContent` in the same file parses a comment's Markdown box, and it breaks
 §2's rule on purpose. §2 says the parse list *is* the encode list; here the parse list is

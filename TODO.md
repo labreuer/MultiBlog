@@ -66,7 +66,7 @@ is the cheaper path to it.
 ## Comment quotations: deferred follow-ups (PLAN.md §23)
 
 **Status:** §23 built in full on `annotations-and-comments`, 2026-09-16 (seven commits, Phase 0
-to Phase 5; the "as built" paragraphs in §23c, §23h, §23j, §23m and §23n are the account).
+to Phase 5; docs/COMMENTS.md is the as-built account).
 Not merged to `main`. Each item below is additive and needs no schema it does not have.
 
 - **No inline quote gesture.** Both gestures ("Quote in comment instead" in the article's
@@ -89,7 +89,7 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
   cheaper fix and needs a renderer style plus a shim removal.
 - **The e2e per-IP comment budget is nearly spent.** The real form is rate-limited to 5 posts
   per IP per 10 minutes and every worker shares one IP; `moderation` (1), `comment-markdown` (2)
-  and `comment-quoting` (2) use four. A new spec that must post through the form should seed
+  and `comment-quoting` (1) use four. A new spec that must post through the form should seed
   with `createCommentWithQuotes()`/`createComment()` instead, or the sixth post in a run fails
   as "too quickly" and reads like a regression (it did once, before Phase 3 trimmed a case).
 - **One retry-shaped test.** `comment-quoting.spec.ts`'s reply-gesture case re-issues its
@@ -97,10 +97,8 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
   affordance did not appear for a first synthetic selection while appearing 30/30 in
   isolation. Not diagnosed; docs/playwright-flakiness.html's shared-state class is the first
   suspect if it recurs.
-- **`reference/comment-edit-history`** still holds the two superseded §22d commits as a record
-  (PLAN.md §23l). Deletable when that record stops being worth keeping.
 
-## A PDF annotation reply's quote is still client-supplied (PLAN.md §22j)
+## A PDF annotation reply's quote is still client-supplied (PLAN.md §22e; docs/ANNOTATIONS.md)
 
 `postFileAnnotation` stores a reply's `anchorFrom`/`anchorTo`/`quotedText` exactly as the
 client sent them. The doc path does not: it runs `captureAnchorInYdoc`, which materializes the
