@@ -8357,12 +8357,23 @@ model CommentRevision {
   Plain text in, plain text out: comment bodies stay the `{ text }` envelope, and this section
   does not make them rich (§22h).
 - **The history UI** is one client island shared with annotations
-  (`src/components/EditHistory.tsx`): the "edited <LocalTime>" marker is a button; opening it
+  (`src/components/EditHistory.tsx`): the "edited" marker is a button; opening it
   calls `getCommentHistory(commentId)` (or the annotation twin) and lists the non-silent
   versions newest-first with author and time, each rendered as the live comment is. It fetches
   on open rather than shipping revisions in the page for the same reason `TagChips` does: the
   post page is statically generated (§21) and must not touch a dynamic API at build. The
   action applies §22b's silence rule server-side; the island never sees a silent revision.
+  The marker has two `placement`s. An annotation's sits on a line of its own below the body and
+  reads "edited <LocalTime>"; a comment's is parenthesized at the end of the meta line, directly
+  after the posting time, where a second visible timestamp would read as a confusing pair — so
+  there the edit time is the button's `title` ("Last edited …") and only the word is the link.
+  The parentheses are the island's, not the call site's, so the panel opens after the closing
+  one rather than between them. Because a comment's panel opens *above* the body, the open
+  list stands in for it: the current version is the list's first entry, so `CommentNode` hides
+  the live body while versions are showing and the versions are told apart by background — the
+  current one on the page's own, the superseded ones on the panel's muted fill. The island
+  reports that it is *listing* versions rather than that it is open, so a fetch still in
+  flight, a failed one, or one every version of which is withheld leaves the body up.
   A moderator-made edit shows the moderator's name on that version, which is the honest thing
   and needs no extra column.
 - **`/comments`** already has an Edited-at column; it starts being non-empty. A "Versions"

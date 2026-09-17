@@ -104,12 +104,53 @@ test.describe("editing a comment", () => {
     const marker = card(page, commentId).getByRole("button", { name: /earlier versions/ });
     await expect(marker).toBeVisible();
 
+    // Where it sits and what it says. The marker ends the meta line, after
+    // the *posting* time, and the link is the bare word — the parentheses
+    // around it are not clickable and the edit time is in the tooltip, which
+    // is the whole point of `placement="meta"`.
+    await expect(marker).toHaveText("edited");
+    await expect(marker).toHaveAttribute("title", /^Last edited \S/);
+    const metaLine = card(page, commentId).locator('a[href^="#"]').first().locator("..");
+    await expect(metaLine).toContainText(/\(edited\)$/);
+
+    const body = card(page, commentId).locator("[data-comment-body]");
+    await expect(body).toContainText(corrected);
+
     await marker.click();
     const history = page.locator('[data-edit-history="comment"]');
     await expect(history).toContainText(original);
     await expect(history).toContainText(corrected);
     await expect(history).toContainText("Earlier version");
     await expect(history).toContainText("Current version");
+
+    // The open list stands in for the body: the current version is its first
+    // entry, so leaving the body up would show the same words twice.
+    await expect(body).toHaveCount(0);
+
+    // And the two kinds of version are told apart by background, not only by
+    // the word above them: the current one on the page's own background, the
+    // superseded ones showing the panel's muted fill through them. The
+    // panel's left border survives the move of its padding onto the versions.
+    const paint = await history.evaluate((panel) => {
+      const bg = (el: Element) => getComputedStyle(el).backgroundColor;
+      return {
+        page: bg(document.body),
+        panel: bg(panel),
+        panelBorderLeft: getComputedStyle(panel).borderLeftWidth,
+        current: bg(panel.querySelector('[data-edit-version="current"]')!),
+        earlier: bg(panel.querySelector('[data-edit-version="earlier"]')!),
+      };
+    });
+    expect(paint.current).toBe(paint.page);
+    expect(paint.panel).not.toBe(paint.page);
+    // Transparent, i.e. the panel's fill is what shows.
+    expect(paint.earlier).toBe("rgba(0, 0, 0, 0)");
+    expect(paint.panelBorderLeft).toBe("2px");
+
+    // Closing it puts the comment back.
+    await marker.click();
+    await expect(history).toHaveCount(0);
+    await expect(body).toContainText(corrected);
   });
 
   test("a moderator's edit is attributed to the moderator", async ({ page, publishedPost }) => {
