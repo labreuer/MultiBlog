@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import LocalTime from "./LocalTime";
+import { useEffect, useState, type ReactNode } from "react";
+import LocalTime, { useLocalTime } from "./LocalTime";
 import styles from "./EditHistory.module.css";
 
 /**
@@ -39,6 +39,32 @@ type Props<V extends EditHistoryMeta> = {
   renderBody: (version: V) => ReactNode;
   /** Names what is being versioned, for the marker's accessible label. */
   what: "comment" | "annotation";
+  /**
+   * Where the marker sits, which is what decides whether it says the edit
+   * time out loud.
+   *
+   * `"own-line"` is the marker on a line of its own below the body, where
+   * there is room for "edited <when>". `"meta"` is the marker parenthesized
+   * at the end of the entry's meta line, directly after the *posting* time
+   * (`CommentNode`) — two timestamps side by side there would read as one
+   * confusing pair, so the edit time moves into the tooltip. The parentheses
+   * belong to this component rather than the call site so the panel opens
+   * *after* the closing one: a block between them would push the ")" onto a
+   * line of its own.
+   */
+  placement?: "own-line" | "meta";
+  /**
+   * Told when the panel is actually *listing* versions, so a caller whose
+   * marker sits above the body can hide that body while the list stands in
+   * for it (`CommentNode`) — the current version is the first entry, so
+   * leaving both up shows the same text twice.
+   *
+   * Deliberately narrower than "the panel is open": while the fetch is in
+   * flight, or if it fails, or if every version is withheld, the panel has
+   * nothing to stand in *with*, and hiding the body would leave the reader
+   * with a spinner or an error where the comment was.
+   */
+  onVersionsShown?: (shown: boolean) => void;
 };
 
 // PLAN.md §22c — the "edited" marker, and the history behind it. One island
@@ -50,11 +76,27 @@ type Props<V extends EditHistoryMeta> = {
 // where §22b's silence rule says the edit is visible, which is decided on the
 // server — so a silent edit reaches neither this component nor the payload it
 // would have been rendered from.
-export default function EditHistory<V extends EditHistoryMeta>({ editedAt, load, renderBody, what }: Props<V>) {
+export default function EditHistory<V extends EditHistoryMeta>({
+  editedAt,
+  load,
+  renderBody,
+  what,
+  placement = "own-line",
+  onVersionsShown,
+}: Props<V>) {
+  // Hydration-safe by construction, same as the element form: UTC text on the
+  // server and the first client render, localized after. A `title` React
+  // rendered differently on the two sides would be a prop mismatch.
+  const editedAtText = useLocalTime(editedAt);
   const [open, setOpen] = useState(false);
   const [versions, setVersions] = useState<V[] | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const showingVersions = open && versions !== null && versions.length > 0;
+  useEffect(() => {
+    onVersionsShown?.(showingVersions);
+  }, [showingVersions, onVersionsShown]);
 
   async function toggle() {
     if (open) {
@@ -79,22 +121,31 @@ export default function EditHistory<V extends EditHistoryMeta>({ editedAt, load,
 
   return (
     <span className={styles.wrap}>
+      {placement === "meta" && <span className={styles.paren}>(</span>}
       <button
         type="button"
         onClick={toggle}
         className={styles.marker}
         aria-expanded={open}
         aria-label={open ? `Hide earlier versions of this ${what}` : `Show earlier versions of this ${what}`}
+        title={editedAtText ? `Last edited ${editedAtText}` : undefined}
       >
-        edited{editedAt ? " " : ""}
-        {editedAt && <LocalTime value={editedAt} />}
+        edited{placement === "own-line" && editedAt ? " " : ""}
+        {placement === "own-line" && editedAt && <LocalTime value={editedAt} />}
       </button>
+      {placement === "meta" && <span className={styles.paren}>)</span>}
       {open && (
         <div className={styles.panel} data-edit-history={what}>
           {pending && <p className={styles.status}>Loading earlier versions…</p>}
           {error && <p className={styles.error}>{error}</p>}
           {versions?.map((version) => (
-            <div key={version.revisionNo} className={styles.version}>
+            <div
+              key={version.revisionNo}
+              className={`${styles.version} ${version.current ? styles.currentVersion : ""}`}
+              // A hook for the suite: which block is which is otherwise only
+              // a hashed CSS-module class and a word of prose.
+              data-edit-version={version.current ? "current" : "earlier"}
+            >
               <p className={styles.versionMeta}>
                 {version.current ? "Current" : "Earlier"} version
                 {version.authorName ? ` by ${version.authorName}` : ""} · <LocalTime value={version.createdAt} />

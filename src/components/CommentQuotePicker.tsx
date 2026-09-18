@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { loadQuotableTarget, searchQuotableTargets, type QuotableTargetBody, type QuotableTargetHit } from "@/app/actions/comments";
 import { commentContentExtensions, contentExtensions } from "@/lib/tiptap-schema";
@@ -94,17 +94,29 @@ export default function CommentQuotePicker({ hostPostId, onQuote, onClose }: Pro
     });
   }
 
-  let rendered: ReactNode = null;
-  if (chosen) {
+  // Rendered once per chosen target, never per render. `renderToReactElement`
+  // builds a fresh closure for every node and mark type on each call, and
+  // those closures are the elements' *types* — so a second call over the
+  // same JSON hands React a tree it cannot reconcile with the first, and it
+  // unmounts and remounts every DOM node of the body. This component
+  // re-renders on every settled selection (`setSelectedText` above), which
+  // put that remount in the middle of the reader's drag: the selection's
+  // anchor node was removed from the document, the DOM's range-adjustment
+  // rule moved that boundary to the body container at offset 0, and the
+  // selection grew backwards to the start of the article as the drag went
+  // on (docs/TIPTAP.md). Memoising on `chosen` passes React the identical
+  // element each time, which it skips outright.
+  const rendered = useMemo<ReactNode>(() => {
+    if (!chosen) return null;
     try {
-      rendered = renderToReactElement({
+      return renderToReactElement({
         content: chosen.body as never,
         extensions: chosen.kind === "post" ? contentExtensions : commentContentExtensions,
       });
     } catch {
-      rendered = <p>This {chosen.kind} could not be shown.</p>;
+      return <p>This {chosen.kind} could not be shown.</p>;
     }
-  }
+  }, [chosen]);
 
   return (
     <div className={styles.panel} data-testid="quote-picker">

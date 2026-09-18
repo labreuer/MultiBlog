@@ -15,6 +15,16 @@ import { EDIT_GRACE_MS } from "../src/lib/edit-grace";
 // actually stored. They are deliberately different questions here — a silent
 // edit still writes a revision row, so "no marker appeared" alone would pass
 // just as well against an implementation that had thrown the old version away.
+//
+// **Every navigation to the post page here is a `freshGoto`, including the
+// first one of a test.** `createComment` writes straight to the database, so
+// nothing revalidates the post page — and against the prod target that page
+// is ISR (`revalidate = 60`), which serves whatever render is already cached
+// for that path. Any earlier request fills it: a landing page in another
+// worker lists this post and Next prefetches the link. The failure is a page
+// that says "No comments yet." and a test that waits out its timeout for a
+// card which is never coming, and it reads as a broken loader rather than a
+// stale cache. Seen once for real (comment-markdown.spec.ts, 2026-09-17).
 
 const PAST_THE_WINDOW = EDIT_GRACE_MS + 60_000;
 
@@ -51,7 +61,7 @@ test.describe("editing a comment", () => {
       status: "APPROVED",
     });
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await expect(visibleText(page, original)).toBeVisible();
 
     await editTo(page, commentId, corrected);
@@ -82,16 +92,29 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await editTo(page, commentId, corrected);
 
-    // The marker only renders from a fresh server render — `visiblyEdited` is
-    // resolved by the loader, not in the browser. freshGoto rather than
-    // reload() because the post page is ISR against the prod target, and the
-    // action's own revalidatePath is not the thing under test here.
+    // This one is a freshGoto for a second reason on top of the header's: the
+    // marker only renders from a fresh server render — `visiblyEdited` is
+    // resolved by the loader, not in the browser — and reload() would leave
+    // the action's own revalidatePath deciding a race that is not the thing
+    // under test here.
     await freshGoto(page, publishedPost.path);
     const marker = card(page, commentId).getByRole("button", { name: /earlier versions/ });
     await expect(marker).toBeVisible();
+
+    // Where it sits and what it says. The marker ends the meta line, after
+    // the *posting* time, and the link is the bare word — the parentheses
+    // around it are not clickable and the edit time is in the tooltip, which
+    // is the whole point of `placement="meta"`.
+    await expect(marker).toHaveText("edited");
+    await expect(marker).toHaveAttribute("title", /^Last edited \S/);
+    const metaLine = card(page, commentId).locator('a[href^="#"]').first().locator("..");
+    await expect(metaLine).toContainText(/\(edited\)$/);
+
+    const body = card(page, commentId).locator("[data-comment-body]");
+    await expect(body).toContainText(corrected);
 
     await marker.click();
     const history = page.locator('[data-edit-history="comment"]');
@@ -99,6 +122,35 @@ test.describe("editing a comment", () => {
     await expect(history).toContainText(corrected);
     await expect(history).toContainText("Earlier version");
     await expect(history).toContainText("Current version");
+
+    // The open list stands in for the body: the current version is its first
+    // entry, so leaving the body up would show the same words twice.
+    await expect(body).toHaveCount(0);
+
+    // And the two kinds of version are told apart by background, not only by
+    // the word above them: the current one on the page's own background, the
+    // superseded ones showing the panel's muted fill through them. The
+    // panel's left border survives the move of its padding onto the versions.
+    const paint = await history.evaluate((panel) => {
+      const bg = (el: Element) => getComputedStyle(el).backgroundColor;
+      return {
+        page: bg(document.body),
+        panel: bg(panel),
+        panelBorderLeft: getComputedStyle(panel).borderLeftWidth,
+        current: bg(panel.querySelector('[data-edit-version="current"]')!),
+        earlier: bg(panel.querySelector('[data-edit-version="earlier"]')!),
+      };
+    });
+    expect(paint.current).toBe(paint.page);
+    expect(paint.panel).not.toBe(paint.page);
+    // Transparent, i.e. the panel's fill is what shows.
+    expect(paint.earlier).toBe("rgba(0, 0, 0, 0)");
+    expect(paint.panelBorderLeft).toBe("2px");
+
+    // Closing it puts the comment back.
+    await marker.click();
+    await expect(history).toHaveCount(0);
+    await expect(body).toContainText(corrected);
   });
 
   test("a moderator's edit is attributed to the moderator", async ({ page, publishedPost }) => {
@@ -117,7 +169,7 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await editTo(page, commentId, corrected);
 
     const facts = await getCommentFacts(commentId);
@@ -142,7 +194,7 @@ test.describe("editing a comment", () => {
     const anonymous = await page.context().browser()!.newContext({ storageState: { cookies: [], origins: [] } });
     const anonymousPage = await anonymous.newPage();
     try {
-      await anonymousPage.goto(publishedPost.path);
+      await freshGoto(anonymousPage, publishedPost.path);
       await expect(visibleText(anonymousPage, original)).toBeVisible();
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Edit" })).toHaveCount(0);
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Reply" })).toBeVisible();
@@ -166,7 +218,7 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await editTo(page, commentId, original);
 
     // The point of the no-op branch: a Save with nothing changed must not

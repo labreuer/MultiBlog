@@ -15,18 +15,36 @@
   text-decoration: underline dotted;
 }
 
+/* The `placement="meta"` brackets. Outside the button on purpose: only the
+   word is the link, and only the word is clickable. */
+.paren {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* The padding lives on the children, not here: each version paints its own
+   background (below), and an inset block would read as a card rather than as
+   the stack of versions it is. The left border stays on the panel, so it runs
+   the whole height whatever the versions do. */
 .panel {
   display: block;
   margin-top: 6px;
-  padding: 8px 10px;
   border-left: 2px solid var(--border);
   background: var(--surface-muted);
   font-size: 0.9rem;
 }
 
+.version {
+  padding: 8px 10px;
+}
+
+/* The text that is live on the page, on the page's own background — the
+   muted panel behind it is what says "superseded". */
+.currentVersion {
+  background: var(--background);
+}
+
 .version + .version {
-  margin-top: 10px;
-  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 
@@ -43,9 +61,11 @@
 .status {
   color: var(--text-secondary);
   font-size: 0.85rem;
+  padding: 8px 10px;
 }
 
 .error {
   color: var(--error);
   font-size: 0.85rem;
+  padding: 8px 10px;
 }

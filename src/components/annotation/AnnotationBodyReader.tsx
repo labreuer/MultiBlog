@@ -213,10 +213,10 @@ export default function AnnotationBodyReader({
   // the class (AnnotationBody.tsx), looked right.
   return (
     <div className={styles.body}>
-      <div className={proseStyles.prose} style={{ display: ready ? "none" : "block" }}>
+      <div className={`${proseStyles.prose} ${styles.type} ${styles.copy}`} style={{ display: ready ? "none" : "block" }}>
         {staticBody}
       </div>
-      <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
+      <div className={`${proseStyles.prose} ${styles.type} ${styles.copy}`} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
       </div>
     </div>

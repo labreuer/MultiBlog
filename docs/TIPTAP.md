@@ -296,6 +296,30 @@ it is worth recognizing rather than re-deriving. `use-live-doc-content.ts` uses 
 push live Yjs updates into the reading views' non-`Collaboration` editors without re-emitting
 them.
 
+## `setEditable` emits an `update`, so disabling an editor looks like a keystroke
+
+```ts
+setEditable(editable, emitUpdate = true) {   // @tiptap/core
+  this.setOptions({ editable });
+  if (emitUpdate) this.emit("update", { editor: this, transaction: this.state.tr, appendedTransactions: [] });
+}
+```
+
+The default is `true`, so `editor.setEditable(false)` runs the `onUpdate` handler with the
+document unchanged. Anything downstream that keys on "the body changed" — a debounced save, a
+dirty flag, a `router.refresh()` — fires once more, at the moment a form goes `disabled`, which
+is the moment its content is least likely to still be wanted.
+
+That is not hypothetical: a comment posted from the rich composer came back as a restored
+draft. `disabled={pending}` reached `CommentEditor`'s `setEditable` effect on submit, the
+emitted update scheduled one more `saveCommentDraft`, the action returned ~200ms later and
+deleted the draft, and the scheduled save then wrote it back ~400ms *after* the delete. The
+composer greeted its own author with "Draft restored" for a comment already on the page.
+`useCommentDraft`'s `clear()` cancels the pending save (PLAN.md §23g), which is the fix for
+this shape generally: **whatever cancels the work must cancel the timer, not just undo its
+result.** Pass `false` where a caller can, but the comment composer cannot — `setEditable` is
+called by an effect inside `CommentEditor`, not by the code that knows the body is gone.
+
 ## `Collaboration` binds through `@tiptap/y-tiptap`, not `y-prosemirror`
 
 A separate package — Tiptap's own fork.
@@ -494,3 +518,30 @@ Destructure `marks` and `content` out of the base object before spreading (so th
 stale array left for a skipped conditional to leak), **and** only re-add the `marks` key when
 the filtered result is non-empty (so the output matches ProseMirror's own convention of
 omitting it rather than serializing `[]`).
+
+## `renderToReactElement` builds a new tree *type* on every call
+
+`@tiptap/static-renderer` makes a fresh closure for every node and mark type each time
+`renderToReactElement` runs (`mapNodeExtensionToReactNode`, and the inline `doc` mapping),
+and those closures are what `React.createElement(component, …)` gets as the element type.
+Two calls over the same JSON therefore produce two trees React cannot reconcile with each
+other — every element's type differs by identity — and it unmounts and remounts the whole
+body. The sequential numeric keys are stable, so keys are not the tell; the type is.
+
+That is harmless everywhere the renderer runs once: the Server Components and the
+per-request helpers (`ydoc-render.ts`, `annotation-entries.ts`), and a client component
+that never re-renders while its body is on screen (`CommentBody` inside `CommentNode`).
+It bites when the body sits inside a client component whose *own state changes while the
+reader is interacting with that body*. The quote picker (`CommentQuotePicker`, PLAN.md
+§23h) was the first: it sets `selectedText` on every settled selection, and each set
+re-rendered the body under the drag. The DOM then applied its range-adjustment rule — a
+live range whose boundary is inside a removed node moves to that node's parent at the
+removed index — so the selection's anchor landed on the body container at offset 0, and
+the visible selection ran from the start of the article to wherever the pointer was, with
+the remount showing as a flicker. Reported 2026-09-17 as "selecting the second paragraph
+selects from the top".
+
+The rule: in a `"use client"` component, `useMemo` the `renderToReactElement` result on
+the content it renders, so every render passes React the identical element and it skips
+the subtree outright. Same trap, same fix, for anything else that renders a body and
+tracks a selection or hover in state beside it.

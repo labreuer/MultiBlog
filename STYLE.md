@@ -537,7 +537,7 @@ Four reflow breakpoints, each with one job:
 | --- | --- |
 | `max-width: 480px` | Touch targets and padding (editor toolbar, `DocEditor`) |
 | `max-width: 900px` | `/side-by-side`'s two doc columns stack (PLAN.md §14f); the landing page's contributor rail drops below the posts (§17l) |
-| `min-width: 1180px` | Comments/annotations move from below the article into a margin rail (§18) |
+| `min-width: 1180px` | Comments/annotations move from below the article into a margin rail (§18). Inside it the rail then grows with the window, 340px to 680px — one range, not a second breakpoint |
 | `(orientation: landscape) and (max-height: 500px)` | The doc editor drops every piece of stacked chrome, and its rail becomes a scrolling queue — marking the cards whose passage is on screen rather than aligning to them (§18c, §18f) |
 
 The fourth is the only one that asks about **height**, and the only one scoped
@@ -551,10 +551,14 @@ about available height, and a 400px-tall window has a phone's problem.
 
 The width it buys back is spent on a row that is **wider than the phone and
 scrolls sideways as one piece**: the editor column, a 44px gutter, and the rail
-at its full desktop 340px. This is the "Narrow viewports and horizontal
-overflow" rule above rather than an exception to it — the scroller is
-`.container`, not the page, because `html, body { overflow-x: hidden }` would
-clip a page-level overflow unreachably.
+at 340px — the floor of the desktop rail's range rather than a width of its
+own. It does not grow here even where the window is wide enough: in this mode
+the rail is a queue in document order, with no passage to sit level with, so
+the extra width would buy nothing and cost the document. This is the "Narrow
+viewports and horizontal overflow" rule above rather than an exception to it —
+the scroller is `.container`, not the page, because
+`html, body { overflow-x: hidden }` would clip a page-level overflow
+unreachably.
 
 Three consequences worth knowing before touching it.
 
@@ -596,7 +600,7 @@ runtime by the positioning hook, and a `max-width: 1179px` mirror in CSS would b
 same rule spelled as its off-by-one complement, which is exactly how the two drift apart
 later. Anything else keying JS off a breakpoint should do the same.
 
-Four centred-column widths now, and they are one decision rather than four:
+Five centred-column widths now, and they are one decision rather than five:
 
 - **680px** — listings.
 - **800px** — full text (`/[slug]`, `/doc/[slug]`, `DocEditor`). This is *the* reading
@@ -607,6 +611,38 @@ Four centred-column widths now, and they are one decision rather than four:
   applied inside, so the rail engages exactly when this width fits and the reading column
   is untouched at every narrower one. It was a 1200px threshold over a 1180px layout until
   an iPad measured 1194 in landscape and fell six pixels short of twenty pixels of slack.
+- **1520px** — the same composition with the rail at 680px, twice the floor. The two are
+  the ends of **one** range and not two layouts: between them the rail is
+  `clamp(340px, calc(100% - 800px - 2.5rem), 680px)` and simply takes whatever the window
+  has beyond the reading measure, so there is no second breakpoint and nothing new for
+  JS to mirror — `MARGIN_NOTES_MEDIA_QUERY` still answers the only question JS asks,
+  which is whether there is a rail at all, and the positioning hook re-packs off its
+  `resize` listener and per-card `ResizeObserver` without being told a width.
+
+  **Write that rail as a `clamp()`, never as `minmax(340px, 680px)`.** Grid's
+  maximize-tracks step distributes free space to the tracks *equally*, freezing each as it
+  hits its growth limit, which fills the smaller track first: a `minmax` here would hand
+  the rail its full 680px at the 1180px breakpoint itself and leave the prose 428px. The
+  `clamp()` states the priority — reading column first, rail gets the remainder — instead
+  of hoping the distribution agrees with it. The reading column's own track stays
+  `minmax(0, 800px)` rather than a literal `800px` so it still absorbs the post page's and
+  the editor's 1rem of container padding, where it measures 768px at the breakpoint
+  exactly as it did before any of this.
+
+  The containers carrying it differ by their own gutters and say so:
+  `calc(1520px + 2rem)` on `/[year]/[month]/[day]/[slug]` and `DocEditor`, which get 1rem
+  from `.main` one level in and from the container itself respectively, and
+  `calc(1520px + 1.5rem)` on `/doc/[slug]`, whose container *is* the `<main>` and so
+  carries a 0.75rem gutter directly. Above the breakpoint that padding sits outside the
+  grid, which is what puts it to the left of the document and the right of the rail;
+  below it, where there is one column, to either side of the document. One rule, both
+  layouts — don't reach for a second inside the `@media` block.
+
+  **At the breakpoint exactly, every one of those gutters is spent out of the layout
+  rather than out of spare window**, because `max-width: 100%` is what is deciding there.
+  So the reading column measures 768px on the post page and the editor, and 776px on
+  `/doc/[slug]`, reaching its full 800 a few pixels further up. 800 is the measure the
+  layout is composed from, not a promise about the narrowest window that has a rail.
 
 ## The admin-table kit (`components/table/`)
 

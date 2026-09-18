@@ -15,6 +15,7 @@ import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import DocRefMenu from "../DocRefMenu";
 import proseStyles from "@/styles/prose.module.css";
+import readerStyles from "./AnnotationBodyReader.module.css";
 import styles from "./AnnotationBody.module.css";
 
 const TOOLBAR_STORAGE_KEY = "multiblog.annotationToolbar";
@@ -110,7 +111,13 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
   return (
     <div className={styles.frame}>
       {toolbarVisible && <EditorToolbar editor={editor} disabled={!editable} tools={ANNOTATION_TOOLS} />}
-      <EditorContent editor={editor} className={`${styles.content} ${proseStyles.prose}`} />
+      <EditorContent
+        editor={editor}
+        // `readerStyles.type` so the box you type in is set exactly like the
+        // posted body above it — CommentEditor wears CommentBody's `.body` for
+        // the same reason.
+        className={`${styles.content} ${proseStyles.prose} ${readerStyles.type}`}
+      />
       <DocRefMenu editor={editor} disabled={!editable} />
       {editable && (
         <button type="button" onClick={toggleToolbar} className={styles.toolbarToggle}>
