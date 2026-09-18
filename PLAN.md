@@ -6818,3 +6818,53 @@ with a fifth arc leg for comments. PDF quoting exists behind a gate §19 has not
 ### 23l. Where §22's built work went, and why — docs/COMMENTS.md, "History"; the revert record was deleted with the branch
 ### 23m. The Markdown front door — docs/COMMENTS.md, "The Markdown box"; docs/DOC_IMPORT.md §11
 ### 23n. The quote matcher — docs/COMMENTS.md, "The matcher"; docs/COLLAB.md §9
+
+---
+
+## 24. Tables in docs
+
+Built 2026-09-18 on `tables`, after the survey in
+[docs/research/tables.md](docs/research/tables.md) rejected every external-block pattern for
+one reason: an external table holds no text in the ydoc, so nothing in it can be quoted,
+annotated or tag-anchored. TipTap's own table extension keeps every cell as ordinary paragraphs
+in the document, and every anchoring mechanism (§20a's compiler, COLLAB.md's strategies,
+docs/COMMENTS.md's matcher) works on table content unchanged — verified headless:
+`textBetween` reads straight across cells, and `check()` passes on the imported node.
+
+### 24a. What is built
+
+- `tableExtensions` (`src/lib/tiptap-schema.ts`): `Table`, `TableRow`, `TableHeader`,
+  `TableCell` from `@tiptap/extension-table@3.29.0`, pinned to the installed TipTap line. In
+  `contentExtensions` and therefore in every body variant (docs, posts, the front-page
+  preamble, `/side-by-side`), and added by hand to `CollabEditorBody`'s live list.
+- **Not in annotation bodies.** `annotationContentExtensions` stopped being an alias of
+  `authorHighlightExtensions` and is now its own `[StarterKit, AuthorHighlight]`, mirrored by
+  `AnnotationBody.tsx`. A margin card is 340px wide; §13e's toolbar already withholds headings
+  and numbered lists for the same reason. Comments were never in question: §23b lists tables
+  among what a stranger may not put in a comment, and that schema is stated, not derived.
+- **The toolbar** (`TableControls.tsx`): `QuoteControls`' split button. The main button inserts
+  a 3×3 table with a header row and is disabled while the caret is already in one (the schema
+  would nest tables; nothing wants that). The chevron opens rows / columns / header toggles /
+  merge and split / delete, each item dry-run through `can()` so "Split cell" is only live on a
+  merged cell. Tab, Shift-Tab and Tab-in-the-last-cell-adds-a-row are the extension's own keys.
+- **Rendering**: one `.tableWrapper` on both surfaces (docs/TIPTAP.md, "Tables are four
+  nodes…"), styled in `prose.module.css` as the `overflow-x: auto` box STYLE.md's wide-surface
+  rule asks for, with `table-layout: fixed; width: 100%`, restored cell padding under
+  `globals.css`'s reset, a `--surface-muted` header row, and prosemirror-tables' cell-selection
+  class painted with the same `--link` wash as `.selection`. No color literals.
+- **Markdown import** gains GFM pipe tables for free (docs/DOC_IMPORT.md §2); **spreadsheet
+  paste** works because Excel, Numbers and Sheets put an HTML `<table>` on the clipboard and
+  the extension's `parseHTML` accepts it.
+
+### 24b. Judgment calls
+
+- **Column resizing is off.** The research note's own recommendation; the reasoning is in
+  `tableExtensions`' comment and docs/TIPTAP.md. TODO.md carries it.
+- **CSV import and export are not built.** The research note's second half designs them
+  (a hand-rolled `src/lib/csv.ts` with unit tests, a "Table from CSV…" menu item, a Download
+  CSV button on both reading views, a rows×columns cap). That is a separate change on top of
+  this one and is in TODO.md with a pointer to the design.
+- **No e2e spec yet.** Per CLAUDE.md's convention UI testing was deferred at `npm run check`;
+  the natural spec is `e2e/markdown-import.spec.ts`'s shape — import a fixture with a pipe
+  table, assert the cell text in the editor and on the post page — and is listed in TODO.md
+  beside the CSV item it would share fixtures with.

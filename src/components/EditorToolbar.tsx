@@ -14,23 +14,53 @@ import {
 import { tightenLines } from "@/lib/tighten-lines";
 import LinkControls from "./LinkControls";
 import QuoteControls from "./QuoteControls";
+import TableControls from "./TableControls";
 import styles from "./EditorChrome.module.css";
 
-export type ToolbarTool = "undo" | "redo" | "bold" | "italic" | "link" | "h2" | "bullets" | "numbered" | "quote" | "tighten" | "clear";
+export type ToolbarTool =
+  | "undo"
+  | "redo"
+  | "bold"
+  | "italic"
+  | "link"
+  | "h2"
+  | "bullets"
+  | "numbered"
+  | "quote"
+  | "table"
+  | "tighten"
+  | "clear";
 
 // Every tool CollabEditorBody's own toolbar has always offered — its default
 // so extracting this component changes nothing about the doc/post body
 // editor. "tighten" (reduce space between lines, tighten-lines.ts) joined
-// later, in both lists.
+// later, in both lists; "table" (PLAN.md §24, TableControls.tsx) later
+// still, in this one only.
 //
 // Both editors disable StarterKit's undoRedo and get these commands from
 // `Collaboration` instead — its Yjs UndoManager undoes local changes only,
 // which is exactly what a button press should mean under co-editing.
-export const FULL_TOOLS: ToolbarTool[] = ["undo", "redo", "bold", "italic", "link", "h2", "bullets", "numbered", "quote", "tighten", "clear"];
+export const FULL_TOOLS: ToolbarTool[] = [
+  "undo",
+  "redo",
+  "bold",
+  "italic",
+  "link",
+  "h2",
+  "bullets",
+  "numbered",
+  "quote",
+  "table",
+  "tighten",
+  "clear",
+];
 
 // PLAN.md §13e — the reduced set an annotation's editor offers: no headings,
-// no numbered lists, both heavier than a margin note needs. "tighten" stays:
-// cramped margin cards are where tight spacing matters most.
+// no numbered lists, both heavier than a margin note needs, and no table —
+// its schema (annotationContentExtensions) has no table node to insert, and
+// the button would be as much a TypeError as undo on the blurb editor is
+// (the `can()` note below). "tighten" stays: cramped margin cards are where
+// tight spacing matters most.
 export const ANNOTATION_TOOLS: ToolbarTool[] = ["undo", "redo", "bold", "italic", "link", "bullets", "quote", "tighten", "clear"];
 
 // match Tabler style
@@ -180,6 +210,7 @@ export default function EditorToolbar({
         </button>
       )}
       {tools.includes("quote") && <QuoteControls editor={editor} disabled={disabled} />}
+      {tools.includes("table") && <TableControls editor={editor} disabled={disabled} />}
       {tools.includes("tighten") && (
         <button
           type="button"

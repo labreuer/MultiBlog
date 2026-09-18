@@ -16,10 +16,17 @@ definition. Picking the wrong one silently drops marks on decode or render:
 |---|---|---|---|
 | body | `contentExtensions` | `authorHighlightExtensions` | `docContentExtensions` (doc side only, PLAN.md §12i) |
 | title | `titleExtensions` | `titleAuthorHighlightExtensions` | — |
+| annotation body | — | `annotationContentExtensions` | — |
 
 The title is a separate Yjs fragment (PLAN.md §3d), which is why it has its own schema at
 all. Anything decoding a *doc's* ydoc wants `docContentExtensions` — `server/doc-cache.ts`
 and `src/lib/ydoc-render.ts` both do.
+
+The annotation-body row used to be an alias of `authorHighlightExtensions` and stopped being
+one when tables arrived (PLAN.md §24, "Tables" below): the body row carries the four table
+nodes and the annotation row deliberately does not, so a table pasted into a margin note
+flattens to paragraphs rather than rendering in a 340px card. `AnnotationBody.tsx`'s own
+list mirrors it, and neither may quietly be re-derived from the other.
 
 ## Never add StarterKit's own extensions beside it
 
@@ -545,3 +552,37 @@ The rule: in a `"use client"` component, `useMemo` the `renderToReactElement` re
 the content it renders, so every render passes React the identical element and it skips
 the subtree outright. Same trap, same fix, for anything else that renders a body and
 tracks a selection or hover in state beside it.
+
+## Tables are four nodes beside StarterKit, and one wrapper on both surfaces
+
+PLAN.md §24. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
+`tableExtensions` in `src/lib/tiptap-schema.ts`, spread into `contentExtensions` and, by
+hand, into `CollabEditorBody`'s own list (which builds its own StarterKit, per the rule
+above). Four things worth knowing before touching it:
+
+- **The editor and the static renderer both emit `<div class="tableWrapper">`**, by two
+  different routes. In the editor the extension's `TableView` node view draws it (it is
+  the default `View`, used whenever `resizable` is off, not only when it is on). The static
+  renderer has no node views, so `Table.configure({ renderWrapper: true })` makes its
+  `renderHTML` produce the same wrapper. `prose.module.css` styles that one class as the
+  `overflow-x: auto` box STYLE.md's "Adding a new wide surface" asks for. Turn
+  `renderWrapper` off and the post page loses its scroll box while the editor keeps it —
+  and nothing in `npm run check` notices.
+- **`resizable` stays off.** Column widths would be `colwidth` cell attrs synced through Yjs
+  (fine) but set by a drag handle the reading views cannot reproduce, and the reading
+  column is 800px wide. `table-layout: fixed; width: 100%` gives equal columns instead.
+  TODO.md carries the follow-up.
+- **A cell is `block+` and a table is `group: block`, so the schema allows a table inside a
+  cell.** `TableControls` disables its insert button while the caret is in a table
+  (`isActive("table")`); nothing else stops nesting, and Markdown import can't produce it.
+- **Decoding a ydoc adds default attrs the parser omitted.** A cell straight out of
+  `markdownToDocContent` has no `attrs`; the same cell read back through
+  `TiptapTransformer.fromYdoc` carries `{ colspan: 1, rowspan: 1 }`. Harmless — the
+  seeding path never compares the two, and `orderedList`'s `start` has always behaved the
+  same way — but a test that expects a round trip to be `docsEqual` will be wrong.
+
+Keys: Tab and Shift-Tab move between cells and Tab in the last cell appends a row (the
+extension's own keymap); StarterKit's gap cursor is what lets the caret leave a table that
+ends the document. GFM pipe tables import through the extension's `parseMarkdown` and
+`markdownTokenizer` the moment it is in the parse list — which is why the *comment* Markdown
+path, whose list has no Table, still needs its shim (docs/DOC_IMPORT.md §11).

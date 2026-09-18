@@ -361,6 +361,22 @@
   background: var(--surface-hover);
 }
 
+/* A menu item the editor's dry run said no to (TableControls: "Split cell"
+   on an unmerged cell, "Merge cells" with one cell selected). Kept in the
+   menu rather than hidden so the list never reshuffles under the pointer;
+   the same opacity the admin tables use for a soft-deleted row. */
+.quoteMenuItem:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: none;
+}
+
+/* The rule between a menu's groups (TableControls: rows / columns /
+   headers / cells / delete). */
+.menuItemSeparated {
+  border-top: 1px solid var(--border);
+}
+
 /* The scroll container: sized by flex-grow up to the space available, with
    a 300px floor and its own scrollbar for content taller than that. */
 .editorContent {

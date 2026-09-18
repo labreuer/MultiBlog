@@ -18,6 +18,7 @@ to re-derive the decision from.
 | [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
 | [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
+| [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), and the CSV import/export design that is not yet built. PLAN.md §24. |
 | [docs/ANCHORED_LINKS.md](docs/ANCHORED_LINKS.md) | Anchored links as built: one `/link/<id>` URL for passages across docs and PDFs — schema, the landing route that redirects or excerpts per viewer, the per-target visibility rule, the tray (a draft, or a minted link reopened for editing — one open link per creator), and every deviation from the plan. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
@@ -194,6 +195,13 @@ before changing the behavior it describes.
   `resolveAvatarSrc` prefers the upload. `src/lib/avatar.ts` is server-only; `avatar-url.ts` is
   the browser-safe half. There is deliberately **no "avatar from URL" path** — a server-side
   fetch of a user-supplied URL is SSRF. PLAN.md §17n, §17o.
+- **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
+  The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
+  `[StarterKit, AuthorHighlight]`, mirrored by `AnnotationBody.tsx`; don't re-derive one from
+  the other. And `Table` is configured with `renderWrapper: true` so the static renderer
+  emits the same `.tableWrapper` the editor's node view draws — that wrapper is the post
+  page's only horizontal scroll box, and losing it fails no check. PLAN.md §24, docs/TIPTAP.md
+  "Tables are four nodes beside StarterKit".
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. PLAN.md §12e,
   docs/PERMISSIONS.md.
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**

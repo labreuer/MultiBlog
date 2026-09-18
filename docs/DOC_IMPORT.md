@@ -44,6 +44,14 @@ Not `docContentExtensions`: its two extra marks (`authorHighlight`, `annotation`
 a doc acquires by being *edited*, and no Markdown source can produce either. The reading and
 editing sides register that superset, so nothing written here is dropped when it's read back.
 
+A GFM pipe table is the worked example of the rule cutting the other way. Until PLAN.md §24 put
+`@tiptap/extension-table` into `contentExtensions`, a table in the source was **silently
+dropped** — a probe on 2026-09-17 returned the paragraphs on either side and nothing between,
+because the fallback parser knows no `table` token and the extension that does was not
+registered. Now it is, its `parseMarkdown` builds real `tableHeader`/`tableCell` rows (with
+`align` from the delimiter row), and the same list encodes them. §11's comment path keeps its
+table shim precisely because *that* list has no Table.
+
 ## 3. HTML in the source: tags stay text, entities get decoded
 
 These two look adjacent and pull in opposite directions, so both halves are stated here.

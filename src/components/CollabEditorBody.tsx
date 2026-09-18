@@ -18,7 +18,7 @@ import {
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
-import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
+import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS, tableExtensions } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
@@ -124,6 +124,11 @@ export default function CollabEditorBody({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false, link: EDITOR_LINK_OPTIONS }),
+      // The table nodes (PLAN.md §24) — the same list contentExtensions
+      // carries, so this editor's schema is that one plus the marks below
+      // and never a table short of it. Not in AnnotationBody, on purpose:
+      // annotationContentExtensions says why.
+      ...tableExtensions,
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         provider,
