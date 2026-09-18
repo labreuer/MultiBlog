@@ -158,12 +158,15 @@ and they differ in what a version *is* — a `comment_revision` row holding text
 are separate scripts rather than one with a branch.
 
 `comment.body` and its newest `comment_revision` are written in a single transaction, so there
-is no legitimate staleness window at all and any divergence is a fault. An annotation's cache
-and its newest snapshot are written in one transaction too, from one decoded document, so
-`settled-cache` on that side is a fault as well; what can still produce one is a body written
-to by something other than a settle while no session was open, and the message names the
-repair — open and close an edit session, which settles what is there now. It also has a
-`stale-session` WARN for a session someone abandoned, which is not a fault at all.
+is no legitimate staleness window at all and any divergence is a fault. Since PLAN.md §23 both
+are ProseMirror JSON and the comparison is of their derived text; the same script also holds
+`comment.body_text` to that text (`body-text`), because /comments' filter searches the column
+and a drift there is a search that silently misses. An annotation's cache and its newest
+snapshot are written in one transaction too, from one decoded document, so `settled-cache` on
+that side is a fault as well; what can still produce one is a body written to by something
+other than a settle while no session was open, and the message names the repair — open and
+close an edit session, which settles what is there now. It also has a `stale-session` WARN for
+a session someone abandoned, which is not a fault at all.
 
 Between them they also check what the *history view* needs to be trustworthy, none of which
 Postgres can state:

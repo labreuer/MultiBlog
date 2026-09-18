@@ -13,11 +13,17 @@ import { isCommentEditRateLimited, isCommentRateLimited } from "@/lib/rate-limit
 import { checkSpam } from "@/lib/spam-check";
 import { visibleVersions, withSupersededAt } from "@/lib/edit-grace";
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
+import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
+import { commentBodyTextFromJSON, isCommentBodyError } from "@/lib/comment-body";
+import { resolveCommentBody } from "@/lib/comment-body-resolve";
+import type { CommentBodyInput } from "@/lib/comment-body-value";
+import { commentContentToMarkdown } from "@/lib/markdown-import";
+import { docsEqual } from "@/lib/diff";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
-const MAX_BODY_LENGTH = 5000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function submitComment(
@@ -27,6 +33,7 @@ export async function submitComment(
   const postId = formData.get("postId");
   const parentCommentId = formData.get("parentCommentId");
   const body = formData.get("body");
+  const bodyFormat = formData.get("bodyFormat");
   const anchorFromRaw = formData.get("anchorFrom");
   const anchorToRaw = formData.get("anchorTo");
   const quotedText = formData.get("quotedText");
@@ -34,11 +41,15 @@ export async function submitComment(
   if (typeof postId !== "string" || !postId) {
     return { error: "Missing post." };
   }
-  if (typeof body !== "string" || !body.trim()) {
+  if (typeof body !== "string") {
     return { error: "Comment can't be empty." };
   }
-  if (body.length > MAX_BODY_LENGTH) {
-    return { error: `Comment is too long (max ${MAX_BODY_LENGTH} characters).` };
+  // PLAN.md §23m — two front doors, one validated document. Anything but an
+  // explicit "rich" is read as Markdown, which is also what a form with no
+  // JavaScript at all submits.
+  const parsedBody = resolveCommentBody({ format: bodyFormat === "rich" ? "rich" : "markdown", content: body });
+  if (isCommentBodyError(parsedBody)) {
+    return { error: parsedBody.error };
   }
 
   const session = await auth();
@@ -141,9 +152,8 @@ export async function submitComment(
       }));
   }
 
-  const trimmedBody = body.trim();
   const commenterIsAdmin = !!session?.user && isAdmin(session.user.role);
-  const isSpam = !commenterIsAdmin && (await checkSpam({ body: trimmedBody, displayName, email, ipAddress }));
+  const isSpam = !commenterIsAdmin && (await checkSpam({ body: parsedBody.text, displayName, email, ipAddress }));
 
   const siteSettings = await getSiteSettings();
   const status: CommentStatus = isSpam
@@ -168,13 +178,14 @@ export async function submitComment(
       threadId: thread.id,
       parentCommentId: parentId,
       commenterId: commenter.id,
-      body: { text: trimmedBody },
+      body: parsedBody.json as Prisma.InputJsonValue,
+      bodyText: parsedBody.text,
       status,
       ipAddress,
       revisions: {
         create: {
           revisionNo: 1,
-          body: { text: trimmedBody },
+          body: parsedBody.json as Prisma.InputJsonValue,
           // The commenter's user when they are signed in, null when they are
           // not — an anonymous original is the one version with nobody to
           // name, and `commenter.userId` is already exactly that distinction.
@@ -295,20 +306,24 @@ async function restoreOne(userId: string, role: Role, commentId: string) {
 // sending an untrusted commenter's edit back to PENDING is the stricter
 // policy, and needs per-revision status to avoid the comment vanishing
 // mid-conversation; §22h defers it with that prerequisite named.
-export type EditCommentResult = { error?: string; status?: CommentStatus };
+export type EditCommentResult = {
+  error?: string;
+  status?: CommentStatus;
+  /** The stored body after a successful save, so the card can render it before the refresh lands. */
+  body?: JSONContent;
+  bodyText?: string;
+};
 
-export async function editComment(commentId: string, body: string): Promise<EditCommentResult> {
+export async function editComment(commentId: string, input: CommentBodyInput): Promise<EditCommentResult> {
   const session = await auth();
   if (!session?.user) {
     return { error: "You must be signed in to edit a comment." };
   }
   const { id: userId, role } = session.user;
 
-  if (!body.trim()) {
-    return { error: "Comment can't be empty." };
-  }
-  if (body.length > MAX_BODY_LENGTH) {
-    return { error: `Comment is too long (max ${MAX_BODY_LENGTH} characters).` };
+  const parsedBody = resolveCommentBody(input);
+  if (isCommentBodyError(parsedBody)) {
+    return { error: parsedBody.error };
   }
 
   const comment = await prisma.comment.findUnique({
@@ -334,10 +349,10 @@ export async function editComment(commentId: string, body: string): Promise<Edit
     return { error: "You don't have permission to edit this comment." };
   }
 
-  const trimmed = body.trim();
-  const currentText = (comment.body as { text?: string } | null)?.text ?? "";
-  if (trimmed === currentText) {
-    // Deliberately not an error: nothing is wrong, and nothing happened.
+  // docsEqual rather than string equality: jsonb does not preserve key order
+  // on read-back, so a byte comparison would call every unchanged save a
+  // change. Deliberately not an error: nothing is wrong, and nothing happened.
+  if (docsEqual(parsedBody.json, comment.body)) {
     return {};
   }
 
@@ -348,7 +363,7 @@ export async function editComment(commentId: string, body: string): Promise<Edit
   const isSpam =
     !isAdmin(role) &&
     (await checkSpam({
-      body: trimmed,
+      body: parsedBody.text,
       displayName: comment.commenter.displayName,
       email: comment.commenter.email,
       ipAddress: comment.ipAddress,
@@ -365,7 +380,7 @@ export async function editComment(commentId: string, body: string): Promise<Edit
       data: {
         commentId,
         revisionNo: nextRevisionNo,
-        body: { text: trimmed },
+        body: parsedBody.json as Prisma.InputJsonValue,
         // Who wrote *this version* — the moderator when a moderator edited it,
         // which is why this is the acting user and not `commenter.userId`.
         authorUserId: userId,
@@ -374,7 +389,8 @@ export async function editComment(commentId: string, body: string): Promise<Edit
     prisma.comment.update({
       where: { id: commentId },
       data: {
-        body: { text: trimmed },
+        body: parsedBody.json as Prisma.InputJsonValue,
+        bodyText: parsedBody.text,
         editedAt: new Date(),
         ...(isSpam ? { status: "SPAM" as CommentStatus, statusChangedById: userId, statusChangedAt: new Date() } : {}),
       },
@@ -382,7 +398,55 @@ export async function editComment(commentId: string, body: string): Promise<Edit
   ]);
 
   revalidateTouchedPosts([comment.thread.post]);
-  return { status: isSpam ? "SPAM" : comment.status };
+  return { status: isSpam ? "SPAM" : comment.status, body: parsedBody.json, bodyText: parsedBody.text };
+}
+
+// Whether this viewer may read a comment at all — the rule getCommentHistory
+// states: an APPROVED, undeleted comment is public; anything else is its own
+// author's and its post's moderators'. Shared with getCommentMarkdown, which
+// hands the same body back in a different form.
+async function canViewerReadComment(comment: {
+  status: CommentStatus;
+  deletedAt: Date | null;
+  commenter: { userId: string | null };
+  thread: { post: { id: string } };
+}): Promise<boolean> {
+  if (comment.status === "APPROVED" && comment.deletedAt === null) return true;
+  const session = await auth();
+  if (!session?.user) return false;
+  if (comment.commenter.userId === session.user.id) return true;
+  return canUserEditPost(session.user.id, session.user.role, comment.thread.post.id);
+}
+
+// PLAN.md §23m — the stored body serialized back to Markdown, for the edit
+// box in Markdown mode. On demand rather than stored: a second stored form of
+// one body is exactly the two-copies-that-can-disagree problem §23f's rewrite
+// exists to avoid, and the round trip is a few microseconds.
+export async function getCommentMarkdown(commentId: string): Promise<{ markdown: string } | { error: string }> {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    include: { commenter: { select: { userId: true } }, thread: { select: { post: { select: { id: true } } } } },
+  });
+  if (!comment || !(await canViewerReadComment(comment))) {
+    return { error: "Comment not found." };
+  }
+  return { markdown: commentContentToMarkdown(comment.body as JSONContent) };
+}
+
+// PLAN.md §23m — switching the composer's mode with content in it. Both
+// directions go through the server, so the browser never runs the Markdown
+// parser: parsed there, an HTML token becomes a real node, the opposite of
+// what the server does with the same text. Pure — no row is read or
+// written, and the result is what a submit of the same content would store.
+export async function convertCommentBody(
+  input: CommentBodyInput,
+  to: "markdown" | "rich",
+): Promise<{ markdown: string } | { json: JSONContent } | { error: string }> {
+  const parsedBody = resolveCommentBody(input);
+  if (isCommentBodyError(parsedBody)) {
+    return { error: parsedBody.error };
+  }
+  return to === "markdown" ? { markdown: commentContentToMarkdown(parsedBody.json) } : { json: parsedBody.json };
 }
 
 // PLAN.md §22c — the history one comment's "edited" marker opens.
@@ -397,6 +461,7 @@ export async function editComment(commentId: string, body: string): Promise<Edit
 // read there throws at build (§12f).
 export type CommentVersion = {
   revisionNo: number;
+  body: JSONContent;
   bodyText: string;
   createdAt: string;
   authorName: string | null;
@@ -425,13 +490,8 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
   // point of a visible edit. Anything else (pending, spam, deleted) is
   // withheld from everyone but its own author and whoever moderates the post,
   // matching what the reading views already show of the comment itself.
-  const isPublic = comment.status === "APPROVED" && comment.deletedAt === null;
-  if (!isPublic) {
-    const session = await auth();
-    if (!session?.user) return [];
-    const isOwnComment = comment.commenter.userId === session.user.id;
-    const canModerate = await canUserEditPost(session.user.id, session.user.role, comment.thread.post.id);
-    if (!isOwnComment && !canModerate) return [];
+  if (!(await canViewerReadComment(comment))) {
+    return [];
   }
 
   // `quoted` is always false until something exists that can point at a
@@ -444,7 +504,8 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
   return visible
     .map((revision) => ({
       revisionNo: revision.revisionNo,
-      bodyText: (revision.body as { text?: string } | null)?.text ?? "",
+      body: revision.body as JSONContent,
+      bodyText: commentBodyTextFromJSON(revision.body),
       createdAt: revision.createdAt.toISOString(),
       authorName: revision.author?.name ?? revision.author?.email ?? null,
       current: revision.revisionNo === newestNo,

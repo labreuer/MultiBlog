@@ -1,0 +1,59 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The same box CommentForm.module.css's .field/.textarea drew, kept here so
+   the markdown door looks exactly as the form always did. */
+.textarea {
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  resize: both;
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.modeRow {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 0.75rem;
+}
+
+/* The annotation toolbar toggle's look (AnnotationBody.module.css
+   .toolbarToggle): quiet, italic, underlined only when it is the choice
+   not currently in effect. */
+.modeButton {
+  font: inherit;
+  font-size: 0.75rem;
+  font-style: italic;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.modeButton[aria-pressed="true"] {
+  color: var(--text-secondary);
+  text-decoration: none;
+  cursor: default;
+}
+
+.modeButton:disabled {
+  cursor: default;
+}
+
+.modeNote {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.modeError {
+  color: var(--error);
+}

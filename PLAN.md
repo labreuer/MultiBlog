@@ -8740,7 +8740,8 @@ Two additions the plan did not name, both small and both load-bearing:
 
 **Planned 2026-09-16 on `annotations-and-comments`, replacing §22d before it was merged.
 Amended the same day, before any of it was built, for a plain-Markdown front door (§23m) and
-the text-matching it needs (§23n); the amendments are marked where they land.**
+the text-matching it needs (§23n); the amendments are marked where they land. Phases 0 and 1
+of §23j built the same day — §23m's "as built" paragraph is the account.**
 §22d built a quotation as four columns on the reply and a blockquote above its body: one
 quotation, of the parent comment, outside the reply's text. The ask that arrived after it was
 built is larger in every dimension, and the difference is not a refinement — it is a different
@@ -9292,6 +9293,30 @@ for the edit box; `blockquote` already renders, and the `Quote` mark renders as 
 double quotes. On save the matcher runs again, with the revisions this comment's existing
 anchor rows already pin searched *first*, so editing the quoting comment does not silently
 re-pin a quotation to a newer version of its target.
+
+**As built (Phase 1, 2026-09-16).** `src/lib/comment-body.ts` is the validation
+(`parseCommentBody`: depth cap, `nodeFromJSON` + `node.check()`, link hardening, text cap),
+`comment-body-resolve.ts` the two doors converging, `comment-body-value.ts` the composer's
+value and wire shape, `comment-draft-store.ts` + `use-comment-draft.ts` the IndexedDB draft,
+`markdown-import.ts` the parse with its shims (docs/DOC_IMPORT.md §11). `CommentBodyInput`
+is the two-door control, `CommentEditor` the rich half, `CommentBody` the renderer; every
+reader of `body.text` now reads `Comment.bodyText` or renders the JSON. Judgment calls:
+
+- **Markdown is the default mode**, remembered per browser in `localStorage`. It is the
+  textarea the form always had, so every existing spec and the no-JavaScript submit keep
+  working; the rich editor is one click away and the choice sticks.
+- **Switching modes with content in the box is a server round trip** (`convertCommentBody`),
+  because the browser must never run the Markdown parser (§23m's preview argument). An empty
+  box switches instantly.
+- **The inline edit box has no draft.** §23g is about *unsent* comments; an abandoned edit
+  leaves the posted text exactly as it was.
+- **The migration made one paragraph per line**, not one paragraph with newlines in it, so a
+  pre-§23 comment that had line breaks keeps them. `body_text` was derived the same way, and
+  `check-comment-revisions.ts` gained a `body-text` finding that holds every row to it.
+- **Links are hardened twice**: `Link.configure`'s HTMLAttributes on the renderer, and
+  `hardenCommentLinks` rewriting the stored mark's `rel`/`target` and dropping any href that
+  is not http, https or mailto. Neither depends on the other.
+- **`checkSpam` sees the plain text**, as before; it never saw markup and still doesn't.
 
 ### 23n. The quote matcher
 

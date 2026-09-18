@@ -8,6 +8,8 @@ export type ThreadComment = {
   id: string;
   parentCommentId: string | null;
   displayName: string;
+  // PLAN.md §23b — the stored ProseMirror JSON, and its plain text beside it.
+  body: unknown;
   bodyText: string;
   createdAt: string;
   deletedByUserId: string | null;
@@ -116,7 +118,8 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
             id: c.id,
             parentCommentId: c.parentCommentId,
             displayName: c.commenter.displayName,
-            bodyText: (c.body as { text?: string } | null)?.text ?? "",
+            body: c.body,
+            bodyText: c.bodyText,
             createdAt: c.createdAt.toISOString(),
             deletedByUserId: c.deletedByUserId,
             commenterUserId: c.commenter.userId,

@@ -9,13 +9,31 @@ import { useSession } from "next-auth/react";
 import { canEditAnyPost, isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "./LocalTime";
 import CommentForm from "./CommentForm";
+import CommentBody from "./CommentBody";
+import CommentBodyInput from "./CommentBodyInput";
 import EditHistory from "./EditHistory";
-import { deleteComment, editComment, getCommentHistory, type CommentVersion } from "@/app/actions/comments";
+import {
+  deleteComment,
+  editComment,
+  getCommentHistory,
+  getCommentMarkdown,
+  type CommentVersion,
+} from "@/app/actions/comments";
+import {
+  commentBodyValueToInput,
+  isCommentBodyValueEmpty,
+  rememberedCommentBodyMode,
+  type CommentBodyValue,
+} from "@/lib/comment-body-value";
+import type { JSONContent } from "@tiptap/core";
 import styles from "./CommentNode.module.css";
 
 export type CommentNodeData = {
   id: string;
   displayName: string;
+  // PLAN.md §23b — the stored document, rendered by CommentBody; bodyText is
+  // the same words plain, for the fallback and for anything text-shaped.
+  body: unknown;
   bodyText: string;
   createdAt: string;
   deletedByUserId: string | null;
@@ -63,7 +81,10 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   const [replying, setReplying] = useState(false);
   const [posted, setPosted] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(comment.bodyText);
+  // The edit box's value in either mode (PLAN.md §23m). Null while the
+  // Markdown serialization is being fetched — the stored form is JSON, and
+  // the Markdown for the box comes from the server on demand.
+  const [draft, setDraft] = useState<CommentBodyValue | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [editPending, startEditTransition] = useTransition();
   // Set by this viewer's own successful save, and shown in place of the
@@ -72,7 +93,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // post page is statically generated (PLAN.md §21), so the revalidation and
   // the refresh that follow are a round trip the author should not have to
   // watch to see their own words.
-  const [savedText, setSavedText] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ body: JSONContent; bodyText: string } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletePending, startDeleteTransition] = useTransition();
@@ -97,21 +118,47 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // session (§22c records the gap). A control that is absent is not a
   // permission error, and the two admin surfaces reach every comment anyway.
   const canEdit = isOwnComment || (!!session?.user && canEditAnyPost(session.user.role));
-  const bodyText = savedText ?? comment.bodyText;
+  const body = saved?.body ?? comment.body;
+  const bodyText = saved?.bodyText ?? comment.bodyText;
   // Admin power being used on someone else's comment gets a visibly
   // different (maroon) button; deleting your own comment, even as an
   // admin, is just the normal action.
   const isAdminOnOthers = isAdmin && !isOwnComment;
 
+  // Opens the box in the browser's remembered mode. Rich mode edits the
+  // stored JSON directly; Markdown mode asks the server for the serialization
+  // first, so the box is briefly absent rather than briefly wrong.
+  const handleStartEdit = () => {
+    setEditError(null);
+    setEditing(true);
+    if (rememberedCommentBodyMode() === "rich") {
+      setDraft({ mode: "rich", json: body as JSONContent });
+      return;
+    }
+    setDraft(null);
+    startEditTransition(async () => {
+      const result = await getCommentMarkdown(comment.id);
+      if ("error" in result) {
+        setEditError(result.error);
+        setEditing(false);
+        return;
+      }
+      setDraft({ mode: "markdown", markdown: result.markdown });
+    });
+  };
+
   const handleSaveEdit = () => {
+    if (!draft || isCommentBodyValueEmpty(draft)) return;
     setEditError(null);
     startEditTransition(async () => {
-      const result = await editComment(comment.id, draft);
+      const result = await editComment(comment.id, commentBodyValueToInput(draft));
       if (result.error) {
         setEditError(result.error);
         return;
       }
-      setSavedText(draft.trim());
+      if (result.body && result.bodyText !== undefined) {
+        setSaved({ body: result.body, bodyText: result.bodyText });
+      }
       setEditing(false);
       if (result.status === "SPAM") {
         // The edit was saved and the comment was withdrawn from public view
@@ -152,16 +199,18 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
           </p>
           {editing ? (
             <div className={styles.editForm}>
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                disabled={editPending}
-                className={styles.editTextarea}
-                aria-label="Edit comment"
-                rows={4}
-              />
+              {draft ? (
+                <CommentBodyInput value={draft} onChange={setDraft} ariaLabel="Edit comment" disabled={editPending} rows={4} autoFocus />
+              ) : (
+                <p className={styles.editLoading}>Loading…</p>
+              )}
               <span className={styles.editActions}>
-                <button type="button" onClick={handleSaveEdit} disabled={editPending} className={styles.confirmYes}>
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={editPending || !draft || isCommentBodyValueEmpty(draft)}
+                  className={styles.confirmYes}
+                >
                   {editPending ? "Saving…" : "Save"}
                 </button>{" "}
                 /{" "}
@@ -169,7 +218,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
                   type="button"
                   onClick={() => {
                     setEditing(false);
-                    setDraft(bodyText);
+                    setDraft(null);
                     setEditError(null);
                   }}
                   disabled={editPending}
@@ -180,7 +229,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
               </span>
             </div>
           ) : (
-            <p>{bodyText}</p>
+            <CommentBody body={body} bodyText={bodyText} />
           )}
           {comment.visiblyEdited && (
             <p className={styles.historyLine}>
@@ -188,7 +237,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
                 what="comment"
                 editedAt={comment.editedAt}
                 load={() => getCommentHistory(comment.id)}
-                renderBody={(version: CommentVersion) => version.bodyText}
+                renderBody={(version: CommentVersion) => <CommentBody body={version.body} bodyText={version.bodyText} />}
               />
             </p>
           )}
@@ -198,14 +247,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
             </button>
           )}
           {canEdit && !editing && !confirmingDelete && (
-            <button
-              type="button"
-              onClick={() => {
-                setDraft(bodyText);
-                setEditing(true);
-              }}
-              className={styles.editButton}
-            >
+            <button type="button" onClick={handleStartEdit} className={styles.editButton}>
               Edit
             </button>
           )}

@@ -305,6 +305,13 @@ the admin account.
   `margin-rail-widths.spec.ts` loads and waits at a desktop size first and then
   resizes, which is also the honest case — a phone opening a doc that already
   has annotations on it.
+- **The comment form has two modes** (PLAN.md §23m): the Markdown textarea, which is the
+  default and is `getByRole("textbox", { name: "Comment body" })`, and a rich TipTap editor
+  behind the "Rich text" button with the same accessible name. The mode is remembered in
+  `localStorage`, which a fresh test context does not carry over, so a spec that switches to
+  rich mode does not change the next spec's form. The inline edit box is
+  `{ name: "Edit comment" }` in either mode. `comment-markdown.spec.ts` submits three real
+  comments through the form, which counts against the rate limit below.
 - **Comments are rate-limited to 5 per IP per 10 minutes**
   (`src/lib/rate-limit.ts`), and every worker shares 127.0.0.1. Create comments
   with `createComment()` (straight to the DB) unless the test is *about* the

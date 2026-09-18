@@ -290,3 +290,44 @@ before editing it:
 The size-cap test pastes 800 KB — above our cap, below Next's — and asserts *our* message
 appears. That gap is the whole point of §6, so the test fails if the two numbers are ever
 brought together.
+
+## 11. The second consumer: a comment typed as Markdown (PLAN.md §23m)
+
+`markdownToCommentContent` in the same file parses a comment's Markdown box, and it breaks
+§2's rule on purpose. §2 says the parse list *is* the encode list; here the parse list is
+**`commentContentExtensions` plus three shims**, and the schema the result is validated against
+(`pmCommentContentSchema`, via `parseCommentBody`) is the list *without* them.
+
+The reason is a measurement, on `@tiptap/markdown@3.29` with the comment extension list alone:
+
+| Source | What the parser's own fallback emits |
+|---|---|
+| `# Title` | a `heading` node — **not in the schema, so `nodeFromJSON` throws** and the whole comment is refused for one `#` |
+| a fenced code block | nothing: the block is silently deleted |
+| a table | nothing |
+| a rule | nothing (fine) |
+| `![alt](src)` | the alt text, plain (fine — the src is exactly what §23b excludes) |
+| raw HTML | literal text, per §3 (fine, and the reason this stays server-side) |
+| a soft line break | a newline *inside* a text node, which the editor renders as a break and the static renderer collapses |
+
+So a restricted extension list does not give a restricted parse: the fallback in
+`parseFallbackToken` knows about `heading` and `text` regardless of what is registered, and
+knows nothing about `code`, `table` or `hr`. Each shim is a bare `Extension` whose
+`markdownTokenName` is the token the fallback mishandles and whose `parseMarkdown` returns
+something the schema *does* define. The manager dispatches by token name, and an `Extension`
+contributes nothing to `getSchema`, so the shims are parse-only by construction:
+
+| Token | Becomes |
+|---|---|
+| `heading` | a paragraph, bold |
+| `code` (a fence) | a paragraph of `code`-marked lines joined by `hardBreak` |
+| `table` | its raw source, one row per line, joined by `hardBreak` |
+
+A newline inside a text node becomes a space afterwards (`collapseSoftBreaks`). Then
+`parseCommentBody` runs `nodeFromJSON` and `node.check()` on the result anyway — after the
+conform pass that should throw only on a bug in the shims, and `src/lib/markdown-comment.test.ts`
+is the table that says so, case by case.
+
+The reverse, `commentContentToMarkdown`, serializes a stored body back for the edit box; there is
+deliberately no second stored form (§23m). It runs over the same manager, so a body parsed from
+Markdown and serialized again re-parses to itself — the last case in that test file.

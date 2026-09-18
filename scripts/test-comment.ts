@@ -28,7 +28,7 @@ async function list(slugOrId: string) {
 
   console.log(`Comments on "${post.title}" (id=${post.id}):`);
   for (const comment of comments) {
-    const text = (comment.body as { text?: string } | null)?.text ?? "";
+    const text = comment.bodyText;
     const preview = text.length > 60 ? `${text.slice(0, 60)}…` : text;
     const deletedNote = comment.deletedAt ? " [deleted]" : "";
     console.log(

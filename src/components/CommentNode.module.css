@@ -127,6 +127,12 @@
    would couple a comment's display to the form's layout. Colors are left to
    the browser's own light-dark defaults exactly as .field does — the one
    thing that would look wrong here is a second, differently-tinted box. */
+.editLoading {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .editTextarea {
   width: 100%;
   font: inherit;

@@ -137,7 +137,9 @@ test.describe("editing a comment", () => {
       status: "APPROVED",
     });
 
-    const anonymous = await page.context().browser()!.newContext();
+    // Explicitly empty: a bare newContext() inherits the project's signed-in
+    // storageState (fixtures.ts says why), which is the opposite of anonymous.
+    const anonymous = await page.context().browser()!.newContext({ storageState: { cookies: [], origins: [] } });
     const anonymousPage = await anonymous.newPage();
     try {
       await anonymousPage.goto(publishedPost.path);

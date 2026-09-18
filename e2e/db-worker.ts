@@ -23,6 +23,7 @@ import type { JSONContent } from "@tiptap/core";
 import { readFile } from "node:fs/promises";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
+import { commentBodyTextFromJSON, commentDocFromText } from "@/lib/comment-body";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
@@ -149,7 +150,12 @@ export async function deleteTestUser(email: string): Promise<void> {
   assertSafe(email);
   // Commenter.email is unique and its userId FK is optional, so deleting the
   // User alone strands a row that then blocks reusing this address — the same
-  // collision scripts/test-user.ts documents.
+  // collision scripts/test-user.ts documents. comment.commenter_id is ON
+  // DELETE RESTRICT, so a second user who commented through the real form
+  // during the test (comment-markdown.spec.ts) would otherwise block their
+  // own teardown when their fixture tears down before the post's — the
+  // comments go first, taking their revisions with them by cascade.
+  await prisma.comment.deleteMany({ where: { commenter: { email } } });
   await prisma.commenter.deleteMany({ where: { email } });
   // annotation.user_id is ON DELETE RESTRICT (an annotation's author is never
   // optional, unlike Commenter's) — a secondUser({role: "AUTHORIZED"}) who
@@ -1284,9 +1290,10 @@ export async function createComment(opts: {
     data: {
       threadId: thread.id,
       commenterId: commenter.id,
-      body: { text: body },
+      body: commentDocFromText(body),
+      bodyText: body,
       status,
-      revisions: { create: { revisionNo: 1, body: { text: body }, authorUserId: commenter.userId } },
+      revisions: { create: { revisionNo: 1, body: commentDocFromText(body), authorUserId: commenter.userId } },
     },
   });
 
@@ -1321,6 +1328,7 @@ export async function getCommentFacts(commentId: string): Promise<CommentFacts |
     where: { id: commentId },
     select: {
       body: true,
+      bodyText: true,
       editedAt: true,
       status: true,
       revisions: {
@@ -1331,12 +1339,12 @@ export async function getCommentFacts(commentId: string): Promise<CommentFacts |
   });
   if (!comment) return null;
   return {
-    bodyText: (comment.body as { text?: string } | null)?.text ?? "",
+    bodyText: comment.bodyText,
     editedAt: comment.editedAt?.toISOString() ?? null,
     status: comment.status,
     revisions: comment.revisions.map((r) => ({
       revisionNo: r.revisionNo,
-      bodyText: (r.body as { text?: string } | null)?.text ?? "",
+      bodyText: commentBodyTextFromJSON(r.body),
       authorEmail: r.author?.email ?? null,
       createdAt: r.createdAt.toISOString(),
     })),
@@ -1403,7 +1411,14 @@ export async function createQuoteThread(opts: {
     data: { postId, anchoredEventId, anchorFrom, anchorTo, quotedText },
   });
   const comment = await prisma.comment.create({
-    data: { threadId: thread.id, commenterId: commenter.id, body: { text: body }, status: "APPROVED" },
+    data: {
+      threadId: thread.id,
+      commenterId: commenter.id,
+      body: commentDocFromText(body),
+      bodyText: body,
+      status: "APPROVED",
+      revisions: { create: { revisionNo: 1, body: commentDocFromText(body), authorUserId: commenter.userId } },
+    },
   });
 
   return { threadId: thread.id, commentId: comment.id };

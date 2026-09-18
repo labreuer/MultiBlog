@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { canUserEditPost } from "@/lib/authz";
 import { signInPath } from "@/lib/sign-in-redirect";
 import ModerateCommentButtons from "@/components/ModerateCommentButtons";
+import CommentBody from "@/components/CommentBody";
 
 export const metadata: Metadata = { title: "Moderate comments" };
 
@@ -60,7 +61,7 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
                 {comment.createdAt.toLocaleString()}
                 {comment.ipAddress && ` · ${comment.ipAddress}`}
               </p>
-              <p>{(comment.body as { text?: string } | null)?.text ?? ""}</p>
+              <CommentBody body={comment.body} bodyText={comment.bodyText} />
               <ModerateCommentButtons commentId={comment.id} />
             </li>
           ))}
