@@ -575,6 +575,16 @@ above). Four things worth knowing before touching it:
 - **A cell is `block+` and a table is `group: block`, so the schema allows a table inside a
   cell.** `TableControls` disables its insert button while the caret is in a table
   (`isActive("table")`); nothing else stops nesting, and Markdown import can't produce it.
+- **The cells' `renderHTML` is overridden to emit `colSpan`/`rowSpan`, not the extension's
+  `colspan`/`rowspan`.** The extension's spelling is right for the DOM, but
+  `@tiptap/static-renderer`'s React path (`mapAttrsToHTMLAttributes`) translates only
+  `class` and `style` and passes every other attribute name to `React.createElement` as-is,
+  so the reading views warned "Invalid DOM property `colspan`. Did you mean `colSpan`?" on
+  every cell — dev-only, and the DOM was still right, since React writes an unrecognised
+  lowercase attribute through unchanged. The rename is safe for the editor because
+  `setAttribute` lowercases names on HTML elements and the cells' `parseHTML` reads the
+  lowercase attribute back. Don't "restore" the extension's stock `TableCell`/`TableHeader`
+  imports: `tiptap-schema.ts` exports the extended pair under the same names on purpose.
 - **Decoding a ydoc adds default attrs the parser omitted.** A cell straight out of
   `markdownToDocContent` has no `attrs`; the same cell read back through
   `TiptapTransformer.fromYdoc` carries `{ colspan: 1, rowspan: 1 }`. Harmless — the

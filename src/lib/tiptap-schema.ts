@@ -10,9 +10,9 @@ import Blockquote from "@tiptap/extension-blockquote";
 import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
 import Link from "@tiptap/extension-link";
-import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
+import { Table, TableCell as BaseTableCell, TableHeader as BaseTableHeader, TableRow } from "@tiptap/extension-table";
 import { Quote } from "./quote-mark-extension";
-import { getSchema, type JSONContent } from "@tiptap/core";
+import { getSchema, mergeAttributes, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
 import { Annotation } from "./annotation-extension";
@@ -50,6 +50,31 @@ export const EDITOR_LINK_OPTIONS = { openOnClick: false } as const;
 // synced through Yjs (fine) but drawn by a drag interaction the reading
 // views can't reproduce from the static HTML, and a 800px reading column
 // has little to give — TODO.md carries the follow-up.
+//
+// The cells render `colSpan`/`rowSpan` rather than the extension's own
+// `colspan`/`rowspan`. Both spellings are the same attribute to the DOM
+// (`setAttribute` lowercases on HTML elements, and `parseHTML` reads the
+// lowercase form back), but `@tiptap/static-renderer`'s React path hands
+// every attribute name to `React.createElement` verbatim — it translates
+// only `class` and `style` — and React wants the camelCase prop, so the
+// reading views warned "Invalid DOM property `colspan`" on every cell.
+// Renaming here fixes every static-render call site at once instead of a
+// `nodeMapping` per call. docs/TIPTAP.md "Tables are four nodes".
+const reactCellAttributes = ({ colspan, rowspan, ...rest }: Record<string, unknown>) => ({
+  ...rest,
+  colSpan: colspan,
+  rowSpan: rowspan,
+});
+export const TableCell = BaseTableCell.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ["td", reactCellAttributes(mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)), 0];
+  },
+});
+export const TableHeader = BaseTableHeader.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ["th", reactCellAttributes(mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)), 0];
+  },
+});
 export const tableExtensions = [Table.configure({ renderWrapper: true }), TableRow, TableHeader, TableCell];
 
 // The node/mark schema used for a post's content. Shared between the
