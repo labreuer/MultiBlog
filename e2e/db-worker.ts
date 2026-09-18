@@ -23,7 +23,9 @@ import type { JSONContent } from "@tiptap/core";
 import { readFile } from "node:fs/promises";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
-import { commentBodyTextFromJSON, commentDocFromText } from "@/lib/comment-body";
+import { commentBodyTextFromJSON, commentDocFromText, isCommentBodyError } from "@/lib/comment-body";
+import { resolveCommentBody } from "@/lib/comment-body-resolve";
+import { captureCommentQuotes } from "@/lib/comment-quote-capture";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
@@ -32,7 +34,7 @@ import { derivePostStatus } from "@/lib/post-status";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { uniqueFileSlug } from "@/lib/file-slug";
 import { uniqueTagSlug } from "@/lib/tag-slug";
-import { targetToColumns, type AnchorTarget } from "@/lib/anchors";
+import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
 import { parsePdfTarget } from "@/lib/pdf-anchor";
@@ -1424,6 +1426,115 @@ export async function createQuoteThread(opts: {
   return { threadId: thread.id, commentId: comment.id };
 }
 
+/**
+ * Inserts a comment the way submitComment would store it — Markdown parsed
+ * through the conform pass, every quotation matched and rewritten, the anchor
+ * rows written beside it (PLAN.md §23n) — without the form and so without the
+ * rate limit. The gestures that *produce* a quotation are what the real form
+ * is for in comment-quoting.spec.ts; what this seeds is the server's answer to
+ * text that is already in the box.
+ */
+export async function createCommentWithQuotes(opts: {
+  postId: string;
+  email: string;
+  displayName: string;
+  markdown: string;
+  parentCommentId?: string;
+  /** Unbound hints (PLAN.md §23h, Phase 4) — an off-page target for the matcher to load; a file (Phase 5) is refused. */
+  pending?: { id?: string | null; target: { kind: "post" | "comment" | "file"; id: string }; text: string }[];
+}): Promise<{ id: string }> {
+  const { postId, email, displayName, markdown, parentCommentId } = opts;
+  assertSafe(email);
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  const commenter = user
+    ? await prisma.commenter.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id, email, displayName } })
+    : await prisma.commenter.upsert({ where: { email }, update: {}, create: { email, displayName } });
+  const post = await prisma.post.findUniqueOrThrow({ where: { id: postId }, select: { publishEventId: true } });
+
+  let thread: { id: string; anchorFrom: number };
+  if (parentCommentId) {
+    const parent = await prisma.comment.findUniqueOrThrow({
+      where: { id: parentCommentId },
+      select: { threadId: true, thread: { select: { anchorFrom: true } } },
+    });
+    thread = { id: parent.threadId, anchorFrom: parent.thread.anchorFrom };
+  } else {
+    thread =
+      (await prisma.commentThread.findFirst({ where: { postId, quotedText: "" }, select: { id: true, anchorFrom: true } })) ??
+      (await prisma.commentThread.create({
+        data: { postId, anchoredEventId: post.publishEventId!, anchorFrom: 0, anchorTo: 0, quotedText: "" },
+        select: { id: true, anchorFrom: true },
+      }));
+  }
+
+  const parsed = resolveCommentBody({ format: "markdown", content: markdown });
+  if (isCommentBodyError(parsed)) throw new Error(parsed.error);
+  const captured = await captureCommentQuotes({
+    node: parsed.node,
+    host: { postId, parentCommentId: parentCommentId ?? null, threadAnchorFrom: thread.anchorFrom > 0 ? thread.anchorFrom : null },
+    hints: (opts.pending ?? []).map((hint) => ({ id: null, ...hint })),
+  });
+  const comment = await prisma.comment.create({
+    data: {
+      threadId: thread.id,
+      parentCommentId: parentCommentId ?? null,
+      commenterId: commenter.id,
+      body: captured.json as Prisma.InputJsonValue,
+      bodyText: captured.text,
+      status: "APPROVED",
+      quoteAnchors: {
+        create: captured.anchors.map((anchor) => ({
+          id: anchor.id,
+          partOrder: anchor.partOrder,
+          ...targetToColumns(anchor.target),
+          selectorKind: anchor.selectorKind,
+          anchorFrom: anchor.anchorFrom,
+          anchorTo: anchor.anchorTo,
+          quotedText: anchor.quotedText,
+          selector: anchor.selector as Prisma.InputJsonValue,
+          anchoredEventId: anchor.anchoredEventId,
+          quotedRevisionId: anchor.quotedRevisionId,
+        })),
+      },
+      revisions: { create: { revisionNo: 1, body: captured.json as Prisma.InputJsonValue, authorUserId: commenter.userId } },
+    },
+    select: { id: true },
+  });
+  return { id: comment.id };
+}
+
+export type CommentQuoteFacts = {
+  anchorId: string;
+  targetKind: string;
+  targetId: string;
+  quotedText: string;
+  anchorFrom: number | null;
+  anchorTo: number | null;
+  anchoredEventId: string | null;
+  quotedRevisionId: string | null;
+};
+
+/** Every quote anchor row a comment's body carries, in part order (PLAN.md §23c). */
+export async function getCommentQuoteFacts(commentId: string): Promise<CommentQuoteFacts[]> {
+  const rows = await prisma.commentQuoteAnchor.findMany({
+    where: { commentId },
+    orderBy: [{ partOrder: "asc" }, { id: "asc" }],
+  });
+  return rows.map((row) => {
+    const target = targetFromColumns(row);
+    return {
+      anchorId: row.id,
+      targetKind: target?.kind ?? "none",
+      targetId: target?.id ?? "",
+      quotedText: row.quotedText,
+      anchorFrom: row.anchorFrom,
+      anchorTo: row.anchorTo,
+      anchoredEventId: row.anchoredEventId,
+      quotedRevisionId: row.quotedRevisionId,
+    };
+  });
+}
+
 export type ThreadState = {
   status: string;
   anchorFrom: number;
@@ -1975,6 +2086,8 @@ const handlers = {
   backdateAnnotationPosting,
   setAnnotationEditingSince,
   createComment,
+  createCommentWithQuotes,
+  getCommentQuoteFacts,
   getCommentFacts,
   backdateComment,
   createQuoteThread,

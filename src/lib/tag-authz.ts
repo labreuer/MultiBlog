@@ -4,6 +4,7 @@ import { canApplyTags, canCurateTags } from "@/lib/role-checks";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
 import { readablePostWhere } from "@/lib/post-status";
+import { canUserReadComment } from "@/lib/comment-authz";
 import type { AnchorTarget } from "@/lib/anchors";
 
 export { canApplyTags, canCurateTags } from "@/lib/role-checks";
@@ -104,6 +105,23 @@ export async function canUserTagTarget(userId: string, role: Role, target: Ancho
       // Neither container. Unreachable while annotation_one_container_check
       // holds; denying is the safe answer if it ever doesn't.
       return false;
+    }
+    case "comment": {
+      // PLAN.md §23c — the fifth arc leg. "You may tag what you may read",
+      // with a comment's readability being canUserReadComment's: public when
+      // APPROVED on a live post, otherwise its author's and moderators'. No
+      // chip UI targets a comment yet; the arm exists because the union is
+      // exhaustive and the gate must answer for every kind the CHECK admits.
+      const comment = await prisma.comment.findUnique({
+        where: { id: target.id },
+        select: {
+          status: true,
+          deletedAt: true,
+          commenter: { select: { userId: true } },
+          thread: { select: { post: { select: { id: true, publishedAt: true } } } },
+        },
+      });
+      return comment !== null && (await canUserReadComment({ id: userId, role }, comment));
     }
   }
 }

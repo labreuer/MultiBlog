@@ -10,6 +10,7 @@ import Blockquote from "@tiptap/extension-blockquote";
 import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
 import Link from "@tiptap/extension-link";
+import { Quote } from "./quote-mark-extension";
 import { getSchema, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
@@ -149,6 +150,27 @@ export const pmBlurbSchema = getSchema(blurbExtensions);
 // (comment-body.ts) on every write, so neither depends on the other.
 export const COMMENT_LINK_REL = "nofollow noopener";
 export const COMMENT_LINK_TARGET = "_blank";
+
+// PLAN.md §23f — a comment's blockquote carries a nullable `anchorId`: the
+// `comment_quote_anchor` row this quotation cites, or null for an ordinary
+// quote (the toolbar's, or a `>` in the Markdown box that matched nothing).
+// One node type rather than a separate `Quotation`: Markdown parses to
+// `blockquote`, so promotion is an attribute write and degradation is
+// `anchorId: null`, with no node swap either way. What the attribute form
+// cannot say structurally — an anchored quote never nests inside another —
+// is a server rule in the matcher instead.
+export const CommentBlockquote = Blockquote.extend({
+  addAttributes() {
+    return {
+      anchorId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-anchor-id"),
+        renderHTML: (attributes) => (attributes.anchorId ? { "data-anchor-id": attributes.anchorId } : {}),
+      },
+    };
+  },
+});
+
 export const commentContentExtensions = [
   Document,
   Paragraph,
@@ -157,7 +179,8 @@ export const commentContentExtensions = [
   Italic,
   Strike,
   Code,
-  Blockquote,
+  CommentBlockquote,
+  Quote,
   BulletList,
   OrderedList,
   ListItem,

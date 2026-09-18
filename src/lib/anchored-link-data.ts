@@ -105,6 +105,7 @@ export async function anchoredLinkForViewer(
           postId: true,
           fileId: true,
           targetAnnotationId: true,
+          targetCommentId: true,
         },
       },
     },

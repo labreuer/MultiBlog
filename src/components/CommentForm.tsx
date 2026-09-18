@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
 import {
+  commentBodyValuePendingJSON,
   emptyCommentBodyValue,
   isCommentBodyValueEmpty,
   rememberedCommentBodyMode,
@@ -15,6 +16,12 @@ import CommentBodyInput from "./CommentBodyInput";
 import styles from "./CommentForm.module.css";
 
 const initialState: SubmitCommentState = {};
+
+// The remembered mode never changes under a mounted form, so nothing to
+// subscribe to; the store exists for its server-vs-client snapshot pair.
+function subscribeNever() {
+  return () => {};
+}
 
 type Props = {
   postId: string;
@@ -43,19 +50,26 @@ export default function CommentForm(props: Props) {
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
-  // Markdown on the server render, always — the remembered mode lives in
-  // localStorage, which SSR cannot read, and a form whose first paint differs
-  // from its HTML is a hydration mismatch. The effect below switches an
-  // *empty* form to the remembered mode once mounted; a restored draft brings
-  // its own mode with it.
-  const [value, setValue] = useState<CommentBodyValue>(() => emptyCommentBodyValue("markdown"));
+  // The remembered mode lives in localStorage, which SSR cannot read, and a
+  // form whose first paint differs from its HTML is a hydration mismatch.
+  // useSyncExternalStore is the shape for "markdown on the server, the real
+  // answer in the browser" (docs/DOC_IMPORT.md §7's reasoning): a form
+  // mounted after hydration — a reply, the passage popover — starts in the
+  // remembered mode outright, which matters because a queued quote gesture
+  // is delivered the moment its composer registers. The server-rendered
+  // general form still starts as Markdown and the effect below switches it
+  // while empty; a restored draft brings its own mode with it.
+  const rememberedMode = useSyncExternalStore(subscribeNever, rememberedCommentBodyMode, () => "markdown" as const);
+  const [value, setValue] = useState<CommentBodyValue>(() => emptyCommentBodyValue(rememberedMode));
   useEffect(() => {
-    const mode = rememberedCommentBodyMode();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from localStorage (an external system)
-    setValue((current) => (isCommentBodyValueEmpty(current) && current.mode !== mode ? emptyCommentBodyValue(mode) : current));
-  }, []);
+    setValue((current) =>
+      isCommentBodyValueEmpty(current) && current.mode !== rememberedMode ? emptyCommentBodyValue(rememberedMode) : current,
+    );
+  }, [rememberedMode]);
 
-  const draft = useCommentDraft(draftKey(props), value, setValue);
+  const composerKey = draftKey(props);
+  const draft = useCommentDraft(composerKey, value, setValue);
 
   useEffect(() => {
     if (state.status === "APPROVED" || state.status === "PENDING") {
@@ -106,6 +120,8 @@ export default function CommentForm(props: Props) {
         name="body"
         value={value.mode === "markdown" ? value.markdown : value.json ? JSON.stringify(value.json) : ""}
       />
+      {/* PLAN.md §23g — what the rich body's placeholder anchor ids point at. */}
+      <input type="hidden" name="pendingQuotes" value={commentBodyValuePendingJSON(value)} />
       <CommentBodyInput
         value={value}
         onChange={setValue}
@@ -113,6 +129,7 @@ export default function CommentForm(props: Props) {
         placeholder={userName ? `Commenting as ${userName}` : "Write a comment..."}
         disabled={pending}
         required
+        composerKey={composerKey}
       />
       {draft.restored && (
         <p className={styles.draftLine}>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { UndoRedo } from "@tiptap/extensions";
 import { ListKeymap } from "@tiptap/extension-list";
 import { commentContentExtensions } from "@/lib/tiptap-schema";
@@ -25,6 +25,8 @@ type Props = {
   ariaLabel: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  /** The live instance, for the quote gesture's insertContent; null on unmount. */
+  onEditorReady?: (editor: Editor | null) => void;
 };
 
 // PLAN.md §23h — AnnotationBody's shape minus every collaboration piece: no
@@ -33,7 +35,14 @@ type Props = {
 // validates against — plus editor-only behaviour that contributes no node or
 // mark (undo history, list keys, the virtual-keyboard Enter, quote-depth
 // shortcuts), so nothing typeable here is refused on submit.
-export default function CommentEditor({ initialContent, onChange, ariaLabel, disabled = false, autoFocus = false }: Props) {
+export default function CommentEditor({
+  initialContent,
+  onChange,
+  ariaLabel,
+  disabled = false,
+  autoFocus = false,
+  onEditorReady,
+}: Props) {
   // A ref rather than a captured closure: useEditor's options are read once
   // at construction, and the parent's onChange is recreated per render.
   const onChangeRef = useRef(onChange);
@@ -54,6 +63,11 @@ export default function CommentEditor({ initialContent, onChange, ariaLabel, dis
   useEffect(() => {
     editor?.setEditable(!disabled);
   }, [editor, disabled]);
+
+  useEffect(() => {
+    onEditorReady?.(editor);
+    return () => onEditorReady?.(null);
+  }, [editor, onEditorReady]);
 
   if (!editor) {
     return <div className={styles.placeholder} aria-hidden="true" />;

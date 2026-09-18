@@ -61,6 +61,9 @@ type Fixtures = {
   linkUserId: string;
   /** A second probe user with *nothing* open, for the rows that must go in when the slot is free. */
   linkUser2Id: string;
+  /** A comment with one revision, for comment_quote_anchor's rows (PLAN.md §23c). */
+  commentId: string;
+  commentRevisionId: string;
 };
 
 type Probe = {
@@ -207,6 +210,56 @@ const MUST_REJECT: Probe[] = [
   },
 ];
 
+// PLAN.md §23c — the third anchor table, and the fifth arc column on the
+// other two. The first probe is the one that matters most: it proves the
+// rewritten one-target CHECK on tag_anchor *counts* target_comment_id, which
+// the migration had to DROP and re-ADD to achieve.
+MUST_REJECT.push(
+  {
+    name: "tag_anchor with a doc AND a comment target",
+    constraint: "tag_anchor_one_target_check",
+    why: "the fifth arc leg is counted by the rewritten CHECK, not merely present as a column (§23c)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO tag_anchor (id, assignment_id, doc_id, target_comment_id)
+        VALUES ('probe-tag-doc-comment', ${f.assignmentId}, ${f.docId}, ${f.commentId})`,
+  },
+  {
+    name: "comment_quote_anchor with no target",
+    constraint: "comment_quote_anchor_one_target_check",
+    why: "a quotation of nothing is a row with no meaning — the same rule, restated per table",
+    attempt: (tx, f) =>
+      tx.$executeRaw`INSERT INTO comment_quote_anchor (id, comment_id) VALUES ('probe-q-none', ${f.commentId})`,
+  },
+  {
+    name: "comment_quote_anchor with a post AND a comment target",
+    constraint: "comment_quote_anchor_one_target_check",
+    why: "one quotation names one thing; two targets is a different construct (docs/research/multi-anchoring.md)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor (id, comment_id, post_id, target_comment_id)
+        VALUES ('probe-q-two', ${f.commentId}, ${f.postId}, ${f.commentId})`,
+  },
+  {
+    name: "comment_quote_anchor with a selector kind and no range",
+    constraint: "comment_quote_anchor_selector_columns_check",
+    why: "the half-written part state the all-or-nothing CHECK exists for (§20b), on the third table too",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor (id, comment_id, target_comment_id, selector_kind)
+        VALUES ('probe-q-kindonly', ${f.commentId}, ${f.commentId}, 'DOC_RANGE')`,
+  },
+  {
+    name: "comment_quote_anchor with two version stamps",
+    constraint: "comment_quote_anchor_one_stamp_check",
+    why: "one stamp per substrate (§23d): a row pinned to both an event and a revision names two versions of two things",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor (id, comment_id, target_comment_id, quoted_revision_id, ydoc_update_id)
+        VALUES ('probe-q-stamps', ${f.commentId}, ${f.commentId}, ${f.commentRevisionId}, 1)`,
+  },
+);
+
 // A constraint set that rejects everything is not a passing test. These are
 // what tell the two apart — the shapes the design says are *legal*, which have
 // to go in.
@@ -246,6 +299,26 @@ const MUST_ACCEPT: Probe[] = [
           (id, link_id, doc_id, selector_kind, anchor_from, anchor_to, quoted_text, selector)
         VALUES ('probe-link-ok', ${f.linkId}, ${f.docId}, 'DOC_RANGE', 3, 9, 'six ch',
           '{"v":1,"before":"","after":"","blocks":1}'::jsonb)`,
+  },
+  {
+    name: "a quotation of a comment — the shape Phase 3's writer produces",
+    constraint: "",
+    why: "one target, a DOC_RANGE part with its context blob, and the revision stamp (PLAN.md §23c/§23n)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor
+          (id, comment_id, target_comment_id, selector_kind, anchor_from, anchor_to, quoted_text, selector, quoted_revision_id)
+        VALUES ('probe-q-ok', ${f.commentId}, ${f.commentId}, 'DOC_RANGE', 1, 5, 'four',
+          '{"v":1,"before":"","after":"","blocks":1}'::jsonb, ${f.commentRevisionId})`,
+  },
+  {
+    name: "a whole-object tag_anchor on a comment",
+    constraint: "",
+    why: "the fifth arc leg is a legal sole target on the existing tables, not just a counted one",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO tag_anchor (id, assignment_id, target_comment_id)
+        VALUES ('probe-tag-comment', ${f.assignmentId}, ${f.commentId})`,
   },
   {
     name: "a second link for a user whose first is minted",
@@ -369,6 +442,38 @@ async function main() {
         data: { createdById: linkUser.id },
         select: { id: true },
       });
+      // A comment for the quote-anchor probes, with the thread and
+      // commenter it needs and the revision 1 every comment carries (§22c).
+      // publish_event_id is nullable on a post but a thread needs an event;
+      // a post with none has nothing to anchor a thread against, so the
+      // probe builds an UNPUBLISHED-shaped event of its own.
+      const probeEvent = await tx.postPublicationEvent.create({
+        data: { postId: post.id, type: "UNPUBLISHED", actorId: user.id },
+        select: { id: true },
+      });
+      const probeThread = await tx.commentThread.create({
+        data: { postId: post.id, anchoredEventId: probeEvent.id, anchorFrom: 0, anchorTo: 0, quotedText: "probe" },
+        select: { id: true },
+      });
+      const probeCommenter = await tx.commenter.create({
+        data: { email: `probe-commenter-${Date.now()}@probe.invalid`, displayName: "Probe Commenter" },
+        select: { id: true },
+      });
+      const probeComment = await tx.comment.create({
+        data: {
+          threadId: probeThread.id,
+          commenterId: probeCommenter.id,
+          body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "probe" }] }] },
+          bodyText: "probe",
+          revisions: {
+            create: {
+              revisionNo: 1,
+              body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "probe" }] }] },
+            },
+          },
+        },
+        select: { id: true, revisions: { select: { id: true } } },
+      });
       const fixtures: Fixtures = {
         userId: user.id,
         assignmentId: assignment.id,
@@ -378,6 +483,8 @@ async function main() {
         linkId: link.id,
         linkUserId: linkUser.id,
         linkUser2Id: linkUser2.id,
+        commentId: probeComment.id,
+        commentRevisionId: probeComment.revisions[0].id,
       };
 
       for (const probe of MUST_REJECT) {

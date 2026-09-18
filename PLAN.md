@@ -8740,8 +8740,10 @@ Two additions the plan did not name, both small and both load-bearing:
 
 **Planned 2026-09-16 on `annotations-and-comments`, replacing §22d before it was merged.
 Amended the same day, before any of it was built, for a plain-Markdown front door (§23m) and
-the text-matching it needs (§23n); the amendments are marked where they land. Phases 0 and 1
-of §23j built the same day — §23m's "as built" paragraph is the account.**
+the text-matching it needs (§23n); the amendments are marked where they land. All five phases
+of §23j built the same day — the "as built" paragraphs in §23c, §23h, §23j, §23m and §23n are
+the account; Phase 5's gate is shut by construction (§23k), so PDF quoting exists as a
+refusal until §19 grows a public file tier.**
 §22d built a quotation as four columns on the reply and a blockquote above its body: one
 quotation, of the parent comment, outside the reply's text. The ask that arrived after it was
 built is larger in every dimension, and the difference is not a refinement — it is a different
@@ -8872,6 +8874,16 @@ because the alternative is three tables that no longer share a shape and a compi
 cannot hold them to one. `AnchorTarget` gains a `comment` member, and every `switch` over it
 fails to compile until handled — which is the other half of the price, working as intended.
 
+**As built (Phase 2, 2026-09-16).** Migration `comment_quote_anchors`: the table above with
+three hand-written CHECKs (one target of five, selector columns all-or-nothing, at most one
+stamp), and the fifth column with its index and rewritten one-target CHECK on the two
+existing tables. Adding the member to `AnchorTarget` made eleven call sites fail to compile —
+every select feeding `targetFromColumns`, the two `switch`es (`canUserTagTarget`,
+`pathForTarget`), the anchored-link action's refusal list, the tag script's resolver — and
+each now says what a comment target means there. `canUserReadComment`
+(`src/lib/comment-authz.ts`) is the read predicate the `comment` arm wears, shared with the
+comment actions. No writer exists yet; `check-tag-constraints.ts` probes the new CHECKs.
+
 **Why the anchor is outside the body**, when an annotation's is a mark *inside* its document:
 §14a's argument, unchanged. A mark lives in exactly one document; a quotation joins a comment
 to a *different* object, and no single document can hold that. The body carries an `anchorId`
@@ -8945,7 +8957,8 @@ What that admits, and what it refuses:
 | A doc, `PRIVATE` or `SHARED` | ❌ — there is no public doc tier at all (§12e) |
 | An annotation body | ❌ — it lives on a doc or a file, and inherits the above |
 
-`canQuoteTargetInto(target, host)` in `src/lib/comment-quote-authz.ts`, and it is **load-bearing
+`canQuoteTargetInto(target, host)` in `src/lib/comment-quote-authz.ts` (built in Phase 2, ahead
+of its first caller, because the citation render below filters by it), and it is **load-bearing
 rather than belt-and-braces** — the §20m precedent, where a second narrower check earns its
 place by asking a genuinely different question from the page's own gate. It runs at post time,
 on the server, against the resolved target; the composer's picker filters by the same predicate
@@ -9066,17 +9079,51 @@ anchor — or, in Markdown mode, a `> ` line at the caret and nothing else.
 Selection settles on `selectionchange` with `pointerup` short-circuiting it, per CLAUDE.md's
 rule, and for its stated reason.
 
+*As built (Phase 3):* `CommentQuoteProvider` (`comment-quote-context.tsx`) wraps the post page —
+composers register under a key (`post:<id>`, `reply:<commentId>`, `edit:<commentId>`, the passage
+popover's), mark themselves active on focus, and `quoteInto` delivers to a preferred composer, the
+active one, or the general form; a reply form that is not open yet is opened by its card and the
+request is delivered when it registers. Two gestures: **"Quote in comment instead"** in the
+article's existing selection popover (carries the editor's offsets as the hint), and
+**"Quote in reply"** (`CommentQuoteSelectionPopover`, one `selectionchange` listener for the
+page, `pointerup` short-circuiting it, floating-ui placement) over a selection in any card. In
+Markdown mode the gesture appends a `> ` block; in rich mode it inserts an anchored blockquote
+with a `pending:` placeholder id and records the hint in the value and the draft.
+
 **Quoting something not on the page** needs a picker, and that is the one genuinely new surface:
 a search over publicly-readable posts and comments, then a passage chosen inside the chosen
 object. §14's doc-link picker and the `[[` doc-ref menu are the precedents. This is Phase 4 and
 the largest UI item in the section; Phases 1 to 3 are deliberately shaped so that it is
 additive.
 
+*As built (Phase 4, 2026-09-16):* `CommentQuotePicker`, a panel under the composer ("Quote from
+elsewhere…" at the end of the mode row) rather than a floating menu — a body to select text in
+needs room a menu does not have. `searchQuotableTargets` runs /search's hobby-scale substring
+search over published posts plus a `body_text` search over public comments, both without a
+session, since §23e's admitted set *is* the public set; `loadQuotableTarget` returns the chosen
+body, gated by `canQuoteTargetInto`, and the panel renders it statically for a selection.
+"Quote selection" hands the composer a request naming the target, and that is the part that
+matters: the server cannot find an off-page target by text alone, so the hint is what makes it
+a candidate — `loadCandidates` loads every hinted post or comment, gated exactly as an on-page
+one. **A hint may be unbound** (`id: null`): the Markdown box has no placeholder ids, so its
+hints name a target to search without saying which `> ` block is which, and the matcher sorts
+that out. Unbound hints ride in the Markdown value and its draft too.
+
 **The citation line** is resolved server-side per anchor row —
 `describeQuoteTarget(anchor)` returning a label and an href, filtered by §23e's predicate at
 render as well as at write, since a target can stop being public after the fact. An edited
 target is worth saying so about: when a comment quote's pinned revision is not the newest, the
 citation reads "quoted an earlier version", which is §22d's link surviving into the new design.
+
+*As built (Phase 2):* `src/lib/comment-quote-data.ts` — `loadCommentQuoteCitations` is one
+query for every comment on a page, keyed by quoting comment then by anchor id; `CommentBody`
+takes the map and renders a `<footer>` citation under an anchored blockquote and wraps an
+anchored `<q>` in the link, via the static renderer's `nodeMapping`/`markMapping`. A comment
+target's href is the post path plus the comment's permalink fragment
+(`commentAnchorName`, extracted from `CommentNode` so the two cannot drift). A row whose target
+is no longer public renders "a source that is no longer available" with no link. The
+`quotedBy` clause of §22b's grace rule is wired in both loaders — a version a row pins is never
+silent — and answers `false` for every row today, since nothing writes one.
 
 ### 23i. What the §22 work becomes
 
@@ -9109,8 +9156,9 @@ is parked rather than merged.
 
 - **§22d's four columns on `comment`** (`quoted_revision_id`, `quote_from`, `quote_to`,
   `quoted_text`), the `comment_quote_all_or_nothing_check` and `comment_quote_range_check`
-  constraints, and the partial index. Replaced by §23c's table. Phase 2's migration drops them;
-  they were never merged, so nothing has ever depended on them.
+  constraints, and the partial index. Replaced by §23c's table. They never reached this branch
+  (§23l), so Phase 2's migration had nothing to drop, and the two string helpers below never
+  came back either.
 - **`src/lib/text-quote.ts` and `src/lib/text-selection-offsets.ts`**, with their unit tests.
   Both exist because a comment body was a plain string: one re-finds a quote in a string, the
   other turns a DOM selection into string offsets. A ProseMirror document answers both questions
@@ -9142,15 +9190,27 @@ is parked rather than merged.
    citation render;
    §22d's columns and helpers dropped. §20h's pattern exactly: the shape and the readers ship
    before the writers, so the writers land into a surface that already renders them.
-3. **Quoting what is on the page.** The host post and any comment on it: the matcher (§23n),
+3. **Quoting what is on the page** (built). The host post and any comment on it: the matcher (§23n),
    shared by both front doors with the rich mode's selection as an optional hint; the audience gate, the server-side derive-and-rewrite, inline and block, the highlight in the
    quoted comment, and the "quoted an earlier version" degradation. This is the phase that makes
    the feature real, and it reuses §5 and §22d's gestures.
-4. **Quoting what is not on the page.** Another published post, a comment on another post: the
+4. **Quoting what is not on the page** (built). Another published post, a comment on another post: the
    picker, and the same gate and capture path.
-5. **PDFs, behind the tier they need.** `PDF_TEXT` parts via `capturePdfTextAnchor`, which
+5. **PDFs, behind the tier they need** (built, gate shut). `PDF_TEXT` parts via `capturePdfTextAnchor`, which
    already writes `tag_anchor`'s PDF parts; the gate refuses every file until §19 grows a
    publicly-readable tier, and the e2e case asserts the refusal rather than the capability.
+
+   *As built (2026-09-16):* a `file` hint kind carrying the viewer's `PdfTarget` blob
+   (`comment-quote-pending.ts`); in `captureCommentQuotes`, a span bound to one goes through
+   `canQuoteTargetInto` and, if admitted, `capturePdfTextAnchor` — a `PDF_TEXT` row with the
+   page-text offsets and the blob, no stamp, the block rewritten to the derived quote. The gate
+   admits nothing, so that branch degrades every time and `comment-quoting.spec.ts` asserts a
+   plain blockquote and no row for a SHARED file. **No PDF-side gesture is built**: a comment
+   composer lives on a post page and the PDF viewer does not, so a "Quote in comment" there
+   would have to carry the selection across pages through the draft — a Phase 4-shaped picker
+   over files is the natural form, once there is a file a stranger may read. The rewrite's input
+   was generalized for this (a resolution carries its paragraphs, not a source document and
+   range), which is the one change the phase made outside the gate.
 
 Each phase ends at `npm run check`. `scripts/integrity/check-comment-quotes.ts` arrives with
 Phase 3 and verifies the pair §23f rests on: the body's quoted span equals the anchor row's
@@ -9238,6 +9298,12 @@ likely to be wanted verbatim are `src/lib/edit-grace.ts` with its unit tests, wh
 change at all, and §22e's annotation edit sessions, which §23 does not touch either. Both are in
 the first commit, which also carries §22c — so a cherry-pick brings comment revisions along, and
 §23's Phase 1 would then be a migration of `body` rather than a new table.
+
+**Done, 2026-09-16, as §23j's Phase 0**: the first commit was cherry-picked onto this branch
+(`e2d3a15`), its two migrations applied, and Phase 1's migration was indeed a rewrite of `body`
+across `comment` and `comment_revision`. The other two commits stay on the reference branch as
+the record of the design §23 replaced; nothing on this branch depends on them, and the branch
+can be deleted whenever that record stops being worth keeping.
 
 ### 23m. The Markdown front door
 
@@ -9386,3 +9452,33 @@ with `textBetween`'s space separator like every other anchor, and a `DOC_RANGE` 
 **Where.** `src/lib/comment-quote-match.ts`, pure and browser-safe, with the unit table; and
 `src/lib/comment-quote-capture.ts`, server-side, loading candidates through Prisma — the split
 `src/lib/anchors/` already makes.
+
+**As built (Phase 3, 2026-09-16).** Three modules rather than two: `comment-quote-match.ts`
+(normalize, flatten, the three tiers, `matchQuoteAcross`), `comment-quote-extract.ts` (which
+spans of a body are candidates, and the §23f rewrite over a `Transform`), and
+`comment-quote-capture.ts` (loads the targets, runs the two, returns the rows). Both front doors
+and both writers — `submitComment`, `editComment`, and the e2e seeder `createCommentWithQuotes` —
+call the capture; the rich composer's pending quotations arrive as a `pendingQuotes` field
+(`comment-quote-pending.ts`, hints only, never trusted as the answer). Deviations and calls:
+
+- **`quoted_text` is `textBetween(from, to, " ", " ")`** — the space block separator every
+  anchor uses, *plus* a space for an inline leaf, because a hard break inside the quoted words
+  would otherwise contribute nothing and glue two words together. `quotedTextAt` is the one
+  function; the rewrite, the integrity check and the matcher's verify all derive with it.
+- **Candidate priority is parent, post, then every public comment on the post newest first**, not
+  "the thread's comments first, then the page's". One query rather than two, and the difference
+  only decides ties between identical text in two comments.
+- **The fuzzy tier needs a quote of at least 65 normalized characters** (`END_CHARS` on each end
+  plus one), so a short misquote stays unmatched rather than being guessed at.
+- **An inline candidate needs 12 characters** (`MIN_INLINE_QUOTE_CHARS`), and only straight or
+  curly *double* quotes delimit one — single quotes are apostrophes too often.
+- **On edit, the anchor rows are replaced wholesale** (`deleteMany` then `create`); the pinned
+  versions the old rows named are searched first, so a quotation that still matches re-pins to
+  the version it already had, under a new row id. The body's old ids are cleared by
+  `clearUnassignedAnchorIds`, so a stored body never names a row that does not exist.
+- **The inline gesture is not built**: both gestures insert a block quote. An inline quotation
+  is typed — `"…"` in either mode — and found by the matcher.
+- **The article does not highlight comment quotations of it, and a quoted comment's card does
+  not highlight the quoted span** — §23k's deferral stands, and the second half joins it: the
+  cards are static renders with no decoration layer, and the citation link is the connection.
+- `scripts/integrity/check-comment-quotes.ts` verifies the three copies (§23j).

@@ -205,6 +205,7 @@ export async function loadMyOpenLink(): Promise<OpenLinkView | null> {
           postId: true,
           fileId: true,
           targetAnnotationId: true,
+          targetCommentId: true,
           quotedText: true,
           anchorFrom: true,
           anchorTo: true,
@@ -270,7 +271,7 @@ export async function addAnchoredLinkPart(
   if (!kind || typeof targetId !== "string" || targetId === "") {
     throw new Error("Malformed link target.");
   }
-  if (kind === "post" || kind === "annotation") {
+  if (kind === "post" || kind === "annotation" || kind === "comment") {
     throw new Error("Only doc and PDF passages can be linked for now.");
   }
   const target: AnchorTarget = { kind, id: targetId };

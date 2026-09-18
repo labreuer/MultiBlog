@@ -1,0 +1,17 @@
+/* The floating "Quote in reply" affordance over a selection in a comment
+   card. position: fixed, placed by floating-ui — left/top are written before
+   its first paint. Small and dark, like the form's submit button, so it reads
+   as an action rather than as more comment text. */
+.button {
+  position: fixed;
+  z-index: 20;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 3px 8px;
+  border: 1px solid var(--foreground);
+  border-radius: 4px;
+  background: var(--foreground);
+  color: var(--background);
+  cursor: pointer;
+  box-shadow: 0 2px 8px var(--shadow-color);
+}

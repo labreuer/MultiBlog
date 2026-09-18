@@ -25,7 +25,7 @@ a restart does and does not do, and the IndexedDB rules — is [YDOC.md](YDOC.md
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
   (including [showing an annotation at its own revision](#showing-an-annotation-at-its-own-revision--built-one-way-with-a-better-one-available),
   the one part of §8 that is partly built)
-- Planned: [comment quotations — text search into an immutable target, verified](#9-comment-quotations--text-search-into-an-immutable-target-verified)
+- [comment quotations — text search into an immutable target, verified](#9-comment-quotations--text-search-into-an-immutable-target-verified)
 - [Comparison](#comparison) · [Choosing](#choosing) · [Log](#log)
 
 ---
@@ -836,8 +836,9 @@ starts to hurt.
 
 ## 9. Comment quotations — text search into an immutable target, verified
 
-**Surface:** a post's comment thread. **Code (planned):** `src/lib/comment-quote-match.ts`,
-`src/lib/comment-quote-capture.ts`, `comment_quote_anchor`. **Design:** PLAN.md §23f, §23n.
+**Surface:** a post's comment thread. **Code:** `src/lib/comment-quote-match.ts`,
+`src/lib/comment-quote-extract.ts`, `src/lib/comment-quote-capture.ts`, `comment_quote_anchor`,
+`scripts/integrity/check-comment-quotes.ts`. **Design:** PLAN.md §23f, §23n. Built 2026-09-16.
 
 A comment quotes a passage of the post or of another comment, inline or as a block, and the
 quotation is a row on §20a's anchor envelope pinning an immutable version — a publication event
@@ -894,7 +895,7 @@ the first or second candidate. Nothing at read time.
 | 6. Awareness anchors | Awareness channel | Yes | Yes | Yes | No, by design | O(1)-ish |
 | 7. Scrub-state anchor | Columns + a version stamp | Yes | Yes | Yes (materialize) | Yes | Materialize + diff |
 | 8. Log-derived | Columns + the update log | Yes | Yes | Yes | Yes | Materialize + resolve |
-| 9. Comment quotations (planned) | Columns, vs. an immutable version | Yes (the version cannot move) | Yes (same) | No | Yes | Zero at read; one flatten per candidate at post |
+| 9. Comment quotations | Columns, vs. an immutable version | Yes (the version cannot move) | Yes (same) | No | Yes | Zero at read; one flatten per candidate at post |
 
 ## Choosing
 
@@ -1038,6 +1039,28 @@ Materializing a 500-character annotation ydoc is nothing. So mutable annotations
 inherit the weaker text-search repair — they are the case where the strong version finally becomes
 affordable, and where the version stamp already stored on every row starts earning its keep
 instead of only recording intent.
+
+## 2026-09-16 — Comment quotations, built (PLAN.md §23)
+
+The same day as the entry below, and the ninth strategy: [§9](#9-comment-quotations--text-search-into-an-immutable-target-verified).
+A comment quotes a passage of the post, of any comment on the page, or of a post or comment
+elsewhere, and the row pins an immutable version. Two things this file's earlier entries
+predicted came true and one they refused came back under a condition:
+
+- **"There is no universal anchor" held again.** The envelope is §20a's, the selector is
+  `DOC_RANGE` for a post or a comment and `PDF_TEXT` for a file, and the stamps differ per
+  substrate (§23d). Nothing was unified but the row shape.
+- **Immutable targets made offsets trivial, as §1 always said**, and made the interesting question
+  "does the passage also still appear in the current version" — a display question, answered by
+  the citation line ("quoted an earlier version") rather than by re-anchoring.
+- **The flatten-and-map search §4 rejected is used**, on the condition §9 states: the target
+  never moves, the search runs once at post time, every hit is verified against `quotedTextAt`,
+  and the stored text is derived from the verified range rather than taken from the query. A
+  flattening mistake is a missed match, never a wrong anchor. Don't lift it into a live surface.
+
+Not built, recorded in PLAN.md §23k/§23n: the article does not highlight comment quotations of
+it, and a quoted comment's card does not highlight the quoted span — both static renders with
+no decoration layer; the citation link is the connection.
 
 ## 2026-09-16 — Mutable bodies, built (PLAN.md §22)
 

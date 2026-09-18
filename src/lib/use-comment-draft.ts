@@ -13,7 +13,9 @@ import { isCommentBodyValueEmpty, type CommentBodyValue } from "./comment-body-v
 const SAVE_DEBOUNCE_MS = 500;
 
 function draftToValue(draft: CommentDraft): CommentBodyValue {
-  return draft.mode === "markdown" ? { mode: "markdown", markdown: draft.markdown } : { mode: "rich", json: draft.json };
+  return draft.mode === "markdown"
+    ? { mode: "markdown", markdown: draft.markdown, pending: draft.pending ?? [] }
+    : { mode: "rich", json: draft.json, pending: draft.pending ?? [] };
 }
 
 /**
@@ -74,8 +76,8 @@ export function useCommentDraft(
       } else {
         void saveCommentDraft(
           value.mode === "markdown"
-            ? { key, mode: "markdown", markdown: value.markdown, json: null }
-            : { key, mode: "rich", markdown: "", json: value.json },
+            ? { key, mode: "markdown", markdown: value.markdown, json: null, pending: value.pending ?? [] }
+            : { key, mode: "rich", markdown: "", json: value.json, pending: value.pending ?? [] },
         );
       }
     }, SAVE_DEBOUNCE_MS);

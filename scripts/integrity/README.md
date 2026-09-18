@@ -118,7 +118,11 @@ at all, so its findings are never downstream of a bad blob.
 Every other script here verifies **stored data**. This one verifies the **schema**: that
 `add_tags`' two hand-written CHECK constraints and its `lower(name)` unique index actually
 reject what their comments claim, by attempting each violation inside a transaction it always
-rolls back.
+rolls back. It has grown with every anchor table since: `add_anchored_links`' CHECKs and
+partial index, and `comment_quote_anchors`' three CHECKs (PLAN.md §23c) plus the one probe
+that matters most there — a `tag_anchor` with both a doc and a comment target must be refused,
+which proves the rewritten one-target CHECK *counts* the fifth arc column rather than merely
+tolerating it.
 
 It exists because nothing else can reach them. `npx tsc --noEmit` sees TypeScript, and every
 violation is well-typed. `npm run e2e` drives the UI, and the UI never attempts one — the
@@ -149,6 +153,23 @@ draft must be refused, as must a reopened link beside a draft and `reopened_at` 
 second link for a user whose first is *minted* must go in, as must a reopened link once the
 slot is free), and the not-blank CHECK on `name` (a whitespace-only name must be refused; a
 real one must go in — docs/ANCHORED_LINKS.md, "Naming a link").
+
+## `check-comment-quotes.ts` (PLAN.md §23)
+
+The pair §23f rests on, checked for every `comment_quote_anchor` row: the quoting body's span
+that names the row carries exactly `quoted_text`, and `quoted_text` is exactly the target's
+words at the pinned version — a publication event's `prose_json` for a post, a
+`comment_revision`'s body for a comment, both immutable, so "exact, forever" is the standard.
+Three copies of one string, written once from a verified match; a divergence is a fault in
+the write path or a body rewritten without re-running the capture, and nothing on the read
+path would notice — the body renders its own words with no join, by design.
+
+```
+npx tsx scripts/integrity/check-comment-quotes.ts [--post <id>] [--verbose]
+```
+
+Touches no ydoc; run any time. A doc, file or annotation target is a WARN: none has a writer
+(§23e), so a row with one came from somewhere else.
 
 ## `check-comment-revisions.ts` and `check-annotation-snapshots.ts` (PLAN.md §22)
 

@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { pmSchema } from "@/lib/tiptap-schema";
 import { colorForSeed } from "@/lib/author-colors";
 import { isVisiblyEdited, withSupersededAt } from "@/lib/edit-grace";
+import { loadCommentQuoteCitations } from "@/lib/comment-quote-data";
+import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 
 export type ThreadComment = {
@@ -11,6 +13,10 @@ export type ThreadComment = {
   // PLAN.md §23b — the stored ProseMirror JSON, and its plain text beside it.
   body: unknown;
   bodyText: string;
+  // PLAN.md §23h — what each quotation in the body cites, keyed by the
+  // anchor id the body's blockquote/quote attrs name. Resolved here, on the
+  // server, filtered by §23e's rule at render.
+  citations: CommentQuoteCitations;
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
@@ -83,11 +89,20 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
           // every comment on the page, and all the silence rule needs is when
           // each version was replaced; the text of a superseded version is
           // fetched on demand by getCommentHistory, under its own gate.
-          revisions: { orderBy: { revisionNo: "asc" }, select: { createdAt: true } },
+          // `quotedBy` is §22b's other clause: a version something quotes is
+          // never silent, and `take: 1` is all "something" needs.
+          revisions: {
+            orderBy: { revisionNo: "asc" },
+            select: { createdAt: true, quotedBy: { select: { id: true }, take: 1 } },
+          },
         },
       },
     },
   });
+
+  const citationsByComment = await loadCommentQuoteCitations(
+    threads.flatMap((thread) => thread.comments.map((c) => c.id)),
+  );
 
   return threads
     .filter((thread) => thread.comments.length > 0)
@@ -109,9 +124,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         color,
         comments: thread.comments.map((c) => {
           const visiblyEdited = isVisiblyEdited(
-            // `quoted` is always false until something can point at a comment
-            // revision; the one line to change is here.
-            withSupersededAt(c.revisions, () => false),
+            withSupersededAt(c.revisions, (revision) => revision.quotedBy.length > 0),
             c.createdAt,
           );
           return {
@@ -120,6 +133,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
             displayName: c.commenter.displayName,
             body: c.body,
             bodyText: c.bodyText,
+            citations: citationsByComment.get(c.id) ?? {},
             createdAt: c.createdAt.toISOString(),
             deletedByUserId: c.deletedByUserId,
             commenterUserId: c.commenter.userId,

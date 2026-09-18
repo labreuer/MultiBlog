@@ -37,3 +37,24 @@
 .body :global(q) {
   font-style: italic;
 }
+
+/* PLAN.md §23h — the citation line under an anchored blockquote: who or what
+   is quoted, as a link while the target is public. Set small and secondary
+   so it reads as attribution, not as more of the quote. */
+.citation {
+  margin-top: 0.25em;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+}
+
+.citation a {
+  color: inherit;
+}
+
+/* An inline quotation's citation is the <q> itself made a link, with the
+   label in its title; no underline, so the quote reads as prose. */
+.inlineCitation {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-muted);
+}

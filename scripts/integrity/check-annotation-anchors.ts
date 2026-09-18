@@ -153,6 +153,7 @@ const PART_ANCHOR_SELECT = {
   postId: true,
   fileId: true,
   targetAnnotationId: true,
+  targetCommentId: true,
   selectorKind: true,
   anchorFrom: true,
   anchorTo: true,
@@ -166,6 +167,7 @@ type PartAnchorRow = {
   postId: string | null;
   fileId: string | null;
   targetAnnotationId: string | null;
+  targetCommentId: string | null;
   selectorKind: "DOC_RANGE" | "PDF_TEXT" | null;
   anchorFrom: number | null;
   anchorTo: number | null;

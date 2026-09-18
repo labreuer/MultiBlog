@@ -23,7 +23,7 @@ to re-derive the decision from.
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | /dashboard: the section cards, Recent docs, the Settings tiers, and where an author color is cached. |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Tags have their own section: minting vs. applying vs. curating. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
-| [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Creating a doc from Markdown — file import and paste box. |
+| [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Markdown → TipTap: creating a doc (file import, paste box), and §11, the comment box's parse with its conform shims. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
 | [docs/DEV_SLOTS.md](docs/DEV_SLOTS.md) | Two working trees side by side: ports, hosts, databases. |
 | [docs/DATABASE.md](docs/DATABASE.md) | The Postgres cluster, what 18 doesn't change, migration recipes. |
@@ -74,13 +74,15 @@ before changing the behavior it describes.
   thing being removed, not an implementation detail. `resolveAnnotationRanges`
   (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
   jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
-- **One anchor row shape, per-consumer tables.** `tag_anchor` and `anchored_link_anchor`
-  (docs/ANCHORED_LINKS.md — and, from PR 2, `annotation_anchor`) share a column shape by
+- **One anchor row shape, per-consumer tables.** `tag_anchor`, `anchored_link_anchor` and
+  `comment_quote_anchor` (docs/ANCHORED_LINKS.md, PLAN.md §23c — and, from §20's PR 2,
+  `annotation_anchor`) share a column shape by
   *compiler*, not by convention:
   `src/lib/anchors/` holds the target arc as a discriminated union, `parseSelector`, and the
-  capture/resolve pair, and every consumer goes through it. The object side is four nullable
+  capture/resolve pair, and every consumer goes through it. The object side is five nullable
   FKs with exactly one non-null, enforced by a hand-written CHECK — so **a new targetable kind
-  is a migration** (one column, one index, one CHECK edit, per anchor table), which is the
+  is a migration** (one column, one index, one CHECK edit, per anchor table; `comment` was
+  the first paid instance, migration `comment_quote_anchors`), which is the
   cost §20a took on deliberately over an `anchor` table with an owner arc or one W3C-style
   supertable. What is unified is the *envelope*, never the selector: each mechanism keeps its
   own physics, and COLLAB.md's "there is no universal anchor" is unchanged. `src/lib/anchors/`
@@ -130,6 +132,15 @@ before changing the behavior it describes.
   would make real nodes of it — so no client-side preview or conversion, ever
   (`convertCommentBody` is a round trip on purpose). `Comment.bodyText` is derived by the
   same writers, never a trigger. PLAN.md §23b, §23m.
+- **A comment's quotation is found by text and stored from the target, never from the
+  query.** `captureCommentQuotes` (PLAN.md §23n) flattens each immutable target once, matches
+  the typed words, *verifies* every hit against `quotedTextAt` the range, and rewrites the body's
+  span to that derivation before anything is stored — so the typed words are only ever a query,
+  and a flattening mistake costs a missed match, never a wrong anchor. That verify-then-derive
+  step is what makes this the one place docs/COLLAB.md §4's rejected flatten-and-map technique
+  is used (COLLAB.md §9); don't lift the search out of it into a live surface, and don't store a
+  client's `pendingQuotes` hint as an answer. `check-comment-quotes.ts` holds the three copies
+  (body span, row, pinned version) to one string.
 - **`Comment.body` is a cache of the newest `comment_revision`, and is never written alone.**
   One transaction writes both, in `submitComment` and `editComment`; there is no legitimate
   staleness window, so any divergence is a fault —

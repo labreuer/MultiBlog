@@ -52,6 +52,7 @@ export async function tagsForTarget(target: AnchorTarget, viewerId?: string): Pr
       postId: columns.postId,
       fileId: columns.fileId,
       targetAnnotationId: columns.targetAnnotationId,
+      targetCommentId: columns.targetCommentId,
       assignment: {
         deletedAt: null,
         tag: { deletedAt: null },

@@ -15,6 +15,8 @@ import PostEditLink from "@/components/PostEditLink";
 import AnnotatableArticle from "@/components/AnnotatableArticle";
 import CommentSection from "@/components/CommentSection";
 import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
+import { CommentQuoteProvider } from "@/components/comment-quote-context";
+import CommentQuoteSelectionPopover from "@/components/CommentQuoteSelectionPopover";
 import TagChips from "@/components/tags/TagChips";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
@@ -136,6 +138,11 @@ export default async function PublicPostPage({ params }: { params: Params }) {
             rail beside it. This carries the two things that crossing needs:
             the article's editor (only it knows where a quote landed) and the
             rail's DOM node. */}
+        {/* PLAN.md §23h — the quote gesture's seam: the article and every
+            comment card are where text gets selected, the composers are where
+            it lands, and they are siblings. The popover is the "Quote in
+            reply" affordance over a selection in any card. */}
+        <CommentQuoteProvider postId={post.id}>
         <MarginNotesProvider>
           <div className={styles.layout}>
             <div className={styles.mainColumn}>
@@ -170,6 +177,8 @@ export default async function PublicPostPage({ params }: { params: Params }) {
             <MarginNotesRail className={styles.rail} />
           </div>
         </MarginNotesProvider>
+        <CommentQuoteSelectionPopover />
+        </CommentQuoteProvider>
       </main>
     </div>
   );

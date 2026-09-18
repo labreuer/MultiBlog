@@ -1,6 +1,7 @@
 "use client";
 
 import type { JSONContent } from "@tiptap/core";
+import type { PendingQuoteHint } from "./comment-quote-pending";
 
 // PLAN.md §23g — an unsent comment lives in the browser, in IndexedDB, keyed
 // by which composer it belongs to. Not a server-side row: most commenters
@@ -32,6 +33,8 @@ export type CommentDraft = {
   markdown: string;
   /** The editor's JSON, in rich mode; null otherwise. */
   json: JSONContent | null;
+  /** PLAN.md §23g — pending quotations ride in the draft, keyed by the placeholder ids the body carries. */
+  pending?: PendingQuoteHint[];
   updatedAt: number;
 };
 
@@ -93,6 +96,7 @@ function isDraft(value: unknown): value is CommentDraft {
     (v.mode === "markdown" || v.mode === "rich") &&
     typeof v.markdown === "string" &&
     (v.json === null || (typeof v.json === "object" && v.json !== null)) &&
+    (v.pending === undefined || Array.isArray(v.pending)) &&
     typeof v.updatedAt === "number"
   );
 }

@@ -102,7 +102,10 @@ Hand-appended DDL (the `add_tags` convention — Prisma has no CHECK or partial-
 
 The v1 writer produces only `doc_id`+`DOC_RANGE` and `file_id`+`PDF_TEXT` rows;
 `post_id`/`target_annotation_id`/`anchored_event_id` ship inert on `tag_anchor`'s
-one-column-now reasoning.
+one-column-now reasoning. **`target_comment_id`** (migration `comment_quote_anchors`, PLAN.md
+§23c) is the fifth arc leg, added for `comment_quote_anchor` and landing here and on
+`tag_anchor` because the three tables share a shape by compiler — the one-target CHECK now
+counts five columns, and the action refuses `comment` beside `post` and `annotation`.
 
 ## Read path — `src/lib/anchored-link-data.ts`
 

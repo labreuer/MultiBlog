@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import type { PendingQuoteHint } from "./comment-quote-pending";
 
 // PLAN.md §23m — the composer's value, in either of its two modes, and the
 // wire shape the server actions take. Browser-safe on purpose: the form, the
@@ -9,10 +10,14 @@ import type { JSONContent } from "@tiptap/core";
 export type CommentBodyMode = "markdown" | "rich";
 
 export type CommentBodyValue =
-  | { mode: "markdown"; markdown: string }
+  // `pending` here is unbound (PLAN.md §23h, Phase 4): the off-page picker
+  // names a target to search, and a `> ` block in the text is what is found.
+  | { mode: "markdown"; markdown: string; pending?: PendingQuoteHint[] }
   // `json` is null while the editor is empty, so "is there anything to post"
-  // is one check in either mode.
-  | { mode: "rich"; json: JSONContent | null };
+  // is one check in either mode. `pending` (PLAN.md §23g) is what the body's
+  // placeholder anchor ids point at — the rich composer's quote gesture; the
+  // Markdown box has no equivalent, the matcher finds its quotes from text.
+  | { mode: "rich"; json: JSONContent | null; pending?: PendingQuoteHint[] };
 
 /**
  * What crosses the action boundary. The rich body travels as a JSON *string*
@@ -35,6 +40,11 @@ export function commentBodyValueToInput(value: CommentBodyValue): CommentBodyInp
   return value.mode === "markdown"
     ? { format: "markdown", content: value.markdown }
     : { format: "rich", content: value.json ? JSON.stringify(value.json) : "" };
+}
+
+/** The pending hints as the wire carries them — a JSON string, "" when there are none. */
+export function commentBodyValuePendingJSON(value: CommentBodyValue): string {
+  return value.pending && value.pending.length > 0 ? JSON.stringify(value.pending) : "";
 }
 
 // The mode a browser last chose, remembered per browser like the annotation

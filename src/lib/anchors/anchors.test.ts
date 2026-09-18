@@ -14,7 +14,7 @@ import type { AnchorTarget } from "./types";
 // resolves the `@/` alias and the CJS/ESM edges the generated Prisma client
 // introduces (the same reason e2e/db.ts spawns its worker under it).
 
-const NO_TARGET = { docId: null, postId: null, fileId: null, targetAnnotationId: null };
+const NO_TARGET = { docId: null, postId: null, fileId: null, targetAnnotationId: null, targetCommentId: null };
 
 test("targetToColumns sets exactly one column per kind", () => {
   const cases: [AnchorTarget, keyof typeof NO_TARGET][] = [
@@ -22,6 +22,7 @@ test("targetToColumns sets exactly one column per kind", () => {
     [{ kind: "post", id: "p1" }, "postId"],
     [{ kind: "file", id: "f1" }, "fileId"],
     [{ kind: "annotation", id: "a1" }, "targetAnnotationId"],
+    [{ kind: "comment", id: "c1" }, "targetCommentId"],
   ];
   for (const [target, column] of cases) {
     const columns = targetToColumns(target);
@@ -40,6 +41,7 @@ test("targetFromColumns round-trips every kind", () => {
     { kind: "post", id: "p1" },
     { kind: "file", id: "f1" },
     { kind: "annotation", id: "a1" },
+    { kind: "comment", id: "c1" },
   ];
   for (const target of targets) {
     assert.deepEqual(targetFromColumns(targetToColumns(target)), target);
@@ -54,9 +56,9 @@ test("targetFromColumns rejects a malformed arc", () => {
   assert.equal(targetFromColumns(NO_TARGET), null, "no column set");
   assert.equal(targetFromColumns({ ...NO_TARGET, docId: "d1", postId: "p1" }), null, "two columns set");
   assert.equal(
-    targetFromColumns({ docId: "d", postId: "p", fileId: "f", targetAnnotationId: "a" }),
+    targetFromColumns({ docId: "d", postId: "p", fileId: "f", targetAnnotationId: "a", targetCommentId: "c" }),
     null,
-    "all four set",
+    "all five set",
   );
 });
 
@@ -65,11 +67,11 @@ test("targetKey distinguishes kinds sharing an id", () => {
   assert.equal(targetKey({ kind: "file", id: "x" }), targetKey({ kind: "file", id: "x" }));
 });
 
-test("parseAnchorTargetKind admits only the four arc members", () => {
-  for (const kind of ["doc", "post", "file", "annotation"]) {
+test("parseAnchorTargetKind admits only the five arc members", () => {
+  for (const kind of ["doc", "post", "file", "annotation", "comment"]) {
     assert.equal(parseAnchorTargetKind(kind), kind);
   }
-  for (const bad of ["comment", "Doc", "", null, undefined, 3, {}, ["doc"]]) {
+  for (const bad of ["thread", "Doc", "", null, undefined, 3, {}, ["doc"]]) {
     assert.equal(parseAnchorTargetKind(bad), null, `should reject ${JSON.stringify(bad)}`);
   }
 });
