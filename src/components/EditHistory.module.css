@@ -1,0 +1,51 @@
+.wrap {
+  display: inline;
+}
+
+/* Deliberately quieter than Reply/Delete: this is a note about the comment,
+   not an action on it. Same size as .timestamp in CommentNode.module.css,
+   which is what it sits beside. */
+.marker {
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.panel {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 0.9rem;
+}
+
+.version + .version {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.versionMeta {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin-bottom: 3px;
+}
+
+.versionBody {
+  white-space: pre-wrap;
+}
+
+.status {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--error);
+  font-size: 0.85rem;
+}

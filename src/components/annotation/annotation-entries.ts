@@ -49,6 +49,13 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
       deletedByUserId: a.deletedByUserId,
       commenterUserId: a.commenterUserId,
       ydocUpdateId: a.ydocUpdateId,
+      // PLAN.md §22e — carried, not derived: the silence rule needs every
+      // version's timestamp, and this tree is built on the server precisely
+      // so the browser never receives them.
+      visiblyEdited: a.visiblyEdited,
+      editedAt: a.editedAt,
+      editingSince: a.editingSince,
+      editSessionStale: a.editSessionStale,
       replies: [],
     });
   }

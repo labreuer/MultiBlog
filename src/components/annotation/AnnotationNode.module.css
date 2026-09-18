@@ -110,3 +110,59 @@
   color: var(--error);
   font-size: 0.85rem;
 }
+
+/* PLAN.md §22e — the edit-session controls. Same quiet underlined-text
+   treatment as Reply and Delete: editing a body is one of the things you can
+   do to an annotation, not a mode worth a real button. */
+.editButton {
+  font-size: 0.85rem;
+  margin-top: 4px;
+  margin-left: 8px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Throwing away someone's unsaved text, even text nobody ever saw — the
+   same warning colour the admin-on-others delete carries. */
+.discardButton {
+  font-size: 0.85rem;
+  margin-top: 4px;
+  margin-left: 8px;
+  border: none;
+  background: none;
+  color: var(--danger);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.editActions {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.editStatus {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.historyLine {
+  margin-top: 2px;
+}
+
+/* PLAN.md §22e — the parent body as it read when a reply quoted it,
+   materialized from that reply's own version stamp. Inset like the history
+   panel it is a cousin of, and quieter than the live body beside it. */
+.quotedVersion {
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 0.9rem;
+}

@@ -51,6 +51,8 @@ import { postContentFromYdoc } from "@/lib/post-content";
 import { docContentFromYdoc } from "@/lib/doc-content";
 import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
+import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
+import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
 import { generateToken } from "@/lib/tokens";
@@ -1102,16 +1104,132 @@ export async function createTestAnnotation(opts: {
   const { docId, authorEmail, bodyText, anchor } = opts;
   assertSafe(authorEmail);
   const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
+  // PLAN.md §22e — a posted annotation comes with a body ydoc, `postedAt`,
+  // and version 1 (a snapshot on that ydoc), so the fixture builds all three.
+  // None is decoration:
+  //
+  //   * Without the **ydoc**, an edit session connects to a document
+  //     `ydocOnLoadDocument` helpfully auto-creates *empty*, and the first
+  //     Done settles that emptiness — refused, so a fixture that cannot be
+  //     edited, failing in a way that looks like the feature is broken.
+  //   * Without **version 1**, there is no settled state to cancel back to,
+  //     and check-annotation-snapshots.ts reports every leftover row; without
+  //     **`postedAt`** the grace window has nothing to measure from.
+  //
+  // The snapshot's bytes are the seed state itself, which is also update row
+  // 1 of the log — so check-ydoc-integrity.ts's replay check holds for it.
+  const seed = seedAnnotationYdoc(bodyText);
+  const now = new Date();
   const annotation = await prisma.annotation.create({
     data: {
       docId,
       userId: author.id,
       bodyText,
+      proseJson: seed.proseJson as Prisma.InputJsonValue,
       status: "LIVE",
+      postedAt: now,
       ...(anchor ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText } : {}),
     },
   });
+  const ydocId = ydocIdForAnnotation(annotation.id);
+  await ydocStore.createIfAbsent(ydocId, seed.ydoc, seed.stateVector);
+  const mark = await ydocStore.maxUpdateId(ydocId);
+  if (mark === null) throw new Error(`createTestAnnotation: ${ydocId} has no update row 1 to snapshot at.`);
+  await prisma.ydocSnapshot.create({
+    data: {
+      ydocId,
+      ydoc: Buffer.from(seed.ydoc),
+      stateVector: Buffer.from(seed.stateVector),
+      lastYdocUpdateId: mark,
+      userId: author.id,
+      createdAt: now,
+    },
+  });
   return { id: annotation.id };
+}
+
+export type AnnotationVersionFacts = {
+  revisionNo: number;
+  bodyText: string;
+  authorEmail: string | null;
+  /** The snapshot's mark in the body's own update log, stringified. */
+  mark: string;
+  createdAt: string;
+};
+
+export type AnnotationEditFacts = {
+  bodyText: string;
+  postedAt: string | null;
+  editedAt: string | null;
+  editingSince: string | null;
+  versions: AnnotationVersionFacts[];
+};
+
+/** Everything PLAN.md §22e's invariant is about, for one annotation. */
+export async function getAnnotationEditFacts(annotationId: string): Promise<AnnotationEditFacts | null> {
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { bodyText: true, postedAt: true, editedAt: true, editingSince: true },
+  });
+  if (!annotation) return null;
+  const snapshots = await prisma.ydocSnapshot.findMany({
+    where: { ydocId: ydocIdForAnnotation(annotationId) },
+    orderBy: { lastYdocUpdateId: "asc" },
+    select: { ydoc: true, lastYdocUpdateId: true, createdAt: true, user: { select: { email: true } } },
+  });
+  return {
+    bodyText: annotation.bodyText,
+    postedAt: annotation.postedAt?.toISOString() ?? null,
+    editedAt: annotation.editedAt?.toISOString() ?? null,
+    editingSince: annotation.editingSince?.toISOString() ?? null,
+    versions: snapshots.map((s, index) => ({
+      revisionNo: index + 1,
+      bodyText: decodeAnnotationSnapshot(new Uint8Array(s.ydoc)).bodyText,
+      authorEmail: s.user?.email ?? null,
+      mark: s.lastYdocUpdateId.toString(),
+      createdAt: s.createdAt.toISOString(),
+    })),
+  };
+}
+
+/**
+ * Moves an annotation's posting back by `msAgo`, so a later edit falls
+ * outside PLAN.md §22b's grace window.
+ *
+ * The annotation side's counterpart of `backdateComment`, and shaped the same
+ * way for the same reason: `postedAt` is what the window is measured from and
+ * version 1's `createdAt` is what its successor is compared against, and the
+ * settle transaction writes both from one instant — so the two move together
+ * here too, or the fixture would create a pair no real row can have.
+ * `Annotation.createdAt` is when the draft was opened and nothing measures
+ * from it.
+ */
+export async function backdateAnnotationPosting(annotationId: string, msAgo: number): Promise<void> {
+  const annotation = await prisma.annotation.findUniqueOrThrow({
+    where: { id: annotationId },
+    select: { postedAt: true },
+  });
+  const first = await prisma.ydocSnapshot.findFirstOrThrow({
+    where: { ydocId: ydocIdForAnnotation(annotationId) },
+    orderBy: { lastYdocUpdateId: "asc" },
+    select: { id: true, createdAt: true },
+  });
+  const postedAt = annotation.postedAt ?? first.createdAt;
+  await prisma.$transaction([
+    prisma.annotation.update({ where: { id: annotationId }, data: { postedAt: new Date(postedAt.getTime() - msAgo) } }),
+    prisma.ydocSnapshot.update({ where: { id: first.id }, data: { createdAt: new Date(first.createdAt.getTime() - msAgo) } }),
+  ]);
+}
+
+/**
+ * Sets (or clears) `editing_since` directly — how the abandoned-session UI is
+ * tested without leaving a test running for an hour.
+ */
+export async function setAnnotationEditingSince(annotationId: string, msAgo: number | null): Promise<void> {
+  await prisma.annotation.update({
+    where: { id: annotationId },
+    data: { editingSince: msAgo === null ? null : new Date(Date.now() - msAgo) },
+  });
 }
 
 /**
@@ -1134,11 +1252,24 @@ export async function createComment(opts: {
   const { postId, anchoredEventId, email, displayName, body, status = "PENDING" } = opts;
   assertSafe(email);
 
-  const commenter = await prisma.commenter.upsert({
-    where: { email },
-    update: {},
-    create: { email, displayName },
-  });
+  // Linked to a User when one exists with this email, keyed on `userId` — the
+  // same upsert shape submitComment uses for a signed-in commenter. Without
+  // this every fixture comment is anonymous, and "edit your own comment"
+  // (PLAN.md §22c, which is `commenter.userId === viewer`) is untestable: the
+  // control would never appear for anyone. An email belonging to no user still
+  // produces an anonymous commenter, so every existing caller is unaffected.
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  const commenter = user
+    ? await prisma.commenter.upsert({
+        where: { userId: user.id },
+        update: {},
+        create: { userId: user.id, email, displayName },
+      })
+    : await prisma.commenter.upsert({
+        where: { email },
+        update: {},
+        create: { email, displayName },
+      });
 
   const thread =
     (await prisma.commentThread.findFirst({ where: { postId, quotedText: "" } })) ??
@@ -1146,11 +1277,99 @@ export async function createComment(opts: {
       data: { postId, anchoredEventId, anchorFrom: 0, anchorTo: 0, quotedText: "" },
     }));
 
+  // PLAN.md §22c — revision 1 alongside the row, exactly as submitComment
+  // writes it, so a fixture comment has the same history shape a real one
+  // does and check-comment-revisions.ts passes over the suite's leftovers.
   const comment = await prisma.comment.create({
-    data: { threadId: thread.id, commenterId: commenter.id, body: { text: body }, status },
+    data: {
+      threadId: thread.id,
+      commenterId: commenter.id,
+      body: { text: body },
+      status,
+      revisions: { create: { revisionNo: 1, body: { text: body }, authorUserId: commenter.userId } },
+    },
   });
 
   return { id: comment.id, commenterId: commenter.id };
+}
+
+export type CommentRevisionFacts = {
+  revisionNo: number;
+  bodyText: string;
+  authorEmail: string | null;
+  createdAt: string;
+};
+
+export type CommentFacts = {
+  bodyText: string;
+  editedAt: string | null;
+  status: CommentStatus;
+  revisions: CommentRevisionFacts[];
+};
+
+/**
+ * Everything §22c's invariant is about, in one round trip: the cached body,
+ * the edit stamp, and every stored version.
+ *
+ * Deliberately returns the whole revision list rather than a count. The
+ * interesting assertions are about *which* text survived where — a silent
+ * edit still writes a row, so a count alone cannot tell the silent case from
+ * the visible one.
+ */
+export async function getCommentFacts(commentId: string): Promise<CommentFacts | null> {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    select: {
+      body: true,
+      editedAt: true,
+      status: true,
+      revisions: {
+        orderBy: { revisionNo: "asc" },
+        select: { revisionNo: true, body: true, createdAt: true, author: { select: { email: true } } },
+      },
+    },
+  });
+  if (!comment) return null;
+  return {
+    bodyText: (comment.body as { text?: string } | null)?.text ?? "",
+    editedAt: comment.editedAt?.toISOString() ?? null,
+    status: comment.status,
+    revisions: comment.revisions.map((r) => ({
+      revisionNo: r.revisionNo,
+      bodyText: (r.body as { text?: string } | null)?.text ?? "",
+      authorEmail: r.author?.email ?? null,
+      createdAt: r.createdAt.toISOString(),
+    })),
+  };
+}
+
+/**
+ * Moves a comment's posting time (and revision 1's, which must agree with it)
+ * back by `msAgo`, so a later edit falls outside PLAN.md §22b's grace window.
+ *
+ * **This is how the visible-edit case is tested, and `page.clock` is not.**
+ * The silence rule compares two *stored* timestamps — when a version was
+ * superseded against when the comment was posted — and never reads the clock,
+ * so moving the browser's time forward changes nothing at all. What decides
+ * the outcome is the interval between posting and editing, and backdating the
+ * posting is the only way a test can make that interval large without waiting
+ * three real minutes.
+ *
+ * Both timestamps move together deliberately: check-comment-revisions.ts's
+ * `posted-at` finding is exactly the two disagreeing.
+ */
+export async function backdateComment(commentId: string, msAgo: number): Promise<void> {
+  const comment = await prisma.comment.findUniqueOrThrow({
+    where: { id: commentId },
+    select: { createdAt: true, revisions: { orderBy: { revisionNo: "asc" }, take: 1, select: { id: true } } },
+  });
+  const when = new Date(comment.createdAt.getTime() - msAgo);
+  await prisma.$transaction([
+    prisma.comment.update({ where: { id: commentId }, data: { createdAt: when } }),
+    ...(comment.revisions[0]
+      ? [prisma.commentRevision.update({ where: { id: comment.revisions[0].id }, data: { createdAt: when } })]
+      : []),
+  ]);
 }
 
 /**
@@ -1737,7 +1956,12 @@ const handlers = {
   getAnnotationStates,
   markPresentAtStamp,
   createTestAnnotation,
+  getAnnotationEditFacts,
+  backdateAnnotationPosting,
+  setAnnotationEditingSince,
   createComment,
+  getCommentFacts,
+  backdateComment,
   createQuoteThread,
   getThread,
   getPublicationEvents,

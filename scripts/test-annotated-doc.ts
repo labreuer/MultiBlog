@@ -215,6 +215,7 @@ async function create(visibility: DocVisibility) {
     anchor?: { from: number; to: number; quotedText: string; stamp: bigint };
   }): Promise<string> {
     const { proseJson, ydoc: annYdoc, stateVector: annSv } = seedAnnotationYdoc(opts.bodyText);
+    const now = new Date();
     const annotation = await prisma.annotation.create({
       data: {
         docId: doc.id,
@@ -222,6 +223,7 @@ async function create(visibility: DocVisibility) {
         bodyText: opts.bodyText,
         proseJson: proseJson as Prisma.InputJsonValue,
         status: "LIVE",
+        postedAt: now,
         ...(opts.anchor
           ? {
               anchorFrom: opts.anchor.from,
@@ -234,8 +236,24 @@ async function create(visibility: DocVisibility) {
     });
     // The body lives in its own ydoc, and `bodyText` is only a cache of it
     // (§13p). Skip this and the card renders empty everywhere except
-    // /annotations, which reads the column.
-    await ydocStore.createIfAbsent(ydocIdForAnnotation(annotation.id), annYdoc, annSv);
+    // /annotations, which reads the column. Version 1 is a snapshot of that
+    // ydoc at its seed (PLAN.md §22e) — the same bytes as update row 1, so
+    // check-ydoc-integrity.ts's replay check holds — and without it there is
+    // no settled state for an edit session to cancel back to.
+    const annotationYdocId = ydocIdForAnnotation(annotation.id);
+    await ydocStore.createIfAbsent(annotationYdocId, annYdoc, annSv);
+    const mark = await ydocStore.maxUpdateId(annotationYdocId);
+    if (mark === null) throw new Error(`${annotationYdocId} has no update row 1 to snapshot at.`);
+    await prisma.ydocSnapshot.create({
+      data: {
+        ydocId: annotationYdocId,
+        ydoc: Buffer.from(annYdoc),
+        stateVector: Buffer.from(annSv),
+        lastYdocUpdateId: mark,
+        userId: opts.userId,
+        createdAt: now,
+      },
+    });
     return annotation.id;
   }
 

@@ -267,6 +267,10 @@ published fixtures, null on `draftPost`. The date segment *is* `publishedAt`, so
 `getPostPath(post.id)` (`publish.spec.ts`'s `publicPath`), never by formatting "today" — that
 crosses midnight in UTC eventually and reads exactly like a regression.
 
+DB helpers worth knowing beyond the fixtures (all from `./db`):
+`getCommentFacts()`, `getAnnotationEditFacts()`, `backdateComment()`,
+`backdateAnnotationPosting()`, `setAnnotationEditingSince()`.
+
 Plus helpers: `bodyEditor(page)`, `titleEditor(page)`, `statusLine(page)`,
 `visibleText(page, text)`, `deleteTextInBody(page, needle)`,
 `selectTextInBody(page, needle)`, `collapseToBodyStart(page)` (never
@@ -304,7 +308,35 @@ the admin account.
 - **Comments are rate-limited to 5 per IP per 10 minutes**
   (`src/lib/rate-limit.ts`), and every worker shares 127.0.0.1. Create comments
   with `createComment()` (straight to the DB) unless the test is *about* the
-  submission form; `moderation.spec.ts` has exactly one that is.
+  submission form; `moderation.spec.ts` has exactly one that is. Editing has its
+  own limiter (`isCommentEditRateLimited`, 5 revisions per user per 10 minutes),
+  which is per *user* rather than per IP — so parallel workers don't share it,
+  but a single test making six edits as the shared admin would.
+- **A fixture comment or annotation comes with its revision 1** (PLAN.md §22).
+  `createComment()` and `createTestAnnotation()` write it, and the annotation one
+  also seeds the body's ydoc from `bodyText`. Both matter: without the ydoc, an
+  edit session connects to a document Hocuspocus helpfully auto-creates *empty*
+  and the first Done tries to settle that emptiness (refused); without version 1
+  — a `ydoc_snapshot` of the seed — and `postedAt` there is no settled state to
+  cancel back to, nothing for the grace window to be measured from, and
+  `check-annotation-snapshots.ts` reports every leftover row.
+- **`createComment()` links the commenter to a `User` when one exists with that
+  email.** Pass `ADMIN_EMAIL` and the comment is the signed-in admin's *own*, which
+  is what makes "edit your own comment" reachable at all — an anonymous commenter
+  cannot edit (§22h), so a fixture with an unowned address is testing the
+  moderator path instead. An email belonging to no user still produces an
+  anonymous commenter.
+- **The three-minute edit window is not tested with `page.clock`.** §22b's silence
+  rule compares two *stored* timestamps — when a version was superseded, against
+  when the thing was posted — and never reads a clock, so moving the browser's
+  time forward changes nothing whatsoever. What decides the outcome is the interval
+  between posting and editing: `backdateComment()` and
+  `backdateAnnotationPosting()` produce it directly. `setAnnotationEditingSince()`
+  is the same trick for the abandoned-session UI, whose window is an hour.
+  A spec asserting "no marker appeared" should also assert on
+  `getCommentFacts()` / `getAnnotationEditFacts()`: a silent edit still writes a
+  version, so the UI assertion alone passes just as well against an
+  implementation that threw the old version away.
 - **`"Publish"` also matches "Publish as blog post" on `/doc/[slug]`.** Use
   `exact: true`.
 - **`getByRole("button", { name: "Next" })` also matches Next.js's dev-tools

@@ -1,5 +1,6 @@
 import type { Role } from "@/generated/prisma/enums";
 import type { AnnotationStatus } from "@/generated/prisma/enums";
+import { isAdmin } from "./role-checks";
 import { canUserReadDoc } from "./doc-authz";
 import { canUserReadFile } from "./file-authz";
 
@@ -41,4 +42,31 @@ export async function canUserAccessAnnotationYdoc(
   // Neither container present. Unreachable while annotation_one_container_check
   // holds; denying is the safe answer if it ever doesn't.
   return false;
+}
+
+// PLAN.md §22e/§22f — who may *write* a posted annotation's body, as opposed
+// to who may open a connection to it at all (above). Author or ADMIN — the
+// same `requireOwnOrAdmin` pair that already gates deleting one, deliberately
+// rather than a new predicate: whoever may remove an annotation outright is
+// exactly who may reword it, and an EDITOR who can merely read the container
+// can do neither.
+//
+// **This is the gate the function above deliberately did not have**, and the
+// comment above is still true of what it answers: it collapses "may read" and
+// "may connect" into one question. What it never answered is "may edit", and
+// until §22e nothing asked — no UI opened a writable connection to a posted
+// body, so the writable token every reader was handed went unused
+// (docs/COLLAB.md's 2026-08-13 entry called this the real gate on mutable
+// bodies). `/api/annotation/[id]/token` now asks both: this one decides
+// `readOnly`, that one decides 401/403.
+//
+// Pure and synchronous, unlike its sibling — neither branch needs the
+// container, which is why a DRAFT needs no special case here. A DRAFT is
+// owner-only by the connection gate, and its owner passes this one too.
+export function canUserEditAnnotationBody(
+  userId: string,
+  role: Role,
+  annotation: { userId: string },
+): boolean {
+  return annotation.userId === userId || isAdmin(role);
 }

@@ -20,3 +20,25 @@ export async function isCommentRateLimited(ipAddress: string | null, commenterId
 
   return ipCount >= MAX_PER_IP || commenterCount >= MAX_PER_COMMENTER;
 }
+
+// PLAN.md §22c — the edit counterpart, and deliberately not a second call to
+// the function above.
+//
+// That one counts `comment` rows, so it bounds *posting* and is blind to
+// editing: a commenter who has posted nothing in ten minutes could rewrite an
+// old comment without limit, which is the half of the abuse surface editing
+// adds. Counting revisions instead bounds what editing actually produces, in
+// the same window and at the same ceiling.
+//
+// Keyed on the *author of the edit* rather than on the comment's commenter,
+// because a moderator editing other people's comments (§22f) is the one case
+// where those differ, and it is the acting identity that a limit is about.
+// There is no IP half: an anonymous commenter cannot edit at all (§22h), so
+// every caller here is a signed-in user with a stabler key than an address.
+export async function isCommentEditRateLimited(userId: string): Promise<boolean> {
+  const since = new Date(Date.now() - WINDOW_MS);
+  const edits = await prisma.commentRevision.count({
+    where: { authorUserId: userId, createdAt: { gte: since }, revisionNo: { gt: 1 } },
+  });
+  return edits >= MAX_PER_COMMENTER;
+}

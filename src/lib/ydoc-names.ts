@@ -108,9 +108,25 @@ export function annotationIdFromYdocId(ydocId: string): string | null {
   return ydocId.startsWith(YDOC_ANNOTATION_PREFIX) ? ydocId.slice(YDOC_ANNOTATION_PREFIX.length) : null;
 }
 
-// Path the collab server's onRequest hook listens on to force
-// server/annotation-cache.ts's write immediately rather than waiting for
-// the next store debounce — postAnnotation (PLAN.md §13j Phase 3) calls
-// this before flipping DRAFT to LIVE, so a reader who opens the annotation
-// the instant it becomes visible never sees stale (pre-typing) content.
+// Path the collab server's onRequest hook listens on to drain a body's
+// append queue and answer with its log's tail — the mark a settle records a
+// version at (PLAN.md §22e) — and, unless told not to, to force
+// server/annotation-cache.ts's write immediately rather than waiting for the
+// next store debounce (§13j Phase 3, what saveDraftAnnotation wants).
 export const ANNOTATION_FLUSH_PATH = "/admin/annotation-flush";
+
+// Path the collab server's onRequest hook listens on to replace an
+// annotation body's content wholesale (PLAN.md §22e) — what Cancel on an edit
+// session calls to put the last settled version back.
+//
+// **A restore is new updates, not an undo.** Yjs has no un-apply: the log is
+// append-only, so putting the old text back means writing it forward. That is
+// the honest shape anyway — the cancelled attempt stays in the history where
+// it happened, and the body's snapshots (its versions, PLAN.md §22e) still
+// describe a strictly increasing sequence of settled states.
+//
+// Through the collab server rather than the Next process for the same reason
+// annotation-mark goes this way: the live document lives in that process, and
+// a second writer editing the stored blob behind its back would be overwritten
+// by the next debounce.
+export const ANNOTATION_REPLACE_PATH = "/admin/annotation-replace";

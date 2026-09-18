@@ -1,7 +1,14 @@
 import "dotenv/config";
 import { Server } from "@hocuspocus/server";
 import { COLLAB_PORT } from "../scripts/dev-ports";
-import { isYdocDocument, YDOC_SNAPSHOT_PATH, ANNOTATION_MARK_PATH, ANNOTATION_UNMARK_PATH, ANNOTATION_FLUSH_PATH } from "../src/lib/ydoc-names";
+import {
+  isYdocDocument,
+  YDOC_SNAPSHOT_PATH,
+  ANNOTATION_MARK_PATH,
+  ANNOTATION_UNMARK_PATH,
+  ANNOTATION_FLUSH_PATH,
+  ANNOTATION_REPLACE_PATH,
+} from "../src/lib/ydoc-names";
 import {
   ydocOnAuthenticate,
   ydocOnAwarenessUpdate,
@@ -12,6 +19,7 @@ import {
   handleApplyAnnotationMark,
   handleRemoveAnnotationMark,
   handleFlushAnnotationCache,
+  handleReplaceAnnotationBody,
   send,
 } from "./ydoc-hooks";
 
@@ -80,6 +88,15 @@ const server = new Server({
       } catch (err) {
         console.error("[collab] annotation-unmark failed:", err);
         send(response, 500, err instanceof Error ? err.message : "Failed to remove annotation mark.");
+      }
+      return Promise.reject();
+    }
+    if (request.url?.startsWith(ANNOTATION_REPLACE_PATH)) {
+      try {
+        await handleReplaceAnnotationBody(request, response, instance);
+      } catch (err) {
+        console.error("[collab] annotation-replace failed:", err);
+        send(response, 500, err instanceof Error ? err.message : "Failed to replace annotation body.");
       }
       return Promise.reject();
     }

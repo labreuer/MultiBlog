@@ -6,10 +6,11 @@ import { useSession } from "next-auth/react";
 // Aliased because the local `isAdmin` below is the resolved boolean for this
 // viewer; role-checks.ts is safe in a client bundle by design (its own header
 // says so — authz.ts is not, since it imports prisma).
-import { isAdmin as isAdminRole } from "@/lib/role-checks";
+import { canEditAnyPost, isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "./LocalTime";
 import CommentForm from "./CommentForm";
-import { deleteComment } from "@/app/actions/comments";
+import EditHistory from "./EditHistory";
+import { deleteComment, editComment, getCommentHistory, type CommentVersion } from "@/app/actions/comments";
 import styles from "./CommentNode.module.css";
 
 export type CommentNodeData = {
@@ -19,6 +20,12 @@ export type CommentNodeData = {
   createdAt: string;
   deletedByUserId: string | null;
   commenterUserId: string | null;
+  // PLAN.md §22b — resolved by the loader (comment-data.ts), not here: the
+  // silence rule needs every revision's timestamp, and a client deciding it
+  // would need them shipped. `editedAt` is null whenever visiblyEdited is
+  // false, including for a comment that really was edited silently.
+  visiblyEdited: boolean;
+  editedAt: string | null;
   replies: CommentNodeData[];
 };
 
@@ -55,6 +62,17 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   const isAdmin = !!session?.user && isAdminRole(session.user.role);
   const [replying, setReplying] = useState(false);
   const [posted, setPosted] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(comment.bodyText);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editPending, startEditTransition] = useTransition();
+  // Set by this viewer's own successful save, and shown in place of the
+  // server's copy until a refresh lands. Not an optimistic update — the save
+  // has already succeeded — but the same reason `justDeleted` exists: the
+  // post page is statically generated (PLAN.md §21), so the revalidation and
+  // the refresh that follow are a round trip the author should not have to
+  // watch to see their own words.
+  const [savedText, setSavedText] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletePending, startDeleteTransition] = useTransition();
@@ -72,10 +90,38 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
 
   const isOwnComment = viewerId !== null && comment.commenterUserId === viewerId;
   const canDelete = isAdmin || isOwnComment;
+  // PLAN.md §22f — the author, or someone who moderates the post. The
+  // *action* asks `canUserEditPost`, which also admits an AUTHOR moderating
+  // their own post; this control cannot, because the page it renders on is
+  // statically generated and so knows nothing about the viewer beyond their
+  // session (§22c records the gap). A control that is absent is not a
+  // permission error, and the two admin surfaces reach every comment anyway.
+  const canEdit = isOwnComment || (!!session?.user && canEditAnyPost(session.user.role));
+  const bodyText = savedText ?? comment.bodyText;
   // Admin power being used on someone else's comment gets a visibly
   // different (maroon) button; deleting your own comment, even as an
   // admin, is just the normal action.
   const isAdminOnOthers = isAdmin && !isOwnComment;
+
+  const handleSaveEdit = () => {
+    setEditError(null);
+    startEditTransition(async () => {
+      const result = await editComment(comment.id, draft);
+      if (result.error) {
+        setEditError(result.error);
+        return;
+      }
+      setSavedText(draft.trim());
+      setEditing(false);
+      if (result.status === "SPAM") {
+        // The edit was saved and the comment was withdrawn from public view
+        // (§22c). Saying so is the whole point: the author would otherwise
+        // watch their words vanish from the page with no explanation.
+        setEditError("Saved, but this comment has been flagged for moderation and is no longer public.");
+      }
+      router.refresh();
+    });
+  };
 
   const handleDelete = () => {
     setDeleteError(null);
@@ -104,13 +150,66 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
               <LocalTime value={comment.createdAt} />
             </a>
           </p>
-          <p>{comment.bodyText}</p>
-          {!posted && (
+          {editing ? (
+            <div className={styles.editForm}>
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                disabled={editPending}
+                className={styles.editTextarea}
+                aria-label="Edit comment"
+                rows={4}
+              />
+              <span className={styles.editActions}>
+                <button type="button" onClick={handleSaveEdit} disabled={editPending} className={styles.confirmYes}>
+                  {editPending ? "Saving…" : "Save"}
+                </button>{" "}
+                /{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                    setDraft(bodyText);
+                    setEditError(null);
+                  }}
+                  disabled={editPending}
+                  className={styles.confirmNo}
+                >
+                  Cancel
+                </button>
+              </span>
+            </div>
+          ) : (
+            <p>{bodyText}</p>
+          )}
+          {comment.visiblyEdited && (
+            <p className={styles.historyLine}>
+              <EditHistory
+                what="comment"
+                editedAt={comment.editedAt}
+                load={() => getCommentHistory(comment.id)}
+                renderBody={(version: CommentVersion) => version.bodyText}
+              />
+            </p>
+          )}
+          {!posted && !editing && (
             <button type="button" onClick={() => setReplying((r) => !r)} className={styles.replyButton}>
               {replying ? "Cancel" : "Reply"}
             </button>
           )}
-          {canDelete && !confirmingDelete && (
+          {canEdit && !editing && !confirmingDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(bodyText);
+                setEditing(true);
+              }}
+              className={styles.editButton}
+            >
+              Edit
+            </button>
+          )}
+          {canDelete && !editing && !confirmingDelete && (
             <button
               type="button"
               onClick={() => setConfirmingDelete(true)}
@@ -136,6 +235,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
               </button>
             </span>
           )}
+          {editError && <p className={styles.error}>{editError}</p>}
           {deleteError && <p className={styles.error}>{deleteError}</p>}
         </div>
       )}

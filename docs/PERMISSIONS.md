@@ -160,6 +160,45 @@ or the annotation's own author — and never consults the doc, which is why that
 identically in all four tables and why an ADMIN retains it even where the doc is otherwise
 invisible to them (the † in table 2).
 
+## Editing what is already posted (PLAN.md §22)
+
+Two questions, deliberately answered by two different existing gates rather than by a new
+predicate.
+
+| Permission | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER | signed out |
+|---|---|---|---|---|---|---|
+| Edit own comment (its `Commenter` is keyed to this user) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Edit any comment on a post | ✅ | ✅ | own posts | ❌ | ❌ | ❌ |
+| See a comment's history | anyone who can see the comment — an APPROVED, undeleted one is public, so its history is too; anything else is author-or-moderator |
+| Edit own annotation's body | ✅ | ✅ | ✅ | ✅ | — | — |
+| Edit another's annotation body | ✅ | ❌ | ❌ | ❌ | — | — |
+| Writable ydoc connection to a posted annotation | author or ADMIN; every other reader's token carries `readOnly` |
+| See an annotation's history | anyone who can read the container (the same gate as the body) |
+
+**Editing a comment is the moderation gate**, `canUserEditPost` — the one `moderateComment`
+already uses. Whoever may approve, spam and delete a comment may also fix it; a moderator who
+can destroy a comment outright but not correct its spelling would be a strange rule to defend.
+A moderator's edit is attributed to *them* on that version, not to the commenter.
+
+**Editing an annotation body is `requireOwnOrAdmin`**, the gate that already covers deleting
+one, and deliberately not the doc's read gate. Rewording someone's words and removing them
+outright are the same kind of act on the same person's work. An EDITOR who can read a doc can
+do neither. This is the rule that had to be built *before* the feature: until §22e,
+`canUserAccessAnnotationYdoc` handed every reader of a container a writable connection to every
+annotation in it — unexploited only because no UI opened one.
+
+**An anonymous commenter cannot edit at all.** There is no way to prove they are the same
+person; the moderation gate covers fixing their typo on request, and an emailed edit link is
+the honest self-service path (docs/EMAIL.md's deferred list).
+
+**Two gaps worth knowing, both deliberate.** The inline Edit control on a public post page is
+shown to the comment's author and to ADMIN/EDITOR, while the *action* also admits an AUTHOR
+moderating their own post: that page is statically generated (PLAN.md §21) and so cannot know
+whether this viewer edits this post. A control that is absent is not a permission error, and
+`/comments` reaches every row. And a *silent* edit (PLAN.md §22b) is withheld from readers but
+never from moderators — `/comments` and `/annotations` show `editedAt` whatever the silence
+rule says.
+
 ## A post's byline is not its doc's (PLAN.md §15d, §15i)
 
 **Being credited on a post says nothing about rights over the doc it was published from, and
@@ -489,6 +528,9 @@ Re-derive from these rather than trusting the tables after an authz change:
 | File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
 | File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |
 | Annotation ydoc access (DRAFT is owner-only, even from ADMIN; asks whichever container the annotation has) | `src/lib/annotation-authz.ts` |
+| Who may *write* a posted annotation body (author or ADMIN), and the token's `readOnly` | `canUserEditAnnotationBody` in `src/lib/annotation-authz.ts`, applied in `src/app/api/annotation/[id]/token/route.ts` |
+| Annotation edit sessions (begin / finish / cancel) | `requireEditableBody` in `src/app/actions/annotations.ts` |
+| Comment editing and history | `editComment` / `getCommentHistory` in `src/app/actions/comments.ts` |
 | `/docs` row scoping + the "Show all docs" override | `src/app/docs/page.tsx` |
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
@@ -516,6 +558,10 @@ Re-derive from these rather than trusting the tables after an authz change:
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader
 seeing a public post's chip but no tagger, and the EDITOR who cannot see a PRIVATE doc under
 a term they can otherwise browse.
+
+`e2e/annotation-readonly.spec.ts` pins the writable-token row, and from below the UI: it mints
+tokens through the real route with real cookies and then asks the collab server to accept a
+write, which is the only way to test a rule no page ever exercises.
 
 `e2e/anchored-links.spec.ts`'s second test pins the link rules' load-bearing row — the
 reader who may see only the PDF half of a PRIVATE-doc+shared-PDF link gets that page's

@@ -25,6 +25,7 @@ a restart does and does not do, and the IndexedDB rules — is [YDOC.md](YDOC.md
   [what the update log makes possible](#8-what-the-full-ydoc_update-history-makes-possible)
   (including [showing an annotation at its own revision](#showing-an-annotation-at-its-own-revision--built-one-way-with-a-better-one-available),
   the one part of §8 that is partly built)
+- Planned: [comment quotations — text search into an immutable target, verified](#9-comment-quotations--text-search-into-an-immutable-target-verified)
 - [Comparison](#comparison) · [Choosing](#choosing) · [Log](#log)
 
 ---
@@ -77,6 +78,12 @@ One cross-cutting hazard worth stating on its own, because three different bugs 
 it: **`Doc.proseJson` is a store-debounce cache, not the document** (PLAN.md §12d). It lags the
 live ydoc by seconds whenever anyone is typing. It is fine for deciding *whether* to draw
 something and wrong for deciding *where*.
+
+`Annotation.proseJson` was the same kind of cache and is no longer, which is worth knowing
+because the two columns now behave differently. Since PLAN.md §22e it holds the last
+**settled** body: the debounce skips it while `Annotation.editingSince` is set, so it never
+shows a half-typed sentence and every reader path renders from it safely. The 2026-08-13 entry
+below predicted the hazard spreading there; the guard is what stopped it.
 
 ---
 
@@ -431,6 +438,10 @@ prosemirror-model internals.
 
 The direction that does not have this problem is [§5](#5-yjs-relative-positions): stop naming
 the position with text at all.
+
+**One place the flatten-and-map technique *is* used, and why that is not a contradiction:**
+[§9](#9-comment-quotations--text-search-into-an-immutable-target-verified). The difference is
+not the algorithm but what depends on its output.
 
 ## 5. Yjs relative positions
 
@@ -823,6 +834,53 @@ starts to hurt.
 
 ---
 
+## 9. Comment quotations — text search into an immutable target, verified
+
+**Surface:** a post's comment thread. **Code (planned):** `src/lib/comment-quote-match.ts`,
+`src/lib/comment-quote-capture.ts`, `comment_quote_anchor`. **Design:** PLAN.md §23f, §23n.
+
+A comment quotes a passage of the post or of another comment, inline or as a block, and the
+quotation is a row on §20a's anchor envelope pinning an immutable version — a publication event
+or a comment revision. What is new is how the range is *found*: the commenter may have typed
+the quote by hand in a Markdown box, so there may be no selection to verify, only words.
+
+**The technique is the one §4 rejected.** Flatten the target once into a string, keeping each
+character's ProseMirror position; normalize both the string and the query (quotes, dashes,
+whitespace, NFKC) with an index map back; search with `indexOf`; map the hit back to a range.
+This matches across block boundaries, which `findQuoteOccurrences` cannot, and is O(target)
+rather than O(target × quote).
+
+**Why it is safe here and was not there.** §4's rewrite was rejected because every caller
+downstream depended on `textBetween(from, to) === quotedText` holding for the ranges it
+returned, with `quotedText` being the *input* — so a flattening mistake at a block boundary
+produced a range that silently named the wrong text, and only a property test caught it. Here
+three things differ, and together they invert the failure mode:
+
+1. **The target is immutable and the search runs once, server-side, at post time.** There is
+   no per-keystroke re-resolution and no transient decoration to keep alive.
+2. **Every hit is verified after mapping back** — `normalize(textBetween(from, to, " "))` must
+   equal the normalized query (or share its prefix and suffix, for the one fuzzy tier). A range
+   the flattening got wrong fails this and is discarded.
+3. **The stored `quoted_text` is derived from the verified range by `textBetween`**, never
+   taken from the query, and the comment body's quoted span is rewritten to that derivation
+   (§23f). So the invariant §4 needed — stored text equals `textBetween` at the stored range —
+   holds by construction, and a flattening mistake costs a *missed match*, never a wrong anchor.
+
+**Tiers**, first hit wins: the rich composer's own selection offsets when it has them (the
+`resolveAnchorInDoc` shape, tier 1); exact normalized substring across candidates in priority
+order (parent comment, host post, thread, page); a prefix-and-suffix match with a length bound,
+for a typo in a hand-typed quote, which the rewrite then corrects; and finally no anchor, with
+the blockquote or the text left exactly as typed.
+
+**Ambiguity is resolved, not refused** — a deliberate departure from `resolveAnchorInDoc`'s
+exactly-one rule. Several occurrences of the quote inside one immutable object are the same
+words by the same author, so the citation and the stored text are correct whichever is chosen;
+the one thing that could be wrong is a highlight position, and nothing draws one in the article
+yet. Nearest the thread's own passage anchor if there is one, else the first.
+
+**Cost.** One flatten per candidate per submission, lazily in priority order; most quotes hit
+the first or second candidate. Nothing at read time.
+
 ## Comparison
 
 | | Anchor lives | Survives edit *before* | Survives edit *inside* | Needs collab server | Durable | Per-resolution cost |
@@ -836,6 +894,7 @@ starts to hurt.
 | 6. Awareness anchors | Awareness channel | Yes | Yes | Yes | No, by design | O(1)-ish |
 | 7. Scrub-state anchor | Columns + a version stamp | Yes | Yes | Yes (materialize) | Yes | Materialize + diff |
 | 8. Log-derived | Columns + the update log | Yes | Yes | Yes | Yes | Materialize + resolve |
+| 9. Comment quotations (planned) | Columns, vs. an immutable version | Yes (the version cannot move) | Yes (same) | No | Yes | Zero at read; one flatten per candidate at post |
 
 ## Choosing
 
@@ -979,6 +1038,53 @@ Materializing a 500-character annotation ydoc is nothing. So mutable annotations
 inherit the weaker text-search repair — they are the case where the strong version finally becomes
 affordable, and where the version stamp already stored on every row starts earning its keep
 instead of only recording intent.
+
+## 2026-09-16 — Mutable bodies, built (PLAN.md §22)
+
+The 2026-08-13 entry below asked what changes if annotation bodies become mutable, and answered:
+the re-anchoring generalizes for free, the freeze does less than it appears to, and the hard part
+is not anchoring. All three held. What they turned into:
+
+**The permission was the real gate, exactly as that entry said.** It shipped first and alone
+(§22e PR 1). `/api/annotation/[id]/token` had been minting an unconditionally *writable* token
+for anyone who could read the container — harmless while no UI opened one, and "any reader can
+rewrite any annotation" the moment one did. It now carries `readOnly: true` for anyone but the
+author or an ADMIN, and `e2e/annotation-readonly.spec.ts` asserts the collab server actually
+drops their writes. That spec connects from Node rather than driving the page, because the hole
+was never reachable from the UI and a UI test would pass against a broken gate.
+
+**The staleness hazard was closed rather than accepted.** That entry's item 2 expected
+`Annotation.proseJson` to join `Doc.proseJson` as a thing you must not position off.
+`Annotation.editingSince` made it unnecessary: the store debounce skips the cache while a
+session is open, so the column means "the last settled body" and every reader path — the rails,
+`annotation-entries.ts`, `/annotations` — kept reading it unchanged. Nobody sees anybody else's
+keystrokes, which is also why the entry's awareness-driven mounting scheme was not needed. It
+stays available and is still the right answer if live co-editing of one body is ever wanted.
+
+**The `ydoc_update_id` overload got thinner in the way item 3 predicted, and the fix was a
+row that already existed.** An anchored reply needs "which version of the parent body was I
+reading", and a version *is* a `ydoc_snapshot` on the body's own ydoc — the boundary where a
+settle ended, which is exactly what a reader of a body sees — so the reply stamps the parent's
+newest snapshot mark. No second `anchor_update_id` was added, and no client-side capture was
+needed (the client has no live connection to a parent body to capture from).
+`Annotation.proseJsonUpdateId`, declared as a seam for exactly this while citing this entry,
+stays the cache's own checkpoint and nothing anchors off it: it can trail a Done, since the
+flush writes content without an id and the debounce skips a body under edit.
+
+**Tier 3's sticky detachment was relaxed for bodies**, as the entry recommended, behind a
+`retryDetached` option that only `AnnotationBodyReader` sets. A reply now re-attaches live as
+its parent is edited back toward the words it quoted.
+
+**And §7's materialize half is built, for bodies only** — the upside that entry named last.
+`getQuotedParentVersion` replays a parent body to the reply's own stamp and shows the reader the
+text that was quoted; a 500-character ydoc makes that a few milliseconds, which is the whole
+reason it is affordable here and not on a 50k-character doc. The **diff** half is still unbuilt:
+this shows what was quoted, it does not repair the anchor. §7's banner stands.
+
+The post-comment side got the same feature by a completely different mechanism — immutable
+revision rows, `comment_revision` — and that asymmetry is the file's thesis in miniature: a
+comment's text exists only in its revisions, an annotation's exists in its ydoc, so "keep every
+version" means storing text in one case and marking a boundary — a snapshot — in the other.
 
 ## 2026-08-13 — How a client names the version it annotated against
 

@@ -7,6 +7,7 @@ import { PendingAnnotation, setPendingAnnotation } from "@/lib/pending-annotatio
 import { AnnotationClick } from "@/lib/annotation-click-extension";
 import {
   AnnotationHighlight,
+  annotationHighlightKey,
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
@@ -45,6 +46,18 @@ type Props = {
   onSelect?: (selection: BodySelection) => void;
   /** Clicking a highlighted range: the ids of the replies anchored over it. */
   onAnchorClick?: (replyIds: string[]) => void;
+  /**
+   * Which of `replyAnchors` currently resolve in this body, reported whenever
+   * that set changes (PLAN.md §22e).
+   *
+   * The complement is what the caller wants: a reply whose quote no longer
+   * appears here is one whose parent has been edited away from the words it
+   * answered, and it is offered a link to the version it quoted. Reported
+   * from here because this is where the answer already exists — the highlight
+   * plugin resolves all three tiers per transaction, and asking a second time
+   * outside would be the same scan again.
+   */
+  onResolvedAnchorsChange?: (resolvedIds: string[]) => void;
 };
 
 // A stable default, so the anchor-push effect doesn't fire every render on an
@@ -84,6 +97,7 @@ export default function AnnotationBodyReader({
   pending = null,
   onSelect,
   onAnchorClick,
+  onResolvedAnchorsChange,
 }: Props) {
   const [ready, setReady] = useState(false);
   // The editor is built once; these handlers change per render, so they are
@@ -91,9 +105,14 @@ export default function AnnotationBodyReader({
   // never be updated. Same shape DocReadingBody's own once-only editor uses.
   const onSelectRef = useRef(onSelect);
   const onAnchorClickRef = useRef(onAnchorClick);
+  const onResolvedRef = useRef(onResolvedAnchorsChange);
+  // The last set reported, so an unchanged answer doesn't re-render the
+  // parent on every keystroke of an unrelated edit.
+  const lastReportedRef = useRef<string | null>(null);
   useEffect(() => {
     onSelectRef.current = onSelect;
     onAnchorClickRef.current = onAnchorClick;
+    onResolvedRef.current = onResolvedAnchorsChange;
   });
   const [initialAnchors] = useState(replyAnchors);
 
@@ -107,7 +126,12 @@ export default function AnnotationBodyReader({
     extensions: [
       ...annotationContentExtensions,
       PendingAnnotation,
-      AnnotationHighlight.configure({ anchors: initialAnchors }),
+      // PLAN.md §22e — `retryDetached` is true here and nowhere else: this is
+      // the one surface whose tracked document is an annotation body, small
+      // enough that re-searching a detached reply anchor on every content
+      // change is free. It is what lets a reply re-attach live as its parent
+      // is edited back toward the words it quoted.
+      AnnotationHighlight.configure({ anchors: initialAnchors, retryDetached: true }),
       // eslint-disable-next-line react-hooks/refs -- onHit is only ever invoked from the AnnotationClick plugin's handleClick, on a real DOM click, never during React's render
       AnnotationClick.configure({ onHit: (ids) => onAnchorClickRef.current?.(ids) }),
     ],
@@ -132,6 +156,31 @@ export default function AnnotationBodyReader({
       onSelectRef.current?.({ from, to, quotedText });
     },
   });
+
+  // Which anchors resolve, reported after every transaction that could have
+  // changed the answer — a content change, and the anchor push below.
+  //
+  // In an effect rather than inside the plugin: the plugin is shared with the
+  // doc surfaces, which have no use for this, and a plugin that called back
+  // into React from `apply` would be dispatching state updates from inside a
+  // ProseMirror transaction.
+  useEffect(() => {
+    if (!editor) return;
+    const report = () => {
+      const state = annotationHighlightKey.getState(editor.state);
+      if (!state) return;
+      const resolved = [...state.ranges.keys()].sort();
+      const key = resolved.join(" ");
+      if (key === lastReportedRef.current) return;
+      lastReportedRef.current = key;
+      onResolvedRef.current?.(resolved);
+    };
+    report();
+    editor.on("transaction", report);
+    return () => {
+      editor.off("transaction", report);
+    };
+  }, [editor]);
 
   // Posted anchors change when a reply is posted or deleted (router.refresh()).
   useEffect(() => {

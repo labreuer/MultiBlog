@@ -146,7 +146,10 @@ export async function ydocOnStoreDocument({
   // this point: the store hook is debounced, so several authors' edits can
   // coalesce into one flush and this names whichever was last.
   await updateDocCache(documentName, document, lastContext?.userId, lastUpdateId);
-  await updateAnnotationCache(documentName, document, lastUpdateId);
+  // PLAN.md §22e — `skipWhileEditing` only here. This is the ambient writer,
+  // and an annotation under edit must keep showing its last settled body to
+  // everyone but the person editing it.
+  await updateAnnotationCache(documentName, document, lastUpdateId, { skipWhileEditing: true });
 }
 
 // clientID -> user_id attribution (PLAN.md §11d). A connection's own Yjs
@@ -267,6 +270,14 @@ export async function handleYdocSnapshot(
     send(response, 403, "Invalid or mismatched ydoc token.");
     return;
   }
+  // PLAN.md §22e — an annotation body's snapshots are its versions, written
+  // only by the settle paths (src/app/actions/annotations.ts). Refused here as
+  // well as in the Next route that fronts the debug button, since this is the
+  // writer.
+  if (annotationIdFromYdocId(documentName)) {
+    send(response, 409, "An annotation body's snapshots are its versions; settle it from the annotation instead.");
+    return;
+  }
 
   const throughUpdateId = await ydocStore.maxUpdateId(documentName);
   if (throughUpdateId === null) {
@@ -282,14 +293,31 @@ export async function handleYdocSnapshot(
   send(response, 204, "");
 }
 
-// POST /admin/annotation-flush (PLAN.md §13j Phase 3) — forces
-// server/annotation-cache.ts's proseJson/bodyText write immediately instead
-// of waiting for onStoreDocument's next debounce, called from
-// postAnnotation right before flipping DRAFT to LIVE. Without this, a
-// reader who opens the annotation the instant it becomes visible could see
-// whatever bodyText/proseJson happened to be cached as of the *last* debounce
-// — for a brand-new annotation, that's still its creation-time empty
-// paragraph, regardless of everything typed since.
+// POST /admin/annotation-flush (PLAN.md §13j Phase 3, §22e) — two things,
+// and the second is what the settle paths are for.
+//
+// It forces server/annotation-cache.ts's proseJson/bodyText write immediately
+// instead of waiting for onStoreDocument's next debounce, which is what
+// `saveDraftAnnotation` wants: without it, a reader who opens a draft's
+// composer later could see whatever was cached as of the *last* debounce —
+// for a brand-new annotation, its creation-time empty paragraph, regardless of
+// everything typed since.
+//
+// And it answers with **the tail of the body's update log after a drain**,
+// `{ lastUpdateId }`. That is the mark a settle (`postAnnotation`,
+// `finishAnnotationEdit`) materialises, validates and snapshots at. Drained
+// first, for the reason `appendUpdate`'s comment gives: the in-memory id lags
+// the content by however long an insert takes, and a snapshot taken at a
+// lagging mark would hold older bytes than the cache shows. Read from the
+// database after the drain rather than from `drainAppends`' own return value,
+// which is empty after a collab restart until the first append lands. A
+// string, because BigInt does not survive JSON.
+//
+// `writeCache: false` is how a settle asks for the mark **without** the cache
+// write: it validates the materialised body first and writes the cache itself,
+// from the same decoded document it snapshots, inside its own transaction —
+// so a Done on an emptied body cannot dirty the columns every reader renders
+// from and then fail. The default is to write, for the draft path above.
 //
 // `document` here is a Hocuspocus `Document`, which extends `Y.Doc` directly
 // (the same assumption handleYdocSnapshot's encodeYdocState(document) call
@@ -301,8 +329,9 @@ export async function handleFlushAnnotationCache(
   response: ServerResponse,
   instance: Hocuspocus,
 ): Promise<void> {
-  const body = (await readJsonBody(request)) as Partial<{ token: string; documentName: string }>;
+  const body = (await readJsonBody(request)) as Partial<{ token: string; documentName: string; writeCache: boolean }>;
   const { token, documentName } = body;
+  const writeCache = body.writeCache !== false;
   if (typeof token !== "string" || typeof documentName !== "string") {
     send(response, 400, "Expected token and documentName.");
     return;
@@ -314,20 +343,92 @@ export async function handleFlushAnnotationCache(
     return;
   }
 
+  // Drain before reading the document, the order the store debounce uses:
+  // the cache may then hold a keystroke the mark does not yet name, which the
+  // next debounce corrects, rather than the mark naming content the cache
+  // does not hold.
+  await drainAppends(documentName);
+  const lastUpdateId = await ydocStore.maxUpdateId(documentName);
+
+  if (writeCache) {
+    const connection = await instance.openDirectConnection(documentName);
+    let ydocDocument: Y.Doc | null = null;
+    try {
+      await connection.transact((document) => {
+        ydocDocument = document;
+      });
+    } finally {
+      await connection.disconnect();
+    }
+    if (ydocDocument) {
+      await updateAnnotationCache(documentName, ydocDocument, lastUpdateId);
+    }
+  }
+  send(response, 200, JSON.stringify({ lastUpdateId: lastUpdateId?.toString() ?? null }));
+}
+
+// POST /admin/annotation-replace (PLAN.md §22e) — replaces an annotation
+// body's "default" fragment with the supplied TipTap JSON, as one update.
+//
+// Cancel on an edit session is the only caller: it puts the last settled
+// revision's content back. Writing the old text *forward* is not a
+// workaround for Yjs having no undo — it is the truthful record. The
+// abandoned attempt happened, `ydoc_update` says so, and the revision
+// sequence stays a list of states readers were actually shown.
+//
+// Rejects anything that is not an annotation's own ydoc. The transformer pair
+// is the annotation schema (annotationContentExtensions), never the doc's:
+// decoding or encoding a body with the doc schema would register an
+// `annotation` mark a body can never contain (§13p).
+export async function handleReplaceAnnotationBody(
+  request: IncomingMessage,
+  response: ServerResponse,
+  instance: Hocuspocus,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as Partial<{
+    token: string;
+    documentName: string;
+    proseJson: unknown;
+  }>;
+  const { token, documentName, proseJson } = body;
+  if (typeof token !== "string" || typeof documentName !== "string" || !proseJson || typeof proseJson !== "object") {
+    send(response, 400, "Expected token, documentName and proseJson.");
+    return;
+  }
+
+  const payload = await verifyYdocToken(token).catch(() => null);
+  if (!payload || payload.documentName !== documentName) {
+    send(response, 403, "Invalid or mismatched ydoc token.");
+    return;
+  }
+  if (!annotationIdFromYdocId(documentName)) {
+    send(response, 400, "Not an annotation document.");
+    return;
+  }
+
+  let node: PMNode;
+  try {
+    node = pmAnnotationContentSchema.nodeFromJSON(proseJson as object);
+  } catch (err) {
+    send(response, 400, `proseJson isn't a valid annotation body: ${err instanceof Error ? err.message : err}`);
+    return;
+  }
+
   const connection = await instance.openDirectConnection(documentName);
-  let ydocDocument: Y.Doc | null = null;
   try {
     await connection.transact((document) => {
-      ydocDocument = document;
+      // prosemirrorToYXmlFragment diffs the node against the fragment and
+      // writes the difference, so restoring a body that is already correct is
+      // a genuine no-op rather than a churn of deletes and inserts — the same
+      // property handleApplyAnnotationMark relies on.
+      prosemirrorToYXmlFragment(node, document.getXmlFragment("default"));
     });
   } finally {
     await connection.disconnect();
   }
 
-  if (ydocDocument) {
-    await updateAnnotationCache(documentName, ydocDocument);
-  }
-  send(response, 204, "");
+  const updateId = await drainAppends(documentName);
+  send(response, 200, JSON.stringify({ updateId: updateId?.toString() ?? null }));
 }
 
 // POST /admin/annotation-mark (PLAN.md §12i) — applies a mark carrying

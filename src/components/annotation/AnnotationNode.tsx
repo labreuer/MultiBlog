@@ -13,10 +13,21 @@ import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 // says so — authz.ts is not, since it imports prisma).
 import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "../LocalTime";
+import EditHistory from "../EditHistory";
 import AnnotationBodyReader, { type BodySelection } from "./AnnotationBodyReader";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
+import AnnotationEditSession from "./AnnotationEditSession";
+import AnnotationVersionBody from "./AnnotationVersionBody";
 import { useAnnotationReload } from "./annotation-reload-context";
-import { deleteAnnotation, createDraftAnnotation } from "@/app/actions/annotations";
+import {
+  beginAnnotationEdit,
+  cancelAnnotationEdit,
+  createDraftAnnotation,
+  deleteAnnotation,
+  getAnnotationHistory,
+  getQuotedParentVersion,
+  type AnnotationVersion,
+} from "@/app/actions/annotations";
 import { useDocScrub } from "../DocScrubContext";
 import styles from "./AnnotationNode.module.css";
 
@@ -48,11 +59,33 @@ export type AnnotationNodeData = {
   // for a row from before the column existed. Metadata, not an anchor —
   // drives the "at this revision" control below, nothing else.
   ydocUpdateId: string | null;
+  // PLAN.md §22b/§22e — resolved by the loader (annotation-data.ts), not
+  // here: the silence rule needs every version's timestamp, and this tree is
+  // built on the server precisely so the browser never receives them.
+  visiblyEdited: boolean;
+  editedAt: string | null;
+  // PLAN.md §22e — non-null while someone has an edit session open on this
+  // body. Two consequences here: nobody else is offered Edit, and the body
+  // being rendered is the last *settled* state rather than live text.
+  editingSince: string | null;
+  // Whether that session has been abandoned, decided by the loader against
+  // the server's clock — see annotation-data.ts for why not here.
+  editSessionStale: boolean;
   replies: AnnotationNodeData[];
 };
 
 type Props = {
   annotation: AnnotationNodeData;
+  /**
+   * PLAN.md §22e — set by this node's *parent* when this reply's stored quote
+   * no longer appears in the parent's current body, which is only knowable
+   * from inside the parent's own editor (the highlight plugin resolves it).
+   *
+   * Undefined until the parent's body has reported once, which is why the
+   * link below is keyed on `=== true` rather than on falsiness: "not yet
+   * known" must not render as "the quote is gone".
+   */
+  quoteLost?: boolean;
   // PLAN.md §19 — the container this thread lives in, so Reply can create its
   // draft in the right one. A discriminated union rather than a doc id, since
   // the same node renders on /doc/[slug] and /pdf/[slug].
@@ -101,7 +134,7 @@ export function hasNonDeletedDescendant(annotation: AnnotationNodeData): boolean
 
 // The doc-side sibling of CommentNode (PLAN.md §13c) — un-shared from it now
 // that an annotation and a post comment no longer share a rendering problem.
-export default function AnnotationNode({ annotation, target, depth = 0 }: Props) {
+export default function AnnotationNode({ annotation, target, quoteLost, depth = 0 }: Props) {
   const reloadAnnotations = useAnnotationReload();
   const router = useRouter();
   const { data: session } = useSession();
@@ -135,6 +168,20 @@ export default function AnnotationNode({ annotation, target, depth = 0 }: Props)
   // visible "[deleted]" feedback instead of it just silently vanishing. A
   // fresh page load never sets this, so the collapse rule still applies there.
   const [justDeleted, setJustDeleted] = useState(false);
+  // PLAN.md §22e — an edit session this viewer has open. Separate from
+  // `annotation.editingSince`, which is what the *server* last knew: this one
+  // says "the editor is mounted right here, in this browser".
+  const [editing, setEditing] = useState(false);
+  const [editPending, setEditPending] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  // PLAN.md §22e — which of this body's anchored replies currently resolve in
+  // it, as reported by AnnotationBodyReader. Null until it has reported once;
+  // the complement is what gets the "quoted an earlier version" link, so the
+  // distinction between "nothing resolves" and "nothing known yet" matters.
+  const [resolvedReplyIds, setResolvedReplyIds] = useState<string[] | null>(null);
+  // The parent version this reply quoted, fetched on demand.
+  const [quotedVersion, setQuotedVersion] = useState<{ proseJson: unknown; quotedText: string } | null>(null);
+  const [quotedVersionPending, setQuotedVersionPending] = useState(false);
   // Null outside a DocScrubProvider (the doc editor's rail has none) or
   // before the reading view's scrub bar has been touched at all — both
   // supported states, see useDocScrub's own note.
@@ -180,10 +227,73 @@ export default function AnnotationNode({ annotation, target, depth = 0 }: Props)
 
   const isOwnAnnotation = viewerId !== null && annotation.commenterUserId === viewerId;
   const canDelete = isAdmin || isOwnAnnotation;
+  // PLAN.md §22f — the same pair that gates deleting. Editing someone's words
+  // and removing them outright are the same kind of act on the same person's
+  // work, so they get the same answer; an EDITOR who can merely read the doc
+  // gets neither.
+  const canEditBody = canDelete;
+  const sessionIsStale = annotation.editSessionStale;
+  // Someone has a session open and it is not this viewer's mounted editor.
+  // Deliberately keyed on the server's column and not on identity: two tabs
+  // of the same author are as much a version problem as two people
+  // (finishAnnotationEdit attributes one version to whoever ends last).
+  const heldByAnother = annotation.editingSince !== null && !editing && !sessionIsStale;
   // Admin power being used on someone else's annotation gets a visibly
   // different (maroon) button; deleting your own, even as an admin, is just
   // the normal action.
   const isAdminOnOthers = isAdmin && !isOwnAnnotation;
+
+  const startEditing = () => {
+    setEditError(null);
+    setEditPending(true);
+    void beginAnnotationEdit(annotation.id).then((result) => {
+      setEditPending(false);
+      if (result.error) {
+        setEditError(result.error);
+        return;
+      }
+      setEditing(true);
+    });
+  };
+
+  // Discarding *someone else's* abandoned session: the same action Cancel
+  // calls, from the other side. It restores the last settled version, which
+  // is already what everyone has been reading — so what it actually discards
+  // is an edit nobody ever saw.
+  const discardStaleSession = () => {
+    setEditError(null);
+    setEditPending(true);
+    void cancelAnnotationEdit(annotation.id).then((result) => {
+      setEditPending(false);
+      if (result.error) {
+        setEditError(result.error);
+        return;
+      }
+      router.refresh();
+      reloadAnnotations();
+    });
+  };
+
+  const showQuotedVersion = () => {
+    if (quotedVersion) {
+      setQuotedVersion(null);
+      return;
+    }
+    setQuotedVersionPending(true);
+    void getQuotedParentVersion(annotation.id).then((result) => {
+      setQuotedVersionPending(false);
+      setQuotedVersion(result);
+    });
+  };
+
+  const endEditing = () => {
+    setEditing(false);
+    router.refresh();
+    // The PDF surface cannot count on that refresh landing (CLAUDE.md's
+    // `router.refresh()` note), and this is exactly a change that arrives
+    // only through one.
+    reloadAnnotations();
+  };
 
   const handleDelete = () => {
     setDeleteError(null);
@@ -267,25 +377,91 @@ export default function AnnotationNode({ annotation, target, depth = 0 }: Props)
               </button>
             )}
           </p>
-          <AnnotationBodyReader
-            proseJson={annotation.proseJson}
-            staticBody={annotation.body}
-            replyAnchors={replyAnchors}
-            pending={
-              replyAnchor && viewerColor
-                ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
-                : null
-            }
-            onSelect={handleBodySelect}
-            onAnchorClick={jumpToReply}
-          />
-          {!posted && !replyDraftId && (
+          {editing ? (
+            <AnnotationEditSession
+              annotationId={annotation.id}
+              onFinished={endEditing}
+              onCancelled={endEditing}
+            />
+          ) : (
+            <AnnotationBodyReader
+              proseJson={annotation.proseJson}
+              staticBody={annotation.body}
+              replyAnchors={replyAnchors}
+              pending={
+                replyAnchor && viewerColor
+                  ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
+                  : null
+              }
+              onSelect={handleBodySelect}
+              onAnchorClick={jumpToReply}
+              onResolvedAnchorsChange={setResolvedReplyIds}
+            />
+          )}
+          {annotation.visiblyEdited && !editing && (
+            <p className={styles.historyLine}>
+              <EditHistory
+                what="annotation"
+                editedAt={annotation.editedAt}
+                load={() => getAnnotationHistory(annotation.id)}
+                renderBody={(version: AnnotationVersion) => (
+                  <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} />
+                )}
+              />
+            </p>
+          )}
+          {quoteLost === true && (
+            <p className={styles.editStatus}>
+              <button
+                type="button"
+                onClick={showQuotedVersion}
+                className={styles.revisionButton}
+                title="The passage this reply quoted is no longer in the annotation above"
+              >
+                {quotedVersionPending
+                  ? "Loading…"
+                  : quotedVersion
+                    ? "Hide the version this quoted"
+                    : "quoted an earlier version"}
+              </button>
+            </p>
+          )}
+          {quotedVersion && (
+            <div className={styles.quotedVersion}>
+              <p className={styles.editStatus}>The annotation as it read when this reply quoted it:</p>
+              <AnnotationVersionBody proseJson={quotedVersion.proseJson} bodyText={quotedVersion.quotedText} />
+            </div>
+          )}
+          {heldByAnother && (
+            <p className={styles.editStatus}>
+              Being edited since <LocalTime value={annotation.editingSince!} /> — what you see is the last saved
+              version.
+            </p>
+          )}
+          {!posted && !replyDraftId && !editing && (
             <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
               {replyPending ? "Opening…" : "Reply"}
             </button>
           )}
           {replyError && <p className={styles.error}>{replyError}</p>}
-          {canDelete && !confirmingDelete && (
+          {canEditBody && !editing && !confirmingDelete && !heldByAnother && (
+            <button type="button" onClick={startEditing} disabled={editPending} className={styles.editButton}>
+              {editPending ? "Opening…" : sessionIsStale ? "Resume editing" : "Edit"}
+            </button>
+          )}
+          {canEditBody && !editing && sessionIsStale && (
+            <button
+              type="button"
+              onClick={discardStaleSession}
+              disabled={editPending}
+              className={styles.discardButton}
+              title="Put the last saved version back and close the abandoned session"
+            >
+              Discard unsaved edit
+            </button>
+          )}
+          {editError && <p className={styles.error}>{editError}</p>}
+          {canDelete && !editing && !confirmingDelete && (
             <button
               type="button"
               onClick={() => setConfirmingDelete(true)}
@@ -334,7 +510,23 @@ export default function AnnotationNode({ annotation, target, depth = 0 }: Props)
         />
       )}
       {annotation.replies.map((reply) => (
-        <AnnotationNode key={reply.id} annotation={reply} target={target} depth={depth + 1} />
+        <AnnotationNode
+          key={reply.id}
+          annotation={reply}
+          target={target}
+          // PLAN.md §22e — only this node can answer it: the reply's anchor
+          // points into *this* body, and whether it still resolves is what
+          // this body's own editor just reported. A reply with no anchor at
+          // all (the plain Reply button) is never "lost".
+          quoteLost={
+            resolvedReplyIds !== null &&
+            reply.anchorFrom !== null &&
+            reply.quotedText !== "" &&
+            reply.deletedByUserId === null &&
+            !resolvedReplyIds.includes(reply.id)
+          }
+          depth={depth + 1}
+        />
       ))}
     </div>
   );

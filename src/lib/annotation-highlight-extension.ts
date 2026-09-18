@@ -168,10 +168,33 @@ function resolveAll(anchors: AnnotationAnchorInput[], doc: PMNode): TrackedAncho
 //     re-evaluated on the next anchor push instead, which is the doc-side
 //     equivalent of the post side re-testing a DETACHED thread at the next
 //     publish rather than continuously (COLLAB.md §1).
-function reresolve(anchors: TrackedAnchor[], tr: Transaction, oldSize: number, newDoc: PMNode): TrackedAnchor[] {
+function reresolve(
+  anchors: TrackedAnchor[],
+  tr: Transaction,
+  oldSize: number,
+  newDoc: PMNode,
+  retryDetached: boolean,
+): TrackedAnchor[] {
   const radius = Math.abs(newDoc.content.size - oldSize) + NEARBY_PAD;
   return anchors.map((anchor) => {
-    if (!anchor.resolved) return anchor;
+    if (!anchor.resolved) {
+      // PLAN.md §22e / docs/COLLAB.md's 2026-08-13 entry — tier 3's
+      // detached-is-sticky rule, relaxed for an **annotation body**.
+      //
+      // The rule exists because `findQuoteOccurrences` is O(document × quote)
+      // and a doc is large, so retrying a genuinely-gone quote per keystroke
+      // reintroduces exactly the cost tier 2 avoids. An annotation body is
+      // 100–5000 characters, where a full scan is cheap enough to run
+      // continuously — and where it buys something the doc side cannot have:
+      // a reply re-attaches live as its parent is edited back toward what it
+      // quoted, which is the ordinary case when someone is rewording their
+      // own annotation around a passage that was replied to.
+      //
+      // `null` stays null when the text really is gone; what changes is only
+      // that the question is asked again.
+      if (!retryDetached) return anchor;
+      return { ...anchor, resolved: resolveAnchorInDoc(newDoc, anchor.from, anchor.to, anchor.quotedText) };
+    }
     const from = tr.mapping.map(anchor.resolved.from, 1);
     const to = tr.mapping.map(anchor.resolved.to, -1);
     if (to > from && to <= newDoc.content.size && newDoc.textBetween(from, to, " ") === anchor.quotedText) {
@@ -197,15 +220,25 @@ function rangeMaps(anchors: TrackedAnchor[]): Pick<AnnotationHighlightState, "ra
   return { ranges, linkRanges };
 }
 
-export const AnnotationHighlight = Extension.create<{ anchors: AnnotationAnchorInput[] }>({
+export const AnnotationHighlight = Extension.create<{
+  anchors: AnnotationAnchorInput[];
+  /**
+   * Whether a detached anchor is re-searched on every content change
+   * (PLAN.md §22e) — true only where the tracked document is small enough for
+   * that to be free, which means an annotation body and not a doc. See
+   * `reresolve`'s own comment for the measurement behind the split.
+   */
+  retryDetached: boolean;
+}>({
   name: "annotationHighlight",
 
   addOptions() {
-    return { anchors: [] };
+    return { anchors: [], retryDetached: false };
   },
 
   addProseMirrorPlugins() {
     const initial = this.options.anchors;
+    const retryDetached = this.options.retryDetached;
 
     return [
       new Plugin<AnnotationHighlightState>({
@@ -222,7 +255,7 @@ export const AnnotationHighlight = Extension.create<{ anchors: AnnotationAnchorI
               return { anchors, ...rangeMaps(anchors) };
             }
             if (!tr.docChanged) return value;
-            const anchors = reresolve(value.anchors, tr, oldState.doc.content.size, newState.doc);
+            const anchors = reresolve(value.anchors, tr, oldState.doc.content.size, newState.doc, retryDetached);
             return { anchors, ...rangeMaps(anchors) };
           },
         },

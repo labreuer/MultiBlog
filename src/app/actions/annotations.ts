@@ -4,13 +4,21 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
+import { canUserAccessAnnotationYdoc, canUserEditAnnotationBody } from "@/lib/annotation-authz";
+import { isVersionQuoted, STALE_EDIT_SESSION_MS, visibleVersions, withSupersededAt } from "@/lib/edit-grace";
 import { canUserReadFile } from "@/lib/file-authz";
 import { isAdmin } from "@/lib/authz";
-import { applyAnnotationMark, flushAnnotationCache, removeAnnotationMark } from "@/lib/annotation-admin";
+import {
+  applyAnnotationMark,
+  flushAnnotationCache,
+  removeAnnotationMark,
+  replaceAnnotationBody,
+} from "@/lib/annotation-admin";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { decodeAnnotationBody, decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import {
   annotationRevalidationPaths,
   requireDocAnnotationId,
@@ -28,11 +36,197 @@ import {
   pmDocContentSchema,
 } from "@/lib/tiptap-schema";
 import { ydocIdForAnnotation, ydocIdForDoc } from "@/lib/ydoc-names";
-import { ydocStore } from "../../../server/ydoc-store";
+import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
+import type { Role } from "@/generated/prisma/enums";
+import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
 const MAX_BODY_LENGTH = 5000;
+
+type SettledBody = {
+  /** The drained tail of the body's own update log — what the snapshot is taken at. */
+  mark: bigint;
+  /** The body materialised at `mark`, encoded as `ydoc_snapshot` stores it. */
+  snapshot: { ydoc: Uint8Array; stateVector: Uint8Array };
+  /** The same document, decoded exactly as the cache columns hold it. */
+  proseJson: JSONContent;
+  bodyText: string;
+  /** Whether the text is the cached (last settled) text — the no-op check. */
+  unchanged: boolean;
+};
+
+/**
+ * PLAN.md §22e — a body's settled state, ready to record as a version.
+ *
+ * Asks the collab server for the drained tail of the body's own update log
+ * (`flushAnnotationCache` with `writeCache: false`, falling back to the
+ * database's own reading of the tail if the collab server cannot be reached),
+ * materialises the body *at* that mark, and decodes it with the same function
+ * the cache writer uses. Everything a version is — its bytes, its mark, and
+ * the two cache columns — comes from that one decoded document, which is what
+ * lets `writeSettledBody` below make the cache and the newest snapshot agree
+ * by construction rather than by a later check.
+ *
+ * Validated **before** anything is written: an emptied or over-long body
+ * returns an error and touches no column, so a reader keeps seeing the last
+ * settled text and the session stays open for the author to fix it.
+ *
+ * The bounded retry is the same one posting has always had, for the same
+ * reason: the collab server's Y.Doc only holds what has actually arrived over
+ * the websocket, and a keystroke followed immediately by a click can outrun
+ * that delivery. `expectChange` is what "outran" means for the caller — a post
+ * retries while the body is empty, a Done also retries while it still reads
+ * as the cached text, since opening the editor and closing it again is a
+ * legitimate no-op there and a race here.
+ *
+ * `unchanged` is compared on `bodyText` rather than on `proseJson`: two
+ * settled states with identical text but a different mark structure are the
+ * same thing to a reader, and a version nobody could tell from its
+ * predecessor would still cost the author their grace window (§22b).
+ *
+ * Deliberately returns *data* rather than writing: every caller needs the
+ * write to be part of its own transaction (post sets the status alongside it,
+ * Done clears `editingSince` alongside it), and a helper that wrote on its own
+ * would make both of those two statements that can half-happen.
+ */
+async function settleAnnotationBody(
+  annotationId: string,
+  actor: { id: string; role: Role },
+  opts: { expectChange: boolean },
+): Promise<SettledBody | { error: string }> {
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { bodyText: true },
+  });
+  if (!annotation) {
+    return { error: "Annotation not found." };
+  }
+  const ydocId = ydocIdForAnnotation(annotationId);
+
+  let settled: SettledBody | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const mark =
+      (await flushAnnotationCache({ userId: actor.id, role: actor.role, annotationId, writeCache: false })) ??
+      (await ydocStore.maxUpdateId(ydocId));
+    if (mark === null) {
+      return { error: "This annotation's body has no history to record." };
+    }
+    let doc;
+    try {
+      doc = await materializeYdocAt(ydocId, mark);
+    } catch (err) {
+      console.error(`[annotations] couldn't materialize ${ydocId} at ${mark}:`, err);
+      return { error: "Couldn't read the annotation's body right now — try again shortly." };
+    }
+    try {
+      const { proseJson, bodyText } = decodeAnnotationBody(doc);
+      settled = {
+        mark,
+        snapshot: encodeYdocState(doc),
+        proseJson,
+        bodyText,
+        unchanged: bodyText === annotation.bodyText,
+      };
+    } catch (err) {
+      console.error(`[annotations] ${ydocId} at ${mark} isn't TipTap-decodable:`, err);
+      return { error: "Couldn't read the annotation's body." };
+    } finally {
+      doc.destroy();
+    }
+    const outran = !settled.bodyText.trim() || (opts.expectChange && settled.unchanged);
+    if (!outran) break;
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+
+  if (!settled!.bodyText.trim()) {
+    return { error: "Annotation can't be empty." };
+  }
+  if (settled!.bodyText.length > MAX_BODY_LENGTH) {
+    return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
+  }
+  return settled!;
+}
+
+/**
+ * The settle transaction (PLAN.md §22e): one `ydoc_snapshot` on the body's
+ * own ydoc at the settled mark, and the annotation's cache columns written
+ * from the same decoded document, plus whatever the caller settles alongside
+ * (status and `postedAt` for a post, `editingSince`/`editedAt` for a Done).
+ *
+ * One transaction, so a posted annotation with no version 1 — or a version
+ * with a cache that disagrees with it — cannot exist even briefly. The
+ * snapshot's `createdAt` is the caller's `at`, the same instant it stamps on
+ * the row, so `postedAt` and version 1's timestamp are one moment and §22b's
+ * window is measured between values that agree.
+ *
+ * `userId` is who settled it: the acting user, which is the ADMIN when an
+ * ADMIN edited (§22f), and why callers pass the session's id rather than the
+ * annotation's author.
+ *
+ * A snapshot already sitting at the mark is reused rather than duplicated —
+ * nothing legitimate produces one (the debug button refuses annotation ydocs
+ * and an unchanged body settles nothing), so this is a guard, not a path.
+ */
+async function writeSettledBody(opts: {
+  annotationId: string;
+  settled: SettledBody;
+  userId: string;
+  at: Date;
+  alongside: Prisma.AnnotationUpdateInput;
+}): Promise<void> {
+  const { annotationId, settled, userId, at, alongside } = opts;
+  const ydocId = ydocIdForAnnotation(annotationId);
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.ydocSnapshot.findFirst({
+      where: { ydocId, lastYdocUpdateId: settled.mark },
+      select: { id: true },
+    });
+    if (!existing) {
+      await tx.ydocSnapshot.create({
+        data: {
+          ydocId,
+          ydoc: Buffer.from(settled.snapshot.ydoc),
+          stateVector: Buffer.from(settled.snapshot.stateVector),
+          lastYdocUpdateId: settled.mark,
+          userId,
+          createdAt: at,
+        },
+      });
+    }
+    await tx.annotation.update({
+      where: { id: annotationId },
+      data: {
+        proseJson: settled.proseJson as Prisma.InputJsonValue,
+        bodyText: settled.bodyText,
+        proseJsonUpdateId: settled.mark,
+        ...alongside,
+      },
+    });
+  });
+}
+
+/**
+ * PLAN.md §22e — the version of a parent body an anchored reply is measured
+ * against: the mark of the parent's newest snapshot, which is the last
+ * settled body and therefore exactly what the replier was reading (a reader
+ * of a body sees settled text, never keystrokes). The log's tail is the
+ * fallback for a parent with no snapshot at all — a row the backfill missed.
+ *
+ * Not `Annotation.proseJsonUpdateId`: that is the cache's own checkpoint and
+ * can trail a Done (the flush writes content without an id, and the debounce
+ * skips a body under edit), so a reply stamped from it could name a state its
+ * quote does not reproduce.
+ */
+async function parentSettledMark(parentId: string): Promise<bigint | null> {
+  const ydocId = ydocIdForAnnotation(parentId);
+  const newest = await prisma.ydocSnapshot.findFirst({
+    where: { ydocId },
+    orderBy: { lastYdocUpdateId: "desc" },
+    select: { lastYdocUpdateId: true },
+  });
+  return newest?.lastYdocUpdateId ?? (await ydocStore.maxUpdateId(ydocId));
+}
 
 
 // PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
@@ -184,34 +378,20 @@ export async function postAnnotation(opts: {
     return { error: "This annotation has already been posted." };
   }
 
-  // Forces the store-debounce write bodyText/proseJson normally wait for —
-  // without this, a reader who opens the annotation the instant it becomes
-  // LIVE could see whatever was cached as of the *last* debounce (for a
-  // brand-new annotation, its creation-time empty paragraph) rather than
-  // what was actually typed just now.
+  // PLAN.md §22e — version 1 is the DRAFT -> LIVE/RAISED transition, not the
+  // row's creation. A draft is visible to nobody but its author, so nothing
+  // before this moment is a state a reader was ever shown — and §22b's grace
+  // window is measured from `postedAt` precisely so it starts when readers
+  // could first have seen the text.
   //
-  // The flush reads the *collab server's* Y.Doc, which only has what it's
-  // already received from the client over the websocket — a keystroke and
-  // an immediate click can outrace that delivery (real for a slow
-  // connection, and reliably reproducible in an automated test that types
-  // and clicks back-to-back with no human-typing-speed gap between them).
-  // A bounded retry absorbs that without adding any real delay for the
-  // overwhelming common case where the flush already sees everything.
-  let bodyText = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await flushAnnotationCache({ userId: session.user.id, role: session.user.role, annotationId: annotation.id });
-    const fresh = await prisma.annotation.findUnique({ where: { id: annotation.id }, select: { bodyText: true } });
-    bodyText = fresh?.bodyText ?? "";
-    if (bodyText.trim() || attempt === 2) break;
-    await new Promise((resolve) => setTimeout(resolve, 150));
+  // Settled first, before the anchor: the body is validated against what the
+  // author actually typed (a keystroke can outrun the click; the helper's
+  // bounded retry absorbs that), and nothing below writes until it passes.
+  const settled = await settleAnnotationBody(annotation.id, session.user, { expectChange: false });
+  if ("error" in settled) {
+    return settled;
   }
-
-  if (!bodyText.trim()) {
-    return { error: "Annotation can't be empty." };
-  }
-  if (bodyText.length > MAX_BODY_LENGTH) {
-    return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
-  }
+  const bodyText = settled.bodyText;
 
   const parentId = annotation.parentAnnotationId;
 
@@ -226,10 +406,11 @@ export async function postAnnotation(opts: {
       annotationId: annotation.id,
       fileId: annotation.fileId,
       parentId,
-      bodyText,
+      settled,
       rawTarget: opts.pdfTarget,
       raise: opts.raise === true,
       raisedBy: session.user.name ?? session.user.email ?? "Someone",
+      authorUserId: session.user.id,
       // A reply anchors into its parent's *body*, exactly as on the doc side
       // (§13p) — that mechanism is container-independent, because an
       // annotation's body is a ydoc whatever it hangs off.
@@ -298,13 +479,11 @@ export async function postAnnotation(opts: {
   // the stamp exists for.
   //
   // Only for an anchor into the doc. A reply's anchor targets its parent
-  // annotation's ydoc, which the client has no live connection to (an
-  // annotation body renders from its proseJson cache, not a tap), so there is
-  // no version to capture and the tail is used. That is not a gap: nothing
-  // edits a posted annotation body today, so the tail *is* what the reader
-  // saw. It stops being true the day bodies become mutable (COLLAB.md's
-  // 2026-08-13 entry), which is when this branch needs a client-side capture
-  // of its own rather than a different server-side rule.
+  // annotation's ydoc, which the client has no live connection to — an
+  // annotation body renders from its `proseJson` cache, not a tap — so there
+  // is no Yjs snapshot for it to capture and this path cannot apply. The
+  // reply's stamp comes from the parent's newest settled version instead,
+  // below.
   if (ydocUpdateId === null && opts.atVersion && anchorRequested && parentId === null) {
     try {
       const headDoc = await materializeYdocAt(anchorYdocId, (await ydocStore.maxUpdateId(anchorYdocId))!);
@@ -329,6 +508,20 @@ export async function postAnnotation(opts: {
       // rather than fails.
       console.error(`[annotations] couldn't resolve the client's version for ${anchorYdocId}:`, err);
     }
+  }
+  // PLAN.md §22e — **an anchored reply stamps the version its author was
+  // actually reading, which is the parent's newest settled version**: the
+  // mark of its newest snapshot (`parentSettledMark`). A reader of a body
+  // sees settled text and never keystrokes, so that is the exact answer, and
+  // no client-side capture is needed — which is just as well, since the
+  // client has no live connection to the parent body to capture from.
+  //
+  // It is *more* precise than the tail now that bodies are mutable, and in
+  // exactly the case that matters: while an edit session is open the tail
+  // names text the replier has never seen, while the snapshot names the text
+  // they quoted.
+  if (ydocUpdateId === null && anchorRequested && parentId !== null) {
+    ydocUpdateId = await parentSettledMark(parentId);
   }
   if (ydocUpdateId === null) {
     ydocUpdateId = await ydocStore.maxUpdateId(
@@ -357,10 +550,17 @@ export async function postAnnotation(opts: {
     });
   }
 
-  await prisma.annotation.update({
-    where: { id: annotation.id },
-    data: {
-      ...(opts.raise ? { status: "RAISED", raisedAt: new Date() } : { status: "LIVE" }),
+  // Version 1, the status and `postedAt` in one transaction (writeSettledBody),
+  // so a posted annotation with no version cannot exist even briefly.
+  const now = new Date();
+  await writeSettledBody({
+    annotationId: annotation.id,
+    settled,
+    userId: session.user.id,
+    at: now,
+    alongside: {
+      ...(opts.raise ? { status: "RAISED", raisedAt: now } : { status: "LIVE" }),
+      postedAt: now,
       ydocUpdateId,
       ...(capturedAnchor
         ? { anchorFrom: capturedAnchor.from, anchorTo: capturedAnchor.to, quotedText: capturedAnchor.quotedText }
@@ -485,6 +685,323 @@ export async function discardDraftAnnotation(annotationId: string): Promise<void
   for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
 }
 
+// PLAN.md §22e — the edit session. Three actions, one for each way it can
+// end, and the shape of them is what keeps a posted annotation's cache
+// meaning "the last settled body":
+//
+//   begin   — stamps `editingSince`, which is what stops the store debounce
+//             from writing the cache while someone types.
+//   finish  — settles: validates the body at the drained mark, snapshots it as
+//             the next version and writes the cache from it, clears the stamp.
+//   cancel  — puts the newest version's content back, clears the stamp.
+//
+// **The gate is `requireOwnOrAdmin`**, the same pair that gates deleting an
+// annotation, and deliberately not the doc's read gate: until PR 1 of §22e
+// every reader of a doc held a writable connection to every annotation on it
+// (docs/COLLAB.md's 2026-08-13 entry called this the real gate on mutable
+// bodies). The token route now refuses to mint a writable token for anyone
+// else, and these three refuse to open a session for them.
+async function requireEditableBody(annotationId: string) {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: {
+      userId: true,
+      status: true,
+      docId: true,
+      fileId: true,
+      editingSince: true,
+      deletedAt: true,
+    },
+  });
+  if (!annotation) {
+    throw new Error("Annotation not found.");
+  }
+  // A DRAFT is not "posted", and its composer already owns a live editor —
+  // saveDraftAnnotation/postAnnotation are its vocabulary, not this.
+  if (annotation.status === "DRAFT") {
+    throw new Error("This annotation hasn't been posted yet.");
+  }
+  if (annotation.deletedAt !== null) {
+    throw new Error("This annotation has been deleted.");
+  }
+  if (!canUserEditAnnotationBody(session.user.id, session.user.role, annotation)) {
+    throw new Error("You don't have permission to edit this annotation.");
+  }
+  return { session, annotation };
+}
+
+export async function beginAnnotationEdit(annotationId: string): Promise<{ error?: string }> {
+  try {
+    const { session, annotation } = await requireEditableBody(annotationId);
+
+    // Someone else's session, still fresh. Two people editing one body is
+    // not a data problem — it is a ydoc, and concurrent editing is what a
+    // ydoc is for — but it is a *revision* problem: whoever finishes second
+    // records a revision attributed to them containing the other's words. So
+    // one session at a time, and the second person is told who has it.
+    if (annotation.editingSince && annotation.userId !== session.user.id) {
+      const age = Date.now() - annotation.editingSince.getTime();
+      if (age < STALE_EDIT_SESSION_MS) {
+        return { error: "Someone else is editing this annotation right now." };
+      }
+    }
+
+    await prisma.annotation.update({
+      where: { id: annotationId },
+      data: { editingSince: new Date() },
+    });
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Couldn't start editing." };
+  }
+}
+
+export async function finishAnnotationEdit(annotationId: string): Promise<{ error?: string }> {
+  try {
+    const { session, annotation } = await requireEditableBody(annotationId);
+
+    // Validated at the drained mark before anything is written: a Done on an
+    // emptied body returns the error with every cache column untouched, so
+    // readers keep the last settled text and the session stays open.
+    const settled = await settleAnnotationBody(annotationId, session.user, { expectChange: true });
+    if ("error" in settled) {
+      return settled;
+    }
+
+    if (settled.unchanged) {
+      // Opening the editor and closing it again is not an edit. Writing a
+      // version here would cost the author §22b's grace window for having
+      // changed nothing — the same no-op rule editComment has, and load-
+      // bearing for the same reason.
+      await prisma.annotation.update({ where: { id: annotationId }, data: { editingSince: null } });
+      for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
+      return {};
+    }
+
+    const now = new Date();
+    await writeSettledBody({
+      annotationId,
+      settled,
+      // The ADMIN when an ADMIN edited it, which is why this is the acting
+      // user rather than `annotation.userId`.
+      userId: session.user.id,
+      at: now,
+      alongside: { editingSince: null, editedAt: now },
+    });
+
+    for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
+    revalidatePath("/annotations");
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Couldn't save the annotation." };
+  }
+}
+
+export async function cancelAnnotationEdit(annotationId: string): Promise<{ error?: string }> {
+  try {
+    const { session, annotation } = await requireEditableBody(annotationId);
+
+    const newest = await prisma.ydocSnapshot.findFirst({
+      where: { ydocId: ydocIdForAnnotation(annotationId) },
+      orderBy: { lastYdocUpdateId: "desc" },
+      select: { ydoc: true },
+    });
+    if (!newest) {
+      // No settled state to go back to. Only reachable for a row posted
+      // before §22e's backfill ran against a database it didn't cover, which
+      // is not a state to guess at: leaving the session open is recoverable,
+      // silently accepting the draft as the body is not.
+      return { error: "This annotation has no earlier version to restore." };
+    }
+    let last;
+    try {
+      last = decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+    } catch (err) {
+      console.error(`[annotations] the newest version of ${annotationId} isn't TipTap-decodable:`, err);
+      return { error: "Couldn't read the earlier version. Nothing was changed." };
+    }
+
+    const { replaced } = await replaceAnnotationBody({
+      userId: session.user.id,
+      role: session.user.role,
+      annotationId,
+      proseJson: last.proseJson,
+    });
+    if (!replaced) {
+      // Deliberately not best-effort, unlike a mark: the session stays open
+      // so the author sees their words still there and can try again, rather
+      // than being told it rolled back while the abandoned text is live.
+      return { error: "Couldn't restore the earlier version. Nothing was changed." };
+    }
+
+    // Cleared *after* the restore, so no debounce can write the abandoned
+    // text into the cache in between.
+    await prisma.annotation.update({ where: { id: annotationId }, data: { editingSince: null } });
+    for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
+    return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Couldn't cancel editing." };
+  }
+}
+
+// PLAN.md §22e — the history behind an annotation's "edited" marker: the
+// body's snapshots, decoded, under §22b's silence rule.
+//
+// Read gate: whoever can read the container can read the history, the same
+// question `canUserAccessAnnotationYdoc` asks for the body itself. Editing is
+// narrower (author or ADMIN); seeing what changed is not, because the current
+// text is already visible to every reader and hiding its predecessor would
+// leave a visible "edited" marker with nothing behind it.
+export type AnnotationVersion = {
+  revisionNo: number;
+  proseJson: unknown;
+  bodyText: string;
+  createdAt: string;
+  authorName: string | null;
+  current: boolean;
+};
+
+export async function getAnnotationHistory(annotationId: string): Promise<AnnotationVersion[]> {
+  const session = await auth();
+  if (!session?.user) {
+    return [];
+  }
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: {
+      userId: true,
+      status: true,
+      postedAt: true,
+      doc: { select: { id: true, visibility: true } },
+      file: { select: { id: true, visibility: true } },
+    },
+  });
+  if (!annotation) {
+    return [];
+  }
+  if (!(await canUserAccessAnnotationYdoc(session.user.id, session.user.role, annotation))) {
+    return [];
+  }
+
+  // The versions are the body's snapshots in mark order (§22e), and the
+  // replies that quote it are the anchored, undeleted ones — the same two
+  // facts annotation-data.ts's loaders hold for a whole page.
+  const [snapshots, replies] = await Promise.all([
+    prisma.ydocSnapshot.findMany({
+      where: { ydocId: ydocIdForAnnotation(annotationId) },
+      orderBy: { lastYdocUpdateId: "asc" },
+      include: { user: { select: { name: true, email: true } } },
+    }),
+    prisma.annotation.findMany({
+      where: { parentAnnotationId: annotationId, anchorFrom: { not: null }, deletedByUserId: null },
+      select: { ydocUpdateId: true },
+    }),
+  ]);
+  const marks = snapshots.map((s) => s.lastYdocUpdateId);
+  const stamps = replies.flatMap((r) => (r.ydocUpdateId === null ? [] : [r.ydocUpdateId]));
+
+  const versions = withSupersededAt(
+    snapshots.map((s, index) => ({ ...s, revisionNo: index + 1 })),
+    (_row, index) => isVersionQuoted(marks, stamps, index),
+  );
+  // `postedAt` is the DRAFT -> LIVE transition — the moment readers could
+  // first have seen anything. Null only for a row the backfill never reached,
+  // for which every version is shown rather than silenced.
+  const postedAt = annotation.postedAt ?? new Date(0);
+  const visible = visibleVersions(versions, postedAt);
+  const newestNo = versions[versions.length - 1]?.revisionNo;
+
+  // Decoded from the snapshot bytes on demand — there is no text copy
+  // anywhere (§22e). A version that will not decode is listed from nothing
+  // rather than dropped, so the count a reader sees is still honest.
+  return visible
+    .map((version) => {
+      let body: { proseJson: unknown; bodyText: string };
+      try {
+        body = decodeAnnotationSnapshot(new Uint8Array(version.ydoc));
+      } catch (err) {
+        console.error(`[annotations] version ${version.revisionNo} of ${annotationId} isn't TipTap-decodable:`, err);
+        body = { proseJson: null, bodyText: "" };
+      }
+      return {
+        revisionNo: version.revisionNo,
+        proseJson: body.proseJson,
+        bodyText: body.bodyText,
+        createdAt: version.createdAt.toISOString(),
+        authorName: version.user ? (version.user.name ?? version.user.email) : null,
+        current: version.revisionNo === newestNo,
+      };
+    })
+    .reverse();
+}
+
+// PLAN.md §22e — the state a reply's stored anchor was measured against, for
+// a reply whose quote no longer resolves in its parent's current body.
+//
+// **This is where §13q's version stamp finally earns its keep.** A reply
+// already records which update of its parent's log it was written against —
+// since §22e the mark of a settled version, so `materializeYdocAt` finds a
+// snapshot exactly there and replays nothing; even without one, an annotation
+// body is 100–5000 characters and the replay is a few milliseconds — the cost
+// that makes COLLAB.md §7's materialize half affordable here and not on the
+// doc side. The *diff* half stays unbuilt: this shows the reader the text that
+// was quoted, it does not try to repair the anchor.
+export async function getQuotedParentVersion(
+  replyAnnotationId: string,
+): Promise<{ proseJson: unknown; quotedText: string } | null> {
+  const session = await auth();
+  if (!session?.user) {
+    return null;
+  }
+  const reply = await prisma.annotation.findUnique({
+    where: { id: replyAnnotationId },
+    select: {
+      parentAnnotationId: true,
+      ydocUpdateId: true,
+      quotedText: true,
+      anchorFrom: true,
+      parent: {
+        select: {
+          userId: true,
+          status: true,
+          doc: { select: { id: true, visibility: true } },
+          file: { select: { id: true, visibility: true } },
+        },
+      },
+    },
+  });
+  if (!reply?.parentAnnotationId || !reply.parent || reply.ydocUpdateId === null || reply.anchorFrom === null) {
+    return null;
+  }
+  // The parent's gate, not the reply's: what is being handed back is a state
+  // of the parent's body.
+  if (!(await canUserAccessAnnotationYdoc(session.user.id, session.user.role, reply.parent))) {
+    return null;
+  }
+
+  const ydocId = ydocIdForAnnotation(reply.parentAnnotationId);
+  let materialized;
+  try {
+    materialized = await materializeYdocAt(ydocId, reply.ydocUpdateId);
+  } catch (err) {
+    console.error(`[annotations] couldn't materialize ${ydocId} at ${reply.ydocUpdateId}:`, err);
+    return null;
+  }
+  try {
+    const { proseJson } = decodeAnnotationBody(materialized);
+    return { proseJson, quotedText: reply.quotedText };
+  } catch (err) {
+    console.error(`[annotations] ${ydocId} at ${reply.ydocUpdateId} isn't TipTap-decodable:`, err);
+    return null;
+  } finally {
+    materialized.destroy();
+  }
+}
+
 async function requireOwnOrAdmin(annotationId: string) {
   const session = await auth();
   if (!session?.user) {
@@ -569,14 +1086,18 @@ async function postFileAnnotation(opts: {
   annotationId: string;
   fileId: string;
   parentId: string | null;
-  bodyText: string;
+  /** The validated body, from `settleAnnotationBody` — version 1 is written from it. */
+  settled: SettledBody;
   rawTarget: unknown;
   raise: boolean;
   /** Display name for the notification email — resolved by the caller, which already has the session. */
   raisedBy: string;
+  /** Who is posting — PLAN.md §22e's version 1 is attributed to them. */
+  authorUserId: string;
   replyAnchor: { from: number; to: number; quotedText: string } | null;
 }): Promise<{ error?: string }> {
-  const { annotationId, fileId, parentId, bodyText, raise, raisedBy, replyAnchor } = opts;
+  const { annotationId, fileId, parentId, settled, raise, raisedBy, replyAnchor } = opts;
+  const bodyText = settled.bodyText;
 
   // A root annotation may carry a PDF target; a reply never does — its anchor
   // points into its parent's body, not into the document, for the same reason
@@ -588,14 +1109,45 @@ async function postFileAnnotation(opts: {
   const quotedText = captured?.quotedText ?? "";
   const storedTarget = captured?.target ?? null;
 
-  await prisma.annotation.update({
-    where: { id: annotationId },
-    data: {
-      ...(raise ? { status: "RAISED" as const, raisedAt: new Date() } : { status: "LIVE" as const }),
+  // The parent's newest settled version — what the replier was actually
+  // reading (see the doc path's own comment on this).
+  const parentStamp = parentId !== null && replyAnchor !== null ? await parentSettledMark(parentId) : null;
+
+  // PLAN.md §22e — version 1, exactly as on the doc side. An annotation's
+  // body is a ydoc whatever it hangs off, so its history is container-
+  // independent: the file path differs in its *anchor*, not in its body.
+  const now = new Date();
+  await writeSettledBody({
+    annotationId,
+    settled,
+    userId: opts.authorUserId,
+    at: now,
+    alongside: {
+      ...(raise ? { status: "RAISED" as const, raisedAt: now } : { status: "LIVE" as const }),
+      postedAt: now,
       ...(storedTarget ? { pdfTarget: storedTarget as unknown as Prisma.InputJsonValue, quotedText } : {}),
       // A reply's anchor into its parent's body, unchanged from the doc side.
       ...(replyAnchor
-        ? { anchorFrom: replyAnchor.from, anchorTo: replyAnchor.to, quotedText: replyAnchor.quotedText }
+        ? {
+            anchorFrom: replyAnchor.from,
+            anchorTo: replyAnchor.to,
+            quotedText: replyAnchor.quotedText,
+            // PLAN.md §22e — the same stamp the doc side's anchored reply
+            // gets, and for the same reason: an annotation body is a ydoc
+            // whatever it hangs off, so once bodies are mutable a reply into
+            // one needs to name the version it quoted. This is the only
+            // circumstance in which a *file* annotation carries a
+            // `ydoc_update_id` at all — it names the parent body's log, never
+            // the file, which has none.
+            //
+            // Still unbuilt on this path: server-side derivation of the quote
+            // itself (captureAnchorInYdoc, which the doc side runs). A file
+            // reply's offsets and quote are taken from the client as they
+            // were before §22e, so its stored triple is not self-consistent
+            // by construction the way a doc reply's is. Pre-existing, and
+            // listed in §22h rather than quietly fixed here.
+            ydocUpdateId: parentStamp,
+          }
         : {}),
     },
   });

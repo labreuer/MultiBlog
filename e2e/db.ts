@@ -32,6 +32,8 @@ import type {
   AvatarFacts,
   TestInvite,
   TestAnchoredLink,
+  CommentFacts,
+  AnnotationEditFacts,
 } from "./db-worker";
 
 export type {
@@ -55,6 +57,10 @@ export type {
   AvatarFacts,
   TestInvite,
   TestAnchoredLink,
+  CommentFacts,
+  CommentRevisionFacts,
+  AnnotationEditFacts,
+  AnnotationVersionFacts,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
 
@@ -251,6 +257,20 @@ export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotatio
 export const markPresentAtStamp = (...args: Parameters<DbHandlers["markPresentAtStamp"]>): Promise<boolean> =>
   call("markPresentAtStamp", ...args);
 
+// PLAN.md §22e — an annotation body's settled-state history, and the two
+// knobs the grace window and the abandoned-session UI are tested with.
+export const getAnnotationEditFacts = (
+  ...args: Parameters<DbHandlers["getAnnotationEditFacts"]>
+): Promise<AnnotationEditFacts | null> => call("getAnnotationEditFacts", ...args);
+
+export const backdateAnnotationPosting = (
+  ...args: Parameters<DbHandlers["backdateAnnotationPosting"]>
+): Promise<void> => call("backdateAnnotationPosting", ...args);
+
+export const setAnnotationEditingSince = (
+  ...args: Parameters<DbHandlers["setAnnotationEditingSince"]>
+): Promise<void> => call("setAnnotationEditingSince", ...args);
+
 export const createTestAnnotation = (
   ...args: Parameters<DbHandlers["createTestAnnotation"]>
 ): Promise<{ id: string }> => call("createTestAnnotation", ...args);
@@ -272,6 +292,15 @@ export const getPostContentText = (...args: Parameters<DbHandlers["getPostConten
 
 export const countDocYdocSnapshots = (...args: Parameters<DbHandlers["countDocYdocSnapshots"]>): Promise<number> =>
   call("countDocYdocSnapshots", ...args);
+
+// PLAN.md §22c — the revision history behind one comment, and the knob that
+// puts an edit outside the grace window (see backdateComment's own comment for
+// why this is not page.clock).
+export const getCommentFacts = (...args: Parameters<DbHandlers["getCommentFacts"]>): Promise<CommentFacts | null> =>
+  call("getCommentFacts", ...args);
+
+export const backdateComment = (...args: Parameters<DbHandlers["backdateComment"]>): Promise<void> =>
+  call("backdateComment", ...args);
 
 export const getCommentStatus = (...args: Parameters<DbHandlers["getCommentStatus"]>) =>
   call("getCommentStatus", ...args);

@@ -9,8 +9,9 @@ import { derivePostStatus } from "@/lib/post-status";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
 import { getClientIp } from "@/lib/request-ip";
-import { isCommentRateLimited } from "@/lib/rate-limit";
+import { isCommentEditRateLimited, isCommentRateLimited } from "@/lib/rate-limit";
 import { checkSpam } from "@/lib/spam-check";
+import { visibleVersions, withSupersededAt } from "@/lib/edit-grace";
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
@@ -157,6 +158,11 @@ export async function submitComment(
         sitePolicy: siteSettings.defaultModerationPolicy === "AUTO" ? "AUTO" : "ALWAYS",
       });
 
+  // PLAN.md §22c — the comment and its revision 1 in one transaction, which
+  // is what makes `Comment.body`'s "cache of the newest revision" invariant
+  // hold from the row's first instant rather than from its first edit. A
+  // nested create rather than two statements: same atomicity, one round trip,
+  // and the revision cannot be given the wrong `commentId`.
   await prisma.comment.create({
     data: {
       threadId: thread.id,
@@ -165,6 +171,16 @@ export async function submitComment(
       body: { text: trimmedBody },
       status,
       ipAddress,
+      revisions: {
+        create: {
+          revisionNo: 1,
+          body: { text: trimmedBody },
+          // The commenter's user when they are signed in, null when they are
+          // not — an anonymous original is the one version with nobody to
+          // name, and `commenter.userId` is already exactly that distinction.
+          authorUserId: commenter.userId,
+        },
+      },
     },
   });
 
@@ -254,6 +270,186 @@ async function restoreOne(userId: string, role: Role, commentId: string) {
   });
 
   return comment.thread.post;
+}
+
+// PLAN.md §22c — editing a posted comment.
+//
+// Three things about the shape are decisions rather than plumbing:
+//
+// 1. **The gate is the moderation gate**, `canUserEditPost`, plus "it's
+//    mine". Whoever may approve, spam and delete a comment may also fix it;
+//    inventing a narrower predicate would mean a moderator who can destroy a
+//    comment outright cannot correct its spelling. §22f has the table.
+// 2. **An anonymous commenter cannot edit**, because there is nothing to
+//    prove they are the same person. The honest self-service path is an
+//    emailed edit link, deferred with the rest of docs/EMAIL.md's list. The
+//    moderation gate covers fixing their typo on request.
+// 3. **A no-op edit writes nothing at all.** Not an optimization: a revision
+//    row stamped `now` would close §22b's grace window (it supersedes the
+//    previous version at the moment of the click), so a Save with nothing
+//    changed could silently cost the author their quiet-correction window.
+//
+// Moderation state survives an edit except when the spam check trips, in which
+// case the edit is still recorded — a moderator reversing the status should be
+// able to see what was actually written. Re-running the full cascade and
+// sending an untrusted commenter's edit back to PENDING is the stricter
+// policy, and needs per-revision status to avoid the comment vanishing
+// mid-conversation; §22h defers it with that prerequisite named.
+export type EditCommentResult = { error?: string; status?: CommentStatus };
+
+export async function editComment(commentId: string, body: string): Promise<EditCommentResult> {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: "You must be signed in to edit a comment." };
+  }
+  const { id: userId, role } = session.user;
+
+  if (!body.trim()) {
+    return { error: "Comment can't be empty." };
+  }
+  if (body.length > MAX_BODY_LENGTH) {
+    return { error: `Comment is too long (max ${MAX_BODY_LENGTH} characters).` };
+  }
+
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    include: {
+      commenter: { select: { id: true, userId: true, displayName: true, email: true } },
+      thread: { select: { post: { select: { id: true, slug: true, publishedAt: true } } } },
+      // The tail alone, not the whole history: all an edit needs is the
+      // number to follow and the text to compare against.
+      revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { revisionNo: true, body: true } },
+    },
+  });
+  if (!comment) {
+    return { error: "Comment not found." };
+  }
+  if (comment.deletedAt) {
+    return { error: "This comment has been deleted." };
+  }
+
+  const isOwnComment = comment.commenter.userId === userId;
+  const canModerate = await canUserEditPost(userId, role, comment.thread.post.id);
+  if (!isOwnComment && !canModerate) {
+    return { error: "You don't have permission to edit this comment." };
+  }
+
+  const trimmed = body.trim();
+  const currentText = (comment.body as { text?: string } | null)?.text ?? "";
+  if (trimmed === currentText) {
+    // Deliberately not an error: nothing is wrong, and nothing happened.
+    return {};
+  }
+
+  if (await isCommentEditRateLimited(userId)) {
+    return { error: "You're editing comments too quickly. Please wait a few minutes and try again." };
+  }
+
+  const isSpam =
+    !isAdmin(role) &&
+    (await checkSpam({
+      body: trimmed,
+      displayName: comment.commenter.displayName,
+      email: comment.commenter.email,
+      ipAddress: comment.ipAddress,
+    }));
+
+  // `revisions[0]` is absent only for a row predating the §22c backfill, which
+  // cannot exist — the migration covered every comment, including soft-deleted
+  // ones. Falling back to the comment's own count keeps the numbering dense
+  // rather than throwing if that ever stops being true.
+  const nextRevisionNo = (comment.revisions[0]?.revisionNo ?? 0) + 1;
+
+  await prisma.$transaction([
+    prisma.commentRevision.create({
+      data: {
+        commentId,
+        revisionNo: nextRevisionNo,
+        body: { text: trimmed },
+        // Who wrote *this version* — the moderator when a moderator edited it,
+        // which is why this is the acting user and not `commenter.userId`.
+        authorUserId: userId,
+      },
+    }),
+    prisma.comment.update({
+      where: { id: commentId },
+      data: {
+        body: { text: trimmed },
+        editedAt: new Date(),
+        ...(isSpam ? { status: "SPAM" as CommentStatus, statusChangedById: userId, statusChangedAt: new Date() } : {}),
+      },
+    }),
+  ]);
+
+  revalidateTouchedPosts([comment.thread.post]);
+  return { status: isSpam ? "SPAM" : comment.status };
+}
+
+// PLAN.md §22c — the history one comment's "edited" marker opens.
+//
+// **The silence rule is applied here, on the server**, so a silent version
+// never reaches the browser at all. The alternative — shipping every revision
+// and hiding some in the client — would put the text of an edit nobody is
+// meant to know about into a payload anyone can read.
+//
+// Fetched on open rather than rendered into the page for the reason
+// `TagChips` is: the post page is statically generated (§21), and a dynamic
+// read there throws at build (§12f).
+export type CommentVersion = {
+  revisionNo: number;
+  bodyText: string;
+  createdAt: string;
+  authorName: string | null;
+  /** The text currently on screen, i.e. the newest version. */
+  current: boolean;
+};
+
+export async function getCommentHistory(commentId: string): Promise<CommentVersion[]> {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    include: {
+      commenter: { select: { userId: true } },
+      thread: { select: { post: { select: { id: true } } } },
+      revisions: {
+        orderBy: { revisionNo: "asc" },
+        include: { author: { select: { name: true, email: true } } },
+      },
+    },
+  });
+  if (!comment) {
+    return [];
+  }
+
+  // Who may see it: the same people who may see the comment. An APPROVED,
+  // undeleted comment is public, so its history is too — that is the whole
+  // point of a visible edit. Anything else (pending, spam, deleted) is
+  // withheld from everyone but its own author and whoever moderates the post,
+  // matching what the reading views already show of the comment itself.
+  const isPublic = comment.status === "APPROVED" && comment.deletedAt === null;
+  if (!isPublic) {
+    const session = await auth();
+    if (!session?.user) return [];
+    const isOwnComment = comment.commenter.userId === session.user.id;
+    const canModerate = await canUserEditPost(session.user.id, session.user.role, comment.thread.post.id);
+    if (!isOwnComment && !canModerate) return [];
+  }
+
+  // `quoted` is always false until something exists that can point at a
+  // comment revision. Written as a call rather than a literal so the one line
+  // to change is here.
+  const versions = withSupersededAt(comment.revisions, () => false);
+  const visible = visibleVersions(versions, comment.createdAt);
+  const newestNo = versions[versions.length - 1]?.revisionNo;
+
+  return visible
+    .map((revision) => ({
+      revisionNo: revision.revisionNo,
+      bodyText: (revision.body as { text?: string } | null)?.text ?? "",
+      createdAt: revision.createdAt.toISOString(),
+      authorName: revision.author?.name ?? revision.author?.email ?? null,
+      current: revision.revisionNo === newestNo,
+    }))
+    .reverse();
 }
 
 // Revalidates the public post page (comment visibility) and its per-post
