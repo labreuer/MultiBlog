@@ -14,6 +14,9 @@ to re-derive the decision from.
 | [PLAN.md](PLAN.md) | Architecture and build order — the **fallback**, not the default home. Record a decision here only when no doc below owns its topic; where one does, that doc holds the reasoning and PLAN.md merely links to it. What is actually built is noted per section ("Built &lt;date&gt;", "as built", "Known gaps") — **not** in §10, which stopped at 2026-07-25. |
 | [TODO.md](TODO.md) | Open items carrying enough context to act on directly. |
 | [docs/COLLAB.md](docs/COLLAB.md) | How a remark stays attached to a passage while the passage moves — every strategy used, the ones rejected, and how to pick. |
+| [docs/COMMENTS.md](docs/COMMENTS.md) | Comments as built: identity and moderation, the validated body and its two front doors, drafts, editing with history and the grace window, and quotation as an anchor row. |
+| [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
+| [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
 | [docs/ANCHORED_LINKS.md](docs/ANCHORED_LINKS.md) | Anchored links as built: one `/link/<id>` URL for passages across docs and PDFs — schema, the landing route that redirects or excerpts per viewer, the per-target visibility rule, the tray (a draft, or a minted link reopened for editing — one open link per creator), and every deviation from the plan. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
@@ -64,13 +67,10 @@ before changing the behavior it describes.
   what keeps the rail server-rendered in the right place. The `.anchored` class is toggled
   from JS, never from a `@media` block. 1180 is a *composed* width (800 + 2.5rem + 340) and
   moves when the layout does, so it is never a round number to round off. The rail's
-  *width* is composed the same way and is a range, not a number —
-  `clamp(340px, calc(100% - 800px - 2.5rem), 680px)`, and **never a `minmax()`**, which
-  grid's free-space distribution fills before the prose (STYLE.md's centred-column
-  widths). Growing it needs no JS: `MARGIN_NOTES_MEDIA_QUERY` answers only whether there
-  *is* a rail. The doc *editor*'s rail matches a second clause besides that threshold
-  (phone landscape), where its cards are a queue rather than aligned and so keep the
-  340px floor. PLAN.md §18, §18c.
+  *width* is a range, 340px to 680px, written as a `clamp()` and **never a `minmax()`** —
+  STYLE.md's centred-column widths say why, and why growing it needs no JS. The doc
+  *editor*'s rail matches a second clause besides that threshold (phone landscape), where
+  its cards are a queue rather than aligned and so keep the 340px floor. docs/MARGIN_NOTES.md.
 - **An annotation's mechanism follows the surface, never the permission.** The doc *editor*
   writes an `annotation` mark into the doc's ydoc and leaves `anchorFrom`/`anchorTo`/
   `quotedText` null; either *reading* view writes those three columns and never touches the
@@ -78,9 +78,11 @@ before changing the behavior it describes.
   instead". Don't "unify" them by giving the reading views the mark back: that write is the
   thing being removed, not an implementation detail. `resolveAnnotationRanges`
   (`src/lib/annotation-marks.ts`) is the one function that answers for both, and every rail and
-  jump target goes through it rather than knowing there are two. PLAN.md §13o, docs/COLLAB.md.
+  jump target goes through it rather than knowing there are two. docs/ANNOTATIONS.md
+  "Anchoring", docs/COLLAB.md.
 - **One anchor row shape, per-consumer tables.** `tag_anchor`, `anchored_link_anchor` and
-  `comment_quote_anchor` (docs/ANCHORED_LINKS.md, PLAN.md §23c — and, from §20's PR 2,
+  `comment_quote_anchor` (docs/ANCHORED_LINKS.md, docs/COMMENTS.md "The anchor row" — and,
+  from §20's PR 2,
   `annotation_anchor`) share a column shape by
   *compiler*, not by convention:
   `src/lib/anchors/` holds the target arc as a discriminated union, `parseSelector`, and the
@@ -116,61 +118,49 @@ before changing the behavior it describes.
   viewer can publish from, so switching to one restores everything). PLAN.md §15i,
   docs/PERMISSIONS.md's "A post's byline is not its doc's".
 - **Every version of every comment and annotation body is stored; the three-minute window is a
-  *display* rule.** An edit within `EDIT_GRACE_MS` of posting shows readers nothing — no marker,
-  no history entry — but it is still a `comment_revision` row or a `ydoc_snapshot` on the
-  annotation body's own ydoc, and `editedAt` is still stamped. `src/lib/edit-grace.ts` holds the
-  constant and the two predicates, and is the only place that rule exists for both kinds; a
-  quotation of a version cancels its silence. Don't reimplement the comparison at a call site,
-  and don't ship version timestamps to the browser to apply it there — the existence of a silent
-  edit is the thing being withheld, so both loaders resolve it server-side. An annotation's
-  versions are decoded from their snapshots on demand — there is no text copy and no revision
-  table — and only the settle paths may write one there (the debug button refuses the
-  namespace). PLAN.md §22b, §22e.
+  *display* rule.** `src/lib/edit-grace.ts` is the only place that rule exists, for both kinds.
+  Don't reimplement the comparison at a call site, and don't ship version timestamps to the
+  browser to apply it there — the existence of a silent edit is the thing being withheld, so
+  both loaders resolve it server-side. A comment's versions are `comment_revision` rows; an
+  annotation's are `ydoc_snapshot` rows on its own ydoc, decoded on demand — there is no text
+  copy and no revision table, and only the settle paths may write one there (the debug button
+  refuses the namespace). docs/COMMENTS.md and docs/ANNOTATIONS.md, "Editing after posting".
 - **A comment body is ProseMirror JSON that `parseCommentBody` has accepted, and nothing
-  else.** The schema (`pmCommentContentSchema`) *is* the validation — there is no HTML
-  anywhere between commenter and reader, and no sanitizer to keep in step. Two things
-  are easy to undo by accident: the Markdown box's parse list is a **superset** of the
-  schema (three parse-only shims, docs/DOC_IMPORT.md §11) because `@tiptap/markdown`'s
-  fallback emits a `heading` node and deletes fences whatever is registered, so never
-  store a parse result without `parseCommentBody` after it; and the parse runs on the
-  **server** because headless, raw HTML becomes literal text, where a browser-side parse
-  would make real nodes of it — so no client-side preview or conversion, ever
-  (`convertCommentBody` is a round trip on purpose). `Comment.bodyText` is derived by the
-  same writers, never a trigger. PLAN.md §23b, §23m.
+  else.** The schema *is* the validation; there is no HTML between commenter and reader and
+  no sanitizer to keep in step. Two things are easy to undo by accident: the Markdown box's
+  parse list is a superset of the schema, so never store a parse result without
+  `parseCommentBody` after it; and the parse runs on the **server**, where raw HTML becomes
+  literal text — so no client-side preview or conversion, ever. docs/COMMENTS.md "The body",
+  docs/DOC_IMPORT.md §11.
 - **A comment's quotation is found by text and stored from the target, never from the
-  query.** `captureCommentQuotes` (PLAN.md §23n) flattens each immutable target once, matches
-  the typed words, *verifies* every hit against `quotedTextAt` the range, and rewrites the body's
-  span to that derivation before anything is stored — so the typed words are only ever a query,
-  and a flattening mistake costs a missed match, never a wrong anchor. That verify-then-derive
-  step is what makes this the one place docs/COLLAB.md §4's rejected flatten-and-map technique
-  is used (COLLAB.md §9); don't lift the search out of it into a live surface, and don't store a
-  client's `pendingQuotes` hint as an answer. `check-comment-quotes.ts` holds the three copies
-  (body span, row, pinned version) to one string.
+  query.** `captureCommentQuotes` verifies every match against the immutable target and
+  rewrites the body's span to that derivation before anything is stored. That verify-then-derive
+  step is the only reason docs/COLLAB.md §4's rejected flatten-and-map technique is used here
+  (COLLAB.md §9): don't lift the search into a live surface, and don't store a client's
+  `pendingQuotes` hint as an answer. docs/COMMENTS.md "The matcher".
 - **`Comment.body` is a cache of the newest `comment_revision`, and is never written alone.**
-  One transaction writes both, in `submitComment` and `editComment`; there is no legitimate
-  staleness window, so any divergence is a fault —
-  `scripts/integrity/check-comment-revisions.ts` is the standing guard. Every reader path still
-  reads the column, which is why adding history changed no query. PLAN.md §22c.
+  One transaction writes both; there is no legitimate staleness window, so any divergence is a
+  fault, and `scripts/integrity/check-comment-revisions.ts` is the standing guard.
+  docs/COMMENTS.md "Editing after posting".
 - **`Annotation.proseJson` is the last *settled* body, not the live text** — the
-  store-debounce cache skips its write while `Annotation.editingSince` is set, which is what
-  lets a posted body be editable without a single reader path changing, and a settle (post,
-  Done) writes it from the snapshot it records, in the same transaction, so the cache and the
-  newest version agree by construction. So the rule below about `Doc.proseJson` does *not*
-  transfer to this column: positioning off it is fine, because it cannot be mid-sentence. The
-  flush endpoint deliberately ignores the guard (a flush is an explicit "write it now" and
-  `saveDraftAnnotation` is what asks); a settle asks it for the mark only (`writeCache: false`)
-  and validates before anything is written. PLAN.md §22e.
+  store-debounce cache skips its write while `Annotation.editingSince` is set, and a settle
+  (post, Done) writes it from the snapshot it records, in the same transaction, so the cache
+  and the newest version agree by construction. So the rule below about `Doc.proseJson` does
+  *not* transfer to this column: positioning off it is fine, because it cannot be mid-sentence.
+  The flush endpoint deliberately ignores the guard; a settle asks it for the mark only
+  (`writeCache: false`) and validates before anything is written.
+  docs/ANNOTATIONS.md "Editing after posting".
 - **Never position a doc annotation off `Doc.proseJson`.** It's a store-debounce snapshot,
   stale by seconds while anyone is typing. Fine as the *seed* for which cards start in the
   rail, and nothing more.
 - **A reply's anchor points into its parent annotation's body, not the doc** — same three
   columns, different target ydoc, different update log (`ydoc:annotation:<parentId>`).
   `postAnnotation` picks the target from `parentAnnotationId` rather than taking it as an
-  argument. PLAN.md §13p.
+  argument. docs/ANNOTATIONS.md "Replies anchor into their parent".
 - **`Annotation.ydocUpdateId` is the version the annotator was looking at**, not the log's tail
   at post time, and `quotedText` is derived server-side against exactly that state — so
   replaying reproduces the quote by construction. `scripts/integrity/check-annotation-anchors.ts`
-  verifies the arrangement still holds. PLAN.md §13n, §13q.
+  verifies the arrangement still holds. docs/ANNOTATIONS.md "The version stamp".
 - **A PDF anchor cannot drift**, because a file's `sha256` is its identity — no tracking
   plugin, no re-resolution, no version stamp. Don't reach for the doc side's drift machinery.
   The one thing that *can* invalidate a stored anchor is our own normaliser, so bump
@@ -398,17 +388,15 @@ working on.
   finished string in the RSC payload. A call site whose data arrives from a client-side fetch
   is also fine, since it was never in the SSR HTML. **This class is invisible to every local
   check**, including `npm run e2e` and `web-prod`: locally the dev server and the browser are
-  one machine and so always agree. Same reason PLAN.md §13m's collab bug survived to
-  production.
+  one machine and so always agree. Same reason the collab-origin bug (docs/YDOC.md) survived
+  to production.
 - **On a statically generated page, anything rendered before `useSession` answers is a
-  guess — and a `required` guess swallows the submit.** The HTML has no session, so the
-  first render is the signed-out one; a form that renders `required` identity fields on that
-  guess fails *constraint validation* if it is submitted before the answer arrives, which
-  dispatches no submit event and leaves nothing behind: no request, no error, no pending
-  state, no console line. Gate such fields on `status !== "loading"` and disable the submit
-  with them (`CommentForm`, PLAN.md §6). Local checks never see it — the session answers in
-  milliseconds on this machine — and it surfaced only as an e2e click that produced no POST
-  under a loaded suite.
+  guess — and a `required` guess swallows the submit.** A form that renders `required` identity
+  fields on the signed-out first render fails *constraint validation* if submitted before the
+  session arrives: no submit event, no request, no error, no console line. Gate such fields on
+  `status !== "loading"` and disable the submit with them (`CommentForm`). Local checks never
+  see it; it surfaced only as an e2e click that produced no POST under a loaded suite.
+  docs/COMMENTS.md "Identity, moderation and abuse".
 - **No hex or named color literal anywhere in `src/`** outside `src/app/globals.css`,
   `src/lib/author-colors.ts`, and the handful named in STYLE.md's Dark theme section. Every
   color is one of `globals.css`'s tokens — `style={{ color: "var(--text-secondary)" }}` is the
