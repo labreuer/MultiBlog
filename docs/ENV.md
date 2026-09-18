@@ -64,9 +64,11 @@ derivation.
 
 The Next server calls the collab process directly over plain HTTP:
 `/admin/ydoc-snapshot`, `/admin/annotation-mark`, `/admin/annotation-unmark`,
-`/admin/annotation-flush`. That origin comes from `src/lib/collab-http-origin.ts` —
+`/admin/annotation-flush`, `/admin/annotation-replace`. That origin comes from
+`src/lib/collab-http-origin.ts` —
 `COLLAB_INTERNAL_URL` falling back to `http://127.0.0.1:${COLLAB_PORT}` — and must
-**never** be derived from `NEXT_PUBLIC_COLLAB_URL`.
+**never** be derived from `NEXT_PUBLIC_COLLAB_URL`. The full account of the bug is docs/YDOC.md,
+"The server→collab HTTP origin".
 
 It was, once, and the bug was invisible locally and total in production: the public URL is
 `wss://<host>/collab`, nginx forwards `/collab/...` unrewritten, the handler matches on

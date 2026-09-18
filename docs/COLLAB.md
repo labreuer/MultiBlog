@@ -134,7 +134,7 @@ per event, not one per thread. Zero cost at read time.
 
 **Surface:** the doc editor (`/doc/[slug]/edit`). **Code:** `src/lib/annotation-extension.ts`,
 `server/ydoc-hooks.ts`'s `handleApplyAnnotationMark`, `src/lib/annotation-data.ts`.
-**Design:** PLAN.md §12h, §12i, §13o.
+**Design:** PLAN.md §12h, §12i, §13o. **As built:** docs/ANNOTATIONS.md, "Anchoring".
 
 > **This is now one of two mechanisms on the same model, and no longer the one a *reader*
 > gets.** Annotating from either reading view stores offsets instead —
@@ -232,7 +232,7 @@ be a new-docs-only decision, not a config change.
 **Surface:** `/doc/[slug]` — both the doc itself and, since PLAN.md §13p, the body of any
 posted annotation on it. **Code:** `Annotation.anchor_from`/`anchor_to`/`quoted_text`,
 `src/lib/annotation-anchor-capture.ts`, `src/lib/annotation-highlight-extension.ts`.
-**Design:** PLAN.md §13o, §13p. **This is [§7](#7-anchoring-to-a-scrub-reachable-state) built**
+**Design:** PLAN.md §13o, §13p; **as built:** docs/ANNOTATIONS.md, "Anchoring". **This is [§7](#7-anchoring-to-a-scrub-reachable-state) built**
 — its columns and its version stamp, though not yet its materialize-and-diff resolver.
 
 Same model, same surface family, opposite side of §2's central trade. §2 buys "cannot drift" by
@@ -838,7 +838,8 @@ starts to hurt.
 
 **Surface:** a post's comment thread. **Code:** `src/lib/comment-quote-match.ts`,
 `src/lib/comment-quote-extract.ts`, `src/lib/comment-quote-capture.ts`, `comment_quote_anchor`,
-`scripts/integrity/check-comment-quotes.ts`. **Design:** PLAN.md §23f, §23n. Built 2026-09-16.
+`scripts/integrity/check-comment-quotes.ts`. **Design:** PLAN.md §23f, §23n; **as built:**
+docs/COMMENTS.md, "The matcher". Built 2026-09-16.
 
 A comment quotes a passage of the post or of another comment, inline or as a block, and the
 quotation is a row on §20a's anchor envelope pinning an immutable version — a publication event
@@ -1058,7 +1059,7 @@ predicted came true and one they refused came back under a condition:
   and the stored text is derived from the verified range rather than taken from the query. A
   flattening mistake is a missed match, never a wrong anchor. Don't lift it into a live surface.
 
-Not built, recorded in PLAN.md §23k/§23n: the article does not highlight comment quotations of
+Not built, recorded in PLAN.md §23k and docs/COMMENTS.md: the article does not highlight comment quotations of
 it, and a quoted comment's card does not highlight the quoted span — both static renders with
 no decoration layer; the citation link is the connection.
 

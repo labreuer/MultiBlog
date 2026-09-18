@@ -1,10 +1,10 @@
 # Integrity checks
 
-Five scripts — three about the doc/ydoc chain, one about the PDF side, one about the schema
-itself, plus the two §22 revision checks described at the bottom. The count in the next
-sentence is the original three.
+Eight scripts. Three are about the doc/ydoc chain and are described first; then one about
+the PDF side, one about the schema itself, and the three that arrived with PLAN.md §22 and
+§23 — the two edit-history checks and the quotation check — at the bottom.
 
-Three scripts. Two verify one link each in the chain that turns an append-only
+The doc/ydoc three: two verify one link each in the chain that turns an append-only
 log into the columns the app reads; the third verifies a claim made *about* a
 point in that log:
 

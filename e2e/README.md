@@ -311,7 +311,7 @@ the admin account.
   `localStorage`, which a fresh test context does not carry over, so a spec that switches to
   rich mode does not change the next spec's form. The inline edit box is
   `{ name: "Edit comment" }` in either mode. `comment-markdown.spec.ts` submits two real
-  comments through the form and `comment-quoting.spec.ts` two more, which count against the
+  comments through the form and `comment-quoting.spec.ts` one more, which count against the
   rate limit below; everything else those specs need is seeded. **`createCommentWithQuotes()`**
   runs the real parse → match → rewrite path (PLAN.md §23n) without the form, so a comment
   that quotes the post or another comment can exist without spending a submission, and takes
