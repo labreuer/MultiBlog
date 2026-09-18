@@ -1,4 +1,19 @@
 .container {
+  /* `width: 100%` is load-bearing, not a default restated. This is a <div>
+     straight under <body>, which is a column flex container, and the auto
+     side margins below suppress a flex item's `align-self: stretch` — so
+     without a width it is sized fit-content, i.e. to its *content*. That is
+     the trap `body > main { width: 100% }` in globals.css exists for
+     (STYLE.md, "Narrow viewports and horizontal overflow"); this element
+     escapes that rule by not being a <main>. It went unnoticed while the
+     rail was a fixed 340px, because the grid's max-content then happened to
+     be the full 1180px composition. Once the rail track carried a percentage
+     (the `clamp()` below), grid sizing treats that track as `auto` while
+     computing the container's intrinsic width, the grid measured 840px
+     (800 + the gap, and nothing for the rail), and the rail's 340px floor
+     then came out of the reading column at every width past the breakpoint:
+     460px of prose beside a 340px rail, with the window's remainder unused. */
+  width: 100%;
   max-width: 800px;
   margin: 0 auto;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

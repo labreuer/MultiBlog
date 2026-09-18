@@ -374,6 +374,20 @@ here on a phone, not in the browser pane or a WebKit Playwright project.
 The per-page inline `max-width` still caps main on wide screens and the `auto` margins
 still centre it, so desktop layout is unchanged.
 
+**The rule is scoped to `<main>`, so a page whose body-level container is a `<div>` has
+to carry `width: 100%` itself** — `/[year]/[month]/[day]/[slug]`'s `.container` does,
+and says why in place. The failure there was not the phone one above but its desktop
+mirror, and it stayed invisible for as long as the margin rail was a fixed 340px: a
+fit-content container takes the grid's max-content width, which was then the whole
+1180px composition, so nothing looked wrong. The moment the rail track became the
+`clamp()` below (a percentage of the grid container), grid sizing treated that track as
+`auto` while working out the container's intrinsic width, the grid measured 840px
+(the reading column plus the gap and nothing for the rail), and the rail's 340px floor
+was then taken out of the prose — 460px of reading column at every width past the
+breakpoint, beside an unused window. The test for whether a container is in this
+position is structural, not visual: a flex item with cross-axis `auto` margins and no
+explicit cross size is fit-content, whatever it currently happens to measure.
+
 ### `.tableScroll` (`AdminTable.module.css`)
 
 Wraps the `<table>` — and *only* the table — in an `overflow-x: auto` box, so a table

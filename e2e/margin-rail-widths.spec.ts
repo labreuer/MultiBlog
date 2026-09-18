@@ -183,6 +183,46 @@ test.describe("the margin rail across the breakpoint", () => {
     expect(await articleWidth()).toBe(midwayArticle);
   });
 
+  test("the post page's reading column keeps its 800px while its rail grows", async ({ page, quotedPost }) => {
+    // The post page, separately from the doc above, and to an absolute width
+    // rather than "unchanged between two viewports": the doc's test compares
+    // the article at MIDWAY and WIDE and passes whenever they agree, which a
+    // column stuck at the wrong width does perfectly well. That was the shape
+    // of the one regression this file has actually had. The post page's
+    // container is a <div> straight under body — a column flex container —
+    // with `auto` side margins, so it is fit-content unless it says `width:
+    // 100%`, and a percentage-sized rail track measures as nothing during
+    // that intrinsic sizing: the grid came out at 840px and the rail's floor
+    // took its 340 out of the prose, leaving 460px at every width past the
+    // breakpoint. The doc page is a <main> and gets globals.css's `body >
+    // main { width: 100% }` for free (STYLE.md, "Narrow viewports and
+    // horizontal overflow"), which is why only this surface ever showed it.
+    await page.setViewportSize(IPAD_LANDSCAPE);
+    await page.goto(quotedPost.path);
+    const card = page.locator("[data-margin-note-id]").first();
+    await expect(card).toBeVisible();
+
+    // The <h1> is a block inside the reading column, so its width is the
+    // column's — measured through a role rather than a module class name.
+    const heading = page.getByRole("heading", { level: 1, name: quotedPost.title });
+    const railWidth = async () => Math.round((await card.boundingBox())?.width ?? Number.NaN);
+    const columnWidth = async () => Math.round((await heading.boundingBox())?.width ?? Number.NaN);
+
+    // The floor, as on the doc page.
+    await expect.poll(railWidth, { timeout: 10_000 }).toBe(340);
+
+    // 800 exactly, at both wide viewports, scrollbar or not: past ~1212px of
+    // window the column has its full measure and every further pixel is the
+    // rail's, so a classic scrollbar moves the rail and never the prose.
+    await page.setViewportSize(MIDWAY);
+    await expect.poll(columnWidth, { timeout: 10_000 }).toBe(800);
+    expect(await railWidth()).toBeGreaterThan(340);
+
+    await page.setViewportSize(WIDE);
+    await expect.poll(railWidth, { timeout: 10_000 }).toBe(680);
+    expect(await columnWidth()).toBe(800);
+  });
+
   test("the doc editor's rail appears at iPad-landscape width and is absent below it", async ({ page, sharedDoc }) => {
     await page.setViewportSize(IPAD_LANDSCAPE);
     await page.goto(`/doc/${sharedDoc.id}/edit`);
