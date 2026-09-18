@@ -5,6 +5,14 @@
 // the stored quotedText, flips the thread to DETACHED and freezes its anchor
 // at the last event it was valid against.
 //
+// **Every read of the post page here is a `freshGoto`.** Against the prod
+// target that page is ISR, and what these tests assert on is a thread status
+// the anchoring machinery wrote to the database during a republish — never
+// through a render. A cached entry taken before that write, by anything at
+// all (another worker's landing page prefetches this post's link), outlives
+// the write and is served to the assertion: a DETACHED thread still shown as
+// live, which reads as the remapping being broken.
+//
 // Editing happens on the *doc* now, not the post (PLAN.md §15) — a case here
 // is always "edit the backing doc, then publish that doc's new head from
 // /post/[id]/edit".
@@ -28,6 +36,7 @@ import {
   bodyEditor,
   collapseToBodyStart,
   deleteTextInBody,
+  freshGoto,
   visibleText,
   waitForDocCollabReady,
   QUOTED_BODY,
@@ -112,7 +121,7 @@ test.describe("quote anchoring across publishes", () => {
     });
 
     // Still highlighted inline, at its new home.
-    await page.goto(quotedPost.path);
+    await freshGoto(page, quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
     await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
   });
@@ -141,7 +150,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(quotedPost.path);
+    await freshGoto(page, quotedPost.path);
     // No inline highlight any more, but the thread is still listed, showing
     // the quote as it was written.
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
@@ -175,7 +184,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(quotedPost.path);
+    await freshGoto(page, quotedPost.path);
     // The quoted words are gone from the article body entirely, yet the thread
     // still renders its quote and notice.
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
@@ -202,7 +211,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(quotedPost.path);
+    await freshGoto(page, quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`)).toHaveCount(0);
     await expect(visibleText(page, DETACHED_NOTICE)).toBeVisible();
   });
@@ -247,7 +256,7 @@ test.describe("quote anchoring across publishes", () => {
       anchorTo: QUOTE_TO,
     });
 
-    await page.goto(quotedPost.path);
+    await freshGoto(page, quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
     await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
   });

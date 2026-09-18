@@ -8,10 +8,12 @@
   border-left: 2px solid var(--border);
 }
 
+/* Inline flow rather than flex, and deliberately: the line ends in
+   EditHistory's "(edited)", whose parentheses a flex container would make
+   into items of their own with a gap on either side. Inline flow also lets
+   the history panel — a block inside the inline marker — break out onto its
+   own line below instead of being squeezed into this one. */
 .meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
   margin-bottom: 4px;
 }
 
@@ -22,6 +24,7 @@
 .timestamp {
   color: var(--text-secondary);
   font-size: 0.8rem;
+  margin-left: 8px;
 }
 
 .deleted {
@@ -148,6 +151,4 @@
   color: var(--text-secondary);
 }
 
-.historyLine {
-  margin-top: 2px;
-}
+

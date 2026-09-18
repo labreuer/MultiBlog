@@ -114,6 +114,13 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // "[deleted]" feedback instead of it just silently vanishing. A fresh page
   // load never sets this, so the collapse rule still applies there.
   const [justDeleted, setJustDeleted] = useState(false);
+  // True only while the history panel is listing versions. The current
+  // version is the first of them, so the body below would be the same text a
+  // second time; it comes back the moment the panel closes. Set from
+  // `EditHistory` rather than from a click here because the panel has states
+  // — loading, failed, nothing the viewer may see — in which it stands in for
+  // nothing and the body has to stay.
+  const [historyShown, setHistoryShown] = useState(false);
   const anchorId = anchorName(comment.displayName, comment.createdAt);
   const isDeleted = comment.deletedByUserId !== null || justDeleted;
 
@@ -203,12 +210,27 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
         </div>
       ) : (
         <div data-comment-id={comment.id}>
-          <p className={styles.meta}>
+          <div className={styles.meta}>
             <span className={styles.name}>{comment.displayName}</span>
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
               <LocalTime value={comment.createdAt} />
             </a>
-          </p>
+            {comment.visiblyEdited && (
+              <>
+                {" "}
+                <EditHistory
+                  what="comment"
+                  placement="meta"
+                  onVersionsShown={setHistoryShown}
+                  editedAt={comment.editedAt}
+                  load={() => getCommentHistory(comment.id)}
+                  renderBody={(version: CommentVersion) => (
+                    <CommentBody body={version.body} bodyText={version.bodyText} citations={comment.citations} />
+                  )}
+                />
+              </>
+            )}
+          </div>
           {editing ? (
             <div className={styles.editForm}>
               {draft ? (
@@ -249,21 +271,11 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
               </span>
             </div>
           ) : (
-            <div data-comment-body>
-              <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
-            </div>
-          )}
-          {comment.visiblyEdited && (
-            <p className={styles.historyLine}>
-              <EditHistory
-                what="comment"
-                editedAt={comment.editedAt}
-                load={() => getCommentHistory(comment.id)}
-                renderBody={(version: CommentVersion) => (
-                  <CommentBody body={version.body} bodyText={version.bodyText} citations={comment.citations} />
-                )}
-              />
-            </p>
+            !historyShown && (
+              <div data-comment-body>
+                <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
+              </div>
+            )
           )}
           {!posted && !editing && (
             <button type="button" onClick={() => setReplying((r) => !r)} className={styles.replyButton}>

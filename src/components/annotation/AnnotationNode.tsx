@@ -399,7 +399,13 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
             />
           )}
           {annotation.visiblyEdited && !editing && (
-            <p className={styles.historyLine}>
+            // A `div`, not a `p`: opening the panel puts `EditHistory`'s own
+            // `p`s and `div`s inside this element, and a block inside a `p` is
+            // invalid nesting React refuses at render time. The comment side
+            // stopped being a `p` when its marker moved into the meta line
+            // (PLAN.md §22c); this is the same fault, on the placement that
+            // kept its own line.
+            <div className={styles.historyLine}>
               <EditHistory
                 what="annotation"
                 editedAt={annotation.editedAt}
@@ -408,7 +414,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                   <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} />
                 )}
               />
-            </p>
+            </div>
           )}
           {quoteLost === true && (
             <p className={styles.editStatus}>

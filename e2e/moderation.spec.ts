@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, freshGoto } from "./fixtures";
 import { createComment, getCommentStatus, uniqueEmail } from "./db";
 
 test.describe("comment moderation", () => {
@@ -13,7 +13,12 @@ test.describe("comment moderation", () => {
       status: "PENDING",
     });
 
-    await page.goto(publishedPost.path);
+    // freshGoto, though this one asserts an *absence*: a stale render would
+    // show no comment either, and pass for a reason that has nothing to do
+    // with moderation. The two `goto`s below stay plain on purpose —
+    // moderateComment revalidates the post page itself (revalidateTouchedPosts),
+    // and that it does so is part of what these tests are for.
+    await freshGoto(page, publishedPost.path);
     await expect(page.getByText(body)).toHaveCount(0);
 
     // The deep-link filter (?post=) narrows the queue to this post, so parallel
@@ -40,7 +45,7 @@ test.describe("comment moderation", () => {
       status: "APPROVED",
     });
 
-    await page.goto(publishedPost.path);
+    await freshGoto(page, publishedPost.path);
     await expect(page.getByText(body)).toBeVisible();
 
     await page.goto(`/comments?post=${publishedPost.id}`);

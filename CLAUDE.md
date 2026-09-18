@@ -63,9 +63,14 @@ before changing the behavior it describes.
   vertical alignment** — don't move the column layout into JS to "simplify", that split is
   what keeps the rail server-rendered in the right place. The `.anchored` class is toggled
   from JS, never from a `@media` block. 1180 is a *composed* width (800 + 2.5rem + 340) and
-  moves when the layout does, so it is never a round number to round off; the doc *editor*'s
-  rail matches a second clause besides it (phone landscape), where its cards are a queue
-  rather than aligned. PLAN.md §18, §18c.
+  moves when the layout does, so it is never a round number to round off. The rail's
+  *width* is composed the same way and is a range, not a number —
+  `clamp(340px, calc(100% - 800px - 2.5rem), 680px)`, and **never a `minmax()`**, which
+  grid's free-space distribution fills before the prose (STYLE.md's centred-column
+  widths). Growing it needs no JS: `MARGIN_NOTES_MEDIA_QUERY` answers only whether there
+  *is* a rail. The doc *editor*'s rail matches a second clause besides that threshold
+  (phone landscape), where its cards are a queue rather than aligned and so keep the
+  340px floor. PLAN.md §18, §18c.
 - **An annotation's mechanism follows the surface, never the permission.** The doc *editor*
   writes an `annotation` mark into the doc's ydoc and leaves `anchorFrom`/`anchorTo`/
   `quotedText` null; either *reading* view writes those three columns and never touches the
@@ -395,6 +400,15 @@ working on.
   check**, including `npm run e2e` and `web-prod`: locally the dev server and the browser are
   one machine and so always agree. Same reason PLAN.md §13m's collab bug survived to
   production.
+- **On a statically generated page, anything rendered before `useSession` answers is a
+  guess — and a `required` guess swallows the submit.** The HTML has no session, so the
+  first render is the signed-out one; a form that renders `required` identity fields on that
+  guess fails *constraint validation* if it is submitted before the answer arrives, which
+  dispatches no submit event and leaves nothing behind: no request, no error, no pending
+  state, no console line. Gate such fields on `status !== "loading"` and disable the submit
+  with them (`CommentForm`, PLAN.md §6). Local checks never see it — the session answers in
+  milliseconds on this machine — and it surfaced only as an e2e click that produced no POST
+  under a loaded suite.
 - **No hex or named color literal anywhere in `src/`** outside `src/app/globals.css`,
   `src/lib/author-colors.ts`, and the handful named in STYLE.md's Dark theme section. Every
   color is one of `globals.css`'s tokens — `style={{ color: "var(--text-secondary)" }}` is the

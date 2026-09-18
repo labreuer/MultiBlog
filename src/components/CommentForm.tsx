@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState, useSyncExternalStore } from "react";
+import { useActionState, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
@@ -46,7 +46,19 @@ function draftKey(props: Props): string {
 export default function CommentForm(props: Props) {
   const { postId, parentCommentId, anchorFrom, anchorTo, quotedText, onPosted, onCancel } = props;
   const router = useRouter();
-  const { data: session } = useSession();
+  // **`status` is load-bearing here, not decoration.** The post page is
+  // statically generated (§21), so no session can be in its HTML: every
+  // reader gets the signed-out render first, and `useSession` corrects it
+  // once /api/auth/session answers. Guessing "anonymous" during that window
+  // is a guess with teeth, because the identity fields it renders are
+  // `required` — a submit made before the answer arrives fails *constraint
+  // validation* instead of posting. The browser fires `invalid` on two
+  // fields that are about to disappear, dispatches no submit event at all,
+  // and the reader's click does nothing, with nothing to show for it: no
+  // request, no error, no pending state. So the fields wait for the answer,
+  // and the button waits with them.
+  const { data: session, status } = useSession();
+  const identityKnown = status !== "loading";
   const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
@@ -71,9 +83,20 @@ export default function CommentForm(props: Props) {
   const composerKey = draftKey(props);
   const draft = useCommentDraft(composerKey, value, setValue);
 
+  // Once per action result, never once per render. `state` is a new object
+  // only when the action returns, so it is the right identity to key on:
+  // the general form stays mounted after approval (rendering null), the
+  // refresh below re-renders it, and an effect keyed on anything that
+  // changes identity per render — the draft hook's return object did, and a
+  // caller's inline `onPosted` does — re-fires and refreshes again, a full
+  // reload loop at the rate the page can render (seen 2026-09-17, ~7/s).
+  const handled = useRef<SubmitCommentState | null>(null);
+  const { clear } = draft;
   useEffect(() => {
+    if (handled.current === state) return;
+    handled.current = state;
     if (state.status === "APPROVED" || state.status === "PENDING") {
-      draft.clear();
+      clear();
     }
     if (state.status === "APPROVED") {
       onPosted?.();
@@ -82,7 +105,7 @@ export default function CommentForm(props: Props) {
       // manual reload. Same call CommentNode makes after an edit or delete.
       router.refresh();
     }
-  }, [state.status, onPosted, draft, router]);
+  }, [state, onPosted, clear, router]);
 
   if (state.status === "APPROVED") {
     return null;
@@ -105,7 +128,7 @@ export default function CommentForm(props: Props) {
           <input type="hidden" name="quotedText" value={quotedText} />
         </>
       )}
-      {!userName && (
+      {identityKnown && !userName && (
         <>
           <input name="name" type="text" placeholder="Name" required className={styles.field} />
           <input name="email" type="email" placeholder="Email" required className={styles.field} />
@@ -143,7 +166,7 @@ export default function CommentForm(props: Props) {
       <div className={styles.buttonRow}>
         <button
           type="submit"
-          disabled={pending || empty}
+          disabled={pending || empty || !identityKnown}
           className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
         >
           {pending ? "Posting..." : "Post comment"}

@@ -14,10 +14,13 @@ export const MARGIN_NOTE_GAP = 12;
 // deliberately mobile-first so the two can be compared literally rather than
 // as a value and its off-by-one complement — a `max-width: 1179px` mirror
 // would be the same rule spelled differently, which is exactly how the two
-// drift apart later. 1180px is the fourth documented width alongside
-// STYLE.md's 680/800/1040 — an 800px reading column plus the 2.5rem gap plus
-// a 340px rail — and the threshold *is* that width, so the rail engages
-// exactly when its layout fits rather than at a round number above it. It was
+// drift apart later. 1180px is a documented width alongside STYLE.md's
+// 680/800/1040/1520 — an 800px reading column plus the 2.5rem gap plus a
+// 340px rail — and the threshold *is* that width, so the rail engages exactly
+// when its layout fits rather than at a round number above it. 340 is the
+// rail's floor and 1520 the same composition at its 680px ceiling; the width
+// in between is a CSS `clamp()` and never reaches this file, because what JS
+// asks is whether there is a rail, not how wide it is. The threshold was
 // 1200px until an iPad measured 1194 in landscape (PLAN.md §18): six pixels
 // short of a threshold whose layout had twenty to spare.
 export const MARGIN_NOTES_MEDIA_QUERY = "(min-width: 1180px)";

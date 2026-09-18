@@ -45,15 +45,31 @@
 }
 
 @media (min-width: 1180px) {
-  /* 800 reading column + 2.5rem gap + 340 rail. A fourth documented
-     centred-column width alongside STYLE.md's 680/800/1040 — the reading
-     column itself is unchanged at 800px, and the extra is the rail. */
+  /* 800 reading column + 2.5rem gap + a rail that starts at 340px and grows
+     to 680px — STYLE.md's 1180 and 1520 widths, the floor and the ceiling of
+     one range rather than two separate layouts. Plus `.main`'s own 1rem of
+     padding each side, which is the only reason this number differs from
+     /doc/[slug]'s copy of the same rule; written as the sum so that stays
+     visible. The reading column is unchanged at either end — every pixel of
+     the growth goes to the rail. */
   .container {
-    max-width: 1180px;
+    max-width: calc(1520px + 2rem);
   }
 
   .layout {
-    grid-template-columns: minmax(0, 800px) 340px;
+    /* The rail takes whatever is left once the reading column has its 800px,
+       floored at 340 and capped at 680.
+
+       Deliberately *not* `minmax(340px, 680px)`: grid's maximize-tracks step
+       hands free space to the tracks equally and freezes each as it reaches
+       its growth limit, so a range here would fill the rail before the prose
+       — at this very breakpoint it gives the rail 680px and the reading
+       column 428. `clamp()` over the grid container's own width states the
+       priority outright instead of hoping the distribution happens to match
+       it. The first track stays `minmax(0, 800px)` rather than a literal
+       800px so it still absorbs `.main`'s padding on the way in: at exactly
+       1180px it is 768px, as it was before the rail grew a range. */
+    grid-template-columns: minmax(0, 800px) clamp(340px, calc(100% - 800px - 2.5rem), 680px);
     gap: 2.5rem;
     /* The rail is as tall as its own content — the layout hook gives the
        portaled card list an explicit height, since absolutely positioned

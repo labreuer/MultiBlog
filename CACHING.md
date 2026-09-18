@@ -397,3 +397,59 @@ render path reads the request. Invalidation is `revalidatePostArchives`
 publish, unpublish and both slug-change actions. Comment actions don't call it, since a
 comment changes nothing a listing shows. In the e2e suite a fixture-dated post is invisible
 to a cached prefix until `freshGoto` posts to `/api/test/revalidate`, exactly as for `/`.
+
+## 2026-09-17 — what a reader *does* revalidates a post page; what an author *is* does not
+
+The post page's freshness is not one story but two, split by who writes and through what.
+
+**Everything a reader does to a post invalidates that post's page, on the spot.** Posting,
+editing and deleting a comment, moderating one (singly or in a bulk action), and tagging the
+post all reach `revalidatePostPage(post)` — `submitComment` directly, the rest through
+`revalidateTouchedPosts` (`src/app/actions/comments.ts`), tagging through `pathForTarget`
+(`src/app/actions/tags.ts`). So a commenter sees their own comment immediately — the action
+purges the path, and `CommentForm`'s `router.refresh()` then fetches the new render — and
+every other reader's next request re-renders rather than being served the copy from before.
+There is no window here to reason about.
+
+**Nothing about the author is revalidated onto it.** A byline is `a.user.name` and
+`a.user.slug`, read at render time, and no action that changes either tells the post page:
+
+| action | revalidates | the post page? |
+|---|---|---|
+| `updateAccountSettings` (rename yourself) | `/dashboard` | no |
+| `updateUserName` (an admin renames someone) | `/users` | no |
+| `updateUserSlug` | `/users`, the slug page, both `/authors/<slug>` | no |
+
+So a cached post page keeps the old name until the page is regenerated, which the
+`revalidate = 60` window bounds — with the ordinary stale-while-revalidate tail: once the
+window expires the *first* request still gets the old copy while the new one renders behind
+it, and everyone after that gets the new one. Worst case is about a minute plus one unlucky
+reader, and it heals without anyone doing anything. A stale byline *link* is harmless for a
+separate reason: `/authors/[slug]` resolves a superseded slug through `UserSlugHistory` and
+permanently redirects, so the old href still lands.
+
+**Deliberately not fixed.** Revalidating every post a renamed user has ever bylined, on a
+rename, is a fan-out priced in posts-per-author to save at most a minute of a name almost
+nobody is watching change. Naming it is the point; if it ever matters, the fan-out is the fix
+and `revalidatePostPage` is already the per-post primitive to call.
+
+This is read off the call sites rather than measured — the `revalidatePath` calls are
+explicit, and which of them exist is the whole of the finding. What is *not* measured is the
+byline case end to end; `npm run build` plus `web-prod` (:3001), a rename through
+`/dashboard`, and a reload of a post page would settle it in a couple of minutes if it ever
+seems worth it.
+
+**One case that is not a user's at all, and is the reason this entry exists.** The e2e suite
+writes comments, threads and tags straight into Postgres, which no action ever does, so
+nothing revalidates and a post page cached by *anything* — most easily another worker's
+landing page, which prefetches every post link it lists — is served to the assertion. The
+failure is a page reading "No comments yet." with the row plainly in the database, and a test
+that waits out its timeout for a card that is never coming: it reads as a broken loader, not
+as a cache. Every navigation in the suite that depends on such a write is now a `freshGoto`
+(`comment-editing`, `comment-markdown`, `comment-quoting`, `moderation`, `quote-anchoring`),
+which posts to `/api/test/revalidate` first. The two `goto`s in `moderation.spec.ts` that
+follow a moderation action stay plain on purpose: that the action revalidates the post page
+is part of what those tests are for. Same shape as the Tags section above, and as the date
+archives' entry — this is the third time it has been written down, which is itself the
+argument for the rule being "a fixture write means `freshGoto`", not a judgement call each
+time.

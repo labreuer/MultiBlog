@@ -635,6 +635,19 @@ logging in to an account is also allowed (and a logged-in commenter is the same 
 record keyed by `user_id`). Email lets us tie anonymous comments to a stable identity for
 the trust model; optional double opt-in verification can come later.
 
+**The identity fields wait for `useSession`'s answer, and the submit button waits with
+them.** A post page is statically generated (§21), so no session can be in its HTML: the
+signed-out render is what every reader gets first, and `useSession` corrects it once
+/api/auth/session answers. Rendering the name/email pair on that guess is a guess with
+teeth, because they are `required` — a submit made in that window fails **constraint
+validation** rather than posting. The browser fires `invalid` on two fields that are about
+to disappear, dispatches no submit event at all, and the click does nothing: no request, no
+error, no pending state, nothing in a log. `CommentForm` therefore renders the pair only
+once `status !== "loading"`, and disables the button until then. Found from the outside, as
+a Playwright click on an enabled "Post comment" that produced no POST, on a suite run heavy
+enough to slow the session fetch past the typing — which is the only way it ever shows,
+since a local reader's session answers long before they have finished a sentence.
+
 **Moderation policy — three-level cascade (decided).** Each comment's required policy is
 resolved as **post override → author override → site default**, where each level is one of
 `always` (queue for approval), `auto` (publish immediately), or `inherit` (defer to the
@@ -5846,7 +5859,9 @@ scroll. Above 1180px there is room not to ask, so each card is positioned level 
 own quote. (1200px as built, and 1180 since an iPad measured 1194 in landscape — six
 pixels short of a threshold whose layout had twenty to spare. The threshold now *is* the
 composed width, 800 + 2.5rem + 340; STYLE.md's centred-column widths carry that arithmetic,
-and `src/lib/margin-notes-layout.ts` is the one place JS writes it.)
+and `src/lib/margin-notes-layout.ts` is the one place JS writes it. 340 is the rail's floor
+rather than its width since 2026-09-17 — see this section's Known gaps — but the threshold
+is still composed from it, because the floor is what has to fit for the rail to engage.)
 
 **Only the anchored cards move.** `CommentSection` and `AnnotationSection` stay exactly
 where they were, below the article, and keep everything that isn't a placeable card: the
@@ -6102,8 +6117,15 @@ of which this section prejudges:
   spec can assert on (`boundingBox()` per card versus per highlight) and exactly what a
   reviewer cannot check by reading. `packMarginNotes` being pure is half of that debt
   already paid; nothing exercises it yet.
-- **340px is fixed.** The rail doesn't grow on a very wide viewport, so a 2560px screen
-  gets more whitespace rather than roomier cards.
+- ~~**340px is fixed.**~~ Fixed 2026-09-17: the rail is
+  `clamp(340px, calc(100% - 800px - 2.5rem), 680px)` on all three surfaces, so it takes
+  whatever the window has past the 800px reading measure and tops out at twice its old
+  width. Pure CSS — the threshold is still one breakpoint, `MARGIN_NOTES_MEDIA_QUERY` is
+  still the only thing JS mirrors, and `useMarginNotesLayout` re-packs off the `resize`
+  listener and per-card `ResizeObserver` it already had, since a wider card that re-wraps
+  is just a shorter one. The doc editor's phone-landscape queue (§18c) stays at the 340px
+  floor, having no passage to align with. STYLE.md's centred-column widths carry the
+  arithmetic and the reason the track is a `clamp()` rather than a `minmax()`.
 
 ### 18f. Annotating from the doc editor
 
@@ -8344,12 +8366,23 @@ model CommentRevision {
   Plain text in, plain text out: comment bodies stay the `{ text }` envelope, and this section
   does not make them rich (§22h).
 - **The history UI** is one client island shared with annotations
-  (`src/components/EditHistory.tsx`): the "edited <LocalTime>" marker is a button; opening it
+  (`src/components/EditHistory.tsx`): the "edited" marker is a button; opening it
   calls `getCommentHistory(commentId)` (or the annotation twin) and lists the non-silent
   versions newest-first with author and time, each rendered as the live comment is. It fetches
   on open rather than shipping revisions in the page for the same reason `TagChips` does: the
   post page is statically generated (§21) and must not touch a dynamic API at build. The
   action applies §22b's silence rule server-side; the island never sees a silent revision.
+  The marker has two `placement`s. An annotation's sits on a line of its own below the body and
+  reads "edited <LocalTime>"; a comment's is parenthesized at the end of the meta line, directly
+  after the posting time, where a second visible timestamp would read as a confusing pair — so
+  there the edit time is the button's `title` ("Last edited …") and only the word is the link.
+  The parentheses are the island's, not the call site's, so the panel opens after the closing
+  one rather than between them. Because a comment's panel opens *above* the body, the open
+  list stands in for it: the current version is the list's first entry, so `CommentNode` hides
+  the live body while versions are showing and the versions are told apart by background — the
+  current one on the page's own, the superseded ones on the panel's muted fill. The island
+  reports that it is *listing* versions rather than that it is open, so a fetch still in
+  flight, a failed one, or one every version of which is withheld leaves the body up.
   A moderator-made edit shows the moderator's name on that version, which is the honest thing
   and needs no extra column.
 - **`/comments`** already has an Edited-at column; it starts being non-empty. A "Versions"
@@ -9054,6 +9087,22 @@ how a stale paragraph gets posted. A prune of entries older than thirty days on 
 deliberately **not** `y-indexeddb`: `src/lib/ydoc-persistence.ts` exists to work around two real
 bugs in that library's interaction with Yjs documents, and none of that applies to a plain JSON
 value.
+
+**The restore gate is state, not a ref.** Nothing may be saved before the mount-time read has
+answered, or a composer would overwrite a draft it has not seen yet — but the gate opening has
+to be something the save effect can *watch*. Held in a ref it was not: a body that arrived
+while the read was in flight (a paste, a restored quote, the first burst of typing on a slow
+page) found the gate shut and was never saved, with no later change to rescue it.
+
+**A draft's end is `clear()`, and it cancels rather than deletes.** Posting is the one moment
+a save is in flight for a body that no longer exists, because the submission itself changes the
+value one last time — `disabled={pending}` reaches TipTap as `setEditable`, which emits an
+`update` unasked (docs/TIPTAP.md). Deleting the row is not enough: the scheduled write lands
+after the delete and restores the draft of a comment already posted. So `clear()` cancels the
+debounce timer *and* latches the composer closed, and only an empty body lifts that latch —
+which is what keeps `discard()` (clear, then empty the box) saving normally afterwards. The
+e2e proof is in `comment-markdown.spec.ts`'s rich-mode test, and it needs a comment already on
+the page to reproduce.
 
 **Pending quotations ride in the draft.** A quotation captured while composing is not a row yet
 — the rows are written at post time — so the draft holds the body JSON plus the pending targets
