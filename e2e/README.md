@@ -212,11 +212,14 @@ why). What is left is not the suite's to fix:
   painted over the summary — the very bug the test guards, real and
   intermittent on Firefox under load. The probe polls for 10 s now and reports
   where the summary was; a red here is the app, not the wait. TODO.md.
-- **`anchored-link-editing.spec.ts:291`, once at 10 workers**: the file bytes
-  answered 503 "File contents are missing" 700 ms after the row was created,
-  so the row outlived its bytes: every default test PDF has the same bytes
-  and so one `sha256`, and `deleteTestFile`'s count-then-sweep of it can
-  run between another test's create and its row. Fixture side; TODO.md.
+- ~~**`anchored-link-editing.spec.ts:291`**~~ — fixed 2026-09-19. The file
+  bytes answered 503 "File contents are missing" 700 ms after the row was
+  created (once at 10 firefox workers, once in a chromium full run, once more
+  in a firefox one): every default test PDF has the same bytes and so one
+  `sha256`, and `deleteTestFile`'s count-then-sweep of it ran between another
+  worker's write of those bytes and its row. Both sides now hold a Postgres
+  advisory lock on the sha (`withShaLock` in db-worker.ts) for the whole
+  create or delete.
 
 The globe-icon assertion in `link-bubble.spec.ts` is skipped on webkit, and
 the touch-pinch test in `pdf-zoom.spec.ts` where `Touch` isn't constructible;
