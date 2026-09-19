@@ -53,7 +53,15 @@ Three modules, deliberately separable:
   the precedent). Recompute triggers: the editor mounting, `window.resize`, a
   `ResizeObserver` on the container, on every card and on the editor's own DOM node (a card
   growing when a reply composer opens; the article reflowing on a late font), the editor's
-  `update` event, and the context's channel — all through one `requestAnimationFrame` gate.
+  `transaction` event, and the context's channel — all through one `requestAnimationFrame`
+  gate. `transaction` rather than `update`, since 2026-09-19: tiptap emits `update` only for
+  a transaction that changed the document, and the one that *anchors* a card is a meta-only
+  `setAnnotationAnchors` push into plugin state. The doc editor sends that push from a React
+  effect once the document has text — after the Yjs sync whose `update` the hook used to
+  wait for — so whether the card was drawn came down to whether the effect beat the hook's
+  one queued frame; under a loaded suite it lost about one run in five, and in a bounded
+  rail nothing re-measured until a scroll or the next keystroke. The extra firings a
+  `transaction` listener brings (selection moves, remote cursors) cost one coalesced frame.
 - **`src/components/margin-notes/margin-notes-context.tsx`** — carries the article's
   *editor* (only it knows where a quote landed) and the rail's *DOM node* across subtrees
   that are siblings under the page, the same problem `DocPresenceProvider` solves for
