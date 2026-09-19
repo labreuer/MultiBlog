@@ -7,7 +7,9 @@ import { IconChevronDown, IconTable } from "@tabler/icons-react";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { popoverBoundsElement } from "@/lib/popover-placement";
 import { TABLE_CODECS, TABLE_FILE_ACCEPT, type TableCodec } from "@/lib/table-codecs";
-import { downloadTableNode, insertTableFromFile, tableAroundSelection } from "@/lib/table-file-editor";
+import { downloadTableNode, insertTableFromFile } from "@/lib/table-file-editor";
+import { tableAroundSelection } from "@/lib/table-selection";
+import { autoSizeTable, tableHasManualSizing } from "@/lib/table-sizing";
 import styles from "./EditorChrome.module.css";
 
 // PLAN.md §24 — the toolbar's table tool, QuoteControls' split-button shape
@@ -61,6 +63,7 @@ type MenuItem = {
     }
   | { kind: "import" }
   | { kind: "export"; codec: TableCodec }
+  | { kind: "autosize" }
 );
 
 const COMMAND_ITEMS: (MenuItem & { kind: "command" })[] = [
@@ -79,12 +82,15 @@ const COMMAND_ITEMS: (MenuItem & { kind: "command" })[] = [
 const MENU_ITEMS: MenuItem[] = [
   { kind: "import", label: "Table from file…" },
   ...COMMAND_ITEMS.map((item, i) => (i === 0 ? { ...item, separator: true } : item)),
+  // §24d — live only while the table carries widths (a pasted one), so an
+  // author can tell from the menu whether there is anything to clear.
+  { kind: "autosize", label: "Auto-size columns", separator: true },
   ...TABLE_CODECS.map((codec, i) => ({ kind: "export" as const, label: `Download as ${codec.label}`, codec, separator: i === 0 })),
   { kind: "command", label: "Delete table", command: "deleteTable", separator: true },
 ];
 
 const itemKey = (item: MenuItem) =>
-  item.kind === "command" ? item.command : item.kind === "export" ? `export:${item.codec.label}` : "import";
+  item.kind === "command" ? item.command : item.kind === "export" ? `export:${item.codec.label}` : item.kind;
 
 export default function TableControls({
   editor,
@@ -112,18 +118,33 @@ export default function TableControls({
   // selection, splitCell a merged cell, and so on — and useEditorState
   // deep-equals the object, so this re-renders only when a boolean flips,
   // not per keystroke (EditorToolbar's own selector note).
-  const { inTable, can } = useEditorState({
+  const { inTable, canAutoSize, can } = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
       inTable: e.isActive("table"),
+      // A walk over the table's cells per transaction; a table is small.
+      canAutoSize: (() => {
+        const found = tableAroundSelection(e);
+        return !!found && tableHasManualSizing(found.node);
+      })(),
       can: Object.fromEntries(
         [...COMMAND_ITEMS, { command: "deleteTable" as const }].map((item) => [item.command, e.can()[item.command]()]),
       ) as Record<CommandName, boolean>,
     }),
   });
 
-  const enabled = (item: MenuItem) =>
-    item.kind === "command" ? can[item.command] : item.kind === "import" ? !inTable : inTable;
+  const enabled = (item: MenuItem) => {
+    switch (item.kind) {
+      case "command":
+        return can[item.command];
+      case "import":
+        return !inTable;
+      case "export":
+        return inTable;
+      case "autosize":
+        return canAutoSize;
+    }
+  };
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -182,6 +203,10 @@ export default function TableControls({
         fileRef.current.value = "";
         fileRef.current.click();
       }
+      return;
+    }
+    if (item.kind === "autosize") {
+      autoSizeTable(editor);
       return;
     }
     const found = tableAroundSelection(editor);

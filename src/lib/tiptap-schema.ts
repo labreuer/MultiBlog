@@ -11,6 +11,7 @@ import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
 import Link from "@tiptap/extension-link";
 import { Table, TableCell as BaseTableCell, TableHeader as BaseTableHeader, TableRow } from "@tiptap/extension-table";
+import { TableViewWithClearedWidths } from "./table-view";
 import { Quote } from "./quote-mark-extension";
 import { getSchema, mergeAttributes, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -75,7 +76,17 @@ export const TableHeader = BaseTableHeader.extend({
     return ["th", reactCellAttributes(mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)), 0];
   },
 });
-export const tableExtensions = [Table.configure({ renderWrapper: true }), TableRow, TableHeader, TableCell];
+//
+// View: the stock TableView leaves a stale `width` on a <col> whose column
+// has just lost its width — table-view.ts says how, and why "Auto-size
+// columns" (PLAN.md §24d) needs it fixed. Harmless in contentExtensions'
+// non-editor uses: a node view is only ever constructed by a live editor.
+export const tableExtensions = [
+  Table.configure({ renderWrapper: true, View: TableViewWithClearedWidths }),
+  TableRow,
+  TableHeader,
+  TableCell,
+];
 
 // The node/mark schema used for a post's content. Shared between the
 // editor, the Hocuspocus doc-seeding step, and the public renderer so

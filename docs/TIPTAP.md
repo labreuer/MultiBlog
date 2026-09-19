@@ -558,7 +558,7 @@ tracks a selection or hover in state beside it.
 PLAN.md §24. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
 `tableExtensions` in `src/lib/tiptap-schema.ts`, spread into `contentExtensions` and, by
 hand, into `CollabEditorBody`'s own list (which builds its own StarterKit, per the rule
-above). Eight things worth knowing before touching it:
+above). Nine things worth knowing before touching it:
 
 - **The editor and the static renderer both emit `<div class="tableWrapper">`**, by two
   different routes. In the editor the extension's `TableView` node view draws it (it is
@@ -592,13 +592,26 @@ above). Eight things worth knowing before touching it:
   classes, and `<caption>`/`<thead>`/`<tfoot>` wrappers (their rows are lifted into the
   table). The one other cell attr kept is `align`, from `style="text-align"` or `align=`,
   rendered back as an inline `text-align`. Marks inside cells follow StarterKit's rules.
-  The two ways out are to strip the `<colgroup>` before parsing (`transformPastedHTML`, or
-  a `parseHTML: () => null` override on `colwidth`) or to start honouring widths properly,
-  which is TODO.md's column-resizing item — pick one there rather than patching a doc.
+  The two ways out *for the paste* are to strip the `<colgroup>` before parsing
+  (`transformPastedHTML`, or a `parseHTML: () => null` override on `colwidth`) or to start
+  honouring widths properly, which is TODO.md's column-resizing item — pick one there
+  rather than patching a doc. For a table already pasted, the menu's "Auto-size columns"
+  (PLAN.md §24d, `src/lib/table-sizing.ts`) nulls every cell's `colwidth` in one
+  transaction, and the derived inline table width goes with it.
 - **A cell is `block+` and a table is `group: block`, so the schema allows a table inside a
   cell.** `TableControls` disables its insert button while the caret is in a table
   (`isActive("table")`) and both file-insert paths (`insertTableFromFile`, PLAN.md §24c)
   refuse with a message; nothing else stops nesting, and Markdown import can't produce it.
+- **The stock `TableView` leaves a stale `width` on a `<col>` whose column just lost its
+  width** (3.29.0). `updateColumns` reuses the `<col>` elements across updates and, on the
+  width-to-none transition, does `style.setProperty("min-width", …)` without removing the
+  `width` it set earlier; the table's own inline width *is* cleared, so the table snaps back
+  to `width: 100%` while the columns keep their old ratio until a reload — on every client,
+  since the remote update runs the same `update()`. `tableExtensions` therefore configures
+  `View: TableViewWithClearedWidths` (`src/lib/table-view.ts`), a subclass whose `update`
+  recomputes which columns have a width and strips the property from the rest. "Auto-size
+  columns" (PLAN.md §24d) is the transition that surfaced it; `e2e/table-sizing.spec.ts`
+  asserts on the `<col>` styles, not the attrs, for exactly this reason.
 - **`TableView.ignoreMutation` ignores everything inside the wrapper but outside the
   `<tbody>`** — attribute, child-list and character-data mutations alike (3.29.0). That is
   what lets `TableDownloadButtons` portal a button *into* `.tableWrapper` after the table on

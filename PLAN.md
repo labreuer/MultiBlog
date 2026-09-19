@@ -6953,3 +6953,40 @@ two `test:unit` tables. The post page's button is the same component mounted by
 or SheetJS by whether styled cells will be asked for), a header-row option, "replace this
 table from file…" (cheap on the grid side, but every anchor on a changed cell goes orphan
 and the UI must say so), and measuring the cap.
+
+### 24d. "Auto-size columns"
+
+Built 2026-09-19 on `tables`. A menu item on the table dropdown that strips every manual
+size from the table at the caret, so it lays out like one built in the editor: equal
+columns, `table-layout: fixed; width: 100%` from `prose.module.css`. The case it exists
+for is the pasted table (§24b, docs/TIPTAP.md "A pasted table keeps its source's column
+widths"): Word, Docs, Excel and Sheets all put a `<colgroup>` on the clipboard, every cell
+arrives with a `colwidth`, and with `resizable` off there was no handle to undo it with.
+
+- **What "sizing" is.** The cells' `colwidth` attr, and nothing else: `Table` declares no
+  attributes, and a cell's others are `colspan`, `rowspan` and `align`. The `<table>`'s
+  inline `style="width: Npx"` is *derived* from the colwidths by `createColGroup` at render
+  time on both surfaces, so nulling the attrs removes it too. `src/lib/table-sizing.ts`
+  says so at the top; if a table-level width or border attribute is ever added
+  (docs/research/tables.md, "Table-level width and borders"), that file is where it joins
+  the list.
+- **One transaction**, `setNodeMarkup` per cell that has a width, positions collected
+  before any is applied (attrs replaced in place, so none shift). Syncs through Yjs like
+  any other edit and undoes as one step.
+- **Dry-run like the rest of the menu**: enabled only while the table at the caret has at
+  least one cell with a width, so the menu itself says whether there is anything to clear.
+  The check walks the table's cells per transaction, stopping at cell boundaries — a
+  nested table's widths are its own.
+- `tableAroundSelection` moved from `table-file-editor.ts` to its own
+  `src/lib/table-selection.ts`, since it now serves download and auto-size alike.
+- **An upstream node-view bug, fixed by subclass.** The first run cleared every attr and
+  changed nothing on screen: the extension's `updateColumns` leaves the old `width` on a
+  `<col>` that has just lost its width. `tableExtensions` now configures
+  `View: TableViewWithClearedWidths` (`src/lib/table-view.ts`); docs/TIPTAP.md has the
+  mechanism.
+
+Tested by `e2e/table-sizing.spec.ts`, which pastes the Word shape (a synthetic
+`ClipboardEvent` carrying `text/html` with a `<colgroup>`), asserts the 93px `<col>` and
+the derived table width, clears them, and checks the item is disabled afterwards and on a
+table built in the editor. TODO.md's column-width item is unchanged in substance: this is
+the per-table fix, and the strip-on-paste-vs-honour-widths decision is still open.

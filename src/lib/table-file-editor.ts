@@ -47,16 +47,6 @@ export async function insertTableFromFile(editor: Editor, file: File, at?: numbe
   return null;
 }
 
-/** The table node the selection is in, if any, with its position. */
-export function tableAroundSelection(editor: Editor): { node: PMNode; pos: number } | null {
-  const { $from } = editor.state.selection;
-  for (let depth = $from.depth; depth > 0; depth--) {
-    const node = $from.node(depth);
-    if (node.type.name === "table") return { node, pos: $from.before(depth) };
-  }
-  return null;
-}
-
 /** A table node written through `codec` and handed to the browser. */
 export async function downloadTableNode(node: PMNode, codec: TableCodec, filename: string): Promise<void> {
   const grid = tableJsonToGrid(node.toJSON());

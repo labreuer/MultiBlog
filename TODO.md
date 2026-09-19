@@ -125,9 +125,11 @@ import and export into an existing doc followed the same day (PLAN.md §24c). St
    pasted tables: the cell parser reads `<col width>` out of the pasted `<colgroup>`
    (docs/TIPTAP.md, "A pasted table keeps its source's column widths"), Word and every
    spreadsheet supply one, and the result is a table frozen at the source's pixel widths,
-   narrower than the reading column, with no UI to change it (found 2026-09-18 on a
-   pasted-from-Word doc whose first column came through at 93px). Two ways to go, and the
-   choice is the same one column resizing needs:
+   narrower than the reading column (found 2026-09-18 on a pasted-from-Word doc whose
+   first column came through at 93px). Since 2026-09-19 the menu's "Auto-size columns"
+   (PLAN.md §24d) clears a pasted table's widths by hand, so nobody is stuck — but it is a
+   per-table fix, and the question of what a paste should *do* is still open. Two ways to
+   go, and the choice is the same one column resizing needs:
    - **Drop widths on paste.** `transformPastedHTML` strips `<colgroup>`, or `colwidth`'s
      `parseHTML` is overridden to return null. Pasted tables then get equal columns like
      every other table. Cheapest, and consistent with `resizable` being off. A one-off
