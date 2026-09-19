@@ -354,7 +354,18 @@ Resume then Cancel.
 stamp falls in the span that version settled — `isVersionQuoted`: a stamp in `(m[i-1], m[i]]`
 names version *i*, the first version owning everything up to its own mark — so a quoted
 version stays visible inside the window. The "edited" marker (`EditHistory`, the island shared
-with comments) sits on a line of its own below the body; opening it calls
+with comments) is parenthesized at the end of the meta line, directly after "at this revision"
+— `placement="meta"`, the same mode a comment uses, which drops the edit time from the marker
+into its tooltip rather than letting two timestamps sit side by side reading as a pair. It cost
+this line some length, which was the reason it kept its own line until 2026-09-19 and was
+accepted then in exchange for mirroring the comment side. Two things follow from the placement,
+both of them already true of `CommentNode`: the meta line is a `div` and not a `p`, since the
+panel that opens inside it is full of blocks, and `.meta` is a plain block and not a flex row,
+since the panel is a block inside the marker's inline wrapper and a flex item would size it
+into the line instead of under it. The body is hidden while the panel is actually *listing*
+versions (`onVersionsShown`) — the current version is its first entry, so leaving both up would
+show the same text twice — and not merely while it is open, because a panel that is loading,
+failed, or showing nothing the viewer may see stands in for nothing. Opening it calls
 `getAnnotationHistory`, which lists the body's snapshots in mark order, applies the silence
 rule server-side and decodes each visible version for `AnnotationVersionBody`. The thread
 loaders fetch a whole page's snapshot marks and timestamps in **one** query keyed by the

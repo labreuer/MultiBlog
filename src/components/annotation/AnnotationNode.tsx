@@ -172,6 +172,15 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // `annotation.editingSince`, which is what the *server* last knew: this one
   // says "the editor is mounted right here, in this browser".
   const [editing, setEditing] = useState(false);
+  // PLAN.md §22c — the history panel now opens *above* the body (the marker
+  // moved into the meta line), and the current version is its first entry, so
+  // the body underneath would be the same text twice. Hidden while the panel
+  // is actually listing versions, and back the moment it closes. Set from
+  // `EditHistory` rather than from a click here, because the panel has states
+  // — loading, failed, every version withheld — in which it stands in for
+  // nothing and the body has to stay. `CommentNode` carries the identical
+  // pair; this is that, on the annotation side.
+  const [historyShown, setHistoryShown] = useState(false);
   const [editPending, setEditPending] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   // PLAN.md §22e — which of this body's anchored replies currently resolve in
@@ -376,7 +385,12 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
         </div>
       ) : (
         <div data-comment-id={annotation.id}>
-          <p className={styles.meta}>
+          {/* A `div`, not a `p`: opening the history panel puts `EditHistory`'s
+              own `p`s and `div`s inside this element, and a block inside a `p`
+              is invalid nesting React refuses at render time. The comment side
+              made exactly this change when its marker moved into the meta line
+              (PLAN.md §22c); this is the same fault on the same placement. */}
+          <div className={styles.meta}>
             <span className={styles.name}>{annotation.displayName}</span>
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
               <LocalTime value={annotation.createdAt} />
@@ -391,7 +405,22 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                 at this revision
               </button>
             )}
-          </p>
+            {annotation.visiblyEdited && (
+              <>
+                {" "}
+                <EditHistory
+                  what="annotation"
+                  placement="meta"
+                  onVersionsShown={setHistoryShown}
+                  editedAt={annotation.editedAt}
+                  load={() => getAnnotationHistory(annotation.id)}
+                  renderBody={(version: AnnotationVersion) => (
+                    <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} />
+                  )}
+                />
+              </>
+            )}
+          </div>
           {editing ? (
             <AnnotationEditSession
               annotationId={annotation.id}
@@ -399,37 +428,21 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
               onCancelled={endEditing}
             />
           ) : (
-            <AnnotationBodyReader
-              proseJson={annotation.proseJson}
-              staticBody={annotation.body}
-              replyAnchors={replyAnchors}
-              pending={
-                replyAnchor && viewerColor
-                  ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
-                  : null
-              }
-              onSelect={handleBodySelect}
-              onAnchorClick={jumpToReply}
-              onResolvedAnchorsChange={setResolvedReplyIds}
-            />
-          )}
-          {annotation.visiblyEdited && !editing && (
-            // A `div`, not a `p`: opening the panel puts `EditHistory`'s own
-            // `p`s and `div`s inside this element, and a block inside a `p` is
-            // invalid nesting React refuses at render time. The comment side
-            // stopped being a `p` when its marker moved into the meta line
-            // (PLAN.md §22c); this is the same fault, on the placement that
-            // kept its own line.
-            <div className={styles.historyLine}>
-              <EditHistory
-                what="annotation"
-                editedAt={annotation.editedAt}
-                load={() => getAnnotationHistory(annotation.id)}
-                renderBody={(version: AnnotationVersion) => (
-                  <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} />
-                )}
+            !historyShown && (
+              <AnnotationBodyReader
+                proseJson={annotation.proseJson}
+                staticBody={annotation.body}
+                replyAnchors={replyAnchors}
+                pending={
+                  replyAnchor && viewerColor
+                    ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
+                    : null
+                }
+                onSelect={handleBodySelect}
+                onAnchorClick={jumpToReply}
+                onResolvedAnchorsChange={setResolvedReplyIds}
               />
-            </div>
+            )
           )}
           {quoteLost === true && (
             <p className={styles.editStatus}>
