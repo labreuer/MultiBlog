@@ -39,6 +39,103 @@
   color: var(--text-secondary);
 }
 
+/* Tables (docs/TABLES.md). `.tableWrapper` is the one element both surfaces
+   share: the editor's TableView node view draws it, and the static renderer
+   emits it because Table is configured with renderWrapper (tiptap-schema.ts).
+   It is the `overflow-x: auto` box STYLE.md's "Adding a new wide surface"
+   asks for — a table wider than the reading column scrolls in place rather
+   than pushing the page sideways, and no breakpoint is needed for that.
+   The margin lives on the wrapper, not the table, so it matches the other
+   blocks' 1.25em whether or not the table is scrolling. */
+.prose :global(.tableWrapper) {
+  overflow-x: auto;
+  margin: 0 0 1.25em;
+}
+
+/* table-layout: fixed with width: 100% (TipTap's own recommended pair):
+   without `fixed`, a column with one long cell takes the width its text
+   asks for and squeezes its neighbours to a word per line; with it, every
+   column starts at an equal share and the extension's inline min-width
+   (25px per column) is the floor the wrapper scrolls past. */
+.prose :global(table) {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0;
+  font-size: 0.95em;
+}
+
+/* globals.css's `* { padding: 0 }` reaches cells too, so the padding is
+   restored here the way list indents are above. position: relative is for
+   the selection overlay below. */
+.prose :global(td),
+.prose :global(th) {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 1em;
+  padding: 0.35em 0.6em;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.prose :global(th) {
+  font-weight: 600;
+  text-align: left;
+  background: var(--surface-muted);
+}
+
+/* A cell holds paragraphs (`block+`), and prose's paragraph margin would put
+   1.25em of air under every one-line cell. Zero, with a smaller gap between
+   paragraphs inside the same cell. */
+.prose :global(td) :global(p),
+.prose :global(th) :global(p) {
+  margin: 0;
+}
+
+.prose :global(td) :global(p) + :global(p),
+.prose :global(th) :global(p) + :global(p) {
+  margin-top: 0.5em;
+}
+
+/* The reading views' per-table download control (TableDownloadButtons),
+   portaled into the wrapper after the table: a small right-aligned line
+   in secondary text, so a table's last row keeps its border and the
+   control never overlaps a cell. It is a block child of the scroll box,
+   which is why it is not an overlay — see the component. */
+.tableDownload {
+  /* A block-level flex box with an auto left margin and a content width:
+     right-aligned without touching the wrapper's own layout. */
+  display: flex;
+  width: max-content;
+  align-items: center;
+  gap: 0.3em;
+  margin: 0.2em 0 0 auto;
+  padding: 0.1em 0.2em;
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.tableDownload:hover,
+.tableDownload:focus-visible {
+  color: var(--link);
+}
+
+/* prosemirror-tables' cell selection (drag across cells, or Shift-click) —
+   the class is the plugin's, hence :global. An overlay rather than a
+   background so it paints over a header cell's own fill. The same
+   --link-derived wash as `.selection` above, since it is a selection. */
+.prose :global(.selectedCell)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--link) 20%, transparent);
+}
+
 /* Quote-anchoring decorations (step 6) — set as literal class names by a
    ProseMirror plugin, not through this module's scoping, hence :global().
    Each thread's own color rides in via the inline `--thread-color` custom

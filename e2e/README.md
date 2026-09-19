@@ -355,6 +355,11 @@ the admin account.
 - **`getByRole("button", { name: "Next" })` also matches Next.js's dev-tools
   button.** The pagination controls are `"◀ Prev"`/`"Next ▶"`; match them with
   `exact: true` on the full label, arrows included.
+- **`getByRole("alert")` also matches Next's route announcer**, a permanent empty
+  `<div role="alert" aria-live="assertive" id="__next-route-announcer__">` on every page —
+  so a bare `getByRole("alert")` is a strict-mode violation the moment the app renders one
+  of its own. Locate the app's alert by element and role (`page.locator("p[role=alert]")`,
+  as `table-csv.spec.ts` does) or `.filter({ hasText })`.
 - **An admin table's row can hold several textboxes.** A `/users` row has three
   (name, initials, colour), so `row.getByRole("textbox")` trips strict mode —
   scope to a cell first. `admin-table.spec.ts` does this, and is the place to

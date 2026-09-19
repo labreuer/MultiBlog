@@ -10,8 +10,10 @@ import Blockquote from "@tiptap/extension-blockquote";
 import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
 import Link from "@tiptap/extension-link";
+import { Table, TableCell as BaseTableCell, TableHeader as BaseTableHeader, TableRow } from "@tiptap/extension-table";
+import { TableViewWithClearedWidths } from "./table-view";
 import { Quote } from "./quote-mark-extension";
-import { getSchema, type JSONContent } from "@tiptap/core";
+import { getSchema, mergeAttributes, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
 import { Annotation } from "./annotation-extension";
@@ -35,10 +37,61 @@ import { Annotation } from "./annotation-extension";
 // down in a read-only view, so it is the same setting under another name.
 export const EDITOR_LINK_OPTIONS = { openOnClick: false } as const;
 
+// docs/TABLES.md — TipTap's own table nodes, as one list so the live editors
+// (CollabEditorBody builds its own StarterKit and adds these beside it) and
+// the schema below register exactly the same four types. Not part of
+// StarterKit, so docs/TIPTAP.md's "never add StarterKit's own extensions
+// beside it" doesn't apply; the extension exists precisely to be added.
+//
+// renderWrapper: the static renderer emits `<div class="tableWrapper">`
+// around the `<table>`, the same element the editor's TableView node view
+// draws — so prose.module.css styles one wrapper for both surfaces, and
+// that wrapper is the `overflow-x: auto` box STYLE.md's "Adding a new wide
+// surface" asks for. resizable stays off: column widths would be cell attrs
+// synced through Yjs (fine) but drawn by a drag interaction the reading
+// views can't reproduce from the static HTML, and a 800px reading column
+// has little to give — TODO.md carries the follow-up.
+//
+// The cells render `colSpan`/`rowSpan` rather than the extension's own
+// `colspan`/`rowspan`. Both spellings are the same attribute to the DOM
+// (`setAttribute` lowercases on HTML elements, and `parseHTML` reads the
+// lowercase form back), but `@tiptap/static-renderer`'s React path hands
+// every attribute name to `React.createElement` verbatim — it translates
+// only `class` and `style` — and React wants the camelCase prop, so the
+// reading views warned "Invalid DOM property `colspan`" on every cell.
+// Renaming here fixes every static-render call site at once instead of a
+// `nodeMapping` per call. docs/TIPTAP.md "Tables are four nodes".
+const reactCellAttributes = ({ colspan, rowspan, ...rest }: Record<string, unknown>) => ({
+  ...rest,
+  colSpan: colspan,
+  rowSpan: rowspan,
+});
+export const TableCell = BaseTableCell.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ["td", reactCellAttributes(mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)), 0];
+  },
+});
+export const TableHeader = BaseTableHeader.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ["th", reactCellAttributes(mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)), 0];
+  },
+});
+//
+// View: the stock TableView leaves a stale `width` on a <col> whose column
+// has just lost its width — table-view.ts says how, and why "Auto-size
+// columns" (docs/TABLES.md) needs it fixed. Harmless in contentExtensions'
+// non-editor uses: a node view is only ever constructed by a live editor.
+export const tableExtensions = [
+  Table.configure({ renderWrapper: true, View: TableViewWithClearedWidths }),
+  TableRow,
+  TableHeader,
+  TableCell,
+];
+
 // The node/mark schema used for a post's content. Shared between the
 // editor, the Hocuspocus doc-seeding step, and the public renderer so
 // they can never drift out of sync with each other.
-export const contentExtensions = [StarterKit];
+export const contentExtensions = [StarterKit, ...tableExtensions];
 
 // The same schema as a plain prosemirror-model Schema, for code that walks
 // or diffs docs outside a live editor instance (anchor remapping, detached
@@ -67,15 +120,20 @@ export const docContentExtensions = [...authorHighlightExtensions, Annotation];
 // pmSchema/pmTitleSchema above.
 export const pmDocContentSchema = getSchema(docContentExtensions);
 
-// The schema for an annotation's own body (PLAN.md §13b) — deliberately
-// authorHighlightExtensions alone, not docContentExtensions: an annotation
-// body can't itself carry the `annotation` anchor mark (an annotation on an
-// annotation isn't a thing this app has), and picking the wrong variant here
-// would silently let one be typed in and then vanish the moment it's
-// re-rendered through a schema that doesn't know the mark (docs/TIPTAP.md's
-// "picking the wrong variant silently drops marks" warning, restated for a
-// third consumer).
-export const annotationContentExtensions = authorHighlightExtensions;
+// The schema for an annotation's own body (PLAN.md §13b) — StarterKit plus
+// the author-highlight mark, and deliberately nothing more. Not
+// docContentExtensions: an annotation body can't itself carry the
+// `annotation` anchor mark (an annotation on an annotation isn't a thing this
+// app has), and picking the wrong variant here would silently let one be
+// typed in and then vanish the moment it's re-rendered through a schema that
+// doesn't know the mark (docs/TIPTAP.md's "picking the wrong variant silently
+// drops marks" warning, restated for a third consumer). And not
+// authorHighlightExtensions, which it used to be an alias of: that list
+// carries tableExtensions since docs/TABLES.md, and a margin note has no room
+// for a table — the same reason ANNOTATION_TOOLS (EditorToolbar.tsx) offers
+// no headings. AnnotationBody's own extension list mirrors this one, so the
+// live annotation editor and every decoder of its ydoc agree on the shape.
+export const annotationContentExtensions = [StarterKit, AuthorHighlight];
 export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
 
 // The schema for a post's *title*, which lives in its own Yjs fragment

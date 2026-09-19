@@ -5,6 +5,12 @@ Markdown** opens a box to paste into. Both are the same server action and the sa
 they differ only in where the text came from and what to call a doc that carries no heading
 to take a title from.
 
+**Markdown is the only format that creates a doc here, on purpose.** A CSV (and, when it
+comes, an xlsx) is a table, not a document: it goes into an *existing* doc through the
+editor's table menu or a drop onto the text (docs/TABLES.md, `src/lib/table-codecs.ts`), and
+nothing about it belongs in this action or its paste box. Don't add `.csv` to the accept
+list below thinking it was overlooked.
+
 The pieces:
 
 | | |
@@ -43,6 +49,14 @@ another consumer.
 Not `docContentExtensions`: its two extra marks (`authorHighlight`, `annotation`) are things
 a doc acquires by being *edited*, and no Markdown source can produce either. The reading and
 editing sides register that superset, so nothing written here is dropped when it's read back.
+
+A GFM pipe table is the worked example of the rule cutting the other way. Until docs/TABLES.md's native tables put
+`@tiptap/extension-table` into `contentExtensions`, a table in the source was **silently
+dropped** — a probe on 2026-09-17 returned the paragraphs on either side and nothing between,
+because the fallback parser knows no `table` token and the extension that does was not
+registered. Now it is, its `parseMarkdown` builds real `tableHeader`/`tableCell` rows (with
+`align` from the delimiter row), and the same list encodes them. §11's comment path keeps its
+table shim precisely because *that* list has no Table.
 
 ## 3. HTML in the source: tags stay text, entities get decoded
 

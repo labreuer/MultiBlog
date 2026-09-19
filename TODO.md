@@ -98,6 +98,46 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
   isolation. Not diagnosed; docs/playwright-flakiness.html's shared-state class is the first
   suspect if it recurs.
 
+## Tables: what is left (docs/TABLES.md; docs/research/tables.md)
+
+Native TipTap tables landed 2026-09-18 with the toolbar, styling and Markdown import; CSV
+import and export into an existing doc followed the same day (docs/TABLES.md). Still open:
+
+1. **An xlsx codec.** `src/lib/table-codecs.ts` is shaped for it: one entry with
+   `read`/`write` over the `TableGrid`, whose `colspan`/`rowspan`/`href` fields exist for
+   this. Take the first sheet by rule so the insert flow stays one step; read each cell's
+   *formatted* text, never the raw serial (docs/research/tables.md, "What xlsx packs in").
+   Pick the library first: ExcelJS if styled cells (option 3) are a plausible later ask,
+   else SheetJS from its own CDN tarball (the npm copy is frozen with open advisories, and
+   that packaging needs a line in docs/ENV.md).
+2. **Small follow-ups to the CSV work**, each additive: a header-row checkbox on the file picker
+   (`gridToTableJson` already takes `headerRow`); "Replace this table from file…" (the
+   grid side is trivial, but anchors on changed cells go orphan exactly as with any text
+   replacement, and the UI has to say so).
+3. **Measure `MAX_TABLE_CELLS`.** 2,000 is a starting number. PERFORMANCE.md records the
+   debounced revision diff going super-linear at 18k characters, and every cell is at
+   least one paragraph node; the right number comes from a real 2,000-cell table in the
+   editor, not from the note.
+4. **Column widths — already a live problem, not a resizing follow-up.** `colwidth` attrs
+   sync through Yjs and the static renderer already emits a `<colgroup>` from them
+   (`createColGroup`), so widths *would* carry to the post page — and they already do, for
+   pasted tables: the cell parser reads `<col width>` out of the pasted `<colgroup>`
+   (docs/TIPTAP.md, "A pasted table keeps its source's column widths"), Word and every
+   spreadsheet supply one, and the result is a table frozen at the source's pixel widths,
+   narrower than the reading column (found 2026-09-18 on a pasted-from-Word doc whose
+   first column came through at 93px). Since 2026-09-19 the menu's "Auto-size columns"
+   (docs/TABLES.md, "Auto-size columns") clears a pasted table's widths by hand, so nobody is stuck — but it is a
+   per-table fix, and the question of what a paste should *do* is still open. Two ways to
+   go, and the choice is the same one column resizing needs:
+   - **Drop widths on paste.** `transformPastedHTML` strips `<colgroup>`, or `colwidth`'s
+     `parseHTML` is overridden to return null. Pasted tables then get equal columns like
+     every other table. Cheapest, and consistent with `resizable` being off. A one-off
+     script nulling `colwidth` on existing docs' cells goes with it.
+   - **Honour widths, and turn on resizing.** `Table.configure({ resizable: true })` is one
+     line; the work is the reading side: whether an 800px reading column can honour widths
+     set in a wider editor or pasted from a 6.5in Word page (scale proportionally? clamp?),
+     and how the drag handle (`.column-resize-handle`, prosemirror-tables) should look
+     under the site's tokens. Decide before turning it on, not after.
 ## A PDF annotation reply's quote is still client-supplied (PLAN.md §22e; docs/ANNOTATIONS.md)
 
 `postFileAnnotation` stores a reply's `anchorFrom`/`anchorTo`/`quotedText` exactly as the

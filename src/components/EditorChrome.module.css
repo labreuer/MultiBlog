@@ -361,6 +361,22 @@
   background: var(--surface-hover);
 }
 
+/* A menu item the editor's dry run said no to (TableControls: "Split cell"
+   on an unmerged cell, "Merge cells" with one cell selected). Kept in the
+   menu rather than hidden so the list never reshuffles under the pointer;
+   the same opacity the admin tables use for a soft-deleted row. */
+.quoteMenuItem:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: none;
+}
+
+/* The rule between a menu's groups (TableControls: rows / columns /
+   headers / cells / delete). */
+.menuItemSeparated {
+  border-top: 1px solid var(--border);
+}
+
 /* The scroll container: sized by flex-grow up to the space available, with
    a 300px floor and its own scrollbar for content taller than that. */
 .editorContent {
@@ -528,4 +544,33 @@
   .editorContent {
     min-height: 200px;
   }
+}
+
+/* A table file's rejection (TableControls' "Table from file…", the drop
+   handler), as one line between the toolbar and the body — the toolbar
+   has no room for a sentence, and a fixed popover would hide the text the
+   author is about to fix. Cleared by the next success or the ×. */
+.editorNotice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75em;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--error);
+  font-size: 0.9em;
+  flex: 0 0 auto;
+}
+
+.editorNotice > span {
+  flex: 1 1 auto;
+}
+
+.editorNoticeDismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.2em;
+  line-height: 1;
+  padding: 0 4px;
 }

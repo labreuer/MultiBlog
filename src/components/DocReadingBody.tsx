@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import TableDownloadButtons from "./TableDownloadButtons";
 import { EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
 import { useSelectionPopover } from "@/lib/use-selection-popover";
@@ -231,6 +232,7 @@ export default function DocReadingBody({
       <div style={{ display: ready ? "none" : "block" }}>{staticBody}</div>
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
+        <TableDownloadButtons editor={editor} ready={ready} />
       </div>
       {selection.pending && (
         <AnnotationPopover

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import TableDownloadButtons from "./TableDownloadButtons";
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { QuoteHighlight, type QuoteHighlightThread } from "@/lib/quote-highlight-extension";
@@ -111,6 +112,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
       <div style={{ display: ready ? "none" : "block" }}>{staticContent}</div>
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
+        <TableDownloadButtons editor={editor} ready={ready} />
       </div>
       {pending && (
         <div

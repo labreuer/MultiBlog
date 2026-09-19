@@ -16,10 +16,17 @@ definition. Picking the wrong one silently drops marks on decode or render:
 |---|---|---|---|
 | body | `contentExtensions` | `authorHighlightExtensions` | `docContentExtensions` (doc side only, PLAN.md §12i) |
 | title | `titleExtensions` | `titleAuthorHighlightExtensions` | — |
+| annotation body | — | `annotationContentExtensions` | — |
 
 The title is a separate Yjs fragment (PLAN.md §3d), which is why it has its own schema at
 all. Anything decoding a *doc's* ydoc wants `docContentExtensions` — `server/doc-cache.ts`
 and `src/lib/ydoc-render.ts` both do.
+
+The annotation-body row used to be an alias of `authorHighlightExtensions` and stopped being
+one when tables arrived (docs/TABLES.md, "Tables" below): the body row carries the four table
+nodes and the annotation row deliberately does not, so a table pasted into a margin note
+flattens to paragraphs rather than rendering in a 340px card. `AnnotationBody.tsx`'s own
+list mirrors it, and neither may quietly be re-derived from the other.
 
 ## Never add StarterKit's own extensions beside it
 
@@ -545,3 +552,99 @@ The rule: in a `"use client"` component, `useMemo` the `renderToReactElement` re
 the content it renders, so every render passes React the identical element and it skips
 the subtree outright. Same trap, same fix, for anything else that renders a body and
 tracks a selection or hover in state beside it.
+
+## Tables are four nodes beside StarterKit, and one wrapper on both surfaces
+
+docs/TABLES.md. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
+`tableExtensions` in `src/lib/tiptap-schema.ts`, spread into `contentExtensions` and, by
+hand, into `CollabEditorBody`'s own list (which builds its own StarterKit, per the rule
+above). Nine things worth knowing before touching it:
+
+- **The editor and the static renderer both emit `<div class="tableWrapper">`**, by two
+  different routes. In the editor the extension's `TableView` node view draws it (it is
+  the default `View`, used whenever `resizable` is off, not only when it is on). The static
+  renderer has no node views, so `Table.configure({ renderWrapper: true })` makes its
+  `renderHTML` produce the same wrapper. `prose.module.css` styles that one class as the
+  `overflow-x: auto` box STYLE.md's "Adding a new wide surface" asks for. Turn
+  `renderWrapper` off and the post page loses its scroll box while the editor keeps it —
+  and nothing in `npm run check` notices.
+- **`resizable` stays off.** Column widths would be `colwidth` cell attrs synced through Yjs
+  (fine) but set by a drag handle the reading views cannot reproduce, and the reading
+  column is 800px wide. `table-layout: fixed; width: 100%` gives equal columns instead —
+  **for tables built in the editor or imported from Markdown.** A pasted table is a
+  different story, next bullet. TODO.md carries the follow-up.
+- **A pasted table keeps its source's column widths, and nothing in the UI can change
+  them.** Not documented anywhere by TipTap: the published Table and TableCell pages list
+  settings only, and the behaviour lives in `parseColwidth` in `@tiptap/extension-table`'s
+  source (3.29.0). The cells' `colwidth` attr is parsed from a `colwidth` attribute, else
+  from the `width` attribute of the matching `<col>` in the pasted table's `<colgroup>`.
+  Word, Google Docs, Excel and Sheets all put a `<colgroup>` with pixel widths on the
+  clipboard, so every cell of a pasted table arrives with a `colwidth`. Once every column
+  has one, `createColGroup` (the static renderer's `renderHTML` and the editor's `TableView`
+  share it) emits `<col style="width: Npx">` per column *and* an inline
+  `style="width: <sum>px"` on the `<table>` — and the inline width beats
+  `prose.module.css`'s `width: 100%`. So a table Word laid out at 542px renders 542px wide
+  in the 800px column with its columns frozen at Word's widths, and since `resizable` is
+  off there is no drag handle to fix a 93px first column with (the doc titled "From Word",
+  2026-09-18, is the live example). Everything else about a pasted table is dropped,
+  because ProseMirror's parser keeps only the attributes a node declares: the `<table>`'s
+  own `width`, `border` and `style`, cell `width`/`bgcolor`/border styles, Word's `mso-*`
+  classes, and `<caption>`/`<thead>`/`<tfoot>` wrappers (their rows are lifted into the
+  table). The one other cell attr kept is `align`, from `style="text-align"` or `align=`,
+  rendered back as an inline `text-align`. Marks inside cells follow StarterKit's rules.
+  The two ways out *for the paste* are to strip the `<colgroup>` before parsing
+  (`transformPastedHTML`, or a `parseHTML: () => null` override on `colwidth`) or to start
+  honouring widths properly, which is TODO.md's column-resizing item — pick one there
+  rather than patching a doc. For a table already pasted, the menu's "Auto-size columns"
+  (docs/TABLES.md, `src/lib/table-sizing.ts`) nulls every cell's `colwidth` in one
+  transaction, and the derived inline table width goes with it.
+- **A cell is `block+` and a table is `group: block`, so the schema allows a table inside a
+  cell.** `TableControls` disables its insert button while the caret is in a table
+  (`isActive("table")`) and both file-insert paths (`insertTableFromFile`, docs/TABLES.md)
+  refuse with a message; nothing else stops nesting, and Markdown import can't produce it.
+- **The stock `TableView` leaves a stale `width` on a `<col>` whose column just lost its
+  width** (3.29.0). `updateColumns` reuses the `<col>` elements across updates and, on the
+  width-to-none transition, does `style.setProperty("min-width", …)` without removing the
+  `width` it set earlier; the table's own inline width *is* cleared, so the table snaps back
+  to `width: 100%` while the columns keep their old ratio until a reload — on every client,
+  since the remote update runs the same `update()`. `tableExtensions` therefore configures
+  `View: TableViewWithClearedWidths` (`src/lib/table-view.ts`), a subclass whose `update`
+  recomputes which columns have a width and strips the property from the rest. "Auto-size
+  columns" (docs/TABLES.md) is the transition that surfaced it; `e2e/table-sizing.spec.ts`
+  asserts on the `<col>` styles, not the attrs, for exactly this reason.
+- **`TableView.ignoreMutation` ignores everything inside the wrapper but outside the
+  `<tbody>`** — attribute, child-list and character-data mutations alike (3.29.0). That is
+  what lets `TableDownloadButtons` portal a button *into* `.tableWrapper` after the table on
+  the reading views without ProseMirror re-reading the DOM and finding a node its document
+  doesn't have. The default `ViewDesc` rule is the opposite for a node view with a
+  `contentDOM`, so this holds for the table's wrapper specifically, not for node views in
+  general — check the node view's own `ignoreMutation` before doing the same elsewhere.
+- **A file dropped on the editor is the browser's to handle unless `handleDrop` claims
+  it.** ProseMirror's drop handler parses text and HTML off the `dataTransfer`; a file
+  yields no slice, and with nothing to insert it returns without `preventDefault`, so the
+  browser's default runs — which for a file dropped on a page is to *navigate to it*.
+  `CollabEditorBody`'s `handleDrop` (docs/TABLES.md) returns true for a file the format
+  table knows and inserts asynchronously; ProseMirror calls `preventDefault` on a true
+  return. It reaches the editor through a ref because `editorProps` is written at
+  construction, before the editor exists.
+- **The cells' `renderHTML` is overridden to emit `colSpan`/`rowSpan`, not the extension's
+  `colspan`/`rowspan`.** The extension's spelling is right for the DOM, but
+  `@tiptap/static-renderer`'s React path (`mapAttrsToHTMLAttributes`) translates only
+  `class` and `style` and passes every other attribute name to `React.createElement` as-is,
+  so the reading views warned "Invalid DOM property `colspan`. Did you mean `colSpan`?" on
+  every cell — dev-only, and the DOM was still right, since React writes an unrecognised
+  lowercase attribute through unchanged. The rename is safe for the editor because
+  `setAttribute` lowercases names on HTML elements and the cells' `parseHTML` reads the
+  lowercase attribute back. Don't "restore" the extension's stock `TableCell`/`TableHeader`
+  imports: `tiptap-schema.ts` exports the extended pair under the same names on purpose.
+- **Decoding a ydoc adds default attrs the parser omitted.** A cell straight out of
+  `markdownToDocContent` has no `attrs`; the same cell read back through
+  `TiptapTransformer.fromYdoc` carries `{ colspan: 1, rowspan: 1 }`. Harmless — the
+  seeding path never compares the two, and `orderedList`'s `start` has always behaved the
+  same way — but a test that expects a round trip to be `docsEqual` will be wrong.
+
+Keys: Tab and Shift-Tab move between cells and Tab in the last cell appends a row (the
+extension's own keymap); StarterKit's gap cursor is what lets the caret leave a table that
+ends the document. GFM pipe tables import through the extension's `parseMarkdown` and
+`markdownTokenizer` the moment it is in the parse list — which is why the *comment* Markdown
+path, whose list has no Table, still needs its shim (docs/DOC_IMPORT.md §11).

@@ -6818,3 +6818,19 @@ with a fifth arc leg for comments. PDF quoting exists behind a gate §19 has not
 ### 23l. Where §22's built work went, and why — docs/COMMENTS.md, "History"; the revert record was deleted with the branch
 ### 23m. The Markdown front door — docs/COMMENTS.md, "The Markdown box"; docs/DOC_IMPORT.md §11
 ### 23n. The quote matcher — docs/COMMENTS.md, "The matcher"; docs/COLLAB.md §9
+
+---
+
+## 24. Tables in docs
+
+Built 2026-09-18 on `tables` — TipTap's native table nodes, after
+[docs/research/tables.md](docs/research/tables.md) rejected every external-block pattern
+because an external table holds no text in the ydoc; CSV into an existing doc and tables out
+as CSV the same day; "Auto-size columns" on 2026-09-19. **As built:
+[docs/TABLES.md](docs/TABLES.md).** The section text is in the parent of the commit that
+introduced this stub.
+
+### 24a. What is built — docs/TABLES.md, "What is built"
+### 24b. Judgment calls — docs/TABLES.md, "Column widths" and "Testing"
+### 24c. CSV in and out of an existing doc — docs/TABLES.md, "CSV in and out of an existing doc"
+### 24d. "Auto-size columns" — docs/TABLES.md, "Auto-size columns"

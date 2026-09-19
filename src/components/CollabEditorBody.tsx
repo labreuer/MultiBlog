@@ -18,7 +18,9 @@ import {
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
-import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
+import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS, tableExtensions } from "@/lib/tiptap-schema";
+import { codecForFile } from "@/lib/table-codecs";
+import { insertTableFromFile } from "@/lib/table-file-editor";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
@@ -121,9 +123,27 @@ export default function CollabEditorBody({
   // what react-hooks/refs forbids a ref for.
   const [initialAnchors] = useState(annotationAnchors);
 
+  // A table file's rejection, shown under the toolbar (docs/TABLES.md). Set
+  // from two places — the toolbar's "Table from file…" item and the drop
+  // handler below — and cleared by either's next success or the ×.
+  const [notice, setNotice] = useState<string | null>(null);
+  // handleDrop below is written into editorProps at construction and
+  // closes over nothing reactive; the editor it inserts into is the one
+  // being built, reached through this ref.
+  const editorRef = useRef<Editor | null>(null);
+  const editableRef = useRef(editable);
+  useEffect(() => {
+    editableRef.current = editable;
+  }, [editable]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false, link: EDITOR_LINK_OPTIONS }),
+      // The table nodes (docs/TABLES.md) — the same list contentExtensions
+      // carries, so this editor's schema is that one plus the marks below
+      // and never a table short of it. Not in AnnotationBody, on purpose:
+      // annotationContentExtensions says why.
+      ...tableExtensions,
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         provider,
@@ -165,7 +185,28 @@ export default function CollabEditorBody({
     // share this page, and without distinct accessible names the only thing
     // telling them apart is DOM order — which is what the e2e suite would
     // otherwise have to key off (see docs/TIPTAP.md's `.tiptap` ordering note).
-    editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
+    editorProps: {
+      attributes: { "aria-label": ariaLabel, role: "textbox" },
+      // A table file dropped onto the document becomes a table at the drop
+      // point (docs/TABLES.md) — dispatched by extension through the format
+      // table, never by sniffing content. Claiming the event matters as
+      // much as the insert: ProseMirror reads nothing from a file drop and
+      // leaves the browser's default, which is to *navigate to the file*.
+      // Anything not a table file falls through to that default as before.
+      handleDrop: (view, event) => {
+        const file = event.dataTransfer?.files?.[0];
+        if (!file || !codecForFile(file.name)) return false;
+        const live = editorRef.current;
+        if (!live || !editableRef.current) return false;
+        const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        if (at === undefined) return false;
+        setNotice(null);
+        void insertTableFromFile(live, file, at).then((error) => {
+          if (error) setNotice(error);
+        });
+        return true;
+      },
+    },
     immediatelyRender: false,
     onUpdate: ({ editor: e }) => {
       // setTimeout(0), not queueMicrotask: onUpdate fires from inside
@@ -229,6 +270,10 @@ export default function CollabEditorBody({
     editor?.setEditable(editable);
   }, [editor, editable]);
 
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
+
   // Same reason as `editable` above: the anchor set changes after
   // construction (a reader posts an annotation, this page refreshes) and the
   // extension's options were read once. PLAN.md §13o.
@@ -289,7 +334,15 @@ export default function CollabEditorBody({
   return (
     <div className={styles.editorFrame}>
       <AuthorHighlightStyles colors={authorColors} />
-      <EditorToolbar editor={editor} disabled={!editable} />
+      <EditorToolbar editor={editor} disabled={!editable} onNotice={setNotice} />
+      {notice && (
+        <p role="alert" className={styles.editorNotice}>
+          <span>{notice}</span>
+          <button type="button" className={styles.editorNoticeDismiss} aria-label="Dismiss" onClick={() => setNotice(null)}>
+            ×
+          </button>
+        </p>
+      )}
       {/* The attribute marks this as *the* scrolling box for the body, which
           the doc editor's annotation rail (PLAN.md §18c) needs in order to
           know which band of text is on screen — the page doesn't scroll here,
