@@ -6,14 +6,23 @@ import { useEditorState, type Editor } from "@tiptap/react";
 import { IconChevronDown, IconTable } from "@tabler/icons-react";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { popoverBoundsElement } from "@/lib/popover-placement";
+import { TABLE_CODECS, TABLE_FILE_ACCEPT, type TableCodec } from "@/lib/table-codecs";
+import { downloadTableNode, insertTableFromFile, tableAroundSelection } from "@/lib/table-file-editor";
 import styles from "./EditorChrome.module.css";
 
 // PLAN.md §24 — the toolbar's table tool, QuoteControls' split-button shape
-// reused verbatim: the main button inserts, the chevron opens a menu of the
-// operations that only mean something once the caret is in a table. The
-// commands are all the table extension's own (`insertTable`, `addRowAfter`,
-// … `deleteTable`); this component adds no editing logic, only the
-// enabled-ness and a place to click.
+// reused verbatim: the main button inserts, the chevron opens a menu. The
+// editing commands are all the table extension's own (`insertTable`,
+// `addRowAfter`, … `deleteTable`); this component adds no editing logic,
+// only the enabled-ness and a place to click.
+//
+// §24c added the two items that are not commands: "Table from file…" and
+// "Download as <format>", one per codec in table-codecs.ts. The first is
+// the reason the chevron is enabled *outside* a table too — it used to
+// open only inside one, and an item that inserts a table has nowhere
+// enabled to live under that gate. Each item is still dry-run
+// individually, so the menu reads the same in both places and only the
+// enabled set changes.
 //
 // The menu is position: fixed, placed by floating-ui and portaled to <body>
 // — QuoteControls.tsx says why an absolute menu inside the toolbar cannot
@@ -24,64 +33,97 @@ const MENU_GAP = 2;
 // editor with this control defaults to, and the menu grows it from there.
 const NEW_TABLE = { rows: 3, cols: 3, withHeaderRow: true };
 
+type CommandName =
+  | "addRowBefore"
+  | "addRowAfter"
+  | "deleteRow"
+  | "addColumnBefore"
+  | "addColumnAfter"
+  | "deleteColumn"
+  | "toggleHeaderRow"
+  | "toggleHeaderColumn"
+  | "mergeCells"
+  | "splitCell"
+  | "deleteTable";
+
 type MenuItem = {
   label: string;
-  // Keyed by the command name so one `can()` dry run and one chained call
-  // read the same word — a typo would fail typecheck rather than silently
-  // enable a button that does nothing.
-  command:
-    | "addRowBefore"
-    | "addRowAfter"
-    | "deleteRow"
-    | "addColumnBefore"
-    | "addColumnAfter"
-    | "deleteColumn"
-    | "toggleHeaderRow"
-    | "toggleHeaderColumn"
-    | "mergeCells"
-    | "splitCell"
-    | "deleteTable";
-  // A rule above the item, grouping rows, columns, headers, cells, and the
-  // one destructive action.
+  // A rule above the item, grouping file, rows, columns, headers, cells,
+  // download, and the one destructive action.
   separator?: boolean;
-};
+} & (
+  | {
+      // Keyed by the command name so one `can()` dry run and one chained
+      // call read the same word — a typo would fail typecheck rather than
+      // silently enable a button that does nothing.
+      kind: "command";
+      command: CommandName;
+    }
+  | { kind: "import" }
+  | { kind: "export"; codec: TableCodec }
+);
 
-const MENU_ITEMS: MenuItem[] = [
-  { label: "Add row above", command: "addRowBefore" },
-  { label: "Add row below", command: "addRowAfter" },
-  { label: "Delete row", command: "deleteRow" },
-  { label: "Add column before", command: "addColumnBefore", separator: true },
-  { label: "Add column after", command: "addColumnAfter" },
-  { label: "Delete column", command: "deleteColumn" },
-  { label: "Toggle header row", command: "toggleHeaderRow", separator: true },
-  { label: "Toggle header column", command: "toggleHeaderColumn" },
-  { label: "Merge cells", command: "mergeCells", separator: true },
-  { label: "Split cell", command: "splitCell" },
-  { label: "Delete table", command: "deleteTable", separator: true },
+const COMMAND_ITEMS: (MenuItem & { kind: "command" })[] = [
+  { kind: "command", label: "Add row above", command: "addRowBefore" },
+  { kind: "command", label: "Add row below", command: "addRowAfter" },
+  { kind: "command", label: "Delete row", command: "deleteRow" },
+  { kind: "command", label: "Add column before", command: "addColumnBefore", separator: true },
+  { kind: "command", label: "Add column after", command: "addColumnAfter" },
+  { kind: "command", label: "Delete column", command: "deleteColumn" },
+  { kind: "command", label: "Toggle header row", command: "toggleHeaderRow", separator: true },
+  { kind: "command", label: "Toggle header column", command: "toggleHeaderColumn" },
+  { kind: "command", label: "Merge cells", command: "mergeCells", separator: true },
+  { kind: "command", label: "Split cell", command: "splitCell" },
 ];
 
-export default function TableControls({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
+const MENU_ITEMS: MenuItem[] = [
+  { kind: "import", label: "Table from file…" },
+  ...COMMAND_ITEMS.map((item, i) => (i === 0 ? { ...item, separator: true } : item)),
+  ...TABLE_CODECS.map((codec, i) => ({ kind: "export" as const, label: `Download as ${codec.label}`, codec, separator: i === 0 })),
+  { kind: "command", label: "Delete table", command: "deleteTable", separator: true },
+];
+
+const itemKey = (item: MenuItem) =>
+  item.kind === "command" ? item.command : item.kind === "export" ? `export:${item.codec.label}` : "import";
+
+export default function TableControls({
+  editor,
+  disabled,
+  onNotice,
+}: {
+  editor: Editor;
+  disabled?: boolean;
+  // Where a file's rejection is shown — the toolbar has no room of its own
+  // for a sentence, so the embedder renders it (CollabEditorBody, under the
+  // toolbar) and the drop handler there reports through the same seam.
+  // Null clears it, which a successful insert does.
+  onNotice: (message: string | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  // `inTable` gates the insert button: a cell is `block+` and a table is a
-  // block, so the schema would happily nest one table inside another, and
-  // nothing about the reading views or the CSV follow-up wants that. The
-  // dropdown's items are dry-run individually — mergeCells needs a
-  // multi-cell selection, splitCell a merged cell, and so on — and
-  // useEditorState deep-equals the object, so this re-renders only when a
-  // boolean flips, not per keystroke (EditorToolbar's own selector note).
+  // `inTable` gates the insert button and the file item: a cell is `block+`
+  // and a table is a block, so the schema would happily nest one table
+  // inside another, and nothing about the reading views or the file path
+  // wants that. It also gates the download items the other way. The
+  // command items are dry-run individually — mergeCells needs a multi-cell
+  // selection, splitCell a merged cell, and so on — and useEditorState
+  // deep-equals the object, so this re-renders only when a boolean flips,
+  // not per keystroke (EditorToolbar's own selector note).
   const { inTable, can } = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
       inTable: e.isActive("table"),
-      can: Object.fromEntries(MENU_ITEMS.map((item) => [item.command, e.can()[item.command]()])) as Record<
-        MenuItem["command"],
-        boolean
-      >,
+      can: Object.fromEntries(
+        [...COMMAND_ITEMS, { command: "deleteTable" as const }].map((item) => [item.command, e.can()[item.command]()]),
+      ) as Record<CommandName, boolean>,
     }),
   });
+
+  const enabled = (item: MenuItem) =>
+    item.kind === "command" ? can[item.command] : item.kind === "import" ? !inTable : inTable;
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -126,6 +168,33 @@ export default function TableControls({ editor, disabled }: { editor: Editor; di
     return autoUpdate(reference, menu, update);
   }, [open]);
 
+  function run(item: MenuItem) {
+    close();
+    if (item.kind === "command") {
+      editor.chain().focus()[item.command]().run();
+      return;
+    }
+    if (item.kind === "import") {
+      // The value is cleared HERE, not after a pick: `change` only fires on
+      // a value that differs, so re-picking the same file after a rejected
+      // import would otherwise do nothing (DocImportButton's own rule).
+      if (fileRef.current) {
+        fileRef.current.value = "";
+        fileRef.current.click();
+      }
+      return;
+    }
+    const found = tableAroundSelection(editor);
+    if (!found) return;
+    void downloadTableNode(found.node, item.codec, `table${item.codec.extensions[0]}`);
+  }
+
+  async function handleFile(file: File) {
+    onNotice(null);
+    const error = await insertTableFromFile(editor, file);
+    if (error) onNotice(error);
+  }
+
   return (
     <div className={styles.quoteGroup} ref={containerRef}>
       <button
@@ -144,27 +213,35 @@ export default function TableControls({ editor, disabled }: { editor: Editor; di
         aria-label="Table options"
         aria-haspopup="menu"
         aria-expanded={open}
-        disabled={disabled || !inTable}
-        title={inTable ? "Table options" : "Put the caret in a table for its options"}
+        disabled={disabled}
+        title="Table options"
         onClick={() => (open ? close() : setOpen(true))}
       >
         <IconChevronDown size={14} />
       </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept={TABLE_FILE_ACCEPT}
+        hidden
+        aria-label="Table file"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void handleFile(file);
+        }}
+      />
       {open &&
         !disabled &&
         createPortal(
           <div ref={menuRef} className={styles.quoteMenu} role="menu">
             {MENU_ITEMS.map((item) => (
               <button
-                key={item.command}
+                key={itemKey(item)}
                 type="button"
                 role="menuitem"
                 className={`${styles.quoteMenuItem} ${item.separator ? styles.menuItemSeparated : ""}`}
-                disabled={!can[item.command]}
-                onClick={() => {
-                  editor.chain().focus()[item.command]().run();
-                  close();
-                }}
+                disabled={!enabled(item)}
+                onClick={() => run(item)}
               >
                 {item.label}
               </button>

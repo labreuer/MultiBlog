@@ -90,14 +90,25 @@ function IconTightenLines({ size }: { size: number }) {
 // PLAN.md §13e) can reuse it with a smaller `tools` list instead of forking
 // the markup — the buttons themselves don't know or care which editor they're
 // attached to, only the `editor` instance passed in.
+const alertNotice = (message: string | null) => {
+  if (message) window.alert(message);
+};
+
 export default function EditorToolbar({
   editor,
   disabled,
   tools = FULL_TOOLS,
+  onNotice,
 }: {
   editor: Editor;
   disabled?: boolean;
   tools?: ToolbarTool[];
+  // Where the table tool's file rejections go (TableControls). The
+  // embedder that lists "table" renders the sentence under the toolbar
+  // (CollabEditorBody); one that lists it without wiring this gets a
+  // window.alert rather than silence, since a swallowed rejection reads as
+  // a broken menu item.
+  onNotice?: (message: string | null) => void;
 }) {
   // The buttons whose enabled-ness depends on editor state: tightening
   // acts on the selection, so a caret alone leaves it inert (its chosen
@@ -210,7 +221,9 @@ export default function EditorToolbar({
         </button>
       )}
       {tools.includes("quote") && <QuoteControls editor={editor} disabled={disabled} />}
-      {tools.includes("table") && <TableControls editor={editor} disabled={disabled} />}
+      {tools.includes("table") && (
+        <TableControls editor={editor} disabled={disabled} onNotice={onNotice ?? alertNotice} />
+      )}
       {tools.includes("tighten") && (
         <button
           type="button"

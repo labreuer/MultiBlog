@@ -97,6 +97,32 @@
   margin-top: 0.5em;
 }
 
+/* The reading views' per-table download control (TableDownloadButtons),
+   portaled into the wrapper after the table: a small right-aligned line
+   in secondary text, so a table's last row keeps its border and the
+   control never overlaps a cell. It is a block child of the scroll box,
+   which is why it is not an overlay — see the component. */
+.tableDownload {
+  /* A block-level flex box with an auto left margin and a content width:
+     right-aligned without touching the wrapper's own layout. */
+  display: flex;
+  width: max-content;
+  align-items: center;
+  gap: 0.3em;
+  margin: 0.2em 0 0 auto;
+  padding: 0.1em 0.2em;
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.tableDownload:hover,
+.tableDownload:focus-visible {
+  color: var(--link);
+}
+
 /* prosemirror-tables' cell selection (drag across cells, or Shift-click) —
    the class is the plugin's, hence :global. An overlay rather than a
    background so it paints over a header cell's own fill. The same
