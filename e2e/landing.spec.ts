@@ -224,7 +224,15 @@ test("avatar upload: re-encodes and resizes, serves immutably, and removal falls
       .poll(() => avatar.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
       .toBe(160);
 
-    const response = await page.request.get(`/api/avatar/${user.id}/${facts!.hash}`);
+    // `maxRetries`: a socket the request context kept alive can be closed by
+    // `next start` (Node's 5 s keepAliveTimeout) at the very moment the next
+    // request goes out on it, and that surfaces as `read ECONNRESET` with no
+    // response at all. The UI steps above leave this context idle for well
+    // over 5 s, so its first request afterwards is exactly the one at risk —
+    // one firefox full run in three saw it here (2026-09-19). Playwright
+    // retries only ECONNRESET under this option, which is the one error it
+    // is for.
+    const response = await page.request.get(`/api/avatar/${user.id}/${facts!.hash}`, { maxRetries: 2 });
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toBe("image/webp");
     expect(response.headers()["cache-control"]).toContain("immutable");
@@ -233,7 +241,7 @@ test("avatar upload: re-encodes and resizes, serves immutably, and removal falls
     // A URL carrying a hash that is no longer current still serves the
     // person's actual avatar (so HTML cached inside `/`'s 60s ISR window
     // doesn't show a broken image) but stops claiming immutability.
-    const stale = await page.request.get(`/api/avatar/${user.id}/${"0".repeat(32)}`);
+    const stale = await page.request.get(`/api/avatar/${user.id}/${"0".repeat(32)}`, { maxRetries: 2 });
     expect(stale.status()).toBe(200);
     expect(stale.headers()["cache-control"]).toContain("must-revalidate");
 

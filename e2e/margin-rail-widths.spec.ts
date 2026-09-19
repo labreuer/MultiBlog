@@ -310,19 +310,29 @@ test.describe("the margin rail across the breakpoint", () => {
       };
     };
 
-    // Polled: the bar is re-placed from the layout pass's rAF, one frame after
-    // the card lands in the rail.
+    // Polled, and as one reading rather than a poll followed by one-shot
+    // reads. The bar is re-placed from the layout pass's rAF, one frame after
+    // the card lands in the rail, and again on every pass after that — which
+    // under a loaded suite come every few frames while the collab editor
+    // settles. Until 2026-09-19 each re-place *re-created* the node, and a
+    // boundingBox taken between two passes resolved the old one and measured
+    // a detached element: null, once in six full runs. The bar is moved in
+    // place now (pseudo-border.ts), but three boxes read one after another
+    // can still straddle a pass, so the whole reading is what gets retried.
+    // Level with the card and the same height as it — a bar that merely
+    // landed in the right column but at the section's offset would satisfy
+    // `inRail` alone and fail the other two.
     await expect
-      .poll(async () => (await measure())?.pastArticle ?? Number.NaN, { timeout: 10_000 })
-      .toBeGreaterThan(0);
-
-    const placed = await measure();
-    expect(placed).not.toBeNull();
-    // Level with the card and the same height as it — a bar that merely landed
-    // in the right column but at the section's offset would pass the check
-    // above and fail these.
-    expect(placed!.alignedBy).toBe(0);
-    expect(placed!.heightDiff).toBe(0);
+      .poll(
+        async () => {
+          const placed = await measure();
+          return (
+            placed && { inRail: placed.pastArticle > 0, alignedBy: placed.alignedBy, heightDiff: placed.heightDiff }
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toEqual({ inRail: true, alignedBy: 0, heightDiff: 0 });
 
     // And back again: narrowing past the threshold removes the rail container,
     // and with it any bar appended to it. The bar has to be re-placed in the
@@ -330,15 +340,20 @@ test.describe("the margin rail across the breakpoint", () => {
     await page.setViewportSize(NARROW);
     await expect.poll(() => belowBy(page), { timeout: 10_000 }).toBeGreaterThan(0);
     await expect(page.locator("[data-pseudo-border]")).toHaveCount(1);
-    const narrowed = await measure();
-    expect(narrowed).not.toBeNull();
     // A pixel of slack, unlike the rail case above: the bar's `top` is a
     // fractional offset between two rects written back as a px string, and in
     // the section the card sits at a fractional offset of its own. One pixel
     // is rounding; the failure this guards against is a bar left in the other
-    // container, hundreds away.
-    expect(Math.abs(narrowed!.alignedBy)).toBeLessThanOrEqual(1);
-    expect(narrowed!.pastArticle).toBeLessThan(0);
+    // container, hundreds away. Polled for the same reason as above.
+    await expect
+      .poll(
+        async () => {
+          const narrowed = await measure();
+          return narrowed && { inSection: narrowed.pastArticle < 0, alignedWithinAPixel: Math.abs(narrowed.alignedBy) <= 1 };
+        },
+        { timeout: 10_000 },
+      )
+      .toEqual({ inSection: true, alignedWithinAPixel: true });
   });
 
 });

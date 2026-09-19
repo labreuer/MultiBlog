@@ -1123,24 +1123,6 @@ reason against clipping can be met another way.
 
 ---
 
-## `deleteTestFile` can sweep bytes another test's row still needs
-
-**Status:** seen once, 2026-09-14, `anchored-link-editing.spec.ts:291` at 10 workers:
-`/api/files/<id>/<sha256>` answered 503 "File contents are missing" 700 ms after
-`createTestFile` returned, with `[files] … references missing bytes` in the server log. Not
-fixed; not seen in the fifteen matrix runs before it.
-
-File storage is content-addressed, so test files whose bytes match share one blob and one
-`sha256`. `deleteTestFile` (`e2e/db-worker.ts`) deletes its row, counts the rows left on that
-sha, and sweeps the bytes at zero — two steps, and a concurrent `createTestFile` in another
-worker can land its bytes-then-row between them, or its row after the count. And they do
-share bytes: `createTestFile` builds the same two pages of fixed text for every file unless
-the caller passes `pages`, so nearly every test file in the suite is one blob under one sha.
-Either give each test file distinct bytes (the title is already unique — put it in the PDF),
-or never sweep in `deleteTestFile` and leave unreferenced test shas to `cleanup.teardown.ts`.
-
----
-
 ## Three zoom-gesture measurements the Windows pass left open (docs/PDF.md §10c)
 
 **Status:** the Windows half of §10c was measured 2026-09-15 (trackpad, touchscreen and mouse,

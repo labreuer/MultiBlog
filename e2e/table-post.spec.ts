@@ -75,7 +75,11 @@ test("a pipe table imports, publishes, scrolls in place on a phone, and download
     await bodyEditor(page).evaluate((el, html) => {
       const dt = new DataTransfer();
       dt.setData("text/html", html);
-      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+      const event = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+      // Filled after construction as well, for Gecko — table-sizing.spec.ts
+      // says why.
+      for (const type of dt.types) event.clipboardData?.setData(type, dt.getData(type));
+      el.dispatchEvent(event);
     }, WIDE_PASTE);
     await expect(bodyEditor(page).locator("table")).toHaveCount(2);
     await expect(bodyEditor(page).locator("table").nth(1)).toHaveAttribute("style", /width: 700px/);

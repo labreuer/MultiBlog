@@ -8,7 +8,6 @@ import { test, expect, visibleText } from "./fixtures";
 import {
   ADMIN_EMAIL,
   addTestDocAuthor,
-  clearColumnOrder,
   createTestAnnotation,
   createTestDoc,
   createTestUser,
@@ -133,7 +132,6 @@ test.describe("/docs 'Show all docs' admin override (docs/PERMISSIONS.md)", () =
       await page.goto("about:blank").catch(() => {});
       await deleteTestDoc(notOwned.id);
       await deleteTestUser(otherAdmin);
-      await clearColumnOrder(ADMIN_EMAIL);
     }
   });
 

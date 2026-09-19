@@ -212,11 +212,14 @@ why). What is left is not the suite's to fix:
   painted over the summary — the very bug the test guards, real and
   intermittent on Firefox under load. The probe polls for 10 s now and reports
   where the summary was; a red here is the app, not the wait. TODO.md.
-- **`anchored-link-editing.spec.ts:291`, once at 10 workers**: the file bytes
-  answered 503 "File contents are missing" 700 ms after the row was created,
-  so the row outlived its bytes: every default test PDF has the same bytes
-  and so one `sha256`, and `deleteTestFile`'s count-then-sweep of it can
-  run between another test's create and its row. Fixture side; TODO.md.
+- ~~**`anchored-link-editing.spec.ts:291`**~~ — fixed 2026-09-19. The file
+  bytes answered 503 "File contents are missing" 700 ms after the row was
+  created (once at 10 firefox workers, once in a chromium full run, once more
+  in a firefox one): every default test PDF has the same bytes and so one
+  `sha256`, and `deleteTestFile`'s count-then-sweep of it ran between another
+  worker's write of those bytes and its row. Both sides now hold a Postgres
+  advisory lock on the sha (`withShaLock` in db-worker.ts) for the whole
+  create or delete.
 
 The globe-icon assertion in `link-bubble.spec.ts` is skipped on webkit, and
 the touch-pinch test in `pdf-zoom.spec.ts` where `Touch` isn't constructible;
@@ -407,6 +410,27 @@ the admin account.
   DETACHED from its query entirely on its own, so this never happens no matter
   what a later publish says *unless* something actually republishes from the
   matching point — there is no automatic reattachment.
+- **A synthetic paste needs its data written onto the event, not only passed
+  to the constructor.** `new ClipboardEvent("paste", { clipboardData })` is
+  honoured by Chromium and ignored by Gecko, which gives the event an empty
+  `DataTransfer` of its own — writable, so the table specs fill
+  `event.clipboardData` after constructing it and dispatch the same event on
+  both engines (measured 2026-09-19; `table-sizing.spec.ts` has the helper
+  and the reason it is dispatched in-page at all).
+- **A direct `page.request.get()` after a long stretch of UI work can die with
+  `read ECONNRESET` and no response.** The request context keeps its socket
+  alive and `next start` closes idle ones after Node's 5 s
+  `keepAliveTimeout`; a request sent on a socket the server is closing at
+  that instant is reset. Pass `{ maxRetries: 2 }` — Playwright retries
+  exactly that error and nothing else (`landing.spec.ts`'s avatar test, one
+  firefox full run in three on 2026-09-19).
+- **Never write the shared admin's preferences from a spec that did not set
+  them.** `clearColumnOrder(ADMIN_EMAIL)` used to sit in two `finally` blocks
+  whose tests only ever navigated with `?cols=`; from another worker that
+  write landed between `admin-table.spec.ts`'s "Save as my default" and the
+  navigation that checks it, and the saved column came back (once in a full
+  chromium run, 2026-09-18). A shared-admin preference belongs to the one
+  test that saves it, which puts it back itself.
 - **Playwright aborts every request whose URL ends in `/favicon.ico`** — in every
   browser, before `page.route` or the request events see it (playwright-core's
   `requestStarted`, `_isFavicon`). An `<img src="https://any.host/favicon.ico">`
