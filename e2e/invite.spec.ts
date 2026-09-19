@@ -8,8 +8,6 @@
 // nothing leaves the box by construction, key or no key (see e2e/README.md).
 import { test, expect } from "./fixtures";
 import {
-  ADMIN_EMAIL,
-  clearColumnOrder,
   createTestInvite,
   createTestUser,
   deleteTestUser,
@@ -43,8 +41,6 @@ test.describe("email invites", () => {
       expect(invites[0].token).not.toBeNull();
     } finally {
       await deleteTestUser(email);
-      // The shared admin is reused by every other spec.
-      await clearColumnOrder(ADMIN_EMAIL);
     }
   });
 

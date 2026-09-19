@@ -291,9 +291,23 @@ export function useMarginNotesLayout({
     }
 
     window.addEventListener("resize", schedule);
-    // Local edits and, on a live doc, remote ones that arrive as real
-    // transactions.
-    editor.on("update", schedule);
+    // `transaction`, not `update`. Local edits and, on a live doc, remote ones
+    // arrive as document-changing transactions and either event reports them.
+    // What only `transaction` reports is the one that *anchors* a card: a
+    // column anchor resolves into plugin state, and `setAnnotationAnchors`
+    // delivers it as a meta-only transaction that tiptap does not count as an
+    // update (`update` is gated on `docChanged`). The doc editor's push runs
+    // from a React effect once the document has text, i.e. some time *after*
+    // the Yjs sync that fired the `update` this used to listen for — so
+    // whether the anchored card was drawn came down to whether that effect
+    // beat this hook's one queued frame. Under a loaded suite it lost about
+    // one run in five (e2e/doc.spec.ts, "visible in the editor's rail too"),
+    // and there was no later trigger: a bounded rail hides an unresolved card
+    // and only a scroll, a resize or the next keystroke re-measured it. The
+    // extra firings — selection moves, remote cursors — cost nothing beyond
+    // the frame already coalescing them, and EditorAnnotationRail's queue
+    // ordering had already learnt the same lesson.
+    editor.on("transaction", schedule);
     // The reading views push remote content in with `emitUpdate: false`
     // (use-live-doc-content.ts), so `update` above never fires for them —
     // this is the channel those surfaces report through instead.
@@ -307,7 +321,7 @@ export function useMarginNotesLayout({
       if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener("resize", schedule);
-      editor.off("update", schedule);
+      editor.off("transaction", schedule);
       unsubscribe?.();
       if (bounds) window.removeEventListener("scroll", schedule, true);
     };

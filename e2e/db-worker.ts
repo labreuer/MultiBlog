@@ -21,6 +21,7 @@ import * as Y from "yjs";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { commentBodyTextFromJSON, commentDocFromText, isCommentBodyError } from "@/lib/comment-body";
@@ -487,6 +488,40 @@ export type TestFile = {
   pages: string[];
 };
 
+
+// File storage is content-addressed (src/lib/file-storage.ts), and nearly
+// every test file is the *same* two pages of fixed text — one blob, one sha,
+// shared by every spec that never passes `pages`. That makes the sweep in
+// deleteTestFile a race across workers: it deletes its row, counts the rows
+// left on the sha, and removes the bytes at zero, while another worker's
+// createTestFile can land its bytes-then-row in between. The loser answers
+// 503 "File contents are missing" for a row created milliseconds earlier —
+// anchored-link-editing.spec.ts:291, once at 10 firefox workers (2026-09-14),
+// once in a chromium full run (2026-09-17) and once more in firefox
+// (2026-09-19), always on the default blob's sha.
+//
+// So both sides run under one Postgres advisory lock keyed on the sha: a
+// create holds it from writing the bytes until its row is committed, a
+// delete from removing its row until the bytes are gone or found still
+// referenced. Transaction-scoped (`pg_advisory_xact_lock`) inside an
+// interactive transaction, because Prisma's pool hands the lock and the
+// unlock to whichever connection is free — a session lock would be released
+// on the wrong one. The transaction holds one connection and nothing else;
+// the work inside uses the ordinary client, so the row is committed and
+// visible before the lock is released.
+async function withShaLock<T>(sha256: string, work: () => Promise<T>): Promise<T> {
+  return prisma.$transaction(
+    async (tx) => {
+      // `$executeRaw`, not `$queryRaw`: the lock function returns `void`,
+      // which the query path refuses to deserialize as a column.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sha256}))`;
+      return work();
+    },
+    // A cold extractPdf under a loaded suite runs well past the 5 s default.
+    { maxWait: 30_000, timeout: 120_000 },
+  );
+}
+
 /**
  * A throwaway uploaded file (PLAN.md §19).
  *
@@ -533,30 +568,37 @@ export async function createTestFile(opts: {
   ];
 
   const bytes = buildTestPdf(pageLines, { outline: opts.outline, pageLabels: opts.pageLabels });
-  const stored = await storeUploadStream(
-    new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(bytes);
-        controller.close();
-      },
-    }),
-  );
-  const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
+  // Hashed here as well as by the store, because the lock has to be taken
+  // before the bytes are written and the store only reports the sha after.
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const { stored, parsed, file } = await withShaLock(sha256, async () => {
+    const stored = await storeUploadStream(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+    );
+    if (stored.sha256 !== sha256) throw new Error(`Stored sha ${stored.sha256} differs from the computed ${sha256}.`);
+    const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
 
-  const file = await prisma.storedFile.create({
-    data: {
-      slug: await uniqueFileSlug(title),
-      title,
-      filename: `${title.replace(/[^\w.-]+/g, "-")}.pdf`,
-      contentType: "application/pdf",
-      byteSize: stored.byteSize,
-      sha256: stored.sha256,
-      pageCount: parsed.pageCount,
-      visibility,
-      updatedByUserId: owner.id,
-      owners: { create: { userId: owner.id, ownerOrder: 0 } },
-    },
-    select: { id: true, slug: true },
+    const file = await prisma.storedFile.create({
+      data: {
+        slug: await uniqueFileSlug(title),
+        title,
+        filename: `${title.replace(/[^\w.-]+/g, "-")}.pdf`,
+        contentType: "application/pdf",
+        byteSize: stored.byteSize,
+        sha256: stored.sha256,
+        pageCount: parsed.pageCount,
+        visibility,
+        updatedByUserId: owner.id,
+        owners: { create: { userId: owner.id, ownerOrder: 0 } },
+      },
+      select: { id: true, slug: true },
+    });
+    return { stored, parsed, file };
   });
   await prisma.filePageText.createMany({
     data: parsed.pages.map((text, pageIndex) => ({
@@ -651,11 +693,15 @@ export async function deleteTestFile(idOrSlug: string): Promise<void> {
     throw new Error(`Refusing to delete file "${file.title}" — it has a non-throwaway (or missing) owner.`);
   }
 
-  await prismaIncludingDeleted.storedFile.delete({ where: { id: file.id } });
   // Content-addressed storage means another file may share these bytes; only
-  // sweep them once nothing points at them.
-  const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
-  await deleteBytesIfUnreferenced(file.sha256, remaining);
+  // sweep them once nothing points at them — and only under the per-sha lock
+  // (withShaLock), or a create in another worker lands between the count and
+  // the sweep.
+  await withShaLock(file.sha256, async () => {
+    await prismaIncludingDeleted.storedFile.delete({ where: { id: file.id } });
+    const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
+    await deleteBytesIfUnreferenced(file.sha256, remaining);
+  });
 }
 
 export async function deleteTestDoc(idOrSlug: string): Promise<void> {
