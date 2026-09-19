@@ -93,6 +93,17 @@ never handled: the rail repacking around a neighbour that grew, a resize, and th
 card changing height. The activation is remembered as **data** — a hash, or a thread id and
 colour — never as the element it marked, because the two containers are a `createPortal`
 boundary and the card's DOM node is replaced exactly when the bar needs re-placing.
+A re-place **moves the bar rather than re-creating it** when its target is still in the same
+container (keyed by `data-pseudo-border-for`), and a bar left in the other container is
+removed after the pass — a node churned once per frame while anyone types was wasteful, and
+anything measuring it between two passes could resolve a node the next pass had detached.
+And `pseudo-border.ts` watches its own root and target with a `ResizeObserver`, because in
+the **stacked** layout the hook has no container to observe and the bar was otherwise placed
+exactly once: a card body that finished mounting a frame later, a composer opening above
+the card, a viewport narrowed so the text rewrapped, each left the bar where the card had
+been (the spec measured 24px adrift after a resize, once in three runs). Each element is
+observed at most once — `observe()` fires an initial notification, so re-arming on every
+refresh would refresh forever.
 `margin-rail-widths.spec.ts` guards it; that test only reproduces the bug after a
 `page.reload()`, since a `goto` differing only in the hash is a same-document navigation and
 fires `hashchange` at a page whose cards are already in the rail.
