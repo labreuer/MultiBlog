@@ -113,8 +113,7 @@ import and export into an existing doc followed the same day (PLAN.md §24c). St
 2. **Small follow-ups to §24c**, each additive: a header-row checkbox on the file picker
    (`gridToTableJson` already takes `headerRow`); "Replace this table from file…" (the
    grid side is trivial, but anchors on changed cells go orphan exactly as with any text
-   replacement, and the UI has to say so); the post page's download button has no spec of
-   its own (same component as the doc view's, which is covered).
+   replacement, and the UI has to say so).
 3. **Measure `MAX_TABLE_CELLS`.** 2,000 is a starting number. PERFORMANCE.md records the
    debounced revision diff going super-linear at 18k characters, and every cell is at
    least one paragraph node; the right number comes from a real 2,000-cell table in the
@@ -139,12 +138,6 @@ import and export into an existing doc followed the same day (PLAN.md §24c). St
      set in a wider editor or pasted from a 6.5in Word page (scale proportionally? clamp?),
      and how the drag handle (`.column-resize-handle`, prosemirror-tables) should look
      under the site's tokens. Decide before turning it on, not after.
-5. **An e2e spec for the pipe-table import.** `e2e/markdown-import.spec.ts`'s shape: import
-   a fixture with a pipe table, assert the header and body cell text in the editor,
-   publish, assert the same on the post page and that `.tableWrapper` scrolls rather than
-   the page at 390px (the `admin-table.spec.ts` narrow-viewport assertion, reused).
-   `e2e/table-csv.spec.ts` covers the nodes in the editor and on the doc view already.
-
 ## A PDF annotation reply's quote is still client-supplied (PLAN.md §22e; docs/ANNOTATIONS.md)
 
 `postFileAnnotation` stores a reply's `anchorFrom`/`anchorTo`/`quotedText` exactly as the

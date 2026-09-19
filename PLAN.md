@@ -6862,11 +6862,12 @@ docs/COMMENTS.md's matcher) works on table content unchanged — verified headle
   `tableExtensions`' comment and docs/TIPTAP.md. TODO.md carries it.
 - **CSV import and export were a separate change** — §24c, built the same day on top of
   this one.
-- **No e2e spec for the pipe-table import yet.** Per CLAUDE.md's convention UI testing was
-  deferred at `npm run check`; the natural spec is `e2e/markdown-import.spec.ts`'s shape —
-  import a fixture with a pipe table, assert the cell text in the editor and on the post
-  page — and is listed in TODO.md. `e2e/table-csv.spec.ts` (§24c) covers the table nodes
-  themselves in the editor and on the doc reading view.
+- **The pipe-table spec came a day later**: `e2e/table-post.spec.ts` (2026-09-19) imports a
+  fixture with a pipe table, asserts the cells in the editor, publishes, and asserts them on
+  the post page — plus the phone-width check that a *pasted* table's wrapper scrolls rather
+  than the page, since a pipe table under `table-layout: fixed; width: 100%` can never
+  overflow its wrapper and only a width-carrying table can. `e2e/table-csv.spec.ts` (§24c)
+  covers the nodes in the editor and on the doc reading view.
 
 ### 24c. CSV in and out of an existing doc
 
@@ -6947,7 +6948,8 @@ super-linear diff is the reason it exists, and real tables should move it.
 enabled set inside and outside a table, and both downloads compared as bytes — BOM and CRLF
 included — one from the editor's menu and one from the doc reading view's button) and the
 two `test:unit` tables. The post page's button is the same component mounted by
-`AnnotatableArticle` and has no spec of its own.
+`AnnotatableArticle`; `e2e/table-post.spec.ts` covers it at the end of the pipe-table flow,
+one button per table, the first compared as bytes.
 
 **Deferred**, in TODO.md: the xlsx codec (the format table is shaped for it; pick ExcelJS
 or SheetJS by whether styled cells will be asked for), a header-row option, "replace this
