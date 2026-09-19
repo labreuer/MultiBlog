@@ -8,10 +8,16 @@
   border-left: 2px solid var(--border);
 }
 
+/* PLAN.md §22c — deliberately *not* `display: flex`, which this was until the
+   "(edited)" marker moved in here. `EditHistory`'s panel is a block inside the
+   marker's own inline wrapper: in a flex row that wrapper is a flex item, so
+   the panel gets sized and placed as part of the meta line instead of opening
+   underneath it. A plain block puts every child in inline flow, where
+   baselines line up on their own and the panel breaks the line box the way it
+   does on a comment. Spacing is by margin for the same reason — there is no
+   gap to inherit. CommentNode.module.css's `.meta` is this, and has been since
+   its own marker moved. */
 .meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
   margin-bottom: 4px;
 }
 
@@ -22,6 +28,14 @@
 .timestamp {
   color: var(--text-secondary);
   font-size: 0.8rem;
+  margin-left: 8px;
+}
+
+/* Only in the meta line: `.revisionButton` is also the "quoted an earlier
+   version" control, which sits alone in its own `.editStatus` line and would
+   be indented by an inherited margin. */
+.meta .revisionButton {
+  margin-left: 8px;
 }
 
 .revisionButton {
@@ -149,10 +163,6 @@
 .editStatus {
   font-size: 0.8rem;
   color: var(--text-secondary);
-  margin-top: 2px;
-}
-
-.historyLine {
   margin-top: 2px;
 }
 

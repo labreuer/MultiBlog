@@ -252,6 +252,95 @@ test.describe("the margin rail across the breakpoint", () => {
     await page.setViewportSize(IPAD_LANDSCAPE);
     await expect(cards).toHaveCount(1);
   });
+  test("a permalinked card's bookmark bar follows it into the rail", async ({ page, sharedDoc }) => {
+    // PLAN.md §18 / pseudo-border.ts. The bar marking a permalinked entry is
+    // placed imperatively against that entry's card, and until 2026-09-19 it
+    // was placed exactly once, from a mount effect with no dependencies. Both
+    // reading views paint their first client render with every card in the
+    // section below the article — `anchored` needs a mounted editor to measure
+    // and TipTap's is `immediatelyRender: false` — so the bar was appended to
+    // the section at the card's stacked-layout offset, and stayed there after
+    // the card portaled up into the rail. A reader following a permalink got a
+    // red bar at the bottom of the page pointing at nothing.
+    //
+    // The hash has to be present *at load*, which is what makes this different
+    // from clicking a permalink on a page already laid out: by then the card
+    // is in the rail and even the broken version placed the bar correctly.
+    await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: "Where does my bookmark bar end up?",
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+    });
+
+    await page.setViewportSize(IPAD_LANDSCAPE);
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await expect(page.locator("[data-margin-note-id]")).toHaveCount(1);
+
+    // Read the permalink off the card rather than rebuilding `anchorName` here
+    // — a second copy of that derivation would pass this test while the real
+    // links pointed somewhere else.
+    const href = await page.locator("[data-margin-note-id] a[href^='#']").first().getAttribute("href");
+    expect(href).toBeTruthy();
+
+    await page.goto(`/doc/${sharedDoc.slug}${href}`);
+    // **The reload is the test.** `goto` to the same path with only the hash
+    // changed is a *same-document* navigation: the browser fires `hashchange`
+    // at a page that is already laid out with its card in the rail, which even
+    // the broken version handled correctly. Only a real document load puts the
+    // hash effect where the bug lives — on the first client render, before the
+    // editor has mounted and while every card is still in the section below.
+    // Without this line the whole test passed against the unfixed code.
+    await page.reload();
+    await expect.poll(() => besideBy(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(0);
+
+    // The bar's own geometry, against the element it is standing in for a
+    // border on: `[data-comment-id]`, the card's root annotation div, not the
+    // whole entry (which also carries the quoted-text header above it).
+    const measure = async () => {
+      const bar = await page.locator("[data-pseudo-border]").first().boundingBox();
+      const target = await page.locator("[data-margin-note-id] [data-comment-id]").first().boundingBox();
+      const article = await bodyEditor(page).boundingBox();
+      // NaN rather than a throw, for the reason besideBy above returns one.
+      if (!bar || !target || !article) return null;
+      return {
+        alignedBy: Math.round(bar.y - target.y),
+        heightDiff: Math.round(bar.height - target.height),
+        pastArticle: Math.round(bar.x - (article.x + article.width)),
+      };
+    };
+
+    // Polled: the bar is re-placed from the layout pass's rAF, one frame after
+    // the card lands in the rail.
+    await expect
+      .poll(async () => (await measure())?.pastArticle ?? Number.NaN, { timeout: 10_000 })
+      .toBeGreaterThan(0);
+
+    const placed = await measure();
+    expect(placed).not.toBeNull();
+    // Level with the card and the same height as it — a bar that merely landed
+    // in the right column but at the section's offset would pass the check
+    // above and fail these.
+    expect(placed!.alignedBy).toBe(0);
+    expect(placed!.heightDiff).toBe(0);
+
+    // And back again: narrowing past the threshold removes the rail container,
+    // and with it any bar appended to it. The bar has to be re-placed in the
+    // section rather than simply vanishing.
+    await page.setViewportSize(NARROW);
+    await expect.poll(() => belowBy(page), { timeout: 10_000 }).toBeGreaterThan(0);
+    await expect(page.locator("[data-pseudo-border]")).toHaveCount(1);
+    const narrowed = await measure();
+    expect(narrowed).not.toBeNull();
+    // A pixel of slack, unlike the rail case above: the bar's `top` is a
+    // fractional offset between two rects written back as a px string, and in
+    // the section the card sits at a fractional offset of its own. One pixel
+    // is rounding; the failure this guards against is a bar left in the other
+    // container, hundreds away.
+    expect(Math.abs(narrowed!.alignedBy)).toBeLessThanOrEqual(1);
+    expect(narrowed!.pastArticle).toBeLessThan(0);
+  });
+
 });
 
 // PLAN.md §18f's surface, in the one orientation where the page is nothing but

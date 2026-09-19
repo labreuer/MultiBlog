@@ -335,16 +335,37 @@ changed nothing writes nothing, so opening and closing the editor cannot close t
 window. Cancel calls `cancelAnnotationEdit`, which decodes the newest snapshot and asks the
 collab process (`/admin/annotation-replace`) to write it back — Yjs has no un-apply, so a
 cancel is new log rows that restore the old text, and the versions stay a strictly increasing
-sequence of marks. A session left open is settled on the author's next visit: once
-`editingSince` is older than `STALE_EDIT_SESSION_MS` (an hour) the card offers Resume or
-Discard, with staleness decided by the loader rather than in render.
+sequence of marks. A session left open is settled on the author's next visit, and *who* is
+visiting decides how: the author gets **Resume editing** immediately, because
+`beginAnnotationEdit` only ever makes a *stranger* wait — its freshness check is skipped when
+`Annotation.userId` is the caller, so a reload mid-edit costs nothing, and the card says "You
+have an edit open since …" rather than reporting the author to themselves. Anyone else — an
+`ADMIN`, or the author's session seen by the author's own admin colleague — reads "Being edited
+since …" and waits until `editingSince` is older than `STALE_EDIT_SESSION_MS` (an hour), at
+which point the card offers Resume or Discard. Staleness is decided by the loader rather than in
+render. There is no column recording *which user* holds a session, so the two questions the UI
+can ask are the two the server asks: "is this viewer the annotation's author" and "has an hour
+passed" — which is why an `ADMIN` who reloads mid-edit on someone else's annotation waits out
+the hour like any other stranger, and why the author's own Discard arrives only by way of
+Resume then Cancel.
 
 **The grace window** is docs/COMMENTS.md's, from `src/lib/edit-grace.ts`, with `posted` =
 `Annotation.postedAt` and "something quotes this version" = an anchored, undeleted reply whose
 stamp falls in the span that version settled — `isVersionQuoted`: a stamp in `(m[i-1], m[i]]`
 names version *i*, the first version owning everything up to its own mark — so a quoted
 version stays visible inside the window. The "edited" marker (`EditHistory`, the island shared
-with comments) sits on a line of its own below the body; opening it calls
+with comments) is parenthesized at the end of the meta line, directly after "at this revision"
+— `placement="meta"`, the same mode a comment uses, which drops the edit time from the marker
+into its tooltip rather than letting two timestamps sit side by side reading as a pair. It cost
+this line some length, which was the reason it kept its own line until 2026-09-19 and was
+accepted then in exchange for mirroring the comment side. Two things follow from the placement,
+both of them already true of `CommentNode`: the meta line is a `div` and not a `p`, since the
+panel that opens inside it is full of blocks, and `.meta` is a plain block and not a flex row,
+since the panel is a block inside the marker's inline wrapper and a flex item would size it
+into the line instead of under it. The body is hidden while the panel is actually *listing*
+versions (`onVersionsShown`) — the current version is its first entry, so leaving both up would
+show the same text twice — and not merely while it is open, because a panel that is loading,
+failed, or showing nothing the viewer may see stands in for nothing. Opening it calls
 `getAnnotationHistory`, which lists the body's snapshots in mark order, applies the silence
 rule server-side and decodes each visible version for `AnnotationVersionBody`. The thread
 loaders fetch a whole page's snapshot marks and timestamps in **one** query keyed by the
@@ -367,6 +388,22 @@ settled.
 
 **Permissions** are docs/PERMISSIONS.md, "Editing what is already posted": rewording and
 removing are the same act on the same person's work, so both are author-or-`ADMIN`.
+
+**A settled body has to be pushed into the card's editor; a refreshed prop is not enough.**
+`AnnotationBodyReader` is a read-only ProseMirror editor, and `useEditor`'s `content` is a
+construction-time option — @tiptap/react's re-render path calls `setOptions`, which never
+re-parses it (docs/TIPTAP.md, "`useEditor`'s `content` is construction-time only"). Clicking
+Done sets `editing` false and calls `router.refresh()` in one batch, so the reader remounts
+with the *pre-edit* prop and then ignores the new one when it arrives: the card showed the
+text as it read before the edit until a full page load. Fixed 2026-09-19 with a value-compared
+`setContent(next, { emitUpdate: false })` effect, the same delivery `use-live-doc-content.ts`
+uses for a doc.
+
+The shape worth recognising is **a prop-fed ProseMirror editor on data that has become
+mutable**: the freeze is silent, and it arrived here not by changing this component but by
+giving a posted body an editor (§22e) that §13p had built on the assumption it never changed.
+The `staticBody` copy kept updating correctly the whole time — it was just behind
+`display: none`, which is also why nothing looked broken in the DOM.
 
 ## Rendering, rails and delivery
 

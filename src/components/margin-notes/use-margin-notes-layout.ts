@@ -58,6 +58,19 @@ export type MarginNotesLayoutOptions = {
   // means "a rail, laid out by CSS". Consumers therefore get two booleans
   // back, not one.
   positioned?: boolean;
+  // Fired after every pass, once the cards are where this hook is going to
+  // leave them — including the passes that move nothing, since "there is no
+  // rail here" is an answer something positioned against a card still has to
+  // hear. For anything measured *against* these cards from outside React,
+  // which today means pseudo-border.ts's bookmark bar: this hook is the only
+  // thing that knows when a card moved, whether because the rail claimed it,
+  // because a neighbour repacked it, or because the viewport narrowed the
+  // rail away entirely.
+  //
+  // Deliberately not a list of positions. A consumer that wanted those would
+  // be re-deriving the layout rather than reacting to it, and the whole file's
+  // premise (see the header) is that positions never leave the DOM.
+  onLayout?: () => void;
 };
 
 // How far above the visible band an anchor may sit and still have its card
@@ -87,6 +100,7 @@ export function useMarginNotesLayout({
   onAnchoredIdsChange,
   bounds,
   positioned = true,
+  onLayout,
 }: MarginNotesLayoutOptions) {
   const context = useMarginNotes();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -111,10 +125,12 @@ export function useMarginNotesLayout({
   const resolveTopsRef = useRef(resolveTops);
   const boundsRef = useRef(bounds);
   const onAnchoredIdsChangeRef = useRef(onAnchoredIdsChange);
+  const onLayoutRef = useRef(onLayout);
   useEffect(() => {
     resolveTopsRef.current = resolveTops;
     boundsRef.current = bounds;
     onAnchoredIdsChangeRef.current = onAnchoredIdsChange;
+    onLayoutRef.current = onLayout;
   });
 
   // What was last reported upward, so a per-keystroke measurement pass that
@@ -125,7 +141,15 @@ export function useMarginNotesLayout({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) {
+      // No rail in this render at all — the consumer renders the portal only
+      // once it is anchored, so the cards are in the section below and this
+      // hook has nothing to place. Still a layout answer, and the one the
+      // bookmark bar most needs: it is the state both reading views start in,
+      // before the editor has mounted for the first measurement.
+      onLayoutRef.current?.();
+      return;
+    }
 
     const cards = () => Array.from(container.querySelectorAll<HTMLElement>("[data-margin-note-id]"));
 
@@ -140,6 +164,7 @@ export function useMarginNotesLayout({
         card.removeAttribute("data-on-screen");
       }
       reportedIdsRef.current = null;
+      onLayoutRef.current?.();
       return;
     }
 
@@ -241,6 +266,9 @@ export function useMarginNotesLayout({
       frame = requestAnimationFrame(() => {
         frame = 0;
         apply();
+        // After `apply`, never inside it: the point of this callback is that
+        // the cards have stopped moving, and `apply` has two return paths.
+        onLayoutRef.current?.();
       });
     };
 

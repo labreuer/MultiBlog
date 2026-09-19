@@ -172,6 +172,15 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // `annotation.editingSince`, which is what the *server* last knew: this one
   // says "the editor is mounted right here, in this browser".
   const [editing, setEditing] = useState(false);
+  // PLAN.md §22c — the history panel now opens *above* the body (the marker
+  // moved into the meta line), and the current version is its first entry, so
+  // the body underneath would be the same text twice. Hidden while the panel
+  // is actually listing versions, and back the moment it closes. Set from
+  // `EditHistory` rather than from a click here, because the panel has states
+  // — loading, failed, every version withheld — in which it stands in for
+  // nothing and the body has to stay. `CommentNode` carries the identical
+  // pair; this is that, on the annotation side.
+  const [historyShown, setHistoryShown] = useState(false);
   const [editPending, setEditPending] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   // PLAN.md §22e — which of this body's anchored replies currently resolve in
@@ -233,11 +242,26 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // gets neither.
   const canEditBody = canDelete;
   const sessionIsStale = annotation.editSessionStale;
-  // Someone has a session open and it is not this viewer's mounted editor.
-  // Deliberately keyed on the server's column and not on identity: two tabs
-  // of the same author are as much a version problem as two people
-  // (finishAnnotationEdit attributes one version to whoever ends last).
-  const heldByAnother = annotation.editingSince !== null && !editing && !sessionIsStale;
+  // A session is open on the server and this viewer has no editor mounted for
+  // it — either a reload of their own, or somebody else's.
+  const sessionOpenElsewhere = annotation.editingSince !== null && !editing && !sessionIsStale;
+  // The author's own open session, seen from a browser that isn't the one
+  // holding it. `beginAnnotationEdit` lets the *annotation's author* re-begin
+  // a fresh session at any time and only makes a stranger wait out
+  // STALE_EDIT_SESSION_MS, so the offer here is keyed on exactly the predicate
+  // the server uses (`Annotation.userId`, which is what `commenterUserId`
+  // carries). Two tabs of one author are not the version problem the
+  // one-session-at-a-time rule exists for — whoever ends last, the version is
+  // attributed to the same person either way — while a reload mid-edit is
+  // common, and without this it cost the author an hour's lockout from their
+  // own words.
+  const ownSessionOpen = sessionOpenElsewhere && isOwnAnnotation;
+  // Someone *else* has a session open: no Resume, no Discard, wait for it to
+  // go stale. There is no column recording who holds a session, so an ADMIN
+  // who reloads mid-edit on someone else's annotation still waits — the
+  // server refuses their re-begin too, so the UI is not hiding anything that
+  // would work.
+  const heldByAnother = sessionOpenElsewhere && !isOwnAnnotation;
   // Admin power being used on someone else's annotation gets a visibly
   // different (maroon) button; deleting your own, even as an admin, is just
   // the normal action.
@@ -361,7 +385,12 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
         </div>
       ) : (
         <div data-comment-id={annotation.id}>
-          <p className={styles.meta}>
+          {/* A `div`, not a `p`: opening the history panel puts `EditHistory`'s
+              own `p`s and `div`s inside this element, and a block inside a `p`
+              is invalid nesting React refuses at render time. The comment side
+              made exactly this change when its marker moved into the meta line
+              (PLAN.md §22c); this is the same fault on the same placement. */}
+          <div className={styles.meta}>
             <span className={styles.name}>{annotation.displayName}</span>
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
               <LocalTime value={annotation.createdAt} />
@@ -376,7 +405,22 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                 at this revision
               </button>
             )}
-          </p>
+            {annotation.visiblyEdited && (
+              <>
+                {" "}
+                <EditHistory
+                  what="annotation"
+                  placement="meta"
+                  onVersionsShown={setHistoryShown}
+                  editedAt={annotation.editedAt}
+                  load={() => getAnnotationHistory(annotation.id)}
+                  renderBody={(version: AnnotationVersion) => (
+                    <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} />
+                  )}
+                />
+              </>
+            )}
+          </div>
           {editing ? (
             <AnnotationEditSession
               annotationId={annotation.id}
@@ -384,37 +428,21 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
               onCancelled={endEditing}
             />
           ) : (
-            <AnnotationBodyReader
-              proseJson={annotation.proseJson}
-              staticBody={annotation.body}
-              replyAnchors={replyAnchors}
-              pending={
-                replyAnchor && viewerColor
-                  ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
-                  : null
-              }
-              onSelect={handleBodySelect}
-              onAnchorClick={jumpToReply}
-              onResolvedAnchorsChange={setResolvedReplyIds}
-            />
-          )}
-          {annotation.visiblyEdited && !editing && (
-            // A `div`, not a `p`: opening the panel puts `EditHistory`'s own
-            // `p`s and `div`s inside this element, and a block inside a `p` is
-            // invalid nesting React refuses at render time. The comment side
-            // stopped being a `p` when its marker moved into the meta line
-            // (PLAN.md §22c); this is the same fault, on the placement that
-            // kept its own line.
-            <div className={styles.historyLine}>
-              <EditHistory
-                what="annotation"
-                editedAt={annotation.editedAt}
-                load={() => getAnnotationHistory(annotation.id)}
-                renderBody={(version: AnnotationVersion) => (
-                  <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} />
-                )}
+            !historyShown && (
+              <AnnotationBodyReader
+                proseJson={annotation.proseJson}
+                staticBody={annotation.body}
+                replyAnchors={replyAnchors}
+                pending={
+                  replyAnchor && viewerColor
+                    ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
+                    : null
+                }
+                onSelect={handleBodySelect}
+                onAnchorClick={jumpToReply}
+                onResolvedAnchorsChange={setResolvedReplyIds}
               />
-            </div>
+            )
           )}
           {quoteLost === true && (
             <p className={styles.editStatus}>
@@ -444,6 +472,12 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
               version.
             </p>
           )}
+          {ownSessionOpen && (
+            <p className={styles.editStatus}>
+              You have an edit open since <LocalTime value={annotation.editingSince!} /> — what you see is the last
+              saved version.
+            </p>
+          )}
           {!posted && !replyDraftId && !editing && (
             <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
               {replyPending ? "Opening…" : "Reply"}
@@ -452,7 +486,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
           {replyError && <p className={styles.error}>{replyError}</p>}
           {canEditBody && !editing && !confirmingDelete && !heldByAnother && (
             <button type="button" onClick={startEditing} disabled={editPending} className={styles.editButton}>
-              {editPending ? "Opening…" : sessionIsStale ? "Resume editing" : "Edit"}
+              {editPending ? "Opening…" : sessionIsStale || ownSessionOpen ? "Resume editing" : "Edit"}
             </button>
           )}
           {canEditBody && !editing && sessionIsStale && (

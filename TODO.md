@@ -163,6 +163,64 @@ anchor mechanism — inside a branch that was already changing the doc path's. T
 small: `postFileAnnotation`'s reply branch calls `captureAnchorInYdoc` with the annotation
 schema and the stamp it now computes, the same three arguments the doc branch passes.
 
+## Author-highlight marks on annotation bodies are unstyled by design-by-accident (PLAN.md §13h)
+
+Annotations carry the same `authorHighlight` mark docs do — same extension
+(`src/lib/author-highlight-extension.ts`), same `<span class="author-highlight"
+data-author-id>` output — but every surrounding decision differs, and no one decided the last
+one. **Nothing here should be changed yet: the colors as they currently fall out are the
+behavior wanted** (2026-09-19). This item is to work out where attributed text is *meant* to
+show up and then make the styling say so on purpose, not to fix a reported breakage.
+
+**What differs from the doc side today.**
+
+- **When the mark is applied.** Both doc editors turn it on unconditionally
+  (`CollabEditorBody.tsx`, `CollabTitleField.tsx`: `getAuthorId: () => userId`). An annotation
+  gates it on §13h co-authoring — `getAuthorId` returns null until the annotation's own ydoc
+  `clients` map holds two distinct userIds (`AnnotationBody.tsx`). A solo annotation carries no
+  marks at all, which is why this is invisible until someone else joins one.
+- **The backfill.** Because the mark starts off, §13h added one docs need no counterpart to:
+  `backfillAnnotationHighlight` (`server/ydoc-hooks.ts`) runs one `addMark(0, size)` attributed
+  to `Annotation.userId` when the second distinct user connects, keyed `=== 2` so it fires
+  exactly once per annotation.
+- **Persistence.** The doc side treats the mark as working-session-only and strips it before it
+  reaches public content (`stripMarksFromDoc` in `src/lib/post-content.ts` and
+  `src/lib/front-page.ts`) — which is what keeps `contentExtensions` (without the mark) honest
+  as the schema for saved content. The annotation side strips nothing: the mark lands in
+  `Annotation.proseJson` and in the `ydoc_snapshot` versions, and renders back out through
+  `annotationContentExtensions` in `annotation-entries.ts`, `AnnotationVersionBody` and
+  `AnnotationBodyReader`.
+
+**The undecided part.** `.author-highlight` has **no CSS rule anywhere** — grep finds the class
+only in the mark's own `renderHTML` and in `AuthorHighlightStyles.tsx`, which emits one
+`background-color` rule per known author into a `<style>` tag. That component is mounted in
+exactly two places, both doc editors. So:
+
+- In the **doc editor**, annotation bodies in the rail are painted by `CollabEditorBody`'s
+  `<style>` — a document-wide attribute selector reaches them wherever they sit, the same
+  property `AnnotationSection`'s own comment relies on for `AnnotationColorStyles`. But that
+  map is keyed on the *doc's* authorIds, so an annotation co-author who is not also a doc
+  author falls through it uncolored.
+- On **`/doc/[slug]`** and the **PDF surface** there is no `AuthorHighlightStyles` at all —
+  not for the live `AnnotationEditSession` editor, not for the persisted `proseJson`. The
+  attributed spans are in the DOM with nothing painting them.
+
+Neither of those is written down as intended anywhere; both are what happens to fall out of
+where the `<style>` tag got mounted.
+
+**What the work is.** Decide, per surface, whether attributed annotation text is meant to be
+visible — reading view, PDF, editor rail, the `EditHistory` version bodies, and the
+`/annotations` admin table — and whether it should survive the settle at all or be stripped
+the way a post's is. Then make the answer explicit: either an annotation-side
+`AuthorHighlightStyles` fed from the body's own `authorId`s (the ids are already collectable
+with `collectMarkAttrValues`, as `readYdocContent` does for a doc), or a strip on the settle
+path, or a deliberate flat fallback rule for `.author-highlight` so an unknown author is not
+simply invisible. The two candidate fixes are opposites, so the "where should it show up"
+question has to be answered first.
+
+**Not this.** `AnnotationColorStyles` colors the annotation *highlight in the doc's prose* by
+thread; it has nothing to do with attributed text inside a body.
+
 ## No CI: nothing runs the checks except the committer
 
 **Status:** open as of 2026-09-04. `npm run check` (schema format, sign-in redirects, unit

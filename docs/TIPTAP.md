@@ -303,6 +303,41 @@ it is worth recognizing rather than re-deriving. `use-live-doc-content.ts` uses 
 push live Yjs updates into the reading views' non-`Collaboration` editors without re-emitting
 them.
 
+## `useEditor`'s `content` is construction-time only — a changed prop is not delivered
+
+`useEditor({ content })` parses `content` once, when the editor is built. On every later
+render `@tiptap/react` compares the options and, if they differ, calls `editor.setOptions` —
+which merges the new options over the old and then does this, and nothing else:
+
+```ts
+setOptions(options = {}) {                      // @tiptap/core
+  this.options = { ...this.options, ...options }
+  if (!this.editorView || !this.state || this.isDestroyed) return
+  if (this.options.editorProps) this.view.setProps(this.options.editorProps)
+  this.view.updateState(this.state)             // the *existing* state
+}
+```
+
+`content` is never re-parsed, so **a read-only editor fed from a prop silently freezes at
+whatever it mounted with**. There is no warning and no error; the editor keeps rendering its
+first document forever.
+
+That matters exactly where the prop can change under a mounted editor, which is every surface
+here that renders server data through ProseMirror rather than through `renderToReactElement`.
+The delivery mechanism is `editor.commands.setContent(next, { emitUpdate: false })` from an
+effect — what `use-live-doc-content.ts` does for a doc's live Yjs updates and its scrub
+pushes, and what `AnnotationBodyReader` does for a body that has just been edited.
+
+Two details of that effect are load-bearing. It compares **by value**, not identity: an RSC
+refresh deserializes a fresh object each time, so an identity check re-`setContent`s on every
+unrelated refresh and collapses a selection the reader was holding. And it skips the first
+run, since the editor was constructed with exactly that content.
+
+The failure this caused is in docs/ANNOTATIONS.md, "Editing after posting" — and note how it
+hid: the surface also renders the server's static copy of the same body behind
+`display: none`, so the *correct* text was in the DOM the whole time, one `display` away from
+the stale text on screen.
+
 ## `setEditable` emits an `update`, so disabling an editor looks like a keystroke
 
 ```ts

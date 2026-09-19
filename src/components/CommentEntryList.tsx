@@ -6,7 +6,7 @@ import type { Editor } from "@tiptap/react";
 import CommentNode, { hasNonDeletedDescendant, type CommentNodeData } from "./CommentNode";
 import QuoteThreadHeader from "./QuoteThreadHeader";
 import { useMarginNotesLayout } from "./margin-notes/use-margin-notes-layout";
-import { activatePseudoBorderForHash } from "@/lib/pseudo-border";
+import { activatePseudoBorderForHash, refreshPseudoBorders } from "@/lib/pseudo-border";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 import marginStyles from "./margin-notes/MarginNotes.module.css";
 
@@ -104,6 +104,11 @@ export default function CommentEntryList({ entries, postId }: Props) {
     resolveTops,
     ids: railIds,
     onAnchoredIdsChange: setAnchoredIds,
+    // The bar marking a permalinked entry is positioned against that
+    // entry's card, so it has to be re-placed whenever this hook moves
+    // one — above all on the first pass, which is when an anchored card
+    // leaves the section below for the rail.
+    onLayout: refreshPseudoBorders,
   });
 
   // Everything stays in one list until there is both room and something to
