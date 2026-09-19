@@ -69,6 +69,26 @@ state into a third place. `pseudo-border.ts` gained multi-root support for the s
 a card can sit in either column, so the bar resolves
 `closest("[data-comment-section], [data-pseudo-border-root]")` and appends there.
 
+**A bar is placed once per layout, not once per mount.** Resolving the right root is only
+half of it: the card the bar marks *moves*, and the bar has to be re-placed when it does.
+It was placed from a `[]`-dependency effect until 2026-09-19, which put it in the one
+container the card was about to leave — both reading views paint their first client render
+with every card in the section below, since `anchored` needs a mounted editor to measure and
+TipTap's is `immediatelyRender: false`. A reader following a permalink got a bar stranded at
+the bottom of the page, at the offset the card would have had in the stacked layout; the
+portal then took the card to the rail without it. So `useMarginNotesLayout` takes an
+`onLayout` callback, fired after every pass **including the passes that place nothing** (no
+rail this render, or the rail going away under a narrowed viewport — the rail's container is
+where the bar was appended, so its removal takes the bar with it), and both lists pass
+`refreshPseudoBorders`. That also covers the three quieter staleness cases the mount effect
+never handled: the rail repacking around a neighbour that grew, a resize, and the marked
+card changing height. The activation is remembered as **data** — a hash, or a thread id and
+colour — never as the element it marked, because the two containers are a `createPortal`
+boundary and the card's DOM node is replaced exactly when the bar needs re-placing.
+`margin-rail-widths.spec.ts` guards it; that test only reproduces the bug after a
+`page.reload()`, since a `goto` differing only in the hash is a same-document navigation and
+fires `hashchange` at a page whose cards are already in the rail.
+
 **Which ids are anchored is the one thing that goes through React state**, because it
 decides what renders *where* rather than merely where it sits. `onAnchoredIdsChange` fires
 only when the resolved set actually changes, never on the per-keystroke passes that find the

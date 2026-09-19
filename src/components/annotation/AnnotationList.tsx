@@ -7,7 +7,7 @@ import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from
 import QuoteThreadHeader from "../QuoteThreadHeader";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
 import { resolveAnnotationRanges } from "@/lib/annotation-marks";
-import { activatePseudoBorderForHash } from "@/lib/pseudo-border";
+import { activatePseudoBorderForHash, refreshPseudoBorders } from "@/lib/pseudo-border";
 import marginStyles from "../margin-notes/MarginNotes.module.css";
 
 export type AnnotationEntry = {
@@ -109,6 +109,11 @@ export default function AnnotationList({ entries, docId }: Props) {
     resolveTops,
     ids: railIds,
     onAnchoredIdsChange: setAnchoredIds,
+    // The bar marking a permalinked entry is positioned against that
+    // entry's card, so it has to be re-placed whenever this hook moves
+    // one — above all on the first pass, which is when an anchored card
+    // leaves the section below for the rail.
+    onLayout: refreshPseudoBorders,
   });
 
   const inRail = (entry: AnnotationEntry) => anchored && anchoredIds.has(entry.root.id);
