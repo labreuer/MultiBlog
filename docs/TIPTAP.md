@@ -558,7 +558,7 @@ tracks a selection or hover in state beside it.
 PLAN.md §24. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
 `tableExtensions` in `src/lib/tiptap-schema.ts`, spread into `contentExtensions` and, by
 hand, into `CollabEditorBody`'s own list (which builds its own StarterKit, per the rule
-above). Six things worth knowing before touching it:
+above). Eight things worth knowing before touching it:
 
 - **The editor and the static renderer both emit `<div class="tableWrapper">`**, by two
   different routes. In the editor the extension's `TableView` node view draws it (it is
@@ -597,7 +597,23 @@ above). Six things worth knowing before touching it:
   which is TODO.md's column-resizing item — pick one there rather than patching a doc.
 - **A cell is `block+` and a table is `group: block`, so the schema allows a table inside a
   cell.** `TableControls` disables its insert button while the caret is in a table
-  (`isActive("table")`); nothing else stops nesting, and Markdown import can't produce it.
+  (`isActive("table")`) and both file-insert paths (`insertTableFromFile`, PLAN.md §24c)
+  refuse with a message; nothing else stops nesting, and Markdown import can't produce it.
+- **`TableView.ignoreMutation` ignores everything inside the wrapper but outside the
+  `<tbody>`** — attribute, child-list and character-data mutations alike (3.29.0). That is
+  what lets `TableDownloadButtons` portal a button *into* `.tableWrapper` after the table on
+  the reading views without ProseMirror re-reading the DOM and finding a node its document
+  doesn't have. The default `ViewDesc` rule is the opposite for a node view with a
+  `contentDOM`, so this holds for the table's wrapper specifically, not for node views in
+  general — check the node view's own `ignoreMutation` before doing the same elsewhere.
+- **A file dropped on the editor is the browser's to handle unless `handleDrop` claims
+  it.** ProseMirror's drop handler parses text and HTML off the `dataTransfer`; a file
+  yields no slice, and with nothing to insert it returns without `preventDefault`, so the
+  browser's default runs — which for a file dropped on a page is to *navigate to it*.
+  `CollabEditorBody`'s `handleDrop` (PLAN.md §24c) returns true for a file the format
+  table knows and inserts asynchronously; ProseMirror calls `preventDefault` on a true
+  return. It reaches the editor through a ref because `editorProps` is written at
+  construction, before the editor exists.
 - **The cells' `renderHTML` is overridden to emit `colSpan`/`rowSpan`, not the extension's
   `colspan`/`rowspan`.** The extension's spelling is right for the DOM, but
   `@tiptap/static-renderer`'s React path (`mapAttrsToHTMLAttributes`) translates only

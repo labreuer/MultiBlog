@@ -5,6 +5,12 @@ Markdown** opens a box to paste into. Both are the same server action and the sa
 they differ only in where the text came from and what to call a doc that carries no heading
 to take a title from.
 
+**Markdown is the only format that creates a doc here, on purpose.** A CSV (and, when it
+comes, an xlsx) is a table, not a document: it goes into an *existing* doc through the
+editor's table menu or a drop onto the text (PLAN.md §24c, `src/lib/table-codecs.ts`), and
+nothing about it belongs in this action or its paste box. Don't add `.csv` to the accept
+list below thinking it was overlooked.
+
 The pieces:
 
 | | |

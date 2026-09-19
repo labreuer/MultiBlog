@@ -269,6 +269,16 @@ the dropdown and from both reading views. Leave the server route out. The two th
 CSV-only choice costs are a copy affordance and any plain-text paste detection, and both
 are cheap to live without.
 
+**As built, 2026-09-18 (PLAN.md §24c), where it departs from the above:** the `/docs`
+importer placement was dropped before any code — a table file goes into an *existing* doc
+only, so there is no server action and no byte cap tied to Next's; a file *drop* onto the
+editor was added beside the menu item, dispatched by extension like the picker; the cap
+lives on the grid (`MAX_TABLE_CELLS`, `table-grid.ts`) rather than in the parser, for the
+reason the xlsx section gives; the reading-view control is a line under the table rather
+than a button in the wrapper's corner, because the wrapper is the scroll box; formula
+fields are left intact and semicolons are sniffed. The menu item is "Table from file…", not
+"Table from CSV…", because the format table (`table-codecs.ts`) is what names formats.
+
 ## Adding xlsx to the interchange formats
 
 A second follow-on, 2026-09-18: once native tables and the CSV option above exist, what does

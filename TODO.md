@@ -98,20 +98,28 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
   isolation. Not diagnosed; docs/playwright-flakiness.html's shared-state class is the first
   suspect if it recurs.
 
-## Tables: what §24 left for later (PLAN.md §24b; docs/research/tables.md)
+## Tables: what §24 left for later (PLAN.md §24b, §24c; docs/research/tables.md)
 
-Native TipTap tables landed 2026-09-18 with the toolbar, styling and Markdown import, and
-three things deliberately not in that change:
+Native TipTap tables landed 2026-09-18 with the toolbar, styling and Markdown import; CSV
+import and export into an existing doc followed the same day (PLAN.md §24c). Still open:
 
-1. **CSV import and export.** The design is done — docs/research/tables.md, "CSV import and
-   export: the CSV-only option": a hand-rolled RFC 4180 module (`src/lib/csv.ts`, parse and
-   format together, a `test:unit` table for its rejection surface), a `.csv` branch in
-   `DocImportButton`'s file path, a "Table from CSV…" item in `TableControls`' menu, a
-   Download CSV button in the corner of each `.tableWrapper` on both reading views (the doc
-   view reading the *live* editor, never `Doc.proseJson`), and a rows×columns cap in the byte
-   cap's style. Two policy calls it leaves open: whether to mangle formula-leading fields on
-   export (OWASP CSV injection) and whether to sniff `;` on the first line or reject.
-2. **Column widths — already a live problem, not a resizing follow-up.** `colwidth` attrs
+1. **An xlsx codec.** `src/lib/table-codecs.ts` is shaped for it: one entry with
+   `read`/`write` over the `TableGrid`, whose `colspan`/`rowspan`/`href` fields exist for
+   this. Take the first sheet by rule so the insert flow stays one step; read each cell's
+   *formatted* text, never the raw serial (docs/research/tables.md, "What xlsx packs in").
+   Pick the library first: ExcelJS if styled cells (option 3) are a plausible later ask,
+   else SheetJS from its own CDN tarball (the npm copy is frozen with open advisories, and
+   that packaging needs a line in docs/ENV.md).
+2. **Small follow-ups to §24c**, each additive: a header-row checkbox on the file picker
+   (`gridToTableJson` already takes `headerRow`); "Replace this table from file…" (the
+   grid side is trivial, but anchors on changed cells go orphan exactly as with any text
+   replacement, and the UI has to say so); the post page's download button has no spec of
+   its own (same component as the doc view's, which is covered).
+3. **Measure `MAX_TABLE_CELLS`.** 2,000 is a starting number. PERFORMANCE.md records the
+   debounced revision diff going super-linear at 18k characters, and every cell is at
+   least one paragraph node; the right number comes from a real 2,000-cell table in the
+   editor, not from the note.
+4. **Column widths — already a live problem, not a resizing follow-up.** `colwidth` attrs
    sync through Yjs and the static renderer already emits a `<colgroup>` from them
    (`createColGroup`), so widths *would* carry to the post page — and they already do, for
    pasted tables: the cell parser reads `<col width>` out of the pasted `<colgroup>`
@@ -129,14 +137,11 @@ three things deliberately not in that change:
      set in a wider editor or pasted from a 6.5in Word page (scale proportionally? clamp?),
      and how the drag handle (`.column-resize-handle`, prosemirror-tables) should look
      under the site's tokens. Decide before turning it on, not after.
-3. **An e2e spec.** `e2e/markdown-import.spec.ts`'s shape: import a fixture with a pipe
-   table, assert the header and body cell text in the editor, publish, assert the same on the
-   post page and that `.tableWrapper` scrolls rather than the page at 390px (the
-   `admin-table.spec.ts` narrow-viewport assertion, reused). Worth sharing fixtures with item 1.
-
-Also unmeasured: a large table's effect on the debounced revision diff (PERFORMANCE.md records
-the super-linear case at 18k characters). Every cell is a paragraph node, so a 50×10 table is
-500 blocks; the CSV cap in item 1 is where that number gets decided.
+5. **An e2e spec for the pipe-table import.** `e2e/markdown-import.spec.ts`'s shape: import
+   a fixture with a pipe table, assert the header and body cell text in the editor,
+   publish, assert the same on the post page and that `.tableWrapper` scrolls rather than
+   the page at 390px (the `admin-table.spec.ts` narrow-viewport assertion, reused).
+   `e2e/table-csv.spec.ts` covers the nodes in the editor and on the doc view already.
 
 ## A PDF annotation reply's quote is still client-supplied (PLAN.md §22e; docs/ANNOTATIONS.md)
 

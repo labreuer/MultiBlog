@@ -6860,11 +6860,96 @@ docs/COMMENTS.md's matcher) works on table content unchanged — verified headle
 
 - **Column resizing is off.** The research note's own recommendation; the reasoning is in
   `tableExtensions`' comment and docs/TIPTAP.md. TODO.md carries it.
-- **CSV import and export are not built.** The research note's second half designs them
-  (a hand-rolled `src/lib/csv.ts` with unit tests, a "Table from CSV…" menu item, a Download
-  CSV button on both reading views, a rows×columns cap). That is a separate change on top of
-  this one and is in TODO.md with a pointer to the design.
-- **No e2e spec yet.** Per CLAUDE.md's convention UI testing was deferred at `npm run check`;
-  the natural spec is `e2e/markdown-import.spec.ts`'s shape — import a fixture with a pipe
-  table, assert the cell text in the editor and on the post page — and is listed in TODO.md
-  beside the CSV item it would share fixtures with.
+- **CSV import and export were a separate change** — §24c, built the same day on top of
+  this one.
+- **No e2e spec for the pipe-table import yet.** Per CLAUDE.md's convention UI testing was
+  deferred at `npm run check`; the natural spec is `e2e/markdown-import.spec.ts`'s shape —
+  import a fixture with a pipe table, assert the cell text in the editor and on the post
+  page — and is listed in TODO.md. `e2e/table-csv.spec.ts` (§24c) covers the table nodes
+  themselves in the editor and on the doc reading view.
+
+### 24c. CSV in and out of an existing doc
+
+Built 2026-09-18 on `tables`, from the design in docs/research/tables.md ("CSV import and
+export: the CSV-only option") with one change of scope decided before any code: **a table
+file goes into an existing doc, through the editor, and never creates a doc.** The research
+note's `/docs`-importer placement was dropped — a CSV is a table, not a document, and the
+Markdown importer's paste box stays Markdown (docs/DOC_IMPORT.md). With it went the server
+action and the request-body cap: everything below is client-side, and the change reaches
+the ydoc the way typing does.
+
+**The pieces**, in dependency order:
+
+- `src/lib/table-grid.ts` — the `TableGrid` between a file and a `table` node: rows of
+  cells carrying text (paragraphs joined by `\n`), `colspan`, `rowspan` and an optional
+  `href`. `gridToTableJson` (pads ragged rows, first row to `tableHeader`, one paragraph
+  per line), `tableJsonToGrid` (marks dropped except the first link's href, spans kept),
+  `gridToRectangle` (spans flattened to a rectangle of strings — the value in the first
+  cell, empty strings under the span), and the cap. CSV never fills the span or link
+  fields; they are there so an xlsx codec is a third reader and writer over the same grid
+  rather than a second grid-to-nodes path, and so the *CSV writer* is what flattens a span,
+  never the grid reader — the research note's "The shape that keeps it cheap".
+- `src/lib/csv.ts` — RFC 4180, hand-rolled, string arrays only: `parseCsv`, `formatCsv`,
+  `detectDelimiter`. Quoted fields, doubled quotes, CRLF/LF/CR, embedded line breaks, a
+  leading BOM stripped on read and written on export (Excel on Windows). Rejections
+  (`CsvParseError`, with the line): an unterminated quote, text after a closing quote, a
+  quote inside an unquoted field, an empty file. Its `test:unit` table is the rejection
+  surface.
+- `src/lib/table-codecs.ts` — **the format table.** One `TableCodec` per format
+  (`extensions`, `label`, `read(file) → grid`, `write(grid) → Blob`), each module reached
+  through a dynamic `import()` at the moment of use. Every place that names a format — the
+  menu's items, the file input's `accept`, the drop handler — reads `TABLE_CODECS`, so xlsx
+  is one entry plus a library, and that library loads on click or drop and never at page
+  load. `readTableFile` is the one door: extension check, a 4 MB read-sanity limit,
+  decode, then the cell cap.
+- `src/lib/table-file-editor.ts` — `insertTableFromFile(editor, file, at?)` and
+  `downloadTableNode(node, codec, filename)`; `src/lib/download-blob.ts` is the
+  `<a download>` route.
+- `TableControls.tsx` — "Table from file…" (a hidden file input, enabled outside a table)
+  and one "Download as <format>" per codec (enabled inside one), in the existing menu. **The
+  chevron is now enabled outside a table too**; it used to open only inside one, and an item
+  that inserts a table had nowhere enabled to live under that gate. The command items are
+  still dry-run individually, so only the enabled set changes between the two places.
+- `CollabEditorBody.tsx` — `editorProps.handleDrop`: a file whose extension the format
+  table knows is inserted at the drop point. Dispatched by extension, never by sniffing
+  content — commas cannot be sniffed apart from prose, so plain-text paste stays untouched.
+  The handler claiming the event is as important as the insert: ProseMirror reads nothing
+  from a file drop and leaves the browser's default, which is to *navigate to the file*.
+  Rejections from both paths land in one `role="alert"` line under the toolbar
+  (`onNotice`, threaded through `EditorToolbar`), cleared by the next success or its ×.
+- `TableDownloadButtons.tsx` — on both reading views, a "Download CSV" line under every
+  table, portaled *into* the table's `.tableWrapper` after the `<table>`. Safe only because
+  `TableView.ignoreMutation` ignores mutations inside the wrapper but outside its content
+  (docs/TIPTAP.md). It reads the wrappers from the live editor's DOM, re-queried on the
+  margin-notes content-changed signal, and the node through `posAtDOM` — never
+  `Doc.proseJson`. A line under the table rather than a corner overlay: the wrapper is the
+  horizontal scroll box, and an absolutely positioned child of a scroll box scrolls with the
+  content.
+
+**The cap** is `MAX_TABLE_CELLS` (2,000, rows × widest row, spans counted by the cells they
+cover), applied on the grid after decode and before any node is built — for every codec
+alike, which is why it is not in the CSV parser: an xlsx is a zip, and a byte limit says
+nothing about what it unpacks to. The number is a start (a 200×10 table); PERFORMANCE.md's
+super-linear diff is the reason it exists, and real tables should move it.
+
+**Policy calls** the research note left open, decided here:
+
+- **Formula-leading fields are written intact** (`=SUM(A1)` stays `=SUM(A1)`). The
+  quote-prefix defence changes the data on a round trip, and an xlsx cell is typed, so the
+  same table exported two ways would otherwise carry different contents.
+- **Semicolons are sniffed**, by which the first line has more of, outside quotes. One
+  line, and the alternative is a support question from every European locale.
+- **The first row is always the header.** No checkbox in the first build.
+- **Nesting is refused, not allowed**: both insert paths return a message when the caret or
+  drop point is inside a table, matching the toolbar's disabled insert button.
+
+**Tested** by `e2e/table-csv.spec.ts` (the menu item, the drop, the rejection notice, the
+enabled set inside and outside a table, and both downloads compared as bytes — BOM and CRLF
+included — one from the editor's menu and one from the doc reading view's button) and the
+two `test:unit` tables. The post page's button is the same component mounted by
+`AnnotatableArticle` and has no spec of its own.
+
+**Deferred**, in TODO.md: the xlsx codec (the format table is shaped for it; pick ExcelJS
+or SheetJS by whether styled cells will be asked for), a header-row option, "replace this
+table from file…" (cheap on the grid side, but every anchor on a changed cell goes orphan
+and the UI must say so), and measuring the cap.

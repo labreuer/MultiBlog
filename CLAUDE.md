@@ -18,7 +18,7 @@ to re-derive the decision from.
 | [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
 | [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
-| [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), and the CSV import/export design that is not yet built. PLAN.md §24. |
+| [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. PLAN.md §24. |
 | [docs/ANCHORED_LINKS.md](docs/ANCHORED_LINKS.md) | Anchored links as built: one `/link/<id>` URL for passages across docs and PDFs — schema, the landing route that redirects or excerpts per viewer, the per-target visibility rule, the tray (a draft, or a minted link reopened for editing — one open link per creator), and every deviation from the plan. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
@@ -202,6 +202,15 @@ before changing the behavior it describes.
   emits the same `.tableWrapper` the editor's node view draws — that wrapper is the post
   page's only horizontal scroll box, and losing it fails no check. PLAN.md §24, docs/TIPTAP.md
   "Tables are four nodes beside StarterKit".
+- **A table file goes into an existing doc through the editor, and every format is one
+  entry in `src/lib/table-codecs.ts`.** CSV (and xlsx, when it comes) never creates a doc —
+  `/docs`' importer stays Markdown, and its paste box stays Markdown because commas cannot
+  be sniffed apart from prose. The menu item, the file input's `accept` and the drop handler
+  all read `TABLE_CODECS`; don't spell `.csv` at a call site. The `TableGrid` between a file
+  and a `table` node keeps `colspan`/`rowspan`/`href` even though CSV never fills them, and
+  the *CSV writer* flattens a span — `tableJsonToGrid` must not, or an xlsx codec inherits
+  CSV's losses. The cell cap is on the grid, after decode, not in any parser: an xlsx is a
+  zip. PLAN.md §24c.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. PLAN.md §12e,
   docs/PERMISSIONS.md.
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**
