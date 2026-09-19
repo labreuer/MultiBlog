@@ -123,7 +123,7 @@ export default function CollabEditorBody({
   // what react-hooks/refs forbids a ref for.
   const [initialAnchors] = useState(annotationAnchors);
 
-  // A table file's rejection, shown under the toolbar (PLAN.md §24c). Set
+  // A table file's rejection, shown under the toolbar (docs/TABLES.md). Set
   // from two places — the toolbar's "Table from file…" item and the drop
   // handler below — and cleared by either's next success or the ×.
   const [notice, setNotice] = useState<string | null>(null);
@@ -139,7 +139,7 @@ export default function CollabEditorBody({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ undoRedo: false, link: EDITOR_LINK_OPTIONS }),
-      // The table nodes (PLAN.md §24) — the same list contentExtensions
+      // The table nodes (docs/TABLES.md) — the same list contentExtensions
       // carries, so this editor's schema is that one plus the marks below
       // and never a table short of it. Not in AnnotationBody, on purpose:
       // annotationContentExtensions says why.
@@ -188,7 +188,7 @@ export default function CollabEditorBody({
     editorProps: {
       attributes: { "aria-label": ariaLabel, role: "textbox" },
       // A table file dropped onto the document becomes a table at the drop
-      // point (PLAN.md §24c) — dispatched by extension through the format
+      // point (docs/TABLES.md) — dispatched by extension through the format
       // table, never by sniffing content. Claiming the event matters as
       // much as the insert: ProseMirror reads nothing from a file drop and
       // leaves the browser's default, which is to *navigate to the file*.

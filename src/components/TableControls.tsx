@@ -12,13 +12,13 @@ import { tableAroundSelection } from "@/lib/table-selection";
 import { autoSizeTable, tableHasManualSizing } from "@/lib/table-sizing";
 import styles from "./EditorChrome.module.css";
 
-// PLAN.md §24 — the toolbar's table tool, QuoteControls' split-button shape
+// docs/TABLES.md — the toolbar's table tool, QuoteControls' split-button shape
 // reused verbatim: the main button inserts, the chevron opens a menu. The
 // editing commands are all the table extension's own (`insertTable`,
 // `addRowAfter`, … `deleteTable`); this component adds no editing logic,
 // only the enabled-ness and a place to click.
 //
-// §24c added the two items that are not commands: "Table from file…" and
+// The CSV work added the two items that are not commands: "Table from file…" and
 // "Download as <format>", one per codec in table-codecs.ts. The first is
 // the reason the chevron is enabled *outside* a table too — it used to
 // open only inside one, and an item that inserts a table has nowhere
@@ -82,7 +82,7 @@ const COMMAND_ITEMS: (MenuItem & { kind: "command" })[] = [
 const MENU_ITEMS: MenuItem[] = [
   { kind: "import", label: "Table from file…" },
   ...COMMAND_ITEMS.map((item, i) => (i === 0 ? { ...item, separator: true } : item)),
-  // §24d — live only while the table carries widths (a pasted one), so an
+  // Auto-size (docs/TABLES.md) — live only while the table carries widths (a pasted one), so an
   // author can tell from the menu whether there is anything to clear.
   { kind: "autosize", label: "Auto-size columns", separator: true },
   ...TABLE_CODECS.map((codec, i) => ({ kind: "export" as const, label: `Download as ${codec.label}`, codec, separator: i === 0 })),

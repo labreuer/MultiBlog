@@ -7,7 +7,7 @@ to take a title from.
 
 **Markdown is the only format that creates a doc here, on purpose.** A CSV (and, when it
 comes, an xlsx) is a table, not a document: it goes into an *existing* doc through the
-editor's table menu or a drop onto the text (PLAN.md §24c, `src/lib/table-codecs.ts`), and
+editor's table menu or a drop onto the text (docs/TABLES.md, `src/lib/table-codecs.ts`), and
 nothing about it belongs in this action or its paste box. Don't add `.csv` to the accept
 list below thinking it was overlooked.
 
@@ -50,7 +50,7 @@ Not `docContentExtensions`: its two extra marks (`authorHighlight`, `annotation`
 a doc acquires by being *edited*, and no Markdown source can produce either. The reading and
 editing sides register that superset, so nothing written here is dropped when it's read back.
 
-A GFM pipe table is the worked example of the rule cutting the other way. Until PLAN.md §24 put
+A GFM pipe table is the worked example of the rule cutting the other way. Until docs/TABLES.md's native tables put
 `@tiptap/extension-table` into `contentExtensions`, a table in the source was **silently
 dropped** — a probe on 2026-09-17 returned the paragraphs on either side and nothing between,
 because the fallback parser knows no `table` token and the extension that does was not

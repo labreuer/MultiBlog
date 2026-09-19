@@ -10,7 +10,7 @@ import { downloadTableNode } from "@/lib/table-file-editor";
 import { useMarginNotes } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
 
-// PLAN.md §24c — a "Download CSV" control under every table on a reading
+// docs/TABLES.md, "CSV in and out of an existing doc" — a "Download CSV" control under every table on a reading
 // view, for readers who cannot open the editor. Mounted by both reading
 // surfaces (AnnotatableArticle, DocReadingBody) beside their EditorContent.
 //

@@ -1,4 +1,4 @@
-// PLAN.md §24d — "Auto-size columns". A pasted table arrives frozen at its
+// docs/TABLES.md, "Auto-size columns". A pasted table arrives frozen at its
 // source's pixel widths (docs/TIPTAP.md, "A pasted table keeps its source's
 // column widths"), and this is the way out. The paste is a synthetic
 // ClipboardEvent carrying the text/html a word processor puts on the

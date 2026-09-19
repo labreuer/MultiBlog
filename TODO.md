@@ -98,10 +98,10 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
   isolation. Not diagnosed; docs/playwright-flakiness.html's shared-state class is the first
   suspect if it recurs.
 
-## Tables: what §24 left for later (PLAN.md §24b, §24c; docs/research/tables.md)
+## Tables: what is left (docs/TABLES.md; docs/research/tables.md)
 
 Native TipTap tables landed 2026-09-18 with the toolbar, styling and Markdown import; CSV
-import and export into an existing doc followed the same day (PLAN.md §24c). Still open:
+import and export into an existing doc followed the same day (docs/TABLES.md). Still open:
 
 1. **An xlsx codec.** `src/lib/table-codecs.ts` is shaped for it: one entry with
    `read`/`write` over the `TableGrid`, whose `colspan`/`rowspan`/`href` fields exist for
@@ -110,7 +110,7 @@ import and export into an existing doc followed the same day (PLAN.md §24c). St
    Pick the library first: ExcelJS if styled cells (option 3) are a plausible later ask,
    else SheetJS from its own CDN tarball (the npm copy is frozen with open advisories, and
    that packaging needs a line in docs/ENV.md).
-2. **Small follow-ups to §24c**, each additive: a header-row checkbox on the file picker
+2. **Small follow-ups to the CSV work**, each additive: a header-row checkbox on the file picker
    (`gridToTableJson` already takes `headerRow`); "Replace this table from file…" (the
    grid side is trivial, but anchors on changed cells go orphan exactly as with any text
    replacement, and the UI has to say so).
@@ -126,7 +126,7 @@ import and export into an existing doc followed the same day (PLAN.md §24c). St
    spreadsheet supply one, and the result is a table frozen at the source's pixel widths,
    narrower than the reading column (found 2026-09-18 on a pasted-from-Word doc whose
    first column came through at 93px). Since 2026-09-19 the menu's "Auto-size columns"
-   (PLAN.md §24d) clears a pasted table's widths by hand, so nobody is stuck — but it is a
+   (docs/TABLES.md, "Auto-size columns") clears a pasted table's widths by hand, so nobody is stuck — but it is a
    per-table fix, and the question of what a paste should *do* is still open. Two ways to
    go, and the choice is the same one column resizing needs:
    - **Drop widths on paste.** `transformPastedHTML` strips `<colgroup>`, or `colwidth`'s

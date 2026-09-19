@@ -269,7 +269,7 @@ the dropdown and from both reading views. Leave the server route out. The two th
 CSV-only choice costs are a copy affordance and any plain-text paste detection, and both
 are cheap to live without.
 
-**As built, 2026-09-18 (PLAN.md §24c), where it departs from the above:** the `/docs`
+**As built, 2026-09-18 (docs/TABLES.md), where it departs from the above:** the `/docs`
 importer placement was dropped before any code — a table file goes into an *existing* doc
 only, so there is no server action and no byte cap tied to Next's; a file *drop* onto the
 editor was added beside the menu item, dispatched by extension like the picker; the cap

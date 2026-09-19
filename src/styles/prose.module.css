@@ -39,7 +39,7 @@
   color: var(--text-secondary);
 }
 
-/* Tables (PLAN.md §24). `.tableWrapper` is the one element both surfaces
+/* Tables (docs/TABLES.md). `.tableWrapper` is the one element both surfaces
    share: the editor's TableView node view draws it, and the static renderer
    emits it because Table is configured with renderWrapper (tiptap-schema.ts).
    It is the `overflow-x: auto` box STYLE.md's "Adding a new wide surface"

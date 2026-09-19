@@ -23,7 +23,7 @@ all. Anything decoding a *doc's* ydoc wants `docContentExtensions` — `server/d
 and `src/lib/ydoc-render.ts` both do.
 
 The annotation-body row used to be an alias of `authorHighlightExtensions` and stopped being
-one when tables arrived (PLAN.md §24, "Tables" below): the body row carries the four table
+one when tables arrived (docs/TABLES.md, "Tables" below): the body row carries the four table
 nodes and the annotation row deliberately does not, so a table pasted into a margin note
 flattens to paragraphs rather than rendering in a 340px card. `AnnotationBody.tsx`'s own
 list mirrors it, and neither may quietly be re-derived from the other.
@@ -555,7 +555,7 @@ tracks a selection or hover in state beside it.
 
 ## Tables are four nodes beside StarterKit, and one wrapper on both surfaces
 
-PLAN.md §24. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
+docs/TABLES.md. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
 `tableExtensions` in `src/lib/tiptap-schema.ts`, spread into `contentExtensions` and, by
 hand, into `CollabEditorBody`'s own list (which builds its own StarterKit, per the rule
 above). Nine things worth knowing before touching it:
@@ -596,11 +596,11 @@ above). Nine things worth knowing before touching it:
   (`transformPastedHTML`, or a `parseHTML: () => null` override on `colwidth`) or to start
   honouring widths properly, which is TODO.md's column-resizing item — pick one there
   rather than patching a doc. For a table already pasted, the menu's "Auto-size columns"
-  (PLAN.md §24d, `src/lib/table-sizing.ts`) nulls every cell's `colwidth` in one
+  (docs/TABLES.md, `src/lib/table-sizing.ts`) nulls every cell's `colwidth` in one
   transaction, and the derived inline table width goes with it.
 - **A cell is `block+` and a table is `group: block`, so the schema allows a table inside a
   cell.** `TableControls` disables its insert button while the caret is in a table
-  (`isActive("table")`) and both file-insert paths (`insertTableFromFile`, PLAN.md §24c)
+  (`isActive("table")`) and both file-insert paths (`insertTableFromFile`, docs/TABLES.md)
   refuse with a message; nothing else stops nesting, and Markdown import can't produce it.
 - **The stock `TableView` leaves a stale `width` on a `<col>` whose column just lost its
   width** (3.29.0). `updateColumns` reuses the `<col>` elements across updates and, on the
@@ -610,7 +610,7 @@ above). Nine things worth knowing before touching it:
   since the remote update runs the same `update()`. `tableExtensions` therefore configures
   `View: TableViewWithClearedWidths` (`src/lib/table-view.ts`), a subclass whose `update`
   recomputes which columns have a width and strips the property from the rest. "Auto-size
-  columns" (PLAN.md §24d) is the transition that surfaced it; `e2e/table-sizing.spec.ts`
+  columns" (docs/TABLES.md) is the transition that surfaced it; `e2e/table-sizing.spec.ts`
   asserts on the `<col>` styles, not the attrs, for exactly this reason.
 - **`TableView.ignoreMutation` ignores everything inside the wrapper but outside the
   `<tbody>`** — attribute, child-list and character-data mutations alike (3.29.0). That is
@@ -623,7 +623,7 @@ above). Nine things worth knowing before touching it:
   it.** ProseMirror's drop handler parses text and HTML off the `dataTransfer`; a file
   yields no slice, and with nothing to insert it returns without `preventDefault`, so the
   browser's default runs — which for a file dropped on a page is to *navigate to it*.
-  `CollabEditorBody`'s `handleDrop` (PLAN.md §24c) returns true for a file the format
+  `CollabEditorBody`'s `handleDrop` (docs/TABLES.md) returns true for a file the format
   table knows and inserts asynchronously; ProseMirror calls `preventDefault` on a true
   return. It reaches the editor through a ref because `editorProps` is written at
   construction, before the editor exists.

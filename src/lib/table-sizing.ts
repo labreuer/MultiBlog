@@ -1,4 +1,4 @@
-// PLAN.md §24d — "Auto-size": strip every manual size from the table at
+// docs/TABLES.md, "Auto-size columns" — "Auto-size": strip every manual size from the table at
 // the caret so it lays out like one built in the editor (equal columns,
 // `table-layout: fixed; width: 100%` from prose.module.css).
 //

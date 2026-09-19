@@ -37,7 +37,7 @@ import { Annotation } from "./annotation-extension";
 // down in a read-only view, so it is the same setting under another name.
 export const EDITOR_LINK_OPTIONS = { openOnClick: false } as const;
 
-// PLAN.md §24 — TipTap's own table nodes, as one list so the live editors
+// docs/TABLES.md — TipTap's own table nodes, as one list so the live editors
 // (CollabEditorBody builds its own StarterKit and adds these beside it) and
 // the schema below register exactly the same four types. Not part of
 // StarterKit, so docs/TIPTAP.md's "never add StarterKit's own extensions
@@ -79,7 +79,7 @@ export const TableHeader = BaseTableHeader.extend({
 //
 // View: the stock TableView leaves a stale `width` on a <col> whose column
 // has just lost its width — table-view.ts says how, and why "Auto-size
-// columns" (PLAN.md §24d) needs it fixed. Harmless in contentExtensions'
+// columns" (docs/TABLES.md) needs it fixed. Harmless in contentExtensions'
 // non-editor uses: a node view is only ever constructed by a live editor.
 export const tableExtensions = [
   Table.configure({ renderWrapper: true, View: TableViewWithClearedWidths }),
@@ -129,7 +129,7 @@ export const pmDocContentSchema = getSchema(docContentExtensions);
 // doesn't know the mark (docs/TIPTAP.md's "picking the wrong variant silently
 // drops marks" warning, restated for a third consumer). And not
 // authorHighlightExtensions, which it used to be an alias of: that list
-// carries tableExtensions since PLAN.md §24, and a margin note has no room
+// carries tableExtensions since docs/TABLES.md, and a margin note has no room
 // for a table — the same reason ANNOTATION_TOOLS (EditorToolbar.tsx) offers
 // no headings. AnnotationBody's own extension list mirrors this one, so the
 // live annotation editor and every decoder of its ydoc agree on the shape.

@@ -1,4 +1,4 @@
-// PLAN.md §24c — a CSV into an existing doc, and a table out of one. The
+// docs/TABLES.md, "CSV in and out of an existing doc" — a CSV into an existing doc, and a table out of one. The
 // three things the unit tests can't reach: the toolbar's file item and the
 // drop handler put a table at the caret / drop point of a *live*
 // collaborative editor, a rejection reaches the notice under the toolbar,

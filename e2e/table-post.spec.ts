@@ -1,8 +1,8 @@
-// PLAN.md §24, §24c — a table from a Markdown import all the way to the
+// docs/TABLES.md — a table from a Markdown import all the way to the
 // public post page: the pipe table lands in the editor, survives publish,
 // renders on the static post page inside its scroll box, and is offered
 // there as a download by the same button the doc view has. The TODO.md
-// spec §24b owed and the post-page half of §24c's download, in one flow,
+// spec the first build owed and the post-page half of the CSV download, in one flow,
 // since both need a published post whose body holds a table and
 // createTestPost only takes plain text.
 import type { Page } from "@playwright/test";

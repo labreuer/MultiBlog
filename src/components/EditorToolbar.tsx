@@ -34,7 +34,7 @@ export type ToolbarTool =
 // Every tool CollabEditorBody's own toolbar has always offered — its default
 // so extracting this component changes nothing about the doc/post body
 // editor. "tighten" (reduce space between lines, tighten-lines.ts) joined
-// later, in both lists; "table" (PLAN.md §24, TableControls.tsx) later
+// later, in both lists; "table" (docs/TABLES.md, TableControls.tsx) later
 // still, in this one only.
 //
 // Both editors disable StarterKit's undoRedo and get these commands from

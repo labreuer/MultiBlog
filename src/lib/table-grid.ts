@@ -1,4 +1,4 @@
-// PLAN.md §24c — the grid between a table file and a table node. Browser-safe
+// docs/TABLES.md, "CSV in and out of an existing doc" — the grid between a table file and a table node. Browser-safe
 // (the editor's insert path runs it on the client) and ProseMirror-free in
 // the reading direction: a codec (table-codecs.ts) turns a file into a
 // TableGrid and back, and only this module knows what a `table` node looks

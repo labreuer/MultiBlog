@@ -1,4 +1,4 @@
-// PLAN.md §24c — the two editor-facing operations over the format table:
+// docs/TABLES.md, "CSV in and out of an existing doc" — the two editor-facing operations over the format table:
 // a file becomes a table node in a live editor, and a table node in one
 // becomes a file. Shared by TableControls' menu (insert at the caret,
 // download the table around it), CollabEditorBody's drop handler (insert

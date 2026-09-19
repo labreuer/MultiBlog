@@ -1,4 +1,4 @@
-// PLAN.md §24c — CSV, hand-rolled. RFC 4180 is the whole grammar: fields
+// docs/TABLES.md, "CSV in and out of an existing doc" — CSV, hand-rolled. RFC 4180 is the whole grammar: fields
 // split by a delimiter, records by CRLF (LF and a lone CR accepted on
 // read), a field holding the delimiter, a quote or a line break wrapped in
 // quotes with its quotes doubled. docs/research/tables.md, "The library

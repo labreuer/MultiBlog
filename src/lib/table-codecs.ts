@@ -1,4 +1,4 @@
-// PLAN.md §24c — the format table: which files a table can be read from
+// docs/TABLES.md, "CSV in and out of an existing doc" — the format table: which files a table can be read from
 // and written to, one codec per format over the TableGrid. Everything
 // that names a format — the menu's file picker `accept`, the editor's drop
 // handler, the download items — reads this list rather than spelling
