@@ -25,6 +25,12 @@ import type { Page } from "@playwright/test";
 //  3. **The grace window is measured between stored timestamps**, so it is
 //     tested by backdating revision 1 rather than with `page.clock` — see
 //     backdateAnnotationPosting's own comment.
+//  4. **The card has to be read once between Done and any reload.** Every case
+//     here used to assert the new body only after a `page.reload()`, which is
+//     the one navigation that cannot see the bug this surface actually had:
+//     the reader's ProseMirror editor is constructed with `content` and never
+//     re-parses it, so a Done put the *pre-edit* text back on screen until a
+//     full page load. `editBodyTo` closes that gap for every caller.
 
 const PAST_THE_WINDOW = EDIT_GRACE_MS + 60_000;
 
@@ -32,8 +38,11 @@ function card(page: Page, annotationId: string) {
   return page.locator(`[data-comment-id="${annotationId}"]`);
 }
 
-/** Opens the session, replaces the whole body, and clicks Done. */
-async function editBodyTo(page: Page, annotationId: string, text: string) {
+/**
+ * Opens the session, replaces the whole body, clicks Done — and checks the
+ * card shows the new text with no reload. `before` is the text being replaced.
+ */
+async function editBodyTo(page: Page, annotationId: string, text: string, before: string) {
   const own = card(page, annotationId);
   await own.getByRole("button", { name: "Edit", exact: true }).click();
   const editor = annotationEditor(page);
@@ -46,6 +55,11 @@ async function editBodyTo(page: Page, annotationId: string, text: string) {
   await page.keyboard.type(text);
   await own.getByRole("button", { name: "Done" }).click();
   await expect(editor).toHaveCount(0);
+  // The whole point of the helper's last line: what the card shows *now*,
+  // before anyone reloads. `router.refresh()` has to have landed and the
+  // read-only body editor has to have taken the new content from it.
+  await expect(own).toContainText(text);
+  await expect(own).not.toContainText(before);
 }
 
 test.describe("editing a posted annotation", () => {
@@ -65,7 +79,7 @@ test.describe("editing a posted annotation", () => {
     await page.goto(`/doc/${sharedDoc.slug}`);
     await expect(card(page, id)).toContainText(original);
 
-    await editBodyTo(page, id, corrected);
+    await editBodyTo(page, id, corrected, original);
 
     await expect.poll(async () => (await getAnnotationEditFacts(id))?.bodyText).toBe(corrected);
     const facts = await getAnnotationEditFacts(id);
@@ -94,7 +108,7 @@ test.describe("editing a posted annotation", () => {
     await backdateAnnotationPosting(id, PAST_THE_WINDOW);
 
     await page.goto(`/doc/${sharedDoc.slug}`);
-    await editBodyTo(page, id, corrected);
+    await editBodyTo(page, id, corrected, original);
 
     await page.reload();
     const marker = card(page, id).getByRole("button", { name: /earlier versions/ });
@@ -138,6 +152,9 @@ test.describe("editing a posted annotation", () => {
 
     await own.getByRole("button", { name: "Done" }).click();
     await expect(editor).toHaveCount(0);
+    // The author's own card, with no reload — same check editBodyTo makes.
+    await expect(own).toContainText(replacement);
+    await expect(own).not.toContainText(original);
 
     await readerPage.reload();
     await expect(card(readerPage, id)).toContainText(replacement);
@@ -287,7 +304,7 @@ test.describe("editing a posted annotation", () => {
     // has acted on what was said, so the "edited" marker shows even though
     // the parent was posted seconds ago.
     await page.reload();
-    await editBodyTo(page, parentId, "E2E parent annotation with the phrase removed entirely.");
+    await editBodyTo(page, parentId, "E2E parent annotation with the phrase removed entirely.", parentBody);
 
     await page.reload();
     await expect(card(page, parentId).getByRole("button", { name: /earlier versions/ })).toBeVisible();

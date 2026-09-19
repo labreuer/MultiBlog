@@ -368,6 +368,22 @@ settled.
 **Permissions** are docs/PERMISSIONS.md, "Editing what is already posted": rewording and
 removing are the same act on the same person's work, so both are author-or-`ADMIN`.
 
+**A settled body has to be pushed into the card's editor; a refreshed prop is not enough.**
+`AnnotationBodyReader` is a read-only ProseMirror editor, and `useEditor`'s `content` is a
+construction-time option — @tiptap/react's re-render path calls `setOptions`, which never
+re-parses it (docs/TIPTAP.md, "`useEditor`'s `content` is construction-time only"). Clicking
+Done sets `editing` false and calls `router.refresh()` in one batch, so the reader remounts
+with the *pre-edit* prop and then ignores the new one when it arrives: the card showed the
+text as it read before the edit until a full page load. Fixed 2026-09-19 with a value-compared
+`setContent(next, { emitUpdate: false })` effect, the same delivery `use-live-doc-content.ts`
+uses for a doc.
+
+The shape worth recognising is **a prop-fed ProseMirror editor on data that has become
+mutable**: the freeze is silent, and it arrived here not by changing this component but by
+giving a posted body an editor (§22e) that §13p had built on the assumption it never changed.
+The `staticBody` copy kept updating correctly the whole time — it was just behind
+`display: none`, which is also why nothing looked broken in the DOM.
+
 ## Rendering, rails and delivery
 
 `annotation-entries.ts` turns loaded threads into rendered entries on the server, quote-

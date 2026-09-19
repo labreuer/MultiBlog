@@ -64,6 +64,10 @@ type Props = {
 // annotation with no anchored replies.
 const EMPTY_ANCHORS: AnnotationAnchorInput[] = [];
 
+// A body that never reached a store debounce. A module constant so the
+// content-push effect below can compare against a stable value.
+const EMPTY_BODY: JSONContent = { type: "doc", content: [{ type: "paragraph" }] };
+
 // PLAN.md §13p — a posted annotation's body, rendered through a **read-only
 // ProseMirror editor** rather than as the static React tree it used to be
 // (annotation-entries.ts still produces that tree; it is now the pre-ready
@@ -115,6 +119,10 @@ export default function AnnotationBodyReader({
     onResolvedRef.current = onResolvedAnchorsChange;
   });
   const [initialAnchors] = useState(replyAnchors);
+  // The content this editor was constructed with, and every later push. See
+  // the effect below for why it has to be tracked by hand.
+  const [initialBody] = useState<JSONContent>(() => proseJson ?? EMPTY_BODY);
+  const appliedBodyRef = useRef<JSONContent>(initialBody);
 
   const editor = useEditor({
     // No `annotation` mark, matching annotationContentExtensions
@@ -135,7 +143,7 @@ export default function AnnotationBodyReader({
       // eslint-disable-next-line react-hooks/refs -- onHit is only ever invoked from the AnnotationClick plugin's handleClick, on a real DOM click, never during React's render
       AnnotationClick.configure({ onHit: (ids) => onAnchorClickRef.current?.(ids) }),
     ],
-    content: proseJson ?? { type: "doc", content: [{ type: "paragraph" }] },
+    content: initialBody,
     editable: false,
     immediatelyRender: false,
     editorProps: { attributes: { "aria-label": "Annotation", role: "textbox" } },
@@ -156,6 +164,31 @@ export default function AnnotationBodyReader({
       onSelectRef.current?.({ from, to, quotedText });
     },
   });
+
+  // PLAN.md §22e — **a posted body is mutable now, so the prop can change under
+  // a mounted editor**, and `useEditor`'s `content` is a construction-time
+  // option: @tiptap/react's re-render path calls `editor.setOptions`, and core's
+  // `setOptions` merges the options and calls `view.updateState(this.state)`
+  // without ever re-parsing `content`. So a changed `proseJson` has to be
+  // pushed in, exactly as use-live-doc-content.ts pushes a doc's live updates.
+  //
+  // Without it, ending an edit session showed the *previous* text: the card
+  // remounts this reader with the pre-edit prop (Done and `router.refresh()`
+  // are one batch), the refresh then lands with the new body, and the editor
+  // kept the old one — visible until a full page load. The `staticBody` copy
+  // underneath had the new text the whole time, hidden behind `display: none`.
+  //
+  // Compared by value, not identity: an RSC refresh deserializes a fresh
+  // object every time, so an identity check would re-`setContent` on every
+  // unrelated refresh and collapse a selection the reader was holding.
+  useEffect(() => {
+    if (!editor) return;
+    const next = proseJson ?? EMPTY_BODY;
+    if (next === appliedBodyRef.current) return;
+    if (JSON.stringify(next) === JSON.stringify(appliedBodyRef.current)) return;
+    appliedBodyRef.current = next;
+    editor.commands.setContent(next, { emitUpdate: false });
+  }, [editor, proseJson]);
 
   // Which anchors resolve, reported after every transaction that could have
   // changed the answer — a content change, and the anchor push below.
