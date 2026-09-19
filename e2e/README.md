@@ -410,6 +410,13 @@ the admin account.
   DETACHED from its query entirely on its own, so this never happens no matter
   what a later publish says *unless* something actually republishes from the
   matching point — there is no automatic reattachment.
+- **Never write the shared admin's preferences from a spec that did not set
+  them.** `clearColumnOrder(ADMIN_EMAIL)` used to sit in two `finally` blocks
+  whose tests only ever navigated with `?cols=`; from another worker that
+  write landed between `admin-table.spec.ts`'s "Save as my default" and the
+  navigation that checks it, and the saved column came back (once in a full
+  chromium run, 2026-09-18). A shared-admin preference belongs to the one
+  test that saves it, which puts it back itself.
 - **Playwright aborts every request whose URL ends in `/favicon.ico`** — in every
   browser, before `page.route` or the request events see it (playwright-core's
   `requestStarted`, `_isFavicon`). An `<img src="https://any.host/favicon.ico">`
