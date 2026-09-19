@@ -334,6 +334,37 @@ without committing to one now. Item 1 is independent and worth checking on the b
 
 ---
 
+## `deploy.sh` builds in place, so a failed `next build` leaves the live site half-broken
+
+**Status:** open. Seen once, 2026-09, deploying the `tables` branch to `/srv/thicketry`.
+
+`next build` empties `.next` before it writes, and `deploy/deploy.sh` runs it against the
+same `.next` the running `next start` is serving from. If the build then fails — a type
+error, the Nanode running out of memory (DEPLOY.md §2h), a dependency the tree lacks —
+`set -e` stops the script before the `systemctl restart`, and the *old* process keeps
+running over a half-deleted build: routes it has already loaded keep answering (`/` returned
+200 throughout), anything it lazy-loads from then on throws `ChunkLoadError`, and a restart
+would fail outright on the missing `BUILD_ID`. Both units read `active` the whole time.
+From outside there is no state in which this looks like a failed deploy; only the journal
+says so.
+
+The one instance so far arrived through an install skip that has since been removed
+(`git log -- deploy/deploy.sh`), but that was one road in. Every build failure ends in the
+same place.
+
+Options, cheapest first:
+
+1. **Say so.** Trap the build's failure and print, loudly, that the live service is now
+   serving an inconsistent `.next` and must not be restarted until a build succeeds, then
+   `exit 1`. Costs nothing and turns a silent state into a named one.
+2. **Keep the previous build.** `cp -a .next .next.prev` before the build (hundreds of MB,
+   seconds), and on failure `rm -rf .next && mv .next.prev .next`, so the running process is
+   whole again and a restart is safe. Confirm `next start` tolerates the swap beneath it —
+   it should, since it already tolerated the deletion.
+3. **Build elsewhere and swap.** `distDir` is a `next.config` value rather than a CLI flag,
+   so this means an env var read there (which `next start` must then see too), or a second
+   checkout. The largest change, and the one that removes the window entirely.
+
 ## `/users/[id]/slug` still hangs off the plural table (PLAN.md §3d)
 
 On 2026-09-15 a post's own pages moved from `/posts/[id]/…` to `/post/[id]/…`, and PLAN.md

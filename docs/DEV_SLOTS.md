@@ -1,12 +1,13 @@
 # Development slots
 
-This machine runs two working trees side by side, so a branch can be worked on without
+This machine can run two working trees side by side, so a branch can be worked on without
 disturbing what the other tree is serving. A *slot* is a working tree plus its own `.env`,
-its own Postgres database and its own `.file-storage`.
+its own Postgres database and its own `.file-storage`. Slot A is the standing checkout;
+slot B is a second checkout made when one is needed and removed afterwards.
 
 | | slot A | slot B |
 |---|---|---|
-| working tree | `~/Claude/Projects/MultiBlog` (main worktree) | `~/git/MultiBlog` (git worktree) |
+| working tree | `~/git/MultiBlog` (main worktree) | a git worktree when one is needed, e.g. `~/git/MultiBlog-featureX` |
 | `DEV_HOST` | `localhost` | `b.localhost` |
 | `WEB_PORT` (dev server) | 3000 | 3005 |
 | `WEB_PORT + 1` (preview tool's `web-prod`) | 3001 | 3006 |
@@ -84,9 +85,10 @@ enforce the static/dynamic split or the Full Route Cache. The script sets
 reads the slot, only launch.json's *port* number is slot A's; the server itself binds
 correctly in either slot.
 
-## Adding a third slot
+## Adding a slot
 
-Slots are hand-configured; there is no setup script (TODO.md tracks that gap). The steps:
+Slots are hand-configured; there is no setup script (TODO.md tracks that gap). The steps,
+shown with a third slot's values — slot B's are in the table above:
 
 1. `git worktree add <path> <branch>` from either existing tree.
 2. Write that tree's `.env` with `DEV_HOST=c.localhost`, `WEB_PORT=3010`, `COLLAB_PORT=1236`,

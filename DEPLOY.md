@@ -745,6 +745,12 @@ zero-downtime story is needed at hobby scale — the restart blip is seconds. (D
 remains an easy later upgrade for
 reproducibility, per PLAN.md §7.)
 
+**Deploying a branch other than `main`** is a supported thing to do — `/srv/thicketry` has
+run feature branches — but `git checkout <branch>` is a step *before* `deploy.sh`, never
+inside it, and the script's `git pull` will then say "Already up to date". That is expected
+and not a sign the deploy is a no-op: the checkout already moved the tree, and the pull has
+nothing left to fetch.
+
 ---
 
 ## 11. Running a second instance on the same box
