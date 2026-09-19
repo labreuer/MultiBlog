@@ -13,7 +13,7 @@ connections, so `psql -U multiblog -h 127.0.0.1 -d multiblog` just works. Restar
 service needs an elevated shell.
 
 **Two databases in that one cluster**, one per slot: `multiblog` (slot A) and `multiblog_b`
-(slot B, `~/git/MultiBlog`). They are separate precisely so two branches can hold divergent
+(slot B). They are separate precisely so two branches can hold divergent
 migration state without either one's `prisma migrate dev` detecting drift and offering the
 full reset described below — which is the failure this arrangement exists to prevent, and
 the reason a second checkout must never be pointed at the first's `DATABASE_URL`. Adding a

@@ -225,7 +225,7 @@ Two development slots — separate working trees, each with its own `.env`, data
 
 | | slot A | slot B |
 |---|---|---|
-| working tree | `~/Claude/Projects/MultiBlog` | `~/git/MultiBlog` |
+| working tree | `~/git/MultiBlog` | a second checkout when one is needed, e.g. `~/git/MultiBlog-featureX` |
 | `DEV_HOST` | `localhost` | `b.localhost` |
 | `WEB_PORT` (dev) · `+1` (`web-prod`) · `+2` (e2e prod) | 3000 · 3001 · 3002 | 3005 · 3006 · 3007 |
 | `COLLAB_PORT` | 1234 | 1235 |
