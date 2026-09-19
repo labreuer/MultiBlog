@@ -558,7 +558,7 @@ tracks a selection or hover in state beside it.
 PLAN.md §24. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
 `tableExtensions` in `src/lib/tiptap-schema.ts`, spread into `contentExtensions` and, by
 hand, into `CollabEditorBody`'s own list (which builds its own StarterKit, per the rule
-above). Four things worth knowing before touching it:
+above). Six things worth knowing before touching it:
 
 - **The editor and the static renderer both emit `<div class="tableWrapper">`**, by two
   different routes. In the editor the extension's `TableView` node view draws it (it is
@@ -570,8 +570,31 @@ above). Four things worth knowing before touching it:
   and nothing in `npm run check` notices.
 - **`resizable` stays off.** Column widths would be `colwidth` cell attrs synced through Yjs
   (fine) but set by a drag handle the reading views cannot reproduce, and the reading
-  column is 800px wide. `table-layout: fixed; width: 100%` gives equal columns instead.
-  TODO.md carries the follow-up.
+  column is 800px wide. `table-layout: fixed; width: 100%` gives equal columns instead —
+  **for tables built in the editor or imported from Markdown.** A pasted table is a
+  different story, next bullet. TODO.md carries the follow-up.
+- **A pasted table keeps its source's column widths, and nothing in the UI can change
+  them.** Not documented anywhere by TipTap: the published Table and TableCell pages list
+  settings only, and the behaviour lives in `parseColwidth` in `@tiptap/extension-table`'s
+  source (3.29.0). The cells' `colwidth` attr is parsed from a `colwidth` attribute, else
+  from the `width` attribute of the matching `<col>` in the pasted table's `<colgroup>`.
+  Word, Google Docs, Excel and Sheets all put a `<colgroup>` with pixel widths on the
+  clipboard, so every cell of a pasted table arrives with a `colwidth`. Once every column
+  has one, `createColGroup` (the static renderer's `renderHTML` and the editor's `TableView`
+  share it) emits `<col style="width: Npx">` per column *and* an inline
+  `style="width: <sum>px"` on the `<table>` — and the inline width beats
+  `prose.module.css`'s `width: 100%`. So a table Word laid out at 542px renders 542px wide
+  in the 800px column with its columns frozen at Word's widths, and since `resizable` is
+  off there is no drag handle to fix a 93px first column with (the doc titled "From Word",
+  2026-09-18, is the live example). Everything else about a pasted table is dropped,
+  because ProseMirror's parser keeps only the attributes a node declares: the `<table>`'s
+  own `width`, `border` and `style`, cell `width`/`bgcolor`/border styles, Word's `mso-*`
+  classes, and `<caption>`/`<thead>`/`<tfoot>` wrappers (their rows are lifted into the
+  table). The one other cell attr kept is `align`, from `style="text-align"` or `align=`,
+  rendered back as an inline `text-align`. Marks inside cells follow StarterKit's rules.
+  The two ways out are to strip the `<colgroup>` before parsing (`transformPastedHTML`, or
+  a `parseHTML: () => null` override on `colwidth`) or to start honouring widths properly,
+  which is TODO.md's column-resizing item — pick one there rather than patching a doc.
 - **A cell is `block+` and a table is `group: block`, so the schema allows a table inside a
   cell.** `TableControls` disables its insert button while the caret is in a table
   (`isActive("table")`); nothing else stops nesting, and Markdown import can't produce it.

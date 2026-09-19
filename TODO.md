@@ -111,12 +111,24 @@ three things deliberately not in that change:
    view reading the *live* editor, never `Doc.proseJson`), and a rows×columns cap in the byte
    cap's style. Two policy calls it leaves open: whether to mangle formula-leading fields on
    export (OWASP CSV injection) and whether to sniff `;` on the first line or reject.
-2. **Column resizing.** `Table.configure({ resizable: true })` is one line; the work is the
-   reading side. `colwidth` attrs sync through Yjs and the static renderer already emits a
-   `<colgroup>` from them (`createColGroup`), so widths *would* carry to the post page — the
-   open questions are whether an 800px reading column can honour widths set in a wider
-   editor, and how the drag handle (`.column-resize-handle`, prosemirror-tables) should look
-   under the site's tokens. Decide before turning it on, not after.
+2. **Column widths — already a live problem, not a resizing follow-up.** `colwidth` attrs
+   sync through Yjs and the static renderer already emits a `<colgroup>` from them
+   (`createColGroup`), so widths *would* carry to the post page — and they already do, for
+   pasted tables: the cell parser reads `<col width>` out of the pasted `<colgroup>`
+   (docs/TIPTAP.md, "A pasted table keeps its source's column widths"), Word and every
+   spreadsheet supply one, and the result is a table frozen at the source's pixel widths,
+   narrower than the reading column, with no UI to change it (found 2026-09-18 on a
+   pasted-from-Word doc whose first column came through at 93px). Two ways to go, and the
+   choice is the same one column resizing needs:
+   - **Drop widths on paste.** `transformPastedHTML` strips `<colgroup>`, or `colwidth`'s
+     `parseHTML` is overridden to return null. Pasted tables then get equal columns like
+     every other table. Cheapest, and consistent with `resizable` being off. A one-off
+     script nulling `colwidth` on existing docs' cells goes with it.
+   - **Honour widths, and turn on resizing.** `Table.configure({ resizable: true })` is one
+     line; the work is the reading side: whether an 800px reading column can honour widths
+     set in a wider editor or pasted from a 6.5in Word page (scale proportionally? clamp?),
+     and how the drag handle (`.column-resize-handle`, prosemirror-tables) should look
+     under the site's tokens. Decide before turning it on, not after.
 3. **An e2e spec.** `e2e/markdown-import.spec.ts`'s shape: import a fixture with a pipe
    table, assert the header and body cell text in the editor, publish, assert the same on the
    post page and that `.tableWrapper` scrolls rather than the page at 390px (the
