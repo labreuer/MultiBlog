@@ -233,11 +233,26 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // gets neither.
   const canEditBody = canDelete;
   const sessionIsStale = annotation.editSessionStale;
-  // Someone has a session open and it is not this viewer's mounted editor.
-  // Deliberately keyed on the server's column and not on identity: two tabs
-  // of the same author are as much a version problem as two people
-  // (finishAnnotationEdit attributes one version to whoever ends last).
-  const heldByAnother = annotation.editingSince !== null && !editing && !sessionIsStale;
+  // A session is open on the server and this viewer has no editor mounted for
+  // it — either a reload of their own, or somebody else's.
+  const sessionOpenElsewhere = annotation.editingSince !== null && !editing && !sessionIsStale;
+  // The author's own open session, seen from a browser that isn't the one
+  // holding it. `beginAnnotationEdit` lets the *annotation's author* re-begin
+  // a fresh session at any time and only makes a stranger wait out
+  // STALE_EDIT_SESSION_MS, so the offer here is keyed on exactly the predicate
+  // the server uses (`Annotation.userId`, which is what `commenterUserId`
+  // carries). Two tabs of one author are not the version problem the
+  // one-session-at-a-time rule exists for — whoever ends last, the version is
+  // attributed to the same person either way — while a reload mid-edit is
+  // common, and without this it cost the author an hour's lockout from their
+  // own words.
+  const ownSessionOpen = sessionOpenElsewhere && isOwnAnnotation;
+  // Someone *else* has a session open: no Resume, no Discard, wait for it to
+  // go stale. There is no column recording who holds a session, so an ADMIN
+  // who reloads mid-edit on someone else's annotation still waits — the
+  // server refuses their re-begin too, so the UI is not hiding anything that
+  // would work.
+  const heldByAnother = sessionOpenElsewhere && !isOwnAnnotation;
   // Admin power being used on someone else's annotation gets a visibly
   // different (maroon) button; deleting your own, even as an admin, is just
   // the normal action.
@@ -444,6 +459,12 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
               version.
             </p>
           )}
+          {ownSessionOpen && (
+            <p className={styles.editStatus}>
+              You have an edit open since <LocalTime value={annotation.editingSince!} /> — what you see is the last
+              saved version.
+            </p>
+          )}
           {!posted && !replyDraftId && !editing && (
             <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
               {replyPending ? "Opening…" : "Reply"}
@@ -452,7 +473,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
           {replyError && <p className={styles.error}>{replyError}</p>}
           {canEditBody && !editing && !confirmingDelete && !heldByAnother && (
             <button type="button" onClick={startEditing} disabled={editPending} className={styles.editButton}>
-              {editPending ? "Opening…" : sessionIsStale ? "Resume editing" : "Edit"}
+              {editPending ? "Opening…" : sessionIsStale || ownSessionOpen ? "Resume editing" : "Edit"}
             </button>
           )}
           {canEditBody && !editing && sessionIsStale && (

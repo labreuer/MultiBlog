@@ -335,9 +335,19 @@ changed nothing writes nothing, so opening and closing the editor cannot close t
 window. Cancel calls `cancelAnnotationEdit`, which decodes the newest snapshot and asks the
 collab process (`/admin/annotation-replace`) to write it back — Yjs has no un-apply, so a
 cancel is new log rows that restore the old text, and the versions stay a strictly increasing
-sequence of marks. A session left open is settled on the author's next visit: once
-`editingSince` is older than `STALE_EDIT_SESSION_MS` (an hour) the card offers Resume or
-Discard, with staleness decided by the loader rather than in render.
+sequence of marks. A session left open is settled on the author's next visit, and *who* is
+visiting decides how: the author gets **Resume editing** immediately, because
+`beginAnnotationEdit` only ever makes a *stranger* wait — its freshness check is skipped when
+`Annotation.userId` is the caller, so a reload mid-edit costs nothing, and the card says "You
+have an edit open since …" rather than reporting the author to themselves. Anyone else — an
+`ADMIN`, or the author's session seen by the author's own admin colleague — reads "Being edited
+since …" and waits until `editingSince` is older than `STALE_EDIT_SESSION_MS` (an hour), at
+which point the card offers Resume or Discard. Staleness is decided by the loader rather than in
+render. There is no column recording *which user* holds a session, so the two questions the UI
+can ask are the two the server asks: "is this viewer the annotation's author" and "has an hour
+passed" — which is why an `ADMIN` who reloads mid-edit on someone else's annotation waits out
+the hour like any other stranger, and why the author's own Discard arrives only by way of
+Resume then Cancel.
 
 **The grace window** is docs/COMMENTS.md's, from `src/lib/edit-grace.ts`, with `posted` =
 `Annotation.postedAt` and "something quotes this version" = an anchored, undeleted reply whose
