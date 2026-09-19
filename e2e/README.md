@@ -410,6 +410,20 @@ the admin account.
   DETACHED from its query entirely on its own, so this never happens no matter
   what a later publish says *unless* something actually republishes from the
   matching point — there is no automatic reattachment.
+- **A synthetic paste needs its data written onto the event, not only passed
+  to the constructor.** `new ClipboardEvent("paste", { clipboardData })` is
+  honoured by Chromium and ignored by Gecko, which gives the event an empty
+  `DataTransfer` of its own — writable, so the table specs fill
+  `event.clipboardData` after constructing it and dispatch the same event on
+  both engines (measured 2026-09-19; `table-sizing.spec.ts` has the helper
+  and the reason it is dispatched in-page at all).
+- **A direct `page.request.get()` after a long stretch of UI work can die with
+  `read ECONNRESET` and no response.** The request context keeps its socket
+  alive and `next start` closes idle ones after Node's 5 s
+  `keepAliveTimeout`; a request sent on a socket the server is closing at
+  that instant is reset. Pass `{ maxRetries: 2 }` — Playwright retries
+  exactly that error and nothing else (`landing.spec.ts`'s avatar test, one
+  firefox full run in three on 2026-09-19).
 - **Never write the shared admin's preferences from a spec that did not set
   them.** `clearColumnOrder(ADMIN_EMAIL)` used to sit in two `finally` blocks
   whose tests only ever navigated with `?cols=`; from another worker that

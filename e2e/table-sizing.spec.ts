@@ -35,7 +35,15 @@ test("Auto-size columns clears a pasted table's widths and is inert on a table w
     const dt = new DataTransfer();
     dt.setData("text/html", html);
     dt.setData("text/plain", "Name\tNote\nAda\tCounts");
-    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    const event = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+    // Chromium adopts `dt` as the event's clipboardData; Gecko ignores the
+    // init member and gives the event an empty DataTransfer of its own, which
+    // *is* writable — so fill whichever one the event actually carries
+    // (measured 2026-09-19: getData() on the Firefox event returned "" for
+    // what the constructor was handed, and the html once set on
+    // event.clipboardData directly).
+    for (const type of dt.types) event.clipboardData?.setData(type, dt.getData(type));
+    el.dispatchEvent(event);
   }, PASTED_TABLE);
 
   const table = bodyEditor(page).locator("table");
