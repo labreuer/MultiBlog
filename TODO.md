@@ -365,6 +365,34 @@ Options, cheapest first:
    so this means an env var read there (which `next start` must then see too), or a second
    checkout. The largest change, and the one that removes the window entirely.
 
+## `deploy.sh`'s `npm ci` empties `node_modules` under the running site, too
+
+**Status:** open. Measured 2026-09-19, redeploying `main` to `/srv/thicketry`.
+
+The item above is the *build's* window. The install has one of its own, and the change that
+made `npm ci` unconditional (PR #41) made it a fixture of every deploy rather than of the
+deploys that changed a manifest. `npm ci` deletes `node_modules` before it reinstalls, and it
+runs against the tree the live `next start` is loading from. Any module the running process
+has not yet required fails to resolve for the length of the install — about 20s on the
+Nanode — and the request that needed it is a 500, not a 502, so nginx and the units both
+look fine.
+
+Seen the first time the script ran twice back to back: the first run had restarted the
+service a minute earlier, so the new process had loaded almost nothing, and `/posts`,
+`/doc` and `/tag` all returned 500 during the second run's install. The journal named it —
+`Failed to load external module pg-…: ERR_MODULE_NOT_FOUND` and `Cannot find module
+'…/@prisma/client-…/runtime/client.js'` — and `/` kept answering 200 throughout, because
+it had been rendered already. A long-running process has most of its modules in memory,
+so the everyday exposure is smaller than that, but lazy-loaded chunks and any route not yet
+hit since the last restart stay exposed on every deploy.
+
+This is not an argument for bringing the install skip back (the removing commit says why it
+went), and it is not fixed by any of options 1 or 2 above, which only address the `.next`
+half. Option 3 — build in a second checkout, or otherwise somewhere the live process is
+not reading from, and swap — closes both windows at once, which is a reason to prefer it
+over the cheaper two despite its size. Until then, expect a few seconds of 500s on cold
+routes per deploy, and don't read them as a broken build.
+
 ## `/users/[id]/slug` still hangs off the plural table (PLAN.md §3d)
 
 On 2026-09-15 a post's own pages moved from `/posts/[id]/…` to `/post/[id]/…`, and PLAN.md
