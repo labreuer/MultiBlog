@@ -7,6 +7,7 @@ import type {
   onAuthenticatePayload,
   onAwarenessUpdatePayload,
   onChangePayload,
+  onDisconnectPayload,
   onLoadDocumentPayload,
   onStoreDocumentPayload,
 } from "@hocuspocus/server";
@@ -156,13 +157,39 @@ export async function ydocOnStoreDocument({
 // clientID isn't exposed directly by Hocuspocus's Connection type, but it is
 // always the awareness clientID that connection reports for itself — cached
 // here from onAwarenessUpdate and looked up by onChange's `connection`.
+//
+// **Keyed on the socket AND the document, never the socket alone.** One
+// websocket carries several documents (docs/YDOC.md "One socket per page"):
+// a reader's doc tap and every annotation they open ride the same socket,
+// and each is its own Y.Doc with its own clientID. A socket-only key holds
+// whichever document's awareness arrived last, so a write to the annotation
+// would be attributed under the *doc* tap's clientID — the user is right but
+// the key is wrong, and author highlighting never finds it. Hocuspocus's
+// `socketId` is per websocket, not per document connection, which is what
+// makes the pair necessary. e2e/shared-socket.spec.ts is the guard.
 const socketClientIds = new Map<string, number>();
 
-export function ydocOnAwarenessUpdate({ connection, added, updated }: onAwarenessUpdatePayload<YdocContext>): void {
+function clientIdKey(socketId: string, documentName: string): string {
+  return `${socketId}\0${documentName}`;
+}
+
+export function ydocOnAwarenessUpdate({
+  connection,
+  documentName,
+  added,
+  updated,
+}: onAwarenessUpdatePayload<YdocContext>): void {
   if (!connection) return;
   for (const clientId of [...added, ...updated]) {
-    socketClientIds.set(connection.socketId, clientId);
+    socketClientIds.set(clientIdKey(connection.socketId, documentName), clientId);
   }
+}
+
+// One entry per (socket, document) rather than per socket means the map
+// would otherwise grow with every annotation ever opened; a document
+// connection closing is exactly when its entry stops meaning anything.
+export function ydocOnDisconnect({ socketId, documentName }: onDisconnectPayload<YdocContext>): void {
+  socketClientIds.delete(clientIdKey(socketId, documentName));
 }
 
 function getClientsMap(document: Document): Y.Map<string> {
@@ -185,7 +212,7 @@ async function attributeUpdate(
     return;
   }
 
-  let clientId = socketClientIds.get(connection.socketId);
+  let clientId = socketClientIds.get(clientIdKey(connection.socketId, documentName));
   if (clientId === undefined) {
     // No awareness state seen yet from this connection — fall back to the
     // update's own metadata. Only trust it when unambiguous: a single

@@ -80,7 +80,10 @@ keystroke; a settle (post, Done) writes the same three columns from the decoded 
 snapshots, through one shared decoder (`src/lib/annotation-body.ts`). Every list, rail and admin table renders from those columns through
 `renderToReactElement` on the server (`annotation-entries.ts`, `AnnotationVersionBody`),
 and a live `HocuspocusProvider` opens only for an annotation actually open in an editor. A
-doc with fifty annotations opens no annotation sockets until one is clicked into.
+doc with fifty annotations opens no annotation connections until one is clicked into — and
+the one it then opens is a further *document* on the page's existing websocket, not a socket
+of its own (docs/YDOC.md "One socket per page"); read-only or writable is still this
+annotation's token's call, whatever the doc connection beside it was granted.
 
 **But a posted body is also a real editing surface**, `AnnotationBodyReader`: an
 `editable: false` editor mounted behind the SSR copy, because a browser selection over a

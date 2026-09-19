@@ -6,7 +6,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useEditor, type Editor, type JSONContent } from "@tiptap/react";
 import type { Extensions } from "@tiptap/core";
 import { docContentExtensions } from "./tiptap-schema";
-import { getCollabUrl } from "./collab-url";
+import { attachProvider, type CollabSocket } from "./collab-socket";
 import { renderYdocDoc } from "./ydoc-render";
 import { PendingAnnotation } from "./pending-annotation-extension";
 import { captureYdocVersion } from "./ydoc-version-client";
@@ -89,6 +89,14 @@ export type LiveDocContentOptions = {
   // Always supplied together; never toggled on one instance.
   ydoc?: Y.Doc;
   provider?: HocuspocusProvider;
+  // Owned mode's socket — the page's one shared websocket (docs/YDOC.md
+  // "One socket per page"), which the annotation editors beside this surface
+  // attach to as well. A getter rather than the socket itself because it is
+  // created lazily, on the first request from inside an effect, and this
+  // hook's connection effect is that request on /doc/[slug]. Passed in, like
+  // `setAwareness`, so that src/lib keeps not importing from src/components.
+  // Ignored in hoisted mode, where the caller's provider already has one.
+  getSocket?: () => CollabSocket;
   // PLAN.md §13i — a readOnly connection's awareness still flows freely
   // (only document *content* updates are gated), so this same read-only tap
   // doubles as the channel every LiveAnnotationComposer publishes "someone
@@ -137,6 +145,7 @@ export function useLiveDocContent({
   frozen = false,
   ydoc: hoistedYdoc,
   provider: hoistedProvider,
+  getSocket,
   editorRef,
   versionRef,
   setAwareness,
@@ -395,8 +404,10 @@ export function useLiveDocContent({
 
         ydoc.on("update", applyUpdate);
 
-        instance = new HocuspocusProvider({
-          url: getCollabUrl(),
+        // Only after the token succeeded: an anonymous reader is refused
+        // above and must not be the one to open the page's socket.
+        if (!getSocket) throw new Error("useLiveDocContent needs getSocket in owned mode.");
+        instance = attachProvider(getSocket(), {
           name: documentName,
           document: ydoc,
           token: fetchToken,
@@ -425,7 +436,7 @@ export function useLiveDocContent({
       setAwareness(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setAwareness is a context setter (stable); re-running this on its identity would tear down and re-establish the websocket
-  }, [docId, ydoc, hoistedProvider]);
+  }, [docId, ydoc, hoistedProvider, getSocket]);
 
   return {
     editor,

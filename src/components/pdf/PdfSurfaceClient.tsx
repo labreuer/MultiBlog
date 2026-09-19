@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { ReactNode } from "react";
+import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import type { PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import type { AnchoredLinkView } from "@/lib/anchored-link-data";
 
@@ -40,5 +41,12 @@ export default function PdfSurfaceClient(props: {
   anchoredLink: AnchoredLinkView | null;
   metadata: ReactNode;
 }) {
-  return <PdfAnnotationSurface {...props} />;
+  // The provider is above the surface rather than inside it because the
+  // surface's own presence hook attaches to the socket this owns (docs/YDOC.md
+  // "One socket per page"), and LiveAnnotationComposer throws without it.
+  return (
+    <DocPresenceProvider>
+      <PdfAnnotationSurface {...props} />
+    </DocPresenceProvider>
+  );
 }

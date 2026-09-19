@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import PdfViewer, { type PdfPane, type PdfViewerHandle } from "./PdfViewer";
 import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } from "./PdfAnnotationPanel";
@@ -839,12 +838,13 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   );
 
   return (
-    // DocPresenceProvider is here because LiveAnnotationComposer publishes
-    // "who's composing" into it and throws without one. Its awareness stays
-    // null until Phase 4 supplies a connection, which the composer already
-    // handles — the doc reading view has the same null window before its own
-    // provider connects.
-    <DocPresenceProvider>
+    // The DocPresenceProvider this used to render sits in PdfSurfaceClient
+    // now, above this component, because `usePdfPresence` above needs the
+    // socket it owns (docs/YDOC.md "One socket per page") and a hook cannot
+    // read a context its own component renders. Its awareness stays null
+    // here — the presence hook never publishes it — which the composer
+    // already handles.
+    <>
       <AnnotationMoveProvider>
         <PdfViewer
           fileUrl={fileUrl}
@@ -943,7 +943,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           </div>
         )}
       </AnnotationMoveProvider>
-    </DocPresenceProvider>
+    </>
   );
 }
 

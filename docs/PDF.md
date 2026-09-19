@@ -448,6 +448,11 @@ as long as it existed, which made it ~33% looser than the 2% it claims.
   PLAN.md §19, *Decisions taken*, has the full comparison.
 - **Viewport → awareness.** Ephemeral and unpersisted by design. Putting viewport updates in
   the ydoc would bloat the update log badly, which matters given the `gc: false` work.
+- **The presence connection is the page's socket.** Every annotation opened on the file
+  attaches to it as another document rather than opening a socket of its own, the same
+  arrangement `/doc/[slug]` has with its live tap (docs/YDOC.md "One socket per page"). That
+  is why `DocPresenceProvider` sits in `PdfSurfaceClient`, above the surface whose hook
+  needs it.
 
 ### Echo suppression
 

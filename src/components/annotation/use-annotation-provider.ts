@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
-import { HocuspocusProvider } from "@hocuspocus/provider";
-import { getCollabUrl } from "@/lib/collab-url";
+import type { HocuspocusProvider } from "@hocuspocus/provider";
+import { attachProvider } from "@/lib/collab-socket";
+import { useDocPresence } from "./doc-presence-context";
 
 export type AnnotationConnection = {
   provider: HocuspocusProvider | null;
@@ -26,7 +27,17 @@ export type AnnotationConnection = {
 // the initial connection from spending a second round trip on a token the
 // component already holds, while still giving the provider a real refresher
 // for every later reconnect. Same shape DocEditor.tsx uses.
+//
+// The connection is a *document* on the page's one shared socket, not a
+// socket of its own (docs/YDOC.md "One socket per page"): opening an
+// annotation costs the token round trip plus auth and sync on a socket the
+// surface already holds, never a fresh handshake. Every surface that mounts
+// an annotation editor sits inside a DocPresenceProvider, which owns that
+// socket. Read-only or writable is still decided per document, by this
+// annotation's own token — the doc tap being read-only on the same socket
+// constrains nothing here.
 export function useAnnotationProvider(annotationId: string): AnnotationConnection {
+  const { getSocket } = useDocPresence();
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [readOnly, setReadOnly] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,8 +75,7 @@ export function useAnnotationProvider(annotationId: string): AnnotationConnectio
         firstToken = token;
         setReadOnly(ro === true);
 
-        instance = new HocuspocusProvider({
-          url: getCollabUrl(),
+        instance = attachProvider(getSocket(), {
           name: documentName,
           document: ydoc,
           token: fetchToken,
@@ -81,7 +91,8 @@ export function useAnnotationProvider(annotationId: string): AnnotationConnectio
       instance?.destroy();
       ydoc.destroy();
     };
-  }, [annotationId, ydoc]);
+    // getSocket is a stable context callback.
+  }, [annotationId, ydoc, getSocket]);
 
   return { provider, ydoc, readOnly, error };
 }

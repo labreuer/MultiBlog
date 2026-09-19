@@ -104,7 +104,7 @@ export default function DocReadingBody({
   // Declared here so both hooks below can take it as an input — see
   // useLiveDocContent's note on why it owns neither end of that.
   const editorRef = useRef<Editor | null>(null);
-  const { setAwareness } = useDocPresence();
+  const { setAwareness, getSocket } = useDocPresence();
   const marginNotes = useMarginNotes();
 
   // Configured once, from the server's first answer, so the first painted
@@ -145,6 +145,7 @@ export default function DocReadingBody({
     editorRef,
     versionRef,
     setAwareness,
+    getSocket,
     extensions,
     onSelectionUpdate: selection.capture,
     onContentPushed: (liveEditor) => {
