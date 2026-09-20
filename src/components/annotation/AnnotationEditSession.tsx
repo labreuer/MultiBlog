@@ -5,10 +5,16 @@ import { useSession } from "next-auth/react";
 import AnnotationBody from "./AnnotationBody";
 import { useAnnotationProvider } from "./use-annotation-provider";
 import { cancelAnnotationEdit, finishAnnotationEdit } from "@/app/actions/annotations";
+import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import styles from "./AnnotationNode.module.css";
 
 type Props = {
   annotationId: string;
+  // The bundle `beginAnnotationEdit` handed back (annotation-connection.ts).
+  // It matters most here: this card is swapping a rendered body for an
+  // editor, so a wait before the connection is a visibly emptier card than
+  // the one that was just there.
+  connection?: AnnotationConnectionBundle;
   /** The session ended with a revision (or with nothing changed). */
   onFinished: () => void;
   /** The session ended with the previous version put back. */
@@ -30,9 +36,9 @@ type Props = {
 // let mutable bodies arrive without a live editor per card (docs/COLLAB.md's
 // 2026-08-13 entry weighed the alternative, awareness-driven mounting; it
 // stays available and is not needed for this).
-export default function AnnotationEditSession({ annotationId, onFinished, onCancelled }: Props) {
+export default function AnnotationEditSession({ annotationId, connection, onFinished, onCancelled }: Props) {
   const { data: session } = useSession();
-  const { provider, ydoc, readOnly, error: connectionError } = useAnnotationProvider(annotationId);
+  const { provider, ydoc, readOnly, error: connectionError } = useAnnotationProvider(annotationId, connection);
   const [pending, setPending] = useState<null | "finish" | "cancel">(null);
   const [error, setError] = useState<string | null>(null);
 

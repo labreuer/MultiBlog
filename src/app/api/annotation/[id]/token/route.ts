@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canUserAccessAnnotationYdoc, canUserEditAnnotationBody } from "@/lib/annotation-authz";
-import { signYdocToken } from "@/lib/ydoc-token";
-import { ydocIdForAnnotation } from "@/lib/ydoc-names";
+import { canUserAccessAnnotationYdoc } from "@/lib/annotation-authz";
+import { mintAnnotationConnection } from "@/lib/annotation-connection";
 
 // The annotation-scoped sibling of /api/doc/[id]/token (PLAN.md §13a), and
 // since §22e it has the same two questions a doc's token does: one gate
 // deciding whether to mint at all (canUserAccessAnnotationYdoc — "may you
 // read the thing this is about"), a second deciding `readOnly`
-// (canUserEditAnnotationBody — author or ADMIN).
+// (canUserEditAnnotationBody — author or ADMIN). The second one, and the
+// minting itself, live in `mintAnnotationConnection`, which the two actions
+// that open an annotation share so they can hand the bundle back directly
+// rather than making the client come here for it.
 //
 // **It used to mint an unconditionally writable token**, on the reasoning
 // §13a's comment still records: anyone who could post a reply under an
@@ -20,6 +22,11 @@ import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 // anyone's annotation from a console, which docs/COLLAB.md's 2026-08-13 entry
 // named as the real gate on mutable bodies. Hence the split, shipped ahead of
 // the editor rather than with it.
+//
+// **This route is still the only path for a reconnect**, and for a composer
+// mounted on a row this client didn't just create — a moved draft,
+// OwnDraftsList, the editor's rail. What the actions shortcut is the *first*
+// connection after an action that already proved the same access.
 //
 // `readOnly` is returned in the body as well as carried in the token, purely
 // so a client can render the right affordances without decoding a JWT; the
@@ -51,24 +58,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Lineage mirrors /api/doc/[id]/token: the ydoc row's own created_at, not
-  // Annotation.createdAt — the two coincide at ordinary creation time but
-  // only the former tracks a structurally new document (PLAN.md §11e).
-  const documentName = ydocIdForAnnotation(id);
-  const ydocRow = await prisma.ydoc.findUnique({ where: { id: documentName }, select: { createdAt: true } });
-  if (!ydocRow) {
+  const connection = await mintAnnotationConnection({
+    annotationId: id,
+    annotationUserId: annotation.userId,
+    viewer: { id: session.user.id, role: session.user.role },
+  });
+  if (!connection) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
 
-  const readOnly = !canUserEditAnnotationBody(session.user.id, session.user.role, annotation);
-  const token = await signYdocToken({
-    sub: session.user.id,
-    documentName,
-    role: session.user.role,
-    // Absent rather than false when writable, matching YdocTokenPayload's own
-    // comment: ydocOnAuthenticate's default is writable, and only a truthy
-    // flag narrows it.
-    ...(readOnly ? { readOnly: true } : {}),
-  });
-  return NextResponse.json({ token, lineage: ydocRow.createdAt.getTime(), documentName, readOnly });
+  return NextResponse.json(connection);
 }

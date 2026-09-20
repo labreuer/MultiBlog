@@ -13,6 +13,7 @@ import {
   ydocOnAuthenticate,
   ydocOnAwarenessUpdate,
   ydocOnChange,
+  ydocOnDisconnect,
   ydocOnLoadDocument,
   ydocOnStoreDocument,
   handleYdocSnapshot,
@@ -52,6 +53,10 @@ const server = new Server({
 
   async onAwarenessUpdate(payload) {
     ydocOnAwarenessUpdate(payload);
+  },
+
+  async onDisconnect(payload) {
+    ydocOnDisconnect(payload);
   },
 
   // Hocuspocus serves plain HTTP on the same port as the websocket. Its

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createDraftAnnotation } from "@/app/actions/annotations";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
+import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import { useAnnotationMove } from "./annotation-move-context";
 import styles from "./AnnotationPopover.module.css";
 import composerStyles from "./AnnotationComposer.module.css";
@@ -83,7 +84,12 @@ export default function AnnotationPopover({
   onPosted,
   onCancel,
 }: Props) {
-  const [draftId, setDraftId] = useState<string | null>(null);
+  // The draft this popover created, with the connection bundle the same
+  // action handed back (annotation-connection.ts). One state value rather
+  // than two, so the composer can never mount on the id in a render where
+  // the bundle hasn't landed yet — it is only read once, when the composer's
+  // connection effect first runs.
+  const [draft, setDraft] = useState<{ id: string; connection?: AnnotationConnectionBundle } | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const { setMovedDraft } = useAnnotationMove();
@@ -91,9 +97,9 @@ export default function AnnotationPopover({
   function ensureDraft(after: (id: string) => void) {
     setError(null);
     startTransition(async () => {
-      const existing = draftId;
+      const existing = draft;
       if (existing) {
-        after(existing);
+        after(existing.id);
         return;
       }
       const result = await createDraftAnnotation(docId);
@@ -101,7 +107,7 @@ export default function AnnotationPopover({
         setError(result.error);
         return;
       }
-      setDraftId(result.id);
+      setDraft({ id: result.id, connection: result.connection });
       after(result.id);
     });
   }
@@ -125,7 +131,7 @@ export default function AnnotationPopover({
   }
 
   // Fires once, on mount, for the marker-first surface. A ref rather than a
-  // `draftId === null` guard: `ensureDraft` is async inside a transition, so
+  // `draft === null` guard: `ensureDraft` is async inside a transition, so
   // a second effect run before the first resolves would create a second
   // orphan DRAFT row.
   const autoOpenedRef = useRef(false);
@@ -145,9 +151,10 @@ export default function AnnotationPopover({
       <p className={styles.quotedText}>
         Annotating: “{quotedText.length > 80 ? `${quotedText.slice(0, 80)}…` : quotedText}”
       </p>
-      {draftId ? (
+      {draft ? (
         <LiveAnnotationComposer
-          annotationId={draftId}
+          annotationId={draft.id}
+          connection={draft.connection}
           anchorFrom={from}
           anchorTo={to}
           quotedText={quotedText}
@@ -160,7 +167,7 @@ export default function AnnotationPopover({
           onMoveToBottom={
             allowMoveToBottom
               ? () => {
-                  setMovedDraft({ id: draftId, anchorFrom: from, anchorTo: to, quotedText });
+                  setMovedDraft({ id: draft.id, anchorFrom: from, anchorTo: to, quotedText });
                   onCancel();
                 }
               : undefined

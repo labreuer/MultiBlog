@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HocuspocusProvider } from "@hocuspocus/provider";
+import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { useSession } from "next-auth/react";
-import { getCollabUrl } from "@/lib/collab-url";
+import { attachProvider } from "@/lib/collab-socket";
+import { useDocPresence } from "@/components/annotation/doc-presence-context";
 import { pdfjs } from "@/lib/pdfjs-client";
 import {
   PRESENCE_THROTTLE_MS,
@@ -23,6 +24,12 @@ import type { PdfViewerHandle } from "./PdfViewer";
 // this is an awareness channel wearing a ydoc's clothes, because Hocuspocus
 // awareness rides a document connection. No IndexedDB is attached — there is no
 // content to persist — and the token is unconditionally read-only.
+//
+// It is also the document that opens the page's shared socket (docs/YDOC.md
+// "One socket per page"), the same way a doc's live tap does on /doc/[slug]:
+// every annotation opened on this file attaches to it as a further document.
+// So this hook must run inside the DocPresenceProvider that owns the socket
+// — PdfSurfaceClient mounts it above the whole surface for that reason.
 
 export type RemoteReader = {
   clientId: number;
@@ -44,6 +51,7 @@ export type PdfPresenceState = {
 
 export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): PdfPresenceState {
   const { data: session } = useSession();
+  const { getSocket } = useDocPresence();
   const [readers, setReaders] = useState<RemoteReader[]>([]);
   const [leading, setLeadingState] = useState(false);
   const [following, setFollowing] = useState<number | null>(null);
@@ -73,7 +81,7 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
       const { token, documentName } = (await response.json()) as { token: string; documentName: string };
       if (cancelled) return;
 
-      provider = new HocuspocusProvider({ url: getCollabUrl(), name: documentName, token });
+      provider = attachProvider(getSocket(), { name: documentName, token });
       providerRef.current = provider;
 
       const initial: PdfPresence = {
@@ -118,7 +126,7 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
       localRef.current = null;
       provider?.destroy();
     };
-  }, [fileId, session?.user]);
+  }, [fileId, session?.user, getSocket]);
 
   const publish = useCallback((patch: Partial<PdfPresence>) => {
     const provider = providerRef.current;

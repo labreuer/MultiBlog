@@ -36,6 +36,49 @@ A `ydoc:` name nobody has explicitly created — via `scripts/test-ydoc.ts`,
 That there is exactly one `new Server(...)` in the codebase is also why a slot needs one
 collab port and not a block: see [DEV_SLOTS.md](DEV_SLOTS.md).
 
+## One socket per page
+
+A page opens **one websocket** to the collab process and multiplexes every document it
+needs over it (built 2026-09-19). Hocuspocus's `HocuspocusProviderWebsocket` holds the
+socket and routes each incoming message to the `HocuspocusProvider` whose document it names;
+each provider still sends its own token, gets its own `onAuthenticate` run, its own server-side
+`Connection` and its own `readOnly` flag. So on `/doc/[slug]` a reader's read-only live tap
+and the writable body of the annotation they are composing ride one socket, and the server
+keeps them apart *per document* — verified in `@hocuspocus/server`'s `ClientConnection`,
+which creates a fresh `connectionConfig` per document name, and proved by
+`e2e/shared-socket.spec.ts`. Opening an annotation costs the token round trip plus auth and
+sync, never a fresh TCP/TLS/upgrade handshake; on the production box every open annotation
+used to be a socket, a file descriptor and a ping timer of its own.
+
+**Who owns the socket.** `DocPresenceProvider` (`src/components/annotation/
+doc-presence-context.tsx`), which every surface with annotations already mounts — `/doc/[slug]`,
+`/doc/[slug]/edit` and, hoisted into `PdfSurfaceClient`, `/pdf/[slug]`. It exposes `getSocket()`,
+which creates the socket on first call and destroys it when the provider unmounts.
+`src/lib/collab-socket.ts` has the two helpers: `createCollabSocket` and `attachProvider`.
+
+- **Lazy, not at mount.** An anonymous reader of a public doc gets a 401 from
+  `/api/doc/[id]/token` and opens nothing; a socket with no documents on it would be timed out
+  by Hocuspocus after 30s and then retried forever by the client. So the first successful token
+  fetch is what opens the socket — on `/doc/[slug]` the live tap's, on `/pdf/[slug]` the
+  presence hook's, which only runs signed in.
+- **A provider handed a socket does not attach itself.** `new HocuspocusProvider({ url })`
+  attaches in its constructor; `new HocuspocusProvider({ websocketProvider })` does not, and an
+  unattached provider sends nothing — no token, no sync, no error. `attachProvider` exists so
+  that call is made once, in one place. `destroy()` detaches (a per-document close message)
+  and leaves the socket alone.
+- **Two providers with the same document name on one socket throw** once the first is
+  authenticated. Separate sockets used to make that harmless. No surface mounts one annotation
+  twice today (the margin rail *portals* a card rather than duplicating it); side-by-side with
+  the same doc in both columns would, which is one reason `DocColumn` still owns its own
+  provider and socket, and `/ydoc-debug` the other.
+- **Server-side caches must key on socket *and* document.** Hocuspocus's `socketId` is per
+  websocket, not per document connection. The clientID → user attribution cache in
+  `server/ydoc-hooks.ts` was keyed on `socketId` alone and would have held whichever
+  document's awareness arrived last, attributing a write to the annotation under the doc tap's
+  clientID — right user, wrong key, and author highlighting silently never finds it. It is keyed
+  on the pair now, cleared in `onDisconnect`, and `e2e/shared-socket.spec.ts` provokes exactly
+  that ordering in both directions.
+
 ## Restarting the collab server
 
 ### Restarting never duplicates a document's content

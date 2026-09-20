@@ -6,7 +6,7 @@ import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
-import { getCollabUrl } from "@/lib/collab-url";
+import { attachProvider } from "@/lib/collab-socket";
 import { UNTITLED_DOC } from "@/lib/doc-title";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { EDITOR_FOCUS_MEDIA_QUERY } from "@/lib/margin-notes-layout";
@@ -126,7 +126,7 @@ export default function DocEditor({
   // widget — .mainColumn rather than a wrapping div, so nothing here alters
   // DocEditor.module.css's flex-height chain (STYLE.md's flex-grow trap).
   const containerRef = useRef<HTMLDivElement>(null);
-  const { setAwareness } = useDocPresence();
+  const { setAwareness, getSocket } = useDocPresence();
   // Scoped to this column rather than a bare document.querySelector — see
   // the hook's own note on why it takes this as a callback.
   const getFrame = useCallback(
@@ -188,8 +188,9 @@ export default function DocEditor({
         // copy merge into a re-seeded document.
         detachIndexeddb = attachIndexeddb(ydoc, documentName, lineage);
 
-        instance = new HocuspocusProvider({
-          url: getCollabUrl(),
+        // The page's shared socket (docs/YDOC.md "One socket per page"): the
+        // annotation composers this editor opens attach to the same one.
+        instance = attachProvider(getSocket(), {
           name: documentName,
           document: ydoc,
           token: fetchToken,
@@ -212,7 +213,8 @@ export default function DocEditor({
       detachIndexeddb?.();
       ydoc.destroy();
     };
-  }, [docId, ydoc]);
+    // getSocket is a stable context callback.
+  }, [docId, ydoc, getSocket]);
 
   // PLAN.md §13i — publishes this connection's awareness onto
   // DocPresenceProvider (edit/page.tsx wraps DocEditor in one, alongside

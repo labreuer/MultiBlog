@@ -163,6 +163,17 @@ before changing the behavior it describes.
   at post time, and `quotedText` is derived server-side against exactly that state — so
   replaying reproduces the quote by construction. `scripts/integrity/check-annotation-anchors.ts`
   verifies the arrangement still holds. docs/ANNOTATIONS.md "The version stamp".
+- **One websocket per page; every document on it is authorized on its own.** A surface's
+  document (the live tap, the editor, a PDF's presence channel) and every annotation body
+  opened beside it are separate Hocuspocus documents attached to the one socket
+  `DocPresenceProvider` owns, through `attachProvider` (`src/lib/collab-socket.ts`) — never
+  `new HocuspocusProvider({ url })`, which opens a socket of its own, and never a bare
+  `websocketProvider` without the `attach()` the helper makes, which sends nothing and reports
+  nothing. Two consequences that fail no check: a server-side cache keyed on Hocuspocus's
+  `socketId` alone is wrong, because that id is per socket and the documents on it have
+  different clientIDs (the attribution cache keys on the pair; `e2e/shared-socket.spec.ts`);
+  and two providers for one document name on one socket throw, where separate sockets used to
+  make the duplicate harmless. docs/YDOC.md "One socket per page".
 - **A PDF anchor cannot drift**, because a file's `sha256` is its identity — no tracking
   plugin, no re-resolution, no version stamp. Don't reach for the doc side's drift machinery.
   The one thing that *can* invalidate a stored anchor is our own normaliser, so bump

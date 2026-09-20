@@ -80,7 +80,10 @@ keystroke; a settle (post, Done) writes the same three columns from the decoded 
 snapshots, through one shared decoder (`src/lib/annotation-body.ts`). Every list, rail and admin table renders from those columns through
 `renderToReactElement` on the server (`annotation-entries.ts`, `AnnotationVersionBody`),
 and a live `HocuspocusProvider` opens only for an annotation actually open in an editor. A
-doc with fifty annotations opens no annotation sockets until one is clicked into.
+doc with fifty annotations opens no annotation connections until one is clicked into — and
+the one it then opens is a further *document* on the page's existing websocket, not a socket
+of its own (docs/YDOC.md "One socket per page"); read-only or writable is still this
+annotation's token's call, whatever the doc connection beside it was granted.
 
 **But a posted body is also a real editing surface**, `AnnotationBodyReader`: an
 `editable: false` editor mounted behind the SSR copy, because a browser selection over a
@@ -104,6 +107,22 @@ that may delete, so an `EDITOR` who can read the doc gets a read-only connection
 `server/ydoc-hooks.ts` honours the flag, and `e2e/annotation-readonly.spec.ts` proves from
 Node that a plain reader's writes are dropped. Until 2026-09-16 the route minted a writable token
 for every reader — unexploited only because no UI opened one.
+
+**The route is not the only way to get one.** Minting lives in
+`src/lib/annotation-connection.ts` (the token, the lineage, the `documentName` and the
+`readOnly` flag, as one bundle), and `createDraftAnnotation` and `beginAnnotationEdit` return
+it alongside their own answer. The socket is already shared, so what opening an editor costs
+is HTTP — and it used to cost two serial round trips: the action, then the client's fetch of
+this bundle. The second asked a question the first had already answered with more certainty,
+having just written the row. `useAnnotationProvider` takes the bundle as an optional second
+argument and then awaits nothing at all before attaching the document. A composer mounted on a row this client did
+*not* just act on still fetches: a moved draft, `OwnDraftsList`, the editor's rail. So does
+every reconnect, since a token lives two minutes and a bundle is only ever used for the first
+attempt. The mint is best-effort inside the actions — a signing failure costs the round trip
+back, never the draft row or the edit session. **`readOnly` is decided inside the helper and
+never passed in**: a caller supplies the fact of whose annotation it is, and the helper asks
+the policy question, because the answer is signed into a token that the collab process then
+trusts.
 
 **Server-authored writes go through the collab process**, never to the stored blob behind
 its back: `/admin/annotation-mark`, `-unmark`, `-flush` and `-replace`, plus
