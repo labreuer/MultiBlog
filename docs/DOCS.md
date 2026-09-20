@@ -1,12 +1,9 @@
 # Docs — living documents on the ydoc stack
 
-**Status: built.** The Doc entity, its editor, the live reading view and the `prose_json`
-cache landed 2026-07-29 in the five phases PLAN.md §12k laid out; the embedded scrub bar the
-same day; posts became snapshots of docs on 2026-07-30 (§15); the frozen reading view on
-2026-08-12; the live title on 2026-09-20. This file is the as-built account, per the house
-convention: PLAN.md §12 is a stub that points here, subsection by subsection, and the plan
-text is in the parent of the commit that made it one. This file says what the code does and
-why, so that a reader can work on docs without the plan.
+**Status: built.** This file is the as-built account, per the house convention: PLAN.md §12
+is a stub that points here, subsection by subsection, and the plan text is in the parent of
+the commit that made it one. This file says what the code does and why, so that a reader
+can work on docs without the plan. Dates are in "History" at the end.
 
 What it does not repeat, because another file owns it:
 
@@ -26,11 +23,10 @@ What it does not repeat, because another file owns it:
 ## What a doc is
 
 A **Doc** is an always-evolving living document, read as its current Yjs state rather than
-as a revision. It was added on 2026-07-29 as a second entity beside `Post`, with nothing
-about posts changing; since §15 a post is a *snapshot* of a doc and has no editable content
-of its own, so the doc is now the only thing anyone types into.
+as a revision. It is the second content entity beside `Post`, and the only one anyone types
+into: a post is a *snapshot* of a doc (PLAN.md §15) and has no editable content of its own.
 
-Five decisions carry the design, and each still holds:
+Five decisions carry the design:
 
 1. **The collab substrate is the ydoc stack** (PLAN.md §11, YDOC.md). A doc is one
    `ydoc`/`ydoc_update` document like any other, and there are no doc-specific collab
@@ -54,8 +50,8 @@ Five decisions carry the design, and each still holds:
 through `ydocIdForDoc(docId)` / `docIdFromYdocId(name)` in `src/lib/ydoc-names.ts`. There is
 **no foreign key in either direction** — the `ydoc` tables reference nothing, routing stays
 a zero-query string check, and the two ids cannot drift because one is a function of the
-other. A `doc.ydoc_id` column was rejected on the drift argument alone: two sources of truth
-for one fact, one of which the collab server never reads.
+other. There is no `doc.ydoc_id` column, on the drift argument alone: it would be two
+sources of truth for one fact, one of which the collab server never reads.
 
 **Creation is eager, in the same request.** `createDoc` (`src/app/actions/docs.ts`) writes
 the `doc` row and calls `ydocStore.createIfAbsent(ydocIdForDoc(id), …)` with an empty state,
@@ -80,7 +76,7 @@ YDOC.md, "Restarting the collab server", states this as the operational rule.
 same. The reasoning — GC costs nothing here because the anchor is content, and `gc: false`
 would buy resolvable item-id anchors at the price of a tombstone per deletion for the life
 of a document whose premise is that it never ends — is COLLAB.md, "Why `gc: true`, and what
-it rules out". One load with GC on collects tombstones permanently, so a future `gc: false`
+it rules out". One load with GC on collects tombstones permanently, so a `gc: false`
 experiment would be a new-docs-only decision, never a config change.
 
 **Test containment comes from the doc side.** A test doc's ydoc is `ydoc:<cuid>`, not under
@@ -104,18 +100,20 @@ Every table is documented column by column in `prisma/schema.prisma`; this is th
 - **`doc_slug_history`** — old slugs, so a renamed doc's links still resolve ("Routes").
 - **`doc_metrics`** — a view keyed 1:1 on `doc.id`, so `/docs` can sort on values Prisma's
   `orderBy` cannot reach (PLAN.md §16).
-- **`annotation`** — ANNOTATIONS.md. The plan's original sketch, with no anchor columns
-  because the anchor was a mark, was superseded by §13o for annotations written from a
-  reading view.
+- **`annotation`** — ANNOTATIONS.md. Its anchor columns are written only from a reading
+  view; an annotation made in the editor is anchored by a mark in the ydoc and leaves them
+  null ("Annotations on a doc").
 
 **Doc slugs are unique among docs only, not against post slugs.** They live under `/doc/*`
-with no shared catch-all, so `slugInUse` (`src/lib/slug.ts`) has a doc-scoped twin rather
-than two more tables to check. `RESERVED_SLUGS` carries `doc`, `docs` and `annotations`, so
-no *post* can be shadowed by those static segments.
+with no shared catch-all, so `uniqueDocSlug` / `changeDocSlug` (`src/lib/doc-slug.ts`)
+check the `doc` table and `doc_slug_history` and nothing else — the same shape as
+`post-slug.ts`, one namespace over. There is no reserved-slug list anywhere: posts live at
+`/yyyy/mm/dd/slug` (PLAN.md §21) and every other slugged thing sits one level down with no
+sibling static route to collide with, so a doc may legitimately be slugged `docs`.
 
 **`src/lib/prisma.ts`'s soft-delete extension has a `doc` entry**, alongside `post` and
-`user`. It is the mechanism that exists so nobody has to remember the filter — missing it
-would mean `/docs` and `/doc/[slug]` serving soft-deleted docs.
+`user`. It is the mechanism that exists so nobody has to remember the filter — without it,
+`/docs` and `/doc/[slug]` would serve soft-deleted docs.
 
 **There is no `doc_revision`.** Deferred, not omitted ("Deferred").
 
@@ -126,7 +124,7 @@ column costs a render: both are rebuilt from the ydoc on the next store. Losing 
 row costs the doc — its history, its `clients` map and above all its lineage, since a
 `Y.Doc` rebuilt from `prose_json` would be a structurally new document with fresh client ids
 that every browser's `y-indexeddb` copy would *merge* rather than replace. That asymmetry is
-why the collab-restart repair recipe from the old post-editing days has no doc counterpart.
+why there is no repair recipe that rebuilds a ydoc from its cache.
 
 **Both are written from the collab server, on the store debounce.** `server/doc-cache.ts`
 runs at the end of `ydocOnStoreDocument` — Hocuspocus's default debounce, two seconds of
@@ -136,9 +134,9 @@ matches zero rows for a `/ydoc-debug` document, so there is no lookup to decide 
 write and no doc-awareness in `server/ydoc-store.ts`. The derivation is
 `docContentFromYdoc` (`src/lib/doc-content.ts`), shared with the two paths that seed a ydoc
 without a collab server (`scripts/seed-sample-data.ts`, `e2e/db-worker.ts`), so that a
-seeded cache is exactly what the hook would have written — when they drifted, a doc read 0
-characters on `/docs` forever. A document that isn't TipTap-shaped is logged and dropped
-rather than thrown into the hook.
+seeded cache is exactly what the hook would have written — a seed that diverges from the
+hook stays wrong until the doc's first store, because nothing else rewrites it. A document
+that isn't TipTap-shaped is logged and dropped rather than thrown into the hook.
 
 **`prose_json` is the document, marks and all.** `authorHighlight` and the editor's
 annotation mark come through `fromYdoc` and are rendered, never filtered; nothing on the doc
@@ -160,16 +158,13 @@ branch onto the same renderer.
 later; both write through as `""` rather than freezing the column at the last non-empty
 value. `"Untitled"` is never stored: `docTitleOrFallback` (`src/lib/doc-title.ts`)
 supplies it at render, everywhere a title is shown or derived from, so it can never be
-backspaced into `"Untitle"` and never appears when scrubbing history. This is the opposite
-of a post's `updatePostTitle`, whose skip-empty rule exists because a post's title has no
-fragment behind it.
+backspaced into `"Untitle"` and never appears when scrubbing history.
 
 ### The title follows the fragment live
 
-Added 2026-09-20. Every heading and tab used to be a server render of the `title` column, so
-a title edit took a store debounce *and* a reload to appear anywhere but the field it was
-typed into. What changed is only the last hop, and only where a live document was already
-in reach:
+Wherever a live document is already in reach, a title edit shows up in the heading and the
+browser tab as it is typed, rather than after the store debounce and a reload. Only the
+last hop is live; the column is still what every server render reads:
 
 - `useLiveDocContent` decodes the title on every update it renders and reports a *changed*
   one through `onLiveTitle` — raw, `""` included, so the caller applies the fallback. It
@@ -178,15 +173,15 @@ in reach:
 - `/doc/[slug]`'s `<h1>` (`DocView.tsx`) resolves, in order: a scrub position pinned to
   history, then the live tap, then the scrub bar's live-end replay (read from the update
   log, so fresher than the column), then `initialTitle` from the column.
-- A `/side-by-side` column's read-mode `<h2>` follows the same tap; its write mode was
-  already fed by `CollabTitleField`.
+- A `/side-by-side` column's read-mode `<h2>` follows the same tap; its write mode is fed
+  by `CollabTitleField`.
 - The browser tab follows on `/doc/[slug]` and `/doc/[slug]/edit`, through
   `src/lib/use-live-tab-title.ts` — the one place that writes `document.title` by hand. It
-  composes through `site-config.ts`'s `tabTitle`, which the root layout now builds its
-  metadata template from, so the site-name suffix cannot be dropped; and it restores the
-  server's value on unmount, because Next rewrites the tab only when its own metadata value
-  changes. The editor tab's pencil prefix lives once, in `docEditorTabTitle`, for
-  `generateMetadata` and the live update alike.
+  composes through `site-config.ts`'s `tabTitle`, which the root layout builds its metadata
+  template from, so the site-name suffix cannot be dropped; and it restores the server's
+  value on unmount, because Next rewrites the tab only when its own metadata value changes.
+  The editor tab's pencil prefix lives once, in `docEditorTabTitle`, for `generateMetadata`
+  and the live update alike.
 
 Deliberately *not* extended to any listing — `/docs`, the dashboard's Recent docs,
 `DocRefMenu`, `/annotations`, `/links`. Those are server renders with no live document in
@@ -197,14 +192,13 @@ from its own process anyway. A listing's ceiling is the debounce plus a navigati
 
 The tables are PERMISSIONS.md; this is the shape and the reasons.
 
-**`AUTHORIZED` sits between `AUTHOR` and `COMMENTER`**, added 2026-07-29 without touching
-`COMMENTER` — which is why the migration is one hand-edited `ALTER TYPE "role" ADD VALUE
-'AUTHORIZED' BEFORE 'COMMENTER'` rather than the two-step dance a rename would have forced,
-since Postgres cannot use a new enum value in the transaction that adds it. The name says
-what it means: someone has authorized this account for docs. The hierarchy stays linear —
-`ADMIN > EDITOR > AUTHOR > AUTHORIZED > COMMENTER` — which keeps `UsersTable`'s `ROLE_ORDER`
-and every `role ===` check honest. An interim measure pending granular permissions, but the
-only thing gating doc access meanwhile.
+**`AUTHORIZED` sits between `AUTHOR` and `COMMENTER`.** Its migration is one hand-edited
+`ALTER TYPE "role" ADD VALUE 'AUTHORIZED' BEFORE 'COMMENTER'`, because Postgres cannot use a
+new enum value in the transaction that adds it, and renaming `COMMENTER` instead would have
+forced a two-step dance. The name says what it means: someone has authorized this account
+for docs. The hierarchy is linear — `ADMIN > EDITOR > AUTHOR > AUTHORIZED > COMMENTER` —
+which keeps `UsersTable`'s `ROLE_ORDER` and every `role ===` check honest. It is an interim
+measure pending granular permissions, and the only thing gating doc access meanwhile.
 
 **Two doc gates, easily conflated.** `canViewDocs` (`src/lib/role-checks.ts`, so
 `SiteHeader` can import it without Prisma) governs *reading and annotating*: every `SHARED`
@@ -214,9 +208,9 @@ an `AUTHOR`, so an author manages only their own docs while reading everyone's.
 **Per-doc `visibility` is `PRIVATE` | `SHARED`.** `SHARED` is anyone with `canViewDocs`;
 `PRIVATE` is its listed `DocAuthor`s' alone, **with no ADMIN/EDITOR bypass** — the byline
 *is* the rule, and a role can't stand in for it. An enum rather than a boolean so a public
-tier would not need a migration; there is no public tier today.
+tier would not need a migration; there is no public tier.
 
-**Editing a `SHARED` doc is the one place a role still substitutes for a byline**, through
+**Editing a `SHARED` doc is the one place a role substitutes for a byline**, through
 `canEditAnySharedDoc` in `src/lib/doc-authz.ts` — stated independently of `canEditAnyPost`
 rather than delegating, so that changing one rule cannot silently move the other. It lives
 in `doc-authz.ts` rather than `role-checks.ts` even though it is a pure role check, because
@@ -294,10 +288,11 @@ there is no live binding for a caret extension to attach to. Read-only is still 
 even though a reader can annotate, because a reading-view annotation writes columns, not a
 mark ("Annotations on a doc").
 
-**`token` is a `fetchToken` function**, so `HocuspocusProvider` re-mints per reconnect —
-the fix for the old two-minute-expiry reconnect loop, applied to every collab surface at
-once. Every provider on a page attaches to the page's one socket through `attachProvider`
-(YDOC.md, "One socket per page"); the client `Y.Doc` is a bare `new Y.Doc()`.
+**`token` is a `fetchToken` function**, so `HocuspocusProvider` re-mints per reconnect
+instead of presenting a token past its two-minute expiry and looping; every collab surface
+does the same. Every provider on a page attaches to the page's one socket through
+`attachProvider` (YDOC.md, "One socket per page"); the client `Y.Doc` is a bare `new
+Y.Doc()`.
 
 ## The reading view
 
@@ -312,9 +307,10 @@ has synced.
 - **`DocReadingBody.tsx`** is the surface, and **`useLiveDocContent`** (`src/lib/`) is the
   engine underneath it: a read-only Hocuspocus tap that pushes each remote Yjs update into
   a plain `useEditor` through `setContent`, so an already-open tab reflects an author's
-  edits with no reload. The 2026-07-30 split of the old `LiveDocBody` into that engine plus
-  two thin surfaces (this one and a side-by-side column) is drawn in
-  [live-view-composition.html](live-view-composition.html); PLAN.md §14p is the decision.
+  edits with no reload. The engine serves two thin surfaces, this one and a `/side-by-side`
+  column; the composition is drawn in
+  [live-view-composition.html](live-view-composition.html), and PLAN.md §14p is the
+  decision.
 - **The byline** is `AuthorByline` without its `"By "` prefix, dated by `Doc.updatedAt` —
   a doc has no publish date, so "last edited" is the only date that means anything, and the
   cache write is what keeps it current.
@@ -323,9 +319,8 @@ has synced.
   fetches `/api/doc/[id]/replay` and mounts the real slider, and only then does
   `useReplayScrub` (shared with `/ydoc-debug`) allocate a `Y.Doc` and start replaying.
   Scrubbing rewrites the live title and body *in place*, through the same `setContent`
-  path a live update uses, which is why the separate `/doc/[slug]/live-history` route was
-  removed the day the bar landed. With no doc snapshots every rebuild replays from row #1;
-  a performance characteristic, not a defect.
+  path a live update uses, so there is no separate history route. With no doc snapshots
+  every rebuild replays from row #1; a performance characteristic, not a defect.
 - **The column holds a fixed 800px** rather than shrinking to short content, and the
   route's styling is `app/doc/[slug]/page.module.css` (STYLE.md).
 - **Annotation highlights are colored by their author**, one `--thread-color` rule per id
@@ -342,12 +337,12 @@ selection needs the same gate.
 
 ### The frozen reading view
 
-Added 2026-08-12. Pushing every remote update straight into the reading editor is right for
-passive reading and wrong the moment a reader is doing something with the current text:
-dragging the scrub bar (the next remote keystroke overwrote the historical body it was
-showing), or holding a selection about to become an annotation.
+Pushing every remote update straight into the reading editor is right for passive reading
+and wrong the moment a reader is doing something with the current text: dragging the scrub
+bar (a remote keystroke would otherwise overwrite the historical body it is showing), or
+holding a selection about to become an annotation.
 
-**The fix stops rendering, not receiving.** `useLiveDocContent` takes `frozen: boolean`.
+**Freezing stops rendering, not receiving.** `useLiveDocContent` takes `frozen: boolean`.
 Its `ydoc.on("update", …)` listener keeps firing either way — the `Y.Doc` always has
 everything — but while frozen the handler counts the update instead of calling
 `setContent`. Unfreezing runs one catch-up render and zeroes the count. Two independent
@@ -383,7 +378,7 @@ light theme, lighter in dark, the reverse of the usual rule, because it is a sol
 rather than text on the page background.
 
 **Known consequence.** A selection held through a freeze produces offsets measured against
-the frozen document, while the server verifies them against the live one; that path already
+the frozen document, while the server verifies them against the live one; that path
 degrades correctly (verify quoted text → unique-occurrence search → document-level), and
 freezing only widens the window slightly. A real fix needs Yjs relative positions and the
 `Collaboration`-bound editor COLLAB.md §5 names as their precondition, which the reading
@@ -392,13 +387,13 @@ view does not have.
 ## The editor
 
 `/doc/[slug]/edit` is **`DocEditor.tsx`**: provider wiring through the page's shared socket,
-`attachIndexeddb` for offline durability, `CollabTitleField` and `CollabEditorBody` reused
-unmodified, a status line (`🟢 Live` waits for the initial sync, not merely a socket), and
-`DocSettingsPanel` for byline, visibility, delete and undelete. There is no save, publish or
-schedule — a doc auto-persists through the collab server — no revision diff, and no title
-autosave, since the title is a cache written server-side from the fragment. The composing
-surface for annotations, and the rail beside the text, are ANNOTATIONS.md and
-MARGIN_NOTES.md.
+`attachIndexeddb` for offline durability, `CollabTitleField` and `CollabEditorBody` (shared
+with `/side-by-side`'s write mode and `/ydoc-debug`), a status line (`🟢 Live` waits for
+the initial sync, not merely a socket), and `DocSettingsPanel` for byline, visibility,
+delete and undelete. There is no save, publish or schedule — a doc auto-persists through
+the collab server — no revision diff, and no title autosave, since the title is a cache
+written server-side from the fragment. The composing surface for annotations, and the rail
+beside the text, are ANNOTATIONS.md and MARGIN_NOTES.md.
 
 **Creation is titleless.** `+ New doc` creates the row and drops straight into the editor
 with no title-collecting form in between: the title is already a live collaborative field,
@@ -410,8 +405,7 @@ exception that arrives with a name (DOC_IMPORT.md, "The slug follows the title")
 
 **Author colors have no reset.** Per-author highlighting lives in the doc's working Yjs
 state and nothing ever removes it from the doc itself — there is no save step to hang a
-reset on, unlike the old post editor's `clearAuthorHighlights`, which no longer exists
-(TIPTAP.md).
+reset on (TIPTAP.md).
 
 **The title field shares its border with the body frame** (`DocEditor.module.css`'s
 `.titleInput`/`.editorFrame`), so the two read as one editable surface. The browser tab
@@ -435,7 +429,7 @@ document rather than the remark.
   the ydoc — content, so it moves with its text, merges with concurrent edits, and
   disappears exactly when its text does. Either *reading* view writes `anchorFrom` /
   `anchorTo` / `quotedText` columns and never touches the document, because applying a mark
-  is a write and a reader was making it (§13o). Don't unify them.
+  is a write and a reader is making it (§13o). Don't unify them.
 - **Losing the mark degrades the annotation; it does not delete it.** Delete the annotated
   text and the mark goes with it; the row keeps its `doc_id`, so the annotation becomes a
   document-level remark on that doc, derived per render rather than stored. It is one-way:
@@ -443,24 +437,24 @@ document rather than the remark.
   "at this revision" scrubs to the update that carries the mark ("Deferred"); re-anchoring
   from there is not built.
 - **The mark is `clearable: false`** (`src/lib/annotation-extension.ts`), so the editor's
-  "Clear formatting" cannot strip it along with real formatting — found the hard way.
+  "Clear formatting" cannot strip it along with real formatting.
 
 ## Deviations from the plan
 
-- **`AnnotatableArticle` is not reused for docs**, though §12i said it would be. The doc
+- **`AnnotatableArticle` is not reused for docs**, though §12i says it would be. The doc
   reading view copies its *interaction* shape — a plain `useEditor`, `editable: false`,
   selection capture, the `staticBody`/live swap — but a single static `doc` prop for a
   post and a live tap that pushes updates by hand differ enough that literal reuse would
-  have branched a component rendered on every published post.
-- **Annotation capture was reading-view-only** until 2026-08-30, when §18f gave the editor
-  its own composing surface (ANNOTATIONS.md, "Surfaces").
-- **The shared `Comment*` components did not stay shared.** §13c un-shared them the day
-  after §12 landed; the doc side renders through `src/components/annotation/`.
+  branch a component rendered on every published post.
+- **Annotations can be composed from the editor as well as the reading views** (§18f,
+  ANNOTATIONS.md "Surfaces"); §12i plans reading-view capture only.
+- **The doc side renders through `src/components/annotation/`**, not the `Comment*`
+  components §12i plans to share; §13c is where the two kinds part ways.
 - **No `canViewDocs`-gated nav entry**, since there is no route for it to point to — `/docs`
   is management. What `SiteHeader` has is a `canManageDocs`-gated "Docs" link with a
-  dropdown for Annotations and Tags.
-- **`/doc/[slug]/live-history` never survived Phase 5**: the embedded scrub bar made it
-  redundant the same day ("The reading view").
+  dropdown for Annotations and Tags, and a Links entry beside it.
+- **No `/doc/[slug]/live-history` route**: the embedded scrub bar covers it ("The reading
+  view").
 - **The annotation-mark endpoint's fallback search** (`findQuoteOccurrences`,
   `server/ydoc-hooks.ts`) is a plain `O(document × quote)` scan rather than a
   position-mapped walk — correctness by construction over a fallback that only runs when
@@ -490,7 +484,7 @@ document rather than the remark.
 - **`scripts/integrity/check-doc-integrity.ts`** checks that `title`, `prose_json` and
   `prose_json_length` still agree with the ydoc, tolerating debounce lag.
 - **TipTap v3's `setContent` takes an options object**: `setContent(json, { emitUpdate:
-  false })`, not the v2 boolean, which is now a type error and reads as obviously correct
+  false })`, not the v2 boolean, which is a type error and reads as obviously correct
   against any older example (TIPTAP.md).
 
 ## Known gaps
@@ -512,16 +506,16 @@ account above might read.
   rather than an error, and the token route 404s on the missing lineage. Acceptable because
   deleting a `ydoc` row by hand is exactly what YDOC.md warns against.
 - **`Annotation.resolvedAt` is declared and never touched**, and the comment list's
-  "Quoted text position" sort still ties for mark-anchored annotations — both
-  ANNOTATIONS.md, "Not built, deferred".
+  "Quoted text position" sort ties for mark-anchored annotations — both ANNOTATIONS.md,
+  "Not built, deferred".
 
 ## Deferred, with reasons
 
 - **Checkpointing a doc** — a `doc_revision` table, changelogs, restore-to-a-point,
-  `ydoc_snapshot` rows for docs, any doc counterpart to the old replace-doc admin path. Under
-  this design a doc's history is `ydoc_update` and its present is `prose_json`; adding
-  checkpoints later is additive, since the snapshot table and endpoint already exist and are
-  generic. §15's post snapshots pin a doc's state at a point without any of this.
+  `ydoc_snapshot` rows for docs, a replace-the-document admin path. Under this design a
+  doc's history is `ydoc_update` and its present is `prose_json`; adding checkpoints later
+  is additive, since the snapshot table and endpoint already exist and are generic. §15's
+  post snapshots pin a doc's state at a point without any of this.
 - **Re-anchoring an annotation once its mark is gone.** Showing where it pointed is built:
   `ydocUpdateId` is stamped as the update that carries the mark, and the card's "at this
   revision" scrubs to it (COLLAB.md §8; ANNOTATIONS.md, "The version stamp"). That is the
@@ -534,10 +528,11 @@ account above might read.
 
 - **2026-07-28** — the annotation mark (ANNOTATIONS.md).
 - **2026-07-29** — the entity, `AUTHORIZED`, the editor, the reading view and the cache,
-  `/annotations`, in the plan's five phases, each gated on typecheck, lint, hand verification
-  and the full suite; the embedded scrub bar, and the removal of `/doc/[slug]/live-history`.
-- **2026-07-30** — posts become immutable snapshots of docs (§15); `LiveDocBody` split into
-  `useLiveDocContent` plus two surfaces (§14p).
+  `/annotations`, in the plan's five phases (§12k), each gated on typecheck, lint, hand
+  verification and the full suite; the embedded scrub bar.
+- **2026-07-30** — posts become immutable snapshots of docs (§15); `useLiveDocContent`
+  extracted as the engine under two surfaces (§14p).
 - **2026-08-12** — the frozen reading view.
 - **2026-08-13** — reading views stop writing marks (§13o).
+- **2026-08-30** — annotations composed from the editor (§18f).
 - **2026-09-20** — the title follows the fragment live.

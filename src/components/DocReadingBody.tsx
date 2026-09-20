@@ -86,12 +86,12 @@ function jumpToAnnotationEntry(ids: string[]) {
 // The reading view at /doc/[slug] (PLAN.md §12g): live doc content, where
 // selecting text offers to annotate it.
 //
-// Was `LiveDocBody`, which served this surface *and* a /side-by-side column by
-// branching on a `selectionUi` flag (PLAN.md §14p). Splitting them is what
-// lets this file state plainly that it shows annotations and nothing else —
-// where before, whether it rendered an AnnotationPopover depended on a prop,
-// and its pending-selection state was shared with a doc-link popover whose
-// positioning convention silently diverged from this one's.
+// One of two thin surfaces over `useLiveDocContent`; the other is a
+// /side-by-side column (PLAN.md §14p, docs/live-view-composition.html). They
+// are separate components rather than one with a `selectionUi` flag so that
+// this file can state plainly that it shows annotations and nothing else: an
+// AnnotationPopover is always rendered, and the pending-selection state is
+// not shared with the doc-link popover, whose positioning convention differs.
 export default function DocReadingBody({
   docId,
   initialBodyJSON,

@@ -14,11 +14,11 @@ import { captureYdocVersion } from "./ydoc-version-client";
 type Awareness = HocuspocusProvider["awareness"];
 
 // The live reading half of a doc, minus any opinion about what a reader may
-// *do* with a selection (PLAN.md §12g/§12i). Extracted from `LiveDocBody`,
-// which had grown to serve both /doc/[slug] (annotations) and a
-// /side-by-side column (doc links) by branching on a `selectionUi` flag —
-// see PLAN.md §14p. What lives here is only the part that was identical
-// either way, and it is the part worth never writing twice:
+// *do* with a selection (PLAN.md §12g/§12i). Two thin surfaces sit on it —
+// /doc/[slug]'s DocReadingBody (annotations) and a /side-by-side column (doc
+// links) — and each keeps its own selection UI rather than branching on a
+// flag here (PLAN.md §14p). What lives here is only the part identical to
+// both, and it is the part worth never writing twice:
 //
 // - Live updates. Content isn't fixed at mount the way a published post's
 //   is — a read-only Hocuspocus connection taps the live document and
