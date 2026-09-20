@@ -6,6 +6,7 @@ import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import { useAnnotationMove } from "./annotation-move-context";
 import { useAnnotationReload } from "./annotation-reload-context";
 import type { AnnotationTarget } from "@/lib/annotation-container";
+import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import styles from "./AnnotationComposer.module.css";
 
 // PLAN.md §19 — a container rather than a doc id, so the same composer serves
@@ -37,7 +38,16 @@ type Props = {
   onSettled?: () => void;
 };
 
-type OpenDraft = { id: string; anchorFrom?: number; anchorTo?: number; quotedText?: string };
+// `connection` is present only for a draft this slot created itself
+// (annotation-connection.ts) — a draft that arrived by "Move to bottom" was
+// created in another component's action, so the composer fetches its own.
+type OpenDraft = {
+  id: string;
+  connection?: AnnotationConnectionBundle;
+  anchorFrom?: number;
+  anchorTo?: number;
+  quotedText?: string;
+};
 
 // The bottom-of-page composer's open/closed wrapper (PLAN.md §13j Phase 2) —
 // AnnotationSection is a server component and can't hold the "have I
@@ -94,7 +104,7 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
         setError(result.error);
         return;
       }
-      setOpen({ id: result.id });
+      setOpen({ id: result.id, connection: result.connection });
     });
   }, [target]);
 
@@ -113,6 +123,7 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
     return (
       <LiveAnnotationComposer
         annotationId={open.id}
+        connection={open.connection}
         anchorFrom={open.anchorFrom}
         anchorTo={open.anchorTo}
         quotedText={open.quotedText}

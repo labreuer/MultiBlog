@@ -1,6 +1,7 @@
 "use client";
 
 import type { AnnotationTarget } from "@/lib/annotation-container";
+import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -146,12 +147,14 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // moment rather than a wrongly-colored one.
   const viewerColor = session?.user?.color ?? null;
   const isAdmin = !!session?.user && isAdminRole(session.user.role);
-  // A reply's own DRAFT id, once "Reply" has created one (PLAN.md §13j
+  // A reply's own DRAFT, once "Reply" has created one (PLAN.md §13j
   // Phase 2) — null means the reply composer isn't open. Unlike the old
   // plain-textarea CommentForm, there's no separate "replying" boolean:
   // LiveAnnotationComposer needs a real row to connect to before it can
-  // render anything, so "open" and "has a draft id" are the same state.
-  const [replyDraftId, setReplyDraftId] = useState<string | null>(null);
+  // render anything, so "open" and "has a draft" are the same state. The
+  // connection bundle rides along with the id because the action that
+  // created the row returned both (annotation-connection.ts).
+  const [replyDraft, setReplyDraft] = useState<{ id: string; connection?: AnnotationConnectionBundle } | null>(null);
   const [replyPending, startReplyTransition] = useTransition();
   const [replyError, setReplyError] = useState<string | null>(null);
   // PLAN.md §13p — the range in *this* annotation's body that the open (or
@@ -170,8 +173,13 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   const [justDeleted, setJustDeleted] = useState(false);
   // PLAN.md §22e — an edit session this viewer has open. Separate from
   // `annotation.editingSince`, which is what the *server* last knew: this one
-  // says "the editor is mounted right here, in this browser".
-  const [editing, setEditing] = useState(false);
+  // says "the editor is mounted right here, in this browser". Null means no
+  // editor mounted; a non-null value carries the connection bundle
+  // `beginAnnotationEdit` returned with its go-ahead
+  // (annotation-connection.ts), so the editor connects without a second
+  // round trip. `connection` is undefined only if that mint failed, which
+  // falls back to the fetch this always did.
+  const [editing, setEditing] = useState<{ connection?: AnnotationConnectionBundle } | null>(null);
   // PLAN.md §22c — the history panel now opens *above* the body (the marker
   // moved into the meta line), and the current version is its first entry, so
   // the body underneath would be the same text twice. Hidden while the panel
@@ -276,7 +284,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
         setEditError(result.error);
         return;
       }
-      setEditing(true);
+      setEditing({ connection: result.connection });
     });
   };
 
@@ -311,7 +319,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   };
 
   const endEditing = () => {
-    setEditing(false);
+    setEditing(null);
     router.refresh();
     // The PDF surface cannot count on that refresh landing (CLAUDE.md's
     // `router.refresh()` note), and this is exactly a change that arrives
@@ -344,7 +352,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
         setReplyError(result.error);
         return;
       }
-      setReplyDraftId(result.id);
+      setReplyDraft({ id: result.id, connection: result.connection });
     });
   };
 
@@ -366,14 +374,14 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // (shift+arrows, which never emits one) settles the same way.
   const handleBodySelect = (selection: BodySelection) => {
     setReplyAnchor(selection);
-    if (replyDraftId || posted) return;
+    if (replyDraft || posted) return;
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
     openTimerRef.current = setTimeout(openReply, SELECTION_SETTLE_MS);
   };
 
   const closeReply = () => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
-    setReplyDraftId(null);
+    setReplyDraft(null);
     setReplyAnchor(null);
   };
 
@@ -424,6 +432,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
           {editing ? (
             <AnnotationEditSession
               annotationId={annotation.id}
+              connection={editing.connection}
               onFinished={endEditing}
               onCancelled={endEditing}
             />
@@ -478,7 +487,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
               saved version.
             </p>
           )}
-          {!posted && !replyDraftId && !editing && (
+          {!posted && !replyDraft && !editing && (
             <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
               {replyPending ? "Opening…" : "Reply"}
             </button>
@@ -530,9 +539,10 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
           {deleteError && <p className={styles.error}>{deleteError}</p>}
         </div>
       )}
-      {replyDraftId && !posted && (
+      {replyDraft && !posted && (
         <LiveAnnotationComposer
-          annotationId={replyDraftId}
+          annotationId={replyDraft.id}
+          connection={replyDraft.connection}
           // Read at submit time, so re-selecting while this sits open changes
           // what the reply ends up quoting (PLAN.md §13p). Undefined when the
           // reply was opened from the Reply button and no selection followed —

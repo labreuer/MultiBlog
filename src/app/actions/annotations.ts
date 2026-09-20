@@ -18,6 +18,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { mintAnnotationConnection, type AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import { decodeAnnotationBody, decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import {
   annotationRevalidationPaths,
@@ -229,6 +230,30 @@ async function parentSettledMark(parentId: string): Promise<bigint | null> {
 }
 
 
+/**
+ * `mintAnnotationConnection`, degraded to "no bundle" on any failure.
+ *
+ * What the bundle saves is one HTTP round trip on the way into an editor
+ * (annotation-connection.ts says why the action is the right place to mint
+ * it). That is an optimization, and an optimization must never be able to
+ * fail the thing it is optimizing: a draft row that got created, or an edit
+ * session that got stamped, is a success even if the token couldn't be
+ * signed. The client simply falls back to fetching one from
+ * /api/annotation/[id]/token, which is what it did before this existed.
+ */
+async function connectionBundleFor(
+  annotationId: string,
+  annotationUserId: string,
+  viewer: { id: string; role: Role },
+): Promise<AnnotationConnectionBundle | undefined> {
+  try {
+    return (await mintAnnotationConnection({ annotationId, annotationUserId, viewer })) ?? undefined;
+  } catch (err) {
+    console.error(`[annotations] couldn't mint a connection bundle for ${annotationId}:`, err);
+    return undefined;
+  }
+}
+
 // PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
 // editor to before a single keystroke lands, so opening one (the bottom
 // composer, or Reply) creates a DRAFT eagerly: invisible to every other
@@ -240,7 +265,7 @@ async function parentSettledMark(parentId: string): Promise<bigint | null> {
 export async function createDraftAnnotation(
   container: string | AnnotationTarget,
   parentAnnotationId?: string,
-): Promise<{ id: string } | { error: string }> {
+): Promise<{ id: string; connection?: AnnotationConnectionBundle } | { error: string }> {
   const session = await auth();
   if (!session?.user) {
     return { error: "You must be signed in to annotate." };
@@ -302,7 +327,16 @@ export async function createDraftAnnotation(
   });
   await ydocStore.createIfAbsent(ydocIdForAnnotation(annotation.id), seed.ydoc, seed.stateVector);
 
-  return { id: annotation.id };
+  // The composer this id is about to mount would otherwise spend a second
+  // round trip asking /api/annotation/[id]/token what we already know: the
+  // row is this viewer's own, and its ydoc was just created above. Handing
+  // the bundle back lets the composer connect on its first render instead.
+  const connection = await connectionBundleFor(annotation.id, session.user.id, {
+    id: session.user.id,
+    role: session.user.role,
+  });
+
+  return { id: annotation.id, connection };
 }
 
 // Flips a DRAFT to LIVE (or RAISED — PLAN.md §13d) — the live ydoc editor
@@ -734,7 +768,9 @@ async function requireEditableBody(annotationId: string) {
   return { session, annotation };
 }
 
-export async function beginAnnotationEdit(annotationId: string): Promise<{ error?: string }> {
+export async function beginAnnotationEdit(
+  annotationId: string,
+): Promise<{ error?: string; connection?: AnnotationConnectionBundle }> {
   try {
     const { session, annotation } = await requireEditableBody(annotationId);
 
@@ -754,7 +790,17 @@ export async function beginAnnotationEdit(annotationId: string): Promise<{ error
       where: { id: annotationId },
       data: { editingSince: new Date() },
     });
-    return {};
+
+    // Same shortcut createDraftAnnotation takes, and the one that shows: the
+    // card swaps a rendered body for an editor, so every millisecond before
+    // the connection is a visibly emptier card than the one that was there.
+    // `requireEditableBody` has already decided this viewer may write, which
+    // is the same question the bundle's `readOnly` answers.
+    const connection = await connectionBundleFor(annotationId, annotation.userId, {
+      id: session.user.id,
+      role: session.user.role,
+    });
+    return { connection };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Couldn't start editing." };
   }

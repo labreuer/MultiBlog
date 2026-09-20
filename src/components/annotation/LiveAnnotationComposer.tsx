@@ -8,10 +8,17 @@ import { useAnnotationProvider } from "./use-annotation-provider";
 import { useDocPresence } from "./doc-presence-context";
 import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import type { AnnotationTarget } from "@/lib/annotation-container";
+import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import styles from "./AnnotationComposer.module.css";
 
 type Props = {
   annotationId: string;
+  // The connection bundle `createDraftAnnotation` handed back with the id,
+  // when this composer is mounted on a row the same click created
+  // (annotation-connection.ts). Absent for a draft that arrived some other
+  // way — a moved draft, OwnDraftsList, the editor's rail — and the hook
+  // then fetches one, which is what every caller used to do.
+  connection?: AnnotationConnectionBundle;
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
@@ -89,6 +96,7 @@ const VISIBILITY_OPTIONS: Record<AnnotationTarget["kind"], { value: Visibility; 
 // the row itself, only connects to it.
 export default function LiveAnnotationComposer({
   annotationId,
+  connection,
   anchorFrom,
   anchorTo,
   quotedText,
@@ -108,7 +116,7 @@ export default function LiveAnnotationComposer({
   // A composer only ever opens on this viewer's own DRAFT, so `readOnly`
   // cannot come back true here — it is threaded through rather than assumed
   // so that the one place deciding `editable` is the token, on both surfaces.
-  const { provider, ydoc, readOnly, error: connectionError } = useAnnotationProvider(annotationId);
+  const { provider, ydoc, readOnly, error: connectionError } = useAnnotationProvider(annotationId, connection);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<Visibility>("post");
