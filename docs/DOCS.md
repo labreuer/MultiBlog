@@ -490,7 +490,13 @@ document rather than the remark.
   `Doc.title`/`proseJson` after the debounce; a doc never touches a post table and a post
   never touches a ydoc table; a reader's already-open tab updates with no reload; an
   editor's annotation mark lands at the exact selected range, and degrades — never
-  appearing on `/comments` — once its text is deleted.
+  appearing on `/comments` — once its text is deleted. Its last group covers `?at=`: that
+  scrubbing writes the update's *id* (checked against the database, since "some number
+  reached the URL" passes either way), that a URL carrying one opens frozen at that
+  revision without the bar being touched, that returning to live strips it, and that a
+  value naming nothing renders live. What a DOM assertion cannot see — `replaceState`
+  rather than `pushState`, and the debounce — is held by `src/lib/scrub-url.test.ts` and
+  the comment above it instead.
 - **`e2e/doc-visibility.spec.ts`** pins the visibility rule and both listings: an
   ADMIN/EDITOR non-author is refused a `PRIVATE` doc for read and edit, a listed author is
   not, `SHARED` stays open to ADMIN/EDITOR regardless of byline, the `/docs` override is

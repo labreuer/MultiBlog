@@ -253,6 +253,9 @@ export const getDocLinkFields = (...args: Parameters<DbHandlers["getDocLinkField
 export const countDocYdocUpdates = (...args: Parameters<DbHandlers["countDocYdocUpdates"]>): Promise<number> =>
   call("countDocYdocUpdates", ...args);
 
+export const getDocYdocUpdateIds = (...args: Parameters<DbHandlers["getDocYdocUpdateIds"]>): Promise<string[]> =>
+  call("getDocYdocUpdateIds", ...args);
+
 export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotationStates"]>): Promise<AnnotationState[]> =>
   call("getAnnotationStates", ...args);
 

@@ -938,6 +938,22 @@ export async function countDocYdocUpdates(docId: string): Promise<number> {
   return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
 }
 
+/**
+ * Every ydoc_update id for docId's own ydoc, oldest first — the same order
+ * and so the same indices GET /api/doc/[id]/replay hands the scrub bar. Lets
+ * a spec name the id a slider position must be reporting, rather than
+ * asserting that `?at=` merely holds *some* number. Strings, because these
+ * are bigints and the URL carries them as text end to end.
+ */
+export async function getDocYdocUpdateIds(docId: string): Promise<string[]> {
+  const rows = await prisma.ydocUpdate.findMany({
+    where: { ydocId: ydocIdForDoc(docId) },
+    orderBy: { id: "asc" },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id.toString());
+}
+
 // ---------------------------------------------------------------------------
 // Doc links (PLAN.md §14) — a doc link's anchor is a plain JSON blob computed
 // against a doc's body text, not a live-collab mark, so unlike an annotation
@@ -2120,6 +2136,7 @@ const handlers = {
   getSiteDefaultColumnOrder,
   setSiteDefaultColumnOrder,
   countDocYdocUpdates,
+  getDocYdocUpdateIds,
   createTestDocLink,
   deleteTestDocLinkGroup,
   countDocLinks,
