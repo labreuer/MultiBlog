@@ -7,7 +7,8 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { attachProvider } from "@/lib/collab-socket";
-import { UNTITLED_DOC } from "@/lib/doc-title";
+import { UNTITLED_DOC, docEditorTabTitle } from "@/lib/doc-title";
+import { useLiveTabTitle } from "@/lib/use-live-tab-title";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { EDITOR_FOCUS_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 import { useEditorAnnotationWidget } from "@/lib/use-editor-annotation-widget";
@@ -96,6 +97,7 @@ export default function DocEditor({
   initialDeleted,
   annotations,
 }: Props) {
+  // Fed per keystroke by CollabTitleField's onTitleChange below.
   const [title, setTitle] = useState(initialTitle);
   const [deleted, setDeleted] = useState(initialDeleted);
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
@@ -127,6 +129,12 @@ export default function DocEditor({
   // DocEditor.module.css's flex-height chain (STYLE.md's flex-grow trap).
   const containerRef = useRef<HTMLDivElement>(null);
   const { setAwareness, getSocket } = useDocPresence();
+
+  // The tab: generateMetadata composed it from the Doc.title cache, which lags
+  // the fragment by a store debounce. Same composer on both sides, so the
+  // pencil and the site-name suffix cannot drift apart.
+  useLiveTabTitle(docEditorTabTitle(title));
+
   // Scoped to this column rather than a bare document.querySelector — see
   // the hook's own note on why it takes this as a callback.
   const getFrame = useCallback(

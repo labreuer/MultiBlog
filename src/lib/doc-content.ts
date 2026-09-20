@@ -1,7 +1,6 @@
 import type * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
-import { extractText } from "./diff";
-import { readYdocContent } from "./ydoc-render";
+import { readYdocContent, titleTextFromJSON } from "./ydoc-render";
 
 // PLAN.md §12d — derives what a Doc row *caches* from its ydoc, which is the
 // canonical copy (§3d). The doc's own title/prose_json columns are only ever
@@ -31,5 +30,5 @@ export function docContentFromYdoc(doc: Y.Doc): { proseJson: JSONContent; title:
   // when decoding failed (§12n), so "" here means "this doc has no title" —
   // which must write through as an empty title rather than freeze the column
   // at whatever was last typed before it was cleared.
-  return { proseJson: content.bodyJSON, title: content.titleJSON ? extractText(content.titleJSON) : "" };
+  return { proseJson: content.bodyJSON, title: titleTextFromJSON(content.titleJSON) };
 }

@@ -27,6 +27,9 @@ type Props = {
   // websocket; unlike /doc/[slug]'s surface, this one never owns its own.
   ydoc: Y.Doc;
   provider: HocuspocusProvider;
+  // useLiveDocContent's option of the same name, for DocColumn's read-mode
+  // heading.
+  onLiveTitle?: (title: string) => void;
   // PLAN.md §14e — doc links anchored to *this* doc, already carrying their
   // cascaded color; resolved against the current document (and re-resolved on
   // every content change) rather than trusted at whatever positions were
@@ -73,6 +76,7 @@ export default function SideBySideDocBody({
   ariaLabel,
   ydoc,
   provider,
+  onLiveTitle,
   docLinks,
   activeGroupId,
   onDocLinkCreated,
@@ -147,6 +151,7 @@ export default function SideBySideDocBody({
     provider,
     editorRef,
     setAwareness,
+    onLiveTitle,
     // DocLink (§14e) is a decoration layer, no schema change — see the hook's
     // note on why that matters.
     // eslint-disable-next-line react-hooks/refs -- onHit is invoked by ProseMirror on a click, never during render; reaching the current handler through a ref is what lets the extensions array (read once, at construction) stay stable across renders (§14e/§14j)

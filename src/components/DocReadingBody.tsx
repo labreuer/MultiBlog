@@ -50,6 +50,9 @@ type Props = {
   // Clicking FROZEN — clears the scrub override and reports it back up so
   // DocView can also reset the scrub bar's own slider position.
   onReturnToLive?: () => void;
+  // The live tap's title, for DocView's <h1> — useLiveDocContent's option of
+  // the same name. Raw; DocView applies the fallback.
+  onLiveTitle?: (title: string) => void;
   // PLAN.md §13o — every column-anchored annotation on this doc, so their
   // ranges can be tracked against the live document and drawn. Mark-anchored
   // ones aren't in here and don't need to be: their highlight is the mark's
@@ -98,6 +101,7 @@ export default function DocReadingBody({
   scrubFrozen = false,
   scrubUpdateId = null,
   onReturnToLive,
+  onLiveTitle,
   annotationAnchors = EMPTY_ANCHORS,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,6 +151,7 @@ export default function DocReadingBody({
     setAwareness,
     getSocket,
     extensions,
+    onLiveTitle,
     onSelectionUpdate: selection.capture,
     onContentPushed: (liveEditor) => {
       selection.reresolve(liveEditor);

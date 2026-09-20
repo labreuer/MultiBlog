@@ -2081,6 +2081,24 @@ Smaller implementation notes worth recording against the design text above:
   any other row in the same table, so `/ydoc-debug` (ADMIN-only, §11f) already lists it and
   replays it with `ReplayView` unmodified — the two admin-facing tools this section is about
   not duplicating. `GET /api/doc/[id]/replay` stays; it's what `DocScrubBar` itself calls.
+- **The title follows the fragment live, on every surface that has a websocket to read it
+  from (added 2026-09-20).** `Doc.title` was already an honest cache of the ydoc's `title`
+  fragment, but every heading and tab was a server render of that column, so a title edit
+  took a store debounce *and* a reload to appear anywhere but the field it was typed into.
+  What changed is only the last hop, and only where a live document was already in reach:
+  `useLiveDocContent` gained an `onLiveTitle` callback reporting the `titleJSON` its
+  per-update `renderYdocDoc` call already decoded and discarded, so `/doc/[slug]`'s `<h1>`
+  (via `DocView`) and a `/side-by-side` column's read-mode `<h2>` (via `DocColumn`) both
+  track it. `DocView`'s precedence is scrub-position first, then the live tap, then the scrub
+  bar's live-end replay, then `initialTitle`; the live value inherits the body's `frozen`
+  rule for free, since `applyUpdate` returns before rendering. The browser tab follows too,
+  on `/doc/[slug]` and `/doc/[slug]/edit`, through `src/lib/use-live-tab-title.ts` — the one
+  place that writes `document.title` by hand, composing through `site-config.ts`'s new
+  `tabTitle` so the root layout's site-name suffix can't be dropped. Deliberately *not*
+  extended to any listing (`/docs`, Recent docs, `DocRefMenu`, `/annotations`, `/links`):
+  those are server renders with no live document in reach, a connection per row is not worth
+  it, and the collab server cannot `revalidatePath` from its own process anyway. So a
+  listing's ceiling remains the store debounce plus a navigation, unchanged.
 - **The reading view holds a fixed 800px width rather than shrinking to short content**, and
   the doc editor's title field shares its border with the body editor frame below it
   (`DocEditor.module.css`'s `.titleInput`/`.editorFrame`, the latter shared with

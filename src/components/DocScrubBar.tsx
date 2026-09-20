@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
-import { extractText } from "@/lib/diff";
+import { titleTextFromJSON } from "@/lib/ydoc-render";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { useReplayScrub, type ReplayPayload } from "./YdocDebug";
 import { useRegisterDocScrubSeek } from "./DocScrubContext";
@@ -110,7 +110,7 @@ function LoadedScrubBar({
     if (!renderResult?.ok) return;
     // The title fragment has no fallback of its own (PLAN.md §12n) — same
     // "Untitled" render-time rule as everywhere else that shows a doc's title.
-    const title = docTitleOrFallback(renderResult.titleJSON ? extractText(renderResult.titleJSON) : "");
+    const title = docTitleOrFallback(titleTextFromJSON(renderResult.titleJSON));
     onScrub({ bodyJSON: renderResult.bodyJSON, title, live: index === total - 1, updateId: current?.id.toString() ?? null });
   }, [renderResult, onScrub, index, total, current]);
 

@@ -4,6 +4,7 @@ import type { JSONContent } from "@tiptap/core";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { docContentExtensions, titleAuthorHighlightExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { extractText } from "@/lib/diff";
 
 // Renders an already-materialized Y.Doc the way LiveHistoryViewer renders a
 // replayed one (src/components/LiveHistoryViewer.tsx) — but tolerant of a
@@ -63,6 +64,14 @@ export function readYdocContent(doc: Y.Doc): YdocContent {
       error: `This document isn't TipTap-compatible: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+// One derivation for the three readers of the title fragment (the doc cache,
+// the scrub bar, the live tap). "" is a genuinely empty title, not a decode
+// failure — see readYdocContent — and `Untitled` is applied at render, never
+// here.
+export function titleTextFromJSON(titleJSON: JSONContent | null): string {
+  return titleJSON ? extractText(titleJSON) : "";
 }
 
 export type YdocRenderResult =
