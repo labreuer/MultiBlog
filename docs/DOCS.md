@@ -226,10 +226,11 @@ check, so the `PRIVATE`/`SHARED` distinction stays inside one function instead o
 through every call site. `readableDocsFor` / `editableDocsFor` are the same rules as
 listings, for the pickers that need one.
 
-**A role change doesn't reach an existing session.** The session is a JWT with `role` baked
-in at sign-in, so promoting someone to `AUTHORIZED` does nothing until they sign out and
-back in; the permission-denied message says so. `src/app/sign-in/NOTES.md` has the
-mechanics and the deferred fix.
+**A role change doesn't reach an existing session by itself.** The session is a JWT with
+`role` baked in at sign-in. A promoted user picks it up by visiting `/dashboard`, which
+mounts `<SessionRefresh />` and re-reads the row into a re-signed token — no sign-out. The
+doc routes' permission-denied messages do not say this. `src/app/sign-in/NOTES.md` has the
+mechanics, and why the re-read runs there and not on every navigation.
 
 ## Routes
 
@@ -438,8 +439,9 @@ document rather than the remark.
 - **Losing the mark degrades the annotation; it does not delete it.** Delete the annotated
   text and the mark goes with it; the row keeps its `doc_id`, so the annotation becomes a
   document-level remark on that doc, derived per render rather than stored. It is one-way:
-  retyping the text does not re-anchor it. Recovery from the update log is worked out in
-  COLLAB.md §8 and deferred.
+  retyping the text does not re-anchor it. Where it pointed is still visible: the card's
+  "at this revision" scrubs to the update that carries the mark ("Deferred"); re-anchoring
+  from there is not built.
 - **The mark is `clearable: false`** (`src/lib/annotation-extension.ts`), so the editor's
   "Clear formatting" cannot strip it along with real formatting — found the hard way.
 
@@ -499,6 +501,11 @@ account above might read.
 - **There is no reader-facing doc index.** A reader with `canViewDocs` can open any `SHARED`
   doc they have a link to but has no route that lists them and no nav entry; docs are
   share-a-link-only in practice.
+  - The cause is a predicate mismatch: `/docs` and the dashboard's Recent docs list what
+    the viewer may *manage* (`canManageDocs` plus byline, widened by `SHARED` only for
+    ADMIN/EDITOR), so an AUTHORIZED reader gets nothing and an AUTHOR misses every
+    `SHARED` doc they may open; `readableDocsWhere` (`src/lib/doc-authz.ts`) already
+    expresses what they may *read*, and a listing over it is the whole missing piece.
 - **Nothing enforces that a doc's `ydoc` row exists.** Creation is eager on every path, and
   the collab server's forgiving auto-create covers a connection to a name nobody made — but
   a `doc` row whose `ydoc` row was deleted out from under it reads as an empty document
@@ -515,16 +522,13 @@ account above might read.
   this design a doc's history is `ydoc_update` and its present is `prose_json`; adding
   checkpoints later is additive, since the snapshot table and endpoint already exist and are
   generic. §15's post snapshots pin a doc's state at a point without any of this.
-- **Recovering where an annotation used to point once its mark is gone** — replay
-  `ydoc_update` back to a state that still had the mark, read its range, offer to re-anchor.
-  Later if at all, and an ad-hoc tool if ever. The defined behaviour is the degraded one.
-- **Converging posts onto docs.** Largely answered by §15 on 2026-07-30: a post is a
-  snapshot of a doc, and there is no second editor or second collab stack to carry any more.
-  The carrying cost the plan priced in — two editors, two comment stacks, two admin tables —
-  has been paid down to the comment/annotation split, which §13c chose deliberately.
-- **Deduplicating `src/lib/ydoc-render.ts` with `LiveHistoryViewer`** — still two.
-- **Re-reading `role` from the DB in the `jwt` callback** — `src/app/sign-in/NOTES.md`;
-  waits for the granular-permissions work that supersedes the role scheme.
+- **Re-anchoring an annotation once its mark is gone.** Showing where it pointed is built:
+  `ydocUpdateId` is stamped as the update that carries the mark, and the card's "at this
+  revision" scrubs to it (COLLAB.md §8; ANNOTATIONS.md, "The version stamp"). That is the
+  revision the annotation *became attached at*, which can be well after what its author
+  saw. What is deferred is the second half — reading the range there and offering to
+  re-anchor against the live text. Later if at all. The defined behaviour after loss is the
+  degraded one.
 
 ## History
 

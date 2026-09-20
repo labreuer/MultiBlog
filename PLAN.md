@@ -1481,7 +1481,7 @@ now. The plan text is in the parent of the commit that introduced this stub.
 ### 12i. Annotations: the mark, capture, and the shared view model — docs/ANNOTATIONS.md, "Anchoring" and "Decisions" (the reading views stopped writing marks with §13o; the `Comment*` components were un-shared by §13c)
 ### 12j. `/annotations` — docs/ANNOTATIONS.md, "Surfaces" and "Decisions"
 ### 12k. Build order — docs/DOCS.md, "History"
-### 12l. The carrying cost, stated plainly — docs/DOCS.md, "Deferred, with reasons" (paid down by §15)
+### 12l. The carrying cost, stated plainly — superseded by §15, which made a post a snapshot of a doc; docs/DOCS.md, "What a doc is"
 ### 12m. Deferred, with reasons — docs/DOCS.md, "Deferred, with reasons"
 ### 12n. As built — docs/DOCS.md throughout; "The title follows the fragment live" is under "The caches"
 ### 12o. Known gaps — docs/DOCS.md, "Known gaps"
