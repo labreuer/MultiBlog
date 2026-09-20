@@ -38,6 +38,9 @@
   margin-left: 8px;
 }
 
+/* Two <button>s and one <a> ("at this revision", which links to ?at= as well
+   as seeking in place) — hence the explicit reset of the button chrome *and*
+   the explicit color, which an anchor would otherwise take from :link. */
 .revisionButton {
   font-size: 0.8rem;
   border: none;

@@ -186,7 +186,9 @@ function LoadedScrubBar({
   const seekToUpdateId = useCallback(
     (updateId: string) => {
       const targetIndex = replay.updates.findIndex((u) => u.id === updateId);
-      if (targetIndex !== -1) seek(targetIndex);
+      if (targetIndex === -1) return false;
+      seek(targetIndex);
+      return true;
     },
     [replay, seek],
   );

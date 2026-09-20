@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SCRUB_PARAM, parseScrubUpdateId, scrubUrl } from "./scrub-url";
+import { SCRUB_PARAM, parseScrubUpdateId, scrubHref, scrubUrl } from "./scrub-url";
 
 // The parameter is attacker-supplied by definition — it is a URL people paste
 // at each other — and its rejection surface is the whole reason this is a
@@ -76,4 +76,15 @@ test("every other parameter and the hash survive, in place", () => {
 test("the parameter name is the one the page reads", () => {
   assert.equal(SCRUB_PARAM, "at");
   assert.ok(scrubUrl("https://example.test/doc/d", "5").includes(`${SCRUB_PARAM}=5`));
+});
+
+test("scrubHref links to a revision, with the fragment the caller named", () => {
+  assert.equal(scrubHref("/doc/my-doc", "7"), "/doc/my-doc?at=7");
+  assert.equal(scrubHref("/doc/my-doc", "7", "ada-2026-09-20-11-30-00"), "/doc/my-doc?at=7#ada-2026-09-20-11-30-00");
+});
+
+test("scrubHref carries the position and the fragment, and nothing else", () => {
+  // It takes a pathname, so there is no way for it to pick up the copier's
+  // own ?sel= — which would send the recipient to a different subject.
+  assert.ok(!scrubHref("/doc/my-doc", "7", "anchor").includes("sel"));
 });

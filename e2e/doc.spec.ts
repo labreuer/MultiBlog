@@ -796,6 +796,82 @@ test.describe("the scrub position in the URL", () => {
     await expect(bodyEditor(page)).toContainText("Appended after creation.");
   });
 
+  // The control that names a revision is now a link to one (ANNOTATIONS.md,
+  // "The version stamp"). Two properties, and the second is the one a
+  // refactor is most likely to lose: it is reachable *before* the scrub bar
+  // has loaded, which is what it could never do while it was a button wired
+  // straight to the slider.
+  test("'at this revision' links to the revision, and seeks in place once the bar is loaded", async ({
+    page,
+    sharedDoc,
+  }) => {
+    const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
+    await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: "E2E annotation stamped at the doc's first revision.",
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+      ydocUpdateId: updateIds[0],
+    });
+
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    const link = page.getByRole("link", { name: "at this revision" });
+    // Present on arrival — nothing has touched the slider, so the seek
+    // function this used to require does not exist yet.
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", new RegExp(`\\?at=${updateIds[0]}#.`));
+
+    // With no bar loaded there is nothing to seek, so the click falls through
+    // to the href and a fresh page load does the work instead.
+    await link.click();
+    await expect(page.getByRole("button", FROZEN)).toBeVisible({ timeout: 15_000 });
+    await expect(bodyEditor(page)).not.toContainText("Appended after creation.");
+    expect(await scrubParam(page)).toBe(updateIds[0]);
+
+    // Back to live, which leaves the bar loaded behind it — and from here the
+    // same link is handled in place. The marker is what proves it: a survivor
+    // of the click means no navigation happened, where the assertions above
+    // would have passed either way.
+    await page.getByRole("button", FROZEN).click();
+    await expect.poll(() => scrubParam(page), { timeout: 15_000 }).toBeNull();
+    await page.evaluate(() => {
+      (window as unknown as { __sameDocument?: boolean }).__sameDocument = true;
+    });
+    await link.click();
+    await expect(page.getByRole("button", FROZEN)).toBeVisible();
+    await expect.poll(() => scrubParam(page), { timeout: 15_000 }).toBe(updateIds[0]);
+    expect(await page.evaluate(() => (window as unknown as { __sameDocument?: boolean }).__sameDocument)).toBe(true);
+  });
+
+  test("a reader who gets no scrub bar gets no link to a revision either", async ({
+    page,
+    sharedDoc,
+    secondUser,
+  }) => {
+    const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
+    const bodyText = "E2E annotation nobody without edit access can scrub to.";
+    await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText,
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+      ydocUpdateId: updateIds[0],
+    });
+
+    // A SHARED doc is readable by any AUTHORIZED reader and editable only by
+    // its authors, so this reader gets the card and no bar. The link would
+    // then be a control that goes nowhere — ?at= is inert on a page with
+    // nothing to replay it — which is why it is gated on the page having a
+    // bar rather than on the provider existing.
+    const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
+    await readerPage.goto(`/doc/${sharedDoc.slug}`);
+    // Scoped to the body's own read-only editor: the card renders the settled
+    // text statically too, and that copy is hidden once the editor takes over.
+    await expect(readerPage.getByLabel("Annotation", { exact: true }).getByText(bodyText)).toBeVisible();
+    await expect(readerPage.getByLabel("Scrub through this doc's edit history")).toHaveCount(0);
+    await expect(readerPage.getByRole("link", { name: "at this revision" })).toHaveCount(0);
+  });
+
   test("an ?at= that names nothing renders the live doc rather than failing", async ({ page, sharedDoc }) => {
     const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
 

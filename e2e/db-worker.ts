@@ -1170,8 +1170,16 @@ export async function createTestAnnotation(opts: {
   authorEmail: string;
   bodyText: string;
   anchor?: { from: number; to: number; quotedText: string };
+  /**
+   * The version stamp (ANNOTATIONS.md, "The version stamp") — a ydoc_update
+   * id from `getDocYdocUpdateIds`. Only the "at this revision" control reads
+   * it, so it stays optional; a fixture that wants that control has to say
+   * which revision, since the whole point of the control is that the stamp
+   * is older than the doc's head.
+   */
+  ydocUpdateId?: string;
 }): Promise<{ id: string }> {
-  const { docId, authorEmail, bodyText, anchor } = opts;
+  const { docId, authorEmail, bodyText, anchor, ydocUpdateId } = opts;
   assertSafe(authorEmail);
   const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
   // PLAN.md §22e — a posted annotation comes with a body ydoc, `postedAt`,
@@ -1199,6 +1207,7 @@ export async function createTestAnnotation(opts: {
       status: "LIVE",
       postedAt: now,
       ...(anchor ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText } : {}),
+      ...(ydocUpdateId ? { ydocUpdateId: BigInt(ydocUpdateId) } : {}),
     },
   });
   const ydocId = ydocIdForAnnotation(annotation.id);

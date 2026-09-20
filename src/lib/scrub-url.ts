@@ -80,6 +80,23 @@ export function scrubUrl(href: string, updateId: string | null): string {
 }
 
 /**
+ * A link *to* a revision, for a control that names one — `AnnotationNode`'s
+ * "at this revision", whose annotation carries the `ydoc_update` id it was
+ * written against.
+ *
+ * Built from a pathname rather than from the current URL, so it carries the
+ * position and the fragment and nothing else. That is deliberate: the link
+ * means "this annotation, at the revision it was written against", not "that,
+ * plus whatever the reader who copied it happened to have in their address
+ * bar" — an `?sel=` picked up in passing would send the recipient somewhere
+ * about a different subject entirely.
+ */
+export function scrubHref(pathname: string, updateId: string, hash?: string): string {
+  const fragment = hash ? `#${encodeURIComponent(hash)}` : "";
+  return `${pathname}?${SCRUB_PARAM}=${encodeURIComponent(updateId)}${fragment}`;
+}
+
+/**
  * Rewrite the current URL's scrub position in place.
  *
  * `window.history.replaceState` rather than `router.replace`: Next patches the

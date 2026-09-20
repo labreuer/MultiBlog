@@ -3,7 +3,7 @@
 import type { AnnotationTarget } from "@/lib/annotation-container";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { JSONContent } from "@tiptap/react";
 import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
@@ -29,7 +29,8 @@ import {
   getQuotedParentVersion,
   type AnnotationVersion,
 } from "@/app/actions/annotations";
-import { useDocScrub } from "../DocScrubContext";
+import { useDocScrub, useHasDocScrub } from "../DocScrubContext";
+import { scrubHref } from "@/lib/scrub-url";
 import styles from "./AnnotationNode.module.css";
 
 export type AnnotationNodeData = {
@@ -201,8 +202,16 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   const [quotedVersionPending, setQuotedVersionPending] = useState(false);
   // Null outside a DocScrubProvider (the doc editor's rail has none) or
   // before the reading view's scrub bar has been touched at all — both
-  // supported states, see useDocScrub's own note.
+  // supported states, see useDocScrub's own note. `hasDocScrub` is the first
+  // of those two questions on its own: "at this revision" is a link as well
+  // as a button now (docs/DOCS.md, "?at="), and a link needs only a page with
+  // a scrub bar on it, not a bar that has already loaded.
   const seekToUpdateId = useDocScrub();
+  const hasDocScrub = useHasDocScrub();
+  // usePathname rather than useSearchParams: the latter opts its whole page
+  // out of static rendering (SiteHeader's own note says why that matters
+  // here), and the href wants only the path anyway.
+  const pathname = usePathname();
   // PLAN.md §13p — the DRAFT row a selection eventually opens waits for the
   // selection to settle, so the timer that decides "settled" needs somewhere
   // to live. Declared up here with the other hooks, above the early return
@@ -403,15 +412,31 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
               <LocalTime value={annotation.createdAt} />
             </a>
-            {annotation.ydocUpdateId && seekToUpdateId && (
-              <button
-                type="button"
+            {annotation.ydocUpdateId && hasDocScrub && (
+              // A real link, not a button that looks like one: the revision
+              // it names is a URL now, so this is something to copy, open in
+              // a new tab, or send to somebody. The click is still handled in
+              // place when it can be — seeking the slider keeps the live tap,
+              // the rail and any draft where they are, where following the
+              // href is a full page load. preventDefault is conditional on
+              // the seek having actually landed, so the two cases it can't
+              // cover fall through to the navigation and let a fresh load
+              // sort them out: the bar not loaded yet (the common one, since
+              // this now renders before the reader has touched the slider),
+              // and an id the loaded replay has no row for.
+              <a
+                href={scrubHref(pathname, annotation.ydocUpdateId, anchorId)}
                 className={styles.revisionButton}
                 title="Scrub the reading view back to this annotation's revision"
-                onClick={() => seekToUpdateId(annotation.ydocUpdateId!)}
+                onClick={(e) => {
+                  // Let the browser have every click that means "somewhere
+                  // else": a new tab, a new window, a download.
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  if (seekToUpdateId?.(annotation.ydocUpdateId!)) e.preventDefault();
+                }}
               >
                 at this revision
-              </button>
+              </a>
             )}
             {annotation.visiblyEdited && (
               <>

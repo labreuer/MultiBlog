@@ -198,8 +198,12 @@ export default async function PublicDocPage({
           {/* PLAN.md §12p/§13 — same cross-tree reason as the two providers
               above: AnnotationNode's "at this revision" control (inside
               AnnotationSection) reaches DocScrubBar's slider (inside
-              DocView) through this, since neither is the other's ancestor. */}
-          <DocScrubProvider>
+              DocView) through this, since neither is the other's ancestor.
+              `hasScrubBar` is the same canEdit the bar itself is gated on:
+              that control is a link now (docs/DOCS.md, "?at="), so it renders
+              before the bar has loaded — but never on a page where no bar
+              will ever exist, which is what a read-only viewer has. */}
+          <DocScrubProvider hasScrubBar={canEdit}>
             {/* PLAN.md §18. AnnotationSection stays exactly where it was —
                 below the doc, heading and composer and sort control included,
                 along with every annotation whose mark is gone — and only the
