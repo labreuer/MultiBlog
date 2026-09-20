@@ -33,6 +33,11 @@ type Props = {
   // fetch AnnotationSection renders, so the highlight and the card can never
   // disagree about which annotations exist.
   annotationAnchors: AnnotationAnchorInput[];
+  // The ?at= scrub position this page was opened at, validated server-side
+  // (src/lib/scrub-url.ts) and passed straight through to the scrub bar,
+  // which is the only thing here that can turn a ydoc_update id into a
+  // rendered revision. Null on an ordinary visit.
+  initialScrubUpdateId: string | null;
 };
 
 // Owns the one piece of state DocScrubBar, the title, and DocReadingBody need
@@ -48,6 +53,7 @@ export default function DocView({
   canEdit,
   userColor,
   annotationAnchors,
+  initialScrubUpdateId,
 }: Props) {
   const [scrubbed, setScrubbed] = useState<ScrubbedState | null>(null);
   // Raw text from the live tap, null until its first render; the fallback is
@@ -61,7 +67,9 @@ export default function DocView({
   // Scrubbing freezes the view exactly while it's showing something other
   // than the live end — not merely while a scrub bar is mounted, which is
   // why this isn't just `scrubbed !== null` (the mount-time seed already
-  // pushes a `live: true` state before any drag).
+  // pushes a `live: true` state before any drag). It is also the whole of
+  // what `?at=` has to do: the bar opens at that position and reports
+  // `live: false`, and the freeze follows from that alone.
   const scrubFrozen = scrubbed !== null && !scrubbed.live;
 
   // History pinned by the scrub bar wins; then the live tap (frozen by the
@@ -102,7 +110,14 @@ export default function DocView({
         onReturnToLive={handleReturnToLive}
         annotationAnchors={annotationAnchors}
       />
-      {canEdit && <DocScrubBar docId={docId} onScrub={setScrubbed} resetSignal={resetSignal} />}
+      {canEdit && (
+        <DocScrubBar
+          docId={docId}
+          onScrub={setScrubbed}
+          resetSignal={resetSignal}
+          initialUpdateId={initialScrubUpdateId}
+        />
+      )}
     </>
   );
 }

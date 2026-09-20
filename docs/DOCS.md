@@ -231,7 +231,7 @@ mechanics, and why the re-read runs there and not on every navigation.
 | Route | Purpose |
 |---|---|
 | `/docs` | management table, `canManageDocs` + own-byline scoping, widened by `SHARED` docs for ADMIN/EDITOR and by the ADMIN-only override below |
-| `/doc/[slug]` | the live reading view, `canUserReadDoc`; embeds the scrub bar |
+| `/doc/[slug]` | the live reading view, `canUserReadDoc`; embeds the scrub bar. `?sel=` is an anchored link (ANCHORED_LINKS.md), `?at=` a scrub position; both survive the sign-in round trip |
 | `/doc/[slug]/edit` | the editor, `canUserEditDoc`; a soft-deleted doc still loads so Settings can offer Undelete |
 | `/doc/[slug]/slug` | rename, with a suggested standard slug derived from the title |
 | `/annotations` | annotation browse/admin, scoped to the docs the viewer may *read* (ANNOTATIONS.md) |
@@ -321,6 +321,27 @@ has synced.
   Scrubbing rewrites the live title and body *in place*, through the same `setContent`
   path a live update uses, so there is no separate history route. With no doc snapshots
   every rebuild replays from row #1; a performance characteristic, not a defect.
+- **The position is in the URL as `?at=<ydoc_update id>`**, and the live end is the
+  parameter's *absence* — so a link shared before later edits still means "the newest
+  version" rather than pinning its reader to a head that has moved. The id, not the
+  slider's index, because an index shifts under every new update and the id is already
+  what `Annotation.ydocUpdateId` and `PostSnapshotScrubBar` trade in. The reverse
+  direction is the only thing that makes the bar load eagerly: a URL naming a position is
+  a request for the history, so it fetches on mount instead of on first touch, seeds
+  `useReplayScrub` with that index, and reports `live: false` — which is the whole of how
+  the page arrives frozen, with no arrived-from-a-URL state anywhere. An `?at=` that isn't
+  a bare positive integer, or that names no row in *this* doc's log, is no position at
+  all: the view renders live and the next settled scrub strips the parameter.
+  **`src/lib/scrub-url.ts` holds the two rules that are easy to undo**: `replaceState`,
+  never `pushState` (a range input fires `change` per pixel, so pushing buries the page
+  the reader came from under a hundred entries and takes Back away as a way to leave — and
+  it would need a `popstate` listener to seek the slider, where replacing needs none); and
+  the trailing debounce, which is a correctness requirement rather than polish, because
+  WebKit throws `SecurityError` past roughly 100 history calls in 30 seconds and Chromium
+  drops them past its own budget without saying so. Hence the debounce *and* the
+  `try`/`catch`. `router.replace` is not the alternative: it would refetch the doc, its
+  threads and its tags on every settled position, where Next's patched
+  `window.history.replaceState` keeps the router in step for free.
 - **The column holds a fixed 800px** rather than shrinking to short content, and the
   route's styling is `app/doc/[slug]/page.module.css` (STYLE.md).
 - **Annotation highlights are colored by their author**, one `--thread-color` rule per id
