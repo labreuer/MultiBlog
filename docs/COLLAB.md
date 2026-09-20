@@ -75,7 +75,7 @@ of them.
    the document but pays per keystroke; resolve-once is free afterwards but can go stale.
 
 One cross-cutting hazard worth stating on its own, because three different bugs have come from
-it: **`Doc.proseJson` is a store-debounce cache, not the document** (PLAN.md §12d). It lags the
+it: **`Doc.proseJson` is a store-debounce cache, not the document** (DOCS.md, "The caches"). It lags the
 live ydoc by seconds whenever anyone is typing. It is fine for deciding *whether* to draw
 something and wrong for deciding *where*.
 
@@ -475,7 +475,7 @@ property above, correct even when a collaborator edits *inside* the selected ran
 composer sits open, which no offset-based scheme in this file can do.
 
 **Why it was rejected for a *persisted* annotation anchor, and why that still holds.**
-[§12h's GC decision](#why-gc-true-and-what-it-rules-out) rules it out for a **persisted** anchor:
+[The GC decision](#why-gc-true-and-what-it-rules-out) rules it out for a **persisted** anchor:
 a durable relative position needs `gc: false`, and a living document would accumulate a tombstone
 per deletion forever. That reasoning is sound and still holds — the doc editor's own widget never
 serializes a `RelativeRange` anywhere, exactly because of it (see the file's own header comment).
@@ -498,8 +498,8 @@ pending decoration and the selection map automatically and retire `reresolve` en
 not done, still blocked on the same conflict: **`setContent` is load-bearing there.**
 `DocScrubBar` pushes historical bodies into that same editor, and you cannot do that into a
 `Collaboration`-bound editor without writing history into the live shared document. Decoupling
-the scrub preview onto its own editor instance is step one, not an afterthought. (PLAN.md §12g's
-"no remote carets for a reader" becomes true by omission rather than by construction — a
+the scrub preview onto its own editor instance is step one, not an afterthought. (DOCS.md's
+"no caret for a read-only reader" becomes true by omission rather than by construction — a
 documentation change, not a behavioural one.)
 
 ---
@@ -644,7 +644,7 @@ original operation. Two consequences:
 **What becomes answerable that is not today:**
 
 - **"What did this annotation cover?", after its mark is gone.** Materialize the state at the last
-  update where the mark existed and read the range. §12h already notes this is a real path and
+  update where the mark existed and read the range. DOCS.md, "Deferred", notes this is a real path and
   defers it; the doc-side equivalent of the post side's "show the quote in the context of the
   revision it was made against".
 - **"When, exactly, did it detach?"** Binary search over `ydoc_update.id`, materializing at each
@@ -726,7 +726,7 @@ Two things it would need, neither large:
 **Not a GC hazard**, despite the reflex. The document being replayed into is a fresh
 materialization of updates ≤ the stamp, so the annotated text is *alive* there rather than a
 tombstone — the deletion, if any, lives in an update deliberately not applied. GC is an in-memory
-`Y.Doc` operation and never rewrites stored rows. §12h's GC reasoning is about
+`Y.Doc` operation and never rewrites stored rows. The GC reasoning above is about
 `Y.RelativePosition`, a persisted pointer to an item id, and does not transfer to replaying a
 stored update.
 
