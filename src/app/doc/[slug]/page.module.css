@@ -8,7 +8,7 @@
      for a short doc instead of shrinking to fit its content. `max-width`
      still caps it below that on a narrow viewport.
 
-     The 0.75rem is a gutter, not part of the measure, which is why the width
+     The 1.5rem is a gutter, not part of the measure, which is why the width
      carries it as a visible sum rather than being written as a round 800:
      this container is the `<main>` itself and has nothing outside it to pad
      (the post page gets its gutter from `.main`, one level in), so without
@@ -17,16 +17,24 @@
      so `width` here is the outer edge and the sum is what keeps the reading
      measure at 800.
 
+     **The gutter is sized to hold the FROZEN flag**, which hangs 1.25rem into
+     it out of `DocReadingBody.module.css`'s `.flagTrack`, plus 4px so it
+     doesn't sit flush against the window. It was 0.75rem and the flag was
+     clipped by `body`'s `overflow-x: hidden` at every width where
+     `max-width: 100%` is what decides this container — not just phones but
+     the whole 1180–1544 band, i.e. an ordinary desktop window with the rail
+     showing. Shrinking it back costs the flag, not just breathing room.
+
      One rule covers both layouts by construction: above the breakpoint the
      padding is outside the grid, so it falls to the left of the document and
      the right of the annotation rail; below it, where there is one column, to
      either side of the document. Longhands so `.containerScrubbable`'s
      `padding-bottom` is left alone. */
-  width: calc(800px + 1.5rem);
+  width: calc(800px + 3rem);
   max-width: 100%;
   margin: 4rem auto;
-  padding-left: 0.75rem;
-  padding-right: 0.75rem;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
   font-family: sans-serif;
 }
 
@@ -39,7 +47,7 @@
 /* Mirrors app/[slug]/page.module.css exactly — same breakpoint, same track
    sizes, same reasons; see that file's comments. Duplicated rather than
    shared because the two pages' containers differ (this one is the <main>
-   itself, with its own 4rem margin and its own 0.75rem gutter, where the post
+   itself, with its own 4rem margin and its own 1.5rem gutter, where the post
    page's comes from a `.main` one level in) and a shared class would have to
    carry both. */
 .layout {
@@ -59,13 +67,14 @@
      gutter the narrow width carries, for the same reason and on the same
      terms. The one thing it costs is at the breakpoint exactly, where
      `max-width: 100%` is what is deciding and the gutter therefore comes out
-     of the layout rather than out of spare window: between 1180 and 1204 the
-     reading column is 776px rather than 800. That is the trade the gutter was
-     asked for in the knowledge of, and it puts this surface where the post
-     page and the doc editor already sit — both of them are 768px at their own
-     breakpoint, for the same reason and 8px more of it. */
+     of the layout rather than out of spare window: between 1180 and 1228 the
+     reading column is as little as 752px rather than 800. That is the trade
+     the gutter was asked for in the knowledge of — and it is 24px deeper than
+     it was, because the gutter now has to hold the FROZEN flag; the post page
+     and the doc editor, which have no flag to clear, still measure 768px at
+     their own breakpoint. */
   .container {
-    width: calc(1520px + 1.5rem);
+    width: calc(1520px + 3rem);
   }
 
   .layout {

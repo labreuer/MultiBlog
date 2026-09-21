@@ -23,10 +23,13 @@
    re-enables them for itself.
    `left` is negative — the other side of .container's border from the text,
    in the gutter beside the reading column — rather than 0, which would sit
-   the flag between the border and the article. On a viewport narrower than
-   roughly 800px + this width, .container has no gutter to poke into and
-   body's overflow-x: hidden clips the flag; accepted, since the border
-   itself still signals the frozen state even where the flag is clipped. */
+   the flag between the border and the article. That gutter is the *page*
+   container's padding, and this width is what sizes it: `/doc/[slug]`'s
+   .container pads 1.5rem, this 1.25rem plus 4px of breathing room, precisely
+   so body's overflow-x: hidden has nothing to clip at the widths where the
+   page container is the full window. So widening the track here is not a
+   local change — it needs that padding widened to match, or the flag starts
+   being cut off again. */
 .flagTrack {
   position: absolute;
   top: 0;

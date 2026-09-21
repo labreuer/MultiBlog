@@ -139,8 +139,9 @@ and the hook re-packs off the `resize` listener and per-card `ResizeObserver` it
 had, since a wider card that re-wraps is just a shorter one. **Never a `minmax()`**: grid's
 free-space distribution fills the smaller track first and would hand the rail its full
 680px at the breakpoint itself, leaving the prose 428px. STYLE.md's centred-column widths
-hold the arithmetic, the container paddings, and why the reading column measures 768px or
-776px at the breakpoint exactly.
+hold the arithmetic, the container paddings, and why the reading column measures 768px at
+the breakpoint exactly — or 752px on `/doc/[slug]`, whose gutter is wider because the
+FROZEN flag hangs into it.
 
 The doc editor matches a second clause besides the threshold — `(orientation: landscape)
 and (max-height: 500px)`, phone landscape — where the rail is a queue rather than aligned

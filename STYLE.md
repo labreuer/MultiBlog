@@ -646,16 +646,25 @@ Five centred-column widths now, and they are one decision rather than five:
   The containers carrying it differ by their own gutters and say so:
   `calc(1520px + 2rem)` on `/[year]/[month]/[day]/[slug]` and `DocEditor`, which get 1rem
   from `.main` one level in and from the container itself respectively, and
-  `calc(1520px + 1.5rem)` on `/doc/[slug]`, whose container *is* the `<main>` and so
-  carries a 0.75rem gutter directly. Above the breakpoint that padding sits outside the
+  `calc(1520px + 3rem)` on `/doc/[slug]`, whose container *is* the `<main>` and so
+  carries a 1.5rem gutter directly. Above the breakpoint that padding sits outside the
   grid, which is what puts it to the left of the document and the right of the rail;
   below it, where there is one column, to either side of the document. One rule, both
   layouts — don't reach for a second inside the `@media` block.
 
+  **`/doc/[slug]`'s gutter is the widest of the three because it is load-bearing**: the
+  FROZEN flag (`DocReadingBody.module.css`'s `.flagTrack`) hangs 1.25rem to the left of
+  the reading column, into that padding, and the 1.5rem is that plus 4px so it doesn't
+  sit flush against the window. At 0.75rem the flag was clipped by `body`'s
+  `overflow-x: hidden` wherever `max-width: 100%` decided the container — which is not
+  only phone widths but the entire 1180–1544 band, an ordinary desktop window with the
+  rail showing.
+
   **At the breakpoint exactly, every one of those gutters is spent out of the layout
   rather than out of spare window**, because `max-width: 100%` is what is deciding there.
-  So the reading column measures 768px on the post page and the editor, and 776px on
-  `/doc/[slug]`, reaching its full 800 a few pixels further up. 800 is the measure the
+  So the reading column measures 768px on the post page and the editor, and 752px on
+  `/doc/[slug]` — the deepest of the three, the flag's gutter being the widest — reaching
+  its full 800 a few pixels further up. 800 is the measure the
   layout is composed from, not a promise about the narrowest window that has a rail.
 
 ## The admin-table kit (`components/table/`)
