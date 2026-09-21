@@ -8,6 +8,7 @@ import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
+import { docTitleOrFallback } from "@/lib/doc-title";
 import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import SideBySideDocBody from "./SideBySideDocBody";
@@ -74,6 +75,9 @@ export default function DocColumn({
   onLinkClicked,
 }: Props) {
   const [mode, setMode] = useState<Mode>("read");
+  // Fed from both modes: CollabTitleField per keystroke in write mode, the
+  // live tap (SideBySideDocBody's onLiveTitle) in read mode. Raw either way;
+  // the fallback is applied at render.
   const [title, setTitle] = useState(initialTitle);
   // null until the token response arrives — distinct from false, since
   // "may this viewer write" gates whether the Edit button renders at all.
@@ -179,7 +183,7 @@ export default function DocColumn({
           ) : (
             <>
               <h2 className={styles.titleText}>
-                <Link href={canEdit ? `/doc/${docId}/edit` : `/doc/${docId}`}>{title}</Link>
+                <Link href={canEdit ? `/doc/${docId}/edit` : `/doc/${docId}`}>{docTitleOrFallback(title)}</Link>
               </h2>
               {canEdit && (
                 <button type="button" className={styles.titleButton} onClick={() => setMode("write")}>
@@ -219,6 +223,7 @@ export default function DocColumn({
               ariaLabel={aria.body}
               ydoc={ydoc}
               provider={provider}
+              onLiveTitle={setTitle}
               docLinks={docLinks}
               activeGroupId={activeGroupId}
               onDocLinkCreated={onLinkCreated}

@@ -225,7 +225,7 @@ after it waited out its budget with the element on the page (`session-refresh.sp
 year-long window, then: not only a stale read, but a document load that looks finished to a
 driver and isn't. Both contexts carry the header now.
 
-## 2026-07-29 — `/doc/[slug]` (PLAN.md §12) is dynamic by design, and doesn't need ISR to be cheap
+## 2026-07-29 — `/doc/[slug]` (docs/DOCS.md) is dynamic by design, and doesn't need ISR to be cheap
 
 Unlike `/[slug]`, `/doc/[slug]` gets no `generateStaticParams` and is never a Full Route Cache
 candidate — every request calls `auth()` (per-user gating, PRIVATE vs. SHARED) and would throw
@@ -233,7 +233,7 @@ candidate — every request calls `auth()` (per-user gating, PRIVATE vs. SHARED)
 `/[slug]`'s own history). That's not a caching gap to close: a *post* page's cost without ISR
 would be a Yjs decode plus a ProseMirror render on every request, which ISR exists specifically
 to avoid paying repeatedly. A *doc* page's steady-state cost is one row read — `Doc.proseJson`
-(§12d) is a plain `JSONB` column populated by the collab server's own store debounce, so the
+(docs/DOCS.md, "The caches") is a plain `JSONB` column populated by the collab server's own store debounce, so the
 expensive half (decoding the live `ydoc` blob) already happened once, off the request path,
 before any reader shows up. `renderToReactElement` over that cached JSON is the same
 per-request cost `/[slug]` pays for its own (revision-cached, not live-cached) content.
@@ -361,7 +361,7 @@ declared explicitly rather than left to whether some call inside happens to opt 
 
 **The chips do not cost the post page its static generation.** `/[slug]` carries
 `generateStaticParams` and `revalidate = 60`, and a route eligible for static generation that
-also calls a dynamic API throws `DYNAMIC_SERVER_USAGE` at build (PLAN.md §12f). So
+also calls a dynamic API throws `DYNAMIC_SERVER_USAGE` at build (docs/DOCS.md, "Routes"). So
 `TagChips` reads **no session at all**: which terms are on an object is the same answer
 for every viewer who can see the object, and everything viewer-shaped — may you tag this, what
 are your own tags here — lives in a client island that asks the server when someone opens it

@@ -145,14 +145,11 @@ export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
 // neither Enter nor a multi-line paste can turn a title into two lines, and
 // no marks are registered so a title can't carry bold/links/etc.
 //
-// Shared with the Hocuspocus seeding step and LiveHistoryViewer's replay,
-// same reason as contentExtensions above: three consumers, one definition.
+// Shared by the title editor (CollabTitleField) and every path that seeds a
+// title fragment without one — createDoc and the importer, the seed and test
+// scripts, the e2e fixtures — same reason as contentExtensions above: one
+// definition, however many consumers.
 export const titleExtensions = [Document.extend({ content: "paragraph" }), Paragraph, Text];
-
-// The title schema as a plain prosemirror-model Schema — the title-fragment
-// counterpart of pmSchema, for code that builds a title doc outside a live
-// editor (server/collab.ts's restore endpoint).
-export const pmTitleSchema = getSchema(titleExtensions);
 
 // titleExtensions plus the author-highlight mark — the title editor and
 // anything rendering the working Yjs session's title. Mirrors

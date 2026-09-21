@@ -7,18 +7,18 @@ import { useEditor, type Editor, type JSONContent } from "@tiptap/react";
 import type { Extensions } from "@tiptap/core";
 import { docContentExtensions } from "./tiptap-schema";
 import { attachProvider, type CollabSocket } from "./collab-socket";
-import { renderYdocDoc } from "./ydoc-render";
+import { renderYdocDoc, titleTextFromJSON } from "./ydoc-render";
 import { PendingAnnotation } from "./pending-annotation-extension";
 import { captureYdocVersion } from "./ydoc-version-client";
 
 type Awareness = HocuspocusProvider["awareness"];
 
 // The live reading half of a doc, minus any opinion about what a reader may
-// *do* with a selection (PLAN.md §12g/§12i). Extracted from `LiveDocBody`,
-// which had grown to serve both /doc/[slug] (annotations) and a
-// /side-by-side column (doc links) by branching on a `selectionUi` flag —
-// see PLAN.md §14p. What lives here is only the part that was identical
-// either way, and it is the part worth never writing twice:
+// *do* with a selection (PLAN.md §12g/§12i). Two thin surfaces sit on it —
+// /doc/[slug]'s DocReadingBody (annotations) and a /side-by-side column (doc
+// links) — and each keeps its own selection UI rather than branching on a
+// flag here (PLAN.md §14p). What lives here is only the part identical to
+// both, and it is the part worth never writing twice:
 //
 // - Live updates. Content isn't fixed at mount the way a published post's
 //   is — a read-only Hocuspocus connection taps the live document and
@@ -106,6 +106,11 @@ export type LiveDocContentOptions = {
   setAwareness: (awareness: Awareness | null) => void;
   onEditorCreated?: (editor: Editor) => void;
   onSelectionUpdate?: (editor: Editor) => void;
+  // The title fragment's text as of the same render that produced the body —
+  // raw, "" included, so the caller applies docTitleOrFallback. Fires only on
+  // a change, never for an `overrideBodyJSON` push, and never while `frozen`.
+  // PLAN.md §12n, "The title follows the fragment live".
+  onLiveTitle?: (title: string) => void;
   // Fired synchronously after every setContent — a live remote update, a
   // scrub jump, or hoisted mode's catch-up on mount. This is the one
   // content-change choke point each surface re-resolves its own anchored
@@ -152,6 +157,7 @@ export function useLiveDocContent({
   onEditorCreated,
   onSelectionUpdate,
   onContentPushed,
+  onLiveTitle,
 }: LiveDocContentOptions): LiveDocContent {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,6 +179,24 @@ export function useLiveDocContent({
   useEffect(() => {
     onContentPushedRef.current = onContentPushed;
   });
+
+  // Same ref indirection as onContentPushedRef, same reason.
+  const onLiveTitleRef = useRef(onLiveTitle);
+  useEffect(() => {
+    onLiveTitleRef.current = onLiveTitle;
+  });
+
+  // Only a *changed* title goes up: every body keystroke re-derives the same
+  // string, and a caller holding it in state would re-render the whole
+  // surface per keystroke for nothing. Null, not "", so an empty title still
+  // reports once.
+  const lastTitleRef = useRef<string | null>(null);
+  const reportLiveTitle = useCallback((titleJSON: JSONContent | null) => {
+    const text = titleTextFromJSON(titleJSON);
+    if (text === lastTitleRef.current) return;
+    lastTitleRef.current = text;
+    onLiveTitleRef.current?.(text);
+  }, []);
 
   // Read inside the ydoc "update" listener below, which is registered once
   // per connection and would otherwise close over whatever `frozen` was at
@@ -290,6 +314,7 @@ export function useLiveDocContent({
       const result = renderYdocDoc(ydoc);
       if (result.ok) {
         editor.commands.setContent(result.bodyJSON, { emitUpdate: false });
+        reportLiveTitle(result.titleJSON);
         onContentPushedRef.current?.(editor);
       } else {
         setError(result.error);
@@ -298,7 +323,7 @@ export function useLiveDocContent({
     return () => {
       cancelled = true;
     };
-  }, [editor, hoistedProvider, ydoc]);
+  }, [editor, hoistedProvider, ydoc, reportLiveTitle]);
 
   // undefined (the option's unset state) means "no scrub bar mounted yet" —
   // deliberately distinct from null (mounted, but at the live/latest
@@ -336,6 +361,7 @@ export function useLiveDocContent({
       const liveEditor = editorRef.current;
       if (result.ok) {
         liveEditor?.commands.setContent(result.bodyJSON, { emitUpdate: false });
+        reportLiveTitle(result.titleJSON);
         if (liveEditor) onContentPushedRef.current?.(liveEditor);
       } else {
         setError(result.error);

@@ -232,9 +232,17 @@ names the log of whichever document the anchor is measured against:
   own checkpoint, which can trail a Done.
 - An anchorless annotation: the doc log's tail. A PDF root: null, since a file has no log.
 
-"At this revision" on a card seeks the doc's scrub bar to the stamp, and renders only once
-the scrub bar has registered a seek. For an anchored reply it names a position in a
-different log — an accepted cost, retired by PLAN.md §20e when anchor rows arrive.
+"At this revision" on a card is an `<a>` to `?at=<stamp>#<the card's own anchor>`
+(`scrubHref`, docs/DOCS.md "The reading view") whose click is handled in place when it can
+be: seeking the slider keeps the live tap, the rail and any open draft where they are,
+where following the href is a full page load. `preventDefault` is conditional on the seek
+having actually landed, so the two cases it cannot cover fall through to the navigation —
+the bar not loaded yet, and an id the loaded replay has no row for. It renders on the
+strength of the page *having* a scrub bar (`useHasDocScrub`, i.e. page.tsx's `canEdit`)
+rather than of one having loaded, which is what makes it available on arrival instead of
+only after the reader has touched the slider; a viewer who may read but not edit gets no
+bar and so no control. For an anchored reply it names a position in a different log — an
+accepted cost, retired by PLAN.md §20e when anchor rows arrive.
 `scripts/integrity/check-annotation-anchors.ts` pins the triple invariant and, for marks,
 that the mark is present at the stamp.
 

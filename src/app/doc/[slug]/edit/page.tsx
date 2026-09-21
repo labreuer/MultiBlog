@@ -11,7 +11,7 @@ import { EDITOR_MARGIN_NOTES_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import DocEditor from "@/components/DocEditor";
-import { docTitleOrFallback } from "@/lib/doc-title";
+import { docEditorTabTitle } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
 
 // resolveDocParam rather than a direct query — the id-or-slug ambiguity this
@@ -51,7 +51,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  return titleWhenOk(await loadDocForEdit(slug), (doc) => `✎ ${docTitleOrFallback(doc.title)}`);
+  return titleWhenOk(await loadDocForEdit(slug), (doc) => docEditorTabTitle(doc.title));
 }
 
 export default async function EditDocPage({ params }: { params: Promise<{ slug: string }> }) {

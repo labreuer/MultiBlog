@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
 import SiteHeader from "@/components/SiteHeader";
-import { SITE_TITLE } from "@/lib/site-config";
+import { SITE_TITLE, tabTitle } from "@/lib/site-config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   //
   // A page that must keep its exact title takes `{ absolute: "…" }` instead of
   // a string; nothing does today.
-  title: { default: SITE_TITLE, template: `%s | ${SITE_TITLE}` },
+  title: { default: SITE_TITLE, template: tabTitle("%s") },
   description: "A multi-author blog with revisions and quote-anchored comments.",
   alternates: {
     types: { "application/rss+xml": "/rss.xml" },

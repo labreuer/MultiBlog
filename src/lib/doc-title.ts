@@ -10,3 +10,10 @@ export const UNTITLED_DOC = "Untitled";
 export function docTitleOrFallback(title: string): string {
   return title.trim() || UNTITLED_DOC;
 }
+
+// The doc *editor*'s tab title, shared by /doc/[slug]/edit's generateMetadata
+// and by DocEditor's live update of the same string — the pencil is what tells
+// two tabs on the same doc apart, so it cannot live in only one of them.
+export function docEditorTabTitle(title: string): string {
+  return `✎ ${docTitleOrFallback(title)}`;
+}

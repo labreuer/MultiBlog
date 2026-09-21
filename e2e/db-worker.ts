@@ -938,6 +938,22 @@ export async function countDocYdocUpdates(docId: string): Promise<number> {
   return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
 }
 
+/**
+ * Every ydoc_update id for docId's own ydoc, oldest first — the same order
+ * and so the same indices GET /api/doc/[id]/replay hands the scrub bar. Lets
+ * a spec name the id a slider position must be reporting, rather than
+ * asserting that `?at=` merely holds *some* number. Strings, because these
+ * are bigints and the URL carries them as text end to end.
+ */
+export async function getDocYdocUpdateIds(docId: string): Promise<string[]> {
+  const rows = await prisma.ydocUpdate.findMany({
+    where: { ydocId: ydocIdForDoc(docId) },
+    orderBy: { id: "asc" },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id.toString());
+}
+
 // ---------------------------------------------------------------------------
 // Doc links (PLAN.md §14) — a doc link's anchor is a plain JSON blob computed
 // against a doc's body text, not a live-collab mark, so unlike an annotation
@@ -1154,8 +1170,16 @@ export async function createTestAnnotation(opts: {
   authorEmail: string;
   bodyText: string;
   anchor?: { from: number; to: number; quotedText: string };
+  /**
+   * The version stamp (ANNOTATIONS.md, "The version stamp") — a ydoc_update
+   * id from `getDocYdocUpdateIds`. Only the "at this revision" control reads
+   * it, so it stays optional; a fixture that wants that control has to say
+   * which revision, since the whole point of the control is that the stamp
+   * is older than the doc's head.
+   */
+  ydocUpdateId?: string;
 }): Promise<{ id: string }> {
-  const { docId, authorEmail, bodyText, anchor } = opts;
+  const { docId, authorEmail, bodyText, anchor, ydocUpdateId } = opts;
   assertSafe(authorEmail);
   const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
   // PLAN.md §22e — a posted annotation comes with a body ydoc, `postedAt`,
@@ -1183,6 +1207,7 @@ export async function createTestAnnotation(opts: {
       status: "LIVE",
       postedAt: now,
       ...(anchor ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText } : {}),
+      ...(ydocUpdateId ? { ydocUpdateId: BigInt(ydocUpdateId) } : {}),
     },
   });
   const ydocId = ydocIdForAnnotation(annotation.id);
@@ -2120,6 +2145,7 @@ const handlers = {
   getSiteDefaultColumnOrder,
   setSiteDefaultColumnOrder,
   countDocYdocUpdates,
+  getDocYdocUpdateIds,
   createTestDocLink,
   deleteTestDocLinkGroup,
   countDocLinks,

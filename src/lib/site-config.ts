@@ -11,3 +11,10 @@
 // NEXT_PUBLIC_-prefixed vars are inlined into the browser bundle, at build
 // time, same as every other value here.
 export const SITE_TITLE = process.env.NEXT_PUBLIC_SITE_TITLE ?? "MultiBlog";
+
+// The root layout's `title.template`, as a function, so the client surfaces
+// that write `document.title` by hand (src/lib/use-live-tab-title.ts) compose
+// the identical string. Don't inline it back into layout.tsx.
+export function tabTitle(segment: string): string {
+  return `${segment} | ${SITE_TITLE}`;
+}

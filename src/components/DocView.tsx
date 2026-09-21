@@ -6,6 +6,8 @@ import type { JSONContent } from "@tiptap/react";
 import DocReadingBody from "./DocReadingBody";
 import DocScrubBar, { type ScrubbedState } from "./DocScrubBar";
 import type { AnnotationAnchorInput } from "@/lib/annotation-highlight-extension";
+import { docTitleOrFallback } from "@/lib/doc-title";
+import { useLiveTabTitle } from "@/lib/use-live-tab-title";
 
 type Props = {
   docId: string;
@@ -31,6 +33,11 @@ type Props = {
   // fetch AnnotationSection renders, so the highlight and the card can never
   // disagree about which annotations exist.
   annotationAnchors: AnnotationAnchorInput[];
+  // The ?at= scrub position this page was opened at, validated server-side
+  // (src/lib/scrub-url.ts) and passed straight through to the scrub bar,
+  // which is the only thing here that can turn a ydoc_update id into a
+  // rendered revision. Null on an ordinary visit.
+  initialScrubUpdateId: string | null;
 };
 
 // Owns the one piece of state DocScrubBar, the title, and DocReadingBody need
@@ -46,19 +53,36 @@ export default function DocView({
   canEdit,
   userColor,
   annotationAnchors,
+  initialScrubUpdateId,
 }: Props) {
   const [scrubbed, setScrubbed] = useState<ScrubbedState | null>(null);
+  // Raw text from the live tap, null until its first render; the fallback is
+  // applied once, below.
+  const [liveTitle, setLiveTitle] = useState<string | null>(null);
   // Bumped on "return to live" (PLAN.md §12) so DocScrubBar's slider seeks
   // back to the end instead of sitting at whatever historical position it
   // was left at while the body it drives has already snapped back to live.
   const [resetSignal, setResetSignal] = useState(0);
 
-  const title = scrubbed?.title ?? initialTitle;
   // Scrubbing freezes the view exactly while it's showing something other
   // than the live end — not merely while a scrub bar is mounted, which is
   // why this isn't just `scrubbed !== null` (the mount-time seed already
-  // pushes a `live: true` state before any drag).
+  // pushes a `live: true` state before any drag). It is also the whole of
+  // what `?at=` has to do: the bar opens at that position and reports
+  // `live: false`, and the freeze follows from that alone.
   const scrubFrozen = scrubbed !== null && !scrubbed.live;
+
+  // History pinned by the scrub bar wins; then the live tap (frozen by the
+  // same rule as the body, so it never moves above held text); then the scrub
+  // bar's live-end replay; then the server's cache. PLAN.md §12n, "The title
+  // follows the fragment live".
+  const title = docTitleOrFallback(
+    scrubFrozen && scrubbed ? scrubbed.title : (liveTitle ?? scrubbed?.title ?? initialTitle),
+  );
+
+  // The tab, which generateMetadata composed from that same cache.
+  useLiveTabTitle(title);
+
   // Only meaningful while scrub-frozen — a selection-only freeze has no
   // scrub position to report, and a live scrub position is already stale by
   // the time postAnnotation would use it, so the server's own tail lookup
@@ -80,12 +104,20 @@ export default function DocView({
         staticBody={staticBody}
         overrideBodyJSON={scrubbed?.bodyJSON ?? null}
         userColor={userColor}
+        onLiveTitle={setLiveTitle}
         scrubFrozen={scrubFrozen}
         scrubUpdateId={scrubUpdateId}
         onReturnToLive={handleReturnToLive}
         annotationAnchors={annotationAnchors}
       />
-      {canEdit && <DocScrubBar docId={docId} onScrub={setScrubbed} resetSignal={resetSignal} />}
+      {canEdit && (
+        <DocScrubBar
+          docId={docId}
+          onScrub={setScrubbed}
+          resetSignal={resetSignal}
+          initialUpdateId={initialScrubUpdateId}
+        />
+      )}
     </>
   );
 }

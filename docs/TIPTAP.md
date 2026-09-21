@@ -439,7 +439,7 @@ the attribute is `data-thread-ids`, plural.
 
 Per-author color-coding (`src/lib/author-highlight-extension.ts`) lives in a doc's working
 Yjs state and **nothing ever removes them from the doc itself**. A doc has no save step to
-hook a reset into (PLAN.md §12k), unlike the old post editor's `clearAuthorHighlights`, which
+hook a reset into (DOCS.md, "The editor"), unlike the old post editor's `clearAuthorHighlights`, which
 doesn't exist any more.
 
 What keeps them out of *published* content is `postContentFromYdoc`

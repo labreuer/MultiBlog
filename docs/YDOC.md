@@ -1,8 +1,8 @@
 # The ydoc stack
 
 One Hocuspocus process, three Postgres tables, and the rules that keep a document's identity
-intact across restarts and across a browser's local cache. The design is PLAN.md §11 and
-§12; this file is what you need to know before restarting something, debugging something, or
+intact across restarts and across a browser's local cache. The design is PLAN.md §11, and the
+entity that rides on it is [DOCS.md](DOCS.md); this file is what you need to know before restarting something, debugging something, or
 attaching a second persistence layer.
 
 How a *remark* stays attached to a passage inside one of these documents is a different

@@ -4,13 +4,14 @@ import type { JSONContent } from "@tiptap/core";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { docContentExtensions, titleAuthorHighlightExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { extractText } from "@/lib/diff";
 
-// Renders an already-materialized Y.Doc the way LiveHistoryViewer renders a
-// replayed one (src/components/LiveHistoryViewer.tsx) — but tolerant of a
-// document that was never a TipTap doc to begin with (/ydoc-debug's --garbage
-// fixture, PLAN.md §11f). This logic is copied rather than extracted out of
-// LiveHistoryViewer, which the isolation constraint (PLAN.md §11) puts
-// off-limits; de-duplicating the two belongs to the eventual cutover.
+// The one renderer for a materialized Y.Doc, wherever it came from: the doc
+// reading route's cold-start decode, the live tap's per-update render
+// (use-live-doc-content.ts), the scrub bar's and /ydoc-debug's replay
+// (useReplayScrub), and the doc cache (doc-content.ts). Tolerant of a document
+// that was never a TipTap doc to begin with (/ydoc-debug's --garbage fixture,
+// PLAN.md §11f), which is why it returns a result rather than throwing.
 //
 // Takes a Y.Doc rather than a blob, and **never destroys it** — the replay
 // slider owns one long-lived doc that it advances across scrub steps, so
@@ -63,6 +64,14 @@ export function readYdocContent(doc: Y.Doc): YdocContent {
       error: `This document isn't TipTap-compatible: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+// One derivation for the three readers of the title fragment (the doc cache,
+// the scrub bar, the live tap). "" is a genuinely empty title, not a decode
+// failure — see readYdocContent — and `Untitled` is applied at render, never
+// here.
+export function titleTextFromJSON(titleJSON: JSONContent | null): string {
+  return titleJSON ? extractText(titleJSON) : "";
 }
 
 export type YdocRenderResult =

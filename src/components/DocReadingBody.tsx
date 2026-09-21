@@ -50,6 +50,9 @@ type Props = {
   // Clicking FROZEN — clears the scrub override and reports it back up so
   // DocView can also reset the scrub bar's own slider position.
   onReturnToLive?: () => void;
+  // The live tap's title, for DocView's <h1> — useLiveDocContent's option of
+  // the same name. Raw; DocView applies the fallback.
+  onLiveTitle?: (title: string) => void;
   // PLAN.md §13o — every column-anchored annotation on this doc, so their
   // ranges can be tracked against the live document and drawn. Mark-anchored
   // ones aren't in here and don't need to be: their highlight is the mark's
@@ -83,12 +86,12 @@ function jumpToAnnotationEntry(ids: string[]) {
 // The reading view at /doc/[slug] (PLAN.md §12g): live doc content, where
 // selecting text offers to annotate it.
 //
-// Was `LiveDocBody`, which served this surface *and* a /side-by-side column by
-// branching on a `selectionUi` flag (PLAN.md §14p). Splitting them is what
-// lets this file state plainly that it shows annotations and nothing else —
-// where before, whether it rendered an AnnotationPopover depended on a prop,
-// and its pending-selection state was shared with a doc-link popover whose
-// positioning convention silently diverged from this one's.
+// One of two thin surfaces over `useLiveDocContent`; the other is a
+// /side-by-side column (PLAN.md §14p, docs/live-view-composition.html). They
+// are separate components rather than one with a `selectionUi` flag so that
+// this file can state plainly that it shows annotations and nothing else: an
+// AnnotationPopover is always rendered, and the pending-selection state is
+// not shared with the doc-link popover, whose positioning convention differs.
 export default function DocReadingBody({
   docId,
   initialBodyJSON,
@@ -98,6 +101,7 @@ export default function DocReadingBody({
   scrubFrozen = false,
   scrubUpdateId = null,
   onReturnToLive,
+  onLiveTitle,
   annotationAnchors = EMPTY_ANCHORS,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,6 +151,7 @@ export default function DocReadingBody({
     setAwareness,
     getSocket,
     extensions,
+    onLiveTitle,
     onSelectionUpdate: selection.capture,
     onContentPushed: (liveEditor) => {
       selection.reresolve(liveEditor);

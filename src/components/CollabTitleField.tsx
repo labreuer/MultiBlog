@@ -40,11 +40,12 @@ const SingleLine = Extension.create({
   },
 });
 
-// The post title, as a collaborative field rather than a plain <input>: it's a
+// A doc's title, as a collaborative field rather than a plain <input>: it's a
 // second Yjs fragment ("title") of the *same* Y.Doc the body uses, so it rides
-// the existing Hocuspocus connection, PostCollab.ydoc persistence, and
-// PostCollabUpdate replay log — which is what lets /post/[id]/live-history
-// scrub through title changes, colored per author, for free.
+// the existing Hocuspocus connection, `ydoc` persistence and the `ydoc_update`
+// replay log — which is what lets /doc/[slug]'s scrub bar and /ydoc-debug
+// scrub through title changes, colored per author, for free. Used by
+// DocEditor, a /side-by-side column's write mode and YdocDebug.
 //
 // Deliberately no CollaborationCaret: the extension has no per-field awareness
 // key, so a second instance sharing this provider would write the same

@@ -153,7 +153,7 @@ An empty or heading-only source yields one empty paragraph.
 ## 5. Seeding the doc
 
 The same creation path as `createDoc` — one row, slugged by its own id, with an eagerly
-created ydoc (PLAN.md §12b) — differing only in that the ydoc is seeded with content instead
+created ydoc (DOCS.md, "The ydoc behind a doc") — differing only in that the ydoc is seeded with content instead
 of left empty. The seeding is [`scripts/seed-front-page.ts`](../scripts/seed-front-page.ts)'s,
 and both of that script's non-obvious steps are load-bearing here for the same reasons:
 
@@ -177,7 +177,7 @@ notice and clean up.
 
 ### The slug follows the title
 
-PLAN.md §12n has a doc slugged by its own cuid, because a doc is normally created titleless —
+DOCS.md, "The editor", has a doc slugged by its own cuid, because a doc is normally created titleless —
 the title is a live collaborative field, so there is nothing to build a slug from at creation.
 An imported doc is the exception: it arrives *with* a name, from its leading heading or its
 filename (§4), so the slug is generated from that instead and the doc gets a readable URL
@@ -199,7 +199,7 @@ Two edges:
   and then the cuid, so it always terminates.
 
 The action redirects to `/doc/<slug>/edit` rather than `/doc/<id>/edit`. Both resolve —
-`resolveDocParam` tries id first, then slug (§12f) — so this is only about which URL the
+`resolveDocParam` tries id first, then slug (DOCS.md, "Routes") — so this is only about which URL the
 author lands on and bookmarks.
 
 ## 6. The size cap exists to stay under Next's, not to be one

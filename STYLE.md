@@ -64,8 +64,8 @@ lump every table-adjacent style into one file:
 | `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values; `.arrowActive`/`.barActive` also read `--thread-color` |
 | `components/PostSettingsPanel.module.css` | same state-dependent-class rationale as `QuoteThreadHeader` — `.draggableRow`/`.dragOver` toggle on drag state, `.checkboxRow` conditionally combines them; no pseudo-class/media-query is used, but juggling three conditional classes per row as inline `style` objects would be worse than the module |
 | `styles/account.module.css` | shared across the account surfaces — the four auth pages (`/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`) and `/dashboard` — holding their common card, label-over-input field, and house-button chrome. Named for the domain per the "shared across several" clause; consumers keep layout-only classes of their own (widths, `<summary>` behavior) that deliberately never set a property this file sets (docs/DASHBOARD.md) |
-| `app/doc/[slug]/page.module.css` | the doc reading view (PLAN.md §12n). No pseudo-class or media query — created because the alternative was a fresh set of fixed-value inline `style` objects, which the default above rules out. Also carries a state-dependent class pair (`.container` plus `.containerScrubbable`, the latter reserving room for the pinned scrub footer only when it renders), and a `.byline` mirroring `app/[slug]/page.module.css`'s rather than restating those six declarations inline |
-| `components/DocEditor.module.css`, `DocSettingsPanel.module.css` | doc-side siblings of `PostEditor.module.css`/`PostSettingsPanel.module.css` (PLAN.md §12k) — `@media` (narrow container) and the same `.draggableRow`/`.dragOver` state pair, respectively. Trimmed to only what `DocEditor`/`DocSettingsPanel` themselves need: the toolbar/editor-frame/caret rules a doc's editor also uses live in `PostEditor.module.css` still, since `CollabEditorBody` (which owns them) is reused unmodified rather than forked. `DocEditor.module.css` also gained the `[data-empty]::before` + `attr(data-placeholder)` title placeholder (PLAN.md §12n, added 2026-07-29) — the same `content: attr(...)` trick a plain `::before` rule needs, which inline `style` can't express |
+| `app/doc/[slug]/page.module.css` | the doc reading view (docs/DOCS.md, "The reading view"). No pseudo-class or media query — created because the alternative was a fresh set of fixed-value inline `style` objects, which the default above rules out. Also carries a state-dependent class pair (`.container` plus `.containerScrubbable`, the latter reserving room for the pinned scrub footer only when it renders), and a `.byline` mirroring `app/[slug]/page.module.css`'s rather than restating those six declarations inline |
+| `components/DocEditor.module.css`, `DocSettingsPanel.module.css` | doc-side siblings of `PostEditor.module.css`/`PostSettingsPanel.module.css` (docs/DOCS.md, "The editor") — `@media` (narrow container) and the same `.draggableRow`/`.dragOver` state pair, respectively. Trimmed to only what `DocEditor`/`DocSettingsPanel` themselves need: the toolbar/editor-frame/caret rules a doc's editor also uses live in `PostEditor.module.css` still, since `CollabEditorBody` (which owns them) is reused unmodified rather than forked. `DocEditor.module.css` also gained the `[data-empty]::before` + `attr(data-placeholder)` title placeholder (docs/DOCS.md, "The editor", added 2026-07-29) — the same `content: attr(...)` trick a plain `::before` rule needs, which inline `style` can't express |
 
 Numeric constants that also drive non-CSS geometry (e.g. `QuoteThreadHeader`'s
 `HEAD_WIDTH`/`HEAD_HEIGHT`, used in both the SVG `viewBox` and a CSS `width`) stay as
@@ -646,16 +646,25 @@ Five centred-column widths now, and they are one decision rather than five:
   The containers carrying it differ by their own gutters and say so:
   `calc(1520px + 2rem)` on `/[year]/[month]/[day]/[slug]` and `DocEditor`, which get 1rem
   from `.main` one level in and from the container itself respectively, and
-  `calc(1520px + 1.5rem)` on `/doc/[slug]`, whose container *is* the `<main>` and so
-  carries a 0.75rem gutter directly. Above the breakpoint that padding sits outside the
+  `calc(1520px + 3rem)` on `/doc/[slug]`, whose container *is* the `<main>` and so
+  carries a 1.5rem gutter directly. Above the breakpoint that padding sits outside the
   grid, which is what puts it to the left of the document and the right of the rail;
   below it, where there is one column, to either side of the document. One rule, both
   layouts — don't reach for a second inside the `@media` block.
 
+  **`/doc/[slug]`'s gutter is the widest of the three because it is load-bearing**: the
+  FROZEN flag (`DocReadingBody.module.css`'s `.flagTrack`) hangs 1.25rem to the left of
+  the reading column, into that padding, and the 1.5rem is that plus 4px so it doesn't
+  sit flush against the window. At 0.75rem the flag was clipped by `body`'s
+  `overflow-x: hidden` wherever `max-width: 100%` decided the container — which is not
+  only phone widths but the entire 1180–1544 band, an ordinary desktop window with the
+  rail showing.
+
   **At the breakpoint exactly, every one of those gutters is spent out of the layout
   rather than out of spare window**, because `max-width: 100%` is what is deciding there.
-  So the reading column measures 768px on the post page and the editor, and 776px on
-  `/doc/[slug]`, reaching its full 800 a few pixels further up. 800 is the measure the
+  So the reading column measures 768px on the post page and the editor, and 752px on
+  `/doc/[slug]` — the deepest of the three, the flag's gutter being the widest — reaching
+  its full 800 a few pixels further up. 800 is the measure the
   layout is composed from, not a promise about the narrowest window that has a rail.
 
 ## The admin-table kit (`components/table/`)

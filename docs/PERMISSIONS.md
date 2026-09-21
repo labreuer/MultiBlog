@@ -6,10 +6,10 @@ treat this as a map of the code and not as the code: **the authoritative rules l
 check. The "Where each rule lives" section at the end lists every file consulted, so any
 row here can be re-derived rather than trusted.
 
-Assumes PLAN.md §12e's two-doc-gates distinction (`canViewDocs` governs reading and
+Assumes DOCS.md's two-doc-gates distinction ("Roles and visibility") (`canViewDocs` governs reading and
 annotating a `SHARED` doc; `canManageDocs` governs `/docs` management) and the per-doc
 `visibility` rule stated there — a `PRIVATE` doc readable and editable by its listed
-`DocAuthor`s alone, with no ADMIN/EDITOR bypass. §12f covers the two admin listings and the
+`DocAuthor`s alone, with no ADMIN/EDITOR bypass. DOCS.md, "Routes", covers the two admin listings and the
 ADMIN-only "Show all docs" override. `/site-settings` is deliberately out of scope.
 
 **`PRIVATE`/`SHARED` is `Doc.visibility`.** Posts have no visibility column at all, so the
@@ -222,7 +222,7 @@ person coming off a doc's byline must not thereby lose credit for what is alread
 The two doc-side questions are **separate and both get asked**: `canUserReadDoc` decides what
 may be *shown* about the doc (its title as a link, its tags in §20m's offer), and
 `canUserEditDoc` decides what may be *done* with it (scrub, publish). A PRIVATE doc answers
-no to both for anyone off its byline, ADMIN and EDITOR included (§12e); a SHARED doc answers
+no to both for anyone off its byline, ADMIN and EDITOR included (DOCS.md, "Roles and visibility"); a SHARED doc answers
 yes to the first for anyone with `canViewDocs`, which is why a post author usually does see
 the tag offer and usually does not see the scrub bar.
 
@@ -423,7 +423,7 @@ public after it was quoted; the words stay, the citation degrades).
 | A comment that is `APPROVED` and not deleted, on a published post | ✅ |
 | A `PENDING` or `SPAM` or deleted comment | ❌ — not public yet, or no longer |
 | A `StoredFile` | ❌ until §19 grows a publicly-readable tier |
-| A doc, `PRIVATE` or `SHARED` | ❌ — there is no public doc tier (§12e) |
+| A doc, `PRIVATE` or `SHARED` | ❌ — there is no public doc tier (DOCS.md, "Roles and visibility") |
 | An annotation body | ❌ — it lives on a doc or a file, and inherits the above |
 
 Two consequences. The doc, file and annotation arms of `comment_quote_anchor`'s arc have no

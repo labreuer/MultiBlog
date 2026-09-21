@@ -38,6 +38,7 @@ import {
   markPresentAtStamp,
   addTestDocAuthor,
   createTestAnnotation,
+  getDocYdocUpdateIds,
 } from "./db";
 import { ADMIN_EMAIL } from "./naming";
 import { uniqueTitle } from "./naming";
@@ -693,5 +694,215 @@ test.describe("real-time collaboration", () => {
     // title edit leaking into the body would be the failure mode worth
     // catching here.
     await expect(bodyEditor(otherPage)).not.toContainText(suffix);
+  });
+});
+
+// docs/DOCS.md, "The reading view" — the scrub position lives in `?at=`, so a
+// point in a doc's history is something you can link to. Three things are
+// worth holding down: the parameter is written at all (and is the *id*, not
+// the slider index, which is the part a refactor would silently get wrong);
+// a URL carrying one opens frozen at that revision, which is the whole
+// feature; and returning to live strips it, since a stale position left in
+// the URL would outlive the reader's interest in it.
+//
+// The rules this *cannot* see are in src/lib/scrub-url.ts: that the write is
+// a replaceState rather than a pushState, and that it is debounced. Both are
+// invisible to a DOM assertion — the first shows up only as a hundred history
+// entries, the second only as a SecurityError in a browser this suite doesn't
+// run. The unit test and the comment there are what guard them.
+test.describe("the scrub position in the URL", () => {
+  /** A range input ignores fill()/click, per docs/BROWSER_PANE.md's recipe. */
+  async function scrubTo(page: import("@playwright/test").Page, value: number): Promise<void> {
+    await page.getByLabel("Scrub through this doc's edit history").evaluate((el, v) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(el, String(v));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
+  }
+
+  /** `?at=`, read from the page's own location — history.replaceState is the only thing that changes it. */
+  const scrubParam = (page: import("@playwright/test").Page) =>
+    page.evaluate(() => new URL(window.location.href).searchParams.get("at"));
+
+  const FROZEN = { name: /Switch to live view/ };
+
+  /**
+   * Gives `sharedDoc` a history worth scrubbing and returns its update ids.
+   * The fixture is created with one full-state update row holding QUOTED_BODY
+   * (index 0 on the slider), so the appended sentence is what tells an
+   * earlier position apart from the live one.
+   */
+  async function appendToDoc(page: import("@playwright/test").Page, docId: string, text: string): Promise<string[]> {
+    await page.goto(`/doc/${docId}/edit`);
+    await waitForDocCollabReady(page);
+    await bodyEditor(page).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(text);
+    await expect
+      .poll(async () => (await getDocState(docId))?.proseText ?? "", { timeout: 15_000 })
+      .toContain(text.trim());
+    return getDocYdocUpdateIds(docId);
+  }
+
+  test("scrubbing writes ?at=, and it names the update the slider is on", async ({ page, sharedDoc }) => {
+    const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
+    expect(updateIds.length).toBeGreaterThan(1);
+
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await expect(bodyEditor(page)).toBeVisible();
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    // Nothing in the URL until something is scrubbed: an ordinary visit is a
+    // visit to the live doc, and the live end is the parameter's absence.
+    expect(await scrubParam(page)).toBeNull();
+
+    // The bar is inert until touched; focusing it is what fetches the log.
+    await page.getByLabel("Scrub through this doc's edit history").focus();
+    await expect
+      .poll(async () => page.getByLabel("Scrub through this doc's edit history").getAttribute("max"), {
+        timeout: 15_000,
+      })
+      .toBe(String(updateIds.length - 1));
+
+    await scrubTo(page, 0);
+    // The id of the doc's *first* update row, not the index 0 that was
+    // dragged to — asserted against the database rather than against a regex,
+    // because "some number ended up in the URL" would pass either way.
+    await expect.poll(() => scrubParam(page), { timeout: 15_000 }).toBe(updateIds[0]);
+
+    // And the view really is at that revision, not merely labelled as one.
+    await expect(page.getByRole("button", FROZEN)).toBeVisible();
+    await expect(bodyEditor(page)).not.toContainText("Appended after creation.");
+    await expect(bodyEditor(page)).toContainText(QUOTED_TEXT);
+  });
+
+  test("a URL naming a position opens frozen at it, without waiting to be touched", async ({ page, sharedDoc }) => {
+    const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
+
+    await page.goto(`/doc/${sharedDoc.slug}?at=${updateIds[0]}`);
+    // No focus, no drag: the parameter is the request, and the bar loads its
+    // history eagerly because of it. This is the assertion that would fail if
+    // the bar stayed lazy — the page would sit on live content forever.
+    await expect(page.getByRole("button", FROZEN)).toBeVisible({ timeout: 15_000 });
+    await expect(bodyEditor(page)).toContainText(QUOTED_TEXT);
+    await expect(bodyEditor(page)).not.toContainText("Appended after creation.");
+    // The slider agrees with the URL rather than sitting at its own default.
+    await expect(page.getByLabel("Scrub through this doc's edit history")).toHaveValue("0");
+
+    // Returning to live strips the parameter, so the URL never outlives the
+    // position it named.
+    await page.getByRole("button", FROZEN).click();
+    await expect.poll(() => scrubParam(page), { timeout: 15_000 }).toBeNull();
+    await expect(bodyEditor(page)).toContainText("Appended after creation.");
+  });
+
+  // The control that names a revision is now a link to one (ANNOTATIONS.md,
+  // "The version stamp"). Two properties, and the second is the one a
+  // refactor is most likely to lose: it is reachable *before* the scrub bar
+  // has loaded, which is what it could never do while it was a button wired
+  // straight to the slider.
+  test("'at this revision' links to the revision, and seeks in place once the bar is loaded", async ({
+    page,
+    sharedDoc,
+  }) => {
+    const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
+    await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: "E2E annotation stamped at the doc's first revision.",
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+      ydocUpdateId: updateIds[0],
+    });
+
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    const link = page.getByRole("link", { name: "at this revision" });
+    // Present on arrival — nothing has touched the slider, so the seek
+    // function this used to require does not exist yet.
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", new RegExp(`\\?at=${updateIds[0]}#.`));
+
+    // With no bar loaded there is nothing to seek, so the click falls through
+    // to the href and a fresh page load does the work instead.
+    await link.click();
+    await expect(page.getByRole("button", FROZEN)).toBeVisible({ timeout: 15_000 });
+    await expect(bodyEditor(page)).not.toContainText("Appended after creation.");
+    expect(await scrubParam(page)).toBe(updateIds[0]);
+
+    // Back to live, which leaves the bar loaded behind it — and from here the
+    // same link is handled in place. The marker is what proves it: a survivor
+    // of the click means no navigation happened, where the assertions above
+    // would have passed either way.
+    await page.getByRole("button", FROZEN).click();
+    await expect.poll(() => scrubParam(page), { timeout: 15_000 }).toBeNull();
+    await page.evaluate(() => {
+      (window as unknown as { __sameDocument?: boolean }).__sameDocument = true;
+    });
+    await link.click();
+    await expect(page.getByRole("button", FROZEN)).toBeVisible();
+    await expect.poll(() => scrubParam(page), { timeout: 15_000 }).toBe(updateIds[0]);
+    expect(await page.evaluate(() => (window as unknown as { __sameDocument?: boolean }).__sameDocument)).toBe(true);
+  });
+
+  test("a reader who gets no scrub bar gets no link to a revision either", async ({
+    page,
+    sharedDoc,
+    secondUser,
+  }) => {
+    const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
+    const bodyText = "E2E annotation nobody without edit access can scrub to.";
+    await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText,
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+      ydocUpdateId: updateIds[0],
+    });
+
+    // A SHARED doc is readable by any AUTHORIZED reader and editable only by
+    // its authors, so this reader gets the card and no bar. The link would
+    // then be a control that goes nowhere — ?at= is inert on a page with
+    // nothing to replay it — which is why it is gated on the page having a
+    // bar rather than on the provider existing.
+    const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
+    await readerPage.goto(`/doc/${sharedDoc.slug}`);
+    // Scoped to the body's own read-only editor: the card renders the settled
+    // text statically too, and that copy is hidden once the editor takes over.
+    await expect(readerPage.getByLabel("Annotation", { exact: true }).getByText(bodyText)).toBeVisible();
+    await expect(readerPage.getByLabel("Scrub through this doc's edit history")).toHaveCount(0);
+    await expect(readerPage.getByRole("link", { name: "at this revision" })).toHaveCount(0);
+  });
+
+  test("an ?at= that names nothing renders the live doc rather than failing", async ({ page, sharedDoc }) => {
+    const updateIds = await appendToDoc(page, sharedDoc.id, " Appended after creation.");
+
+    // Two different paths to the same outcome, and the difference matters to
+    // what the assertion has to wait for. A malformed value is rejected
+    // server-side (parseScrubUpdateId) and never reaches the bar, which stays
+    // lazy — so there is nothing to wait for. A well-formed id that names no
+    // row in *this* doc's log does reach the bar and does load the history;
+    // it is the findIndex miss that comes to nothing. Asserting "not frozen"
+    // before that load would pass without having looked.
+    const cases = [
+      { at: "not-an-id", loadsHistory: false },
+      { at: "99999999999999999999", loadsHistory: false }, // 20 digits: past a bigint
+      { at: "9223372036854775807", loadsHistory: true }, // well-formed, but another doc's at best
+    ];
+    for (const { at, loadsHistory } of cases) {
+      await page.goto(`/doc/${sharedDoc.slug}?at=${at}`);
+      await expect(bodyEditor(page)).toBeVisible();
+      await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+      const slider = page.getByLabel("Scrub through this doc's edit history");
+      if (loadsHistory) {
+        await expect.poll(() => slider.getAttribute("max"), { timeout: 15_000 }).toBe(String(updateIds.length - 1));
+        // Opened at the head, exactly as if nothing had been asked for…
+        await expect(slider).toHaveValue(String(updateIds.length - 1));
+        // …and the dead parameter is cleaned off the URL on the way past.
+        await expect.poll(() => scrubParam(page), { timeout: 15_000 }).toBeNull();
+      } else {
+        await expect(slider).toHaveAttribute("max", "100"); // the inert, never-fetched slider
+      }
+      await expect(bodyEditor(page)).toContainText("Appended after creation.");
+      await expect(page.getByRole("button", FROZEN)).toHaveCount(0);
+    }
   });
 });

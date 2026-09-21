@@ -21,6 +21,7 @@ to re-derive the decision from.
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
 | [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. |
 | [docs/ANCHORED_LINKS.md](docs/ANCHORED_LINKS.md) | Anchored links as built: one `/link/<id>` URL for passages across docs and PDFs — schema, the landing route that redirects or excerpts per viewer, the per-target visibility rule, the tray (a draft, or a minted link reopened for editing — one open link per creator), and every deviation from the plan. |
+| [docs/DOCS.md](docs/DOCS.md) | Docs as built: the entity beside its ydoc, the `title`/`prose_json` caches and the live title, roles and visibility, routes, the reading view and its freeze, the editor, what is deferred. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
@@ -101,7 +102,7 @@ before changing the behavior it describes.
   renders only from inside a page that has already run its own gate and takes a resolved
   `AnchorTarget` rather than a slug, so it can't be mounted on an ungated surface; it
   deliberately adds no second check. It also reads **no session** — the post page
-  (`/yyyy/mm/dd/slug`, §21) is statically generated, and a dynamic API there throws at build (§12f) — so everything viewer-shaped
+  (`/yyyy/mm/dd/slug`, §21) is statically generated, and a dynamic API there throws at build (docs/DOCS.md, "Routes") — so everything viewer-shaped
   lives in a client island that asks the server on open. `/tag/[slug]` is three per-type
   queries wearing three existing predicates, never one UNION. **The exception is a surface
   showing one object's tags on *another* object's page** — `/post/[id]/edit`'s source-doc
@@ -221,8 +222,8 @@ before changing the behavior it describes.
   moving the flatten into the reader fails no check and makes a later xlsx codec inherit
   CSV's losses. Same reason the cell cap sits on the grid after decode rather than in any
   parser. docs/TABLES.md, "CSV in and out of an existing doc".
-- **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. PLAN.md §12e,
-  docs/PERMISSIONS.md.
+- **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
+  visibility", docs/PERMISSIONS.md.
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**
   (case-insensitive, first-created wins); its own title is never shown. Seed one with
   `npx tsx scripts/seed-front-page.ts`. No `DocVisibility` check — the title alone is what
