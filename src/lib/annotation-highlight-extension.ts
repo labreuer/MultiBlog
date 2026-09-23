@@ -139,10 +139,26 @@ export function anchoredLinkAnchorInputs(
     }));
 }
 
-// A full re-resolve, with no idea where anything was: the initial pass, and
-// every explicit anchor push.
-function resolveAll(anchors: AnnotationAnchorInput[], doc: PMNode): TrackedAnchor[] {
-  return anchors.map((anchor) => ({ ...anchor, resolved: resolveAnchorInDoc(doc, anchor.from, anchor.to, anchor.quotedText) }));
+// A full re-resolve: the initial pass, and every explicit anchor push.
+//
+// On a push, an anchor this plugin is already tracking starts from where it
+// *is*, not from its stored columns. A push arrives on any change to the
+// list (someone else posting is enough), and the columns describe the doc at
+// the anchor's stamp: once earlier text has been edited they name the wrong
+// place, and a quote spanning a block boundary can then only be re-found
+// from a range of the right width (resolveAnchorInDoc). Starting from the
+// stored offsets threw away a position tracked correctly all session. A
+// detached anchor, or a new one, has nothing better than its columns.
+function resolveAll(anchors: AnnotationAnchorInput[], doc: PMNode, tracked: TrackedAnchor[] = []): TrackedAnchor[] {
+  // Kind as well as id: one anchored-link part can arrive under both `link`
+  // and `draft-link`.
+  const current = new Map(tracked.map((anchor) => [`${anchor.kind ?? "annotation"}:${anchor.id}`, anchor]));
+  return anchors.map((anchor) => {
+    const was = current.get(`${anchor.kind ?? "annotation"}:${anchor.id}`);
+    // Same text, or the tracked range describes something else.
+    const start = was?.resolved && was.quotedText === anchor.quotedText ? was.resolved : anchor;
+    return { ...anchor, resolved: resolveAnchorInDoc(doc, start.from, start.to, anchor.quotedText) };
+  });
 }
 
 // The per-transaction pass, which is where all the cost would be if it were
@@ -159,7 +175,9 @@ function resolveAll(anchors: AnnotationAnchorInput[], doc: PMNode): TrackedAncho
 //     mapping meaningless (COLLAB.md §4's trap). But the text has usually
 //     barely moved, so the window is sized by how much the document's own
 //     size changed — a keystroke elsewhere gives a window of a few dozen
-//     positions instead of a scan of the whole document.
+//     positions instead of a scan of the whole document. It and tier 3 start
+//     from the *previous* range, whose width is what re-finds a quote
+//     spanning a block boundary (resolveAnchorInDoc).
 //  3. **A full scan**, once, and if that fails the anchor is left detached
 //     and *not* retried on later transactions. Retrying would mean an
 //     O(document × quote) scan per keystroke, forever, for an annotation
@@ -200,9 +218,17 @@ function reresolve(
     if (to > from && to <= newDoc.content.size && newDoc.textBetween(from, to, " ") === anchor.quotedText) {
       return { ...anchor, resolved: { from, to } };
     }
+    // The *previous* range, not the mapped one: after a `setContent` the
+    // mapping is meaningless (it sends both ends to the document's edges),
+    // while the previous range is still right whenever nothing before it
+    // changed — and its width is what lets resolveAnchorInDoc re-find a quote
+    // spanning a block boundary when something did.
     return {
       ...anchor,
-      resolved: resolveAnchorInDoc(newDoc, from, to, anchor.quotedText, { pos: anchor.resolved.from, radius }),
+      resolved: resolveAnchorInDoc(newDoc, anchor.resolved.from, anchor.resolved.to, anchor.quotedText, {
+        pos: anchor.resolved.from,
+        radius,
+      }),
     };
   });
 }
@@ -251,7 +277,7 @@ export const AnnotationHighlight = Extension.create<{
           apply(tr, value, oldState, newState) {
             const meta = tr.getMeta(annotationHighlightKey) as AnnotationAnchorInput[] | undefined;
             if (meta !== undefined) {
-              const anchors = resolveAll(meta, newState.doc);
+              const anchors = resolveAll(meta, newState.doc, value.anchors);
               return { anchors, ...rangeMaps(anchors) };
             }
             if (!tr.docChanged) return value;

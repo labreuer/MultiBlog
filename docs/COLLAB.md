@@ -287,11 +287,18 @@ one place §2's "there is nothing to re-resolve, ever" is paid back in full. Ran
    updates in with `setContent`, so there is no usable mapping ([§4](#4-the-in-progress-selection--offsets-plus-a-re-resolve)'s
    trap) — but the text has barely moved, so a keystroke elsewhere costs a few dozen probes
    rather than a scan. A window hit is *more* trustworthy than a globally unique match: it is
-   the occurrence nearest where the anchor already was.
+   the occurrence nearest where the anchor already was. Both this window and tier 3's scan are tried at the
+   range's own width in positions (`to - from`) as well as at the quote's length, starting from
+   the *previous* range rather than the meaningless mapped one, so a quote spanning a block
+   boundary follows any edit that leaves its own blocks alone. Before that (2026-09-22) every such
+   anchor detached on the first post-sync `setContent` of an *unchanged* doc. This is still
+   `textBetween` verifying a candidate, not §4's rejected separator re-implementation.
 3. **A full scan, once.** Failing that the anchor is detached and is not rescanned on later
    transactions — that would be O(document × quote) per keystroke forever, for the annotation
    least likely to repay it. Detachment is re-evaluated on the next anchor push, the doc-side
    equivalent of §1 re-testing a `DETACHED` thread at the next publish rather than continuously.
+   A push starts each anchor still attached from where it is tracked, not from its stored
+   columns, which describe the stamped state and not the live one.
 
 Without tier 2 this would be the first per-keystroke full scan on a reading surface. Doc links
 ([§3](#3-doc-links--an-external-blob-repaired-by-search)) pay that cost and memoize on document

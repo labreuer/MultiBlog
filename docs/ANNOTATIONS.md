@@ -172,13 +172,23 @@ construction, forever, and nothing a client says is stored verbatim. `resolveAnc
 (`src/lib/annotation-anchors.ts`) is that verify-then-re-find step, shared with the mark
 endpoint's `handleApplyAnnotationMark` so the two mechanisms cannot disagree about what "this
 quote is still here" means; its fallback search is `findQuoteOccurrences`, a plain scan that
-cannot match a quote spanning a block boundary.
+matches a quote spanning a block boundary only when told the width in positions to look for,
+which `resolveAnchorInDoc` takes from the range it was given.
 
 **Resolution at read time** is `AnnotationHighlight` (`annotation-highlight-extension.ts`),
 three tiers per transaction: map the range through the transaction and verify against the
 quote; search a window sized by the document's size delta; one full `findQuoteOccurrences`
 scan, after which a miss stays detached until the next anchor push rather than costing a scan
-per keystroke. `resolveAnnotationRanges` (`src/lib/annotation-marks.ts`) merges the mark scan
+per keystroke. A quote
+spanning a block boundary covers more positions than it has characters, so both searches also
+slide a window of the range's own *width* (`to - from`), which finds the passage anywhere for as
+long as its own blocks are unchanged; matches are tightened past edge block tokens and deduped
+before the exactly-one rule counts them. After a `setContent`, whose mapping is meaningless, the
+search starts from the previous range rather than the mapped one; an anchor push starts each
+already-tracked anchor from where it is rather than from its stored columns. Before these
+(2026-09-22), such an anchor detached on the first push after sync with no edit anywhere, on page
+load once earlier blocks had been edited, and on any push after that. An edit *inside* a
+multi-block passage still detaches it — the quote no longer matches. `resolveAnnotationRanges` (`src/lib/annotation-marks.ts`) merges the mark scan
 and the tracked ranges into one id → range map, and every consumer — both rails,
 `AnnotationClick`, the quote header's jump — goes through it without knowing there are two
 mechanisms. The doc editor runs the decoration too, so an author rewriting an annotated
