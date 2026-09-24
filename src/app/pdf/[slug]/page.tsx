@@ -24,7 +24,7 @@ import styles from "./page.module.css";
 // The one route whose resolver can answer "somewhere else": a past slug
 // redirects to the current one rather than rendering here, so a shared link
 // doesn't quietly become the canonical URL — the same contract /doc/[slug] has
-// through resolveDocParam. That is the `redirect` arm of Access, and it is
+// through resolveDocSlugHistory. That is the `redirect` arm of Access, and it is
 // returned *before* the gate so the ordering the body used to have is
 // unchanged.
 const loadFileForRead = gated(async (user, slug: string) => {

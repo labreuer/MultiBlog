@@ -4,7 +4,7 @@ import type { JSONContent } from "@tiptap/react";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import * as Y from "yjs";
 import { prisma } from "@/lib/prisma";
-import { resolveDocParam } from "@/lib/resolve-doc-param";
+import { resolveDocParam, resolveDocSlugHistory } from "@/lib/resolve-doc-param";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import { canUserReadDoc, canUserEditDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -66,6 +66,20 @@ const DOC_SELECT = {
 // and so two queries, which is the thing being removed.
 const loadDocForRead = gated(async (user, slug: string) => {
   const doc = await resolveDocParam(slug, DOC_SELECT);
+  if (!doc) {
+    // A past slug redirects to the current one (docs/DOCS.md "Routes"). Gated
+    // before redirecting, not after: the new slug is derived from the title,
+    // so handing it to a viewer who may not read the doc would disclose what
+    // the gate at that URL withholds. Such a viewer gets the answer the
+    // current URL would give them.
+    const moved = await resolveDocSlugHistory(slug);
+    if (moved && moved.deletedByUserId === null) {
+      if (!(await canUserReadDoc(user.id, user.role, moved))) {
+        return "forbidden";
+      }
+      return { redirect: `/doc/${moved.slug}` };
+    }
+  }
   // resolveDocParam uses prismaIncludingDeleted (the editor needs a deleted
   // doc to still resolve, for its Settings panel's Undelete) — the reading
   // route is the caller that must not show a soft-deleted doc, so it checks
@@ -117,7 +131,13 @@ export default async function PublicDocPage({
     redirect(signInPath(pathWithQuery(`/doc/${slug}`, preserved)));
   }
   if (access.status === "redirect") {
-    redirect(access.to);
+    // The slug-history redirect names only the path — re-append ?sel= and
+    // ?at=, or a link shared before a rename would land on the right doc with
+    // its passages or its revision silently gone (as /pdf/[slug] does).
+    const preserved = new URLSearchParams();
+    if (sel) preserved.set("sel", sel);
+    if (scrubUpdateId) preserved.set(SCRUB_PARAM, scrubUpdateId);
+    redirect(pathWithQuery(access.to, preserved));
   }
   if (access.status === "not-found") {
     notFound();
