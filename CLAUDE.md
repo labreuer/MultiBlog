@@ -502,6 +502,13 @@ working on.
 ## Conventions
 
 - Commit only when the user explicitly asks. Commit messages explain *why*, not just what.
+- **Docs and code comments describe what exists, not how it came to exist.** A fix's story
+  ("until now…", "used to…", "Built &lt;date&gt;: before this…") goes in the commit message
+  and the PR, where it is dated and attached to the diff, never into the doc beside the
+  behavior. A rejected alternative with its reason is present-tense design and stays. A past
+  incident earns a place only as the *reason for a rule* someone would otherwise undo, told in
+  a clause, as this file's entries do. The "Built &lt;date&gt;" markers are PLAN.md's
+  convention alone (above) and don't carry over to `docs/`.
 - **Don't test UI changes unprompted** — no browser pane, no e2e run. Stop at
   `npm run check`, report the change as done, and say that UI testing was deferred.
 - **But before committing a change that touched the UI, ask whether to test it first** — if
