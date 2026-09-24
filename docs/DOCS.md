@@ -245,10 +245,9 @@ that accepts an id or a slug, **tried in that order** — a rename must not brea
 edit URL. The reading route additionally falls back to `doc_slug_history` on a live-slug
 miss and redirects (`resolveDocSlugHistory`; a 307, carrying `?sel=` and `?at=`). It gates
 *before* redirecting — the new slug is derived from the title, so a viewer the doc would
-turn away gets Forbidden at the old URL rather than learning the new one. Built 2026-09-24:
-until then this sentence described a fallback nothing implemented, and a renamed doc's old
-links 404ed. (A doc whose *slug* happens to be shaped like another doc's cuid would
-resolve to the id; not worth guarding against.)
+turn away gets Forbidden at the old URL rather than learning the new one. (A doc whose
+*slug* happens to be shaped like another doc's cuid would resolve to the id; not worth
+guarding against.)
 
 **Both listings restate the rule in their own `where` clause** rather than calling
 `readableDocsFor`, so each is a place the two can drift. `/docs` lists a viewer's own
