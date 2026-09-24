@@ -202,7 +202,7 @@ export async function revertFileSlug(fileId: string, updatedByUserId: string): P
  * Resolves a `/pdf/[slug]` param to a file, following FileSlugHistory when the
  * slug is a past one. The `redirectTo` field is how the route knows to answer
  * with a redirect rather than rendering at a stale URL — same contract
- * resolveDocParam has.
+ * /doc/[slug] has through resolveDocSlugHistory.
  *
  * Uses prismaIncludingDeleted so a soft-deleted file still *resolves*; the
  * caller decides what to do about it (the reading route 404s, a future manage

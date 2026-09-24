@@ -32,7 +32,7 @@ import { uniqueUserSlug } from "@/lib/user-slug";
 import { uniquePostSlug } from "@/lib/post-slug";
 import { postPath } from "@/lib/post-path";
 import { derivePostStatus } from "@/lib/post-status";
-import { uniqueDocSlug } from "@/lib/doc-slug";
+import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
 import { uniqueFileSlug } from "@/lib/file-slug";
 import { uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
@@ -430,6 +430,22 @@ export async function createTestDoc(opts: {
  * identities in one doc's editor — secondUser() alongside a fixture's
  * draftDoc, say — has to give the second one a byline of its own first.
  */
+/**
+ * Renames a doc's slug through changeDocSlug, the function the /doc/[slug]/slug
+ * page's action calls, so the old slug lands in doc_slug_history exactly as a
+ * real rename leaves it. Attributed to the doc's first byline author, who is a
+ * throwaway by createTestDoc's construction. Returns the new slug.
+ */
+export async function renameTestDocSlug(docId: string): Promise<string> {
+  const author = await prisma.docAuthor.findFirstOrThrow({
+    where: { docId },
+    orderBy: { bylineOrder: "asc" },
+    include: { user: true },
+  });
+  assertSafe(author.user.email);
+  return changeDocSlug(docId, await uniqueDocSlug(uniqueTitle("renamed")), author.userId);
+}
+
 export async function addTestDocAuthor(docId: string, email: string): Promise<void> {
   assertSafe(email);
   const user = await prisma.user.findUniqueOrThrow({ where: { email } });
@@ -2126,6 +2142,7 @@ const handlers = {
   getPostPath,
   createTestDoc,
   addTestDocAuthor,
+  renameTestDocSlug,
   getDocAuthorEmails,
   addTestPostAuthor,
   deleteTestDoc,
