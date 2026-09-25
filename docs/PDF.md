@@ -183,6 +183,13 @@ silently, since the server-side derivation (§4) slices text *at the client's ve
 lazy path never touches the old rows: every stored anchor names its own `textVersion`, and
 the integrity check verifies it against exactly that extraction.
 
+`scripts/upgrade-pdf-text-version.ts` does the same for every file at once, and adds the
+cleanup the lazy path doesn't: an anchor whose page reads identically at both versions has
+its stamp moved to the new one (its offsets and quote are then true there by construction),
+and an old version is deleted once no anchor names it. An anchor on a page whose text
+changed keeps its version, and so keeps that version's rows alive. Dry run by default; the
+script's header has the details.
+
 Re-anchoring the stored **anchors** themselves is meant to be lazy as well, on next open,
 rewriting `quote`/`position` if resolution succeeds — never a batch migration. **Not built
 yet**: it is deferred together with §4's fuzzy match, and the quads carry every annotation
