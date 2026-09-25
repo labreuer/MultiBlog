@@ -26,7 +26,7 @@
  * to detect it: the old rows would claim to have been measured against a
  * pipeline that no longer exists.
  */
-export const NORMALISER_VERSION = 1;
+export const NORMALISER_VERSION = 2;
 
 export function textVersionFor(pdfjsVersion: string): string {
   return `${pdfjsVersion}/${NORMALISER_VERSION}`;
@@ -81,6 +81,17 @@ const LINE_BREAK_RATIO = 0.5;
 // U+2060 word joiner, U+FEFF BOM. All invisible, all routinely present in
 // extracted PDF text, and all fatal to an exact quote match if kept.
 const INVISIBLE = /[­​‌‍⁠﻿]/;
+
+// C0 controls and DEL, except tab, LF, VT, FF and CR, which step 6 folds as
+// whitespace. A glyph the font maps to no character can extract as U+0000 —
+// JSTOR's stamped download footer does, a dozen per page — and Postgres `text`
+// cannot hold U+0000 at all, so one such page makes the whole upload fail.
+// The other controls go with it: none is visible text, so none can be part of
+// a quote a reader selected.
+function isControl(ch: string): boolean {
+  const code = ch.charCodeAt(0);
+  return (code <= 0x1f && (code < 0x09 || code > 0x0d)) || code === 0x7f;
+}
 
 // Ligature decomposition (docs/PDF.md §3 step 3). A PDF that renders "fi" as
 // U+FB01 extracts it that way too, so a reader who selects "finding" would
@@ -161,14 +172,15 @@ export function normalisePageText(items: readonly PdfTextItemLike[]): Normalised
   }
 
   // Steps 2-5 — per-character rewriting. One source character may expand to
-  // several (a ligature) or to none (an invisible), and provenance follows.
+  // several (a ligature) or to none (an invisible or a control), and
+  // provenance follows.
   const mapped: string[] = [];
   const mappedOffsets: SourceOffset[] = [];
 
   for (let i = 0; i < raw.length; i++) {
     const source = rawOffsets[i];
     let ch = raw[i];
-    if (INVISIBLE.test(ch)) continue;
+    if (INVISIBLE.test(ch) || isControl(ch)) continue;
 
     const ligature = LIGATURES.get(ch);
     if (ligature !== undefined) {

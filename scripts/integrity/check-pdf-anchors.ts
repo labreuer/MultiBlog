@@ -156,7 +156,9 @@ async function main(): Promise<void> {
       // Not an error: a `textVersion` bump leaves older rows pointing at an
       // extraction that is still valid but no longer the newest, and
       // re-extraction is lazy by design (docs/PDF.md §3). It becomes a problem
-      // only if the *old* extraction was deleted, which nothing does.
+      // only if the *old* extraction was deleted, which
+      // scripts/upgrade-pdf-text-version.ts does only for a version no anchor
+      // names.
       report(
         "warn",
         a.id,

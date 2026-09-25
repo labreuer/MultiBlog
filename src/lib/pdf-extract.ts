@@ -106,6 +106,11 @@ function standardFontDataUrl(): string {
   return standardFontDir;
 }
 
+/** The `textVersion` an `extractPdf` on this server stamps, without parsing anything. */
+export async function currentTextVersion(): Promise<string> {
+  return textVersionFor((await loadPdfjs()).version);
+}
+
 export type ExtractedPdf = {
   pageCount: number;
   textVersion: string;

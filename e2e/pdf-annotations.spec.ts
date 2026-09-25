@@ -1,5 +1,6 @@
 import { test, expect, signIn, gotoOk, annotationEditor, visibleText } from "./fixtures";
 import { ADMIN_EMAIL, createTestFile, deleteTestFile, getFileAnnotationFacts, type TestFile } from "./db";
+import { NORMALISER_VERSION } from "@/lib/pdf-text";
 
 // PLAN.md §19 Phase 3 — annotating a PDF.
 //
@@ -255,7 +256,7 @@ test.describe("pdf annotations", () => {
 
       expect(facts.pageIndex).toBe(0);
       expect(facts.quadCount).toBeGreaterThan(0);
-      expect(facts.textVersion).toBe(`6.2.108/1`);
+      expect(facts.textVersion).toBe(`6.2.108/${NORMALISER_VERSION}`);
       expect(facts.pageTextAtTarget, "the server kept page text at the target's own textVersion").not.toBeNull();
       expect(facts.position).not.toBeNull();
       expect(facts.quotedText).toBe(
