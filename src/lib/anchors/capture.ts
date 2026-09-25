@@ -2,8 +2,8 @@ import type * as Y from "yjs";
 import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
-import { prisma } from "../prisma";
 import { parsePdfTarget, type PdfTarget } from "../pdf-anchor";
+import { storedPageText } from "../pdf-page-text";
 import { materializeYdocAt } from "../ydoc-snapshot";
 import { resolveAnchorInDoc } from "./resolve";
 import { deriveDocRangeSelector, type DocRangeSelector } from "./selector";
@@ -102,9 +102,10 @@ export async function captureAnchorInYdoc(opts: {
  * written, for `annotation.pdf_target` and `tag_anchor.selector` alike.
  *
  * Same trust boundary as the ydoc path (§12i via §19): the client's blob is
- * parsed, never believed. The page text *this server* extracted at upload —
- * at the same `textVersion` the client measured against — is sliced at the
- * client's offsets and kept only if it matches the client's own reading.
+ * parsed, never believed. The page text *this server* extracted — at the
+ * same `textVersion` the client measured against, at upload or on first use
+ * if the file predates that version (src/lib/pdf-page-text.ts) — is sliced at
+ * the client's offsets and kept only if it matches the client's own reading.
  * A mismatch (a stale normaliser after a deploy mid-session, say) keeps the
  * quads, which are version-independent, and drops the quote rather than
  * storing text the offsets don't describe. Null means the blob didn't parse
@@ -122,18 +123,9 @@ export async function capturePdfTextAnchor(opts: {
 
   let quotedText = "";
   if (target.position) {
-    const pageText = await prisma.filePageText.findUnique({
-      where: {
-        fileId_pageIndex_textVersion: {
-          fileId: opts.fileId,
-          pageIndex: target.pageIndex,
-          textVersion: target.textVersion,
-        },
-      },
-      select: { text: true },
-    });
-    if (pageText) {
-      const slice = pageText.text.slice(target.position.start, target.position.end);
+    const pageText = await storedPageText(opts.fileId, target.pageIndex, target.textVersion);
+    if (pageText !== null) {
+      const slice = pageText.slice(target.position.start, target.position.end);
       quotedText = slice === target.quote.exact ? slice : "";
     }
   }

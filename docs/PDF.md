@@ -157,7 +157,9 @@ Pipeline, applied per page to `page.getTextContent()`:
    or reorder across characters, which is incompatible with the exact offset map below;
    per-character keeps the map exact and the function deterministic.
 3. Decompose ligatures (ﬁ, ﬂ, ﬀ, ﬃ, ﬄ, ﬅ, ﬆ).
-4. Strip soft hyphens (U+00AD) and zero-width characters.
+4. Strip soft hyphens (U+00AD) and zero-width characters, and control characters: C0 other
+   than the whitespace ones step 6 folds, and DEL. An unmapped glyph can extract as U+0000
+   (JSTOR's stamped download footer does), and Postgres `text` cannot store it at all.
 5. Normalise dashes and quote characters to ASCII.
 6. Collapse runs of whitespace to a single space; trim.
 
@@ -173,10 +175,18 @@ slice rather than a re-parse of the PDF per post; search over it is a free conse
 the reason. Both sides that matter — upload extraction and selection capture — call the same
 function (`src/lib/pdf-text.ts`), so they agree by construction.
 
-When `textVersion` changes, the intended recovery is to re-anchor **lazily** on next open and
-rewrite the stored `quote`/`position` if resolution succeeds — never a batch migration.
-**Not built yet**: it is deferred together with §4's fuzzy match, and the quads carry every
-annotation meanwhile.
+When `textVersion` changes, a file's **page text** is re-extracted lazily: the first capture
+that asks for a file at the version this server produces, and finds no rows there, extracts
+the whole file and stores the new rows beside the old ones (`src/lib/pdf-page-text.ts`).
+Without that, every new anchor on every older file would be stored with an empty quote,
+silently, since the server-side derivation (§4) slices text *at the client's version*. The
+lazy path never touches the old rows: every stored anchor names its own `textVersion`, and
+the integrity check verifies it against exactly that extraction.
+
+Re-anchoring the stored **anchors** themselves is meant to be lazy as well, on next open,
+rewriting `quote`/`position` if resolution succeeds — never a batch migration. **Not built
+yet**: it is deferred together with §4's fuzzy match, and the quads carry every annotation
+meanwhile.
 
 ---
 
