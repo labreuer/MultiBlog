@@ -22,8 +22,9 @@ export type PendingSelection = {
 
 export type SelectionPopover = {
   pending: PendingSelection | null;
-  /** Wire to the editor's selection updates; captures or clears accordingly. */
+  /** Wire to the editor's selection updates; captures or releases accordingly. */
   capture: (liveEditor: Editor) => void;
+  /** Dismisses the popover, and takes the browser's selection with it. */
   clear: (liveEditor?: Editor | null) => void;
   /** Wire to the content-push choke point — see the note on the function. */
   reresolve: (liveEditor: Editor) => void;
@@ -97,10 +98,22 @@ export function useSelectionPopover({
     pendingRef.current = pending;
   }, [pending]);
 
-  function clear(liveEditor?: Editor | null) {
+  // Drops our own state and nothing else. What `capture` calls when the
+  // selection it is handed is empty — and it is handed one on every
+  // mousedown, since ProseMirror collapses its selection to a caret there
+  // before the drag has moved a pixel. Emptying the *browser's* selection at
+  // that moment takes away the range the drag was about to extend, and the
+  // whole gesture selects nothing (e2e/text-selection.spec.ts, "dragging").
+  // An empty selection needs no DOM cleanup in any case: there is nothing
+  // highlighted to leave behind.
+  function release(liveEditor?: Editor | null) {
     setPending(null);
     const target = liveEditor ?? editorRef.current;
     if (target) setPendingAnnotation(target.view, null);
+  }
+
+  function clear(liveEditor?: Editor | null) {
+    release(liveEditor);
     // **The browser's selection goes too, not just ours.** The popover is that
     // selection's whole UI, so leaving the text highlighted behind a dismissed
     // popover would be odd on its own — but the reason it is here is a bug.
@@ -126,12 +139,12 @@ export function useSelectionPopover({
   function capture(liveEditor: Editor) {
     const { from, to, empty } = liveEditor.state.selection;
     if (empty || !containerRef.current) {
-      clear(liveEditor);
+      release(liveEditor);
       return;
     }
     const quotedText = liveEditor.state.doc.textBetween(from, to, " ");
     if (!quotedText.trim()) {
-      clear(liveEditor);
+      release(liveEditor);
       return;
     }
     // PLAN.md §13q — same synchronous tick as reading the selection above.

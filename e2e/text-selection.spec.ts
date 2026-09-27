@@ -188,3 +188,54 @@ test.describe("text selection offers somewhere to respond", () => {
     await expect(page.getByTestId("annotation-popup")).toHaveCount(0);
   });
 });
+
+// Every test above selects by building a DOM Range (selectTextIn), which
+// arrives in one step and so skips the part of a real gesture that broke:
+// the mousedown. ProseMirror collapses its selection to a caret there, the
+// reading view's selection hook was handed that empty selection, and it
+// answered by emptying the *browser's* selection too — taking away the range
+// the drag was about to extend. The page looked fine and selected nothing, by
+// mouse, for every viewer. Only a real press-move-release can see that.
+test.describe("dragging", () => {
+  test("a drag across a doc's reading view selects the text and offers to annotate it", async ({ page, sharedDoc }) => {
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await expect(bodyEditor(page)).toBeVisible();
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+
+    // The left edge of the quote's first character and the right edge of its
+    // last, each nudged a pixel inward so the hit test lands on the intended
+    // side of the glyph boundary.
+    const { start, end } = await page.evaluate((needle) => {
+      const root = document.querySelector('[aria-label="Post body"]')!;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const index = node.textContent?.indexOf(needle) ?? -1;
+        if (index === -1) continue;
+        const charRect = (offset: number) => {
+          const range = document.createRange();
+          range.setStart(node!, offset);
+          range.setEnd(node!, offset + 1);
+          return range.getBoundingClientRect();
+        };
+        const first = charRect(index);
+        const last = charRect(index + needle.length - 1);
+        return {
+          start: { x: first.left + 1, y: first.top + first.height / 2 },
+          end: { x: last.right - 1, y: last.top + last.height / 2 },
+        };
+      }
+      throw new Error(`"${needle}" not found in the body.`);
+    }, QUOTED_TEXT);
+
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 10 });
+    await page.mouse.up();
+
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(QUOTED_TEXT);
+    const popup = page.getByTestId("annotation-popup");
+    await expect(popup).toBeVisible();
+    await expect(popup).toContainText(QUOTED_TEXT);
+  });
+});
