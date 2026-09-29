@@ -42,7 +42,8 @@ export type AnnotationConnection = {
 // **`initialConnection` is the bundle an action already minted** — see
 // annotation-connection.ts. The handshake was already gone; what is left of
 // "opening an annotation costs a token round trip" is that round trip, and
-// with a bundle in hand this hook awaits nothing before attaching. The action
+// with a bundle in hand this hook awaits nothing but one microtask (see the
+// effect) before attaching. The action
 // that created the DRAFT row or opened the edit session answered the same
 // question on its way back, with more certainty than the route has, having
 // just written the row. Without one (a moved draft, OwnDraftsList, the
@@ -108,11 +109,23 @@ export function useAnnotationProvider(
 
     (async () => {
       try {
-        // `??` short-circuits, so the pre-minted path never suspends: this
-        // body runs synchronously inside the effect and the document is
-        // attached on the render right after mount rather than a round trip
-        // later.
+        // `??` short-circuits, so the pre-minted path costs no round trip:
+        // the document is attached a microtask after mount rather than a
+        // fetch later.
+        //
+        // **That one microtask is load-bearing.** Attaching synchronously lets
+        // an effect that is torn down in the same tick — StrictMode's
+        // mount/unmount/mount in `next dev` — detach before its token is sent,
+        // so the server sees CLOSE ahead of Auth for this document. It queues
+        // the CLOSE with the pending document and replays it onto the
+        // connection the *next* attach authenticates, closing it; every
+        // keystroke after that waits for an Auth that never comes, and a post
+        // finds the body empty. Yielding first lets the torn-down run see
+        // `cancelled` and never attach. A production build doesn't double-run
+        // effects, so `npm run e2e` can't catch a regression here;
+        // `npm run e2e:dev` can.
         const connection = initialConnection ?? (await fetchConnection());
+        if (initialConnection) await Promise.resolve();
         if (cancelled) return;
         firstToken = connection.token;
         setReadOnly(connection.readOnly);
