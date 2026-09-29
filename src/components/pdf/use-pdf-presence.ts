@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { useSession } from "next-auth/react";
 import { attachProvider } from "@/lib/collab-socket";
+import { CollabTokenDenied, refreshCollabToken } from "@/lib/collab-token-request";
 import { useDocPresence } from "@/components/annotation/doc-presence-context";
 import { pdfjs } from "@/lib/pdfjs-client";
 import {
@@ -51,7 +52,7 @@ export type PdfPresenceState = {
 
 export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): PdfPresenceState {
   const { data: session } = useSession();
-  const { getSocket } = useDocPresence();
+  const { getSocket, reportSignedOut } = useDocPresence();
   const [readers, setReaders] = useState<RemoteReader[]>([]);
   const [leading, setLeadingState] = useState(false);
   const [following, setFollowing] = useState<number | null>(null);
@@ -75,13 +76,39 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
     let cancelled = false;
     let provider: HocuspocusProvider | null = null;
 
+    // A refresher, not the token string: the provider re-sends whatever
+    // `token` yields on every reconnect, and these expire in two minutes, so a
+    // string would come back refused after any drop later than that and leave
+    // presence dead for the rest of the visit. The first call spends the token
+    // fetched below, as DocEditor's does. A 401 goes to the page; a 403 (lost
+    // access to the file) just stops presence, which has nothing to tell the
+    // reader.
+    let firstToken: string | null = null;
+    async function fetchToken(): Promise<string> {
+      if (firstToken !== null) {
+        const t = firstToken;
+        firstToken = null;
+        return t;
+      }
+      try {
+        return await refreshCollabToken(`/api/file/${fileId}/token`);
+      } catch (e) {
+        if (e instanceof CollabTokenDenied) {
+          if (e.denial === "signed-out") reportSignedOut();
+          else provider?.detach();
+        }
+        throw e;
+      }
+    }
+
     (async () => {
       const response = await fetch(`/api/file/${fileId}/token`, { method: "POST" });
       if (!response.ok || cancelled) return;
       const { token, documentName } = (await response.json()) as { token: string; documentName: string };
       if (cancelled) return;
+      firstToken = token;
 
-      provider = attachProvider(getSocket(), { name: documentName, token });
+      provider = attachProvider(getSocket(), { name: documentName, token: fetchToken });
       providerRef.current = provider;
 
       const initial: PdfPresence = {
@@ -126,7 +153,7 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
       localRef.current = null;
       provider?.destroy();
     };
-  }, [fileId, session?.user, getSocket]);
+  }, [fileId, session?.user, getSocket, reportSignedOut]);
 
   const publish = useCallback((patch: Partial<PdfPresence>) => {
     const provider = providerRef.current;

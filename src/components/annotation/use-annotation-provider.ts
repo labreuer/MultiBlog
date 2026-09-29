@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { attachProvider } from "@/lib/collab-socket";
+import { CollabTokenDenied, refreshCollabToken } from "@/lib/collab-token-request";
 import { useDocPresence } from "./doc-presence-context";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 
@@ -42,7 +43,8 @@ export type AnnotationConnection = {
 // **`initialConnection` is the bundle an action already minted** — see
 // annotation-connection.ts. The handshake was already gone; what is left of
 // "opening an annotation costs a token round trip" is that round trip, and
-// with a bundle in hand this hook awaits nothing before attaching. The action
+// with a bundle in hand this hook awaits nothing but one microtask (see the
+// effect) before attaching. The action
 // that created the DRAFT row or opened the edit session answered the same
 // question on its way back, with more certainty than the route has, having
 // just written the row. Without one (a moved draft, OwnDraftsList, the
@@ -54,7 +56,7 @@ export function useAnnotationProvider(
   annotationId: string,
   initialConnection?: AnnotationConnectionBundle,
 ): AnnotationConnection {
-  const { getSocket } = useDocPresence();
+  const { getSocket, reportSignedOut } = useDocPresence();
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [readOnly, setReadOnly] = useState<boolean | null>(initialConnection?.readOnly ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -73,10 +75,24 @@ export function useAnnotationProvider(
         firstToken = null;
         return t;
       }
-      const res = await fetch(`/api/annotation/${annotationId}/token`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to authenticate.");
-      const { token } = (await res.json()) as { token: string };
-      return token;
+      try {
+        return await refreshCollabToken(`/api/annotation/${annotationId}/token`);
+      } catch (e) {
+        // Final answers (collab-token-request.ts). A 401 is the whole page's
+        // to report; a 403 is this annotation's alone, so it detaches and
+        // drops the provider, which puts the caller back on its "no provider"
+        // branch with this error showing where "Connecting…" would be.
+        if (e instanceof CollabTokenDenied) {
+          if (e.denial === "signed-out") {
+            reportSignedOut();
+          } else {
+            instance?.detach();
+            setProvider(null);
+            setError("You no longer have access to this annotation.");
+          }
+        }
+        throw e;
+      }
     }
 
     async function fetchConnection(): Promise<AnnotationConnectionBundle> {
@@ -108,11 +124,23 @@ export function useAnnotationProvider(
 
     (async () => {
       try {
-        // `??` short-circuits, so the pre-minted path never suspends: this
-        // body runs synchronously inside the effect and the document is
-        // attached on the render right after mount rather than a round trip
-        // later.
+        // `??` short-circuits, so the pre-minted path costs no round trip:
+        // the document is attached a microtask after mount rather than a
+        // fetch later.
+        //
+        // **That one microtask is load-bearing.** Attaching synchronously lets
+        // an effect that is torn down in the same tick — StrictMode's
+        // mount/unmount/mount in `next dev` — detach before its token is sent,
+        // so the server sees CLOSE ahead of Auth for this document. It queues
+        // the CLOSE with the pending document and replays it onto the
+        // connection the *next* attach authenticates, closing it; every
+        // keystroke after that waits for an Auth that never comes, and a post
+        // finds the body empty. Yielding first lets the torn-down run see
+        // `cancelled` and never attach. A production build doesn't double-run
+        // effects, so `npm run e2e` can't catch a regression here;
+        // `npm run e2e:dev` can.
         const connection = initialConnection ?? (await fetchConnection());
+        if (initialConnection) await Promise.resolve();
         if (cancelled) return;
         firstToken = connection.token;
         setReadOnly(connection.readOnly);
@@ -133,9 +161,9 @@ export function useAnnotationProvider(
       instance?.destroy();
       ydoc.destroy();
     };
-    // getSocket is a stable context callback.
+    // getSocket and reportSignedOut are stable context callbacks.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialConnection` is read once, at attach time; a later identity change must not tear down a live connection to re-attach with a token no fresher than the refresher's
-  }, [annotationId, ydoc, getSocket]);
+  }, [annotationId, ydoc, getSocket, reportSignedOut]);
 
   return { provider, ydoc, readOnly, error };
 }

@@ -7,6 +7,7 @@ import { useEditor, type Editor, type JSONContent } from "@tiptap/react";
 import type { Extensions } from "@tiptap/core";
 import { docContentExtensions } from "./tiptap-schema";
 import { attachProvider, type CollabSocket } from "./collab-socket";
+import { CollabTokenDenied, refreshCollabToken } from "./collab-token-request";
 import { renderYdocDoc, titleTextFromJSON } from "./ydoc-render";
 import { PendingAnnotation } from "./pending-annotation-extension";
 import { captureYdocVersion } from "./ydoc-version-client";
@@ -97,6 +98,10 @@ export type LiveDocContentOptions = {
   // `setAwareness`, so that src/lib keeps not importing from src/components.
   // Ignored in hoisted mode, where the caller's provider already has one.
   getSocket?: () => CollabSocket;
+  // Owned mode's answer to a reconnect refused with a 401 — the page's
+  // DocPresenceProvider stops the shared socket and shows the notice
+  // (collab-token-request.ts). Passed in for the same reason as `getSocket`.
+  reportSignedOut?: () => void;
   // PLAN.md §13i — a readOnly connection's awareness still flows freely
   // (only document *content* updates are gated), so this same read-only tap
   // doubles as the channel every LiveAnnotationComposer publishes "someone
@@ -151,6 +156,7 @@ export function useLiveDocContent({
   ydoc: hoistedYdoc,
   provider: hoistedProvider,
   getSocket,
+  reportSignedOut,
   editorRef,
   versionRef,
   setAwareness,
@@ -412,10 +418,19 @@ export function useLiveDocContent({
         firstToken = null;
         return t;
       }
-      const res = await fetch(`/api/doc/${docId}/token`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to authenticate.");
-      const { token } = (await res.json()) as { token: string };
-      return token;
+      try {
+        return await refreshCollabToken(`/api/doc/${docId}/token`);
+      } catch (e) {
+        // A 401 goes to the page, which stops the socket and says so. A 403
+        // is a reader who lost access and has nothing to act on, so the tap
+        // just stops, as silently as a failed first fetch leaves it static
+        // below.
+        if (e instanceof CollabTokenDenied) {
+          if (e.denial === "signed-out") reportSignedOut?.();
+          else instance?.detach();
+        }
+        throw e;
+      }
     }
 
     (async () => {
@@ -462,7 +477,7 @@ export function useLiveDocContent({
       setAwareness(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setAwareness is a context setter (stable); re-running this on its identity would tear down and re-establish the websocket
-  }, [docId, ydoc, hoistedProvider, getSocket]);
+  }, [docId, ydoc, hoistedProvider, getSocket, reportSignedOut]);
 
   return {
     editor,

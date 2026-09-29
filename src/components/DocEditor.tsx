@@ -7,6 +7,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { attachProvider } from "@/lib/collab-socket";
+import { CollabTokenDenied, refreshCollabToken } from "@/lib/collab-token-request";
 import { UNTITLED_DOC, docEditorTabTitle } from "@/lib/doc-title";
 import { useLiveTabTitle } from "@/lib/use-live-tab-title";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -18,6 +19,7 @@ import DocSettingsPanel, { type EligibleUser } from "./DocSettingsPanel";
 import EditorAnnotationRail from "./annotation/EditorAnnotationRail";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
+import { SignInAgainLink } from "./SignedOutNotice";
 import type { AnnotationEntry } from "./annotation/AnnotationList";
 import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
@@ -128,7 +130,7 @@ export default function DocEditor({
   // widget — .mainColumn rather than a wrapping div, so nothing here alters
   // DocEditor.module.css's flex-height chain (STYLE.md's flex-grow trap).
   const containerRef = useRef<HTMLDivElement>(null);
-  const { setAwareness, getSocket } = useDocPresence();
+  const { setAwareness, getSocket, signedOut, reportSignedOut } = useDocPresence();
 
   // The tab: generateMetadata composed it from the Doc.title cache, which lags
   // the fragment by a store debounce. Same composer on both sides, so the
@@ -164,17 +166,35 @@ export default function DocEditor({
     // token already fetched below (lineage has to come from that same
     // response before the provider is even constructed — see the
     // attachIndexeddb call); only a later call hits the network again.
+    //
+    // A 401 or 403 on one of those later calls is final
+    // (collab-token-request.ts): a 401 goes to DocPresenceProvider, which
+    // stops the page's socket and turns the status line into "Signed out", and
+    // a 403 detaches this document and says why. `denied` keeps the provider's
+    // generic authenticationFailed message, which follows the throw, from
+    // replacing either.
     let firstToken: string | null = null;
+    let denied = false;
     async function fetchToken(): Promise<string> {
       if (firstToken !== null) {
         const t = firstToken;
         firstToken = null;
         return t;
       }
-      const res = await fetch(`/api/doc/${docId}/token`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to authenticate for live editing.");
-      const { token } = (await res.json()) as { token: string };
-      return token;
+      try {
+        return await refreshCollabToken(`/api/doc/${docId}/token`, "Failed to authenticate for live editing.");
+      } catch (e) {
+        if (e instanceof CollabTokenDenied) {
+          denied = true;
+          if (e.denial === "signed-out") {
+            reportSignedOut();
+          } else {
+            instance?.detach();
+            setError("Live editing unavailable: you no longer have access to this doc.");
+          }
+        }
+        throw e;
+      }
     }
 
     (async () => {
@@ -207,7 +227,9 @@ export default function DocEditor({
             if (status !== "connected") setSynced(false);
           },
           onSynced: () => setSynced(true),
-          onAuthenticationFailed: ({ reason }) => setError(`Live editing unavailable: ${reason}`),
+          onAuthenticationFailed: ({ reason }) => {
+            if (!denied) setError(`Live editing unavailable: ${reason}`);
+          },
         });
         setProvider(instance);
       } catch (e) {
@@ -221,8 +243,8 @@ export default function DocEditor({
       detachIndexeddb?.();
       ydoc.destroy();
     };
-    // getSocket is a stable context callback.
-  }, [docId, ydoc, getSocket]);
+    // getSocket and reportSignedOut are stable context callbacks.
+  }, [docId, ydoc, getSocket, reportSignedOut]);
 
   // PLAN.md §13i — publishes this connection's awareness onto
   // DocPresenceProvider (edit/page.tsx wraps DocEditor in one, alongside
@@ -279,13 +301,17 @@ export default function DocEditor({
           </div>
         )}
         <p className={styles.statusLine}>
-          {connectionStatus === "connected"
-            ? synced
-              ? "🟢 Live"
-              : "🔵 Connected"
-            : connectionStatus === "connecting"
-              ? "🟡 Connecting…"
-              : "🔴 Disconnected"}
+          {signedOut ? (
+            <>
+              🔴 Signed out — <SignInAgainLink />
+            </>
+          ) : connectionStatus === "connected" ? (
+            synced ? "🟢 Live" : "🔵 Connected"
+          ) : connectionStatus === "connecting" ? (
+            "🟡 Connecting…"
+          ) : (
+            "🔴 Disconnected"
+          )}
           {authorStats.length > 0 && " ("}
           {authorStats.map((author, i) => (
             <span key={author.authorId}>
