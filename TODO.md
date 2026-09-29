@@ -53,11 +53,10 @@ collab. Three details decide whether it is actually a fix:
 2. **A token that comes back `readOnly` on a writable connection (a demotion) has to close
    it**, or narrow `connectionConfig.readOnly` if Hocuspocus honours a change after
    authentication (unverified).
-3. **The PDF presence channel (`use-pdf-presence.ts`) and `/ydoc-debug` pass a fixed token
-   string, not a refresher.** They would answer with an expired token and be closed within the
-   interval, so they need refreshers first. They need them anyway: after any reconnect more than
-   two minutes after page load, PDF presence currently comes back with a stale token and stays
-   dead.
+3. **`/ydoc-debug` passes a fixed token string, not a refresher.** It would answer with an
+   expired token and be closed within the interval, so it needs a refresher first, like the one
+   every other connection (PDF presence included) already has. It is ADMIN-only, so closing it
+   would cost nothing worse than a reload.
 
 **The alternative, and why it is worse.** Revocation could instead be pushed from each action
 that takes access away (removing an author, changing visibility, demoting, deleting a user) by

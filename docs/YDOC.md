@@ -67,8 +67,12 @@ which creates the socket on first call and destroys it when the provider unmount
   throws only leaves the document unauthenticated on a socket that will reconnect and ask again,
   about once a minute, for as long as the tab stays open. `refreshCollabToken`
   (`src/lib/collab-token-request.ts`) turns those two statuses into `CollabTokenDenied`, and
-  every refresher uses it. A 401 goes to `DocPresenceProvider`'s `reportSignedOut()`, which
-  `disconnect()`s the socket — so nothing on it, and nothing attached to it later, reconnects
+  every refresher uses it. Every provider on the shared socket gets a refresher rather than a
+  token string, the PDF presence channel included: a string is re-sent unchanged on each
+  reconnect and refused once its two minutes are up. `/ydoc-debug`, on a socket of its own, is
+  the one that still passes a string. A 401 goes to `DocPresenceProvider`'s
+  `reportSignedOut()`, which `disconnect()`s the socket — so nothing on it, and nothing
+  attached to it later, reconnects
   until the page loads again — and raises `signedOut`: `SignedOutNotice` shows it under the
   byline on `/doc/[slug]` and above the viewer on `/pdf/[slug]`, and the editor's status line
   reads "Signed out — sign in again". A 403 detaches only that document. A surface's *first*
