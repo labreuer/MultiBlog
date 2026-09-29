@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { attachProvider } from "@/lib/collab-socket";
+import { CollabTokenDenied, refreshCollabToken } from "@/lib/collab-token-request";
 import { useDocPresence } from "./doc-presence-context";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 
@@ -55,7 +56,7 @@ export function useAnnotationProvider(
   annotationId: string,
   initialConnection?: AnnotationConnectionBundle,
 ): AnnotationConnection {
-  const { getSocket } = useDocPresence();
+  const { getSocket, reportSignedOut } = useDocPresence();
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [readOnly, setReadOnly] = useState<boolean | null>(initialConnection?.readOnly ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -74,10 +75,24 @@ export function useAnnotationProvider(
         firstToken = null;
         return t;
       }
-      const res = await fetch(`/api/annotation/${annotationId}/token`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to authenticate.");
-      const { token } = (await res.json()) as { token: string };
-      return token;
+      try {
+        return await refreshCollabToken(`/api/annotation/${annotationId}/token`);
+      } catch (e) {
+        // Final answers (collab-token-request.ts). A 401 is the whole page's
+        // to report; a 403 is this annotation's alone, so it detaches and
+        // drops the provider, which puts the caller back on its "no provider"
+        // branch with this error showing where "Connecting…" would be.
+        if (e instanceof CollabTokenDenied) {
+          if (e.denial === "signed-out") {
+            reportSignedOut();
+          } else {
+            instance?.detach();
+            setProvider(null);
+            setError("You no longer have access to this annotation.");
+          }
+        }
+        throw e;
+      }
     }
 
     async function fetchConnection(): Promise<AnnotationConnectionBundle> {
@@ -146,9 +161,9 @@ export function useAnnotationProvider(
       instance?.destroy();
       ydoc.destroy();
     };
-    // getSocket is a stable context callback.
+    // getSocket and reportSignedOut are stable context callbacks.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialConnection` is read once, at attach time; a later identity change must not tear down a live connection to re-attach with a token no fresher than the refresher's
-  }, [annotationId, ydoc, getSocket]);
+  }, [annotationId, ydoc, getSocket, reportSignedOut]);
 
   return { provider, ydoc, readOnly, error };
 }

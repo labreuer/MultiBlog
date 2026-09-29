@@ -33,6 +33,16 @@ type Ctx = {
   setAwareness: (awareness: Awareness | null) => void;
   /** The page's shared socket, created on first call. Effects only — never during render. */
   getSocket: () => CollabSocket;
+  /** True once any document on the page was refused a fresh token with a 401. */
+  signedOut: boolean;
+  /**
+   * Called by a token refresher that got a 401 (collab-token-request.ts). The
+   * session is gone, so every document on the socket would be refused the
+   * same way: this stops the socket reconnecting at all, rather than letting
+   * each provider find out on its own, once a minute, indefinitely. Nothing
+   * reconnects until the page is loaded again.
+   */
+  reportSignedOut: () => void;
 };
 
 const DocPresenceContext = createContext<Ctx | null>(null);
@@ -58,8 +68,21 @@ export function DocPresenceProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // `disconnect()` rather than `destroy()`: it clears the socket's
+  // `shouldConnect`, which both ends its retry loop and makes a later
+  // `attach()` (an annotation opened after this) leave it closed, while the
+  // providers still attached keep their state for their own cleanup to tear
+  // down as usual.
+  const [signedOut, setSignedOut] = useState(false);
+  const reportSignedOut = useCallback(() => {
+    socketRef.current?.disconnect();
+    setSignedOut(true);
+  }, []);
+
   return (
-    <DocPresenceContext.Provider value={{ awareness, setAwareness, getSocket }}>{children}</DocPresenceContext.Provider>
+    <DocPresenceContext.Provider value={{ awareness, setAwareness, getSocket, signedOut, reportSignedOut }}>
+      {children}
+    </DocPresenceContext.Provider>
   );
 }
 

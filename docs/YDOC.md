@@ -61,6 +61,20 @@ which creates the socket on first call and destroys it when the provider unmount
   by Hocuspocus after 30s and then retried forever by the client. So the first successful token
   fetch is what opens the socket — on `/doc/[slug]` the live tap's, on `/pdf/[slug]` the
   presence hook's, which only runs signed in.
+- **A refused reconnect stops; a 401 stops the whole socket.** A token route answering a
+  *refresh* with 401 (the session is gone) or 403 (this viewer may no longer open the document)
+  is final, and the provider cannot tell either from a network blip: a `token` function that
+  throws only leaves the document unauthenticated on a socket that will reconnect and ask again,
+  about once a minute, for as long as the tab stays open. `refreshCollabToken`
+  (`src/lib/collab-token-request.ts`) turns those two statuses into `CollabTokenDenied`, and
+  every refresher uses it. A 401 goes to `DocPresenceProvider`'s `reportSignedOut()`, which
+  `disconnect()`s the socket — so nothing on it, and nothing attached to it later, reconnects
+  until the page loads again — and raises `signedOut`: `SignedOutNotice` shows it under the
+  byline on `/doc/[slug]` and above the viewer on `/pdf/[slug]`, and the editor's status line
+  reads "Signed out — sign in again". A 403 detaches only that document. A surface's *first*
+  fetch is untouched, because a 401 there is the anonymous reader above, with nothing to be
+  told. `DocColumn`, whose provider owns its own socket, stops that socket and says so in its
+  own status line.
 - **A provider handed a socket does not attach itself.** `new HocuspocusProvider({ url })`
   attaches in its constructor; `new HocuspocusProvider({ websocketProvider })` does not, and an
   unattached provider sends nothing — no token, no sync, no error. `attachProvider` exists so

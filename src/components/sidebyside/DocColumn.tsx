@@ -8,9 +8,11 @@ import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
+import { CollabTokenDenied, refreshCollabToken, type TokenDenial } from "@/lib/collab-token-request";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
+import { SignInAgainLink } from "@/components/SignedOutNotice";
 import SideBySideDocBody from "./SideBySideDocBody";
 import CollabTitleField from "@/components/CollabTitleField";
 import CollabEditorBody from "@/components/CollabEditorBody";
@@ -90,6 +92,11 @@ export default function DocColumn({
   // owns that direction.
   const [synced, setSynced] = useState(false);
   const [lineage, setLineage] = useState<{ documentName: string; lineageMs: number } | null>(null);
+  // A reconnect refused for good (collab-token-request.ts). Kept here rather
+  // than reported to a DocPresenceProvider: this column's provider owns its
+  // own socket (docs/YDOC.md), so stopping it stops only this column, and the
+  // status line below is where it says so.
+  const [denial, setDenial] = useState<TokenDenial | null>(null);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ydoc = useMemo(() => new Y.Doc(), [docId]);
@@ -105,10 +112,17 @@ export default function DocColumn({
         firstToken = null;
         return t;
       }
-      const res = await fetch(`/api/doc/${docId}/token`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to authenticate.");
-      const { token } = (await res.json()) as { token: string };
-      return token;
+      try {
+        return await refreshCollabToken(`/api/doc/${docId}/token`);
+      } catch (e) {
+        if (e instanceof CollabTokenDenied) {
+          // The provider built its own socket, so this ends that socket's
+          // retry loop rather than a shared one's.
+          instance?.disconnect();
+          setDenial(e.denial);
+        }
+        throw e;
+      }
     }
 
     (async () => {
@@ -195,7 +209,19 @@ export default function DocColumn({
         </div>
         {mode === "write" && (
           <p className={styles.statusLine}>
-            {connectionStatus === "connected" ? (synced ? "🟢 Live" : "🔵 Connected") : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
+            {denial === "signed-out" ? (
+              <>
+                🔴 Signed out — <SignInAgainLink />
+              </>
+            ) : denial === "forbidden" ? (
+              "🔴 You no longer have access to this doc"
+            ) : connectionStatus === "connected" ? (
+              synced ? "🟢 Live" : "🔵 Connected"
+            ) : connectionStatus === "connecting" ? (
+              "🟡 Connecting…"
+            ) : (
+              "🔴 Disconnected"
+            )}
           </p>
         )}
         <div className={styles.scroller}>
