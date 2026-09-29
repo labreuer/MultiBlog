@@ -6,6 +6,67 @@ the box or the toolchain belongs in CLAUDE.md or DEPLOY.md instead.
 
 ---
 
+## A live collab connection keeps its access after the viewer loses it
+
+**Status:** found 2026-09-29 while fixing the token-refresh 401 loop (`collab-connection-fixes`,
+`7cb07a0`). Not fixed, and the fix is a design decision. docs/PERMISSIONS.md's "A live
+document connection is checked once" points here.
+
+**What happens.** Access to a document over collab is decided exactly once per connection. The
+token route runs `canUserEditDoc`/`canUserReadDoc` when it mints a two-minute token, and
+`ydocOnAuthenticate` (`server/ydoc-hooks.ts`) verifies that token when the document
+authenticates, fixing `readOnly` there and then. Nothing checks again. The expiry only bounds
+when a token can be *presented*: an authenticated connection stays authorized, and writable if
+it was, for as long as its socket stays open. With Hocuspocus's ping/pong that means until the
+tab closes, the network drops or the collab server restarts. None of these reach a connection
+that is already open:
+
+- **Signing out.** Sessions are JWTs (`src/lib/auth.ts`), so signing out deletes a cookie and
+  no server finds out.
+- **Removal from a `PRIVATE` doc's `DocAuthor` rows.** The removed author keeps reading and
+  writing the doc live.
+- **A doc going `SHARED` → `PRIVATE`.** Readers who aren't authors keep receiving every update.
+- **A role demotion, or a user's deletion.** A demoted EDITOR keeps a writable connection to a
+  `SHARED` doc they don't author.
+
+The same holds for an annotation body's connection. Seen for real on 2026-09-29: after signing
+out in another tab, the open editor tab kept editing live until a collab restart forced it to
+reconnect, and only then did its token request get the 401.
+
+**What limits it today, and what doesn't.** The viewer had to be authorized when connecting.
+Sockets close when the tab closes or the network drops, and every deploy restarts collab. Since
+`7cb07a0`, a reconnect that the token route refuses stops instead of retrying. None of that
+limits a tab left open by someone whose access was deliberately taken away.
+
+**Probable fix: re-ask on a timer, using what Hocuspocus already provides.** On the server,
+`Connection.requestToken()` asks a client to send its token again over the open connection. The
+provider answers by calling its `token` function, which is one of our refreshers, so it asks the
+token route again and that re-runs the permission checks. The server passes what comes back to
+an `onTokenSync` hook, and closes that document's connection if the hook throws. So: every
+minute or so, `requestToken()` each connection, and in `onTokenSync` verify the token the way
+`ydocOnAuthenticate` does. That bounds every kind of revocation, sign-out included, to the
+interval plus a round trip. It needs no permission-changing action to remember to notify
+collab. Three details decide whether it is actually a fix:
+
+1. **A client that never answers must be closed too.** Each request needs a deadline, or the
+   check is only advisory.
+2. **A token that comes back `readOnly` on a writable connection (a demotion) has to close
+   it**, or narrow `connectionConfig.readOnly` if Hocuspocus honours a change after
+   authentication (unverified).
+3. **The PDF presence channel (`use-pdf-presence.ts`) and `/ydoc-debug` pass a fixed token
+   string, not a refresher.** They would answer with an expired token and be closed within the
+   interval, so they need refreshers first. They need them anyway: after any reconnect more than
+   two minutes after page load, PDF presence currently comes back with a stale token and stays
+   dead.
+
+**The alternative, and why it is worse.** Revocation could instead be pushed from each action
+that takes access away (removing an author, changing visibility, demoting, deleting a user) by
+calling a collab endpoint that closes the affected connections. That needs every such path,
+present and future, to remember the call. A missing one fails no check. It can't cover sign-out
+at all, since signing out reaches no server.
+
+---
+
 ## Server/client environment divergence has no check covering it
 
 **Status:** two instances found and fixed on 2026-08-11; the *class* is still untested, and one

@@ -250,6 +250,22 @@ reading only", table 4's edit rows would collapse onto table 2's, `canUserEditDo
 reduce to a plain `DocAuthor` lookup with no visibility read, and this predicate would be
 deleted outright rather than merely renamed. Not decided.
 
+## A live document connection is checked once
+
+Every table here describes what a gate allows when it runs. For a live collab connection (the
+doc editor, a reading view's live updates, an annotation body) the gate runs once: when the
+token is minted and the document authenticates on the collab server. From then on the
+connection keeps the access it was granted, writable included, until its socket closes. So
+removing someone from a `PRIVATE` doc's authors, switching a doc from `SHARED` to `PRIVATE`,
+demoting a role, deleting a user or signing out reaches that viewer's open connections only
+when they reconnect.
+
+This is a second lag, on top of the stale role inside a session (src/app/sign-in/NOTES.md).
+That one delays only role changes, and only until the session refreshes. This one delays every
+kind of revocation, byline and visibility included, even though page loads and actions read
+those fresh from the database on every request. TODO.md, "A live collab connection keeps its
+access after the viewer loses it", has the details and the probable fix.
+
 ## Files (PLAN.md §19)
 
 **An uploaded file carries docs' visibility model, with its own predicates.** `StoredFile`
