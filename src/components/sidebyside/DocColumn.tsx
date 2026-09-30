@@ -28,6 +28,7 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  userInitials: string;
   // Derived by SideBySideView (Phase 6) from its own group state —
   // filtered by Display?/"Show only my Links" and colored by the
   // cascade — rather than owned here, since the group bar needs the same
@@ -68,6 +69,7 @@ export default function DocColumn({
   userId,
   userName,
   userColor,
+  userInitials,
   docLinks,
   activeGroupId,
   onLinkCreated,
@@ -233,6 +235,7 @@ export default function DocColumn({
                 userId={userId}
                 userName={userName}
                 userColor={userColor}
+                userInitials={userInitials}
                 onEditorReady={() => {}}
                 ariaLabel={aria.body}
                 suppressAnnotations

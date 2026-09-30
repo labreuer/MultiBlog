@@ -48,6 +48,7 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  userInitials: string;
 };
 
 type Mode = "read" | "edit";
@@ -79,7 +80,7 @@ function DocOption({ doc }: { doc: DocSummary }) {
   );
 }
 
-export default function YdocDebug({ initialDocs, userId, userName, userColor }: Props) {
+export default function YdocDebug({ initialDocs, userId, userName, userColor, userInitials }: Props) {
   const [docs, setDocs] = useState<DocSummary[]>(initialDocs);
   const [selectedId, setSelectedId] = useState<string | null>(initialDocs[0]?.id ?? null);
   const [creating, setCreating] = useState(false);
@@ -137,7 +138,14 @@ export default function YdocDebug({ initialDocs, userId, userName, userColor }: 
           entirely — its mode/detail/render state is naturally fresh for the
           newly selected document instead of needing an effect to reset it. */}
       {selectedId && (
-        <DocumentPanel key={selectedId} documentId={selectedId} userId={userId} userName={userName} userColor={userColor} />
+        <DocumentPanel
+          key={selectedId}
+          documentId={selectedId}
+          userId={userId}
+          userName={userName}
+          userColor={userColor}
+          userInitials={userInitials}
+        />
       )}
     </main>
   );
@@ -148,11 +156,13 @@ function DocumentPanel({
   userId,
   userName,
   userColor,
+  userInitials,
 }: {
   documentId: string;
   userId: string;
   userName: string;
   userColor: string;
+  userInitials: string;
 }) {
   const [mode, setMode] = useState<Mode>("read");
   const [detail, setDetail] = useState<DocDetail | null>(null);
@@ -247,7 +257,13 @@ function DocumentPanel({
             <p>Loading…</p>
           )
         ) : (
-          <EditView documentName={documentId} userId={userId} userName={userName} userColor={userColor} />
+          <EditView
+            documentName={documentId}
+            userId={userId}
+            userName={userName}
+            userColor={userColor}
+            userInitials={userInitials}
+          />
         )}
       </section>
 
@@ -834,11 +850,13 @@ function EditView({
   userId,
   userName,
   userColor,
+  userInitials,
 }: {
   documentName: string;
   userId: string;
   userName: string;
   userColor: string;
+  userInitials: string;
 }) {
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
@@ -924,6 +942,7 @@ function EditView({
         userId={userId}
         userName={userName}
         userColor={userColor}
+        userInitials={userInitials}
         onEditorReady={() => {}}
       />
     </div>

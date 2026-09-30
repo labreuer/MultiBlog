@@ -42,6 +42,7 @@ export default async function YdocDebugPage() {
       userId={session.user.id}
       userName={session.user.name ?? session.user.email ?? "Anonymous"}
       userColor={session.user.color}
+      userInitials={session.user.adminInitials}
     />
   );
 }

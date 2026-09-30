@@ -69,7 +69,7 @@ type Fixtures = {
   /** A SHARED doc, body `QUOTED_BODY` — readable/annotatable by any AUTHORIZED+ reader. */
   sharedDoc: TestDoc;
   /** Creates additional signed-in users on demand, cleaned up at test end. */
-  secondUser: (opts?: { role?: TestUser["role"] }) => Promise<SecondUser>;
+  secondUser: (opts?: { role?: TestUser["role"]; color?: string; adminInitials?: string }) => Promise<SecondUser>;
   /**
    * Tracks a doc id created through the live UI (e.g. clicking "+ New doc")
    * rather than via createTestDoc, so it still gets deleted at test end.
@@ -375,7 +375,7 @@ export const test = base.extend<Fixtures>({
   secondUser: async ({ browser }, use) => {
     const created: { email: string; page: Page }[] = [];
 
-    await use(async ({ role = "ADMIN" } = {}) => {
+    await use(async ({ role = "ADMIN", color, adminInitials } = {}) => {
       const email = uniqueEmail("second");
       // Unique per call, like the email: `uniqueUserSlug` derives the slug from
       // the *name*, and does so with a check-then-create loop. A fixed name
@@ -383,7 +383,7 @@ export const test = base.extend<Fixtures>({
       // and one of them losing on the unique index — a cross-file flake
       // ("Unique constraint failed on the fields: (`slug`)") that has nothing to
       // do with whatever either test was checking.
-      const user = await createTestUser({ email, name: `Second Editor ${email.split("@")[0]}`, role });
+      const user = await createTestUser({ email, name: `Second Editor ${email.split("@")[0]}`, role, color, adminInitials });
       const page = await signedInContext(browser, email);
       created.push({ email, page });
       return { user, page };
