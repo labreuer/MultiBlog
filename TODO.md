@@ -1256,7 +1256,7 @@ an idle one expires within 30 days. Thirty days after the last deploy, no live t
 
 Leaving the block costs nothing at runtime, since it skips its query once the field is there.
 The reason to remove it is that the code keeps saying a token can lack the field when none can.
-Removing it means four edits:
+Removing it means five edits:
 
 - delete the backfill block in the `jwt` callback;
 - make `adminInitials` required (drop the `?`) on both `JWT` declarations in
@@ -1264,5 +1264,7 @@ Removing it means four edits:
 - drop the `?? ""` from `session.user.adminInitials` in the `session` callback.
 - delete the last test in `e2e/collab-caret.spec.ts`, which mints a token without the field to
   exercise the backfill.
+- drop the "one temporary exception" sentence from `src/app/sign-in/NOTES.md`'s "The session is a
+  JWT" section.
 
 `npm run check` then confirms nothing else relied on it being optional.
