@@ -413,13 +413,27 @@ carets.
 
 ### The default render is overridden
 
-`CollaborationCaret`'s default `render` shows an always-visible name label. `renderCaret` in
-`CollabEditorBody.tsx` draws just a colored bar instead, with the name in a CSS `:hover`-only
-tooltip (`.collabCaret`/`.collabCaretLabel` in `EditorChrome.module.css`, shared by every
-`CollabEditorBody` consumer).
+`CollaborationCaret`'s default `render` shows an always-visible name label. `caretRenderer` in
+`CollabEditorBody.tsx` draws a colored bar instead, carrying a small flag with the person's
+`User.adminInitials`, which ride in the awareness state as `user.initials` beside name and
+color. Hovering the bar or the flag swaps the flag for the full name in the same box, in CSS
+alone (`.collabCaret`/`.collabCaretFlag`/`.collabCaretLabel` in `EditorChrome.module.css`,
+shared by every `CollabEditorBody` consumer). Two details there are load-bearing:
 
-The local user's own cursor was never affected either way — y-prosemirror's cursor plugin
-filters out the local clientID before `render` is ever called.
+- **The flag takes pointer events**, because the 2px bar is too small a target to hover. A
+  click on the flag therefore doesn't reach the text under it. Keeping clicks *and* hover
+  would need a JS hit test, since `:hover` never applies to a `pointer-events: none`
+  element.
+- **The flag hides on hover with `opacity`, never `visibility`.** A `visibility: hidden`
+  element drops out of hit-testing, which ends the hover as soon as it begins and makes the
+  name flicker. `e2e/collab-caret.spec.ts` samples the label every frame to catch that.
+
+Both boxes take their text color from `onAuthorColor`, inline, because `User.color` is
+unclamped and white text vanishes on a light pick.
+
+The local user's own cursor is never drawn: y-prosemirror's cursor plugin filters out the
+local clientID before `render` is ever called. The viewer's own caret from *another* tab or
+device is drawn, being a different clientID, but without the flag; it would only say "you".
 
 ## `document.querySelector('.tiptap')` matches the **title** editor first
 

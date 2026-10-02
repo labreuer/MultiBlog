@@ -7,6 +7,7 @@ declare module "next-auth" {
       id: string;
       role: Role;
       color: string;
+      adminInitials: string;
     } & DefaultSession["user"];
   }
 }
@@ -16,6 +17,9 @@ declare module "next-auth/jwt" {
     id: string;
     role: Role;
     color: string;
+    // Optional: a token issued before this field existed lacks it until the
+    // jwt callback backfills it (src/lib/auth.ts).
+    adminInitials?: string;
   }
 }
 
@@ -24,5 +28,8 @@ declare module "@auth/core/jwt" {
     id: string;
     role: Role;
     color: string;
+    // Optional: a token issued before this field existed lacks it until the
+    // jwt callback backfills it (src/lib/auth.ts).
+    adminInitials?: string;
   }
 }

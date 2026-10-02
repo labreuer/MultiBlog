@@ -454,8 +454,8 @@
 /* Remote collaborator cursors: a thin colored bar (border-left) with a
    generous invisible hit area (the padding/negative-margin pair below) so
    hovering near the line — not just the 2px line itself — reveals who it
-   is. The name label is positioned absolutely so it doesn't affect layout
-   or line height while hidden. */
+   is. The initials flag and the name label are positioned absolutely so
+   neither affects layout or line height. */
 .collabCaret {
   position: relative;
   border-left: 2px solid;
@@ -464,18 +464,36 @@
   left: 1px;
 }
 
+/* The initials flag and the name label share one box, so hovering swaps
+   only the text: the flag is always on, and the label takes its place on
+   hover, hiding it, so the two never stack. Both are small so they cover
+   as little of the line above as they can. The text color is set inline
+   per fill (onAuthorColor), since User.color is unclamped. */
+.collabCaretFlag,
 .collabCaretLabel {
   position: absolute;
   top: -1.4em;
   left: -2px;
-  padding: 1px 6px;
-  border-radius: 3px 3px 3px 0;
-  font-size: 11px;
+  padding: 0 3px;
+  border-radius: 2px 2px 2px 0;
+  font-size: 10px;
   font-weight: 600;
   line-height: 1.4;
-  color: var(--on-author-color);
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* The 2px bar is a hard target, so the flag is one too: it takes the
+   pointer (overriding the shared rule), and being inside .collabCaret,
+   hovering it is hovering the caret. The cost is that a click on the flag
+   doesn't reach the text under it. The label stays pointer-events: none,
+   so once shown it never steals the hover from the flag beneath it. */
+.collabCaretFlag {
+  pointer-events: auto;
+  user-select: none;
+}
+
+.collabCaretLabel {
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.12s ease;
@@ -484,6 +502,13 @@
 .collabCaret:hover .collabCaretLabel {
   opacity: 1;
   visibility: visible;
+}
+
+.collabCaret:hover .collabCaretFlag {
+  /* opacity, not visibility: a visibility: hidden element drops out of
+     hit-testing, so hiding the flag that way would end the hover the
+     moment it began and the label would flicker. */
+  opacity: 0;
 }
 
 @media (max-width: 480px) {

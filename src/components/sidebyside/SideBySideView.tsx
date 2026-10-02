@@ -25,6 +25,7 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  userInitials: string;
 };
 
 // PLAN.md §14f/§14h — the page shell: the group bar strip above two
@@ -35,7 +36,7 @@ type Props = {
 // link created in one column has to show up in the bar's dropdown, and
 // selecting a group in the bar has to darken that group's segments in
 // *both* columns at once.
-export default function SideBySideView({ left, right, initialGroups, initialOtherDocLinksCount, userId, userName, userColor }: Props) {
+export default function SideBySideView({ left, right, initialGroups, initialOtherDocLinksCount, userId, userName, userColor, userInitials }: Props) {
   const [groups, setGroups] = useState(initialGroups);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   // Display? — per-group opt-out, not persisted, defaulting to shown
@@ -193,6 +194,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           userId={userId}
           userName={userName}
           userColor={userColor}
+          userInitials={userInitials}
           docLinks={docLinksFor(left.docId)}
           activeGroupId={columnActiveGroupId}
           onLinkCreated={(link) => appendLinkForDoc(left.docId, link)}
@@ -207,6 +209,7 @@ export default function SideBySideView({ left, right, initialGroups, initialOthe
           userId={userId}
           userName={userName}
           userColor={userColor}
+          userInitials={userInitials}
           docLinks={docLinksFor(right.docId)}
           activeGroupId={columnActiveGroupId}
           onLinkCreated={(link) => appendLinkForDoc(right.docId, link)}

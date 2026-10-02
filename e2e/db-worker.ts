@@ -88,6 +88,10 @@ export async function createTestUser(opts: {
   contributorOrder?: number | null;
   orcid?: string | null;
   website?: string | null;
+  /** Default `colorForSeed(email)`; set one to pin which text color a fill gets. */
+  color?: string;
+  /** Default the name's first two letters, uppercased. */
+  adminInitials?: string;
 }): Promise<TestUser> {
   const {
     email,
@@ -99,6 +103,8 @@ export async function createTestUser(opts: {
     contributorOrder = null,
     orcid = null,
     website = null,
+    color = colorForSeed(email),
+    adminInitials = name.slice(0, 2).toUpperCase(),
   } = opts;
   assertSafe(email);
 
@@ -115,8 +121,8 @@ export async function createTestUser(opts: {
       name,
       passwordHash,
       role,
-      color: colorForSeed(email),
-      adminInitials: name.slice(0, 2).toUpperCase(),
+      color,
+      adminInitials,
       isListedContributor,
       contributorOrder,
       orcid,

@@ -94,7 +94,7 @@ what makes the live color sample below free.
 `handleSave` calls `useSession().update({})` (the `{}` matters — an
 argument-less `update()` is a GET and never sets `trigger: "update"`; see
 `SessionRefresh.tsx`'s notes) before `router.refresh()`. Without it the JWT —
-which baked name/role/color in at sign-in — keeps the old values until the
+which baked name/role/color/initials in at sign-in — keeps the old values until the
 next full /dashboard load, because SessionRefresh runs once per mount and has
 already fired by the time Save is pressed. Your own collab caret would keep
 painting the old color.
@@ -123,6 +123,8 @@ different staleness windows:
 1. **The session JWT** — baked at sign-in; refreshed by SessionRefresh once
    per /dashboard mount and by the Settings save path above. Everything
    reading `session.user.color` (your own caret, composers) sees this copy.
+   `User.adminInitials` rides the same copy, with the same refresh paths: it
+   is the flag on your caret in everyone else's editor.
 2. **`/api/users/colors`** — auth-gated dynamic route, reads Postgres per
    request, no cache headers. Always fresh.
 3. **`useAuthorColors`'s per-mount cache** — each author id fetched once per

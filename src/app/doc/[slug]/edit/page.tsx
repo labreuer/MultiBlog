@@ -114,6 +114,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
             userId={user.id}
             userName={user.name ?? user.email ?? "Anonymous"}
             userColor={user.color}
+            userInitials={user.adminInitials}
             authorIds={doc.authors.map((a) => a.userId)}
             eligibleUsers={eligibleUsers}
             initialDeleted={doc.deletedByUserId !== null}

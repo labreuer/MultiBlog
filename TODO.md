@@ -1239,3 +1239,32 @@ already records two iOS touch claims that measured false.
 `(pointer: coarse)` is false and would be right. That is measured, recorded in §10c, and
 **decided** in PLAN.md §19d — a feel knob is not re-aimed on a symmetry argument — rather than
 open.
+
+---
+
+## Remove the `adminInitials` token backfill 30 days after the last instance deploys it
+
+**Status:** waiting on a date. **Fill in the deploy date here** when the last instance
+(thicketry, unchurch, kicking) runs the commit that put admin initials on the session for the
+collab caret's flag: `____-__-__`, so removable from `____-__-__` (+30 days).
+
+`src/lib/auth.ts`'s `jwt` callback has a block that looks up `adminInitials` for a token issued
+before the field existed. It is only there for the changeover. `auth.ts` sets no `maxAge`, so
+Auth.js's 30-day default applies. The session route re-issues the cookie on every GET ("Auth.js
+re-issues the session cookie on every session GET", above), so a token in use gains the field on its next page load and
+an idle one expires within 30 days. Thirty days after the last deploy, no live token lacks it.
+
+Leaving the block costs nothing at runtime, since it skips its query once the field is there.
+The reason to remove it is that the code keeps saying a token can lack the field when none can.
+Removing it means five edits:
+
+- delete the backfill block in the `jwt` callback;
+- make `adminInitials` required (drop the `?`) on both `JWT` declarations in
+  `src/types/next-auth.d.ts`, along with the comment explaining why it was optional;
+- drop the `?? ""` from `session.user.adminInitials` in the `session` callback.
+- delete the last test in `e2e/collab-caret.spec.ts`, which mints a token without the field to
+  exercise the backfill.
+- drop the "one temporary exception" sentence from `src/app/sign-in/NOTES.md`'s "The session is a
+  JWT" section.
+
+`npm run check` then confirms nothing else relied on it being optional.

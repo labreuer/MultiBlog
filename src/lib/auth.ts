@@ -32,7 +32,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        return { id: user.id, email: user.email, name: user.name, role: user.role, color: user.color };
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          color: user.color,
+          adminInitials: user.adminInitials,
+        };
       },
     }),
   ],
@@ -42,7 +49,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.id = user.id as string;
         token.role = (user as { role: Role }).role;
         token.color = (user as { color: string }).color;
+        token.adminInitials = (user as { adminInitials: string }).adminInitials;
         return token;
+      }
+
+      // A token issued before adminInitials rode on it (the collab caret's
+      // flag reads it) has none. Fill it in once rather than forcing everyone
+      // to sign in again; the next cookie the session route writes carries it.
+      if (token.id && token.adminInitials === undefined && trigger !== "update") {
+        const row = await prisma.user.findUnique({ where: { id: token.id }, select: { adminInitials: true } });
+        if (row) {
+          token.adminInitials = row.adminInitials;
+        }
       }
 
       // Re-read the row so a role (or name/color) change made after sign-in
@@ -52,7 +70,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (trigger === "update" && token.id) {
         const fresh = await prisma.user.findUnique({
           where: { id: token.id },
-          select: { name: true, email: true, role: true, color: true },
+          select: { name: true, email: true, role: true, color: true, adminInitials: true },
         });
         // No row means deleted or soft-deleted (`prisma` filters those out),
         // i.e. someone who could no longer sign in. Returning null clears the
@@ -64,6 +82,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.email = fresh.email;
         token.role = fresh.role;
         token.color = fresh.color;
+        token.adminInitials = fresh.adminInitials;
       }
 
       return token;
@@ -72,6 +91,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.id = token.id;
       session.user.role = token.role;
       session.user.color = token.color;
+      session.user.adminInitials = token.adminInitials ?? "";
       return session;
     },
   },

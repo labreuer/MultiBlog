@@ -22,7 +22,7 @@ import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS, tableExtensions } fro
 import { codecForFile } from "@/lib/table-codecs";
 import { insertTableFromFile } from "@/lib/table-file-editor";
 import { useAuthorColors } from "@/lib/use-author-colors";
-import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
+import { NEUTRAL_THREAD_COLOR, onAuthorColor } from "@/lib/author-colors";
 import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import EditorToolbar from "./EditorToolbar";
@@ -43,6 +43,9 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  // User.adminInitials — the flag on this user's caret in everyone else's
+  // editor. Rides in the awareness state beside name and color.
+  userInitials: string;
   editable?: boolean;
   onEditorReady: (editor: Editor | null) => void;
   onAuthorStats?: (stats: AuthorStat[]) => void;
@@ -79,23 +82,46 @@ type Props = {
 // Stable default — see DocReadingBody's identical constant.
 const EMPTY_ANCHORS: AnnotationAnchorInput[] = [];
 
-// A thin colored bar rather than the library default's always-visible name
-// label — the name still shows, but only in a tooltip on hover (see
-// .collabCaretLabel in EditorChrome.module.css). Never rendered for the local
-// user: y-prosemirror's cursor plugin filters out the client's own
-// awareness state before this is ever called.
-function renderCaret(user: Record<string, unknown>): HTMLElement {
-  const caret = document.createElement("span");
-  caret.classList.add(styles.collabCaret);
-  caret.style.borderColor = typeof user.color === "string" ? user.color : NEUTRAL_THREAD_COLOR;
+// A thin colored bar with a small flag of the person's admin initials riding
+// on top of it; the full name shows only in a tooltip on hover, which covers
+// the flag (see .collabCaretFlag/.collabCaretLabel in EditorChrome.module.css).
+// Never rendered for the local client: y-prosemirror's cursor plugin filters
+// out the client's own awareness state before this is ever called. The flag
+// is also left off a caret that is the viewer's own from another tab or
+// device — same user id, different client — since it would only say "you".
+function caretRenderer(localUserId: string) {
+  return (user: Record<string, unknown>): HTMLElement => {
+    const color = typeof user.color === "string" ? user.color : NEUTRAL_THREAD_COLOR;
+    // Black or white per fill, as the avatar fallback's initials do —
+    // User.color is unclamped, so white alone vanishes on a light pick. The
+    // flag and the name label share one fill, so they share this too.
+    const textColor = onAuthorColor(color);
+    const caret = document.createElement("span");
+    caret.classList.add(styles.collabCaret);
+    // The suite's only handle on a caret — CSS-module class names are
+    // hashed in a production build (e2e/collab-caret.spec.ts).
+    caret.dataset.testid = "collab-caret";
+    caret.style.borderColor = color;
 
-  const label = document.createElement("div");
-  label.classList.add(styles.collabCaretLabel);
-  label.style.backgroundColor = typeof user.color === "string" ? user.color : NEUTRAL_THREAD_COLOR;
-  label.textContent = typeof user.name === "string" ? user.name : "Anonymous";
+    const initials = typeof user.initials === "string" ? user.initials : "";
+    if (initials && user.id !== localUserId) {
+      const flag = document.createElement("div");
+      flag.classList.add(styles.collabCaretFlag);
+      flag.style.backgroundColor = color;
+      flag.style.color = textColor;
+      flag.textContent = initials;
+      caret.appendChild(flag);
+    }
 
-  caret.appendChild(label);
-  return caret;
+    const label = document.createElement("div");
+    label.classList.add(styles.collabCaretLabel);
+    label.style.backgroundColor = color;
+    label.style.color = textColor;
+    label.textContent = typeof user.name === "string" ? user.name : "Anonymous";
+
+    caret.appendChild(label);
+    return caret;
+  };
 }
 
 export default function CollabEditorBody({
@@ -104,6 +130,7 @@ export default function CollabEditorBody({
   userId,
   userName,
   userColor,
+  userInitials,
   editable = true,
   onEditorReady,
   onAuthorStats,
@@ -147,8 +174,8 @@ export default function CollabEditorBody({
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         provider,
-        user: { id: userId, name: userName, color: userColor },
-        render: renderCaret,
+        user: { id: userId, name: userName, color: userColor, initials: userInitials },
+        render: caretRenderer(userId),
       }),
       AuthorHighlight.configure({ getAuthorId: () => userId }),
       // Keeps a non-empty selection painted (class "selection", styled in

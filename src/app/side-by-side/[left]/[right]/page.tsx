@@ -167,6 +167,7 @@ export default async function SideBySidePage({
         userId={user.id}
         userName={user.name ?? user.email ?? "Anonymous"}
         userColor={user.color}
+        userInitials={user.adminInitials}
       />
     </main>
   );

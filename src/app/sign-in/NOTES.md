@@ -30,8 +30,11 @@ nothing anywhere today.
 ## The session is a JWT, baked once at sign-in
 
 `session: { strategy: "jwt" }`. The `jwt` callback reads `user` only when it's present —
-i.e. exactly once, at sign-in — and copies `id`, `role`, and `color` into the token. Nothing
-re-reads the database on ordinary later requests.
+i.e. exactly once, at sign-in — and copies `id`, `role`, `color` and `adminInitials` into the
+token. Nothing re-reads the database on ordinary later requests, with one temporary
+exception: a token issued before `adminInitials` was on it gets that one field looked up, and
+the session route's re-issue writes it back, so the lookup happens once per token. TODO.md
+dates its removal.
 
 **Consequence: a role change doesn't reach an existing session by itself.** Promoting someone
 (to `AUTHORIZED`, or anything else) does nothing on its own until they sign out and back in.
@@ -47,7 +50,7 @@ docs/BROWSER_PANE.md covers that angle.
 The one place that *does* re-read the DB. `<SessionRefresh />`
 (`src/components/SessionRefresh.tsx`) is mounted on `/dashboard` and, once per mount, calls
 `useSession().update({})`; the `jwt` callback answers `trigger === "update"` by re-reading
-`name`/`email`/`role`/`color` from the user's row and re-signing the token. So "go to your
+`name`/`email`/`role`/`color`/`adminInitials` from the user's row and re-signing the token. So "go to your
 dashboard" is the whole fix for a promotion that hasn't landed yet — no sign-out, and the
 refreshed cookie is then good everywhere, not just on that page.
 

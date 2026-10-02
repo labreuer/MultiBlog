@@ -64,6 +64,7 @@ type Props = {
   userId: string;
   userName: string;
   userColor: string;
+  userInitials: string;
   authorIds: string[];
   eligibleUsers: EligibleUser[];
   initialDeleted: boolean;
@@ -94,6 +95,7 @@ export default function DocEditor({
   userId,
   userName,
   userColor,
+  userInitials,
   authorIds,
   eligibleUsers,
   initialDeleted,
@@ -328,6 +330,7 @@ export default function DocEditor({
             userId={userId}
             userName={userName}
             userColor={userColor}
+            userInitials={userInitials}
             editable={!deleted}
             onEditorReady={setBodyEditor}
             onAuthorStats={setAuthorStats}
