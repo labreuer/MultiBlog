@@ -1,9 +1,10 @@
-// Import a claude.ai data export's conversations as docs, through /docs'
-// own "Import Markdown" form (docs/DOC_IMPORT.md) — the multipart POST a
-// browser without JS sends — signed in as a real account. Each session becomes
-// Markdown first; the form does the parse, the ydoc seeding and the slug.
+// Import a claude.ai data export's conversations as docs. Each session becomes
+// Markdown, and its doc is created as /docs' own "Import Markdown" creates one
+// (docs/DOC_IMPORT.md): the same parse, then the same createDocWithContent
+// (src/lib/doc-create.ts) for the ydoc seeding, the row and the slug — called
+// directly, as the importing account, with no web server involved.
 //
-// Then, per doc, directly in the database:
+// Then, per doc:
 //   - the byline becomes BYLINE_EMAILS in that order (what updateDocAuthor +
 //     updateDocAuthorOrder would leave);
 //   - createdAt/updatedAt become the session's first and last message activity.
@@ -36,32 +37,27 @@
 // then compared, and with --update edited in place. A file is matched to its
 // doc by title (see markdownSources), and its doc keeps the dates the import
 // gives it, since a file has no activity to date it by.
-// Env: MB_EMAIL/MB_PASSWORD (the importing account, default the Claude one),
-// BYLINE_EMAILS (comma-separated), HUMAN_NAME. Importing goes through the web
-// server, so it must be running when there is anything new to import; MB_URL
-// is where it answers, by default this slot's dev server.
+// Env: MB_EMAIL (the importing account, default the Claude one; it needs
+// canManageDocs), BYLINE_EMAILS (comma-separated), HUMAN_NAME. --update writes
+// through the collab server, so that has to be running for it; nothing else
+// does.
 //
 // Against a deployed instance, run this in that instance's checkout: the
-// database, the collab port and the token secret come from its .env, and only
-// the web server's address does not. A deployed .env has no WEB_PORT, so the
-// default would be some other server's :3000 — set MB_URL to the instance's
-// own port on 127.0.0.1. Going through its public URL works too, but the
-// proxy then decides how large an upload may be. The sign-in checks that the
-// web server and the database are the same instance before anything is
-// written.
+// database, the collab port and the token secret all come from its .env.
 
 import "dotenv/config";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import * as Y from "yjs";
-import bcrypt from "bcryptjs";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prisma } from "../src/lib/prisma";
 import type { Prisma } from "../src/generated/prisma/client";
 import type { Role } from "../src/generated/prisma/enums";
-import { markdownToDocContent } from "../src/lib/markdown-import";
+import { markdownToDocContent, MAX_MARKDOWN_BYTES } from "../src/lib/markdown-import";
+import { createDocWithContent } from "../src/lib/doc-create";
+import { canManageDocs } from "../src/lib/role-checks";
 import { contentExtensions, docContentExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
 import { docContentFromYdoc } from "../src/lib/doc-content";
 import { ydocIdForDoc, DOC_APPLY_UPDATE_PATH } from "../src/lib/ydoc-names";
@@ -69,7 +65,6 @@ import { signYdocToken } from "../src/lib/ydoc-token";
 import { collabHttpOrigin } from "../src/lib/collab-http-origin";
 import { captureAnchorInYdoc } from "../src/lib/anchors/capture";
 import { ydocStore, UNAVAILABLE } from "../server/ydoc-store";
-import { webUrl, WEB_PORT } from "./dev-ports";
 
 type Block = {
   type: string;
@@ -128,9 +123,7 @@ if (markdownMode ? exportPath || framesDir || outDir || dryRun || !ids.length : 
   process.exit(1);
 }
 
-const BASE = (process.env.MB_URL || webUrl(WEB_PORT)).replace(/\/+$/, "");
 const IMPORTER_EMAIL = process.env.MB_EMAIL || "claude@multiblog.invalid";
-const IMPORTER_PASSWORD = process.env.MB_PASSWORD || "testpass123";
 const BYLINE_EMAILS = (process.env.BYLINE_EMAILS || "labreuer@gmail.com,claude@multiblog.invalid").split(",");
 const HUMAN = process.env.HUMAN_NAME || "Luke Breuer";
 const ASSISTANT = "Claude";
@@ -423,79 +416,64 @@ function activitySpan(conv: Conversation): Span {
   return { first: new Date(Math.min(...ms)), last: new Date(Math.max(...ms)) };
 }
 
-// ------------------------------------------------------------------- Upload
+// ------------------------------------------------------------------- Import
 
-const jar = new Map<string, string>();
-function keep(res: Response): Response {
-  for (const c of res.headers.getSetCookie()) {
-    const [pair] = c.split(";");
-    const i = pair.indexOf("=");
-    jar.set(pair.slice(0, i), pair.slice(i + 1));
+// The importing account: docs are created as it, and an update is written as
+// it — its token is who the collab server attributes the new blocks to.
+let account: { id: string; role: Role } | null = null;
+async function importingAccount() {
+  account ??= await prisma.user.findUniqueOrThrow({ where: { email: IMPORTER_EMAIL }, select: { id: true, role: true } });
+  return account;
+}
+
+// Looked up on the first import: whether the importing account may create docs
+// at all — the check /docs' import action makes on its session, since
+// createDocWithContent makes none — and the byline's accounts.
+let byline: string[] | null = null;
+async function bylineForImports(): Promise<string[]> {
+  if (byline) return byline;
+  const { role } = await importingAccount();
+  if (!canManageDocs(role)) throw new Error(`${IMPORTER_EMAIL} is ${role}, which can't create docs`);
+  const database = new URL(process.env.DATABASE_URL!).pathname.slice(1);
+  console.log(`importing into ${database} as ${IMPORTER_EMAIL} (${role})`);
+  const users = await prisma.user.findMany({ where: { email: { in: BYLINE_EMAILS } }, select: { id: true, email: true } });
+  byline = BYLINE_EMAILS.map((e) => {
+    const u = users.find((x) => x.email === e);
+    if (!u) throw new Error(`no user ${e}`);
+    return u.id;
+  });
+  return byline;
+}
+
+// Creates the doc as /docs' import action would, under the same size limit,
+// then sets its byline and dates; returns its slug. The action's
+// revalidatePath("/docs") has no equivalent here and needs none: /docs reads
+// the session, so it renders per request.
+async function importDoc(md: string, span?: Span): Promise<string> {
+  const bytes = Buffer.byteLength(md, "utf8");
+  if (bytes > MAX_MARKDOWN_BYTES) {
+    throw new Error(`${Math.round(bytes / 1024)} KB is over the import limit of ${Math.round(MAX_MARKDOWN_BYTES / 1024)} KB`);
   }
-  return res;
-}
-const cookie = () => [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
-const get = (path: string) => fetch(BASE + path, { headers: { cookie: cookie() }, redirect: "manual" }).then(keep);
-const post = (path: string, body: BodyInit) =>
-  fetch(BASE + path, { method: "POST", body, headers: { cookie: cookie(), origin: BASE }, redirect: "manual" }).then(keep);
-
-async function signIn(email: string, password: string) {
-  const { csrfToken } = await (await get("/api/auth/csrf")).json();
-  await post("/api/auth/callback/credentials", new URLSearchParams({ email, password, csrfToken, callbackUrl: BASE + "/" }));
-  const session = await (await get("/api/auth/session")).json();
-  if (session?.user?.email !== email) throw new Error(`sign-in as ${email} at ${BASE} failed`);
-  // The import goes to whatever answers at BASE, and the byline and dates to
-  // DATABASE_URL. If those are two instances, the doc lands in one and
-  // finishDoc fails in the other, after the import — so check the account on
-  // both sides first. The id alone can't tell them apart when one instance's
-  // database was copied from the other's, which keeps every id; the password
-  // the web server just accepted must also match the hash in this database.
-  const row = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
-  if (!row?.passwordHash || session.user.id !== row.id || !(await bcrypt.compare(password, row.passwordHash))) {
-    throw new Error(`${BASE} is not the instance DATABASE_URL names: ${email} is a different account there`);
-  }
-  return session.user as { email: string; role: string };
-}
-
-// The import form is the one whose server action carries bound state
-// ($ACTION_REF_n — useActionState). Its hidden fields are replayed verbatim.
-async function importFormFields(): Promise<[string, string][]> {
-  const html = await (await get("/docs")).text();
-  const forms = html.match(/<form[^>]*>[\s\S]*?<\/form>/g) ?? [];
-  const form = forms.find((f) => /name="\$ACTION_REF_/.test(f) && /name="file"/.test(f));
-  if (!form) throw new Error("no import form on /docs (not signed in as a doc manager?)");
-  const unescape = (s: string) =>
-    s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-  return [...form.matchAll(/<input type="hidden" name="([^"]+)"(?: value="([^"]*)")?\/?>/g)].map(([, n, v]) => [
-    n,
-    unescape(v ?? ""),
-  ]);
-}
-
-async function importMarkdown(fields: [string, string][], filename: string, markdown: string): Promise<string> {
-  const fd = new FormData();
-  for (const [n, v] of fields) fd.append(n, v);
-  fd.append("file", new Blob([markdown], { type: "text/markdown" }), filename);
-  const res = await post("/docs", fd);
-  const location = res.headers.get("location");
-  const slug = location?.match(/^\/doc\/([^/]+)\/edit$/)?.[1];
-  if (!slug) throw new Error(`import returned ${res.status} with no doc redirect: ${(await res.text()).slice(0, 300)}`);
-  return decodeURIComponent(slug);
+  const bylineIds = await bylineForImports();
+  const { id: userId } = await importingAccount();
+  const { title, body } = markdownToDocContent(md);
+  const doc = await createDocWithContent(userId, title ?? "", body);
+  await finishDoc(doc.id, bylineIds, span);
+  return doc.slug;
 }
 
 // The byline, and for a session the dates; a file's doc keeps the import's.
-async function finishDoc(slug: string, bylineIds: string[], span?: Span) {
-  const doc = await prisma.doc.findUniqueOrThrow({ where: { slug }, select: { id: true } });
+async function finishDoc(docId: string, bylineIds: string[], span?: Span) {
   await prisma.$transaction([
     ...bylineIds.map((userId, bylineOrder) =>
       prisma.docAuthor.upsert({
-        where: { docId_userId: { docId: doc.id, userId } },
-        create: { docId: doc.id, userId, bylineOrder },
+        where: { docId_userId: { docId, userId } },
+        create: { docId, userId, bylineOrder },
         update: { bylineOrder },
       }),
     ),
     // Last, and with updatedAt named explicitly, so @updatedAt doesn't stamp now().
-    ...(span ? [prisma.doc.update({ where: { id: doc.id }, data: { createdAt: span.first, updatedAt: span.last } })] : []),
+    ...(span ? [prisma.doc.update({ where: { id: docId }, data: { createdAt: span.first, updatedAt: span.last } })] : []),
   ]);
 }
 
@@ -671,14 +649,6 @@ async function planInPlace(docId: string, docTitle: string, md: string): Promise
   return { docId, ydoc, before, anchors, blocksChanged: steps.filter((s) => s.kind !== "keep").length };
 }
 
-// The account the update is written as: the importing one, whose token the
-// collab server attributes the new blocks to.
-let writer: { id: string; role: Role } | null = null;
-async function importingAccount() {
-  writer ??= await prisma.user.findUniqueOrThrow({ where: { email: IMPORTER_EMAIL }, select: { id: true, role: true } });
-  return writer;
-}
-
 // Sends the plan's update to the collab server, which applies it to the live
 // doc and stores it before answering; then, for a session, restores Updated,
 // and re-captures each anchor against the version the update became. Returns
@@ -754,7 +724,6 @@ type ExistingDoc = { id: string; slug: string; title: string; body: unknown };
 // One thing to bring into step with its doc: a session, or a Markdown file.
 type Source = {
   label: string; // what the run's messages call it
-  filename: string; // the upload's name
   md: string;
   span?: Span; // a session's first and last activity
   doc: ExistingDoc | null; // the doc it was imported as, if it has been
@@ -792,7 +761,6 @@ async function sessionSources(): Promise<{ sources: Source[]; empty: number } | 
     if (outDir) writeFileSync(join(outDir, `${conv.uuid}.md`), md);
     sources.push({
       label: `${conv.uuid} ${JSON.stringify(conv.name)}`,
-      filename: `${conv.uuid}.md`,
       md,
       span: activitySpan(conv),
       doc: existing.get(chatUrl(conv.uuid)) ?? null,
@@ -834,7 +802,6 @@ async function markdownSources(): Promise<{ sources: Source[]; empty: number }> 
     const [doc] = docs;
     sources.push({
       label: file,
-      filename: basename(file),
       md,
       doc: doc ? { id: doc.id, slug: doc.slug, title: doc.title, body: doc.proseJson } : null,
     });
@@ -846,23 +813,6 @@ async function main() {
   const found = markdownMode ? await markdownSources() : await sessionSources();
   if (!found) return;
   const { sources, empty } = found;
-
-  // Signed in on the first import only, so a run with nothing to import needs
-  // no web server.
-  let form: { fields: [string, string][]; bylineIds: string[] } | null = null;
-  const signedIn = async () => {
-    if (form) return form;
-    const user = await signIn(IMPORTER_EMAIL, IMPORTER_PASSWORD);
-    console.log(`signed in at ${BASE} as ${user.email} (${user.role})`);
-    const users = await prisma.user.findMany({ where: { email: { in: BYLINE_EMAILS } }, select: { id: true, email: true } });
-    const bylineIds = BYLINE_EMAILS.map((e) => {
-      const u = users.find((x) => x.email === e);
-      if (!u) throw new Error(`no user ${e}`);
-      return u.id;
-    });
-    form = { fields: await importFormFields(), bylineIds };
-    return form;
-  };
 
   let imported = 0;
   let upToDate = 0;
@@ -902,9 +852,7 @@ async function main() {
       continue;
     }
     try {
-      const { fields, bylineIds } = await signedIn();
-      const slug = await importMarkdown(fields, source.filename, md);
-      await finishDoc(slug, bylineIds, span);
+      const slug = await importDoc(md, span);
       imported++;
       console.log(`${slug}  (${Math.round(Buffer.byteLength(md) / 1024)} KB)`);
     } catch (err) {

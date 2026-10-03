@@ -1,10 +1,10 @@
 # MultiBlog — Importing a claude.ai data export
 
 `scripts/import-claude-chats.ts` turns each session in a claude.ai data export into a doc,
-through `/docs`' own Markdown import ([DOC_IMPORT.md](DOC_IMPORT.md)), and keeps those docs in
-step with later exports by updating them in place. With `--markdown` it does the same for
-Markdown files written elsewhere, such as an analysis or a summary (§8). The script's header
-documents its flags and environment; this file says what it does and why.
+the way `/docs`' own Markdown import creates one ([DOC_IMPORT.md](DOC_IMPORT.md)), and keeps
+those docs in step with later exports by updating them in place. With `--markdown` it does the
+same for Markdown files written elsewhere, such as an analysis or a summary (§8). The script's
+header documents its flags and environment; this file says what it does and why.
 
 ## 1. The export
 
@@ -42,30 +42,22 @@ Things about the data that the importer is built around:
    (`src/lib/markdown-import.ts`) to check each one parses, takes its title from the leading
    heading, starts its body with the session's link, and stays under the import's size limit
    (DOC_IMPORT.md §6).
-3. **Import** without `--dry-run`. New sessions go through the web server, so it has to be up
-   when there are any. That is this slot's dev server unless `MB_URL` names another.
+3. **Import** without `--dry-run`. This needs only the database; the web server can be down.
 4. **Update** docs the run lists as differing: `--plan` reports what `--update` would change,
    `--update` changes it (§5). Take a `pg_dump` into `.db-backups/` first. Afterwards run
    `scripts/integrity/check-annotation-anchors.ts`, `check-doc-integrity.ts` and
    `check-ydoc-integrity.ts`.
 
-`MB_EMAIL`/`MB_PASSWORD` name the importing account, which needs `canManageDocs`; the
-password defaults to the test one, which only a dev database has. `BYLINE_EMAILS` is the
+`MB_EMAIL` names the importing account, which needs `canManageDocs`. `BYLINE_EMAILS` is the
 byline to give every doc, in order; include the importing account, which the import has
 already put on it. `HUMAN_NAME` is the heading over each prompt.
 
 **On a deployed instance**, run the script in that instance's own checkout, on its server.
-Everything except the web server's address comes from that checkout's `.env`: the database,
-the collab server `--update` writes through, and the secret its token is signed with. A
-deployed `.env` has no `WEB_PORT`, so set `MB_URL` to the instance's own port on `127.0.0.1`.
-The default, `:3000`, may be a different instance on a shared server. The public URL also
-works, but then the proxy sets the upload limit.
-
-Before writing anything, the script checks that the web server and the database are the same
-instance. The account it signed in as must have the same id in the database, and its password
-must match that row's hash. Ids alone don't settle it, because a database copied from another
-instance keeps every id. Copy the extracted export to the server; `conversations.json` is read
-into memory whole, which costs about four times its size.
+Everything comes from that checkout's `.env`: the database, the collab server `--update` writes
+through, and the secret its token is signed with. The first import prints the database it is
+writing to. On a server with more than one instance, check that it names the one you meant.
+Copy the extracted export to the server; `conversations.json` is read into memory whole, which
+costs about four times its size.
 
 ## 3. What happens to each session
 
@@ -74,10 +66,15 @@ into memory whole, which costs about four times its size.
    Markdown is parsed and round-tripped through Yjs exactly as an import would store it, and
    compared with the stored body regardless of JSON key order (jsonb doesn't keep it). The same
    is up to date; a difference is listed, or with `--update` applied in place.
-3. Otherwise the importer signs in and posts the Markdown to `/docs`' Import Markdown form the
-   way a browser without JavaScript does, replaying the form's hidden server-action fields. The
-   app parses it, seeds the doc, and derives the slug from the title — nothing about the doc's
-   creation is reimplemented here.
+3. Otherwise the doc is created as `/docs`' Import Markdown creates one: the same parse, then
+   the same `createDocWithContent` (`src/lib/doc-create.ts`) the import action calls, which
+   seeds the ydoc, inserts the row and derives the slug from the title. Nothing about the
+   doc's creation is reimplemented here. It is created as the importing account, and under the
+   import's size limit (DOC_IMPORT.md §6). That limit exists for the web form's request body,
+   which the script doesn't send; it still applies so the script creates no doc `/docs`
+   couldn't. The new doc's ydoc row is written straight to the database, which is safe only
+   because nobody can have the doc open yet. An existing doc goes through the collab server
+   (§5).
 4. It then sets the byline and the doc's dates directly in the database.
 
 Docs are created `PRIVATE`, so the byline is who can read them (PERMISSIONS.md).
@@ -181,10 +178,10 @@ more than its one seed update.
 ## 8. Markdown files
 
 `--markdown <file.md>...` imports files instead of sessions, through everything above: the
-same account and environment (§2), the same form, the byline from `BYLINE_EMAILS`, and on a
-later run the same comparison and in-place update (§3, §5). `--plan` and `--update` work as
-they do for sessions; `--export`, `--frames`, `--out` and `--dry-run` don't apply. On a
-deployed instance, copy the files to the server and run the script there.
+same account and environment (§2), the same creation path, the byline from `BYLINE_EMAILS`,
+and on a later run the same comparison and in-place update (§3, §5). `--plan` and `--update`
+work as they do for sessions; `--export`, `--frames`, `--out` and `--dry-run` don't apply. On
+a deployed instance, copy the files to the server and run the script there.
 
 What differs from a session:
 
