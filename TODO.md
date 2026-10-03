@@ -1242,17 +1242,18 @@ open.
 
 ---
 
-## Remove the `adminInitials` token backfill 30 days after the last instance deploys it
+## Remove the `adminInitials` token backfill on or after 2026-11-01
 
-**Status:** waiting on a date. **Fill in the deploy date here** when the last instance
-(thicketry, unchurch, kicking) runs the commit that put admin initials on the session for the
-collab caret's flag: `____-__-__`, so removable from `____-__-__` (+30 days).
+**Status:** waiting on the date. Every instance (thicketry, explore, unchurch, kicking) was
+running PR #52, which put admin initials on the session for the collab caret's flag, by
+2026-10-02. The backfill is removable 30 days after that: **2026-11-01**.
 
 `src/lib/auth.ts`'s `jwt` callback has a block that looks up `adminInitials` for a token issued
 before the field existed. It is only there for the changeover. `auth.ts` sets no `maxAge`, so
 Auth.js's 30-day default applies. The session route re-issues the cookie on every GET ("Auth.js
-re-issues the session cookie on every session GET", above), so a token in use gains the field on its next page load and
-an idle one expires within 30 days. Thirty days after the last deploy, no live token lacks it.
+re-issues the session cookie on every session GET", above), so a token in use gains the field
+on its next page load and an idle one expires within 30 days. Thirty days after the last
+deploy, no live token lacks it.
 
 Leaving the block costs nothing at runtime, since it skips its query once the field is there.
 The reason to remove it is that the code keeps saying a token can lack the field when none can.
