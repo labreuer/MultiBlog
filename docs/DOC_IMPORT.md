@@ -3,7 +3,8 @@
 `/docs` can create a doc from Markdown two ways: **Import Markdown** picks a file, **Paste
 Markdown** opens a box to paste into. Both are the same server action and the same parse;
 they differ only in where the text came from and what to call a doc that carries no heading
-to take a title from.
+to take a title from. Files can also go through the same form from the command line, and be
+updated in place later: `scripts/import-claude-chats.ts --markdown` (CLAUDE_IMPORT.md §8).
 
 **Markdown is the only format that creates a doc here, on purpose.** A CSV (and, when it
 comes, an xlsx) is a table, not a document: it goes into an *existing* doc through the

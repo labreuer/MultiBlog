@@ -23,34 +23,53 @@
 // Usage:
 //   npx tsx scripts/import-claude-chats.ts --export <conversations.json> [--frames <dir>] [--out <dir>]
 //     [--dry-run | --update | --plan] [<uuid>...]
+//   npx tsx scripts/import-claude-chats.ts --markdown [--update | --plan] <file.md>...
 // No uuids means every conversation. --dry-run writes <out>/<uuid>.md and stops.
-// --update also updates differing docs in place (see "In-place update" below);
-// it needs the collab server stopped. --plan says what --update would do and
+// --update also updates differing docs in place (see "In-place update" below),
+// through the running collab server. --plan says what --update would do and
 // writes nothing.
 // --frames is the export's frames-000.zip, unzipped: a Claude Docs document a
 // session made (artifacts/<id>/page.md) goes into that session's doc.
+//
+// --markdown takes Markdown files instead — an analysis or a summary written
+// elsewhere — and gives each the same treatment as a session: imported once,
+// then compared, and with --update edited in place. A file is matched to its
+// doc by title (see markdownSources), and its doc keeps the dates the import
+// gives it, since a file has no activity to date it by.
 // Env: MB_EMAIL/MB_PASSWORD (the importing account, default the Claude one),
-// BYLINE_EMAILS (comma-separated), HUMAN_NAME. Importing goes through the dev
-// server, so it must be running when there is anything new to import.
+// BYLINE_EMAILS (comma-separated), HUMAN_NAME. Importing goes through the web
+// server, so it must be running when there is anything new to import; MB_URL
+// is where it answers, by default this slot's dev server.
+//
+// Against a deployed instance, run this in that instance's checkout: the
+// database, the collab port and the token secret come from its .env, and only
+// the web server's address does not. A deployed .env has no WEB_PORT, so the
+// default would be some other server's :3000 — set MB_URL to the instance's
+// own port on 127.0.0.1. Going through its public URL works too, but the
+// proxy then decides how large an upload may be. The sign-in checks that the
+// web server and the database are the same instance before anything is
+// written.
 
 import "dotenv/config";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
-import { connect } from "node:net";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import * as Y from "yjs";
+import bcrypt from "bcryptjs";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prisma } from "../src/lib/prisma";
 import type { Prisma } from "../src/generated/prisma/client";
+import type { Role } from "../src/generated/prisma/enums";
 import { markdownToDocContent } from "../src/lib/markdown-import";
 import { contentExtensions, docContentExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
 import { docContentFromYdoc } from "../src/lib/doc-content";
-import { ydocIdForDoc } from "../src/lib/ydoc-names";
+import { ydocIdForDoc, DOC_APPLY_UPDATE_PATH } from "../src/lib/ydoc-names";
+import { signYdocToken } from "../src/lib/ydoc-token";
+import { collabHttpOrigin } from "../src/lib/collab-http-origin";
 import { captureAnchorInYdoc } from "../src/lib/anchors/capture";
-import { ydocStore, drainAppends, encodeYdocState, UNAVAILABLE } from "../server/ydoc-store";
-import { updateDocCache } from "../server/doc-cache";
-import { webUrl, WEB_PORT, COLLAB_PORT } from "./dev-ports";
+import { ydocStore, UNAVAILABLE } from "../server/ydoc-store";
+import { webUrl, WEB_PORT } from "./dev-ports";
 
 type Block = {
   type: string;
@@ -96,15 +115,20 @@ const framesDir = flag("--frames");
 const dryRun = args.includes("--dry-run");
 const plan = args.includes("--plan");
 const update = plan || args.includes("--update");
-const ids = args.filter((a) => !["--dry-run", "--plan", "--update"].includes(a));
-if (!exportPath || (dryRun && !outDir)) {
+const markdownMode = args.includes("--markdown");
+// Session uuids, or with --markdown the files.
+const ids = args.filter((a) => !["--dry-run", "--plan", "--update", "--markdown"].includes(a));
+if (markdownMode ? exportPath || framesDir || outDir || dryRun || !ids.length : !exportPath || (dryRun && !outDir)) {
   console.error(
-    "Usage: npx tsx scripts/import-claude-chats.ts --export <conversations.json> [--frames <dir>] [--out <dir>] [--dry-run | --update | --plan] [<uuid>...]",
+    [
+      "Usage: npx tsx scripts/import-claude-chats.ts --export <conversations.json> [--frames <dir>] [--out <dir>] [--dry-run | --update | --plan] [<uuid>...]",
+      "       npx tsx scripts/import-claude-chats.ts --markdown [--update | --plan] <file.md>...",
+    ].join("\n"),
   );
   process.exit(1);
 }
 
-const BASE = webUrl(WEB_PORT);
+const BASE = (process.env.MB_URL || webUrl(WEB_PORT)).replace(/\/+$/, "");
 const IMPORTER_EMAIL = process.env.MB_EMAIL || "claude@multiblog.invalid";
 const IMPORTER_PASSWORD = process.env.MB_PASSWORD || "testpass123";
 const BYLINE_EMAILS = (process.env.BYLINE_EMAILS || "labreuer@gmail.com,claude@multiblog.invalid").split(",");
@@ -384,7 +408,8 @@ function conversationToMarkdown(conv: Conversation): string | null {
 // First and last activity: every timestamp on the messages and their blocks.
 // Not the conversation's own updated_at, which moves without any message
 // changing (renames and the like) — up to weeks after the last one.
-function activitySpan(conv: Conversation): { first: Date; last: Date } {
+type Span = { first: Date; last: Date };
+function activitySpan(conv: Conversation): Span {
   const stamps: string[] = [];
   for (const m of conv.chat_messages) {
     stamps.push(m.created_at, m.updated_at);
@@ -418,7 +443,17 @@ async function signIn(email: string, password: string) {
   const { csrfToken } = await (await get("/api/auth/csrf")).json();
   await post("/api/auth/callback/credentials", new URLSearchParams({ email, password, csrfToken, callbackUrl: BASE + "/" }));
   const session = await (await get("/api/auth/session")).json();
-  if (session?.user?.email !== email) throw new Error(`sign-in as ${email} failed`);
+  if (session?.user?.email !== email) throw new Error(`sign-in as ${email} at ${BASE} failed`);
+  // The import goes to whatever answers at BASE, and the byline and dates to
+  // DATABASE_URL. If those are two instances, the doc lands in one and
+  // finishDoc fails in the other, after the import — so check the account on
+  // both sides first. The id alone can't tell them apart when one instance's
+  // database was copied from the other's, which keeps every id; the password
+  // the web server just accepted must also match the hash in this database.
+  const row = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
+  if (!row?.passwordHash || session.user.id !== row.id || !(await bcrypt.compare(password, row.passwordHash))) {
+    throw new Error(`${BASE} is not the instance DATABASE_URL names: ${email} is a different account there`);
+  }
   return session.user as { email: string; role: string };
 }
 
@@ -448,7 +483,8 @@ async function importMarkdown(fields: [string, string][], filename: string, mark
   return decodeURIComponent(slug);
 }
 
-async function finishDoc(slug: string, bylineIds: string[], span: { first: Date; last: Date }) {
+// The byline, and for a session the dates; a file's doc keeps the import's.
+async function finishDoc(slug: string, bylineIds: string[], span?: Span) {
   const doc = await prisma.doc.findUniqueOrThrow({ where: { slug }, select: { id: true } });
   await prisma.$transaction([
     ...bylineIds.map((userId, bylineOrder) =>
@@ -459,7 +495,7 @@ async function finishDoc(slug: string, bylineIds: string[], span: { first: Date;
       }),
     ),
     // Last, and with updatedAt named explicitly, so @updatedAt doesn't stamp now().
-    prisma.doc.update({ where: { id: doc.id }, data: { createdAt: span.first, updatedAt: span.last } }),
+    ...(span ? [prisma.doc.update({ where: { id: doc.id }, data: { createdAt: span.first, updatedAt: span.last } })] : []),
   ]);
 }
 
@@ -492,8 +528,11 @@ function canonical(v: unknown): string {
 // The stored doc and a fresh conversion of the session are aligned block by
 // block. Blocks that are the same stay exactly as they are in the ydoc, Yjs
 // identity and all; each run of blocks that differs is replaced by the
-// conversion's, written the way the collab server writes an edit. An anchor in
-// an unchanged block just moves with it. An anchor in a replaced run moves only
+// conversion's, as one Yjs update the collab server applies to the live doc
+// (/admin/doc-apply-update), so anyone with it open sees the edit arrive.
+// The plan is made against the stored checkpoint, and the server refuses the
+// update if the live doc has moved past it. An anchor in an unchanged block
+// just moves with it. An anchor in a replaced run moves only
 // if the run's positions still line up one for one — its text the same, with
 // at most a newline become a line break, which is one position either way;
 // otherwise the doc is reported and left alone rather than the anchor guessed.
@@ -501,7 +540,7 @@ function canonical(v: unknown): string {
 type Plan = {
   docId: string;
   ydoc: Y.Doc;
-  before: Uint8Array; // the stored state vector, for the update to append
+  before: Uint8Array; // the stored state vector: what the update is built on
   anchors: { id: string; from: number; to: number; quotedText: string }[];
   blocksChanged: number;
 };
@@ -547,7 +586,7 @@ function positionTokens(nodes: PMNode[]): string[] {
 // Stored-doc position → new-doc position, per stretch of the document.
 type Stretch = { aFrom: number; aTo: number; bFrom: number; aligned: boolean };
 
-async function planInPlace(docId: string, docTitle: string, conv: Conversation): Promise<Plan | string> {
+async function planInPlace(docId: string, docTitle: string, md: string): Promise<Plan | string> {
   const ydocId = ydocIdForDoc(docId);
   const loaded = await ydocStore.load(ydocId);
   if (!loaded || loaded === UNAVAILABLE) return "its ydoc couldn't be loaded";
@@ -557,8 +596,6 @@ async function planInPlace(docId: string, docTitle: string, conv: Conversation):
 
   const schema = pmDocContentSchema;
   const A = schema.nodeFromJSON(docContentFromYdoc(ydoc).proseJson);
-  const md = conversationToMarkdown(conv);
-  if (!md) return "the session is empty now";
   const fresh = importedDoc(md);
   const C = schema.nodeFromJSON(fresh.body);
   if (fresh.title !== docTitle) return `its title differs (${JSON.stringify(fresh.title)})`;
@@ -634,18 +671,56 @@ async function planInPlace(docId: string, docTitle: string, conv: Conversation):
   return { docId, ydoc, before, anchors, blocksChanged: steps.filter((s) => s.kind !== "keep").length };
 }
 
-// Writes the plan the way the collab server writes an edit (append the update,
-// wait for it to land, checkpoint the state, refresh the doc's cache), then
-// restores Updated and re-captures each anchor against the new version.
-async function applyInPlace(plan: Plan, span: { first: Date; last: Date }): Promise<void> {
+// The account the update is written as: the importing one, whose token the
+// collab server attributes the new blocks to.
+let writer: { id: string; role: Role } | null = null;
+async function importingAccount() {
+  writer ??= await prisma.user.findUniqueOrThrow({ where: { email: IMPORTER_EMAIL }, select: { id: true, role: true } });
+  return writer;
+}
+
+// Sends the plan's update to the collab server, which applies it to the live
+// doc and stores it before answering; then, for a session, restores Updated,
+// and re-captures each anchor against the version the update became. Returns
+// why nothing was written if the doc moved on after it was planned, and throws
+// on anything else.
+async function applyInPlace(plan: Plan, span?: Span): Promise<string | null> {
   const ydocId = ydocIdForDoc(plan.docId);
-  await ydocStore.appendUpdate(ydocId, Y.encodeStateAsUpdate(plan.ydoc, plan.before));
-  const lastUpdateId = await drainAppends(ydocId);
-  if (lastUpdateId === null) throw new Error("the update didn't land");
-  const { ydoc: state, stateVector } = encodeYdocState(plan.ydoc);
-  await ydocStore.storeState(ydocId, state, stateVector, lastUpdateId);
-  await updateDocCache(ydocId, plan.ydoc, undefined, lastUpdateId);
-  await prisma.doc.update({ where: { id: plan.docId }, data: { updatedAt: span.last } });
+  const { id: sub, role } = await importingAccount();
+  const token = await signYdocToken({ sub, documentName: ydocId, role });
+  const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
+  const endpoint = `${collabHttpOrigin()}${DOC_APPLY_UPDATE_PATH}`;
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token,
+        documentName: ydocId,
+        update: base64(Y.encodeStateAsUpdate(plan.ydoc, plan.before)),
+        stateVector: base64(plan.before),
+      }),
+    });
+  } catch {
+    throw new Error(`no collab server answers at ${endpoint}`);
+  }
+  const text = await res.text();
+  if (res.status === 409) return "it was edited after the plan was made; run again";
+  if (!res.ok) throw new Error(`the collab server refused the update (${res.status}): ${text}`);
+  // A collab server older than the endpoint answers every path with a 200
+  // "Welcome to Hocuspocus!" and writes nothing.
+  let updateId: string | null;
+  try {
+    ({ updateId } = JSON.parse(text) as { updateId: string | null });
+  } catch {
+    throw new Error(`the collab server has no ${DOC_APPLY_UPDATE_PATH}; restart it on this code`);
+  }
+  if (!updateId) throw new Error("the collab server applied the update but has no id for it");
+  const lastUpdateId = BigInt(updateId);
+  // The server's store stamped Updated with the time of the edit, which a
+  // file's doc keeps and a session's gives back to its last activity.
+  if (span) await prisma.doc.update({ where: { id: plan.docId }, data: { updatedAt: span.last } });
 
   for (const a of plan.anchors) {
     const captured = await captureAnchorInYdoc({
@@ -669,38 +744,108 @@ async function applyInPlace(plan: Plan, span: { first: Date; last: Date }): Prom
       },
     });
   }
-}
-
-// The update writes ydocs directly, which is only safe with no collab server
-// holding any of them in memory to write back over it.
-function collabIsUp(): Promise<boolean> {
-  return new Promise((done) => {
-    const socket = connect({ host: "127.0.0.1", port: COLLAB_PORT });
-    socket.once("connect", () => (socket.destroy(), done(true)));
-    socket.once("error", () => done(false));
-  });
+  return null;
 }
 
 // --------------------------------------------------------------------- Main
 
-async function main() {
+type ExistingDoc = { id: string; slug: string; title: string; body: unknown };
+
+// One thing to bring into step with its doc: a session, or a Markdown file.
+type Source = {
+  label: string; // what the run's messages call it
+  filename: string; // the upload's name
+  md: string;
+  span?: Span; // a session's first and last activity
+  doc: ExistingDoc | null; // the doc it was imported as, if it has been
+};
+
+// Each chosen session, matched to its doc by the link the doc opens with (see
+// conversationToMarkdown). A dry run writes the Markdown and stops here.
+async function sessionSources(): Promise<{ sources: Source[]; empty: number } | null> {
   const all: Conversation[] = JSON.parse(readFileSync(exportPath!, "utf8"));
   const chosen = ids.length ? ids.map((id) => all.find((c) => c.uuid === id) ?? id) : all;
   if (outDir) mkdirSync(outDir, { recursive: true });
-  if (update && !plan && (await collabIsUp())) {
-    console.error(`The collab server is up on :${COLLAB_PORT}; stop it before --update (or use --plan).`);
-    process.exit(1);
-  }
 
-  // The link every imported doc opens with (see conversationToMarkdown).
-  const existing = new Map<string, { id: string; slug: string; title: string; body: unknown }>();
+  const existing = new Map<string, ExistingDoc>();
   if (!dryRun) {
-    const rows = await prisma.$queryRaw<{ href: string | null; id: string; slug: string; title: string; body: unknown }[]>`
+    const rows = await prisma.$queryRaw<(ExistingDoc & { href: string | null })[]>`
       SELECT prose_json->'content'->0->'content'->0->'marks'->0->'attrs'->>'href' AS href,
              id, slug, title, prose_json AS body
         FROM doc`;
     for (const r of rows) if (r.href) existing.set(r.href, r);
   }
+
+  const sources: Source[] = [];
+  let empty = 0;
+  for (const conv of chosen) {
+    if (typeof conv === "string") {
+      console.error(`${conv}: not in export`);
+      process.exitCode = 1;
+      continue;
+    }
+    const md = conversationToMarkdown(conv);
+    if (!md) {
+      empty++;
+      continue;
+    }
+    if (outDir) writeFileSync(join(outDir, `${conv.uuid}.md`), md);
+    sources.push({
+      label: `${conv.uuid} ${JSON.stringify(conv.name)}`,
+      filename: `${conv.uuid}.md`,
+      md,
+      span: activitySpan(conv),
+      doc: existing.get(chatUrl(conv.uuid)) ?? null,
+    });
+  }
+  if (dryRun) {
+    console.log(`wrote ${sources.length} file(s) to ${outDir}; ${empty} empty session(s) left out`);
+    return null;
+  }
+  return { sources, empty };
+}
+
+// Each file, matched to its doc by title: the doc titled exactly as the
+// file's leading heading, not in the trash, with the importing account on its
+// byline — the import puts it there. A file has nothing else to be matched
+// by, so a file whose heading changes imports as a new doc. One with no
+// heading is refused, because the app would title it from the file's name and
+// nothing could match it afterwards; so is one whose title two docs share.
+async function markdownSources(): Promise<{ sources: Source[]; empty: number }> {
+  const importer = await importingAccount();
+  const sources: Source[] = [];
+  for (const file of ids) {
+    const md = readFileSync(file, "utf8");
+    const { title } = markdownToDocContent(md);
+    if (!title) {
+      console.error(`${file}: no leading heading to title the doc by`);
+      process.exitCode = 1;
+      continue;
+    }
+    const docs = await prisma.doc.findMany({
+      where: { title, deletedAt: null, authors: { some: { userId: importer.id } } },
+      select: { id: true, slug: true, title: true, proseJson: true },
+    });
+    if (docs.length > 1) {
+      console.error(`${file}: ${docs.length} docs are titled ${JSON.stringify(title)}: ${docs.map((d) => `/doc/${d.slug}`).join(", ")}`);
+      process.exitCode = 1;
+      continue;
+    }
+    const [doc] = docs;
+    sources.push({
+      label: file,
+      filename: basename(file),
+      md,
+      doc: doc ? { id: doc.id, slug: doc.slug, title: doc.title, body: doc.proseJson } : null,
+    });
+  }
+  return { sources, empty: 0 };
+}
+
+async function main() {
+  const found = markdownMode ? await markdownSources() : await sessionSources();
+  if (!found) return;
+  const { sources, empty } = found;
 
   // Signed in on the first import only, so a run with nothing to import needs
   // no web server.
@@ -708,7 +853,7 @@ async function main() {
   const signedIn = async () => {
     if (form) return form;
     const user = await signIn(IMPORTER_EMAIL, IMPORTER_PASSWORD);
-    console.log(`signed in as ${user.email} (${user.role})`);
+    console.log(`signed in at ${BASE} as ${user.email} (${user.role})`);
     const users = await prisma.user.findMany({ where: { email: { in: BYLINE_EMAILS } }, select: { id: true, email: true } });
     const bylineIds = BYLINE_EMAILS.map((e) => {
       const u = users.find((x) => x.email === e);
@@ -722,22 +867,9 @@ async function main() {
   let imported = 0;
   let upToDate = 0;
   let updated = 0;
-  let empty = 0;
   const differing: string[] = [];
-  for (const conv of chosen) {
-    if (typeof conv === "string") {
-      console.error(`${conv}: not in export`);
-      process.exitCode = 1;
-      continue;
-    }
-    const md = conversationToMarkdown(conv);
-    if (!md) {
-      empty++;
-      continue;
-    }
-    if (outDir) writeFileSync(join(outDir, `${conv.uuid}.md`), md);
-    if (dryRun) continue;
-    const doc = existing.get(chatUrl(conv.uuid));
+  for (const source of sources) {
+    const { doc, md, label, span } = source;
     if (doc) {
       const fresh = importedDoc(md);
       fresh.ydoc.destroy();
@@ -746,44 +878,48 @@ async function main() {
         continue;
       }
       if (!update) {
-        differing.push(`/doc/${doc.slug}  ${conv.uuid}`);
+        differing.push(`/doc/${doc.slug}  ${label}`);
         continue;
       }
-      const result = await planInPlace(doc.id, doc.title, conv);
+      const result = await planInPlace(doc.id, doc.title, md);
       if (typeof result === "string") {
-        differing.push(`/doc/${doc.slug}  ${conv.uuid}  (not updated: ${result})`);
+        differing.push(`/doc/${doc.slug}  ${label}  (not updated: ${result})`);
         continue;
       }
       const summary = `${result.blocksChanged} block(s) replaced or added, ${result.anchors.length} anchor(s) moved`;
-      if (!plan) await applyInPlace(result, activitySpan(conv));
+      const refused = plan ? null : await applyInPlace(result, span);
       result.ydoc.destroy();
+      if (refused) {
+        differing.push(`/doc/${doc.slug}  ${label}  (not updated: ${refused})`);
+        continue;
+      }
       updated++;
       console.log(`${plan ? "would update" : "updated"} /doc/${doc.slug}: ${summary}`);
       continue;
     }
     if (plan) {
-      console.log(`would import ${conv.uuid} ${JSON.stringify(conv.name)}`);
+      console.log(`would import ${label}`);
       continue;
     }
     try {
       const { fields, bylineIds } = await signedIn();
-      const slug = await importMarkdown(fields, `${conv.uuid}.md`, md);
-      await finishDoc(slug, bylineIds, activitySpan(conv));
+      const slug = await importMarkdown(fields, source.filename, md);
+      await finishDoc(slug, bylineIds, span);
       imported++;
       console.log(`${slug}  (${Math.round(Buffer.byteLength(md) / 1024)} KB)`);
     } catch (err) {
-      console.error(`${conv.uuid} ${JSON.stringify(conv.name)}: ${err instanceof Error ? err.message : err}`);
+      console.error(`${label}: ${err instanceof Error ? err.message : err}`);
       process.exitCode = 1;
     }
   }
   if (differing.length) {
-    console.log(`\n${differing.length} existing doc(s) differ from this export's session, left as they are:`);
+    const from = markdownMode ? "their file" : "this export's session";
+    console.log(`\n${differing.length} existing doc(s) differ from ${from}, left as they are:`);
     for (const d of differing) console.log(`  ${d}`);
   }
   console.log(
-    dryRun
-      ? `wrote ${chosen.length - empty} file(s) to ${outDir}; ${empty} empty session(s) left out`
-      : `imported ${imported}; already present: ${upToDate} up to date, ${updated} ${plan ? "to update" : "updated"}, ${differing.length} differing; ${empty} empty`,
+    `imported ${imported}; already present: ${upToDate} up to date, ${updated} ${plan ? "to update" : "updated"}, ${differing.length} differing` +
+      (markdownMode ? "" : `; ${empty} empty`),
   );
 }
 

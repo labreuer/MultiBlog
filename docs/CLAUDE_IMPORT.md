@@ -2,8 +2,9 @@
 
 `scripts/import-claude-chats.ts` turns each session in a claude.ai data export into a doc,
 through `/docs`' own Markdown import ([DOC_IMPORT.md](DOC_IMPORT.md)), and keeps those docs in
-step with later exports by updating them in place. The script's header documents its flags
-and environment; this file says what it does and why.
+step with later exports by updating them in place. With `--markdown` it does the same for
+Markdown files written elsewhere, such as an analysis or a summary (§8). The script's header
+documents its flags and environment; this file says what it does and why.
 
 ## 1. The export
 
@@ -41,16 +42,30 @@ Things about the data that the importer is built around:
    (`src/lib/markdown-import.ts`) to check each one parses, takes its title from the leading
    heading, starts its body with the session's link, and stays under the import's size limit
    (DOC_IMPORT.md §6).
-3. **Import** without `--dry-run`. New sessions go through the dev server, so it has to be up
-   when there are any.
+3. **Import** without `--dry-run`. New sessions go through the web server, so it has to be up
+   when there are any. That is this slot's dev server unless `MB_URL` names another.
 4. **Update** docs the run lists as differing: `--plan` reports what `--update` would change,
    `--update` changes it (§5). Take a `pg_dump` into `.db-backups/` first. Afterwards run
    `scripts/integrity/check-annotation-anchors.ts`, `check-doc-integrity.ts` and
    `check-ydoc-integrity.ts`.
 
-`MB_EMAIL`/`MB_PASSWORD` name the importing account, which needs `canManageDocs`.
-`BYLINE_EMAILS` is the byline to give every doc, in order; include the importing account,
-which the import has already put on it. `HUMAN_NAME` is the heading over each prompt.
+`MB_EMAIL`/`MB_PASSWORD` name the importing account, which needs `canManageDocs`; the
+password defaults to the test one, which only a dev database has. `BYLINE_EMAILS` is the
+byline to give every doc, in order; include the importing account, which the import has
+already put on it. `HUMAN_NAME` is the heading over each prompt.
+
+**On a deployed instance**, run the script in that instance's own checkout, on its server.
+Everything except the web server's address comes from that checkout's `.env`: the database,
+the collab server `--update` writes through, and the secret its token is signed with. A
+deployed `.env` has no `WEB_PORT`, so set `MB_URL` to the instance's own port on `127.0.0.1`.
+The default, `:3000`, may be a different instance on a shared server. The public URL also
+works, but then the proxy sets the upload limit.
+
+Before writing anything, the script checks that the web server and the database are the same
+instance. The account it signed in as must have the same id in the database, and its password
+must match that row's hash. Ids alone don't settle it, because a database copied from another
+instance keeps every id. Copy the extracted export to the server; `conversations.json` is read
+into memory whole, which costs about four times its size.
 
 ## 3. What happens to each session
 
@@ -123,10 +138,12 @@ again gets a new id. `--update` edits the doc instead:
    subsequence over the blocks' JSON). Blocks that match stay as they are in the ydoc, Yjs
    identity and all; each run of blocks that differs is replaced by the conversion's.
 2. The result must equal the conversion exactly, or nothing is written.
-3. The write follows the collab server's own sequence: `ydocStore.appendUpdate`,
-   `drainAppends`, `storeState`, then `updateDocCache` (`server/ydoc-store.ts`,
-   `server/doc-cache.ts`), and Updated is set back to the session's last activity. The edit is
-   one more entry in the doc's history, so the scrub bar shows it.
+3. The edit goes to the running collab server as one Yjs update
+   (`/admin/doc-apply-update`, `server/ydoc-hooks.ts`), signed as the importing account. The
+   server applies it to the live doc, so anyone with the doc open sees it arrive. It stores
+   the doc and answers with the update's id. Updated is then set back to the session's last
+   activity. The edit is one more entry in the doc's history, so the scrub bar shows it, and
+   its new blocks are attributed to the importing account.
 4. Every anchored-link anchor on the doc is re-captured through `captureAnchorInYdoc`
    (`src/lib/anchors/capture.ts`), against the new version, as minting a link would. An anchor
    in a matching block moves with it. An anchor in a replaced run moves only if the run's
@@ -134,10 +151,13 @@ again gets a new id. `--update` edits the doc instead:
    hard break, which is one position either way. Otherwise the doc is reported and left
    alone, rather than the anchor guessed.
 
-It writes ydocs directly, so the collab server must be down: a running one could be holding
-the doc in memory and write its own copy back over the edit. `--update` refuses to run while
-the collab port answers. `npm run stop:all` stops it; check first that nobody else, an e2e run
-included, is using the servers.
+The plan is made against the doc's stored state. The server applies the update only if the
+live doc is still at that state, and otherwise refuses it and writes nothing. That happens when
+someone edited the doc between the plan and the write; the run lists it as not updated, and
+running again plans afresh. `e2e/doc-apply-update.spec.ts` covers the endpoint: an open page
+receives the edit, and a stale or read-only request changes nothing. Writing the stored rows directly instead would be wrong while the
+collab server runs: if anyone had the doc open, the server's copy in memory would overwrite
+the edit at its next store, and their tab would never receive it.
 
 ## 6. Deleting an imported doc
 
@@ -157,3 +177,25 @@ more than its one seed update.
 - **Branches** other than the one claude.ai shows.
 - **Display widgets** in a reply's text (a `…_display_v0` block, such as a comparison card)
   are not rendered; they come through as their raw text.
+
+## 8. Markdown files
+
+`--markdown <file.md>...` imports files instead of sessions, through everything above: the
+same account and environment (§2), the same form, the byline from `BYLINE_EMAILS`, and on a
+later run the same comparison and in-place update (§3, §5). `--plan` and `--update` work as
+they do for sessions; `--export`, `--frames`, `--out` and `--dry-run` don't apply. On a
+deployed instance, copy the files to the server and run the script there.
+
+What differs from a session:
+
+- **A file is matched to its doc by title**, because it has no link to be matched by. The
+  match is a doc carrying the title the import takes from the file (DOC_IMPORT.md §4), not in
+  the trash, with the importing account on its byline. So a file whose title changes imports
+  as a new doc beside the old one. A file the import would title from its file name — one
+  without a leading heading — is refused, since no later run could find its doc. So is a title
+  two such docs share, rather than one of them being guessed.
+- **The dates are the import's.** Created is when the file was imported and Updated moves with
+  each update, since a file has no activity of its own to date the doc by.
+
+A revised file is best brought in with `--update`, like a grown session: anchored links into
+its doc survive the edit, and would not survive the doc being deleted and imported again.
