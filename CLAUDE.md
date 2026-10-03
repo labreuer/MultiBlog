@@ -30,6 +30,7 @@ to re-derive the decision from.
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Tags have their own section: minting vs. applying vs. curating. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Markdown → TipTap: creating a doc (file import, paste box), and §11, the comment box's parse with its conform shims. |
+| [docs/CLAUDE_IMPORT.md](docs/CLAUDE_IMPORT.md) | A claude.ai data export → one doc per session, and updating imported docs in place without breaking the anchors other docs hold into them. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
 | [docs/DEV_SLOTS.md](docs/DEV_SLOTS.md) | Two working trees side by side: ports, hosts, databases. |
 | [docs/DATABASE.md](docs/DATABASE.md) | The Postgres cluster, what 18 doesn't change, migration recipes. |
