@@ -823,6 +823,8 @@ export type DocState = {
   visibility: DocVisibility;
   /** Doc.updatedBy's email, or null when nothing has attributed an update yet. */
   updatedByEmail: string | null;
+  /** ISO string. Every cache write moves it, including a store with nothing new to store. */
+  updatedAt: string;
   /**
    * PLAN.md §13q — the version stamps the same store debounce writes, and
    * whether they agree with the log. `stampsAgree` is the property that
@@ -854,6 +856,7 @@ export async function getDocState(docId: string): Promise<DocState | null> {
     proseText: doc.proseJson ? extractText(doc.proseJson) : null,
     visibility: doc.visibility,
     updatedByEmail: doc.updatedBy?.email ?? null,
+    updatedAt: doc.updatedAt.toISOString(),
     proseJsonUpdateId: doc.proseJsonUpdateId?.toString() ?? null,
     ydocLastUpdateId: ydoc?.lastUpdateId?.toString() ?? null,
     ydocMaxUpdateId: tail?.id.toString() ?? null,
