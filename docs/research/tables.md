@@ -226,7 +226,7 @@ input, not a replacement for it.
 
 ### Caps
 
-`MAX_MARKDOWN_BYTES` (768 KB, `src/app/actions/docs.ts`) guards Next's 1 MB server-action
+`MAX_MARKDOWN_BYTES` (768 KB, `src/lib/markdown-import.ts`) guards Next's 1 MB server-action
 body limit (docs/DOC_IMPORT.md §6); it says nothing about the editor. At that size a CSV is
 tens of thousands of cells, each a paragraph node in a DOM ProseMirror renders in full, and
 PERFORMANCE.md already records the debounced revision diff going super-linear — 19.7 ms at

@@ -3,12 +3,10 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import * as Y from "yjs";
-import { TiptapTransformer } from "@hocuspocus/transformer";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
-import { changeDocSlug, revertDocSlug as revertDocSlugInDb, uniqueDocSlug } from "@/lib/doc-slug";
+import { changeDocSlug, revertDocSlug as revertDocSlugInDb } from "@/lib/doc-slug";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
-import { slugify } from "@/lib/slug";
 import {
   canManageDocs,
   canUserEditDoc,
@@ -19,12 +17,10 @@ import {
   type LinkedDocPreview,
 } from "@/lib/doc-authz";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
-import { contentExtensions, titleExtensions } from "@/lib/tiptap-schema";
-import { docContentFromYdoc } from "@/lib/doc-content";
-import { markdownToDocContent } from "@/lib/markdown-import";
+import { markdownToDocContent, MAX_MARKDOWN_BYTES } from "@/lib/markdown-import";
+import { insertDocRow, createDocWithContent } from "@/lib/doc-create";
 import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
 import { DocVisibility } from "@/generated/prisma/enums";
-import type { Prisma } from "@/generated/prisma/client";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { signInPath } from "@/lib/sign-in-redirect";
 
@@ -46,74 +42,6 @@ async function requireEditableDocSession(docId: string) {
   }
 
   return { session, doc };
-}
-
-// Doc.id is @default(cuid()) — unknown until the row is inserted — so the
-// cuid-as-slug (per PLAN.md §12n) needs a second write. The throwaway slug
-// only has to satisfy the unique constraint for the instant between the two
-// statements; nothing ever reads it.
-async function insertDocRowSluggedById(userId: string, title: string) {
-  return prisma.$transaction(async (tx) => {
-    const created = await tx.doc.create({
-      data: {
-        slug: crypto.randomUUID(),
-        title,
-        updatedByUserId: userId,
-        authors: { create: { userId, bylineOrder: 0 } },
-      },
-    });
-    return tx.doc.update({ where: { id: created.id }, data: { slug: created.id } });
-  });
-}
-
-function isSlugTaken(err: unknown): boolean {
-  const code = (err as { code?: unknown })?.code;
-  const target = (err as { meta?: { target?: unknown } })?.meta?.target;
-  return code === "P2002" && (Array.isArray(target) ? target.includes("slug") : target === "slug");
-}
-
-// `title` is the Doc.title *column* only, and every caller passes what its
-// doc's title fragment will say — "" for a blank doc, whose fragment is
-// likewise empty. The fragment is canonical (PLAN.md §3d): a column seeded with
-// anything the fragment doesn't also contain is overwritten by
-// server/doc-cache.ts on the collab server's first flush.
-//
-// A doc with a title gets a slug made FROM it; a titleless one keeps the
-// cuid-as-slug §12n describes. That split is what the title says, not who the
-// caller is, but the two happen to line up: only the Markdown import knows a
-// doc's name at creation time, because only it is handed one (docs/DOC_IMPORT.md
-// §5). `+ New doc` is titleless by design and stays on the cuid.
-//
-// A title that slugifies to nothing — punctuation only, or a script with no
-// ASCII in it at all — falls back to the cuid rather than to slugify's own
-// "doc" placeholder, which uniqueDocSlug would then push to `doc`, `doc-2`,
-// ... A meaningless-but-unique slug beats a misleadingly generic one.
-async function insertDocRow(userId: string, title: string) {
-  if (!title || !slugify(title, "")) {
-    return insertDocRowSluggedById(userId, title);
-  }
-
-  // uniqueDocSlug reads outside the insert, so two imports of same-named docs
-  // landing together can compute the same candidate and race. The loser sees a
-  // P2002 on Doc.slug and asks again — by which point the winner's row is
-  // visible and it gets the `-2`. Bounded, then the cuid, so this always ends.
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      return await prisma.doc.create({
-        data: {
-          slug: await uniqueDocSlug(title),
-          title,
-          updatedByUserId: userId,
-          authors: { create: { userId, bylineOrder: 0 } },
-        },
-      });
-    } catch (err) {
-      if (!isSlugTaken(err)) {
-        throw err;
-      }
-    }
-  }
-  return insertDocRowSluggedById(userId, title);
 }
 
 // Docs skip the title-first form a post uses (PLAN.md §12n) — the title is a
@@ -162,13 +90,6 @@ export async function createDoc(): Promise<void> {
 // Full account — the title rule, the seeding, the size cap, why the paste box
 // is a textarea — in docs/DOC_IMPORT.md.
 
-// MUST stay under Next's own server-action body limit (1 MB by default, not
-// overridden in next.config.ts). That limit is enforced while the body is still
-// being read, so a payload above it never reaches this function and fails with
-// an unstyled 413 instead: a cap at or above 1 MB is a message that never
-// prints. Raise it only alongside `serverActions.bodySizeLimit`, never past it
-// — docs/DOC_IMPORT.md §6.
-const MAX_MARKDOWN_BYTES = 768 * 1024;
 const MARKDOWN_EXTENSIONS = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
 
 export type ImportMarkdownState = { error?: string };
@@ -265,39 +186,7 @@ export async function importMarkdownDocAction(
     return { error: `Couldn't read that Markdown: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  const title = parsed.title ?? fallbackTitle;
-
-  // Seeded, and the row inserted only afterwards, per docs/DOC_IMPORT.md §5 —
-  // where the title fragment (not just the Doc.title column) and the ordering
-  // both matter more than they look.
-  const seed = new Y.Doc();
-  const seededBody = TiptapTransformer.toYdoc(parsed.body, "default", contentExtensions);
-  Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededBody));
-  seededBody.destroy();
-  // Only when there's something to say: seeding a textless paragraph instead
-  // would make "no title" structurally different from what createDoc leaves.
-  if (title) {
-    const seededTitle = TiptapTransformer.toYdoc(
-      { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: title }] }] },
-      "title",
-      titleExtensions,
-    );
-    Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededTitle));
-    seededTitle.destroy();
-  }
-  const { ydoc, stateVector } = encodeYdocState(seed);
-  const cached = docContentFromYdoc(seed);
-  seed.destroy();
-
-  const doc = await insertDocRow(session.user.id, cached.title);
-  await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
-  await prisma.doc.update({
-    where: { id: doc.id },
-    data: {
-      proseJson: cached.proseJson as Prisma.InputJsonValue,
-      updatedByUserId: session.user.id,
-    },
-  });
+  const doc = await createDocWithContent(session.user.id, parsed.title ?? fallbackTitle, parsed.body);
 
   revalidatePath("/docs");
   // The slug, not the id: for an imported doc those differ, and the slug is the

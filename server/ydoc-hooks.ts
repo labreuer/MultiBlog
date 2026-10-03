@@ -20,7 +20,7 @@ import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
 import { resolveAnchorInDoc } from "../src/lib/anchors";
-import { annotationIdFromYdocId } from "../src/lib/ydoc-names";
+import { annotationIdFromYdocId, docIdFromYdocId } from "../src/lib/ydoc-names";
 import {
   ydocStore,
   drainAppends,
@@ -458,6 +458,132 @@ export async function handleReplaceAnnotationBody(
   send(response, 200, JSON.stringify({ updateId: updateId?.toString() ?? null }));
 }
 
+// POST /admin/doc-apply-update — applies a Yjs update, built elsewhere, to a
+// doc's ydoc as one transaction. scripts/import-claude-chats.ts's --update is
+// the caller: it plans an edit against the stored state, and this is how the
+// edit reaches the live document without the collab server being stopped.
+//
+// `update` and `stateVector` are base64. The update applies only if the live
+// document's state vector is still `stateVector`, the state it was built
+// against; anything else is a 409 and nothing is written. Yjs would merge a
+// stale update without complaint, but the caller's plan — which blocks to
+// replace, where each anchor lands afterwards — was computed against that
+// exact state, so a merge into anything else could leave the doc matching
+// neither.
+//
+// A writable token only, unlike annotation-mark, which exists for readers.
+// The update's new Yjs clients are attributed to the token's user in the same
+// transaction: ydocOnChange's attributeUpdate skips a direct connection.
+//
+// Answers `{ updateId }`, the id the update was appended as. Before the
+// direct connection closes (which stores the document immediately), one
+// macrotask passes: Hocuspocus starts onChange on the microtask queue, and the
+// append it makes has to be queued before the store drains, or the cache and
+// checkpoint would name an id older than the content they hold.
+export async function handleApplyDocUpdate(
+  request: IncomingMessage,
+  response: ServerResponse,
+  instance: Hocuspocus,
+): Promise<void> {
+  // A whole imported session can be most of a doc's import limit, in base64.
+  const body = (await readJsonBody(request, 8_000_000)) as Partial<{
+    token: string;
+    documentName: string;
+    update: string;
+    stateVector: string;
+  }>;
+  const { token, documentName } = body;
+  if (
+    typeof token !== "string" ||
+    typeof documentName !== "string" ||
+    typeof body.update !== "string" ||
+    typeof body.stateVector !== "string"
+  ) {
+    send(response, 400, "Expected token, documentName, update and stateVector.");
+    return;
+  }
+
+  const payload = await verifyYdocToken(token).catch(() => null);
+  if (!payload || payload.documentName !== documentName || payload.readOnly) {
+    send(response, 403, "Invalid, mismatched or read-only ydoc token.");
+    return;
+  }
+  if (!docIdFromYdocId(documentName)) {
+    send(response, 400, "Not a doc's document.");
+    return;
+  }
+
+  const update = new Uint8Array(Buffer.from(body.update, "base64"));
+  let expected: Map<number, number>;
+  let newClients: number[];
+  try {
+    expected = Y.decodeStateVector(new Uint8Array(Buffer.from(body.stateVector, "base64")));
+    newClients = [...Y.parseUpdateMeta(update).from.keys()];
+  } catch (err) {
+    send(response, 400, `Malformed update or state vector: ${err instanceof Error ? err.message : err}`);
+    return;
+  }
+
+  const sameState = (stateVector: Uint8Array) => {
+    const current = Y.decodeStateVector(stateVector);
+    return current.size === expected.size && [...current].every(([client, clock]) => expected.get(client) === clock);
+  };
+  // Checked once before opening a connection, because closing one stores the
+  // document whether or not anything changed, and that store moves
+  // Doc.updatedAt and names this token's user as the last editor. A document
+  // nobody has open loads from its checkpoint, so the stored state vector is
+  // the live one. The check inside the transaction is the one that decides.
+  const open = instance.documents.get(documentName);
+  let liveStateVector: Uint8Array;
+  if (open) {
+    liveStateVector = Y.encodeStateVector(open);
+  } else {
+    const stored = await ydocStore.load(documentName);
+    if (stored === UNAVAILABLE) {
+      send(response, 503, "The database is unavailable.");
+      return;
+    }
+    if (!stored) {
+      send(response, 404, "No such document.");
+      return;
+    }
+    liveStateVector = stored.stateVector;
+  }
+  if (!sameState(liveStateVector)) {
+    send(response, 409, "The document has changed since the update was built.");
+    return;
+  }
+
+  const context: YdocContext = { userId: payload.sub, role: payload.role };
+  const connection = await instance.openDirectConnection(documentName, context);
+  const outcome = { applied: false };
+  try {
+    if (isDegraded(documentName)) {
+      send(response, 503, "The document's database was unavailable when it loaded.");
+      return;
+    }
+    await connection.transact((document) => {
+      if (!sameState(Y.encodeStateVector(document))) return;
+      Y.applyUpdate(document, update);
+      const clients = getClientsMap(document);
+      for (const clientId of newClients) {
+        if (!expected.has(clientId) && !clients.has(String(clientId))) clients.set(String(clientId), payload.sub);
+      }
+      outcome.applied = true;
+    });
+    if (outcome.applied) await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    await connection.disconnect();
+  }
+  if (!outcome.applied) {
+    send(response, 409, "The document has changed since the update was built.");
+    return;
+  }
+
+  const updateId = await drainAppends(documentName);
+  send(response, 200, JSON.stringify({ updateId: updateId?.toString() ?? null }));
+}
+
 // POST /admin/annotation-mark (PLAN.md §12i) — applies a mark carrying
 // annotationId over [from, to) in documentName's "default" fragment, via
 // the collab server so a read-only reader (§12g) can annotate without a
@@ -634,12 +760,12 @@ export async function handleRemoveAnnotationMark(
   send(response, 204, "");
 }
 
-function readJsonBody(request: IncomingMessage): Promise<unknown> {
+function readJsonBody(request: IncomingMessage, maxLength = 1_000_000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let raw = "";
     request.on("data", (chunk) => {
       raw += chunk;
-      if (raw.length > 1_000_000) reject(new Error("Request body too large."));
+      if (raw.length > maxLength) reject(new Error("Request body too large."));
     });
     request.on("end", () => {
       try {

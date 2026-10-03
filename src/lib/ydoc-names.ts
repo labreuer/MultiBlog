@@ -130,3 +130,11 @@ export const ANNOTATION_FLUSH_PATH = "/admin/annotation-flush";
 // a second writer editing the stored blob behind its back would be overwritten
 // by the next debounce.
 export const ANNOTATION_REPLACE_PATH = "/admin/annotation-replace";
+
+// Path the collab server's onRequest hook listens on to apply a Yjs update to
+// a doc's ydoc, but only while the live document is still at the state the
+// update was built on — what scripts/import-claude-chats.ts's --update writes
+// through. Through the collab server for annotation-replace's reason: an edit
+// made to the stored rows behind its back is overwritten by its next store,
+// and never reaches anyone who has the doc open.
+export const DOC_APPLY_UPDATE_PATH = "/admin/doc-apply-update";

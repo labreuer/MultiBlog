@@ -8,6 +8,7 @@ import {
   ANNOTATION_UNMARK_PATH,
   ANNOTATION_FLUSH_PATH,
   ANNOTATION_REPLACE_PATH,
+  DOC_APPLY_UPDATE_PATH,
 } from "../src/lib/ydoc-names";
 import {
   ydocOnAuthenticate,
@@ -21,6 +22,7 @@ import {
   handleRemoveAnnotationMark,
   handleFlushAnnotationCache,
   handleReplaceAnnotationBody,
+  handleApplyDocUpdate,
   send,
 } from "./ydoc-hooks";
 
@@ -102,6 +104,15 @@ const server = new Server({
       } catch (err) {
         console.error("[collab] annotation-replace failed:", err);
         send(response, 500, err instanceof Error ? err.message : "Failed to replace annotation body.");
+      }
+      return Promise.reject();
+    }
+    if (request.url?.startsWith(DOC_APPLY_UPDATE_PATH)) {
+      try {
+        await handleApplyDocUpdate(request, response, instance);
+      } catch (err) {
+        console.error("[collab] doc-apply-update failed:", err);
+        send(response, 500, err instanceof Error ? err.message : "Failed to apply update.");
       }
       return Promise.reject();
     }

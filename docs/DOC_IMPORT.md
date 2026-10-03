@@ -3,7 +3,9 @@
 `/docs` can create a doc from Markdown two ways: **Import Markdown** picks a file, **Paste
 Markdown** opens a box to paste into. Both are the same server action and the same parse;
 they differ only in where the text came from and what to call a doc that carries no heading
-to take a title from.
+to take a title from. Files can also be imported from the command line, through the same parse
+and the same creation path, and be updated in place later: `scripts/import-claude-chats.ts
+--markdown` (CLAUDE_IMPORT.md §8).
 
 **Markdown is the only format that creates a doc here, on purpose.** A CSV (and, when it
 comes, an xlsx) is a table, not a document: it goes into an *existing* doc through the
@@ -16,7 +18,8 @@ The pieces:
 | | |
 |---|---|
 | [`src/lib/markdown-import.ts`](../src/lib/markdown-import.ts) | Markdown → TipTap JSON, and the title rule |
-| [`importMarkdownDocAction`](../src/app/actions/docs.ts) | validate → parse → seed → redirect |
+| [`importMarkdownDocAction`](../src/app/actions/docs.ts) | validate → parse → create → redirect |
+| [`createDocWithContent`](../src/lib/doc-create.ts) | seed the ydoc → insert the row → cache the body |
 | [`src/components/DocImportButton.tsx`](../src/components/DocImportButton.tsx) | both controls, one `<form>` |
 | [`e2e/markdown-import.spec.ts`](../e2e/markdown-import.spec.ts) | end to end |
 
@@ -165,6 +168,12 @@ and both of that script's non-obvious steps are load-bearing here for the same r
 - **`Doc.proseJson` is derived from the ydoc that was just built**, not from the parse result,
   so the cache says exactly what the canonical thing says, down to the attribute defaults Yjs
   normalizes in.
+
+The seeding and the insert are `createDocWithContent` (`src/lib/doc-create.ts`), a plain server
+module rather than part of the action module, because every export of a `"use server"` file is
+callable from a browser and this one takes the creating user's id as an argument. The action
+checks the session first. `scripts/import-claude-chats.ts` checks the importing account and
+then calls the same function (CLAUDE_IMPORT.md §3).
 
 The collab server does **not** need to be running: nothing here applies an annotation mark
 (contrast `seed-sample-data.ts`, which reaches a doc's live ydoc through it, §12i), and

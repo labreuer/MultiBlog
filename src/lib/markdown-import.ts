@@ -12,6 +12,16 @@ import { commentContentExtensions, contentExtensions } from "./tiptap-schema";
 // dropped silently on encode rather than reported (docs/DOC_IMPORT.md §2).
 const markdownManager = new MarkdownManager({ extensions: contentExtensions });
 
+// The import limit. MUST stay under Next's own server-action body limit (1 MB
+// by default, not overridden in next.config.ts), which /docs' import action
+// sits behind. That limit is enforced while the body is still being read, so a
+// payload above it never reaches the action and fails with an unstyled 413
+// instead: a cap at or above 1 MB is a message that never prints. Raise it
+// only alongside `serverActions.bodySizeLimit`, never past it — docs/DOC_IMPORT.md
+// §6. scripts/import-claude-chats.ts applies it too, though nothing limits its
+// input, so it creates no doc /docs couldn't (docs/CLAUDE_IMPORT.md §3).
+export const MAX_MARKDOWN_BYTES = 768 * 1024;
+
 export type MarkdownImport = {
   // Always a valid `doc` node with at least one block: the schema's content is
   // `block+`, so an empty content array fails to encode.
