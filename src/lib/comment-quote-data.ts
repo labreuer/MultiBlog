@@ -36,7 +36,15 @@ type AnchorRow = {
     deletedAt: Date | null;
     createdAt: Date;
     commenter: { userId: string | null; displayName: string };
-    thread: { post: { id: string; slug: string; publishedAt: Date | null } };
+    thread: {
+      post: {
+        id: string;
+        slug: string;
+        publishedAt: Date | null;
+        publishEventId: string | null;
+        deletedByUserId: string | null;
+      };
+    };
     revisions: { id: string }[];
   } | null;
 };
@@ -111,7 +119,13 @@ export async function loadCommentQuoteCitations(commentIds: string[]): Promise<M
           deletedAt: true,
           createdAt: true,
           commenter: { select: { userId: true, displayName: true } },
-          thread: { select: { post: { select: { id: true, slug: true, publishedAt: true } } } },
+          thread: {
+            select: {
+              post: {
+                select: { id: true, slug: true, publishedAt: true, publishEventId: true, deletedByUserId: true },
+              },
+            },
+          },
           revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true } },
         },
       },
