@@ -24,10 +24,20 @@ import {
 // working. So most tests are one row searched by several people — the one
 // who may see it and the ones who may not.
 
-/** A token the stemmer leaves alone and no other row contains. */
+/**
+ * A word no other row contains. Random letters throughout, so two of them —
+ * this test's and a neighbouring worker's — share almost no trigrams: typo
+ * correction (§5) would otherwise be free to "correct" one into the other.
+ */
 function plantedWord(): string {
-  return `zq${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  return `zq${Array.from({ length: 12 }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("")}`;
 }
+
+// **Every check that something is *not* found searches with `exact=1`.** When
+// nothing matches, typo correction looks for a near word this viewer *can*
+// read and searches for that instead — a feature, and one that would turn
+// "the draft isn't found" into "something else is" whenever a neighbouring
+// test's word happens to be near.
 
 /** One kind's section on /search, found by its heading ("Docs (2)"). */
 function section(page: Page, heading: "Docs" | "Posts" | "PDFs" | "Annotations" | "Comments") {
@@ -57,7 +67,7 @@ test.describe("/search", () => {
       // PRIVATE doc is anybody's but its byline's, ADMIN and EDITOR included.
       for (const role of ["AUTHOR", "AUTHORIZED", "EDITOR"] as const) {
         const other = await secondUser({ role });
-        await searchAs(other.page, `q=${word}`);
+        await searchAs(other.page, `q=${word}&exact=1`);
         await expect(other.page.getByText(`Nothing you can read matches “${word}”.`)).toBeVisible();
       }
       const anon = await signedOutPage(browser);
@@ -100,10 +110,10 @@ test.describe("/search", () => {
 
       // Another AUTHOR, not on the byline, and a signed-out reader see neither.
       const otherAuthor = await secondUser({ role: "AUTHOR" });
-      await searchAs(otherAuthor.page, query);
+      await searchAs(otherAuthor.page, `${query}&exact=1`);
       await expect(section(otherAuthor.page, "Posts")).toHaveCount(0);
       const anon = await signedOutPage(browser);
-      await searchAs(anon, query);
+      await searchAs(anon, `${query}&exact=1`);
       await expect(section(anon, "Posts")).toHaveCount(0);
       await anon.context().close();
 
@@ -142,7 +152,7 @@ test.describe("/search", () => {
 
     // The DRAFT is the searcher's own, and the post is the searcher's to
     // moderate: neither is a reason to list them (§2, §10 item 2).
-    await searchAs(page, `q=${word}`);
+    await searchAs(page, `q=${word}&exact=1`);
     await expect(page.getByText(`Nothing you can read matches “${word}”.`)).toBeVisible();
 
     await searchAs(page, `q=${liveWord}`);
@@ -191,7 +201,7 @@ test.describe("/search", () => {
       await expect(section(page, "Posts").getByRole("listitem")).toHaveCount(1);
       await expect(section(page, "Docs")).toHaveCount(0);
       // 12:00 UTC on the 3rd is already the 4th at UTC+14.
-      await searchAs(page, `q=${word}&created_from=2001-02-03&created_to=2001-02-03&tz=Pacific/Kiritimati`);
+      await searchAs(page, `q=${word}&created_from=2001-02-03&created_to=2001-02-03&tz=Pacific/Kiritimati&exact=1`);
       await expect(section(page, "Posts")).toHaveCount(0);
     } finally {
       await deleteTestDoc(mine.id);
@@ -218,7 +228,7 @@ test.describe("/search", () => {
     });
     await editCommentAt({ commentId: silent.id, body: `a fixed typo ${word}`, at: "2026-01-02T00:01:00.000Z" });
 
-    await searchAs(page, `q=${word}&updated_from=2026-01-02&updated_to=2026-01-02`);
+    await searchAs(page, `q=${word}&updated_from=2026-01-02&updated_to=2026-01-02&exact=1`);
     await expect(section(page, "Comments")).toHaveCount(0);
     await searchAs(page, `q=${word}&updated_from=2026-01-01&updated_to=2026-01-01`);
     await expect(section(page, "Comments").getByRole("listitem")).toHaveCount(1);

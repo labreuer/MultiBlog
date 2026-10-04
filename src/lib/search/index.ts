@@ -133,6 +133,9 @@ export async function search(
   };
 
   if (!params.q && !hasFilters(params)) return { ...result, status: "idle" };
+  // Every kind asked for is one this viewer can't search: nothing to run, and
+  // nothing for typo correction to look through.
+  if (kinds.length === 0) return { ...result, status: "ok" };
 
   let query: TsQuery | null = null;
   if (params.q) {

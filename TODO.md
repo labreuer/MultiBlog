@@ -158,6 +158,29 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
   isolation. Not diagnosed; docs/playwright-flakiness.html's shared-state class is the first
   suspect if it recurs.
 
+## Full-text search: what is left (docs/FULLTEXT.md)
+
+**Status:** built through the plan's five steps on `fulltext-search`, 2026-10-04, and verified
+against `search()` itself with scripted checks (each kind's read rule as six kinds of viewer,
+silent edits under the date filter, time zones, the author picker, superseded PDF text, typo
+correction that must not reach unreadable text). Not yet done:
+
+- **Nobody has looked at `/search` in a browser**, and `e2e/search.spec.ts` has never run, nor
+  has `comment-quoting.spec.ts`'s picker case against the new picker search. They were left
+  because another session's `web-prod` preview was serving from this slot's `.next`, which
+  `npm run e2e` rebuilds: `npm run e2e -- e2e/search.spec.ts e2e/comment-quoting.spec.ts`.
+- **The open decisions in FULLTEXT.md §10**, several built one way by default: an author
+  filter leaves PDFs and comments out (items 3 and 8), `isCommentPublic` follows its header
+  (item 4, its own commit), and a mark-anchored annotation's passage isn't indexed (item 9).
+- **FULLTEXT.md is still the plan**, with a status line and its departures in §10. Rewrite it
+  as built once those decisions settle, as ANCHORED_LINKS.md was.
+- **The API plan** (`docs/API.md`, on `api-mcp`) should say its search endpoints call
+  `src/lib/search/` with the token's user as the actor.
+- **Deploying it**: `prisma migrate deploy` creates `unaccent` and `pg_trgm` (trusted, so the
+  instance's owning role can) and backfills in under a second. A data-only load between
+  instances must now pass `--exclude-table-data=search_lexeme` (docs/DATABASE.md) — the instance
+  migration runbook outside the repo predates that.
+
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §9, step 1)
 
 **Status:** found 2026-10-04 while giving each read rule one exported `where` helper
