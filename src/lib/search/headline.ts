@@ -80,6 +80,11 @@ export function parseHeadline(raw: string): HeadlineFragment[] {
   return fragments;
 }
 
+/** A headline as plain text, fragments joined by an ellipsis — for a surface that marks nothing. */
+export function headlineText(fragments: HeadlineFragment[]): string {
+  return fragments.map((parts) => parts.map((part) => part.text).join("")).join(" … ");
+}
+
 /** Whether a parsed headline marks anything — false for a snippet of text the query didn't match. */
 export function hasMatch(fragments: HeadlineFragment[]): boolean {
   return fragments.some((fragment) => fragment.some((part) => part.match));

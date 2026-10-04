@@ -1,10 +1,10 @@
 # MultiBlog — full-text search
 
-**Status: being built.** Steps 1–4 of §9 are built: the read rules as named `where` helpers,
-the index (`add_full_text_search`, with `scripts/integrity/check-search-index.ts`), the
-operation (`src/lib/search/`) with the `/search` page, and typo correction with
-search-as-you-type. Step 5, moving the quote picker onto the operation, is not. Where the
-build departed from this plan, §10 says so. Like [ANCHORED_LINKS.md](ANCHORED_LINKS.md), this file
+**Status: built through §9's step 5**: the read rules as named `where` helpers, the index
+(`add_full_text_search`, with `scripts/integrity/check-search-index.ts`), the operation
+(`src/lib/search/`) with the `/search` page, typo correction and search-as-you-type, and the
+quote picker on the operation. Option B and the API's endpoints are not. Where the build
+departed from this plan, §10 says so. Like [ANCHORED_LINKS.md](ANCHORED_LINKS.md), this file
 is the plan until the build and is then rewritten as built.
 
 The plan is one search over docs, posts, annotations, comments and PDF pages, using Postgres's

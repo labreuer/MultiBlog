@@ -90,6 +90,13 @@ export type SearchOptions = {
   asYouType?: boolean;
   /** Leave out this post and its comments: the quote picker's own host post. */
   excludePostId?: string;
+  /** Hits per section, in place of the overview's or a page's. */
+  pageSize?: number;
+  /**
+   * False to skip building the author picker, for a caller that shows none
+   * (the quote picker). Any author slugs requested are then ignored.
+   */
+  authorOptions?: boolean;
 };
 
 export async function search(
@@ -99,7 +106,7 @@ export async function search(
 ): Promise<SearchResult> {
   const scope = opts.scope ?? "viewer";
   const readable = readableKinds(actor, scope);
-  const options = await searchAuthorOptions(actor, scope);
+  const options = opts.authorOptions === false ? [] : await searchAuthorOptions(actor, scope);
 
   // Slugs not on this viewer's picker are dropped, as /docs drops its own.
   const authors = options.filter((option) => requested.authors.includes(option.slug));
@@ -111,7 +118,7 @@ export async function search(
   // Pagination when exactly one kind was asked for (§6), even if an author
   // filter then leaves it out.
   const paginated = params.kinds !== null && params.kinds.length === 1;
-  const pageSize = paginated ? PAGE_SIZE : OVERVIEW_SIZE;
+  const pageSize = opts.pageSize ?? (paginated ? PAGE_SIZE : OVERVIEW_SIZE);
 
   const result = {
     params,
