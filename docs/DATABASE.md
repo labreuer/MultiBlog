@@ -19,6 +19,13 @@ full reset described below — which is the failure this arrangement exists to p
 the reason a second checkout must never be pointed at the first's `DATABASE_URL`. Adding a
 third: [DEV_SLOTS.md](DEV_SLOTS.md).
 
+**The cluster needs the contrib modules.** `add_full_text_search` creates the `unaccent`
+and `pg_trgm` extensions ([FULLTEXT.md](FULLTEXT.md) §3), and so does every shadow
+database `prisma migrate dev` builds, so a cluster without them can't migrate at all. The
+Windows installer ships them; on Fedora it is `sudo dnf install postgresql-contrib`, and the
+servers install `postgresql-contrib` with Postgres (DEPLOY.md §2e). Both extensions are
+*trusted*, so the database's owner creates them with no superuser step.
+
 ## What Postgres 18 does *not* change, having been checked directly
 
 Worth recording because each of these looks like it should help and doesn't.
@@ -51,6 +58,12 @@ is invisible to it and the diff stays clean.
 > catches it, and a no-op `UPDATE doc SET prose_json = prose_json WHERE id = …` re-fires the
 > trigger to repair.
 
+The six `search_vector` columns (`doc`, `post`, `annotation`, `comment`, `file`,
+`file_page_text`) are the same arrangement for the same reason, with one more trigger pair
+per table feeding the `search_lexeme` vocabulary ([FULLTEXT.md](FULLTEXT.md) §3). Never
+assign to them either; `scripts/integrity/check-search-index.ts` is their guard, and its
+`--repair` runs the no-op `UPDATE` for every drifted row.
+
 ### Self-join elimination does not rescue a view over its own base table
 
 It is on by default and does work — an inner join of a table to itself on the primary key
@@ -63,6 +76,23 @@ for a to-one relation ordering no matter how the relation is declared. See
 Every composite index this schema relies on — `post_publication_event(post_id, created_at)`,
 `post_author` and `doc_author`'s composite primary keys — is already queried on its leading
 column.
+
+## A data-only load into an existing schema
+
+Moving content between instances with `pg_dump --data-only` into a migrated database runs
+every trigger as the rows go in. Two things follow:
+
+- **Every trigger function sets its own `search_path`**, because a data-only load runs with
+  an empty one and a function calling `doc_length()` or `prose_text()` without a schema
+  would fail on the first row. A new trigger function needs `SET search_path = public,
+  pg_catalog` too.
+- **Leave `search_lexeme`'s data out** (`--exclude-table-data=search_lexeme`). The
+  vocabulary triggers refill it as the content tables load, and its own `COPY` would then
+  collide on the primary key and abort the load. Run
+  `scripts/integrity/check-search-index.ts` afterwards.
+
+A full dump restored into an empty database has neither problem: `pg_dump` creates triggers
+after the data, so none of them fires during the load.
 
 ## Keeping `schema.prisma` format-clean
 

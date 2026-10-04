@@ -1,7 +1,9 @@
 # MultiBlog — full-text search
 
-**Status: planned; nothing here is built.** Like [ANCHORED_LINKS.md](ANCHORED_LINKS.md), this
-file is the plan until the build and is then rewritten as built.
+**Status: being built.** Steps 1 and 2 of §9 are built: the read rules as named `where`
+helpers, and the index (`add_full_text_search`, with `scripts/integrity/check-search-index.ts`).
+Steps 3–5 are not, so nothing searches it yet. Like [ANCHORED_LINKS.md](ANCHORED_LINKS.md),
+this file is the plan until the build and is then rewritten as built.
 
 The plan is one search over docs, posts, annotations, comments and PDF pages, using Postgres's
 own full-text search:
@@ -515,8 +517,9 @@ After that comes option B (appendix), once hits in long docs need to land on the
      name.
    - **Why it matters.** Anyone who tries that filter can link the old name to the new one.
 4. **`isCommentPublic`.** §9 treats its header comment as correct and its code as wrong. Is that
-   the intent?
-5. **Fixing `search_path` on `doc_sync_prose_json_length`** in the same migration.
+   the intent? Built that way, in a commit of its own so that it can be reverted alone.
+5. **Fixing `search_path` on `doc_sync_prose_json_length`** in the same migration. Built: the
+   migration's last statement.
 6. **Sizes.** Five hits per section, and three pages per PDF.
 7. **Semantic search (A.4).** Is it wanted? If so, are documents embedded by Voyage's hosted
    models, or on a desktop with the open-weights model? Either way it needs option B first.
