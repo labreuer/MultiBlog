@@ -30,9 +30,9 @@ function postDates(post: { createdAt: Date; publishedAt: Date | null; publishEve
 }
 
 /**
- * §4 step 1. The dates are computed (above) rather than columns, so they are
- * applied over the candidates rather than in the `where`; a site's posts
- * number in the dozens.
+ * The readable ids, the first half of `match` (§4). The dates are computed
+ * (above) rather than columns, so they are applied over the candidates
+ * rather than in the `where`; a site's posts number in the dozens.
  */
 function candidates(ctx: KindContext): Promise<Map<string, Date>> {
   return remember(ctx, "posts", async () => {

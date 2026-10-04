@@ -22,10 +22,10 @@ import { remember, type KindContext, type KindSearch } from "./context";
 import type { AnnotationHit } from "./types";
 
 /**
- * §4 step 1: the readable, live annotations under the filters, each with
- * when it was posted. Created is `postedAt`, when readers could first see
- * it; `createdAt` is when the composer opened, and nothing measures from it
- * (§6).
+ * The readable ids, the first half of `match` (§4): the readable, live
+ * annotations under the filters, each with when it was posted. Created is
+ * `postedAt`, when readers could first see it; `createdAt` is when the
+ * composer opened, and nothing measures from it (§6).
  */
 function candidates(ctx: KindContext): Promise<Map<string, Date>> {
   return remember(ctx, "annotations", async () => {

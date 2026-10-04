@@ -65,12 +65,13 @@ async function pageSnippets(pages: PageMatch[], query: TsQuery): Promise<Map<str
 }
 
 /**
- * §4 step 1. A file's dates are its row's (§6): the upload, and changes to
- * its title, visibility or owners. Page text never changes.
+ * The readable ids, the first half of `match` (§4). A file's dates are its
+ * row's (§6): the upload, and changes to its title, visibility or owners.
+ * Page text never changes.
  *
  * A PDF has owners, not authors — nobody listed wrote it — and its page
- * shows no owner, so an author filter leaves PDFs out rather than reveal who
- * owns which (§10, item 8).
+ * shows no owner, so an author filter leaves PDFs out rather than reveal
+ * who owns which (§10, item 8).
  */
 function candidates(ctx: KindContext): Promise<Map<string, Date>> {
   return remember(ctx, "pdfs", async () => {

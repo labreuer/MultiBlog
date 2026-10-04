@@ -160,28 +160,20 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
 
 ## Full-text search: what is left (docs/FULLTEXT.md)
 
-**Status:** built through the plan's five steps on `fulltext-search`, 2026-10-04, and verified
-against `search()` itself with scripted checks (each kind's read rule as six kinds of viewer,
-silent edits under the date filter, time zones, the author picker, superseded PDF text, typo
-correction that must not reach unreadable text). Not yet done:
+**Status:** built on `fulltext-search`, 2026-10-04, and tested: the full chromium suite against
+a production build, `e2e/search.spec.ts` included, and a look at `/search` in light, dark and
+phone widths. Not yet done:
 
-- **Nobody has looked at `/search` in a browser**, and `e2e/search.spec.ts` has never run, nor
-  has `comment-quoting.spec.ts`'s picker case against the new picker search. They were left
-  because another session's `web-prod` preview was serving from this slot's `.next`, which
-  `npm run e2e` rebuilds: `npm run e2e -- e2e/search.spec.ts e2e/comment-quoting.spec.ts`.
-- **The open decisions in FULLTEXT.md §10**, several built one way by default: an author
-  filter leaves PDFs and comments out (items 3 and 8), `isCommentPublic` follows its header
-  (item 4, its own commit), and a mark-anchored annotation's passage isn't indexed (item 9).
-- **FULLTEXT.md is still the plan**, with a status line and its departures in §10. Rewrite it
-  as built once those decisions settle, as ANCHORED_LINKS.md was.
-- **The API plan** (`docs/API.md`, on `api-mcp`) should say its search endpoints call
-  `src/lib/search/` with the token's user as the actor.
-- **Deploying it**: `prisma migrate deploy` creates `unaccent` and `pg_trgm` (trusted, so the
-  instance's owning role can) and backfills in under a second. A data-only load between
-  instances must now pass `--exclude-table-data=search_lexeme` (docs/DATABASE.md) — the instance
-  migration runbook outside the repo predates that.
+- **Semantic search** (FULLTEXT.md §10, item 7) is undecided: hosted Voyage embeddings or an
+  open-weights batch on a desktop, and either way option B's passages and pgvector first.
+- **Firefox and WebKit** haven't run `search.spec.ts`; only chromium has.
+- **Not deployed anywhere.** The first `deploy.sh` on each instance runs the migration (two
+  trusted extensions, a backfill of about a second); run
+  `npx tsx scripts/integrity/check-search-index.ts` afterwards.
+- **The API's search endpoints** (`docs/API.md` on `api-mcp`, which now points them at
+  `src/lib/search/`) wait on the API itself.
 
-## Read rules restated with a difference from the rule (docs/FULLTEXT.md §9, step 1)
+## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 
 **Status:** found 2026-10-04 while giving each read rule one exported `where` helper
 (`readableDocsWhere`, `readableFilesWhere`, `readableAnnotationsWhere`, `publicCommentsWhere`).

@@ -15,9 +15,10 @@ import { remember, type KindContext, type KindSearch } from "./context";
 import type { DocHit } from "./types";
 
 /**
- * §4 step 1: the readable docs under the filters, with the date each sorts
- * by. A doc's dates are its own columns (§6): `updatedAt` moves on every
- * collab cache write, and is the date the reading view's byline shows.
+ * The readable ids, the first half of `match` (§4): the readable docs under
+ * the filters, with the date each sorts by. A doc's dates are its own
+ * columns (§6): `updatedAt` moves on every collab cache write, and is the
+ * date the reading view's byline shows.
  */
 function candidates(ctx: KindContext): Promise<Map<string, Date>> {
   return remember(ctx, "docs", async () => {

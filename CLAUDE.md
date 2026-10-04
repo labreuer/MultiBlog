@@ -31,7 +31,7 @@ to re-derive the decision from.
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Markdown → TipTap: creating a doc (file import, paste box), and §11, the comment box's parse with its conform shims. |
 | [docs/CLAUDE_IMPORT.md](docs/CLAUDE_IMPORT.md) | A claude.ai data export → one doc per session, Markdown files → one doc each (`--markdown`), and updating imported docs in place without breaking the anchors other docs hold into them. |
-| [docs/FULLTEXT.md](docs/FULLTEXT.md) | Full-text search over docs, posts, annotations, comments and PDF pages in Postgres — built through its plan's five steps, with the plan still the text and the departures in its §10: a trigger-maintained vector per row, per-kind queries that rank only inside the viewer's readable ids, accent folding and a typo correction that leaks nothing, filters by kind, author and date; the other options in an appendix. |
+| [docs/FULLTEXT.md](docs/FULLTEXT.md) | Full-text search as built: a trigger-maintained vector per row over docs, posts, annotations, comments and PDF pages, per-kind queries that rank only inside the viewer's readable ids, accent folding and a typo correction that leaks nothing, filters by kind, author and date, the page and the quote picker; the decisions, and the other options in an appendix. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
 | [docs/DEV_SLOTS.md](docs/DEV_SLOTS.md) | Two working trees side by side: ports, hosts, databases. |
 | [docs/DATABASE.md](docs/DATABASE.md) | The Postgres cluster, what 18 doesn't change, migration recipes. |

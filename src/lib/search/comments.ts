@@ -19,12 +19,12 @@ import { remember, type KindContext, type KindSearch } from "./context";
 import type { CommentHit } from "./types";
 
 /**
- * §4 step 1: the public comments under the filters, each with when it was
- * posted.
+ * The readable ids, the first half of `match` (§4): the public comments
+ * under the filters, each with when it was posted.
  *
  * A comment's name is the one it was posted under, fixed when its commenter
- * row was made, so filtering by an account would tie an old name to a renamed
- * one (§10, item 3). An author filter leaves comments out instead.
+ * row was made, so filtering by an account would tie an old name to a
+ * renamed one (§10, item 3). An author filter leaves comments out instead.
  */
 function candidates(ctx: KindContext): Promise<Map<string, Date>> {
   return remember(ctx, "comments", async () => {
