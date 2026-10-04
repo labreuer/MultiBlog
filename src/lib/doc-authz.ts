@@ -84,12 +84,13 @@ export async function canUserReadDoc(
 
 export type ReadableDoc = { id: string; slug: string; title: string };
 
-// PLAN.md §14k — the same predicate canUserReadDoc checks per-row, expressed
-// instead as a `where` clause: SHARED docs for anyone with canViewDocs, plus
-// this user's own byline-authored PRIVATE ones. Backs the "Link to…" picker
-// on /doc/[slug] — proximity to canUserReadDoc, plus this comment, is the
-// only thing keeping the two honest with each other, since Prisma has no way
-// to share a boolean predicate between a per-row check and a query filter.
+// PLAN.md §14k — every doc this viewer may read, through readableDocsWhere
+// below: SHARED docs for anyone with canViewDocs, plus this user's own
+// byline-authored PRIVATE ones. That function and canUserReadDoc above are
+// the same rule twice, per row and as a filter — proximity plus this comment
+// is the only thing keeping the two honest with each other, since Prisma has
+// no way to share a boolean predicate between a per-row check and a query
+// filter.
 export async function readableDocsFor(userId: string, role: Role): Promise<ReadableDoc[]> {
   const where = readableDocsWhere(userId, role);
   if (!where) return [];
@@ -101,15 +102,33 @@ export async function readableDocsFor(userId: string, role: Role): Promise<Reada
   });
 }
 
-// readableDocsFor's where clause on its own, shared with searchReadableDocsFor
-// below so the two can't drift; null means this viewer can read no docs at
-// all, which both callers turn into [] without touching the database.
-function readableDocsWhere(userId: string, role: Role): Prisma.DocWhereInput | null {
+/**
+ * canUserReadDoc as a `where` on Doc, for this viewer — **the one statement of
+ * that rule as a filter**, which every listing of readable docs goes through:
+ * the pickers below, `/tag/[slug]`, `/links`, `/annotations` (through
+ * `readableAnnotationsWhere`) and search.
+ *
+ * Null means this viewer can read no doc at all; callers turn that into an
+ * empty answer without touching the database, since an empty `OR` would match
+ * everything in some Prisma versions and nothing in others.
+ *
+ * `deletedByUserId: null` is spelled out although prisma.ts's soft-delete
+ * $extends adds it to every top-level read, because a relation filter
+ * (`{ doc: readableDocsWhere(…) }`) goes around the extension.
+ * `includeDeleted` leaves it out, for the one caller that lists rows hanging
+ * off a deleted doc (`/annotations`); it widens nothing at the top level,
+ * where the extension still applies.
+ */
+export function readableDocsWhere(
+  userId: string,
+  role: Role,
+  opts: { includeDeleted?: boolean } = {},
+): Prisma.DocWhereInput | null {
   const or: Prisma.DocWhereInput[] = [];
   if (canViewDocs(role)) or.push({ visibility: "SHARED" });
   if (canManageDocs(role)) or.push({ visibility: "PRIVATE", authors: { some: { userId } } });
   if (or.length === 0) return null;
-  return { deletedByUserId: null, OR: or };
+  return opts.includeDeleted ? { OR: or } : { deletedByUserId: null, OR: or };
 }
 
 // The link picker's row (LinkControls.tsx): a readable doc plus when it was

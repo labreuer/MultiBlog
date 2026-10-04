@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import type { Role } from "@/generated/prisma/enums";
-import { canManageDocs, canManageFiles, canViewDocs, canViewFiles } from "@/lib/role-checks";
+import { canManageDocs, readableDocsWhere } from "@/lib/doc-authz";
+import { readableFilesWhere } from "@/lib/file-authz";
 import { canUserDeleteAnchoredLink, canUserRenameAnchoredLink } from "@/lib/anchored-link-authz";
 import { targetFromColumns, targetKey, type AnchorTarget } from "@/lib/anchors";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -59,37 +59,16 @@ export const metadata: Metadata = { title: "Links" };
 // visible in this table's Created by column, and nothing more.
 
 /**
- * canUserReadDoc as a `where` on Doc, for this viewer — readableDocsWhere's
- * rule (src/lib/doc-authz.ts) restated here with the same caveat it carries:
- * Prisma has no way to share a predicate between a per-row check and a
- * filter, so proximity to that file plus this comment is what keeps the two
- * honest. Null when the viewer may read no doc at all.
- */
-function readableDocWhere(userId: string, role: Role): Prisma.DocWhereInput | null {
-  const or: Prisma.DocWhereInput[] = [];
-  if (canViewDocs(role)) or.push({ visibility: "SHARED" });
-  if (canManageDocs(role)) or.push({ visibility: "PRIVATE", authors: { some: { userId } } });
-  if (or.length === 0) return null;
-  // Relation filters bypass prisma.ts's soft-delete $extends, so the deleted
-  // check is spelled out — a link whose only target is a deleted doc has
-  // nothing to show and should not list on that doc's account.
-  return { deletedByUserId: null, OR: or };
-}
-
-/** canUserReadFile as a `where` on StoredFile — readableFilesFor's rule (src/lib/file-authz.ts). */
-function readableFileWhere(userId: string, role: Role): Prisma.StoredFileWhereInput | null {
-  const or: Prisma.StoredFileWhereInput[] = [];
-  if (canViewFiles(role)) or.push({ visibility: "SHARED" });
-  if (canManageFiles(role)) or.push({ visibility: "PRIVATE", owners: { some: { userId } } });
-  if (or.length === 0) return null;
-  return { deletedByUserId: null, OR: or };
-}
-
-/**
- * "An anchor whose target this viewer may read" — the two clauses above
- * lifted onto anchored_link_anchor. Post and annotation targets have no
- * arm here because the v1 writer never produces them; if it ever does, the
- * follow path (`anchoredLinkForViewer`) needs the same arm at the same time.
+ * "An anchor whose target this viewer may read" — readableDocsWhere and
+ * readableFilesWhere (src/lib/doc-authz.ts, src/lib/file-authz.ts) lifted
+ * onto anchored_link_anchor. Each carries its own `deletedByUserId: null`,
+ * which matters here: relation filters bypass prisma.ts's soft-delete
+ * $extends, and a link whose only target is a deleted doc has nothing to show
+ * and should not list on that doc's account.
+ *
+ * Post and annotation targets have no arm here because the v1 writer never
+ * produces them; if it ever does, the follow path (`anchoredLinkForViewer`)
+ * needs the same arm at the same time.
  */
 function readableAnchorWhere(
   docWhere: Prisma.DocWhereInput | null,
@@ -232,8 +211,8 @@ export default async function LinksPage({
   }
   const viewer = { id: session.user.id, role: session.user.role };
 
-  const docWhere = readableDocWhere(viewer.id, viewer.role);
-  const fileWhere = readableFileWhere(viewer.id, viewer.role);
+  const docWhere = readableDocsWhere(viewer.id, viewer.role);
+  const fileWhere = readableFilesWhere(viewer.id, viewer.role);
   const readableAnchor = readableAnchorWhere(docWhere, fileWhere);
 
   const viewerScope: Prisma.AnchoredLinkWhereInput = {

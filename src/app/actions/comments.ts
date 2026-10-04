@@ -29,6 +29,7 @@ import { publishedPostWhere } from "@/lib/post-status";
 import { postPath } from "@/lib/post-path";
 import { extractText } from "@/lib/diff";
 import { canQuoteTargetInto } from "@/lib/comment-quote-authz";
+import { publicCommentsWhere } from "@/lib/comment-authz";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -711,10 +712,11 @@ export async function searchQuotableTargets(query: string, excludePostId?: strin
 
   const comments = await prisma.comment.findMany({
     where: {
-      status: "APPROVED",
-      deletedAt: null,
-      bodyText: { contains: needle, mode: "insensitive" },
-      thread: { post: { ...publishedPostWhere(), ...(excludePostId ? { id: { not: excludePostId } } : {}) } },
+      AND: [
+        publicCommentsWhere(),
+        { bodyText: { contains: needle, mode: "insensitive" } },
+        ...(excludePostId ? [{ thread: { postId: { not: excludePostId } } }] : []),
+      ],
     },
     orderBy: { createdAt: "desc" },
     take: PICKER_LIMIT,

@@ -1,6 +1,7 @@
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
-import { canViewDocs, canManageDocs, canViewFiles, canManageFiles } from "@/lib/role-checks";
+import { readableDocsWhere } from "@/lib/doc-authz";
+import { readableFilesWhere } from "@/lib/file-authz";
 import { derivePostStatus, readablePostWhere } from "@/lib/post-status";
 import { postPath } from "@/lib/post-path";
 
@@ -12,8 +13,8 @@ import { postPath } from "@/lib/post-path";
 // the wrong answer looks exactly like the right one until somebody's PRIVATE
 // doc shows up in a stranger's list. Three separate queries, each wearing the
 // predicate that already governs its own type, cannot make that mistake: the
-// doc query is `readableDocsFor`'s predicate, the post query is
-// `readablePostWhere`, the file query is `readableFilesFor`'s.
+// doc query is `readableDocsWhere`, the post query is `readablePostWhere`,
+// the file query is `readableFilesWhere`.
 //
 // Each is one indexed `tag_anchor` lookup joined to its type's table, so
 // the page costs three queries regardless of how much is tagged (§20g).
@@ -91,22 +92,15 @@ export async function browseTag(tagId: string, userId: string | null, role: Role
   };
 }
 
-// canUserReadDoc as a `where` clause — the same relationship `readableDocsFor`
-// has to it (src/lib/doc-authz.ts), and with the same caveat: Prisma cannot
-// share a boolean predicate between a per-row check and a query filter, so
-// proximity plus this comment is what keeps the two honest. Restated here
-// rather than calling readableDocsFor because that one fetches *every*
-// readable doc to populate a picker; this needs the same predicate ANDed with
-// the tag filter, in Postgres.
+// canUserReadDoc as a `where` clause (`readableDocsWhere`, src/lib/doc-authz.ts),
+// ANDed with the tag filter in Postgres.
 async function listDocs(tagId: string, userId: string | null, role: Role | null): Promise<TagHit[]> {
   if (!userId || !role) return [];
-  const or = [];
-  if (canViewDocs(role)) or.push({ visibility: "SHARED" as const });
-  if (canManageDocs(role)) or.push({ visibility: "PRIVATE" as const, authors: { some: { userId } } });
-  if (or.length === 0) return [];
+  const readable = readableDocsWhere(userId, role);
+  if (!readable) return [];
 
   const rows = await prisma.doc.findMany({
-    where: { deletedByUserId: null, OR: or, tagAnchors: taggedWith(tagId) },
+    where: { AND: [readable, { tagAnchors: taggedWith(tagId) }] },
     select: { id: true, slug: true, title: true },
     orderBy: { updatedAt: "desc" },
     take: PAGE_CAP,
@@ -146,17 +140,15 @@ async function listPosts(tagId: string, userId: string | null, role: Role | null
   });
 }
 
-// canUserReadFile as a `where` clause — `readableFilesFor`'s predicate, ANDed
-// with the tag filter for the same reason listDocs restates its own.
+// canUserReadFile as a `where` clause (`readableFilesWhere`, src/lib/file-authz.ts),
+// ANDed with the tag filter as listDocs does.
 async function listFiles(tagId: string, userId: string | null, role: Role | null): Promise<TagHit[]> {
   if (!userId || !role) return [];
-  const or = [];
-  if (canViewFiles(role)) or.push({ visibility: "SHARED" as const });
-  if (canManageFiles(role)) or.push({ visibility: "PRIVATE" as const, owners: { some: { userId } } });
-  if (or.length === 0) return [];
+  const readable = readableFilesWhere(userId, role);
+  if (!readable) return [];
 
   const rows = await prisma.storedFile.findMany({
-    where: { deletedByUserId: null, OR: or, tagAnchors: taggedWith(tagId) },
+    where: { AND: [readable, { tagAnchors: taggedWith(tagId) }] },
     select: { id: true, slug: true, title: true },
     orderBy: { createdAt: "desc" },
     take: PAGE_CAP,

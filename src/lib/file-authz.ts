@@ -93,18 +93,35 @@ export async function canUserManageFile(userId: string, role: Role, fileId: stri
 
 export type ReadableFile = { id: string; slug: string; title: string };
 
-// canUserReadFile expressed as a `where` clause — the same relationship
-// readableDocsFor has to canUserReadDoc, and with the same caveat: Prisma has
-// no way to share a boolean predicate between a per-row check and a query
-// filter, so proximity plus this comment is all that keeps the two honest.
-export async function readableFilesFor(userId: string, role: Role): Promise<ReadableFile[]> {
+/**
+ * canUserReadFile as a `where` on StoredFile, for this viewer — the same
+ * relationship readableDocsWhere has to canUserReadDoc, and with the same
+ * caveat: Prisma has no way to share a boolean predicate between a per-row
+ * check and a query filter, so proximity plus this comment is all that keeps
+ * the two honest. The one statement of the rule as a filter: `/tag/[slug]`,
+ * `/links`, `/annotations` and search all go through it.
+ *
+ * Null, `deletedByUserId` and `includeDeleted` mean what they mean on
+ * readableDocsWhere.
+ */
+export function readableFilesWhere(
+  userId: string,
+  role: Role,
+  opts: { includeDeleted?: boolean } = {},
+): Prisma.StoredFileWhereInput | null {
   const or: Prisma.StoredFileWhereInput[] = [];
   if (canViewFiles(role)) or.push({ visibility: "SHARED" });
   if (canManageFiles(role)) or.push({ visibility: "PRIVATE", owners: { some: { userId } } });
-  if (or.length === 0) return [];
+  if (or.length === 0) return null;
+  return opts.includeDeleted ? { OR: or } : { deletedByUserId: null, OR: or };
+}
+
+export async function readableFilesFor(userId: string, role: Role): Promise<ReadableFile[]> {
+  const where = readableFilesWhere(userId, role);
+  if (!where) return [];
 
   return prisma.storedFile.findMany({
-    where: { deletedByUserId: null, OR: or },
+    where,
     select: { id: true, slug: true, title: true },
     orderBy: { title: "asc" },
   });

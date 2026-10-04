@@ -578,6 +578,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
 | File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |
 | Annotation ydoc access (DRAFT is owner-only, even from ADMIN; asks whichever container the annotation has) | `src/lib/annotation-authz.ts` |
+| Which annotations a listing may show (posted, on a readable doc or PDF), as a `where` | `readableAnnotationsWhere` in `src/lib/annotation-authz.ts` |
+| Which comments are public, per row and as a `where` | `isCommentPublic` / `publicCommentsWhere` in `src/lib/comment-authz.ts` |
 | Who may *write* a posted annotation body (author or ADMIN), and the token's `readOnly` | `canUserEditAnnotationBody` in `src/lib/annotation-authz.ts`, applied in `src/app/api/annotation/[id]/token/route.ts` |
 | Annotation edit sessions (begin / finish / cancel) | `requireEditableBody` in `src/app/actions/annotations.ts` |
 | Comment editing and history | `editComment` / `getCommentHistory` in `src/app/actions/comments.ts` |

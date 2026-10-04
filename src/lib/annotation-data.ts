@@ -4,6 +4,7 @@ import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { isVersionQuoted, isVisiblyEdited, STALE_EDIT_SESSION_MS, withSupersededAt } from "@/lib/edit-grace";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
+import { postedAnnotationWhere } from "@/lib/annotation-authz";
 
 // PLAN.md §13c — the doc-side view-model, un-shared from comment-data.ts's
 // ThreadWithComments (§12i's original decision) now that an annotation body
@@ -125,7 +126,7 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
   const [doc, annotations] = await Promise.all([
     prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } }),
     prisma.annotation.findMany({
-      where: { docId, status: { not: "DRAFT" } },
+      where: { docId, ...postedAnnotationWhere() },
       orderBy: { createdAt: "asc" },
       include: {
         user: { select: { name: true, email: true, color: true } },
@@ -230,7 +231,7 @@ export async function getOwnDraftAnnotations(docId: string, userId: string): Pro
 // lets an author find their own again.
 export async function getFileAnnotationsAsThreads(fileId: string): Promise<AnnotationThread[]> {
   const annotations = await prisma.annotation.findMany({
-    where: { fileId, status: { not: "DRAFT" } },
+    where: { fileId, ...postedAnnotationWhere() },
     orderBy: { createdAt: "asc" },
     include: {
       user: { select: { name: true, email: true, color: true } },

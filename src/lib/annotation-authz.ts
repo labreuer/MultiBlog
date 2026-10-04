@@ -1,8 +1,9 @@
 import type { Role } from "@/generated/prisma/enums";
 import type { AnnotationStatus } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
 import { isAdmin } from "./role-checks";
-import { canUserReadDoc } from "./doc-authz";
-import { canUserReadFile } from "./file-authz";
+import { canUserReadDoc, readableDocsWhere } from "./doc-authz";
+import { canUserReadFile, readableFilesWhere } from "./file-authz";
 
 type Container = { id: string; visibility: "PRIVATE" | "SHARED" };
 
@@ -42,6 +43,55 @@ export async function canUserAccessAnnotationYdoc(
   // Neither container present. Unreachable while annotation_one_container_check
   // holds; denying is the safe answer if it ever doesn't.
   return false;
+}
+
+/**
+ * Not a DRAFT (PLAN.md §13d). Every listing of annotations wears this — the
+ * doc and PDF thread loaders, `/annotations`, search — because a DRAFT is a
+ * private note that no list shows, its own writer's included; the one place a
+ * writer finds their drafts again is a separate, narrower query scoped to
+ * their own id (`getOwnDraftAnnotations`).
+ */
+export function postedAnnotationWhere(): Prisma.AnnotationWhereInput {
+  return { status: { not: "DRAFT" } };
+}
+
+/**
+ * canUserAccessAnnotationYdoc above as a `where` on Annotation, for this
+ * viewer: posted, and on a doc or PDF this viewer may read, each container
+ * asked by its own rule. Prisma can't share a boolean predicate between a
+ * per-row check and a query filter, so proximity plus this comment is what
+ * keeps the two honest.
+ *
+ * Two differences from the per-row check, both deliberate:
+ *
+ * - **No DRAFT arm.** That function admits a DRAFT's own writer, because the
+ *   writer is who composes it; a listing shows nobody's drafts.
+ * - **Deletion is the caller's.** A deleted annotation is still readable —
+ *   a thread renders "[deleted]" in place of one that has live replies — so
+ *   whether to list it is a property of the surface, not the rule.
+ *
+ * `includeDeletedContainers` lets annotations on a soft-deleted doc or PDF
+ * through. Only `/annotations` passes it; see there.
+ *
+ * Null means this viewer can read no doc and no PDF, so no annotation either.
+ * A relation filter never matches a null foreign key, so the doc arm excludes
+ * every PDF annotation and vice versa, and the two together are exactly
+ * "annotations on something this viewer may read".
+ */
+export function readableAnnotationsWhere(
+  userId: string,
+  role: Role,
+  opts: { includeDeletedContainers?: boolean } = {},
+): Prisma.AnnotationWhereInput | null {
+  const containerOpts = { includeDeleted: opts.includeDeletedContainers };
+  const docs = readableDocsWhere(userId, role, containerOpts);
+  const files = readableFilesWhere(userId, role, containerOpts);
+  const containers: Prisma.AnnotationWhereInput[] = [];
+  if (docs) containers.push({ doc: docs });
+  if (files) containers.push({ file: files });
+  if (containers.length === 0) return null;
+  return { AND: [postedAnnotationWhere(), { OR: containers }] };
 }
 
 // PLAN.md §22e/§22f — who may *write* a posted annotation's body, as opposed

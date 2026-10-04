@@ -158,6 +158,28 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
   isolation. Not diagnosed; docs/playwright-flakiness.html's shared-state class is the first
   suspect if it recurs.
 
+## Read rules restated with a difference from the rule (docs/FULLTEXT.md §9, step 1)
+
+**Status:** found 2026-10-04 while giving each read rule one exported `where` helper
+(`readableDocsWhere`, `readableFilesWhere`, `readableAnnotationsWhere`, `publicCommentsWhere`).
+Each difference below was kept and named rather than fixed in passing, because none is known to
+be a mistake rather than a choice. Each is a one-line change once decided.
+
+- **`/annotations` lists annotations on a soft-deleted doc or PDF.** Its scope passes
+  `includeDeletedContainers`; the read rule excludes a deleted container, so `/doc/[slug]` and
+  `/pdf/[slug]` 404 on the same rows' containers. Either it is wanted (an admin can still find
+  and delete annotations hanging off a deleted doc), or the option goes.
+- **`canViewerReadComment` (`src/app/actions/comments.ts`) never looks at the post.** It calls
+  any `APPROVED`, undeleted comment public, so `getCommentHistory` and `getCommentMarkdown`
+  answer for a comment on a draft, unpublished, scheduled or deleted post to anyone holding its
+  id. `canUserReadComment` (`src/lib/comment-authz.ts`) is the rule it restates.
+- **`describeQuoteTarget`'s post arm (`src/lib/comment-quote-data.ts`) tests `publishedAt`
+  alone.** An unpublished post keeps `publishedAt`, so a citation of it still shows its title
+  and links to a URL that 404s. `canQuoteTargetInto` checks `publishEventId` as well.
+- **`loadCandidates`' host-post check (`src/lib/comment-quote-capture.ts`) tests `publishedAt`
+  alone**, the same way. Reached only by a moderator editing a comment on a post that has since
+  been unpublished.
+
 ## Tables: what is left (docs/TABLES.md; docs/research/tables.md)
 
 Native TipTap tables landed 2026-09-18 with the toolbar, styling and Markdown import; CSV
