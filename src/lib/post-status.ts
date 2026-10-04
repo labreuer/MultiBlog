@@ -43,11 +43,14 @@ export function publishedPostWhere(): Prisma.PostWhereInput {
  * permission doesn't).
  *
  * **This is a read rule, not a publication rule.** Nothing public may use it:
- * the landing page, the archives, RSS, search and `/yyyy/mm/dd/slug` all stay
- * on `publishedPostWhere()`, which is what makes "published" mean one thing.
- * It exists for the surfaces that are *already* viewer-shaped — `/tag/[slug]`
- * and `canUserTagTarget` — so that a draft can carry tags without its title
- * showing up in a stranger's list (PLAN.md §20d).
+ * the landing page, the archives, RSS and `/yyyy/mm/dd/slug` all stay on
+ * `publishedPostWhere()`, which is what makes "published" mean one thing, and
+ * so does anything whose output reaches readers other than the viewer — the
+ * quote picker searches in the public scope for that reason (PLAN.md §23e).
+ * It exists for the surfaces that are *already* viewer-shaped — `/tag/[slug]`,
+ * `canUserTagTarget` and `/search` (docs/FULLTEXT.md §2) — so that a draft
+ * can carry tags, and be found by the people who may edit it, without its
+ * title showing up in a stranger's list (PLAN.md §20d).
  */
 export function readablePostWhere(userId: string | null, role: Role | null): Prisma.PostWhereInput {
   if (!userId || !role) return publishedPostWhere();

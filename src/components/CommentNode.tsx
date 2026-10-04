@@ -29,6 +29,7 @@ import {
 import { useCommentQuote } from "./comment-quote-context";
 import type { JSONContent } from "@tiptap/core";
 import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
+import { commentAnchorName } from "@/lib/comment-anchor-name";
 import styles from "./CommentNode.module.css";
 
 export type CommentNodeData = {
@@ -57,19 +58,6 @@ type Props = {
   postId: string;
   depth?: number;
 };
-
-// A permalink id for the comment — down to the second is enough that a
-// collision would mean the same person posted twice in the same second,
-// which shouldn't happen; not worth guarding.
-function anchorName(displayName: string, createdAt: string): string {
-  const name = displayName
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  const timestamp = new Date(createdAt).toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return `${name || "comment"}-${timestamp}`;
-}
 
 // Whether any comment anywhere below this one (not just direct replies) is
 // still live — a deleted comment with no live descendants collapses
@@ -121,7 +109,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // — loading, failed, nothing the viewer may see — in which it stands in for
   // nothing and the body has to stay.
   const [historyShown, setHistoryShown] = useState(false);
-  const anchorId = anchorName(comment.displayName, comment.createdAt);
+  const anchorId = commentAnchorName(comment.displayName, comment.createdAt);
   const isDeleted = comment.deletedByUserId !== null || justDeleted;
 
   if (isDeleted && !justDeleted && !hasNonDeletedDescendant(comment)) {

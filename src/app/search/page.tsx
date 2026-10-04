@@ -1,66 +1,79 @@
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
-import { extractText } from "@/lib/diff";
-import { publishedPostWhere } from "@/lib/post-status";
-import PostListing, { postListingInclude } from "@/components/PostListing";
+import { auth } from "@/lib/auth";
+import { search } from "@/lib/search";
+import { parseSearchParams, searchQueryString, urlSearchParamsFrom, type SearchKind } from "@/lib/search/params";
+import SearchForm from "./SearchForm";
+import SearchResults from "./SearchResults";
+import { kindList } from "./labels";
+import styles from "./page.module.css";
 
-// No gate to repeat, unlike the doc and post surfaces — the results are
-// publishedPostWhere() only, and the query came from the viewer's own URL.
-export async function generateMetadata({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string }>;
-}): Promise<Metadata> {
-  const { q } = await searchParams;
-  const query = q?.trim() ?? "";
-  return { title: query ? `Search: ${query}` : "Search" };
+// docs/FULLTEXT.md — one search over everything this viewer may read: docs,
+// posts, PDFs, annotations and comments, a section per kind.
+//
+// **Dynamic, never cached, and different for every viewer.** An ADMIN and a
+// signed-out reader see different results for the same URL, so a shared
+// cache entry would be a leak rather than a staleness bug; `force-dynamic`
+// says so out loud, as /tag does (CACHING.md). And no results page is worth
+// a search engine's index, so every one is `noindex`.
+//
+// No sign-in redirect: a signed-out reader searches posts and comments, which
+// is what they can read.
+export const dynamic = "force-dynamic";
+
+// Why an author filter leaves a kind out (src/lib/search/authors.ts).
+const WITHOUT_AUTHOR_REASONS: Partial<Record<SearchKind, string>> = {
+  pdfs: "a PDF has owners rather than authors",
+  comments: "a comment keeps the name it was posted under",
+};
+
+type SearchParamsProp = Promise<Record<string, string | string[] | undefined>>;
+
+export async function generateMetadata({ searchParams }: { searchParams: SearchParamsProp }): Promise<Metadata> {
+  const { q } = parseSearchParams(urlSearchParamsFrom(await searchParams));
+  return { title: q ? `Search: ${q}` : "Search", robots: { index: false } };
 }
 
-export default async function SearchPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string }>;
-}) {
-  const { q } = await searchParams;
-  const query = q?.trim() ?? "";
-
-  const posts = query
-    ? await prisma.post.findMany({
-        where: publishedPostWhere(),
-        orderBy: { publishedAt: "desc" },
-        include: postListingInclude,
-      })
-    : [];
-
-  // Hobby-scale substring search over title + body text — no search index,
-  // fine for the post counts this site is built for (§9, "small/hobby scale").
-  const needle = query.toLowerCase();
-  const results = posts.filter(
-    (post) =>
-      post.title.toLowerCase().includes(needle) ||
-      (post.proseJson ? extractText(post.proseJson).toLowerCase().includes(needle) : false),
-  );
+export default async function SearchPage({ searchParams }: { searchParams: SearchParamsProp }) {
+  const requested = parseSearchParams(urlSearchParamsFrom(await searchParams));
+  const session = await auth();
+  const actor = session?.user ? { userId: session.user.id, role: session.user.role } : null;
+  const result = await search(actor, requested);
 
   return (
-    <div style={{ maxWidth: 680, margin: "0 auto", fontFamily: "sans-serif" }}>
-      <main style={{ padding: "1rem" }}>
-        <form action="/search" style={{ marginBottom: "1.5rem" }}>
-          <input
-            type="search"
-            name="q"
-            defaultValue={query}
-            placeholder="Search posts…"
-            autoFocus
-            style={{ padding: "0.5rem", width: "100%", maxWidth: 400, fontSize: "1rem" }}
-          />
-        </form>
+    <main className={styles.container}>
+      <h1 className={styles.heading}>Search</h1>
+      <SearchForm
+        key={searchQueryString(result.params)}
+        params={result.params}
+        readableKinds={result.readableKinds}
+        authorOptions={result.authorOptions}
+      />
 
-        {!query ? (
-          <p style={{ color: "var(--text-secondary)" }}>Enter a search term above.</p>
-        ) : (
-          <PostListing posts={results} emptyMessage={`No posts match “${query}”.`} />
-        )}
-      </main>
-    </div>
+      {result.withoutAuthors.length > 0 && (
+        <p className={styles.notice}>
+          Filtering by author leaves out {kindList(result.withoutAuthors)}:{" "}
+          {result.withoutAuthors
+            .map((kind) => WITHOUT_AUTHOR_REASONS[kind])
+            .filter(Boolean)
+            .join(", and ")}
+          .
+        </p>
+      )}
+
+      {result.status === "idle" ? (
+        <p className={styles.notice}>
+          Search the {kindList(result.readableKinds)} you can read.
+          {!actor && <> Signed in, you may be able to search more.</>}
+        </p>
+      ) : result.status === "stop-words" ? (
+        <p className={styles.notice}>
+          “{result.params.q}” is made only of words too common to search for. Try a more particular word.
+        </p>
+      ) : result.kinds.length === 0 ? (
+        <p className={styles.notice}>None of the kinds selected is one you can search.</p>
+      ) : (
+        <SearchResults result={result} />
+      )}
+    </main>
   );
 }

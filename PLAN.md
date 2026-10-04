@@ -765,7 +765,8 @@ Git history carries per-step detail.
      moderation cascade so a real integration only has to fill in the one function body.
    - **Search** (`/search`): in-app substring match over post titles + `extractText(doc)`,
      no search index — the plan's own "small/hobby scale" call means the post count never
-     justifies one. Search box lives in `SiteHeader`.
+     justifies one. Search box lives in `SiteHeader`. *Superseded by Postgres full-text
+     search over every kind: [docs/FULLTEXT.md](docs/FULLTEXT.md).*
    - **RSS** (`/rss.xml`, a literal-named route-handler folder): last 30 published posts,
      RSS 2.0. Discovery `<link>` added via `layout.tsx`'s `metadata.alternates`.
    - **Author pages** (`/authors/[slug]`): a user's name + their published posts, linked from
@@ -5923,7 +5924,7 @@ still.
 ### 21h. Date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd`
 
 **Built 2026-09-15.** The three prefixes of a post's URL are pages: each lists the posts
-published in that UTC range, newest first, in the same preview block as `/search`. "URL
+published in that UTC range, newest first, in the same preview block as the landing page. "URL
 hacking" — trimming segments off a post's address — lands somewhere sensible, and the
 byline's date on every surface is a link to its day, so a reader can climb from any post
 to its day, month and year. That is also the public archive §17d and §17m recorded as

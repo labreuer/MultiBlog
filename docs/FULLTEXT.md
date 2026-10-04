@@ -1,9 +1,11 @@
 # MultiBlog — full-text search
 
-**Status: being built.** Steps 1 and 2 of §9 are built: the read rules as named `where`
-helpers, and the index (`add_full_text_search`, with `scripts/integrity/check-search-index.ts`).
-Steps 3–5 are not, so nothing searches it yet. Like [ANCHORED_LINKS.md](ANCHORED_LINKS.md),
-this file is the plan until the build and is then rewritten as built.
+**Status: being built.** Steps 1–3 of §9 are built: the read rules as named `where` helpers,
+the index (`add_full_text_search`, with `scripts/integrity/check-search-index.ts`), and the
+operation (`src/lib/search/`) with the `/search` page. Steps 4 and 5 — typo correction and
+search-as-you-type, and moving the quote picker onto the operation — are not. Where the build
+departed from this plan, §10 says so. Like [ANCHORED_LINKS.md](ANCHORED_LINKS.md), this file
+is the plan until the build and is then rewritten as built.
 
 The plan is one search over docs, posts, annotations, comments and PDF pages, using Postgres's
 own full-text search:
@@ -516,13 +518,28 @@ After that comes option B (appendix), once hits in long docs need to land on the
      So filtering by a user who has since changed their name finds comments shown under the old
      name.
    - **Why it matters.** Anyone who tries that filter can link the old name to the new one.
+   - **As built:** an author filter leaves comments out, and the page says so. Commenters
+     contribute no names to the picker.
 4. **`isCommentPublic`.** §9 treats its header comment as correct and its code as wrong. Is that
    the intent? Built that way, in a commit of its own so that it can be reverted alone.
 5. **Fixing `search_path` on `doc_sync_prose_json_length`** in the same migration. Built: the
    migration's last statement.
-6. **Sizes.** Five hits per section, and three pages per PDF.
+6. **Sizes.** Five hits per section, and three pages per PDF. Built as written, with 20 hits per
+   page once one kind is selected.
 7. **Semantic search (A.4).** Is it wanted? If so, are documents embedded by Voyage's hosted
    models, or on a desktop with the open-weights model? Either way it needs option B first.
+8. **Filtering PDFs by owner.** Departs from §6's table. `/pdf/[slug]` shows no owner, so the
+   picker's premise — people the viewer already sees as authors — doesn't hold for owners, and
+   an owner filter would disclose who owns which file to every reader. As built, an author
+   filter leaves PDFs out too, and owners contribute no names to the picker.
+9. **A mark-anchored annotation's passage isn't in its vector.** The doc editor's annotations
+   keep their passage in the doc's body as a mark, with `quoted_text` empty, so §1's
+   "the quoted passage" covers only column anchors and PDF annotations. Those words find the
+   doc instead; the hit still shows the passage, derived from the mark as `/annotations` does.
+   Indexing it would mean a doc save rewriting its annotations' vectors.
+10. **Listing without text** orders annotations and comments by the date readers are told
+    about, which means applying `edit-grace.ts` to every readable one rather than to a page's
+    worth. Fine at this scale; at thousands of comments it wants a stored column.
 
 ## Appendix: the other options
 

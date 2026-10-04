@@ -72,6 +72,26 @@ export async function getDetachedThreadContext(
   return prefix + node.textBetween(from, to, " ") + suffix;
 }
 
+/**
+ * Whether readers are told this comment was edited (PLAN.md §22b) — the
+ * marker on its card, and with it the edited date the card shows. Search's
+ * "updated" filter and dates (docs/FULLTEXT.md §6) ask this too, from the
+ * same timestamps, so a silent edit can't be found by narrowing the dates
+ * there while the card says nothing.
+ *
+ * Takes timestamps only; `quotedBy` is §22b's other clause, a version
+ * something quotes never being silent.
+ */
+export function isCommentVisiblyEdited(comment: {
+  createdAt: Date;
+  revisions: { createdAt: Date; quotedBy: unknown[] }[];
+}): boolean {
+  return isVisiblyEdited(
+    withSupersededAt(comment.revisions, (revision) => revision.quotedBy.length > 0),
+    comment.createdAt,
+  );
+}
+
 // Threads only surface once they have at least one APPROVED comment — a
 // thread whose sole comment was rejected as spam (or is still pending)
 // shouldn't show up publicly, quote highlight or bottom-list entry alike.
@@ -123,10 +143,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         anchoredEventId: thread.anchoredEventId,
         color,
         comments: thread.comments.map((c) => {
-          const visiblyEdited = isVisiblyEdited(
-            withSupersededAt(c.revisions, (revision) => revision.quotedBy.length > 0),
-            c.createdAt,
-          );
+          const visiblyEdited = isCommentVisiblyEdited(c);
           return {
             id: c.id,
             parentCommentId: c.parentCommentId,

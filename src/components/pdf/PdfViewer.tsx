@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } from "@/lib/pdfjs-client";
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
 import { pageTotalLabel, usablePageLabels } from "@/lib/pdf-page-labels";
+import { pageFromHash } from "@/lib/pdf-open-params";
 import { usePdfZoomGestures } from "./use-pdf-zoom-gestures";
 import { usePdfRefit } from "./use-pdf-refit";
 import "pdfjs-dist/web/pdf_viewer.css";
@@ -245,6 +246,11 @@ export default function PdfViewer({
       // Settable only once the first page has been laid out; assigning earlier
       // is silently dropped and the viewer opens at some default.
       viewer.currentScaleValue = "page-width";
+      // `#page=<n>` (pdf-open-params.ts) — a search hit on a page opens the
+      // document there (docs/FULLTEXT.md §7). After the scale, since a page
+      // jump is a scroll position and the scale change would move it.
+      const askedPage = pageFromHash(window.location.hash);
+      if (askedPage !== null) viewer.currentPageNumber = Math.min(askedPage, pending.pdf.numPages);
       handleRef.current = pending;
       setPageLabels(pending.pageLabels);
       setStatus("ready");
@@ -256,6 +262,15 @@ export default function PdfViewer({
       completeReady();
     };
     eventBus.on("pagesinit", onPagesInit);
+
+    // The same parameter arriving after load: following a second page link
+    // into a document already open changes only the fragment.
+    const onHashChange = () => {
+      const page = pageFromHash(window.location.hash);
+      const handle = handleRef.current;
+      if (page !== null && handle) handle.viewer.currentPageNumber = Math.min(page, handle.pdf.numPages);
+    };
+    window.addEventListener("hashchange", onHashChange);
 
     const task = pdfjs.getDocument(documentOptions(fileUrl));
 
@@ -320,6 +335,7 @@ export default function PdfViewer({
       eventBus.off("pagechanging", onViewArea);
       eventBus.off("scalechanging", onScaleChanging);
       eventBus.off("pagesinit", onPagesInit);
+      window.removeEventListener("hashchange", onHashChange);
       handleRef.current = null;
       // Order matters: drop the viewer's reference to the document before
       // destroying the loading task, or pdfjs renders into a document it no

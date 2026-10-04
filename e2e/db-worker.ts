@@ -239,13 +239,20 @@ export async function createTestPost(opts: {
    * to now.
    */
   publishedAt?: string;
+  /**
+   * ISO timestamp in the future: the post is *scheduled* for then rather than
+   * published — the event is SCHEDULED and `publishedAt` is that time, as
+   * schedulePostFromDoc writes them — so `path` is null. Implies `publish`.
+   */
+  scheduledFor?: string;
 }): Promise<TestPost> {
   const {
     authorEmail,
     title = uniqueTitle("post"),
     bodyText = "The quick brown fox jumps over the lazy dog.",
     policy = "AUTO",
-    publish = false,
+    scheduledFor: scheduledForIso,
+    publish = scheduledForIso !== undefined,
     publishedAt: publishedAtIso,
   } = opts;
   assertSafe(authorEmail);
@@ -278,15 +285,19 @@ export async function createTestPost(opts: {
     const { proseJson, title: docTitle } = postContentFromYdoc(materialized);
     materialized.destroy();
     const publishedTitle = title || docTitle || "Untitled";
-    const publishedAt = publishedAtIso ? new Date(publishedAtIso) : new Date();
-    if (Number.isNaN(publishedAt.getTime()) || publishedAt.getTime() > Date.now()) {
+    const scheduledFor = scheduledForIso ? new Date(scheduledForIso) : null;
+    if (scheduledFor && (Number.isNaN(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now())) {
+      throw new Error(`createTestPost: scheduledFor must be a valid timestamp in the future, got ${scheduledForIso}`);
+    }
+    const publishedAt = scheduledFor ?? (publishedAtIso ? new Date(publishedAtIso) : new Date());
+    if (!scheduledFor && (Number.isNaN(publishedAt.getTime()) || publishedAt.getTime() > Date.now())) {
       throw new Error(`createTestPost: publishedAt must be a valid timestamp in the past, got ${publishedAtIso}`);
     }
 
     const event = await prisma.postPublicationEvent.create({
       data: {
         postId: post.id,
-        type: "PUBLISHED",
+        type: scheduledFor ? "SCHEDULED" : "PUBLISHED",
         docId: doc.id,
         ydocSnapshotId: snapshotId,
         title: publishedTitle,
@@ -294,8 +305,9 @@ export async function createTestPost(opts: {
         actorId: author.id,
         // What publishPostFromDoc writes: a first publish's event is the
         // same instant as publishedAt, so a fixture post dated 2001 is not
-        // "updated" today on its editor (PLAN.md §15c).
-        createdAt: publishedAt,
+        // "updated" today on its editor (PLAN.md §15c). A scheduled one is
+        // written now, for a publishedAt still to come.
+        ...(scheduledFor ? { scheduledFor } : { createdAt: publishedAt }),
       },
     });
     await prisma.post.update({
@@ -308,7 +320,7 @@ export async function createTestPost(opts: {
       },
     });
     eventId = event.id;
-    path = postPath({ slug: post.slug, publishedAt });
+    path = scheduledFor ? null : postPath({ slug: post.slug, publishedAt });
   }
 
   return { id: post.id, slug: post.slug, title: post.title, docId: doc.id, eventId, path, bodyText };
@@ -1203,8 +1215,14 @@ export async function createTestAnnotation(opts: {
    * is older than the doc's head.
    */
   ydocUpdateId?: string;
+  /**
+   * A DRAFT is still being composed, or was kept private (PLAN.md §13d): no
+   * `postedAt` and no version 1, which only posting writes. Its body ydoc is
+   * still seeded, as composing creates one.
+   */
+  draft?: boolean;
 }): Promise<{ id: string }> {
-  const { docId, authorEmail, bodyText, anchor, ydocUpdateId } = opts;
+  const { docId, authorEmail, bodyText, anchor, ydocUpdateId, draft = false } = opts;
   assertSafe(authorEmail);
   const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
   // PLAN.md §22e — a posted annotation comes with a body ydoc, `postedAt`,
@@ -1229,14 +1247,15 @@ export async function createTestAnnotation(opts: {
       userId: author.id,
       bodyText,
       proseJson: seed.proseJson as Prisma.InputJsonValue,
-      status: "LIVE",
-      postedAt: now,
+      status: draft ? "DRAFT" : "LIVE",
+      postedAt: draft ? null : now,
       ...(anchor ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText } : {}),
       ...(ydocUpdateId ? { ydocUpdateId: BigInt(ydocUpdateId) } : {}),
     },
   });
   const ydocId = ydocIdForAnnotation(annotation.id);
   await ydocStore.createIfAbsent(ydocId, seed.ydoc, seed.stateVector);
+  if (draft) return { id: annotation.id };
   const mark = await ydocStore.maxUpdateId(ydocId);
   if (mark === null) throw new Error(`createTestAnnotation: ${ydocId} has no update row 1 to snapshot at.`);
   await prisma.ydocSnapshot.create({
@@ -1352,8 +1371,11 @@ export async function createComment(opts: {
   displayName: string;
   body: string;
   status?: CommentStatus;
+  /** ISO timestamp the comment was posted at, revision 1 with it; default now. */
+  createdAt?: string;
 }): Promise<{ id: string; commenterId: string }> {
   const { postId, anchoredEventId, email, displayName, body, status = "PENDING" } = opts;
+  const createdAt = opts.createdAt ? new Date(opts.createdAt) : new Date();
   assertSafe(email);
 
   // Linked to a User when one exists with this email, keyed on `userId` — the
@@ -1391,11 +1413,43 @@ export async function createComment(opts: {
       body: commentDocFromText(body),
       bodyText: body,
       status,
-      revisions: { create: { revisionNo: 1, body: commentDocFromText(body), authorUserId: commenter.userId } },
+      createdAt,
+      revisions: {
+        create: { revisionNo: 1, body: commentDocFromText(body), authorUserId: commenter.userId, createdAt },
+      },
     },
   });
 
   return { id: comment.id, commenterId: commenter.id };
+}
+
+/**
+ * Edits a comment as at `at` (ISO): the next revision, and the body,
+ * body_text and edited_at caches, as editComment writes them in one
+ * transaction. For a spec that needs an edit at a *known* moment — a silent
+ * one straddling midnight, say — which neither the form nor
+ * `backdateComment` can place.
+ */
+export async function editCommentAt(opts: { commentId: string; body: string; at: string }): Promise<void> {
+  const at = new Date(opts.at);
+  const comment = await prisma.comment.findUniqueOrThrow({
+    where: { id: opts.commentId },
+    select: { commenter: { select: { email: true, userId: true } }, _count: { select: { revisions: true } } },
+  });
+  assertSafe(comment.commenter.email);
+  const body = commentDocFromText(opts.body);
+  await prisma.$transaction([
+    prisma.commentRevision.create({
+      data: {
+        commentId: opts.commentId,
+        revisionNo: comment._count.revisions + 1,
+        body,
+        authorUserId: comment.commenter.userId,
+        createdAt: at,
+      },
+    }),
+    prisma.comment.update({ where: { id: opts.commentId }, data: { body, bodyText: opts.body, editedAt: at } }),
+  ]);
 }
 
 export type CommentRevisionFacts = {
@@ -2188,6 +2242,7 @@ const handlers = {
   getCommentQuoteFacts,
   getCommentFacts,
   backdateComment,
+  editCommentAt,
   createQuoteThread,
   getThread,
   getPublicationEvents,

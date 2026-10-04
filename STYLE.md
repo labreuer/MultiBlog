@@ -241,10 +241,10 @@ by design, not by accident.
   component/class; each page repeats it. Three widths, kept deliberately separate:
   - `800px` on pages showing full post text — `[year]/[month]/[day]/[slug]/page.module.css` (public post
     display) and `PostEditor.module.css` (editor).
-  - `680px` on listing/excerpt pages — `authors/[slug]/page.tsx`, `search/page.tsx`, and
-    the date archives (`[year]/post-archive.module.css`, PLAN.md §21h). These show post
-    previews, not full text, so they weren't widened alongside the two full-text surfaces
-    above.
+  - `680px` on listing/excerpt pages — `authors/[slug]/page.tsx`, `search/page.module.css`,
+    and the date archives (`[year]/post-archive.module.css`, PLAN.md §21h). These show post
+    previews or snippets, not full text, so they weren't widened alongside the two full-text
+    surfaces above.
   - `1040px` on the landing page (`page.module.css` `.layout`, PLAN.md §17l) — not a
     fourth, drifted number: it's a two-column CSS grid (`minmax(0, 1fr) 280px`) built
     for the contributor sidebar, and the main column inside it still lands at roughly

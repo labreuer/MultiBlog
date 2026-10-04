@@ -7,9 +7,10 @@ import PostDate from "@/components/PostDate";
 import styles from "./PostListing.module.css";
 
 // The one post-preview list (PLAN.md §21h): title, byline, date, 200-char
-// excerpt. The landing page, /search, /authors/[slug] and the date archives
-// all render this — before it existed each carried its own copy of the same
-// <article>, and the fourth copy was the moment to stop.
+// excerpt. The landing page, /authors/[slug] and the date archives all render
+// this — before it existed each carried its own copy of the same <article>,
+// and the fourth copy was the moment to stop. /search no longer does: its
+// hits are snippets of every kind, not post previews (docs/FULLTEXT.md §7).
 //
 // A Server Component, and it must stay one: every surface rendering it is
 // ISR (`revalidate = 60`) and reads no session, so nothing here may either.
