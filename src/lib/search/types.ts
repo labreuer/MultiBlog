@@ -117,6 +117,13 @@ export type SearchResult = {
   status: "idle" | "stop-words" | "ok";
   /** One per searched kind, in page order — including empty ones. */
   sections: SearchSection[];
+  /**
+   * Whether nothing matched the query as typed, and these sections are what
+   * typo correction found instead (§5). The page says so, and offers the
+   * search exactly as typed; it names no corrected word — the highlights in
+   * the snippets show what matched.
+   */
+  corrected: boolean;
   /** Whether a single kind was asked for, so its section is paginated rather than cut at the overview's length. */
   paginated: boolean;
   pageSize: number;

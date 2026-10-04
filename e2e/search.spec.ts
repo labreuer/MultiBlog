@@ -253,6 +253,25 @@ test.describe("/search", () => {
     }
   });
 
+  test("a typo is corrected, says so, and can be undone", async ({ page }) => {
+    const word = plantedWord();
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, bodyText: `Alasdair MacIntyre on the virtues, ${word}.` });
+    try {
+      // Nothing matches "macintire" as typed; its nearest lexeme with hits
+      // this reader can see is `macintyr` (§5).
+      await searchAs(page, `q=macintire ${word}`);
+      await expect(page.getByText(/as typed, so these are close matches\./)).toBeVisible();
+      await expect(section(page, "Docs").getByRole("link", { name: doc.title })).toBeVisible();
+      await expect(section(page, "Docs").locator("mark", { hasText: "MacIntyre" })).toBeVisible();
+
+      await page.getByRole("link", { name: "Search exactly as typed" }).click();
+      await expect(page).toHaveURL(/exact=1/);
+      await expect(page.getByText(/^Nothing you can read matches/)).toBeVisible();
+    } finally {
+      await deleteTestDoc(doc.id);
+    }
+  });
+
   test("a stop-word-only query says so rather than finding nothing", async ({ page }) => {
     await searchAs(page, "q=the and of");
     await expect(page.getByText(/is made only of words too common to search for/)).toBeVisible();

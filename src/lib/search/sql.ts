@@ -14,7 +14,12 @@ import { HEADLINE_DELIMITERS, SNIPPET_OPTIONS, TITLE_OPTIONS, parseHeadline, typ
 /** The configuration add_full_text_search created: `english` with `unaccent` ahead of the stemmer. */
 const CONFIG = Prisma.sql`'public.english_unaccent'::regconfig`;
 
-/** A tsquery expression, ready to interpolate: what every match and snippet below takes. */
+/**
+ * A tsquery expression, ready to interpolate: what every match and snippet
+ * below takes. It may be a function call, a cast of a literal or a
+ * `ts_rewrite` of either, so it is always joined in as a one-row subselect —
+ * a bare cast isn't a valid FROM item.
+ */
 export type TsQuery = Prisma.Sql;
 
 /** The query as typed, in `websearch_to_tsquery`'s syntax: words ANDed, "phrases", `or`, `-word`. */
@@ -45,7 +50,7 @@ export async function rankRows(table: RankedTable, ids: string[], query: TsQuery
   if (ids.length === 0) return new Map();
   const rows = await prisma.$queryRaw<{ id: string; rank: number }[]>(Prisma.sql`
     SELECT t.id, ts_rank_cd(t.search_vector, q.query, 32)::float8 AS rank
-    FROM ${Prisma.raw(`"${table}"`)} t CROSS JOIN ${query} AS q(query)
+    FROM ${Prisma.raw(`"${table}"`)} t CROSS JOIN (SELECT ${query} AS query) AS q
     WHERE t.id = ANY(${ids}) AND t.search_vector @@ q.query`);
   return new Map(rows.map((row) => [row.id, row.rank]));
 }
@@ -104,7 +109,7 @@ export async function snippetsFor(
         SELECT t.id,
           ts_headline(${CONFIG}, ${cleaned(title)}, q.query, ${TITLE_OPTIONS}) AS title,
           ts_headline(${CONFIG}, ${cleaned(columns.body)}, q.query, ${SNIPPET_OPTIONS}) AS body
-        FROM ${from} t CROSS JOIN ${query} AS q(query)
+        FROM ${from} t CROSS JOIN (SELECT ${query} AS query) AS q
         WHERE t.id = ANY(${ids})`)
     : await prisma.$queryRaw<{ id: string; title: string; body: string }[]>(Prisma.sql`
         SELECT t.id, ${cleaned(title)} AS title, left(${cleaned(columns.body)}, ${EXCERPT_LENGTH + 1}) AS body
@@ -128,7 +133,7 @@ export async function headlineTexts(texts: string[], query: TsQuery | null): Pro
   if (texts.length === 0) return [];
   const rows = await prisma.$queryRaw<{ i: number; body: string }[]>(Prisma.sql`
     SELECT u.i::int AS i, ts_headline(${CONFIG}, ${cleaned(Prisma.sql`u.text`)}, q.query, ${SNIPPET_OPTIONS}) AS body
-    FROM unnest(${texts}::text[]) WITH ORDINALITY AS u(text, i) CROSS JOIN ${query} AS q(query)`);
+    FROM unnest(${texts}::text[]) WITH ORDINALITY AS u(text, i) CROSS JOIN (SELECT ${query} AS query) AS q`);
   const byIndex = new Map(rows.map((row) => [row.i, row.body]));
   return texts.map((text, index) => (text ? parseHeadline(byIndex.get(index + 1) ?? "") : []));
 }

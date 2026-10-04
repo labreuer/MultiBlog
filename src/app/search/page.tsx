@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { search } from "@/lib/search";
 import { parseSearchParams, searchQueryString, urlSearchParamsFrom, type SearchKind } from "@/lib/search/params";
@@ -72,7 +73,17 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
       ) : result.kinds.length === 0 ? (
         <p className={styles.notice}>None of the kinds selected is one you can search.</p>
       ) : (
-        <SearchResults result={result} />
+        <>
+          {result.corrected && (
+            <p className={styles.notice}>
+              Nothing matched “{result.params.q}” as typed, so these are close matches.{" "}
+              <Link href={`/search${searchQueryString(result.params, { exact: true, page: 1 })}`}>
+                Search exactly as typed
+              </Link>
+            </p>
+          )}
+          <SearchResults result={result} />
+        </>
       )}
     </main>
   );

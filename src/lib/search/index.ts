@@ -16,14 +16,16 @@
 import { canViewDocs, canViewFiles } from "@/lib/role-checks";
 import { dayRangeToInstants } from "./dates";
 import { hasFilters, SEARCH_KINDS, type SearchKind, type SearchParams } from "./params";
-import { isEmptyQuery, websearchQuery } from "./sql";
+import { isEmptyQuery, websearchQuery, windowOf, type TsQuery } from "./sql";
+import { asYouTypeQuery } from "./as-you-type";
+import { correctQuery } from "./correct";
 import { AUTHORED_KINDS, searchAuthorOptions } from "./authors";
-import { searchDocs } from "./docs";
-import { searchPosts } from "./posts";
-import { searchPdfs } from "./pdfs";
-import { searchAnnotations } from "./annotations";
-import { searchComments } from "./comments";
-import type { KindContext } from "./context";
+import { docsSearch } from "./docs";
+import { postsSearch } from "./posts";
+import { pdfsSearch } from "./pdfs";
+import { annotationsSearch } from "./annotations";
+import { commentsSearch } from "./comments";
+import type { KindContext, KindSearch } from "./context";
 import type { SearchActor, SearchResult, SearchScope, SearchSection } from "./types";
 
 export type { SearchActor, SearchResult, SearchScope, SearchSection } from "./types";
@@ -57,25 +59,43 @@ export function readableKinds(actor: SearchActor, scope: SearchScope = "viewer")
   });
 }
 
-async function searchKind(kind: SearchKind, ctx: KindContext): Promise<SearchSection> {
-  switch (kind) {
-    case "docs":
-      return { kind, ...(await searchDocs(ctx)) };
-    case "posts":
-      return { kind, ...(await searchPosts(ctx)) };
-    case "pdfs":
-      return { kind, ...(await searchPdfs(ctx)) };
-    case "annotations":
-      return { kind, ...(await searchAnnotations(ctx)) };
-    case "comments":
-      return { kind, ...(await searchComments(ctx)) };
-  }
+const SEARCHES: { [K in SearchKind]: KindSearch<unknown> } = {
+  docs: docsSearch,
+  posts: postsSearch,
+  pdfs: pdfsSearch,
+  annotations: annotationsSearch,
+  comments: commentsSearch,
+};
+
+/** One kind's section: its count, and the hits in the window. */
+async function sectionFor(
+  kind: SearchKind,
+  ctx: KindContext,
+  query: TsQuery | null,
+  window: { offset: number; limit: number },
+): Promise<SearchSection> {
+  const ordered = await SEARCHES[kind].match(ctx, query);
+  const hits = await SEARCHES[kind].hits(ctx, windowOf(ordered, window), query);
+  // The cast is the price of one table of searchers: SEARCHES[kind] is the
+  // searcher for exactly this kind, so its hits are this kind's.
+  return { kind, total: ordered.length, hits } as SearchSection;
 }
+
+export type SearchOptions = {
+  scope?: SearchScope;
+  /**
+   * Treat the last word as a prefix still being typed (§5) — the quote
+   * picker's mode. Never corrected: a half-typed word is not a typo.
+   */
+  asYouType?: boolean;
+  /** Leave out this post and its comments: the quote picker's own host post. */
+  excludePostId?: string;
+};
 
 export async function search(
   actor: SearchActor,
   requested: SearchParams,
-  opts: { scope?: SearchScope } = {},
+  opts: SearchOptions = {},
 ): Promise<SearchResult> {
   const scope = opts.scope ?? "viewer";
   const readable = readableKinds(actor, scope);
@@ -100,26 +120,47 @@ export async function search(
     withoutAuthors,
     authorOptions: options.map(({ slug, name }) => ({ slug, name })),
     sections: [] as SearchSection[],
+    corrected: false,
     paginated,
     pageSize,
   };
 
   if (!params.q && !hasFilters(params)) return { ...result, status: "idle" };
 
-  const query = params.q ? websearchQuery(params.q) : null;
-  if (query && (await isEmptyQuery(query))) return { ...result, status: "stop-words" };
+  let query: TsQuery | null = null;
+  if (params.q) {
+    query = opts.asYouType ? await asYouTypeQuery(params.q) : websearchQuery(params.q);
+    if (!query || (await isEmptyQuery(query))) return { ...result, status: "stop-words" };
+  }
 
   const ctx: KindContext = {
     actor,
     scope,
-    query,
     authorIds: authors.map((author) => author.id),
     created: dayRangeToInstants(params.created, params.tz),
     updated: dayRangeToInstants(params.updated, params.tz),
-    window: { offset: paginated ? (params.page - 1) * pageSize : 0, limit: pageSize },
+    excludePostId: opts.excludePostId ?? null,
+    memo: new Map(),
   };
+  const window = { offset: paginated ? (params.page - 1) * pageSize : 0, limit: pageSize };
   // Concurrently: each is a handful of queries over its own tables, and the
   // page waits for the slowest anyway.
-  const sections = await Promise.all(kinds.map((kind) => searchKind(kind, ctx)));
+  const run = (q: TsQuery | null) => Promise.all(kinds.map((kind) => sectionFor(kind, ctx, q, window)));
+
+  const sections = await run(query);
+
+  // §5: typo correction, only when every selected kind came back empty, and
+  // never when asked for the query exactly as typed. The corrected search is
+  // shown only if it found something; otherwise the page says nothing
+  // matched, which is what happened.
+  if (query && !opts.asYouType && !params.exact && sections.every((section) => section.total === 0)) {
+    const countHits = async (q: TsQuery) =>
+      (await Promise.all(kinds.map((kind) => SEARCHES[kind].match(ctx, q)))).reduce((n, ids) => n + ids.length, 0);
+    const corrected = await correctQuery(params.q, query, countHits);
+    if (corrected) {
+      const retried = await run(corrected);
+      if (retried.some((section) => section.total > 0)) return { ...result, status: "ok", sections: retried, corrected: true };
+    }
+  }
   return { ...result, status: "ok", sections };
 }
