@@ -32,8 +32,16 @@ export const SNIPPET_OPTIONS = [
   "MinWords=10",
 ].join(", ");
 
-/** For a title: the whole of it, with every match marked. */
+/** For a title, or a short body: the whole of it, with every match marked. */
 export const TITLE_OPTIONS = [`StartSel=${MATCH_START}`, `StopSel=${MATCH_STOP}`, "HighlightAll=true"].join(", ");
+
+/**
+ * A body this short is shown whole rather than as fragments — most comments
+ * and annotations. Fragments drop words of three letters or fewer at their
+ * edges (`ts_headline`'s ShortWord), which in a two-line comment loses its
+ * "A" or "I" and reads as mangled rather than excerpted.
+ */
+export const WHOLE_TEXT_LENGTH = 280;
 
 export type HeadlinePart = { text: string; match: boolean };
 /** One fragment of a snippet: alternating plain and matched text. */

@@ -6,8 +6,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { readableFilesWhere } from "@/lib/file-authz";
 import { currentTextVersion } from "@/lib/pdf-extract";
-import { SNIPPET_OPTIONS, parseHeadline, type HeadlineFragment } from "./headline";
-import { cleanedText, orderNewest, rankRows, snippetsFor, sqlConfig, type TsQuery } from "./sql";
+import { parseHeadline, type HeadlineFragment } from "./headline";
+import { bodyHeadlineSql, cleanedText, orderNewest, rankRows, snippetsFor, type TsQuery } from "./sql";
 import { remember, type KindContext, type KindSearch } from "./context";
 import type { PdfHit } from "./types";
 
@@ -54,12 +54,13 @@ async function pageSnippets(pages: PageMatch[], query: TsQuery): Promise<Map<str
   if (pages.length === 0) return new Map();
   const rows = await prisma.$queryRaw<{ fileId: string; pageIndex: number; snippet: string }[]>(Prisma.sql`
     SELECT t.file_id AS "fileId", t.page_index AS "pageIndex",
-           ts_headline(${sqlConfig}, ${cleanedText(Prisma.sql`t.text`)}, q.query, ${SNIPPET_OPTIONS}) AS snippet
+           ${bodyHeadlineSql(Prisma.sql`b.body`, Prisma.sql`q.query`)} AS snippet
     FROM file_page_text t
     JOIN unnest(${pages.map((p) => p.fileId)}::text[], ${pages.map((p) => p.pageIndex)}::int[],
                 ${pages.map((p) => p.textVersion)}::text[]) AS k(file_id, page_index, text_version)
       ON t.file_id = k.file_id AND t.page_index = k.page_index AND t.text_version = k.text_version
-    CROSS JOIN (SELECT ${query} AS query) AS q`);
+    CROSS JOIN (SELECT ${query} AS query) AS q
+    CROSS JOIN LATERAL (SELECT ${cleanedText(Prisma.sql`t.text`)} AS body) AS b`);
   return new Map(rows.map((row) => [`${row.fileId}:${row.pageIndex}`, parseHeadline(row.snippet)]));
 }
 
