@@ -331,17 +331,20 @@ model UserInvite {
 // `title` is deliberately its own column and not derived: a post's title may
 // differ from the doc's title at snapshot time (it defaults to it).
 model Post {
-  id               String           @id @default(cuid())
-  slug             String           @unique
+  id               String                   @id @default(cuid())
+  slug             String                   @unique
   title            String
-  docId            String           @map("doc_id")
-  proseJson        Json?            @map("prose_json")
-  publishEventId   String?          @unique @map("publish_event_id")
-  moderationPolicy ModerationPolicy @default(INHERIT) @map("moderation_policy")
-  createdAt        DateTime         @default(now()) @map("created_at")
-  publishedAt      DateTime?        @map("published_at") // may be in the future — see below
-  deletedByUserId  String?          @map("deleted_by_user_id")
-  deletedAt        DateTime?        @map("deleted_at")
+  docId            String                   @map("doc_id")
+  proseJson        Json?                    @map("prose_json")
+  publishEventId   String?                  @unique @map("publish_event_id")
+  moderationPolicy ModerationPolicy         @default(INHERIT) @map("moderation_policy")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  publishedAt      DateTime?                @map("published_at") // may be in the future — see below
+  deletedByUserId  String?                  @map("deleted_by_user_id")
+  deletedAt        DateTime?                @map("deleted_at")
+  // docs/FULLTEXT.md §3 — the title (A) and the published body's text (D),
+  // maintained by the post_sync_search_vector trigger; never assign to it.
+  searchVector     Unsupported("tsvector")? @map("search_vector")
 
   // publishEventId is set immediately by both an immediate publish and a
   // *scheduled* one — visibility is gated by publishedAt vs now(), a pure
@@ -362,6 +365,7 @@ model Post {
   metrics             PostMetrics?
 
   @@index([docId])
+  @@index([searchVector], type: Gin)
   @@map("post")
 }
 
@@ -549,10 +553,10 @@ model CommentThread {
 }
 
 model Comment {
-  id                String        @id @default(cuid())
-  threadId          String        @map("thread_id")
-  parentCommentId   String?       @map("parent_comment_id")
-  commenterId       String        @map("commenter_id")
+  id                String                   @id @default(cuid())
+  threadId          String                   @map("thread_id")
+  parentCommentId   String?                  @map("parent_comment_id")
+  commenterId       String                   @map("commenter_id")
   // PLAN.md §23b — the current body as ProseMirror JSON over
   // `pmCommentContentSchema` (tiptap-schema.ts), validated on write by
   // `nodeFromJSON`: the schema *is* the validation, and there is never any
@@ -573,21 +577,26 @@ model Comment {
   // equivalent over a document, and every excerpt wants the same string.
   // Mirrors `Annotation.bodyText`. Not on `comment_revision`, which nothing
   // filters.
-  bodyText          String        @default("") @map("body_text")
-  status            CommentStatus @default(PENDING)
-  ipAddress         String?       @map("ip_address")
-  statusChangedById String?       @map("status_changed_by_id")
-  statusChangedAt   DateTime?     @map("status_changed_at")
-  createdAt         DateTime      @default(now()) @map("created_at")
+  bodyText          String                   @default("") @map("body_text")
+  status            CommentStatus            @default(PENDING)
+  ipAddress         String?                  @map("ip_address")
+  statusChangedById String?                  @map("status_changed_by_id")
+  statusChangedAt   DateTime?                @map("status_changed_at")
+  createdAt         DateTime                 @default(now()) @map("created_at")
   // PLAN.md §22b — stamped on **every** edit, silent or not. Nothing
   // reader-facing keys off it: whether a reader is told about an edit is
   // §22b's two-part silence rule over `comment_revision`, which this column
   // cannot express. What it is for is the people who moderate — /comments'
   // Edited-at column, which sorted on an always-empty column until §22c gave
   // it a writer.
-  editedAt          DateTime?     @map("edited_at")
-  deletedByUserId   String?       @map("deleted_by_user_id")
-  deletedAt         DateTime?     @map("deleted_at")
+  editedAt          DateTime?                @map("edited_at")
+  deletedByUserId   String?                  @map("deleted_by_user_id")
+  deletedAt         DateTime?                @map("deleted_at")
+  // docs/FULLTEXT.md §3 — bodyText as a tsvector, maintained by the
+  // comment_sync_search_vector trigger; never assign to it. The current
+  // revision only: no revision is indexed, or a hit on an old wording would
+  // reveal a silent edit (§1).
+  searchVector      Unsupported("tsvector")? @map("search_vector")
 
   thread              CommentThread        @relation(fields: [threadId], references: [id], onDelete: Cascade)
   parent              Comment?             @relation("CommentReplies", fields: [parentCommentId], references: [id])
@@ -605,6 +614,7 @@ model Comment {
 
   // The other half of post_metrics' count path — see CommentThread.postId.
   @@index([threadId])
+  @@index([searchVector], type: Gin)
   @@map("comment")
 }
 
@@ -730,11 +740,11 @@ model CommentQuoteAnchor {
 // (§12d) — nullable because they're empty until the first store, i.e. for a
 // doc that's been created but never edited.
 model Doc {
-  id                String        @id @default(cuid())
-  slug              String        @unique
+  id                String                   @id @default(cuid())
+  slug              String                   @unique
   title             String
-  visibility        DocVisibility @default(PRIVATE)
-  proseJson         Json?         @map("prose_json")
+  visibility        DocVisibility            @default(PRIVATE)
+  proseJson         Json?                    @map("prose_json")
   // Character count of proseJson, maintained by the doc_sync_prose_json_length
   // trigger — never assign to it. A plain column rather than a GENERATED one
   // because Prisma reads a generated column's expression as a default and
@@ -744,7 +754,12 @@ model Doc {
   // sorting by it, not just the page. @default(0) so
   // `doc.create()` needn't name it; the trigger overwrites it on INSERT
   // anyway.
-  proseJsonLength   Int           @default(0) @map("prose_json_length")
+  proseJsonLength   Int                      @default(0) @map("prose_json_length")
+  // docs/FULLTEXT.md §3 — the title (weight A) and body text (D) as a
+  // tsvector, maintained by the doc_sync_search_vector trigger: never assign
+  // to it, the same rule as proseJsonLength above. Unsupported, so the client
+  // never selects it; search reads it through raw SQL.
+  searchVector      Unsupported("tsvector")? @map("search_vector")
   // PLAN.md §13q — which `ydoc_update` row `proseJson` above is the content
   // of, written by the same `updateDocCache` pass.
   //
@@ -760,13 +775,13 @@ model Doc {
   // system. This one describes a cached rendering; that one describes where a
   // quotation was measured. They are stamped from different logs for a reply
   // (§13p) and mean different things everywhere.
-  proseJsonUpdateId BigInt?       @map("prose_json_update_id")
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
+  proseJsonUpdateId BigInt?                  @map("prose_json_update_id")
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
   // Updated when Prisma would update updatedAt. Sloppy with concurrent writes.
-  updatedByUserId   String?       @map("updated_by_user_id")
-  deletedByUserId   String?       @map("deleted_by_user_id")
-  deletedAt         DateTime?     @map("deleted_at")
+  updatedByUserId   String?                  @map("updated_by_user_id")
+  deletedByUserId   String?                  @map("deleted_by_user_id")
+  deletedAt         DateTime?                @map("deleted_at")
 
   authors             DocAuthor[]
   updatedBy           User?                  @relation("DocUpdatedBy", fields: [updatedByUserId], references: [id])
@@ -781,6 +796,7 @@ model Doc {
   anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorDoc")
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
 
+  @@index([searchVector], type: Gin)
   @@map("doc")
 }
 
@@ -888,16 +904,16 @@ model DocSlugHistory {
 // forever. That is why pdfTarget is a single opaque blob and needs none of
 // anchorFrom/anchorTo's tracking machinery.
 model Annotation {
-  id                 String           @id @default(cuid())
-  docId              String?          @map("doc_id")
+  id                 String                   @id @default(cuid())
+  docId              String?                  @map("doc_id")
   // PLAN.md §19 — the file counterpart of docId. Cascades for the same reason
   // docId does: an annotation on a deleted container is unreachable, not
   // merely orphaned.
-  fileId             String?          @map("file_id")
-  parentAnnotationId String?          @map("parent_annotation_id")
-  userId             String           @map("user_id")
-  proseJson          Json?            @map("prose_json")
-  bodyText           String           @default("") @map("body_text")
+  fileId             String?                  @map("file_id")
+  parentAnnotationId String?                  @map("parent_annotation_id")
+  userId             String                   @map("user_id")
+  proseJson          Json?                    @map("prose_json")
+  bodyText           String                   @default("") @map("body_text")
   // PLAN.md §13q — the annotation-body counterpart of Doc.proseJsonUpdateId:
   // which update of *this annotation's own* ydoc the two columns above are
   // the content of. Written by server/annotation-cache.ts's debounce, and by
@@ -910,8 +926,8 @@ model Annotation {
   // fact a replier read is "the last settled body" and the snapshot is the
   // record of that — this column can trail it (the flush endpoint writes
   // content without it, and the debounce skips a body under edit).
-  proseJsonUpdateId  BigInt?          @map("prose_json_update_id")
-  status             AnnotationStatus @default(DRAFT)
+  proseJsonUpdateId  BigInt?                  @map("prose_json_update_id")
+  status             AnnotationStatus         @default(DRAFT)
   // PLAN.md §22e — non-null exactly while an edit session on this body is
   // open, and the reason `proseJson` above is safe to keep reading everywhere.
   //
@@ -929,26 +945,26 @@ model Annotation {
   // A session left open (a closed tab) is settled by the author's next visit
   // rather than by a cron: the card offers Resume or Discard once this is
   // older than STALE_EDIT_SESSION_MS.
-  editingSince       DateTime?        @map("editing_since")
+  editingSince       DateTime?                @map("editing_since")
   // PLAN.md §22e — the DRAFT -> LIVE/RAISED moment, which is when readers
   // could first have seen the text and so where §22b's grace window is
   // measured from. Null for a DRAFT. Its own column rather than the first
   // version's `created_at`, because it is a fact about the annotation and not
   // about a version: `createdAt` below is when the composer was opened, and
   // nothing measures from that.
-  postedAt           DateTime?        @map("posted_at")
-  raisedAt           DateTime?        @map("raised_at")
-  resolvedAt         DateTime?        @map("resolved_at")
-  createdAt          DateTime         @default(now()) @map("created_at")
+  postedAt           DateTime?                @map("posted_at")
+  raisedAt           DateTime?                @map("raised_at")
+  resolvedAt         DateTime?                @map("resolved_at")
+  createdAt          DateTime                 @default(now()) @map("created_at")
   // PLAN.md §22e — when the newest version settled (the newest
   // `ydoc_snapshot` on this body's own ydoc). Stamped on every edit session
   // that changed anything, silent or not; whether a reader is *told* is §22b's
   // rule over the snapshot rows, which this column cannot express.
   // /annotations' Edited column sorted on it while nothing wrote it (§12o's
   // known gap); §22e is its writer.
-  editedAt           DateTime?        @map("edited_at")
-  deletedByUserId    String?          @map("deleted_by_user_id")
-  deletedAt          DateTime?        @map("deleted_at")
+  editedAt           DateTime?                @map("edited_at")
+  deletedByUserId    String?                  @map("deleted_by_user_id")
+  deletedAt          DateTime?                @map("deleted_at")
   // PLAN.md §13o / COLLAB.md §7 — the reading-view anchor: offsets into the
   // document this annotation is *about*, plus the text that was there.
   //
@@ -972,9 +988,9 @@ model Annotation {
   // fallback (src/lib/annotation-anchors.ts), doc-link shaped (COLLAB.md
   // §3) rather than post-comment shaped, because a doc has no immutable
   // snapshot for offsets to stay stable against.
-  anchorFrom         Int?             @map("anchor_from")
-  anchorTo           Int?             @map("anchor_to")
-  quotedText         String           @default("") @map("quoted_text")
+  anchorFrom         Int?                     @map("anchor_from")
+  anchorTo           Int?                     @map("anchor_to")
+  quotedText         String                   @default("") @map("quoted_text")
   // PLAN.md §12p/§13n/§13o — which ydoc_update the author's view showed when
   // they posted (postAnnotation, src/app/actions/annotations.ts): the
   // client's own scrub position when known precisely (annotating while
@@ -996,7 +1012,7 @@ model Annotation {
   // nothing here worth a join for). Null for every row from before this
   // column existed, and for one whose fallback lookup came back empty (a
   // doc with no update log yet).
-  ydocUpdateId       BigInt?          @map("ydoc_update_id")
+  ydocUpdateId       BigInt?                  @map("ydoc_update_id")
   // PLAN.md §19 / docs/PDF.md §2 — the whole PDF anchor as one JSON blob:
   // { pageIndex, quads, quote: {exact,prefix,suffix}, position: {start,end},
   // textVersion }. Non-null exactly for a *root* annotation on a file; a reply
@@ -1013,7 +1029,12 @@ model Annotation {
   // /annotations render its Quote column with no PDF branch at all. That is a
   // deliberate duplication of one string, not a second source of truth: the
   // column is the display copy, this blob is the anchor.
-  pdfTarget          Json?            @map("pdf_target")
+  pdfTarget          Json?                    @map("pdf_target")
+  // docs/FULLTEXT.md §3 — bodyText (weight B) and quotedText (D) as a
+  // tsvector, maintained by the annotation_sync_search_vector trigger; never
+  // assign to it. bodyText is the last settled body (proseJson's comment), so
+  // an edit in progress is no more searchable than it is readable.
+  searchVector       Unsupported("tsvector")? @map("search_vector")
 
   doc                 Doc?                 @relation(fields: [docId], references: [id], onDelete: Cascade)
   file                StoredFile?          @relation(fields: [fileId], references: [id], onDelete: Cascade)
@@ -1030,6 +1051,7 @@ model Annotation {
 
   @@index([docId])
   @@index([fileId])
+  @@index([searchVector], type: Gin)
   @@map("annotation")
 }
 
@@ -1158,11 +1180,15 @@ model StoredFile {
   // is shared because a third visibility word would be a UI regression.
   visibility  DocVisibility @default(PRIVATE)
 
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  updatedByUserId String?   @map("updated_by_user_id")
-  deletedByUserId String?   @map("deleted_by_user_id")
-  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+  updatedByUserId String?                  @map("updated_by_user_id")
+  deletedByUserId String?                  @map("deleted_by_user_id")
+  deletedAt       DateTime?                @map("deleted_at")
+  // docs/FULLTEXT.md §3 — title (A) and filename (B) as a tsvector,
+  // maintained by the file_sync_search_vector trigger; never assign to it.
+  // The pages' text has its own, on FilePageText.
+  searchVector    Unsupported("tsvector")? @map("search_vector")
 
   owners              FileOwner[]
   slugHistory         FileSlugHistory[]
@@ -1179,6 +1205,7 @@ model StoredFile {
   // partial, so it can't serve a lookup that has to find a deleted file.
   @@index([slug])
   @@index([sha256])
+  @@index([searchVector], type: Gin)
   @@map("file")
 }
 
@@ -1258,15 +1285,45 @@ model FileSlugHistory {
 // bump is lazy and per-annotation (docs/PDF.md §3), which is only possible if
 // both generations are still on disk.
 model FilePageText {
-  fileId      String @map("file_id")
-  pageIndex   Int    @map("page_index")
-  textVersion String @map("text_version")
-  text        String
+  fileId       String                   @map("file_id")
+  pageIndex    Int                      @map("page_index")
+  textVersion  String                   @map("text_version")
+  text         String
+  // docs/FULLTEXT.md §3 — text as a tsvector, maintained by the
+  // file_page_text_sync_search_vector trigger; never assign to it.
+  searchVector Unsupported("tsvector")? @map("search_vector")
 
   file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
   @@id([fileId, pageIndex, textVersion])
+  @@index([searchVector], type: Gin)
   @@map("file_page_text")
+}
+
+// docs/FULLTEXT.md §3, "The vocabulary" — every lexeme (stemmed word) that
+// appears in any search_vector, for typo correction (§5) and search-as-you-type
+// to choose candidates from by trigram similarity.
+//
+// **Written only by triggers**: statement-level AFTER INSERT and AFTER UPDATE
+// triggers on each table that carries a search_vector add the lexemes a
+// statement introduced. Nothing in the app writes or deletes a row here, and
+// nothing removes a lexeme whose last occurrence is gone — a stale one is
+// harmless, because §5 never uses a candidate without a readable hit.
+// `scripts/integrity/check-search-index.ts --repair` rebuilds it from
+// `ts_stat` over every vector.
+//
+// **Global, including words from text a viewer cannot read.** §5 is why that
+// leaks nothing: what a viewer sees depends only on what they can read.
+//
+// A data-only load into an existing schema must leave this table's data out
+// (`pg_dump --exclude-table-data=search_lexeme`): the triggers refill it as
+// the content tables load, and its own COPY would then collide on the key
+// (docs/DATABASE.md).
+model SearchLexeme {
+  lexeme String @id
+
+  @@index([lexeme(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@map("search_lexeme")
 }
 
 // PLAN.md §20c — a term in the site's vocabulary.

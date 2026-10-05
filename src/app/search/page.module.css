@@ -1,0 +1,220 @@
+/* docs/FULLTEXT.md §7 — /search. Every color is a globals.css token
+   (STYLE.md), <mark> included. The 680px listing column STYLE.md gives
+   search and the other excerpt pages. */
+
+.container {
+  max-width: 680px;
+  margin: 2rem auto 4rem;
+  padding: 0 1rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.heading {
+  font-size: 1.8rem;
+  margin-bottom: 1rem;
+}
+
+/* ---- The form ---- */
+
+.form {
+  margin-bottom: 1.5rem;
+}
+
+.queryRow {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* The button matches the input's box model rather than taking a height
+   (STYLE.md, "Buttons sized to match an adjacent input"). */
+.queryInput,
+.button {
+  padding: 0.45rem 0.6rem;
+  font-size: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.queryInput {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.button {
+  background: var(--surface-muted);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--surface-hover);
+}
+
+.filters {
+  margin-top: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.filters > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.filterGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin-top: 0.6rem;
+}
+
+.fieldset {
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.fieldset legend {
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.check,
+.date {
+  white-space: nowrap;
+}
+
+.date input {
+  font: inherit;
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.25rem;
+}
+
+.notice {
+  margin-top: 1rem;
+  color: var(--text-secondary);
+}
+
+/* ---- The sections ---- */
+
+.section {
+  margin-top: 2rem;
+}
+
+.sectionTitle {
+  font-size: 1.1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.25rem;
+}
+
+.count {
+  color: var(--text-muted);
+  font-weight: normal;
+  font-size: 0.9rem;
+}
+
+.hits {
+  list-style: none;
+}
+
+.hit {
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+
+.hitTitle {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hitTitle:hover {
+  text-decoration: underline;
+}
+
+.meta {
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.snippet,
+.quote {
+  margin-top: 0.35rem;
+  line-height: 1.45;
+}
+
+.quote {
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.hit mark {
+  background: var(--fill-warning);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* The draft/scheduled marker /tag uses for the same rows. */
+.marker {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+.pages {
+  list-style: none;
+  margin-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pageLink {
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.pageSnippet {
+  line-height: 1.45;
+}
+
+.more,
+.all,
+.emptyKinds {
+  margin-top: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.emptyKinds {
+  margin-top: 2rem;
+}
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.pageCount {
+  color: var(--text-muted);
+}

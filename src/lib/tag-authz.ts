@@ -118,7 +118,9 @@ export async function canUserTagTarget(userId: string, role: Role, target: Ancho
           status: true,
           deletedAt: true,
           commenter: { select: { userId: true } },
-          thread: { select: { post: { select: { id: true, publishedAt: true } } } },
+          thread: {
+            select: { post: { select: { id: true, publishedAt: true, publishEventId: true, deletedByUserId: true } } },
+          },
         },
       });
       return comment !== null && (await canUserReadComment({ id: userId, role }, comment));

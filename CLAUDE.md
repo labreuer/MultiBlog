@@ -31,6 +31,7 @@ to re-derive the decision from.
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Markdown → TipTap: creating a doc (file import, paste box), and §11, the comment box's parse with its conform shims. |
 | [docs/CLAUDE_IMPORT.md](docs/CLAUDE_IMPORT.md) | A claude.ai data export → one doc per session, Markdown files → one doc each (`--markdown`), and updating imported docs in place without breaking the anchors other docs hold into them. |
+| [docs/FULLTEXT.md](docs/FULLTEXT.md) | Full-text search as built: a trigger-maintained vector per row over docs, posts, annotations, comments and PDF pages, per-kind queries that rank only inside the viewer's readable ids, accent folding and a typo correction that leaks nothing, filters by kind, author and date, the page and the quote picker; the decisions, and the other options in an appendix. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
 | [docs/DEV_SLOTS.md](docs/DEV_SLOTS.md) | Two working trees side by side: ports, hosts, databases. |
 | [docs/DATABASE.md](docs/DATABASE.md) | The Postgres cluster, what 18 doesn't change, migration recipes. |
@@ -99,6 +100,15 @@ before changing the behavior it describes.
   own physics, and COLLAB.md's "there is no universal anchor" is unchanged. `src/lib/anchors/`
   is split browser-safe (`index.ts`) vs. server (`capture.ts`) the way `avatar-url.ts` and
   `avatar.ts` are — don't barrel them together. PLAN.md §20a, §20b.
+- **Search ranks only inside ids a read rule chose.** Each read rule has one exported `where`
+  helper beside its per-row check (`readableDocsWhere`, `readablePostWhere`,
+  `readableFilesWhere`, `readableAnnotationsWhere`, `publicCommentsWhere`), and every listing
+  of readable rows goes through it. `src/lib/search/` asks Prisma for the viewer's ids per
+  kind through those, and only then runs the SQL that matches text — so the index holds no
+  visibility, byline or status, and there is nothing to keep in step. Never one query across
+  kinds, and never a filter on `editedAt` for a comment or annotation: its "updated" date is
+  the edit its card tells readers about, or a date range finds a silent edit.
+  docs/FULLTEXT.md §2 and §6, docs/PERMISSIONS.md "Search".
 - **A tag chip is exactly as private as the thing it is on, structurally.** `TagChips`
   renders only from inside a page that has already run its own gate and takes a resolved
   `AnchorTarget` rather than a slug, so it can't be mounted on an ungated surface; it
@@ -301,6 +311,10 @@ running `prisma migrate dev` on anything unusual.
   query line. Typecheck passes, which makes it read like a logic bug in the code you just
   wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
   refusing to *write*, this one is a successful write the running process never picks up.
+- **Six `search_vector` columns and the `search_lexeme` table are written only by triggers**
+  (docs/FULLTEXT.md §3) — never assign to them, give a new trigger function its own
+  `SET search_path`, and leave `search_lexeme`'s data out of a data-only load, or its `COPY`
+  collides with what the triggers already refilled. docs/DATABASE.md.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
 - **One-off DB scripts can't `require()` the generated client with plain `node -e`** — it's TS

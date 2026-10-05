@@ -21,14 +21,13 @@ import { resolveCommentBody } from "@/lib/comment-body-resolve";
 import type { CommentBodyInput } from "@/lib/comment-body-value";
 import { commentContentToMarkdown } from "@/lib/markdown-import";
 import { docsEqual } from "@/lib/diff";
-import { commentAnchorName } from "@/lib/comment-anchor-name";
 import { captureCommentQuotes, type CommentQuoteAnchorInput } from "@/lib/comment-quote-capture";
 import { parsePendingQuoteHints } from "@/lib/comment-quote-pending";
 import { targetFromColumns, targetToColumns } from "@/lib/anchors";
-import { publishedPostWhere } from "@/lib/post-status";
-import { postPath } from "@/lib/post-path";
-import { extractText } from "@/lib/diff";
 import { canQuoteTargetInto } from "@/lib/comment-quote-authz";
+import { search } from "@/lib/search";
+import { parseSearchParams } from "@/lib/search/params";
+import { headlineText } from "@/lib/search/headline";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -688,54 +687,48 @@ export type QuotableTargetHit =
 
 const PICKER_LIMIT = 8;
 
-/** Published posts by title or body, and public comments by body, matching `query`. */
+/**
+ * Published posts and public comments matching `query` as it is typed —
+ * docs/FULLTEXT.md's search in its **public scope**, whoever is asking, with
+ * the last word matched as a prefix (§5, §8). The public scope is
+ * `publishedPostWhere` and `publicCommentsWhere`, never the viewer's own
+ * wider rules: what is offered here gets quoted to everyone.
+ */
 export async function searchQuotableTargets(query: string, excludePostId?: string): Promise<QuotableTargetHit[]> {
-  const needle = query.trim().slice(0, 200).toLowerCase();
-  if (!needle) return [];
-
-  // The same hobby-scale substring search /search runs (§9): no index, a
-  // published-post count this site is built for.
-  const posts = await prisma.post.findMany({
-    where: publishedPostWhere(),
-    orderBy: { publishedAt: "desc" },
-    select: { id: true, title: true, slug: true, publishedAt: true, proseJson: true },
-  });
-  const postHits: QuotableTargetHit[] = [];
-  for (const post of posts) {
-    if (post.id === excludePostId) continue;
-    const text = post.proseJson ? extractText(post.proseJson) : "";
-    if (!post.title.toLowerCase().includes(needle) && !text.toLowerCase().includes(needle)) continue;
-    postHits.push({ kind: "post", id: post.id, title: post.title, path: postPath(post), excerpt: text.slice(0, 140) });
-    if (postHits.length >= PICKER_LIMIT) break;
+  if (typeof query !== "string") return [];
+  const params = parseSearchParams(new URLSearchParams({ q: query }));
+  if (!params.q) return [];
+  const result = await search(
+    null,
+    { ...params, kinds: ["posts", "comments"] },
+    {
+      scope: "public",
+      asYouType: true,
+      excludePostId: typeof excludePostId === "string" && excludePostId ? excludePostId : undefined,
+      pageSize: PICKER_LIMIT,
+      authorOptions: false,
+    },
+  );
+  const hits: QuotableTargetHit[] = [];
+  for (const section of result.sections) {
+    if (section.kind === "posts") {
+      for (const hit of section.hits) {
+        hits.push({ kind: "post", id: hit.id, title: headlineText(hit.title), path: hit.href, excerpt: headlineText(hit.snippet) });
+      }
+    } else if (section.kind === "comments") {
+      for (const hit of section.hits) {
+        hits.push({
+          kind: "comment",
+          id: hit.id,
+          author: hit.commenter,
+          postTitle: hit.postTitle,
+          path: hit.href,
+          excerpt: headlineText(hit.snippet),
+        });
+      }
+    }
   }
-
-  const comments = await prisma.comment.findMany({
-    where: {
-      status: "APPROVED",
-      deletedAt: null,
-      bodyText: { contains: needle, mode: "insensitive" },
-      thread: { post: { ...publishedPostWhere(), ...(excludePostId ? { id: { not: excludePostId } } : {}) } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: PICKER_LIMIT,
-    select: {
-      id: true,
-      bodyText: true,
-      createdAt: true,
-      commenter: { select: { displayName: true } },
-      thread: { select: { post: { select: { title: true, slug: true, publishedAt: true } } } },
-    },
-  });
-  const commentHits: QuotableTargetHit[] = comments.map((comment) => ({
-    kind: "comment",
-    id: comment.id,
-    author: comment.commenter.displayName,
-    postTitle: comment.thread.post.title,
-    path: `${postPath(comment.thread.post)}#${commentAnchorName(comment.commenter.displayName, comment.createdAt)}`,
-    excerpt: comment.bodyText.slice(0, 140),
-  }));
-
-  return [...postHits, ...commentHits];
+  return hits;
 }
 
 export type QuotableTargetBody = {

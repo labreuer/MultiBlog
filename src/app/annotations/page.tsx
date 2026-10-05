@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
+import { readableAnnotationsWhere } from "@/lib/annotation-authz";
 import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import type { Prisma } from "@/generated/prisma/client";
@@ -120,45 +121,39 @@ export default async function AnnotationsPage({
   const prefs = await getTablePrefs(session.user.id, "annotations");
   const filters = parseAnnotationsFilters(urlSearchParams, prefs);
 
+  // Scoped to what this viewer may *read* — readableAnnotationsWhere
+  // (src/lib/annotation-authz.ts): not a DRAFT, and on a doc or PDF this
+  // viewer may read, each by its own rule.
+  //
+  // A DRAFT annotation (PLAN.md §13d) is a private note — invisible to
+  // everyone but its own author (§13a's authz decision is explicit that this
+  // holds "even from admins"), so this admin browse surface excludes it
+  // outright rather than relying on canManageDocs to gate the whole page and
+  // stop there.
+  //
+  // Readability rather than manage-ability is the bound that matters here
+  // because of what the query below selects: doc.proseJson, rendered as the
+  // Quote column, so a wider scope would put an excerpt of a PRIVATE doc's
+  // body in front of someone /doc/[slug] refuses outright
+  // (docs/PERMISSIONS.md).
+  //
+  // PLAN.md §19 — **both containers**. That /annotations sees PDF annotations
+  // at all is one of the reasons they are Postgres rows rather than entries
+  // in a per-file ydoc — a listing that silently covered half of them would
+  // give that reason away.
+  //
+  // **`includeDeletedContainers` keeps this page's one difference from the
+  // read rule**: annotations on a soft-deleted doc or PDF still list here,
+  // where /doc/[slug] and /pdf/[slug] would 404 on their container. Nothing
+  // records whether that is meant (TODO.md), so it is kept rather than
+  // changed in passing.
+  //
+  // Null is unreachable behind the canManageDocs gate, which implies every
+  // doc and file read role; an empty OR would match everything in some
+  // Prisma versions and nothing in others, so say "nothing" explicitly.
+  const readable = readableAnnotationsWhere(session.user.id, session.user.role, { includeDeletedContainers: true });
   const baseWhere: Prisma.AnnotationWhereInput = {
-    AND: [
-      // A DRAFT annotation (PLAN.md §13d) is a private note — invisible to
-      // everyone but its own author (§13a's authz decision is explicit that
-      // this holds "even from admins"), so this admin browse surface has to
-      // exclude it outright rather than relying on canManageDocs to gate
-      // the whole page and stop there.
-      { status: { not: "DRAFT" } },
-      // Scoped to what this viewer may *read* — canUserReadDoc's and
-      // canUserReadFile's rules restated as a `where`, since Prisma has no way
-      // to share a predicate between a per-row check and a query filter:
-      // SHARED containers for anyone who passes the page gate above, plus this
-      // viewer's own byline-authored PRIVATE ones.
-      //
-      // Readability rather than manage-ability is the bound that matters here
-      // because of what the query below selects: doc.proseJson, rendered as
-      // the Quote column, so a wider scope would put an excerpt of a PRIVATE
-      // doc's body in front of someone /doc/[slug] refuses outright
-      // (docs/PERMISSIONS.md). canUserAccessAnnotationYdoc
-      // (src/lib/annotation-authz.ts) asks the same pair of questions.
-      //
-      // PLAN.md §19 — **both containers**, each scoped by its own read rule.
-      // A relation filter never matches a null foreign key, so the doc terms
-      // exclude every file annotation and vice versa; the four together are
-      // exactly "annotations on something this viewer may read".
-      //
-      // That /annotations sees PDF annotations at all is one of the reasons
-      // they are Postgres rows rather than entries in a per-file ydoc — a
-      // listing that silently covered half of them would give that reason away.
-      {
-        OR: [
-          { doc: { authors: { some: { userId: session.user.id } } } },
-          { doc: { visibility: "SHARED" } },
-          { file: { owners: { some: { userId: session.user.id } } } },
-          { file: { visibility: "SHARED" } },
-        ],
-      },
-      parseDeepLinkWhere(urlSearchParams),
-    ],
+    AND: [readable ?? { id: { in: [] } }, parseDeepLinkWhere(urlSearchParams)],
   };
   const where: Prisma.AnnotationWhereInput = { AND: [baseWhere, buildFilterWhere(filters)] };
   const orderBy = buildOrderBy(filters.sort);

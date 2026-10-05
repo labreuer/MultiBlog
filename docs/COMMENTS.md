@@ -435,9 +435,10 @@ inline quotation is typed as `"…"` in either mode and found by the matcher.
 
 **Quoting something not on the page** is `CommentQuotePicker`, a panel under the composer
 ("Quote from elsewhere…") rather than a floating menu, because a body to select text in needs
-room. `searchQuotableTargets` runs `/search`'s substring search over published posts plus a
-`bodyText` search over public comments, without a session, since the admitted set *is* the
-public set; `loadQuotableTarget` returns the chosen body, gated by `canQuoteTargetInto`, and
+room. `searchQuotableTargets` is the site's full-text search (docs/FULLTEXT.md) over posts and
+comments in its **public scope** — published posts and public comments, whoever is asking,
+since the admitted set *is* the public set — with the last word matched as a prefix while it is
+being typed; `loadQuotableTarget` returns the chosen body, gated by `canQuoteTargetInto`, and
 the panel renders it statically (memoed — see "Rendering") for a selection. "Quote
 selection" hands the composer a request naming the target, which is what makes an off-page
 object a candidate. **A hint may be unbound** (`id: null`): the Markdown box has no

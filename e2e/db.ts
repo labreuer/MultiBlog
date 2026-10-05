@@ -315,6 +315,9 @@ export const getCommentQuoteFacts = (...args: Parameters<DbHandlers["getCommentQ
 export const backdateComment = (...args: Parameters<DbHandlers["backdateComment"]>): Promise<void> =>
   call("backdateComment", ...args);
 
+export const editCommentAt = (...args: Parameters<DbHandlers["editCommentAt"]>): Promise<void> =>
+  call("editCommentAt", ...args);
+
 export const getCommentStatus = (...args: Parameters<DbHandlers["getCommentStatus"]>) =>
   call("getCommentStatus", ...args);
 

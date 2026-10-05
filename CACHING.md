@@ -32,9 +32,10 @@ that a reviewer could otherwise mistake for the `revalidate` export still
 doing something. `src/app/[slug]/page.tsx` also has `revalidate = 60` and
 also calls `auth()` — but that page already called `auth()` before this
 feature (for the commenter's display name), so it was already fully dynamic;
-no new regression there. `src/app/search/page.tsx` has no `revalidate`
-export and reads `searchParams`, which already forces dynamic rendering
-regardless of `auth()`.
+no new regression there. `src/app/search/page.tsx` is different for every
+viewer — it searches what the session may read (docs/FULLTEXT.md §2) — so,
+like `/tag/[slug]`, it says `dynamic = "force-dynamic"` outright rather than
+leaning on its `searchParams` read to force dynamic rendering.
 
 **Not fixed.** If the home/author pages' shared-cache behavior matters
 enough to restore, the fix is to split the personalized part out: keep the

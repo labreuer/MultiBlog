@@ -31,6 +31,7 @@ import {
 } from "@/app/actions/annotations";
 import { useDocScrub, useHasDocScrub } from "../DocScrubContext";
 import { scrubHref } from "@/lib/scrub-url";
+import { annotationAnchorName } from "@/lib/annotation-anchor-name";
 import styles from "./AnnotationNode.module.css";
 
 export type AnnotationNodeData = {
@@ -112,19 +113,6 @@ function jumpToReply(replyIds: string[]) {
   if (!target) return;
   target.scrollIntoView({ behavior: "smooth", block: "center" });
   flashHighlight(target, NEUTRAL_THREAD_COLOR);
-}
-
-// A permalink id for the annotation — down to the second is enough that a
-// collision would mean the same person annotated twice in the same second,
-// which shouldn't happen; not worth guarding.
-function anchorName(displayName: string, createdAt: string): string {
-  const name = displayName
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  const timestamp = new Date(createdAt).toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return `${name || "annotation"}-${timestamp}`;
 }
 
 // Whether any annotation anywhere below this one (not just direct replies)
@@ -244,7 +232,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
     [annotation.replies],
   );
 
-  const anchorId = anchorName(annotation.displayName, annotation.createdAt);
+  const anchorId = annotationAnchorName(annotation.displayName, annotation.createdAt);
   const isDeleted = annotation.deletedByUserId !== null || justDeleted;
 
   if (isDeleted && !justDeleted && !hasNonDeletedDescendant(annotation)) {

@@ -4,6 +4,7 @@ import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { isVersionQuoted, isVisiblyEdited, STALE_EDIT_SESSION_MS, withSupersededAt } from "@/lib/edit-grace";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
+import { postedAnnotationWhere } from "@/lib/annotation-authz";
 
 // PLAN.md §13c — the doc-side view-model, un-shared from comment-data.ts's
 // ThreadWithComments (§12i's original decision) now that an annotation body
@@ -125,14 +126,14 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
   const [doc, annotations] = await Promise.all([
     prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } }),
     prisma.annotation.findMany({
-      where: { docId, status: { not: "DRAFT" } },
+      where: { docId, ...postedAnnotationWhere() },
       orderBy: { createdAt: "asc" },
       include: {
         user: { select: { name: true, email: true, color: true } },
       },
     }),
   ]);
-  const versions = await versionContextFor(annotations);
+  const versions = await versionContextFor(annotations, annotations);
 
   const proseJson = doc?.proseJson as JSONContent | null;
   const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
@@ -230,13 +231,13 @@ export async function getOwnDraftAnnotations(docId: string, userId: string): Pro
 // lets an author find their own again.
 export async function getFileAnnotationsAsThreads(fileId: string): Promise<AnnotationThread[]> {
   const annotations = await prisma.annotation.findMany({
-    where: { fileId, status: { not: "DRAFT" } },
+    where: { fileId, ...postedAnnotationWhere() },
     orderBy: { createdAt: "asc" },
     include: {
       user: { select: { name: true, email: true, color: true } },
     },
   });
-  const versions = await versionContextFor(annotations);
+  const versions = await versionContextFor(annotations, annotations);
 
   const threads: AnnotationThread[] = [];
   for (const [rootId, members] of groupByRoot(annotations)) {
@@ -291,6 +292,57 @@ type AnnotationRow = {
   user: { name: string | null; email: string; color: string };
 };
 
+/** editState's first answer on its own: whether the card shows an "edited" marker. */
+function isAnnotationVisiblyEdited(a: { id: string; postedAt?: Date | null }, context: VersionContext): boolean {
+  const versions = context.versions.get(a.id) ?? [];
+  const marks = versions.map((v) => v.mark);
+  const stamps = context.replyStamps.get(a.id) ?? [];
+  const postedAt = a.postedAt ?? undefined;
+  return (
+    postedAt !== undefined &&
+    isVisiblyEdited(
+      withSupersededAt(versions, (_row, index) => isVersionQuoted(marks, stamps, index)),
+      postedAt,
+    )
+  );
+}
+
+/**
+ * The edited date each annotation's card would show — editState's answer —
+ * for annotations loaded one by one rather than as a container's threads:
+ * search's "updated" filter and dates (docs/FULLTEXT.md §6). Null where the
+ * card shows no marker, which is every silent edit; the caller then uses
+ * `postedAt`. Going through the same rule from the same versions is what
+ * keeps a silent edit from being found by narrowing a date range.
+ *
+ * A thread load has every reply of the container in hand. This has only the
+ * annotations asked about, so the posted replies that might quote them are
+ * fetched alongside, or a version a reply quoted would read as silent here
+ * and visible on the page.
+ */
+export async function visibleAnnotationEditDates(ids: string[]): Promise<Map<string, Date | null>> {
+  const result = new Map<string, Date | null>();
+  if (ids.length === 0) return result;
+  const select = {
+    id: true,
+    parentAnnotationId: true,
+    anchorFrom: true,
+    ydocUpdateId: true,
+    deletedByUserId: true,
+    postedAt: true,
+    editedAt: true,
+  } as const;
+  const [rows, replies] = await Promise.all([
+    prisma.annotation.findMany({ where: { id: { in: ids } }, select }),
+    prisma.annotation.findMany({ where: { parentAnnotationId: { in: ids }, ...postedAnnotationWhere() }, select }),
+  ]);
+  const context = await versionContextFor(rows, replies);
+  for (const row of rows) {
+    result.set(row.id, isAnnotationVisiblyEdited(row, context) ? row.editedAt : null);
+  }
+  return result;
+}
+
 /**
  * What the §22 fields need beyond the row: each body's versions as marks and
  * timestamps — never the bytes, which `getAnnotationHistory` decodes on demand
@@ -302,6 +354,9 @@ type VersionContext = {
   replyStamps: Map<string, bigint[]>;
 };
 
+/** What versionContextFor reads off a row to find the replies that quote it. */
+type StampRow = Pick<AnnotationRow, "id" | "parentAnnotationId" | "anchorFrom" | "ydocUpdateId" | "deletedByUserId">;
+
 /**
  * One query for a whole page's versions (PLAN.md §22e), never one per
  * annotation. There is no Prisma relation from `annotation` to `ydoc` — the
@@ -309,12 +364,15 @@ type VersionContext = {
  * design — so the join is done here, served by `ydoc_snapshot`'s
  * `[ydocId, lastYdocUpdateId]` index and grouped in memory.
  *
- * The reply stamps come from the rows already in hand: only an *anchored*
- * reply stamps its parent's log (an anchorless one stamps the doc's,
- * docs/ANNOTATIONS.md "The version stamp"), and a deleted reply quotes
- * nothing anyone can see.
+ * The reply stamps come from `replies`, which for a thread load is the rows
+ * already in hand: only an *anchored* reply stamps its parent's log (an
+ * anchorless one stamps the doc's, docs/ANNOTATIONS.md "The version stamp"),
+ * and a deleted reply quotes nothing anyone can see.
  */
-async function versionContextFor(annotations: AnnotationRow[]): Promise<VersionContext> {
+async function versionContextFor(
+  annotations: Pick<AnnotationRow, "id">[],
+  replies: StampRow[],
+): Promise<VersionContext> {
   const versions = new Map<string, { mark: bigint; createdAt: Date }[]>();
   if (annotations.length > 0) {
     const rows = await prisma.ydocSnapshot.findMany({
@@ -333,7 +391,7 @@ async function versionContextFor(annotations: AnnotationRow[]): Promise<VersionC
   }
 
   const replyStamps = new Map<string, bigint[]>();
-  for (const a of annotations) {
+  for (const a of replies) {
     if (a.parentAnnotationId === null || a.anchorFrom === null || a.ydocUpdateId === null || a.deletedByUserId !== null) {
       continue;
     }
@@ -422,16 +480,7 @@ function editState(
   editingSince: string | null;
   editSessionStale: boolean;
 } {
-  const versions = context.versions.get(a.id) ?? [];
-  const marks = versions.map((v) => v.mark);
-  const stamps = context.replyStamps.get(a.id) ?? [];
-  const postedAt = a.postedAt ?? undefined;
-  const visiblyEdited =
-    postedAt !== undefined &&
-    isVisiblyEdited(
-      withSupersededAt(versions, (_row, index) => isVersionQuoted(marks, stamps, index)),
-      postedAt,
-    );
+  const visiblyEdited = isAnnotationVisiblyEdited(a, context);
   return {
     visiblyEdited,
     editedAt: visiblyEdited ? (a.editedAt?.toISOString() ?? null) : null,

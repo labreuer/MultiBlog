@@ -375,9 +375,10 @@ where the filtering lives: `readablePostWhere(userId, role)` in `src/lib/post-st
 gate (`canUserTagTarget`) and the post section of `/tag/[slug]` call it, so they cannot drift.
 A signed-out reader still sees published posts only. Rows that are not published link into
 `/post/[id]/edit` and carry a `draft`/`scheduled` marker, since neither has a public URL that
-answers. Nothing else moved onto this predicate — the landing page, the archives, RSS, search
-and `/yyyy/mm/dd/slug` stay on `publishedPostWhere()`, which is what keeps "published"
-meaning one thing.
+answers. `/search` is the third surface on this predicate (docs/FULLTEXT.md §2), for the same
+reason and with the same markers. Nothing else moved onto it — the landing page, the
+archives, RSS and `/yyyy/mm/dd/slug` stay on `publishedPostWhere()`, which is what keeps
+"published" meaning one thing.
 
 | Permission | ADMIN | EDITOR | AUTHOR (on the byline) | AUTHOR (not on it) | AUTHORIZED | signed out |
 |---|---|---|---|---|---|---|
@@ -563,6 +564,39 @@ no link, a deleted link, or someone else's unminted draft is a 404, the existenc
 `anchoredLinkForViewer` already applies. `?noredirect=1` changes only whether the route
 redirects; like `?sel=`, it grants nothing.
 
+## Search (docs/FULLTEXT.md)
+
+`/search` finds only what the searcher could open, and states no rule of its own: each kind's
+hits are ids Prisma chose through the `where` helper that already states that kind's read
+rule, and the SQL that matches text runs only inside them. The index holds no visibility,
+byline or status.
+
+| A hit on… | is found by | through |
+|---|---|---|
+| a doc | whoever may read it — a `PRIVATE` doc's byline alone, ADMIN and EDITOR included | `readableDocsWhere` |
+| a post | everyone when published; a draft or scheduled one also by whoever may edit it | `readablePostWhere` |
+| a PDF | whoever may read the file | `readableFilesWhere` |
+| an annotation | whoever may read its doc or PDF — never a `DRAFT`, its own writer included | `readableAnnotationsWhere` |
+| a comment | everyone when public — never a `PENDING` one, the post's moderators included | `publicCommentsWhere` |
+
+A signed-out reader therefore searches posts and comments only. A `DRAFT` and a `PENDING`
+comment are left out for the people who could otherwise see them because a hit has to link
+to a page that shows it.
+
+**The author picker names only people the searcher already sees on a byline**: the
+authors of docs and posts they may read and the writers of annotations they may read, by
+name, never by email. A slug in the URL that is not on the picker is dropped. **An author
+filter leaves PDFs and comments out**: a PDF's page names no owner, so filtering by one would
+disclose ownership, and a comment keeps the name it was posted under, so filtering by an
+account would tie an old name to a renamed one.
+
+**Dates never reveal a silent edit.** A comment's or annotation's "updated" date is the last
+edit its card tells readers about (`edit-grace.ts`), never `editedAt`, and no superseded
+version is indexed.
+
+The quote picker's search uses the public scope — published posts and public comments,
+whoever is asking — because a quotation may carry only what everyone may read (above).
+
 ## Where each rule lives
 
 Re-derive from these rather than trusting the tables after an authz change:
@@ -578,6 +612,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
 | File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |
 | Annotation ydoc access (DRAFT is owner-only, even from ADMIN; asks whichever container the annotation has) | `src/lib/annotation-authz.ts` |
+| Which annotations a listing may show (posted, on a readable doc or PDF), as a `where` | `readableAnnotationsWhere` in `src/lib/annotation-authz.ts` |
+| Which comments are public, per row and as a `where` | `isCommentPublic` / `publicCommentsWhere` in `src/lib/comment-authz.ts` |
 | Who may *write* a posted annotation body (author or ADMIN), and the token's `readOnly` | `canUserEditAnnotationBody` in `src/lib/annotation-authz.ts`, applied in `src/app/api/annotation/[id]/token/route.ts` |
 | Annotation edit sessions (begin / finish / cancel) | `requireEditableBody` in `src/app/actions/annotations.ts` |
 | Comment editing and history | `editComment` / `getCommentHistory` in `src/app/actions/comments.ts` |
@@ -600,6 +636,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Anchored-link delete/restore (creator or ADMIN/EDITOR; never a draft) | `src/lib/anchored-link-authz.ts`, applied in `src/app/actions/anchored-links.ts` |
 | Anchored-link edit (creator-only reopen/close; add/remove/reorder on the open link; last-part rule) | `src/app/actions/anchored-links.ts`; the Edit affordance's four states in `src/lib/anchored-link-editing.ts` |
 | `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
+| Search: which kinds a viewer may search, each kind's scoping | `src/lib/search/index.ts`, `src/lib/search/{docs,posts,pdfs,annotations,comments}.ts` |
+| Search's author picker, and which kinds an author filter leaves out | `src/lib/search/authors.ts` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |
 | What the post editor shows when only one of those holds | `src/app/post/[id]/edit/page.tsx`'s two doc gates, rendered by `PostPublisher`'s `selectedEditable` |

@@ -1,8 +1,9 @@
 # Integrity checks
 
-Eight scripts. Three are about the doc/ydoc chain and are described first; then one about
-the PDF side, one about the schema itself, and the three that arrived with PLAN.md §22 and
-§23 — the two edit-history checks and the quotation check — at the bottom.
+Nine scripts. Three are about the doc/ydoc chain and are described first; then one about
+the PDF side, one about the schema itself, the three that arrived with PLAN.md §22 and
+§23 — the two edit-history checks and the quotation check — and the search index's at the
+bottom.
 
 The doc/ydoc three: two verify one link each in the chain that turns an append-only
 log into the columns the app reads; the third verifies a claim made *about* a
@@ -211,3 +212,32 @@ npx tsx scripts/integrity/check-annotation-snapshots.ts [--doc <id>] [--verbose]
 Run the annotation one after `check-ydoc-integrity.ts`, for this folder's usual reason: it
 decodes snapshots, so a corrupt one makes it report cache faults that are really one ydoc fault
 wearing several hats. The comment one touches no ydoc and can run any time.
+
+## `check-search-index.ts` (docs/FULLTEXT.md §3)
+
+The six `search_vector` columns and the `search_lexeme` vocabulary are written by triggers and
+read by nothing that would notice them being wrong: a drifted vector is a search that silently
+misses, and a lexeme missing from the vocabulary is a typo that silently goes uncorrected. It
+is the search index's `length-cache`, for the same drift surface — a trigger can be disabled,
+and a load can go around it.
+
+- `trigger`: every trigger `add_full_text_search` created exists and is enabled.
+- `vector`: each row's vector equals its kind's SQL function over the row's own columns —
+  the function the trigger itself calls, so the two cannot disagree about the right answer.
+- `vocabulary`: every lexeme of every vector is in `search_lexeme`. The vocabulary triggers
+  add only what a statement introduced, relying on this being true already, so a gap never
+  closes by itself.
+- `stale` (a WARN): vocabulary rows no vector holds. Harmless, and the table never shrinks on
+  its own.
+
+`--repair` re-fires the row triggers for drifted rows and rebuilds the vocabulary from
+`ts_stat` under a lock that holds the triggers' own inserts off until it commits. It refuses
+while a trigger is missing or disabled, since firing them would then fix nothing.
+
+```
+npx tsx scripts/integrity/check-search-index.ts [--verbose] [--repair]
+```
+
+Touches no ydoc and has no staleness window to excuse — a vector is written in the same
+statement as its text — so it can run any time. Run it after a data-only load
+(docs/DATABASE.md) and after anything that writes these tables with triggers disabled.

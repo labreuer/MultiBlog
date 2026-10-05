@@ -16,7 +16,7 @@ import {
   type QuoteResolution,
 } from "./comment-quote-extract";
 import { isPendingAnchorId, type PendingQuoteHint } from "./comment-quote-pending";
-import { isCommentPublic } from "./comment-authz";
+import { isCommentPublic, publicCommentsWhere } from "./comment-authz";
 import { canQuoteTargetInto } from "./comment-quote-authz";
 
 // PLAN.md §23n — the server half of the matcher: load the immutable targets
@@ -142,7 +142,12 @@ const COMMENT_CANDIDATE_SELECT = {
   deletedAt: true,
   createdAt: true,
   commenter: { select: { userId: true } },
-  thread: { select: { postId: true, post: { select: { id: true, publishedAt: true } } } },
+  thread: {
+    select: {
+      postId: true,
+      post: { select: { id: true, publishedAt: true, publishEventId: true, deletedByUserId: true } },
+    },
+  },
   revisions: { orderBy: { revisionNo: "desc" as const }, take: 1, select: { id: true, body: true } },
 } as const;
 
@@ -218,18 +223,17 @@ async function loadCandidates(
 
   const others = await prisma.comment.findMany({
     where: {
-      thread: { postId: host.postId },
-      status: "APPROVED",
-      deletedAt: null,
-      ...(host.editingCommentId ? { id: { not: host.editingCommentId } } : {}),
+      AND: [
+        publicCommentsWhere(),
+        { thread: { postId: host.postId } },
+        ...(host.editingCommentId ? [{ id: { not: host.editingCommentId } }] : []),
+      ],
     },
     orderBy: { createdAt: "desc" },
     take: MAX_COMMENT_CANDIDATES,
     select: COMMENT_CANDIDATE_SELECT,
   });
-  for (const comment of others) {
-    if (isCommentPublic(comment)) push(candidateFromComment(comment));
-  }
+  for (const comment of others) push(candidateFromComment(comment));
 
   return ordered;
 }

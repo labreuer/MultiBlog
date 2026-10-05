@@ -90,7 +90,10 @@ test.describe("date archives", () => {
     await expect(page.locator("article").filter({ hasText: post.title })).toHaveCount(1);
 
     await page.goto(`/search?q=${encodeURIComponent(post.title)}`);
-    const result = page.locator("article").filter({ hasText: post.title });
+    const result = page
+      .getByRole("region", { name: /^Posts \(/ })
+      .getByRole("listitem")
+      .filter({ hasText: post.title });
     await expect(result.getByRole("link", { name: "2001-02-03" })).toHaveAttribute("href", DAY_PATH);
   });
 });

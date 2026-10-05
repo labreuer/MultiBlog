@@ -1,5 +1,7 @@
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
 import { canUserEditPost } from "./authz";
+import { publishedPostWhere } from "./post-status";
 
 // PLAN.md §23e — who may read a comment, as one predicate the comment actions
 // and the quote gate share rather than restate.
@@ -13,12 +15,44 @@ export type ReadableComment = {
   status: CommentStatus;
   deletedAt: Date | null;
   commenter: { userId: string | null };
-  thread: { post: { id: string; publishedAt: Date | null } };
+  thread: {
+    post: { id: string; publishedAt: Date | null; publishEventId: string | null; deletedByUserId: string | null };
+  };
 };
 
-/** The public case alone: what a signed-out reader sees. Synchronous, no session. */
+/**
+ * The public case alone: what a signed-out reader sees. Synchronous, no session.
+ *
+ * "Published" is `publishedPostWhere()`'s test, row for row: a live
+ * publication *and* a go-live date that has arrived. `publishedAt` alone is
+ * not enough — unpublishing leaves it set, and scheduling sets it to a future
+ * date — and neither post has a page that shows its comments. The post is
+ * reached through a relation, which prisma.ts's soft-delete $extends does not
+ * follow, so its deletion is checked here too.
+ */
 export function isCommentPublic(comment: ReadableComment): boolean {
-  return comment.status === "APPROVED" && comment.deletedAt === null && comment.thread.post.publishedAt !== null;
+  const post = comment.thread.post;
+  return (
+    comment.status === "APPROVED" &&
+    comment.deletedAt === null &&
+    post.deletedByUserId === null &&
+    post.publishEventId !== null &&
+    post.publishedAt !== null &&
+    post.publishedAt <= new Date()
+  );
+}
+
+/**
+ * isCommentPublic as a `where` on Comment — the same test, so a list and a
+ * per-row check can't disagree about one comment. What search, the quote
+ * picker and the quote matcher's candidate list go through.
+ */
+export function publicCommentsWhere(): Prisma.CommentWhereInput {
+  return {
+    status: "APPROVED",
+    deletedAt: null,
+    thread: { post: { ...publishedPostWhere(), deletedByUserId: null } },
+  };
 }
 
 export async function canUserReadComment(
