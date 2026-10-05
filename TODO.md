@@ -162,14 +162,12 @@ Not merged to `main`. Each item below is additive and needs no schema it does no
 
 **Status:** built on `fulltext-search`, 2026-10-04, and tested: the full chromium suite against
 a production build, `e2e/search.spec.ts` included, and a look at `/search` in light, dark and
-phone widths. Not yet done:
+phone widths. Deployed to every instance 2026-10-05, each passing `check-search-index.ts`.
+Not yet done:
 
 - **Semantic search** (FULLTEXT.md §10, item 7) is undecided: hosted Voyage embeddings or an
   open-weights batch on a desktop, and either way option B's passages and pgvector first.
 - **Firefox and WebKit** haven't run `search.spec.ts`; only chromium has.
-- **Not deployed anywhere.** The first `deploy.sh` on each instance runs the migration (two
-  trusted extensions, a backfill of about a second); run
-  `npx tsx scripts/integrity/check-search-index.ts` afterwards.
 - **The API's search endpoints** (`docs/API.md` on `api-mcp`, which now points them at
   `src/lib/search/`) wait on the API itself.
 
