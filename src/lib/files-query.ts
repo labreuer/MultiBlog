@@ -40,6 +40,7 @@ export type FilesSortKey =
   | "size"
   | "annotations"
   | "created"
+  | "createdBy"
   | "slug"
   | "updatedAt"
   | "updatedBy"
@@ -55,6 +56,7 @@ const SORT_KEYS: readonly FilesSortKey[] = [
   "size",
   "annotations",
   "created",
+  "createdBy",
   "slug",
   "updatedAt",
   "updatedBy",

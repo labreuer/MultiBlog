@@ -407,6 +407,15 @@ async function main() {
             if (!deletedByUserId) summary.unresolvedDeleters.push(`${docSlug} (${p.id})`);
           }
 
+          // The first byline author still resolvable: the legacy log has no
+          // `clients` map, so this is what scripts/doc/backfill-created-by.ts
+          // would derive for the doc anyway.
+          let createdByUserId: string | null = null;
+          for (const a of bylinesByPost.get(p.id) ?? []) {
+            createdByUserId = userIdMap.get(a.userId) ?? null;
+            if (createdByUserId) break;
+          }
+
           await tx.doc.create({
             data: {
               id: p.id, // deliberate — see header
@@ -414,6 +423,7 @@ async function main() {
               title: p.title,
               visibility,
               createdAt: p.createdAt,
+              createdByUserId,
               deletedByUserId,
               deletedAt: p.deletedAt,
             },

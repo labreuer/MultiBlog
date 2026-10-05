@@ -5,7 +5,7 @@ import { isAdmin } from "@/lib/authz";
 import { getSiteSettings } from "@/lib/site-settings";
 import { SITE_TITLE } from "@/lib/site-config";
 import { columnOrderFor, type AdminTableName } from "@/lib/column-order";
-import { ADMIN_TABLE_COLUMNS, codeDefaultColumns } from "@/lib/admin-table-columns";
+import { ADMIN_TABLE_COLUMNS, adminTableColumns, codeDefaultColumns } from "@/lib/admin-table-columns";
 import { signInPath } from "@/lib/sign-in-redirect";
 import SiteSettingsTable, { type ConfigRow, type DefaultColumnsRow } from "@/components/SiteSettingsTable";
 
@@ -56,7 +56,7 @@ export default async function SiteSettingsPage() {
   const defaultColumns: DefaultColumnsRow[] = (Object.keys(ADMIN_TABLE_COLUMNS) as AdminTableName[]).map((table) => ({
     table,
     label: TABLE_LABELS[table],
-    columns: ADMIN_TABLE_COLUMNS[table],
+    columns: adminTableColumns(table),
     initialChecked: columnOrderFor(siteSettings.defaultColumnOrder, table) ?? codeDefaultColumns(table),
   }));
 

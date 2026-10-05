@@ -66,8 +66,11 @@ test("+ New doc creates titleless and drops straight into the editor, no title-c
   await expect(titleWrapper).toHaveAttribute("data-placeholder", "Untitled");
 
   // doc.title starts empty too — not the literal word "Untitled" (that only
-  // ever appears as a render-time fallback, never stored, PLAN.md §12n).
-  expect((await getDocState(docId))?.title).toBe("");
+  // ever appears as a render-time fallback, never stored, PLAN.md §12n). And
+  // the row names who made it (docs/DOCS.md "Who created a doc").
+  const created = await getDocState(docId);
+  expect(created?.title).toBe("");
+  expect(created?.createdByEmail).toBe(ADMIN_EMAIL);
 
   // Typing clears the placeholder and reaches doc.title on the store
   // debounce; clearing the title again is the regression case for

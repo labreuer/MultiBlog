@@ -400,6 +400,7 @@ export async function createTestDoc(opts: {
       slug: await uniqueDocSlug(title),
       title,
       visibility,
+      createdByUserId: author.id,
       authors: { create: { userId: author.id, bylineOrder: 0 } },
     },
   });
@@ -627,6 +628,7 @@ export async function createTestFile(opts: {
         sha256: stored.sha256,
         pageCount: parsed.pageCount,
         visibility,
+        createdByUserId: owner.id,
         updatedByUserId: owner.id,
         owners: { create: { userId: owner.id, ownerOrder: 0 } },
       },
@@ -713,6 +715,16 @@ export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnota
       };
     }),
   );
+}
+
+// The uploader `file.created_by_user_id` names, which the upload route sets
+// and nothing in the browser shows.
+export async function getFileCreatorEmail(fileId: string): Promise<string | null> {
+  const file = await prismaIncludingDeleted.storedFile.findUnique({
+    where: { id: fileId },
+    select: { createdBy: { select: { email: true } } },
+  });
+  return file?.createdBy?.email ?? null;
 }
 
 export async function deleteTestFile(idOrSlug: string): Promise<void> {
@@ -833,6 +845,8 @@ export type DocState = {
   title: string;
   proseText: string | null;
   visibility: DocVisibility;
+  /** Doc.createdBy's email: the account whose create path made the row. */
+  createdByEmail: string | null;
   /** Doc.updatedBy's email, or null when nothing has attributed an update yet. */
   updatedByEmail: string | null;
   /** ISO string. Every cache write moves it, including a store with nothing new to store. */
@@ -853,7 +867,7 @@ export type DocState = {
 export async function getDocState(docId: string): Promise<DocState | null> {
   const doc = await prisma.doc.findUnique({
     where: { id: docId },
-    include: { updatedBy: { select: { email: true } } },
+    include: { createdBy: { select: { email: true } }, updatedBy: { select: { email: true } } },
   });
   if (!doc) return null;
 
@@ -867,6 +881,7 @@ export async function getDocState(docId: string): Promise<DocState | null> {
     title: doc.title,
     proseText: doc.proseJson ? extractText(doc.proseJson) : null,
     visibility: doc.visibility,
+    createdByEmail: doc.createdBy?.email ?? null,
     updatedByEmail: doc.updatedBy?.email ?? null,
     updatedAt: doc.updatedAt.toISOString(),
     proseJsonUpdateId: doc.proseJsonUpdateId?.toString() ?? null,
@@ -2217,6 +2232,7 @@ const handlers = {
   getTagAnchorPartColumns,
   deleteTestTag,
   getFileAnnotationFacts,
+  getFileCreatorEmail,
   getDocState,
   getContributorFields,
   getUserIdentityFields,

@@ -192,6 +192,8 @@ export const getTagAnchorPartColumns = (
 export const deleteTestTag = (...args: Parameters<DbHandlers["deleteTestTag"]>): Promise<void> =>
   call("deleteTestTag", ...args);
 
+export const getFileCreatorEmail = (...args: Parameters<DbHandlers["getFileCreatorEmail"]>): Promise<string | null> =>
+  call("getFileCreatorEmail", ...args);
 export const getFileAnnotationFacts = (
   ...args: Parameters<DbHandlers["getFileAnnotationFacts"]>
 ): Promise<FileAnnotationFacts[]> => call("getFileAnnotationFacts", ...args);

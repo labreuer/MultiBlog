@@ -42,7 +42,13 @@ import {
 import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -564,32 +570,17 @@ export default function UsersTable({
     });
   }
 
-  // Declared in the order they render by default; `?cols=` reorders and hides
-  // the movable ones from here (§16i). Built in the component body rather than
-  // at module scope so a cell stays an ordinary React expression closing over
-  // dateFormat, the selection and the per-row edit/save wiring.
+  // What each movable column does, keyed by its entry in src/lib/admin-table-columns.ts, which
+  // owns its header, default visibility and order; `?cols=` reorders and hides them from there
+  // (§16i). Built in the component body rather than at module scope so a cell stays an ordinary
+  // React expression closing over dateFormat, the selection and the per-row edit/save wiring.
   //
   // "Comments" (between Posts and the url link) has never had a value — the
   // cell was already always empty before this conversion, not something lost
   // in it. Preserved as-is rather than fixed or dropped, since neither is what
   // was asked for here.
-  const columns: ColumnSpec<UserRow>[] = [
-    {
-      key: "select",
-      alwaysVisible: true,
-      header: "Select",
-      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
-      cell: (row) => (
-        <SelectRowCheckbox
-          checked={selectedIds.has(row.id)}
-          onChange={() => toggleRow(row.id)}
-          label={`user ${row.email}`}
-        />
-      ),
-    },
-    {
-      key: "name",
-      header: "Name",
+  const columnBodies: Record<AdminColumnKey<"users">, ColumnBody<UserRow>> = {
+    name: {
       sortKey: "name",
       headerClassName: adminStyles.nameColumn,
       cell: (row) => (
@@ -601,9 +592,7 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "email",
-      header: "Email",
+    email: {
       sortKey: "email",
       cell: (row) => (
         <span
@@ -614,9 +603,7 @@ export default function UsersTable({
         </span>
       ),
     },
-    {
-      key: "adminInitials",
-      header: "Initials",
+    adminInitials: {
       sortKey: "adminInitials",
       cell: (row) => (
         <AdminInitialsCell
@@ -627,9 +614,7 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "role",
-      header: "Role",
+    role: {
       sortKey: "role",
       cell: (row) => (
         <SelectCell
@@ -641,9 +626,7 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "image",
-      header: "Image",
+    image: {
       cell: (row) =>
         row.avatarSrc ? (
           // eslint-disable-next-line @next/next/no-img-element -- a self-hosted avatar is already one fixed size behind an immutable URL, so the optimizer would only re-derive it; a remote fallback URL would need an images.remotePatterns entry per host. Same rationale as ContributorCard.
@@ -652,9 +635,7 @@ export default function UsersTable({
           ""
         ),
     },
-    {
-      key: "moderationPolicy",
-      header: "Moderation policy",
+    moderationPolicy: {
       sortKey: "moderationPolicy",
       cell: (row) => (
         <SelectCell
@@ -666,15 +647,12 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "rowsPerPage",
-      header: "Rows/page",
+    rowsPerPage: {
       sortKey: "rowsPerPage",
       nowrap: true,
       // Defaulted hidden (§16m): a per-account preference, not information
       // about the person — an admin scanning /users is almost never looking
       // for it, and it stays one checkbox away in the picker.
-      defaultHidden: true,
       headerTitle: "Default rows per page in every admin table",
       cell: (row) => (
         <SelectCell
@@ -686,36 +664,27 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "color",
-      header: "Color",
+    color: {
       cell: (row) => (
         <ColorCell userId={row.id} color={row.color} onEdit={() => setStatus(row.id, "edited" as RowStatus)} run={(action) => runWithStatus(row.id, action)} />
       ),
     },
-    {
-      key: "created",
-      header: "Created at",
+    created: {
       sortKey: "createdAt",
       nowrap: true,
       cell: (row) => formatDate(row.createdAt, dateFormat),
     },
-    {
-      key: "posts",
-      header: "Posts",
+    posts: {
       sortKey: "posts",
       cell: (row) => (row.postCount > 0 ? <Link href={`/authors/${row.slug}`}>posts</Link> : ""),
     },
     // Defaulted hidden (§16m) — it renders nothing at all (no sortKey, a null
     // cell), so it cost a column of width for an empty one every load.
-    { key: "comments", header: "Comments", defaultHidden: true, cell: () => null },
-    { key: "url", header: "Slug", defaultHidden: true, cell: (row) => <Link href={`/users/${row.id}/slug`}>url</Link> },
+    comments: { cell: () => null },
+    url: { cell: (row) => <Link href={`/users/${row.id}/slug`}>url</Link> },
     // Landing-page contributor fields (PLAN.md §17i), defaulted hidden below.
-    {
-      key: "isListedContributor",
-      header: "Listed contributor",
+    isListedContributor: {
       sortKey: "isListedContributor",
-      defaultHidden: true,
       cell: (row) => (
         <CheckboxCell
           checked={row.isListedContributor}
@@ -725,11 +694,8 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "contributorOrder",
-      header: "Contributor order",
+    contributorOrder: {
       sortKey: "contributorOrder",
-      defaultHidden: true,
       cell: (row) => (
         <ContributorOrderCell
           userId={row.id}
@@ -743,17 +709,11 @@ export default function UsersTable({
     // isn't worth building for an ordering nobody needs (see users-query.ts).
     // Shown as a plain-text excerpt, editable only from /dashboard's own
     // panel — same "shown, not sorted, not inline-editable" shape as `image`.
-    {
-      key: "contributorBlurb",
-      header: "Contributor blurb",
-      defaultHidden: true,
+    contributorBlurb: {
       cell: (row) => (row.contributorBlurb ? extractText(row.contributorBlurb).slice(0, 80) : ""),
     },
-    {
-      key: "orcid",
-      header: "ORCID iD",
+    orcid: {
       sortKey: "orcid",
-      defaultHidden: true,
       cell: (row) => (
         <TextFieldCell
           userId={row.id}
@@ -767,11 +727,8 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "website",
-      header: "Website",
+    website: {
       sortKey: "website",
-      defaultHidden: true,
       cell: (row) => (
         <TextFieldCell
           userId={row.id}
@@ -788,10 +745,7 @@ export default function UsersTable({
     // a button, the other is a URL that only exists while the invite is
     // still live — an action button and a transient value are each, on
     // their own, reasons ColumnSpec's own doc gives for skipping sortKey.
-    {
-      key: "invite",
-      header: "Send invite",
-      defaultHidden: true,
+    invite: {
       nowrap: true,
       headerTitle: "Emails this user a link to set a password and claim their account",
       cell: (row) => (
@@ -803,23 +757,33 @@ export default function UsersTable({
         />
       ),
     },
-    {
-      key: "inviteUrl",
-      header: "Invite URL",
-      defaultHidden: true,
+    inviteUrl: {
       headerTitle: "The most recent invite's link, until it's accepted or revoked",
       cell: (row) => <InviteUrlCell invite={row.lastInvite} count={row.inviteCount} dateFormat={dateFormat} />,
     },
     // Defaulted hidden (§16l/§16i): the raw timestamp behind the existing
     // Deleted action column's boolean.
-    {
-      key: "deletedAt",
-      header: "Deleted at",
+    deletedAt: {
       sortKey: "deletedAt",
       nowrap: true,
-      defaultHidden: true,
       cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
     },
+  };
+  const columns: ColumnSpec<UserRow>[] = [
+    {
+      key: "select",
+      alwaysVisible: true,
+      header: "Select",
+      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
+      cell: (row) => (
+        <SelectRowCheckbox
+          checked={selectedIds.has(row.id)}
+          onChange={() => toggleRow(row.id)}
+          label={`user ${row.email}`}
+        />
+      ),
+    },
+    ...registryColumns("users", columnBodies),
     {
       key: "deleted",
       alwaysVisible: true,

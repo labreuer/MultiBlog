@@ -30,7 +30,13 @@ import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
 import { AuthorFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -52,6 +58,9 @@ export type DocRow = {
   authors: string;
   visibility: DocVisibility;
   createdAt: Date;
+  // Who made the doc (Doc.createdBy), resolved like updatedByName; blank when
+  // nothing names one (docs/DOCS.md "Who created a doc").
+  createdByName: string;
   updatedAt: Date;
   updatedByName: string;
   // Character count, read straight off Doc.proseJsonLength — a stored column
@@ -74,6 +83,7 @@ const SORTABLE_KEYS = [
   "authors",
   "visibility",
   "created",
+  "createdBy",
   "length",
   "annotations",
   "slug",
@@ -129,10 +139,102 @@ export default function DocsTable({
     ...softDeleteBulkActions<DocRow>("docs", bulkDeleteDocs, bulkRestoreDocs),
   ];
 
-  // Declared in the order they render by default; `?cols=` reorders and hides
-  // the movable ones from here (§16i). Built in the component body rather than
-  // at module scope so a cell stays an ordinary React expression closing over
-  // the router, the selection and the pending state.
+  // What each movable column does, keyed by its entry in src/lib/admin-table-columns.ts, which
+  // owns its header, default visibility and order; `?cols=` reorders and hides them from there
+  // (§16i). Built in the component body rather than at module scope so a cell stays an ordinary
+  // React expression closing over the router, the selection and the pending state.
+  const columnBodies: Record<AdminColumnKey<"docs">, ColumnBody<DocRow>> = {
+    title: {
+      sortKey: "title",
+      // The whole cell is the click target, not just the link in it.
+      cellProps: (row) => ({
+        className: styles.titleCell,
+        onClick: (e) => {
+          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/doc/${row.id}`);
+        },
+      }),
+      cell: (row) => <Link href={`/doc/${row.id}`}>{row.title}</Link>,
+    },
+    edit: {
+      cell: (row) => row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>,
+    },
+    authors: { sortKey: "authors", cell: (row) => row.authors },
+    visibility: {
+      sortKey: "visibility",
+      cell: (row) => (
+        <SelectCell
+          value={row.visibility}
+          options={Object.values(DocVisibility)}
+          disabled={row.deleted || !row.canEdit}
+          save={(next) => updateDocVisibility(row.id, next)}
+          failureMessage="Failed to update visibility."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    updatedAt: {
+      sortKey: "updatedAt",
+      nowrap: true,
+      // The ordinary Postgres row-update timestamp — distinct from Length,
+      // which only tracks the body's own trigger-maintained cache. Shown by
+      // default in Created's old spot, and the default sort key (DEFAULT_SORT,
+      // docs-query.ts): "what changed recently" is a more useful landing view
+      // for this table than "what was made first".
+      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
+    },
+    updatedBy: {
+      sortKey: "updatedBy",
+      nowrap: true,
+      // Paired with Updated and shown by default alongside it, the same way
+      // /posts shows "Last edit by" next to "Last edit at" — the timestamp on
+      // its own doesn't answer who, and this table now leads with recency.
+      // Blank for a doc nothing has updated since the column existed.
+      cell: (row) => row.updatedByName,
+    },
+    length: {
+      sortKey: "length",
+      nowrap: true,
+      cell: (row) => row.length.toLocaleString(),
+    },
+    annotations: {
+      sortKey: "annotations",
+      nowrap: true,
+      // Off by default (§16i/§16m), unlike /files' identically-named column,
+      // which is shown: a PDF is something people mark up and the count is
+      // most of what /files has to say about one, where /docs already leads
+      // with recency and authorship and most docs carry no annotations at all.
+      // Declared here rather than down with the default-hidden Doc columns
+      // because this is where it renders once turned on and reordered — next
+      // to Length, the other derived measure of the document.
+      // Blank rather than "0" for a doc nobody has annotated, the same way
+      // /files and /tags print their counts: a column of zeroes reads as
+      // noise, and what an admin turns this on for is which docs have
+      // discussion on them.
+      cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
+    },
+    // Defaulted hidden (§16l/§16i): real Doc columns available on request.
+    // slug is otherwise unused here (Title/Edit link on row.id). created
+    // moved here, defaulted hidden, when updatedAt took its old spot above.
+    slug: { sortKey: "slug", cell: (row) => row.slug },
+    created: {
+      sortKey: "created",
+      nowrap: true,
+      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
+    },
+    createdBy: {
+      sortKey: "createdBy",
+      nowrap: true,
+      // Hidden by default beside Created, the timestamp it pairs with (§16m:
+      // a new column doesn't widen anyone's table unasked). Not the byline,
+      // which is seeded with the creator and then edited freely.
+      cell: (row) => row.createdByName,
+    },
+    deletedAt: {
+      sortKey: "deletedAt",
+      nowrap: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, "yyyy-MM-dd HH:mm") : ""),
+    },
+  };
   const columns: ColumnSpec<DocRow>[] = [
     {
       key: "select",
@@ -147,109 +249,7 @@ export default function DocsTable({
         />
       ),
     },
-    {
-      key: "title",
-      header: "Title",
-      sortKey: "title",
-      // The whole cell is the click target, not just the link in it.
-      cellProps: (row) => ({
-        className: styles.titleCell,
-        onClick: (e) => {
-          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/doc/${row.id}`);
-        },
-      }),
-      cell: (row) => <Link href={`/doc/${row.id}`}>{row.title}</Link>,
-    },
-    {
-      key: "edit",
-      header: "Edit",
-      cell: (row) => row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>,
-    },
-    { key: "authors", header: "Author(s)", sortKey: "authors", cell: (row) => row.authors },
-    {
-      key: "visibility",
-      header: "Visibility",
-      sortKey: "visibility",
-      cell: (row) => (
-        <SelectCell
-          value={row.visibility}
-          options={Object.values(DocVisibility)}
-          disabled={row.deleted || !row.canEdit}
-          save={(next) => updateDocVisibility(row.id, next)}
-          failureMessage="Failed to update visibility."
-          run={(action) => runWithStatus(row.id, action)}
-        />
-      ),
-    },
-    {
-      key: "updatedAt",
-      header: "Updated",
-      sortKey: "updatedAt",
-      nowrap: true,
-      // The ordinary Postgres row-update timestamp — distinct from Length,
-      // which only tracks the body's own trigger-maintained cache. Shown by
-      // default in Created's old spot, and the default sort key (DEFAULT_SORT,
-      // docs-query.ts): "what changed recently" is a more useful landing view
-      // for this table than "what was made first".
-      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
-    },
-    {
-      key: "updatedBy",
-      header: "Updated by",
-      sortKey: "updatedBy",
-      nowrap: true,
-      // Paired with Updated and shown by default alongside it, the same way
-      // /posts shows "Last edit by" next to "Last edit at" — the timestamp on
-      // its own doesn't answer who, and this table now leads with recency.
-      // Blank for a doc nothing has updated since the column existed.
-      cell: (row) => row.updatedByName,
-    },
-    {
-      key: "length",
-      header: "Length",
-      sortKey: "length",
-      nowrap: true,
-      cell: (row) => row.length.toLocaleString(),
-    },
-    {
-      key: "annotations",
-      header: "Annotations",
-      sortKey: "annotations",
-      nowrap: true,
-      // Off by default (§16i/§16m), unlike /files' identically-named column,
-      // which is shown: a PDF is something people mark up and the count is
-      // most of what /files has to say about one, where /docs already leads
-      // with recency and authorship and most docs carry no annotations at all.
-      // Declared here rather than down with the default-hidden Doc columns
-      // because this is where it renders once turned on and reordered — next
-      // to Length, the other derived measure of the document.
-      defaultHidden: true,
-      // Blank rather than "0" for a doc nobody has annotated, the same way
-      // /files and /tags print their counts: a column of zeroes reads as
-      // noise, and what an admin turns this on for is which docs have
-      // discussion on them.
-      cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
-    },
-    // Defaulted hidden (§16l/§16i): real Doc columns available on request.
-    // slug is otherwise unused here (Title/Edit link on row.id). created
-    // moved here, defaulted hidden, when updatedAt took its old spot above.
-    { key: "slug", header: "Slug", sortKey: "slug", defaultHidden: true, cell: (row) => row.slug },
-    {
-      key: "created",
-      header: "Created",
-      sortKey: "created",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
-    },
-    {
-      key: "deletedAt",
-      header: "Deleted at",
-      sortKey: "deletedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, "yyyy-MM-dd HH:mm") : ""),
-    },
+    ...registryColumns("docs", columnBodies),
     {
       key: "deleted",
       alwaysVisible: true,

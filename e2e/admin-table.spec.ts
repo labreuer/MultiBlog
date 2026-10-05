@@ -5,6 +5,8 @@
 // cells, so it exercises the full idle → edited → saving → saved path that
 // §16f describes; the URL assertions hold for every table on the kit.
 import { test, expect } from "./fixtures";
+import { codeDefaultColumns } from "@/lib/admin-table-columns";
+import { columnOrderFor } from "@/lib/column-order";
 import {
   ADMIN_EMAIL,
   addTestDocAuthor,
@@ -13,9 +15,11 @@ import {
   createComment,
   createTestAnnotation,
   createTestDoc,
+  createTestFile,
   createTestPost,
   createTestUser,
   deleteTestDoc,
+  deleteTestFile,
   deleteTestPost,
   deleteTestUser,
   getSiteDefaultColumnOrder,
@@ -466,6 +470,56 @@ test.describe("admin table kit", () => {
     }
   });
 
+  test("Created by is hidden by default and sorts by the creator's name, on /docs and /files", async ({ page }) => {
+    const token = `createdby${Date.now()}`;
+    const aaCreator = uniqueEmail("createdby-aa");
+    const zzCreator = uniqueEmail("createdby-zz");
+    await createTestUser({ email: aaCreator, name: "Aaa Alpha", role: "ADMIN" });
+    await createTestUser({ email: zzCreator, name: "Zzz Omega", role: "ADMIN" });
+
+    // Titles in the opposite order to their creators' names, so a sort that
+    // fell back to title would fail both directions below.
+    const aaDoc = await createTestDoc({ authorEmail: aaCreator, title: uniqueTitle(`${token} zz-titled`) });
+    const zzDoc = await createTestDoc({ authorEmail: zzCreator, title: uniqueTitle(`${token} aa-titled`) });
+    // On the byline but not the creator: the cell must not follow it.
+    await addTestDocAuthor(aaDoc.id, zzCreator);
+    const aaFile = await createTestFile({ ownerEmail: aaCreator, title: uniqueTitle(`${token} zz-titled`) });
+    const zzFile = await createTestFile({ ownerEmail: zzCreator, title: uniqueTitle(`${token} aa-titled`) });
+
+    try {
+      const table = page.getByRole("table").first();
+      const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+      const createdByCell = (title: string) =>
+        table.getByRole("row").filter({ hasText: title }).getByRole("cell").nth(2);
+
+      // Both tables list these rows only with their show-all opt-in: they are
+      // PRIVATE to the two throwaway admins (docs/PERMISSIONS.md).
+      for (const { path, showAll, aa, zz } of [
+        { path: "/docs", showAll: "showAllDocs=1", aa: aaDoc.title, zz: zzDoc.title },
+        { path: "/files", showAll: "showAllFiles=1", aa: aaFile.title, zz: zzFile.title },
+      ]) {
+        // §16m: a column added to an existing table doesn't widen it unasked.
+        await page.goto(`${path}?q=${token}&${showAll}`);
+        await expect(page.getByRole("columnheader", { name: "Created by" })).toHaveCount(0);
+
+        await page.goto(`${path}?q=${token}&cols=title,createdBy&sort=createdBy:asc&${showAll}`);
+        expect(await titlesInOrder()).toEqual([aa, zz]);
+        await expect(createdByCell(aa)).toHaveText("Aaa Alpha");
+        await expect(createdByCell(zz)).toHaveText("Zzz Omega");
+
+        await page.goto(`${path}?q=${token}&cols=title,createdBy&sort=createdBy:desc&${showAll}`);
+        expect(await titlesInOrder()).toEqual([zz, aa]);
+      }
+    } finally {
+      await deleteTestDoc(aaDoc.id);
+      await deleteTestDoc(zzDoc.id);
+      await deleteTestFile(aaFile.id);
+      await deleteTestFile(zzFile.id);
+      await deleteTestUser(aaCreator);
+      await deleteTestUser(zzCreator);
+    }
+  });
+
   // PLAN.md §16d — a just-deleted row keeps its place. With the show-deleted
   // toggle off it is gone from the refetch entirely, so useRevealedRows puts it
   // back from its overlay; appending it there sent it to the bottom of the
@@ -655,6 +709,57 @@ test.describe("admin table kit", () => {
       await setSiteDefaultColumnOrder(originalSiteDefault);
       await deleteTestDoc(shortDoc.id);
       await deleteTestDoc(longDoc.id);
+    }
+  });
+
+  test("a default saved from /site-settings is each table's own default, column for column", async ({ page }) => {
+    // /site-settings saves the column keys its own list offers, and each table
+    // resolves those keys against its own columns, dropping any it doesn't
+    // know. A key the two spell differently is therefore a column that a saved
+    // site default hides from everyone with no preference of their own — which
+    // is what /files' Owner(s) was, listed there as `authors`. So: save every
+    // table's default unchanged through the page, and the tables must not move.
+    const originalSiteDefault = await getSiteDefaultColumnOrder();
+    await setSiteDefaultColumnOrder(null);
+    // A preference of the admin's own would win over the site default and make
+    // every comparison below pass without testing anything.
+    await clearColumnOrder(ADMIN_EMAIL);
+
+    const tables = ["posts", "docs", "files", "users", "comments", "annotations", "tags", "links"] as const;
+    const headers = async (table: string) => {
+      await page.goto(`/${table}`);
+      return (await page.locator("table").first().locator("thead th").allTextContents()).map((t) =>
+        t.replace(/[▲▼]/g, "").trim(),
+      );
+    };
+    try {
+      const before = new Map<string, string[]>();
+      for (const table of tables) before.set(table, await headers(table));
+      expect(before.get("files")).toContain("Owner(s)");
+
+      await page.goto("/site-settings");
+      for (const table of tables) {
+        const section = page.getByRole("row").filter({ has: page.getByText(`/${table}`, { exact: true }) });
+        // Each toggle saves. Unticking the last ticked column and ticking it
+        // again writes the default back unchanged, since a re-ticked column
+        // goes to the end — which is where it was.
+        const lastTicked = section.locator("label").filter({ has: page.getByRole("checkbox", { checked: true }) }).last();
+        const label = (await lastTicked.evaluate((el) => el.lastChild?.textContent ?? "")).trim();
+        const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const checkbox = section.locator("label").filter({ hasText: new RegExp(`${escaped}$`) }).getByRole("checkbox");
+        await checkbox.click();
+        await expect(checkbox).not.toBeChecked();
+        await expect(checkbox).toBeEnabled();
+        await checkbox.click();
+        await expect(checkbox).toBeChecked();
+        await expect
+          .poll(async () => columnOrderFor(await getSiteDefaultColumnOrder(), table))
+          .toEqual(codeDefaultColumns(table));
+      }
+
+      for (const table of tables) expect(await headers(table), table).toEqual(before.get(table));
+    } finally {
+      await setSiteDefaultColumnOrder(originalSiteDefault);
     }
   });
 

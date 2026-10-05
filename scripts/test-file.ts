@@ -117,6 +117,7 @@ async function create(ownerEmail: string, rest: string[]): Promise<void> {
       sha256: stored.sha256,
       pageCount: parsed.pageCount,
       visibility,
+      createdByUserId: owner.id,
       updatedByUserId: owner.id,
       owners: { create: { userId: owner.id, ownerOrder: 0 } },
     },

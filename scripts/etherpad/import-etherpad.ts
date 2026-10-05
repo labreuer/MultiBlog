@@ -1116,6 +1116,10 @@ async function main() {
               visibility,
               proseJson: JSON.parse(JSON.stringify(bodyJSON)),
               createdAt: new Date(replay.steps[0].timestamp),
+              // The first revision's author who maps to a user. That is also
+              // the first entry the log writes into the `clients` map, so it is
+              // what scripts/doc/backfill-created-by.ts would derive for it.
+              createdByUserId: authorsSeen[0] ?? null,
               authors: { create: authorsSeen.map((userId, i) => ({ userId, bylineOrder: i })) },
             },
             select: { id: true },

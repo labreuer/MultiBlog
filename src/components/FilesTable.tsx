@@ -35,7 +35,13 @@ import { ColumnPicker } from "@/components/table/ColumnPicker";
 // this table's vocabulary is the name it is used under here.
 import { AuthorFilterPanel as OwnerFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -73,6 +79,8 @@ export type FileRow = {
   byteSize: number;
   annotationCount: number;
   createdAt: Date;
+  /** The uploader (StoredFile.createdBy), whether or not still an owner; blank when unknown. */
+  createdByName: string;
   updatedAt: Date;
   updatedByName: string;
   deletedAt: Date | null;
@@ -89,6 +97,7 @@ const SORTABLE_KEYS = [
   "size",
   "annotations",
   "created",
+  "createdBy",
   "slug",
   "updatedAt",
   "updatedBy",
@@ -141,6 +150,91 @@ export default function FilesTable({
     ...softDeleteBulkActions<FileRow>("files", bulkDeleteFiles, bulkRestoreFiles),
   ];
 
+  const columnBodies: Record<AdminColumnKey<"files">, ColumnBody<FileRow>> = {
+    title: {
+      sortKey: "title",
+      // Links by slug, not id — unlike /docs, whose /doc/[slug] route resolves
+      // an id too (resolveDocParam). /pdf/[slug] takes a slug only, so the id
+      // would 404.
+      cellProps: (row) => ({
+        className: styles.titleCell,
+        onClick: (e) => {
+          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/pdf/${row.slug}`);
+        },
+      }),
+      cell: (row) => <Link href={`/pdf/${row.slug}`}>{row.title}</Link>,
+    },
+    filename: {
+      sortKey: "filename",
+      cellProps: () => ({ className: styles.filenameCell }),
+      cell: (row) => <a href={`/files/${row.slug}/download`}>{row.filename}</a>,
+    },
+    owners: { sortKey: "owners", cell: (row) => row.owners },
+    visibility: {
+      sortKey: "visibility",
+      cell: (row) => (
+        <SelectCell
+          value={row.visibility}
+          options={Object.values(DocVisibility)}
+          disabled={row.deleted || !row.canManage}
+          save={(next) => updateFileVisibility(row.id, next)}
+          failureMessage="Failed to update visibility."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
+    },
+    pages: {
+      sortKey: "pages",
+      nowrap: true,
+      cellProps: () => ({ className: styles.numeric }),
+      cell: (row) => (row.pageCount === null ? "" : row.pageCount.toLocaleString()),
+    },
+    size: {
+      sortKey: "size",
+      nowrap: true,
+      cellProps: () => ({ className: styles.numeric }),
+      // Sorted on the raw byte count in Postgres, displayed rounded — so
+      // "1.2 MB" and "1.3 MB" order by their real sizes rather than by string.
+      cell: (row) => formatBytes(row.byteSize),
+    },
+    annotations: {
+      sortKey: "annotations",
+      nowrap: true,
+      cellProps: () => ({ className: styles.numeric }),
+      cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
+    },
+    created: {
+      sortKey: "created",
+      nowrap: true,
+      // The default sort (files-query.ts): a file is written once, so "what
+      // arrived recently" is the useful landing view — the opposite of /docs,
+      // where updatedAt leads because a doc's whole life is edits.
+      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
+    },
+    createdBy: {
+      sortKey: "createdBy",
+      nowrap: true,
+      // Beside Added, hidden by default (§16m). Owner(s) can drop the
+      // uploader; this can't (docs/PDF.md).
+      cell: (row) => row.createdByName,
+    },
+    slug: { sortKey: "slug", cell: (row) => row.slug },
+    updatedAt: {
+      sortKey: "updatedAt",
+      nowrap: true,
+      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
+    },
+    updatedBy: {
+      sortKey: "updatedBy",
+      nowrap: true,
+      cell: (row) => row.updatedByName,
+    },
+    deletedAt: {
+      sortKey: "deletedAt",
+      nowrap: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, "yyyy-MM-dd HH:mm") : ""),
+    },
+  };
   const columns: ColumnSpec<FileRow>[] = [
     {
       key: "select",
@@ -155,105 +249,7 @@ export default function FilesTable({
         />
       ),
     },
-    {
-      key: "title",
-      header: "Title (view)",
-      sortKey: "title",
-      // Links by slug, not id — unlike /docs, whose /doc/[slug] route resolves
-      // an id too (resolveDocParam). /pdf/[slug] takes a slug only, so the id
-      // would 404.
-      cellProps: (row) => ({
-        className: styles.titleCell,
-        onClick: (e) => {
-          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/pdf/${row.slug}`);
-        },
-      }),
-      cell: (row) => <Link href={`/pdf/${row.slug}`}>{row.title}</Link>,
-    },
-    {
-      key: "filename",
-      header: "Filename (download)",
-      sortKey: "filename",
-      cellProps: () => ({ className: styles.filenameCell }),
-      cell: (row) => <a href={`/files/${row.slug}/download`}>{row.filename}</a>,
-    },
-    { key: "owners", header: "Owner(s)", sortKey: "owners", cell: (row) => row.owners },
-    {
-      key: "visibility",
-      header: "Visibility",
-      sortKey: "visibility",
-      cell: (row) => (
-        <SelectCell
-          value={row.visibility}
-          options={Object.values(DocVisibility)}
-          disabled={row.deleted || !row.canManage}
-          save={(next) => updateFileVisibility(row.id, next)}
-          failureMessage="Failed to update visibility."
-          run={(action) => runWithStatus(row.id, action)}
-        />
-      ),
-    },
-    {
-      key: "pages",
-      header: "Pages",
-      sortKey: "pages",
-      nowrap: true,
-      cellProps: () => ({ className: styles.numeric }),
-      cell: (row) => (row.pageCount === null ? "" : row.pageCount.toLocaleString()),
-    },
-    {
-      key: "size",
-      header: "Size",
-      sortKey: "size",
-      nowrap: true,
-      cellProps: () => ({ className: styles.numeric }),
-      // Sorted on the raw byte count in Postgres, displayed rounded — so
-      // "1.2 MB" and "1.3 MB" order by their real sizes rather than by string.
-      cell: (row) => formatBytes(row.byteSize),
-    },
-    {
-      key: "annotations",
-      header: "Annotations",
-      sortKey: "annotations",
-      nowrap: true,
-      cellProps: () => ({ className: styles.numeric }),
-      cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
-    },
-    {
-      key: "created",
-      header: "Added",
-      sortKey: "created",
-      nowrap: true,
-      // The default sort (files-query.ts): a file is written once, so "what
-      // arrived recently" is the useful landing view — the opposite of /docs,
-      // where updatedAt leads because a doc's whole life is edits.
-      cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
-    },
-    { key: "slug", header: "Slug", sortKey: "slug", defaultHidden: true, cell: (row) => row.slug },
-    {
-      key: "updatedAt",
-      header: "Updated",
-      sortKey: "updatedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => formatDate(row.updatedAt, "yyyy-MM-dd HH:mm"),
-    },
-    {
-      key: "updatedBy",
-      header: "Updated by",
-      sortKey: "updatedBy",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => row.updatedByName,
-    },
-    {
-      key: "deletedAt",
-      header: "Deleted at",
-      sortKey: "deletedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, "yyyy-MM-dd HH:mm") : ""),
-    },
+    ...registryColumns("files", columnBodies),
     {
       key: "deleted",
       alwaysVisible: true,

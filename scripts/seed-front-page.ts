@@ -71,6 +71,7 @@ async function main() {
       slug: await uniqueDocSlug(FRONT_PAGE_DOC_TITLE),
       title: FRONT_PAGE_DOC_TITLE,
       visibility: "PRIVATE",
+      createdByUserId: author.id,
       authors: { create: { userId: author.id, bylineOrder: 0 } },
     },
   });

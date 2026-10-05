@@ -5,6 +5,7 @@ import {
   createTestFile,
   createTestUser,
   deleteTestFile,
+  getFileCreatorEmail,
   deleteTestUser,
   uniqueEmail,
 } from "./db";
@@ -63,6 +64,9 @@ test.describe("files", () => {
     expect(created.title).toBe(title);
 
     try {
+      // The uploader is recorded apart from the owner list (docs/PDF.md).
+      expect(await getFileCreatorEmail(created.id)).toBe(ADMIN_EMAIL);
+
       // The title comes from the filename with the extension stripped, and the
       // row is immediately listed — which also exercises the file_metrics view
       // (the Owner(s) cell) and the uploader's revalidation path.

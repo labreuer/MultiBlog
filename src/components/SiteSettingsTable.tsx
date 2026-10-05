@@ -129,7 +129,7 @@ function TrustThresholdCell({
 export type DefaultColumnsRow = {
   table: AdminTableName;
   label: string;
-  columns: ColumnMeta[];
+  columns: readonly ColumnMeta[];
   /** The keys currently in the effective default (site override, or the code default if none), in order. */
   initialChecked: string[];
 };
@@ -197,8 +197,8 @@ export default function SiteSettingsTable({
       <h2 style={{ marginTop: "2rem" }}>Default columns per table</h2>
       <p style={{ color: "var(--text-secondary)" }}>
         Which columns each admin table shows when nobody has picked their own (PLAN.md §16i) — an admin&apos;s own
-        &quot;Save as my default&quot; in a table&apos;s own Columns picker still overrides this. Order always
-        follows the table&apos;s own column order; only visibility is configurable here.
+        &quot;Save as my default&quot; in a table&apos;s own Columns picker still overrides this. Tick a column
+        to show it and drag a ticked one to reorder, as in that picker; every change saves at once.
       </p>
       <table className={adminStyles.table}>
         <thead>

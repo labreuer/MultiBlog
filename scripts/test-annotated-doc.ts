@@ -160,6 +160,7 @@ async function create(visibility: DocVisibility) {
       slug: await uniqueDocSlug(TITLE),
       title: TITLE,
       visibility,
+      createdByUserId: author.id,
       authors: { create: { userId: author.id, bylineOrder: 0 } },
     },
   });

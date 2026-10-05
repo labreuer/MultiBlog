@@ -34,7 +34,13 @@ import {
 import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -225,8 +231,79 @@ export default function CommentsTable({
     });
   }
 
-  // Declared in the order they render by default; `?cols=` reorders and hides
-  // the movable ones from here (§16i).
+  // What each movable column does, keyed by its entry in src/lib/admin-table-columns.ts, which
+  // owns its header, default visibility and order; `?cols=` reorders and hides them from there
+  // (§16i).
+  const columnBodies: Record<AdminColumnKey<"comments">, ColumnBody<CommentRow>> = {
+    post: {
+      sortKey: "post",
+      headerClassName: styles.postColumn,
+      cell: (row) => <Link href={`/post/${row.postId}/comments`}>{row.postTitle}</Link>,
+    },
+    commenter: {
+      sortKey: "commenter",
+      cell: (row) => (
+        <>
+          {row.commenterName} <span style={{ color: "var(--text-secondary)" }}>({row.commenterEmail})</span>
+        </>
+      ),
+    },
+    comment: {
+      cellProps: () => ({ className: styles.commentColumn }),
+      cell: (row) => row.bodyText,
+    },
+    status: {
+      sortKey: "status",
+      cellProps: (row) => ({ className: statusTextClass(row.status) }),
+      cell: (row) => row.status,
+    },
+    threadStatus: { sortKey: "threadStatus", cell: (row) => row.threadStatus },
+    created: {
+      sortKey: "created",
+      nowrap: true,
+      cell: (row) => formatDate(row.createdAt, dateFormat),
+    },
+    statusChanged: {
+      sortKey: "statusChanged",
+      nowrap: true,
+      headerTitle: "Last moderation change",
+      cell: (row) => (row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""),
+    },
+    commenterActivity: {
+      nowrap: true,
+      cell: (row) => (
+        <>
+          {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
+        </>
+      ),
+    },
+    action: {
+      cell: (row) => <ActionCell comment={row} disabled={row.deleted} run={(action) => runWithStatus(row.id, action)} />,
+    },
+    // Defaulted hidden (§16l/§16i): real Comment columns, available on
+    // request. statusChangedBy is resolved server-side to a name/email
+    // rather than shown as a raw id, matching how every other identity in
+    // this table is already displayed.
+    ipAddress: {
+      sortKey: "ipAddress",
+      nowrap: true,
+      cell: (row) => row.ipAddress ?? "",
+    },
+    statusChangedBy: {
+      sortKey: "statusChangedBy",
+      cell: (row) => row.statusChangedByName,
+    },
+    editedAt: {
+      sortKey: "editedAt",
+      nowrap: true,
+      cell: (row) => (row.editedAt ? formatDate(row.editedAt, dateFormat) : ""),
+    },
+    deletedAt: {
+      sortKey: "deletedAt",
+      nowrap: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
+    },
+  };
   const columns: ColumnSpec<CommentRow>[] = [
     {
       key: "select",
@@ -241,102 +318,7 @@ export default function CommentsTable({
         />
       ),
     },
-    {
-      key: "post",
-      header: "Post",
-      sortKey: "post",
-      headerClassName: styles.postColumn,
-      cell: (row) => <Link href={`/post/${row.postId}/comments`}>{row.postTitle}</Link>,
-    },
-    {
-      key: "commenter",
-      header: "Commenter",
-      sortKey: "commenter",
-      cell: (row) => (
-        <>
-          {row.commenterName} <span style={{ color: "var(--text-secondary)" }}>({row.commenterEmail})</span>
-        </>
-      ),
-    },
-    {
-      key: "comment",
-      header: "Comment",
-      cellProps: () => ({ className: styles.commentColumn }),
-      cell: (row) => row.bodyText,
-    },
-    {
-      key: "status",
-      header: "Status",
-      sortKey: "status",
-      cellProps: (row) => ({ className: statusTextClass(row.status) }),
-      cell: (row) => row.status,
-    },
-    { key: "threadStatus", header: "Thread", sortKey: "threadStatus", cell: (row) => row.threadStatus },
-    {
-      key: "created",
-      header: "Created at",
-      sortKey: "created",
-      nowrap: true,
-      cell: (row) => formatDate(row.createdAt, dateFormat),
-    },
-    {
-      key: "statusChanged",
-      header: "Changed at",
-      sortKey: "statusChanged",
-      nowrap: true,
-      headerTitle: "Last moderation change",
-      cell: (row) => (row.statusChangedAt ? formatDate(row.statusChangedAt, dateFormat) : ""),
-    },
-    {
-      key: "commenterActivity",
-      header: "Commenter activity",
-      nowrap: true,
-      cell: (row) => (
-        <>
-          {row.commenterCounts.submitted} / {row.commenterCounts.inModeration} / {row.commenterCounts.spam}
-        </>
-      ),
-    },
-    {
-      key: "action",
-      header: "Action",
-      cell: (row) => <ActionCell comment={row} disabled={row.deleted} run={(action) => runWithStatus(row.id, action)} />,
-    },
-    // Defaulted hidden (§16l/§16i): real Comment columns, available on
-    // request. statusChangedBy is resolved server-side to a name/email
-    // rather than shown as a raw id, matching how every other identity in
-    // this table is already displayed.
-    {
-      key: "ipAddress",
-      header: "IP address",
-      sortKey: "ipAddress",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => row.ipAddress ?? "",
-    },
-    {
-      key: "statusChangedBy",
-      header: "Changed by",
-      sortKey: "statusChangedBy",
-      defaultHidden: true,
-      cell: (row) => row.statusChangedByName,
-    },
-    {
-      key: "editedAt",
-      header: "Edited at",
-      sortKey: "editedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.editedAt ? formatDate(row.editedAt, dateFormat) : ""),
-    },
-    {
-      key: "deletedAt",
-      header: "Deleted at",
-      sortKey: "deletedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
-    },
+    ...registryColumns("comments", columnBodies),
     {
       key: "deleted",
       alwaysVisible: true,

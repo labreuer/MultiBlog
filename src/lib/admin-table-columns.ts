@@ -1,22 +1,24 @@
 import type { AdminTableName } from "@/lib/column-order";
 
-// A plain-data mirror of each table's movable (non-`alwaysVisible`) columns —
-// key, a human label, and whether the code itself defaults it to hidden — for
-// the one place that needs column identity without the live `ColumnSpec`
-// declarations: the site-settings page (PLAN.md §16i), which edits
-// `SiteSettings.defaultColumnOrder` for a table nobody has opened, so it has
-// no `ColumnSpec[]` (a client component's closures over its own hooks/state)
-// to read from.
+// Each admin table's movable (non-`alwaysVisible`) columns as plain data: key,
+// header label, whether it is hidden by default, and their order. **This is the
+// only place those four things are declared.** Each table component builds its
+// movable ColumnSpecs from its list here through `registryColumns`
+// (src/components/table/column-spec.ts), supplying only what a column *does*
+// (sort key, cell, cell props), keyed by these keys — and the compiler holds the
+// two together both ways: a key here with no cell, or a cell for a key not
+// here, does not typecheck.
 //
-// This is a real, unavoidable duplication — the alternative is a deeper
-// refactor separating "column identity" from "cell renderer" across all six
-// tables, out of scope here — so it is centralized in this one file rather
-// than scattered, and each table's block below is ordered and worded to make
-// a side-by-side diff against that table's own ColumnSpec easy. **Adding,
-// removing or renaming a movable column means updating both.**
+// Plain data because the site-settings page (PLAN.md §16i) needs column
+// identity without the live ColumnSpecs: it edits `SiteSettings.
+// defaultColumnOrder` for a table nobody has opened, and a table's ColumnSpecs
+// are closures over that client component's hooks and state. Don't let a
+// table declare any of the four again itself: two hand-kept copies drifted in
+// six of the eight tables, and a key that differs is a column a saved site
+// default silently hides.
 export type ColumnMeta = { key: string; label: string; defaultHidden?: boolean };
 
-export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
+export const ADMIN_TABLE_COLUMNS = {
   posts: [
     { key: "title", label: "Title" },
     { key: "authors", label: "Author(s)" },
@@ -38,19 +40,22 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "updatedAt", label: "Updated" },
     { key: "updatedBy", label: "Updated by" },
     { key: "length", label: "Length" },
+    { key: "annotations", label: "Annotations", defaultHidden: true },
     { key: "slug", label: "Slug", defaultHidden: true },
     { key: "created", label: "Created", defaultHidden: true },
+    { key: "createdBy", label: "Created by", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   files: [
-    { key: "title", label: "Title" },
-    { key: "filename", label: "Filename" },
-    { key: "authors", label: "Author(s)" },
+    { key: "title", label: "Title (view)" },
+    { key: "filename", label: "Filename (download)" },
+    { key: "owners", label: "Owner(s)" },
     { key: "visibility", label: "Visibility" },
     { key: "pages", label: "Pages" },
     { key: "size", label: "Size" },
     { key: "annotations", label: "Annotations" },
     { key: "created", label: "Added" },
+    { key: "createdBy", label: "Created by", defaultHidden: true },
     { key: "slug", label: "Slug", defaultHidden: true },
     { key: "updatedAt", label: "Updated", defaultHidden: true },
     { key: "updatedBy", label: "Updated by", defaultHidden: true },
@@ -68,7 +73,7 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "created", label: "Created at" },
     { key: "posts", label: "Posts" },
     { key: "comments", label: "Comments", defaultHidden: true },
-    { key: "url", label: "URL (slug link)" },
+    { key: "url", label: "Slug", defaultHidden: true },
     // Landing-page contributor fields (PLAN.md §17i), all defaulted hidden
     // per §16m so no existing admin's table silently widens by five columns.
     // contributorBlurb carries no sortKey — see UsersTable.tsx's column def.
@@ -106,18 +111,18 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "name", label: "Name" },
     { key: "description", label: "Description" },
     { key: "assignments", label: "Assignments" },
-    { key: "lastUsed", label: "Last used" },
-    { key: "createdBy", label: "Created by" },
-    { key: "created", label: "Created at" },
     { key: "docs", label: "Docs", defaultHidden: true },
     { key: "posts", label: "Posts", defaultHidden: true },
     { key: "files", label: "Files", defaultHidden: true },
     { key: "annotations", label: "Annotations", defaultHidden: true },
+    { key: "lastUsed", label: "Last used" },
+    { key: "createdBy", label: "Created by" },
+    { key: "created", label: "Created at" },
     { key: "slug", label: "Slug", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   annotations: [
-    { key: "doc", label: "Doc" },
+    { key: "doc", label: "Doc / File" },
     { key: "author", label: "Author" },
     { key: "body", label: "Body" },
     { key: "quote", label: "Quote" },
@@ -141,20 +146,29 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "createdBy", label: "Created by" },
     { key: "created", label: "Created at" },
     { key: "minted", label: "Minted at" },
+    { key: "edited", label: "Edited at", defaultHidden: true },
     { key: "id", label: "Id", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
+    { key: "edit", label: "Edit" },
   ],
-};
+} as const satisfies Record<AdminTableName, readonly ColumnMeta[]>;
+
+/** The movable column keys of one admin table — what its `registryColumns` call must supply a body for. */
+export type AdminColumnKey<T extends AdminTableName> = (typeof ADMIN_TABLE_COLUMNS)[T][number]["key"];
+
+/** One table's list, widened to `ColumnMeta` so callers can read `defaultHidden` on every entry. */
+export function adminTableColumns(table: AdminTableName): readonly ColumnMeta[] {
+  return ADMIN_TABLE_COLUMNS[table];
+}
 
 /**
  * The effective default column set for a table when no site override exists —
- * every column except the ones the code itself defaults to hidden, in the
- * order above. Mirrors `defaultColumnKeys` in column-spec.ts, which is the
- * live version of this same rule; kept as a separate small function rather
- * than shared code because that one operates on a live `ColumnSpec<Row>[]`
- * and this one on the static `ColumnMeta[]` above — different types, same
- * one-line rule.
+ * every column except the ones defaulted hidden, in the order above. The same
+ * rule as `defaultColumnKeys` in column-spec.ts, which applies it to the live
+ * ColumnSpecs built from these same entries, so the two agree by construction.
  */
 export function codeDefaultColumns(table: AdminTableName): string[] {
-  return ADMIN_TABLE_COLUMNS[table].filter((column) => !column.defaultHidden).map((column) => column.key);
+  return adminTableColumns(table)
+    .filter((column) => !column.defaultHidden)
+    .map((column) => column.key);
 }

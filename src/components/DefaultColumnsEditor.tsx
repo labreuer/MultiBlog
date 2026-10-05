@@ -27,7 +27,7 @@ export function DefaultColumnsEditor({
   initialChecked,
 }: {
   table: AdminTableName;
-  columns: ColumnMeta[];
+  columns: readonly ColumnMeta[];
   /** The keys currently in the effective default (site override, or the code default if none), in order. */
   initialChecked: string[];
 }) {

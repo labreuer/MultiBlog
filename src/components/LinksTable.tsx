@@ -32,7 +32,13 @@ import { ColumnPicker } from "@/components/table/ColumnPicker";
 // it is used under here.
 import { AuthorFilterPanel as OwnerFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -215,23 +221,8 @@ export default function LinksTable({
     applicableTo: (row: LinkRow) => row.canManage && action.applicableTo(row),
   }));
 
-  const columns: ColumnSpec<LinkRow>[] = [
-    {
-      key: "select",
-      alwaysVisible: true,
-      header: "Select",
-      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
-      cell: (row) => (
-        <SelectRowCheckbox
-          checked={selectedIds.has(row.id)}
-          onChange={() => toggleRow(row.id)}
-          label={`link by ${row.createdByName}`}
-        />
-      ),
-    },
-    {
-      key: "name",
-      header: "Name",
+  const columnBodies: Record<AdminColumnKey<"links">, ColumnBody<LinkRow>> = {
+    name: {
       sortKey: "name",
       headerClassName: adminStyles.nameColumn,
       // In place where the viewer may rename; plain text (usually nothing)
@@ -249,9 +240,7 @@ export default function LinksTable({
           row.name
         ),
     },
-    {
-      key: "passages",
-      header: "Passages",
+    passages: {
       // The count links to the landing route with ?noredirect=1 — the excerpt
       // page, never the redirect: someone browsing this table wants to see the
       // whole link, not be dropped into one of its docs.
@@ -271,9 +260,7 @@ export default function LinksTable({
         );
       },
     },
-    {
-      key: "targets",
-      header: "Targets",
+    targets: {
       // Each title carries ?sel= into its own surface, like the banner's group
       // links. An empty list is the landing page's "no passages you have
       // permission to read", said shorter — it acknowledges the link, which
@@ -292,17 +279,13 @@ export default function LinksTable({
           </div>
         ),
     },
-    { key: "createdBy", header: "Created by", sortKey: "createdBy", nowrap: true, cell: (row) => row.createdByName },
-    {
-      key: "created",
-      header: "Created at",
+    createdBy: { sortKey: "createdBy", nowrap: true, cell: (row) => row.createdByName },
+    created: {
       sortKey: "created",
       nowrap: true,
       cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
     },
-    {
-      key: "minted",
-      header: "Minted at",
+    minted: {
       sortKey: "minted",
       nowrap: true,
       // "Minted" is the feature's own word for the moment Copy link turns a
@@ -319,34 +302,23 @@ export default function LinksTable({
           <em>draft</em>
         ),
     },
-    {
-      key: "edited",
-      header: "Edited at",
+    edited: {
       sortKey: "edited",
       nowrap: true,
-      defaultHidden: true,
       cell: (row) => (row.editedAt ? formatDate(row.editedAt, "yyyy-MM-dd HH:mm") : ""),
     },
-    {
-      key: "id",
-      header: "Id",
+    id: {
       sortKey: "id",
       nowrap: true,
-      defaultHidden: true,
       cellProps: () => ({ className: styles.idCell }),
       cell: (row) => row.id,
     },
-    {
-      key: "deletedAt",
-      header: "Deleted at",
+    deletedAt: {
       sortKey: "deletedAt",
       nowrap: true,
-      defaultHidden: true,
       cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, "yyyy-MM-dd HH:mm") : ""),
     },
-    {
-      key: "edit",
-      header: "Edit",
+    edit: {
       // Creator-only, so most rows are blank for most viewers; the button
       // decides its own enabled/blocked/open state from the open-link store.
       cell: (row) =>
@@ -354,6 +326,22 @@ export default function LinksTable({
           <EditLinkButton linkId={row.id} onOpened={() => router.push(`/link/${row.id}?noredirect=1`)} />
         ) : null,
     },
+  };
+  const columns: ColumnSpec<LinkRow>[] = [
+    {
+      key: "select",
+      alwaysVisible: true,
+      header: "Select",
+      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
+      cell: (row) => (
+        <SelectRowCheckbox
+          checked={selectedIds.has(row.id)}
+          onChange={() => toggleRow(row.id)}
+          label={`link by ${row.createdByName}`}
+        />
+      ),
+    },
+    ...registryColumns("links", columnBodies),
     {
       key: "deleted",
       alwaysVisible: true,
