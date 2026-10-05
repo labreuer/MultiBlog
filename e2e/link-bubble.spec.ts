@@ -494,13 +494,20 @@ test.describe("the link popover: a title box over a URL box (LinkControls.tsx)",
       // The recent docs arrive above the form: the list is over the URL box,
       // and the whole box sits above the text. (Measured once the list is
       // there — on a fast build it lands before the popover can be read
-      // without it, so the list-shown box is the baseline.)
+      // without it, so the list-shown box is the baseline.) Polled for the
+      // reason the collapse below gives, run the other way: the list arrives,
+      // the box grows downward over the text, and only then does floating-ui
+      // move it up.
       const list = page.getByRole("listbox");
       await expect(list).toBeVisible();
+      const popoverBottom = async () => {
+        const b = await popover.boundingBox();
+        return b ? b.y + b.height : NaN;
+      };
+      await expect.poll(popoverBottom).toBeLessThanOrEqual(textBox!.y);
       const grown = await popover.boundingBox();
       expect(grown).not.toBeNull();
       const bottom = grown!.y + grown!.height;
-      expect(bottom).toBeLessThanOrEqual(textBox!.y);
       const listBox = await list.boundingBox();
       const urlBox = await urlInput(page).boundingBox();
       expect(listBox!.y + listBox!.height).toBeLessThanOrEqual(urlBox!.y);
@@ -513,25 +520,26 @@ test.describe("the link popover: a title box over a URL box (LinkControls.tsx)",
       // steps (autoUpdate hears the shrink through a ResizeObserver), and
       // under load a boundingBox() read can land between them, seeing the
       // box shortened from the bottom before it has been moved back down.
-      await expect
-        .poll(async () => {
-          const b = await popover.boundingBox();
-          return b ? b.y + b.height : NaN;
-        })
-        .toBeCloseTo(bottom, 0);
+      await expect.poll(popoverBottom).toBeCloseTo(bottom, 0);
       const collapsed = await popover.boundingBox();
       expect(collapsed!.y).toBeGreaterThan(grown!.y);
       expect(collapsed!.x).toBe(grown!.x);
       expect((await urlInput(page).boundingBox())!.y).toBeCloseTo(urlBox!.y, 0);
 
-      // Emptied again, the list comes back up top and the box regrows upward
-      // to exactly where it was.
+      // Emptied again, the list comes back up top and the box regrows upward:
+      // bottom still on the text, URL box still where it was. Not "to exactly
+      // where it was": the list is this account's recently edited docs, which
+      // other workers' fixtures create and delete between the two searches,
+      // and every row gained or lost moves the top by a row's height.
       await page.keyboard.press("ControlOrMeta+a");
       await page.keyboard.press("Backspace");
       await expect(list).toBeVisible();
+      await expect.poll(popoverBottom).toBeCloseTo(bottom, 0);
       const regrown = await popover.boundingBox();
-      expect(regrown!.y).toBeCloseTo(grown!.y, 0);
-      expect(regrown!.y + regrown!.height).toBeCloseTo(bottom, 0);
+      expect(regrown!.y).toBeLessThan(collapsed!.y);
+      expect((await urlInput(page).boundingBox())!.y).toBeCloseTo(urlBox!.y, 0);
+      const relisted = await list.boundingBox();
+      expect(relisted!.y + relisted!.height).toBeLessThanOrEqual(urlBox!.y);
       await page.keyboard.press("Escape");
     } finally {
       await page.goto("about:blank").catch(() => {});
