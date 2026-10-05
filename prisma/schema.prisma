@@ -151,9 +151,11 @@ model User {
   slugHistory            UserSlugHistory[]
   ydocSnapshots          YdocSnapshot[]         @relation("YdocSnapshotUser")
   docAuthors             DocAuthor[]
+  docsCreated            Doc[]                  @relation("DocCreatedBy")
   docUpdates             Doc[]                  @relation("DocUpdatedBy")
   docDeletions           Doc[]                  @relation("DocDeletedBy")
   fileOwners             FileOwner[]
+  filesCreated           StoredFile[]           @relation("FileCreatedBy")
   fileUpdates            StoredFile[]           @relation("FileUpdatedBy")
   fileDeletions          StoredFile[]           @relation("FileDeletedBy")
   annotations            Annotation[]           @relation("AnnotationAuthor")
@@ -777,6 +779,13 @@ model Doc {
   // (§13p) and mean different things everywhere.
   proseJsonUpdateId BigInt?                  @map("prose_json_update_id")
   createdAt         DateTime                 @default(now()) @map("created_at")
+  // Who made the doc: the account that created the row, set by every create
+  // path and never edited. Not the byline, which is seeded with the creator
+  // and edited freely afterwards (docs/DOCS.md "Who created a doc"). Null
+  // when nothing names one: a row older than the column that
+  // scripts/doc/backfill-created-by.ts found no author for, or a creator
+  // since hard-deleted.
+  createdByUserId   String?                  @map("created_by_user_id")
   updatedAt         DateTime                 @updatedAt @map("updated_at")
   // Updated when Prisma would update updatedAt. Sloppy with concurrent writes.
   updatedByUserId   String?                  @map("updated_by_user_id")
@@ -784,6 +793,7 @@ model Doc {
   deletedAt         DateTime?                @map("deleted_at")
 
   authors             DocAuthor[]
+  createdBy           User?                  @relation("DocCreatedBy", fields: [createdByUserId], references: [id])
   updatedBy           User?                  @relation("DocUpdatedBy", fields: [updatedByUserId], references: [id])
   deletedBy           User?                  @relation("DocDeletedBy", fields: [deletedByUserId], references: [id])
   slugHistory         DocSlugHistory[]
@@ -1181,6 +1191,11 @@ model StoredFile {
   visibility  DocVisibility @default(PRIVATE)
 
   createdAt       DateTime                 @default(now()) @map("created_at")
+  // Who uploaded it, set once and never edited — unlike `owners`, which is
+  // seeded with the uploader and may drop them later (docs/PDF.md, "A file's
+  // listed users are FileOwners"). Null for a row older than the column that
+  // had no owner left to take it from, or for an uploader since hard-deleted.
+  createdByUserId String?                  @map("created_by_user_id")
   updatedAt       DateTime                 @updatedAt @map("updated_at")
   updatedByUserId String?                  @map("updated_by_user_id")
   deletedByUserId String?                  @map("deleted_by_user_id")
@@ -1198,6 +1213,7 @@ model StoredFile {
   tagAnchors          TagAnchor[]          @relation("TagAnchorFile")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorFile")
   commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorFile")
+  createdBy           User?                @relation("FileCreatedBy", fields: [createdByUserId], references: [id])
   updatedBy           User?                @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
   deletedBy           User?                @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
 

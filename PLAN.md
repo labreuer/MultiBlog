@@ -4201,7 +4201,7 @@ model StoredFile {
   id, slug (unique among live files only — see "a deleted file releases its slug" below),
   title, filename, contentType, byteSize Int, sha256 String,
   pageCount Int?, visibility DocVisibility @default(PRIVATE),
-  createdAt, updatedAt, updatedByUserId, deletedByUserId, deletedAt
+  createdAt, createdByUserId, updatedAt, updatedByUserId, deletedByUserId, deletedAt
   owners FileOwner[]  slugHistory FileSlugHistory[]
   annotations Annotation[]  metrics FileMetrics?
   @@map("file")

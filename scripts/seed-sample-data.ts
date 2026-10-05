@@ -175,6 +175,7 @@ async function createDoc(opts: {
       slug: await uniqueDocSlug(opts.title),
       title: opts.title,
       visibility: opts.visibility,
+      createdByUserId: opts.authorId,
       authors: { create: { userId: opts.authorId, bylineOrder: 0 } },
     },
   });

@@ -73,6 +73,7 @@ async function create(authorEmail: string, title: string, visibility: DocVisibil
       slug,
       title,
       visibility,
+      createdByUserId: author.id,
       authors: { create: { userId: author.id, bylineOrder: 0 } },
     },
   });

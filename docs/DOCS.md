@@ -92,7 +92,8 @@ Every table is documented column by column in `prisma/schema.prisma`; this is th
 - **`doc`** — `id`, `slug UNIQUE`, `title`, `visibility` (`PRIVATE` | `SHARED`),
   `prose_json`, `prose_json_length` (trigger-maintained; never assign to it),
   `prose_json_update_id` (which `ydoc_update` the cache is the content of),
-  `created_at`, `updated_at`, `updated_by_user_id`, `deleted_by_user_id`, `deleted_at`.
+  `created_at`, `created_by_user_id` ("Who created a doc"), `updated_at`, `updated_by_user_id`,
+  `deleted_by_user_id`, `deleted_at`.
   No `moderation_policy`: annotations are never moderated. No `publish_revision_id` or
   `published_at`: a doc is never published at a revision; readers see the live document.
 - **`doc_author`** — `doc_id`, `user_id`, `byline_order`. The byline is the whole
@@ -116,6 +117,29 @@ sibling static route to collide with, so a doc may legitimately be slugged `docs
 `/docs` and `/doc/[slug]` would serve soft-deleted docs.
 
 **There is no `doc_revision`.** Deferred, not omitted ("Deferred").
+
+### Who created a doc
+
+**`created_by_user_id` is the account that created the row, and nothing edits it.** Every
+create path sets it: `insertDocRow` (`src/lib/doc-create.ts`, behind `+ New doc`, the Markdown
+import and `scripts/import-claude-chats.ts`), the seed and test scripts, the e2e fixture, and the
+Etherpad and legacy importers. Nullable with `ON DELETE SET NULL`, like `updated_by_user_id`.
+
+**It is not the byline, and it grants nothing.** `doc_author` is seeded with the creator at
+position 0 and edited freely afterwards; who may read or edit a doc is still the byline's
+question alone (PERMISSIONS.md). An importer is the creator of what it imports:
+`import-claude-chats.ts` creates each doc as its importing account, then rewrites the byline to
+its fixed order. So a transcript it imports names that account here, even when the account is
+not first on the byline.
+
+**Rows older than the column hold an inferred value**, written by
+`scripts/doc/backfill-created-by.ts`. Run it once per instance, after the `prisma migrate deploy`
+that crosses `add_doc_file_created_by`. It dry-runs unless given `--apply`, and only ever fills a
+NULL. Its answer is the first user the ydoc's `clients` map names, found by replaying
+`ydoc_update` from row 1. If the map names nobody, the first byline author; if there is no
+byline either, NULL. A doc nobody has edited since it was seeded therefore gets its byline's
+first name, so a transcript imported before the column names the first person on the byline,
+not the importing account. The script's header lists what it leaves NULL rather than guess.
 
 ## The caches: `title` and `prose_json`
 

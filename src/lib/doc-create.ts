@@ -26,6 +26,7 @@ async function insertDocRowSluggedById(userId: string, title: string) {
       data: {
         slug: crypto.randomUUID(),
         title,
+        createdByUserId: userId,
         updatedByUserId: userId,
         authors: { create: { userId, bylineOrder: 0 } },
       },
@@ -71,6 +72,7 @@ export async function insertDocRow(userId: string, title: string) {
         data: {
           slug: await uniqueDocSlug(title),
           title,
+          createdByUserId: userId,
           updatedByUserId: userId,
           authors: { create: { userId, bylineOrder: 0 } },
         },

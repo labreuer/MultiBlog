@@ -133,6 +133,11 @@ Nobody on that list wrote the PDF. The list is seeded with the uploader, is edit
 afterwards, and grants `/files`' Owner(s) line, the right to rename / re-slug / re-own /
 delete, and read access to a `PRIVATE` file.
 
+The uploader is recorded apart from it, in `file.created_by_user_id`. That column is set once
+at upload and never edited, and it grants nothing. It stays correct after the owner list drops
+the uploader. A file older than the column holds its first owner by `owner_order`, filled by the
+`add_doc_file_created_by` migration, or NULL if it had no owner left.
+
 `DocAuthor`/`PostAuthor` are "author" because a doc's or post's listed users really did write
 it, and the shared filter kit (`AuthorFilterPanel`, `authorFilterWhere`, `AuthorMode`) is
 named for those two surfaces. `/files` reaches it through the

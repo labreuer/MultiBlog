@@ -167,6 +167,7 @@ export async function POST(request: Request) {
           byteSize: stored.byteSize,
           sha256: stored.sha256,
           pageCount,
+          createdByUserId: session.user.id,
           updatedByUserId: session.user.id,
           // The uploader becomes the sole owner, the way createDoc makes its
           // creator the sole DocAuthor — "owner" rather than "author" because
