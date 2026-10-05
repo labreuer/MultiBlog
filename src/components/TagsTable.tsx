@@ -27,7 +27,13 @@ import {
 import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -126,23 +132,8 @@ export default function TagsTable({
     return value === 0 ? "" : value.toLocaleString();
   }
 
-  const columns: ColumnSpec<TagRow>[] = [
-    {
-      key: "select",
-      alwaysVisible: true,
-      header: "Select",
-      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
-      cell: (row) => (
-        <SelectRowCheckbox
-          checked={selectedIds.has(row.id)}
-          onChange={() => toggleRow(row.id)}
-          label={`tag ${row.name}`}
-        />
-      ),
-    },
-    {
-      key: "name",
-      header: "Name",
+  const columnBodies: Record<AdminColumnKey<"tags">, ColumnBody<TagRow>> = {
+    name: {
       sortKey: "name",
       // Links to the public browse page, not to an edit form: /tag/[slug]
       // is what a term *is* from every other surface, and an editor who wants
@@ -168,16 +159,12 @@ export default function TagsTable({
         </span>
       ),
     },
-    {
-      key: "description",
-      header: "Description",
+    description: {
       sortKey: "description",
       cellProps: () => ({ className: styles.descriptionCell }),
       cell: (row) => row.description,
     },
-    {
-      key: "assignments",
-      header: "Assignments",
+    assignments: {
       sortKey: "assignments",
       nowrap: true,
       cellProps: () => ({ className: styles.numeric }),
@@ -187,68 +174,65 @@ export default function TagsTable({
       // things carry it".
       cell: (row) => count(row.assignmentCount),
     },
-    {
-      key: "docs",
-      header: "Docs",
+    docs: {
       sortKey: "docs",
       nowrap: true,
-      defaultHidden: true,
       cellProps: () => ({ className: styles.numeric }),
       cell: (row) => count(row.docCount),
     },
-    {
-      key: "posts",
-      header: "Posts",
+    posts: {
       sortKey: "posts",
       nowrap: true,
-      defaultHidden: true,
       cellProps: () => ({ className: styles.numeric }),
       cell: (row) => count(row.postCount),
     },
-    {
-      key: "files",
-      header: "Files",
+    files: {
       sortKey: "files",
       nowrap: true,
-      defaultHidden: true,
       cellProps: () => ({ className: styles.numeric }),
       cell: (row) => count(row.fileCount),
     },
-    {
-      key: "annotations",
-      header: "Annotations",
+    annotations: {
       sortKey: "annotations",
       nowrap: true,
-      defaultHidden: true,
       cellProps: () => ({ className: styles.numeric }),
       cell: (row) => count(row.annotationCount),
     },
-    {
-      key: "lastUsed",
-      header: "Last used",
+    lastUsed: {
       sortKey: "lastUsed",
       nowrap: true,
       // The column that finds dead vocabulary: a term nobody has applied in a
       // year, or ever (blank), is the candidate for merging away.
       cell: (row) => (row.lastUsedAt ? formatDate(row.lastUsedAt, "yyyy-MM-dd HH:mm") : ""),
     },
-    { key: "createdBy", header: "Created by", sortKey: "createdBy", nowrap: true, cell: (row) => row.createdByName },
-    {
-      key: "created",
-      header: "Created at",
+    createdBy: { sortKey: "createdBy", nowrap: true, cell: (row) => row.createdByName },
+    created: {
       sortKey: "created",
       nowrap: true,
       cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
     },
-    { key: "slug", header: "Slug", sortKey: "slug", defaultHidden: true, cell: (row) => row.slug },
-    {
-      key: "deletedAt",
-      header: "Deleted at",
+    slug: { sortKey: "slug", cell: (row) => row.slug },
+    deletedAt: {
       sortKey: "deletedAt",
       nowrap: true,
-      defaultHidden: true,
       cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, "yyyy-MM-dd HH:mm") : ""),
     },
+  };
+  const columns: ColumnSpec<TagRow>[] = [
+    {
+      key: "select",
+      alwaysVisible: true,
+      header: "Select",
+      renderHeader: () => <SelectAllHeader checked={allVisibleSelected} onChange={toggleSelectAll} />,
+      cell: (row) => (
+        <SelectRowCheckbox
+          checked={selectedIds.has(row.id)}
+          onChange={() => toggleRow(row.id)}
+          label={`tag ${row.name}`}
+        />
+      ),
+    },
+    ...registryColumns("tags", columnBodies),
     {
       key: "deleted",
       alwaysVisible: true,

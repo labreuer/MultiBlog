@@ -5,6 +5,8 @@
 // cells, so it exercises the full idle → edited → saving → saved path that
 // §16f describes; the URL assertions hold for every table on the kit.
 import { test, expect } from "./fixtures";
+import { codeDefaultColumns } from "@/lib/admin-table-columns";
+import { columnOrderFor } from "@/lib/column-order";
 import {
   ADMIN_EMAIL,
   addTestDocAuthor,
@@ -707,6 +709,57 @@ test.describe("admin table kit", () => {
       await setSiteDefaultColumnOrder(originalSiteDefault);
       await deleteTestDoc(shortDoc.id);
       await deleteTestDoc(longDoc.id);
+    }
+  });
+
+  test("a default saved from /site-settings is each table's own default, column for column", async ({ page }) => {
+    // /site-settings saves the column keys its own list offers, and each table
+    // resolves those keys against its own columns, dropping any it doesn't
+    // know. A key the two spell differently is therefore a column that a saved
+    // site default hides from everyone with no preference of their own — which
+    // is what /files' Owner(s) was, listed there as `authors`. So: save every
+    // table's default unchanged through the page, and the tables must not move.
+    const originalSiteDefault = await getSiteDefaultColumnOrder();
+    await setSiteDefaultColumnOrder(null);
+    // A preference of the admin's own would win over the site default and make
+    // every comparison below pass without testing anything.
+    await clearColumnOrder(ADMIN_EMAIL);
+
+    const tables = ["posts", "docs", "files", "users", "comments", "annotations", "tags", "links"] as const;
+    const headers = async (table: string) => {
+      await page.goto(`/${table}`);
+      return (await page.locator("table").first().locator("thead th").allTextContents()).map((t) =>
+        t.replace(/[▲▼]/g, "").trim(),
+      );
+    };
+    try {
+      const before = new Map<string, string[]>();
+      for (const table of tables) before.set(table, await headers(table));
+      expect(before.get("files")).toContain("Owner(s)");
+
+      await page.goto("/site-settings");
+      for (const table of tables) {
+        const section = page.getByRole("row").filter({ has: page.getByText(`/${table}`, { exact: true }) });
+        // Each toggle saves. Unticking the last ticked column and ticking it
+        // again writes the default back unchanged, since a re-ticked column
+        // goes to the end — which is where it was.
+        const lastTicked = section.locator("label").filter({ has: page.getByRole("checkbox", { checked: true }) }).last();
+        const label = (await lastTicked.evaluate((el) => el.lastChild?.textContent ?? "")).trim();
+        const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const checkbox = section.locator("label").filter({ hasText: new RegExp(`${escaped}$`) }).getByRole("checkbox");
+        await checkbox.click();
+        await expect(checkbox).not.toBeChecked();
+        await expect(checkbox).toBeEnabled();
+        await checkbox.click();
+        await expect(checkbox).toBeChecked();
+        await expect
+          .poll(async () => columnOrderFor(await getSiteDefaultColumnOrder(), table))
+          .toEqual(codeDefaultColumns(table));
+      }
+
+      for (const table of tables) expect(await headers(table), table).toEqual(before.get(table));
+    } finally {
+      await setSiteDefaultColumnOrder(originalSiteDefault);
     }
   });
 

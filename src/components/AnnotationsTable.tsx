@@ -26,7 +26,13 @@ import {
 import { FilterHelp, deepLinkEntry } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -134,14 +140,61 @@ export default function AnnotationsTable({
     });
   }
 
-  // Declared in the order they render by default; `?cols=` reorders and hides
-  // the movable ones from here (§16i).
+  // What each movable column does, keyed by its entry in src/lib/admin-table-columns.ts, which
+  // owns its header, default visibility and order; `?cols=` reorders and hides them from there
+  // (§16i).
   //
   // Unlike the other four tables, "Deleted" and the row action aren't the same
   // column here: "Deleted" is an ordinary sortable Yes/blank status column, and
   // the actual restore/delete button sits in its own unlabeled column after
   // it — that split predates this conversion and is preserved as-is. Only the
   // action column has to stay alwaysVisible; the status text is just a status.
+  const columnBodies: Record<AdminColumnKey<"annotations">, ColumnBody<AnnotationRow>> = {
+    doc: {
+      sortKey: "doc",
+      cell: (row) => (
+        <Link href={row.containerKind === "file" ? `/pdf/${row.docSlug}` : `/doc/${row.docSlug}`}>{row.docTitle}</Link>
+      ),
+    },
+    author: { sortKey: "author", cell: (row) => row.authorName },
+    body: { cell: (row) => row.bodyText },
+    quote: {
+      cell: (row) => (!row.isRoot ? "" : row.quote ? `“${row.quote}”` : <em>document-level</em>),
+    },
+    // Shown by default, not hidden: unlike the columns below, this names a
+    // real workflow state (RAISED means the doc's byline authors were
+    // emailed, §13d) that otherwise has zero visibility anywhere in this
+    // table.
+    status: { sortKey: "status", cell: (row) => row.status },
+    created: {
+      sortKey: "created",
+      nowrap: true,
+      cell: (row) => formatDate(row.createdAt, dateFormat),
+    },
+    edited: {
+      sortKey: "edited",
+      nowrap: true,
+      cell: (row) => (row.editedAt ? formatDate(row.editedAt, dateFormat) : ""),
+    },
+    deletedStatus: { sortKey: "deleted", cell: (row) => (row.deleted ? "Yes" : "") },
+    // Defaulted hidden (§16l/§16i): real Annotation columns, available on
+    // request.
+    raisedAt: {
+      sortKey: "raisedAt",
+      nowrap: true,
+      cell: (row) => (row.raisedAt ? formatDate(row.raisedAt, dateFormat) : ""),
+    },
+    resolvedAt: {
+      sortKey: "resolvedAt",
+      nowrap: true,
+      cell: (row) => (row.resolvedAt ? formatDate(row.resolvedAt, dateFormat) : ""),
+    },
+    deletedAt: {
+      sortKey: "deletedAt",
+      nowrap: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
+    },
+  };
   const columns: ColumnSpec<AnnotationRow>[] = [
     {
       key: "select",
@@ -156,67 +209,7 @@ export default function AnnotationsTable({
         />
       ),
     },
-    {
-      key: "doc",
-      header: "Doc / File",
-      sortKey: "doc",
-      cell: (row) => (
-        <Link href={row.containerKind === "file" ? `/pdf/${row.docSlug}` : `/doc/${row.docSlug}`}>{row.docTitle}</Link>
-      ),
-    },
-    { key: "author", header: "Author", sortKey: "author", cell: (row) => row.authorName },
-    { key: "body", header: "Body", cell: (row) => row.bodyText },
-    {
-      key: "quote",
-      header: "Quote",
-      cell: (row) => (!row.isRoot ? "" : row.quote ? `“${row.quote}”` : <em>document-level</em>),
-    },
-    // Shown by default, not hidden: unlike the columns below, this names a
-    // real workflow state (RAISED means the doc's byline authors were
-    // emailed, §13d) that otherwise has zero visibility anywhere in this
-    // table.
-    { key: "status", header: "Status", sortKey: "status", cell: (row) => row.status },
-    {
-      key: "created",
-      header: "Created",
-      sortKey: "created",
-      nowrap: true,
-      cell: (row) => formatDate(row.createdAt, dateFormat),
-    },
-    {
-      key: "edited",
-      header: "Edited",
-      sortKey: "edited",
-      nowrap: true,
-      cell: (row) => (row.editedAt ? formatDate(row.editedAt, dateFormat) : ""),
-    },
-    { key: "deletedStatus", header: "Deleted", sortKey: "deleted", cell: (row) => (row.deleted ? "Yes" : "") },
-    // Defaulted hidden (§16l/§16i): real Annotation columns, available on
-    // request.
-    {
-      key: "raisedAt",
-      header: "Raised at",
-      sortKey: "raisedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.raisedAt ? formatDate(row.raisedAt, dateFormat) : ""),
-    },
-    {
-      key: "resolvedAt",
-      header: "Resolved at",
-      sortKey: "resolvedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.resolvedAt ? formatDate(row.resolvedAt, dateFormat) : ""),
-    },
-    {
-      key: "deletedAt",
-      header: "Deleted at",
-      sortKey: "deletedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
-    },
+    ...registryColumns("annotations", columnBodies),
     {
       key: "action",
       alwaysVisible: true,

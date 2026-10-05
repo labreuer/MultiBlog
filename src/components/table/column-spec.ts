@@ -1,4 +1,6 @@
 import type { MouseEventHandler, ReactNode, RefObject } from "react";
+import { adminTableColumns, type AdminColumnKey } from "@/lib/admin-table-columns";
+import type { AdminTableName } from "@/lib/column-order";
 
 // A table's columns as data (PLAN.md §16i), so visibility and order can be a
 // querystring param instead of five hand-edited `<thead>`s.
@@ -145,4 +147,30 @@ export function pickerColumns<Row>(columns: ColumnSpec<Row>[], resolved: ColumnS
   // declaration order — so dragging reorders what you see, and the rest sit
   // below waiting to be checked.
   return [...movableResolved, ...columns.filter((column) => !column.alwaysVisible && !shown.has(column.key))];
+}
+
+/**
+ * A movable column minus its identity — key, header, default visibility and
+ * position — which src/lib/admin-table-columns.ts declares for every table.
+ */
+export type ColumnBody<Row> = Omit<ColumnSpec<Row>, "key" | "header" | "defaultHidden" | "alwaysVisible" | "renderHeader">;
+
+/**
+ * A table's movable ColumnSpecs: its entries in src/lib/admin-table-columns.ts,
+ * in that order, each joined with the body supplied for its key. `bodies` must
+ * name exactly the registry's keys for `table`, so a column added to either
+ * side alone fails to typecheck rather than drifting. The table puts its
+ * `alwaysVisible` columns around the result itself.
+ */
+export function registryColumns<Row, T extends AdminTableName>(
+  table: T,
+  bodies: Record<AdminColumnKey<T>, ColumnBody<Row>>,
+): ColumnSpec<Row>[] {
+  const byKey = bodies as Record<string, ColumnBody<Row>>;
+  return adminTableColumns(table).map(({ key, label, defaultHidden }) => ({
+    ...byKey[key],
+    key,
+    header: label,
+    defaultHidden,
+  }));
 }

@@ -3275,12 +3275,15 @@ columns are keyed by, not something that belongs to the user-preferences half al
 **Editing the site default (`/site-settings`) needs column identity a client component's closures
 can't give a server component.** Each table's real `ColumnSpec<Row>[]` lives inside that table's
 own React component — JSX headers, hooks-dependent cells, closures over local state — and
-`/site-settings` is a server component rendering a page for a table it never opens. Rather than
-splitting "column identity" from "cell renderer" across all five tables (out of scope for this
-pass), `src/lib/admin-table-columns.ts` hand-duplicates the movable columns' `key`/`label`/
-`defaultHidden` as plain data, deliberately and explicitly commented as a duplication that must be
-kept in step by hand: **adding, removing or renaming a movable column means updating both places.**
-`codeDefaultColumns` there mirrors `defaultColumnKeys`'s one-line rule against that static shape.
+`/site-settings` is a server component rendering a page for a table it never opens. So "column
+identity" is split from "cell renderer": `src/lib/admin-table-columns.ts` declares every table's
+movable columns — `key`, header `label`, `defaultHidden` and order — as plain data, and is the only
+place they are declared. Each table builds its movable `ColumnSpec`s from it through
+`registryColumns` (`src/components/table/column-spec.ts`), supplying a body (sort key, cell, cell
+props) per key in a `Record` over that table's registry keys, so a column added on one side alone
+fails to typecheck. Both halves were once kept in step by hand, and six of eight tables drifted;
+a key spelled differently is a column a saved site default hides. `codeDefaultColumns` there
+applies `defaultColumnKeys`'s one-line rule to the same entries the tables are built from.
 
 `DefaultColumnsEditor` (`src/components/DefaultColumnsEditor.tsx`), the `/site-settings` control
 itself, edits visibility and order in one control, for the same reason `ColumnPicker` does:
@@ -3298,9 +3301,8 @@ meaningful position for a column that isn't shown.
 
 `/docs`' default view and default sort (`DEFAULT_SORT`, `docs-query.ts`) both pointed at
 `created`/`createdAt`. Swapped for `updatedAt`, in the same declared position `created` used to
-hold (`DocsTable.tsx`'s `ColumnSpec` list, and its mirror in `admin-table-columns.ts` — §16m's
-"adding, removing or renaming a movable column means updating both places" applies to swapping
-one's `defaultHidden`/position too) — `created` moved to where `updatedAt` used to sit, now
+hold (in `admin-table-columns.ts`, which owns each column's `defaultHidden` and position, §16m) —
+`created` moved to where `updatedAt` used to sit, now
 `defaultHidden`. Both were already sortable, already selected server-side, and already plain
 `Doc` columns (`created`/`updatedAt` both existed as `DocsSortKey`s and `ColumnSpec`s before this;
 nothing new was added, only which one is the default). Rationale: an admin landing on `/docs` is
@@ -3745,9 +3747,8 @@ All five (`isListedContributor`, `contributorBlurb`, `contributorOrder`, `orcid`
 join the users admin table as movable columns, all `defaultHidden: true` per §16m so no
 existing admin's table silently widens by five columns on deploy.
 
-That means **both** `UsersTable.tsx`'s `ColumnSpec[]` and `ADMIN_TABLE_COLUMNS.users` in
-`src/lib/admin-table-columns.ts` — the hand-duplication §16m documents and explicitly warns
-must be kept in step.
+Each is an entry in `ADMIN_TABLE_COLUMNS.users` (`src/lib/admin-table-columns.ts`) and a cell in
+`UsersTable.tsx`'s bodies, which the compiler holds together (§16m).
 
 **Four of the five sort; `contributorBlurb` does not, and that is the `image` column's
 precedent rather than a new exception.** `isListedContributor`, `contributorOrder`, `orcid`

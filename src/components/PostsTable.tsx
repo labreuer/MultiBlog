@@ -23,7 +23,13 @@ import { FilterHelp } from "@/components/table/FilterHelp";
 import { ColumnPicker } from "@/components/table/ColumnPicker";
 import { AuthorFilterPanel, type AuthorOption } from "@/components/table/AuthorFilterPanel";
 import { ColumnCells, ColumnHeaderRow } from "@/components/table/ColumnizedRows";
-import { resolveColumns, type ColumnSpec } from "@/components/table/column-spec";
+import {
+  registryColumns,
+  resolveColumns,
+  type ColumnBody,
+  type ColumnSpec,
+} from "@/components/table/column-spec";
+import type { AdminColumnKey } from "@/lib/admin-table-columns";
 import { saveTableColumns } from "@/app/actions/table-preferences";
 import {
   CellError,
@@ -166,10 +172,77 @@ export default function PostsTable({
     return () => observer.disconnect();
   }, []);
 
-  // Declared in the order they render by default; `?cols=` reorders and hides
-  // the movable ones from here (§16i). Built in the component body rather than
-  // at module scope so a cell stays an ordinary React expression closing over
-  // dateFormat, the selection and the pending state.
+  // What each movable column does, keyed by its entry in src/lib/admin-table-columns.ts, which
+  // owns its header, default visibility and order; `?cols=` reorders and hides them from there
+  // (§16i). Built in the component body rather than at module scope so a cell stays an ordinary
+  // React expression closing over dateFormat, the selection and the pending state.
+  const columnBodies: Record<AdminColumnKey<"posts">, ColumnBody<PostRow>> = {
+    title: {
+      sortKey: "title",
+      thRef: titleThRef,
+      cell: (row) => <Link href={`/post/${row.id}/edit`}>{row.title}</Link>,
+    },
+    authors: { sortKey: "authors", cell: (row) => row.authors },
+    published: {
+      sortKey: "published",
+      nowrap: true,
+      cell: (row) =>
+        row.status === "published" && row.publishedAt ? (
+          <Link href={postPath(row)}>{formatDate(row.publishedAt, dateFormat)}</Link>
+        ) : row.status === "scheduled" && row.publishedAt ? (
+          <span style={{ color: "var(--text-secondary)" }} title={`Scheduled: ${formatCountdown(row.publishedAt)}`}>
+            {formatDate(row.publishedAt, dateFormat)}
+          </span>
+        ) : (
+          ""
+        ),
+    },
+    comments: {
+      sortKey: "comments",
+      cell: (row) => (
+        <>
+          {row.approved}
+          {row.pending > 0 && (
+            <>
+              {" "}
+              <Link href={`/post/${row.id}/comments`}>({row.pending})</Link>
+            </>
+          )}
+        </>
+      ),
+    },
+    events: {
+      sortKey: "events",
+      cell: (row) => <Link href={`/post/${row.id}/history`}>{row.eventCount === 0 ? "none" : row.eventCount}</Link>,
+    },
+    editor: { sortKey: "editor", nowrap: true, cell: (row) => row.lastEditorName },
+    lastEdit: {
+      sortKey: "lastEdit",
+      nowrap: true,
+      cell: (row) => (row.lastEditAt ? formatDate(row.lastEditAt, dateFormat) : ""),
+    },
+    created: {
+      sortKey: "created",
+      nowrap: true,
+      cell: (row) => formatDate(row.createdAt, dateFormat),
+    },
+    // Defaulted hidden (§16l/§16i): real Post columns, available on request
+    // rather than cluttering the default view. slug is otherwise unused here
+    // (the Published link uses row.id); moderationPolicy is the raw column,
+    // distinct from the resolved policy other columns already imply;
+    // deletedAt is the timestamp behind the existing Deleted action column's
+    // boolean.
+    slug: { sortKey: "slug", cell: (row) => row.slug },
+    moderationPolicy: {
+      sortKey: "moderationPolicy",
+      cell: (row) => row.moderationPolicy,
+    },
+    deletedAt: {
+      sortKey: "deletedAt",
+      nowrap: true,
+      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
+    },
+  };
   const columns: ColumnSpec<PostRow>[] = [
     {
       key: "select",
@@ -184,89 +257,12 @@ export default function PostsTable({
         />
       ),
     },
-    {
-      key: "title",
-      header: "Title",
-      sortKey: "title",
-      thRef: titleThRef,
-      cell: (row) => <Link href={`/post/${row.id}/edit`}>{row.title}</Link>,
-    },
-    { key: "authors", header: "Author(s)", sortKey: "authors", cell: (row) => row.authors },
-    {
-      key: "published",
-      header: "Published",
-      sortKey: "published",
-      nowrap: true,
-      cell: (row) =>
-        row.status === "published" && row.publishedAt ? (
-          <Link href={postPath(row)}>{formatDate(row.publishedAt, dateFormat)}</Link>
-        ) : row.status === "scheduled" && row.publishedAt ? (
-          <span style={{ color: "var(--text-secondary)" }} title={`Scheduled: ${formatCountdown(row.publishedAt)}`}>
-            {formatDate(row.publishedAt, dateFormat)}
-          </span>
-        ) : (
-          ""
-        ),
-    },
-    {
-      key: "comments",
-      header: "Comments",
-      sortKey: "comments",
-      cell: (row) => (
-        <>
-          {row.approved}
-          {row.pending > 0 && (
-            <>
-              {" "}
-              <Link href={`/post/${row.id}/comments`}>({row.pending})</Link>
-            </>
-          )}
-        </>
-      ),
-    },
-    {
-      key: "events",
-      header: "History",
-      sortKey: "events",
-      cell: (row) => <Link href={`/post/${row.id}/history`}>{row.eventCount === 0 ? "none" : row.eventCount}</Link>,
-    },
-    { key: "editor", header: "Last edit by", sortKey: "editor", nowrap: true, cell: (row) => row.lastEditorName },
-    {
-      key: "lastEdit",
-      header: "Last edit at",
-      sortKey: "lastEdit",
-      nowrap: true,
-      cell: (row) => (row.lastEditAt ? formatDate(row.lastEditAt, dateFormat) : ""),
-    },
-    {
-      key: "created",
-      header: "Created at",
-      sortKey: "created",
-      nowrap: true,
-      cell: (row) => formatDate(row.createdAt, dateFormat),
-    },
-    // Defaulted hidden (§16l/§16i): real Post columns, available on request
-    // rather than cluttering the default view. slug is otherwise unused here
-    // (the Published link uses row.id); moderationPolicy is the raw column,
-    // distinct from the resolved policy other columns already imply;
-    // deletedAt is the timestamp behind the existing Deleted action column's
-    // boolean.
-    { key: "slug", header: "Slug", sortKey: "slug", defaultHidden: true, cell: (row) => row.slug },
-    {
-      key: "moderationPolicy",
-      header: "Moderation policy",
-      sortKey: "moderationPolicy",
-      defaultHidden: true,
-      cell: (row) => row.moderationPolicy,
-    },
-    {
-      key: "deletedAt",
-      header: "Deleted at",
-      sortKey: "deletedAt",
-      nowrap: true,
-      defaultHidden: true,
-      cell: (row) => (row.deletedAt ? formatDate(row.deletedAt, dateFormat) : ""),
-    },
+    // registryColumns only spreads each body into a ColumnSpec; it never dereferences `.current`.
+    // The lint is conservative about *any* function receiving a value that structurally contains a
+    // ref (here, the Title column's `thRef`), since it can't see inside a generic helper to confirm
+    // that. The ref itself only ever reaches a real `ref={...}` prop, via ColumnHeaderRow -> SortHeader.
+    // eslint-disable-next-line react-hooks/refs
+    ...registryColumns("posts", columnBodies),
     {
       key: "deleted",
       alwaysVisible: true,
@@ -277,11 +273,6 @@ export default function PostsTable({
       ),
     },
   ];
-  // resolveColumns only filters/reorders `columns` by `key`; it never dereferences `.current`.
-  // The lint is conservative about *any* function receiving a value that structurally contains a
-  // ref (here, the Title column's `thRef`), since it can't see inside a generic helper to confirm
-  // that. The ref itself only ever reaches a real `ref={...}` prop, via ColumnHeaderRow -> SortHeader.
-  // eslint-disable-next-line react-hooks/refs
   const visibleColumns = resolveColumns(columns, filters.cols);
 
   function handleDeleteToggle(row: PostRow) {
