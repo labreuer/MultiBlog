@@ -40,6 +40,7 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "length", label: "Length" },
     { key: "slug", label: "Slug", defaultHidden: true },
     { key: "created", label: "Created", defaultHidden: true },
+    { key: "createdBy", label: "Created by", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   files: [
@@ -51,6 +52,7 @@ export const ADMIN_TABLE_COLUMNS: Record<AdminTableName, ColumnMeta[]> = {
     { key: "size", label: "Size" },
     { key: "annotations", label: "Annotations" },
     { key: "created", label: "Added" },
+    { key: "createdBy", label: "Created by", defaultHidden: true },
     { key: "slug", label: "Slug", defaultHidden: true },
     { key: "updatedAt", label: "Updated", defaultHidden: true },
     { key: "updatedBy", label: "Updated by", defaultHidden: true },

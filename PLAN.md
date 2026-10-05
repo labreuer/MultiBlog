@@ -4369,7 +4369,8 @@ component) needs `canManageFiles` for the nav link.
 - `src/lib/files-query.ts` over [src/lib/table-query.ts](src/lib/table-query.ts), + a
   `FilesTable.tsx` built from `src/components/table/` — the kit, not a fresh `<table>`.
   Columns, all sortable: Title, Filename, Owner(s) (`file_metrics.owners`), Visibility, Pages,
-  Size, Annotations (`file_metrics.annotationCount`), Created, Updated, Updated by, Slug,
+  Size, Annotations (`file_metrics.annotationCount`), Created, Created by (the uploader,
+  `created_by_user_id`, default hidden), Updated, Updated by, Slug,
   Deleted at, Deleted. Slug/Created/Deleted default hidden, matching `/docs`.
 - Row scoping copies `docs/page.tsx`'s `authorScope` verbatim as `ownerScope`: own row in
   `file_owner` OR

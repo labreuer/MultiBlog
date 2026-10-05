@@ -32,16 +32,18 @@ import {
 //                would walk every doc in the table on every page load.
 //                Storing it makes that one walk per collab flush instead
 //                (PLAN.md §16l).
-// slug/created/deletedAt are plain Doc columns, defaulted hidden (§16l) —
-// available without cluttering the default view. updatedAt is shown (and
-// sorted) by default instead of created: "what changed recently" is a more
-// useful landing view for this table than "what was made first" (PLAN.md
-// admin-tables rework).
+// slug/created/createdBy/deletedAt are plain Doc columns, defaulted hidden
+// (§16l) — available without cluttering the default view. createdBy and
+// updatedBy sort through their to-one User relation by name, a plain FK
+// needing no view. updatedAt is shown (and sorted) by default instead of
+// created: "what changed recently" is a more useful landing view for this
+// table than "what was made first" (PLAN.md admin-tables rework).
 export type DocsSortKey =
   | "title"
   | "authors"
   | "visibility"
   | "created"
+  | "createdBy"
   | "length"
   | "annotations"
   | "slug"
@@ -54,6 +56,7 @@ const SORT_KEYS: readonly DocsSortKey[] = [
   "authors",
   "visibility",
   "created",
+  "createdBy",
   "length",
   "annotations",
   "slug",

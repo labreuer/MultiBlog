@@ -64,6 +64,8 @@ function buildOrderBy(sort: SortColumn<FilesSortKey>[]): Prisma.StoredFileOrderB
         return { byteSize: dir };
       case "created":
         return { createdAt: dir };
+      case "createdBy":
+        return { createdBy: { name: { sort: dir, nulls: "last" } } };
       case "slug":
         return { slug: dir };
       case "updatedAt":
@@ -155,6 +157,7 @@ export default async function FilesPage({
         metrics: { select: { owners: true, annotationCount: true } },
         // Ids only: canManage below is a membership test, not a display value.
         owners: { select: { userId: true } },
+        createdBy: { select: { name: true, email: true } },
         updatedBy: { select: { name: true, email: true } },
       },
     }),
@@ -174,6 +177,7 @@ export default async function FilesPage({
     // No view row at all means no owners and no annotations, so zero.
     annotationCount: file.metrics?.annotationCount ?? 0,
     createdAt: file.createdAt,
+    createdByName: file.createdBy ? staffDisplayNameOf(file.createdBy, session.user.role) : "",
     updatedAt: file.updatedAt,
     updatedByName: file.updatedBy ? staffDisplayNameOf(file.updatedBy, session.user.role) : "",
     deletedAt: file.deletedAt,

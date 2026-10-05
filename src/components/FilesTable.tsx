@@ -73,6 +73,8 @@ export type FileRow = {
   byteSize: number;
   annotationCount: number;
   createdAt: Date;
+  /** The uploader (StoredFile.createdBy), whether or not still an owner; blank when unknown. */
+  createdByName: string;
   updatedAt: Date;
   updatedByName: string;
   deletedAt: Date | null;
@@ -89,6 +91,7 @@ const SORTABLE_KEYS = [
   "size",
   "annotations",
   "created",
+  "createdBy",
   "slug",
   "updatedAt",
   "updatedBy",
@@ -228,6 +231,16 @@ export default function FilesTable({
       // arrived recently" is the useful landing view — the opposite of /docs,
       // where updatedAt leads because a doc's whole life is edits.
       cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
+    },
+    {
+      key: "createdBy",
+      header: "Created by",
+      sortKey: "createdBy",
+      nowrap: true,
+      // Beside Added, hidden by default (§16m). Owner(s) can drop the
+      // uploader; this can't (docs/PDF.md).
+      defaultHidden: true,
+      cell: (row) => row.createdByName,
     },
     { key: "slug", header: "Slug", sortKey: "slug", defaultHidden: true, cell: (row) => row.slug },
     {

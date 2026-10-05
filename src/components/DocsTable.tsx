@@ -52,6 +52,9 @@ export type DocRow = {
   authors: string;
   visibility: DocVisibility;
   createdAt: Date;
+  // Who made the doc (Doc.createdBy), resolved like updatedByName; blank when
+  // nothing names one (docs/DOCS.md "Who created a doc").
+  createdByName: string;
   updatedAt: Date;
   updatedByName: string;
   // Character count, read straight off Doc.proseJsonLength — a stored column
@@ -74,6 +77,7 @@ const SORTABLE_KEYS = [
   "authors",
   "visibility",
   "created",
+  "createdBy",
   "length",
   "annotations",
   "slug",
@@ -241,6 +245,17 @@ export default function DocsTable({
       nowrap: true,
       defaultHidden: true,
       cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm"),
+    },
+    {
+      key: "createdBy",
+      header: "Created by",
+      sortKey: "createdBy",
+      nowrap: true,
+      // Hidden by default beside Created, the timestamp it pairs with (§16m:
+      // a new column doesn't widen anyone's table unasked). Not the byline,
+      // which is seeded with the creator and then edited freely.
+      defaultHidden: true,
+      cell: (row) => row.createdByName,
     },
     {
       key: "deletedAt",

@@ -45,6 +45,8 @@ function buildOrderBy(sort: SortColumn<DocsSortKey>[]): Prisma.DocOrderByWithRel
         return { visibility: dir };
       case "created":
         return { createdAt: dir };
+      case "createdBy":
+        return { createdBy: { name: { sort: dir, nulls: "last" } } };
       case "length":
         // A plain column on doc, kept current by the doc_sync_prose_json_length
         // trigger — so this is an ordinary column sort with no view, no join
@@ -162,7 +164,8 @@ export default async function DocsPage({
         authors: { select: { userId: true } },
         // A raw updated_by_user_id would be a bare cuid on screen; resolved to
         // the same name-or-email fallback /comments' Changed by and
-        // /annotations' Author already use.
+        // /annotations' Author already use. createdBy the same way.
+        createdBy: { select: { name: true, email: true } },
         updatedBy: { select: { name: true, email: true } },
       },
     }),
@@ -185,6 +188,7 @@ export default async function DocsPage({
     annotationCount: doc.metrics?.annotationCount ?? 0,
     visibility: doc.visibility,
     createdAt: doc.createdAt,
+    createdByName: doc.createdBy ? staffDisplayNameOf(doc.createdBy, session.user.role) : "",
     updatedAt: doc.updatedAt,
     updatedByName: doc.updatedBy ? staffDisplayNameOf(doc.updatedBy, session.user.role) : "",
     length: doc.proseJsonLength,

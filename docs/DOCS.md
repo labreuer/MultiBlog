@@ -466,7 +466,10 @@ One instance of the admin-table kit (PLAN.md §16): a `docs-query.ts` over
 and applied in Postgres. The Title column links to the reading view; a separate Edit column
 links to the editor only when this viewer may edit that row ("Routes"). The Length column is
 the stored, trigger-maintained `prose_json_length`, because a view has no `WHERE` to push
-down when sorted through (CLAUDE.md). The importer and the paste box are DOC_IMPORT.md.
+down when sorted through (CLAUDE.md). Created by is `created_by_user_id` ("Who created a
+doc"), hidden by default beside Created and sorted by the creator's name, as Updated by is;
+`/files` has the same column for its uploader. The importer and the paste box are
+DOC_IMPORT.md.
 
 ## Annotations on a doc
 
