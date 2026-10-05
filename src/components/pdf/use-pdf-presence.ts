@@ -17,6 +17,7 @@ import {
 } from "@/lib/pdf-presence";
 import type { Quad } from "@/lib/pdf-anchor";
 import type { PdfViewerHandle } from "./PdfViewer";
+import { displayNameOf } from "@/lib/display-name";
 
 // PLAN.md §19 Phase 4 — the presence connection for one PDF, and the follow
 // mechanics on top of it.
@@ -114,7 +115,7 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
       const initial: PdfPresence = {
         user: {
           id: session.user.id,
-          name: session.user.name ?? session.user.email ?? "Someone",
+          name: displayNameOf(session.user),
           color: session.user.color,
         },
         viewport: null,

@@ -13,6 +13,7 @@ import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import FilesTable from "@/components/FilesTable";
 import FileUploader from "@/components/FileUploader";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Files" };
 
@@ -101,7 +102,7 @@ export default async function FilesPage({
 
   const [prefs, ownerOptions] = await Promise.all([
     getTablePrefs(session.user.id, "files"),
-    listOwnerFilterOptions(session.user.id),
+    listOwnerFilterOptions(session.user.id, session.user.role),
   ]);
   const filters = parseFilesFilters(
     urlSearchParams,
@@ -174,7 +175,7 @@ export default async function FilesPage({
     annotationCount: file.metrics?.annotationCount ?? 0,
     createdAt: file.createdAt,
     updatedAt: file.updatedAt,
-    updatedByName: file.updatedBy ? (file.updatedBy.name ?? file.updatedBy.email) : "",
+    updatedByName: file.updatedBy ? staffDisplayNameOf(file.updatedBy, session.user.role) : "",
     deletedAt: file.deletedAt,
     deleted: file.deletedByUserId !== null,
     // canUserManageFile's rule inlined, decided here rather than per row

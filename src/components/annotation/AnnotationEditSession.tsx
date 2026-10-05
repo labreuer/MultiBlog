@@ -7,6 +7,7 @@ import { useAnnotationProvider } from "./use-annotation-provider";
 import { cancelAnnotationEdit, finishAnnotationEdit } from "@/app/actions/annotations";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import styles from "./AnnotationNode.module.css";
+import { displayNameOf } from "@/lib/display-name";
 
 type Props = {
   annotationId: string;
@@ -87,7 +88,7 @@ export default function AnnotationEditSession({ annotationId, connection, onFini
         provider={provider}
         ydoc={ydoc}
         userId={session.user.id}
-        userName={session.user.name ?? session.user.email ?? "Anonymous"}
+        userName={displayNameOf(session.user)}
         userColor={session.user.color}
         editable
       />

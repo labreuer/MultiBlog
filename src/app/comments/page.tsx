@@ -11,6 +11,7 @@ import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import CommentsTable from "@/components/CommentsTable";
 import styles from "./page.module.css";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Comments" };
 
@@ -181,7 +182,7 @@ export default async function CommentsPage({
       createdAt: comment.createdAt,
       statusChangedAt: comment.statusChangedAt,
       ipAddress: comment.ipAddress,
-      statusChangedByName: comment.statusChangedBy ? (comment.statusChangedBy.name ?? comment.statusChangedBy.email) : "",
+      statusChangedByName: comment.statusChangedBy ? staffDisplayNameOf(comment.statusChangedBy, session.user.role) : "",
       editedAt: comment.editedAt,
       deletedAt: comment.deletedAt,
       deleted: comment.deletedByUserId !== null,

@@ -366,8 +366,9 @@ can read, or who wrote an annotation they can read, found through those kinds' r
 
 - **Labels are names**, the way public bylines show them. `AuthorByline` leaves out users who
   have no name, and so does the picker.
-- **Never an email.** The admin tables label users with `name ?? email`
-  ([author-filter.ts](../src/lib/author-filter.ts)), and a signed-out reader must never see that.
+- **Never an email.** The admin tables fall back to a nameless account's email for an ADMIN
+  alone (`staffDisplayNameOf`, [display-name.ts](../src/lib/display-name.ts)), and a search
+  reader must never see that.
 - **Slugs in the URL** are checked against this list, the way `/docs` checks its own.
 - **Comments and PDFs take no author.** A comment's name is fixed when its commenter row is
   made, so filtering by an account would tie an old name to a renamed one. A PDF has owners

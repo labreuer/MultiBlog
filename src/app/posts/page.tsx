@@ -104,7 +104,7 @@ export default async function PostsPage({
   // fetching it costs no extra latency in series.
   const [prefs, authorOptions] = await Promise.all([
     getTablePrefs(session.user.id, "posts"),
-    listAuthorFilterOptions(session.user.id),
+    listAuthorFilterOptions(session.user.id, session.user.role),
   ]);
   const filters = parsePostsFilters(
     urlSearchParams,

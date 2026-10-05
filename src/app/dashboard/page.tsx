@@ -16,6 +16,7 @@ import styles from "./page.module.css";
 import account from "@/styles/account.module.css";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { signInPath } from "@/lib/sign-in-redirect";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -75,7 +76,7 @@ export default async function DashboardPage() {
           select: { id: true, name: true, email: true, adminInitials: true, color: true },
         })
       )
-        .map((u) => ({ ...u, label: u.name ?? u.email }))
+        .map((u) => ({ ...u, label: staffDisplayNameOf(u, session.user.role) }))
         .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }))
     : null;
 

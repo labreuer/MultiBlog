@@ -11,8 +11,8 @@ import styles from "./DocSettingsPanel.module.css";
 
 export type EligibleUser = {
   id: string;
-  name: string | null;
-  email: string;
+  /** What the byline picker shows: staffDisplayNameOf, decided on the server. */
+  label: string;
   role: Role;
 };
 
@@ -203,7 +203,7 @@ export default function DocSettingsPanel({
                     disabled={pending || deleted}
                     onChange={(e) => handleAuthorToggle(userId, e.target.checked)}
                   />
-                  {user.name ?? user.email} <span className={styles.roleTag}>({user.role})</span>
+                  {user.label} <span className={styles.roleTag}>({user.role})</span>
                 </label>
               );
             })}

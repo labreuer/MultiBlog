@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { signInPath } from "@/lib/sign-in-redirect";
 import YdocDebug from "@/components/YdocDebug";
+import { displayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Ydoc debug" };
 
@@ -40,7 +41,7 @@ export default async function YdocDebugPage() {
         updatedAt: doc.updatedAt.toISOString(),
       }))}
       userId={session.user.id}
-      userName={session.user.name ?? session.user.email ?? "Anonymous"}
+      userName={displayNameOf(session.user)}
       userColor={session.user.color}
       userInitials={session.user.adminInitials}
     />

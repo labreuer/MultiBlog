@@ -11,6 +11,7 @@ import { parseTagsFilters, type TagsFilters, type TagsSortKey } from "@/lib/tags
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import TagsTable from "@/components/TagsTable";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Tags" };
 
@@ -164,7 +165,7 @@ export default async function TagsPage({
     fileCount: tag.metrics?.fileCount ?? 0,
     annotationCount: tag.metrics?.annotationCount ?? 0,
     lastUsedAt: tag.metrics?.lastUsedAt ?? null,
-    createdByName: tag.createdBy.name ?? tag.createdBy.email,
+    createdByName: staffDisplayNameOf(tag.createdBy, session.user.role),
     createdAt: tag.createdAt,
     deletedAt: tag.deletedAt,
     deleted: tag.deletedByUserId !== null,

@@ -16,6 +16,7 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import DocsTable from "@/components/DocsTable";
 import DocImportButton from "@/components/DocImportButton";
 import styles from "./page.module.css";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Docs" };
 
@@ -99,7 +100,7 @@ export default async function DocsPage({
   // fetching it costs no extra latency in series.
   const [prefs, authorOptions] = await Promise.all([
     getTablePrefs(session.user.id, "docs"),
-    listAuthorFilterOptions(session.user.id),
+    listAuthorFilterOptions(session.user.id, session.user.role),
   ]);
   const filters = parseDocsFilters(
     urlSearchParams,
@@ -185,7 +186,7 @@ export default async function DocsPage({
     visibility: doc.visibility,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
-    updatedByName: doc.updatedBy ? (doc.updatedBy.name ?? doc.updatedBy.email) : "",
+    updatedByName: doc.updatedBy ? staffDisplayNameOf(doc.updatedBy, session.user.role) : "",
     length: doc.proseJsonLength,
     deletedAt: doc.deletedAt,
     deleted: doc.deletedByUserId !== null,

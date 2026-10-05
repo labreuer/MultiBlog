@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
 import { signInPath } from "@/lib/sign-in-redirect";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "History" };
 
@@ -64,7 +65,7 @@ export default async function PostHistoryPage({ params }: { params: Promise<{ id
               {event.id === post.publishEventId && <strong style={{ color: "var(--success)" }}>(current)</strong>}
               <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
                 {event.createdAt.toLocaleString()} by{" "}
-                {event.actor?.name ?? event.actor?.email ?? "system"}
+                {event.actor ? staffDisplayNameOf(event.actor, session.user.role) : "system"}
                 {event.doc && ` — from doc “${event.doc.title || "Untitled"}”`}
                 {event.scheduledFor && ` — scheduled for ${event.scheduledFor.toLocaleString()}`}
               </div>

@@ -13,6 +13,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
 import PostPublisher from "@/components/PostPublisher";
 import TagChips from "@/components/tags/TagChips";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 // prismaIncludingDeleted rather than the soft-delete-filtered prisma — a
 // soft-deleted post must still load here so its Settings panel can offer
@@ -78,7 +79,7 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     where: { role: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
     select: { id: true, name: true, email: true, role: true },
     orderBy: { name: "asc" },
-  });
+  }).then((users) => users.map((u) => ({ id: u.id, role: u.role, label: staffDisplayNameOf(u, user.role) })));
 
   // PLAN.md §15d — "Change doc…" only ever offers a doc this user could
   // actually publish from. **The post's own doc need not be in it**: a

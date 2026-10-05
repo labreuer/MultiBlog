@@ -14,6 +14,7 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import AnnotationsTable, { type AnnotationRow } from "@/components/AnnotationsTable";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Annotations" };
 
@@ -34,7 +35,10 @@ function parseDeepLinkWhere(searchParams: URLSearchParams): Prisma.AnnotationWhe
   return where;
 }
 
-function buildFilterWhere(filters: ReturnType<typeof parseAnnotationsFilters>): Prisma.AnnotationWhereInput {
+function buildFilterWhere(
+  filters: ReturnType<typeof parseAnnotationsFilters>,
+  viewerIsAdmin: boolean,
+): Prisma.AnnotationWhereInput {
   const where: Prisma.AnnotationWhereInput = {};
   if (!filters.deleted) where.deletedByUserId = null;
   if (filters.q) {
@@ -45,7 +49,10 @@ function buildFilterWhere(filters: ReturnType<typeof parseAnnotationsFilters>): 
       // exactly as searching a doc's does.
       { file: { title: { contains: filters.q, mode: "insensitive" } } },
       { user: { name: { contains: filters.q, mode: "insensitive" } } },
-      { user: { email: { contains: filters.q, mode: "insensitive" } } },
+      // An email matches only for an ADMIN, the one viewer the table shows
+      // emails to (staffDisplayNameOf); for anyone else it would confirm an
+      // address the page never displays.
+      ...(viewerIsAdmin ? [{ user: { email: { contains: filters.q, mode: "insensitive" as const } } }] : []),
     ];
   }
   return where;
@@ -155,7 +162,7 @@ export default async function AnnotationsPage({
   const baseWhere: Prisma.AnnotationWhereInput = {
     AND: [readable ?? { id: { in: [] } }, parseDeepLinkWhere(urlSearchParams)],
   };
-  const where: Prisma.AnnotationWhereInput = { AND: [baseWhere, buildFilterWhere(filters)] };
+  const where: Prisma.AnnotationWhereInput = { AND: [baseWhere, buildFilterWhere(filters, session.user.role === "ADMIN")] };
   const orderBy = buildOrderBy(filters.sort);
 
   const [annotations, totalCount] = await Promise.all([
@@ -225,7 +232,7 @@ export default async function AnnotationsPage({
       docId: a.container.id,
       docSlug: a.container.slug,
       docTitle: a.container.title,
-      authorName: a.user.name ?? a.user.email,
+      authorName: staffDisplayNameOf(a.user, session.user.role),
       bodyText: a.bodyText,
       // Stored first, since a row that has one was never marked and looking
       // for its mark would always come up empty. A reply can have one now

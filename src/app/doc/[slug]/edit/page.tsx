@@ -13,6 +13,8 @@ import { DocPresenceProvider } from "@/components/annotation/doc-presence-contex
 import DocEditor from "@/components/DocEditor";
 import { docEditorTabTitle } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
+import { displayNameOf } from "@/lib/display-name";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 // resolveDocParam rather than a direct query — the id-or-slug ambiguity this
 // route shares with /doc/[slug] and /doc/[slug]/slug (PLAN.md §12f). No
@@ -82,7 +84,9 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
       where: { role: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: "asc" },
-    }),
+    }).then((users) =>
+      users.map((u) => ({ id: u.id, role: u.role, label: staffDisplayNameOf(u, user.role) })),
+    ),
     getDocAnnotationsAsThreads(doc.id),
   ]);
 
@@ -112,7 +116,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
             visibility={doc.visibility}
             createdAt={doc.createdAt}
             userId={user.id}
-            userName={user.name ?? user.email ?? "Anonymous"}
+            userName={displayNameOf(user)}
             userColor={user.color}
             userInitials={user.adminInitials}
             authorIds={doc.authors.map((a) => a.userId)}

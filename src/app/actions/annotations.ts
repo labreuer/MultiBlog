@@ -42,6 +42,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
+import { displayNameOf } from "@/lib/display-name";
 
 const MAX_BODY_LENGTH = 5000;
 
@@ -443,7 +444,7 @@ export async function postAnnotation(opts: {
       settled,
       rawTarget: opts.pdfTarget,
       raise: opts.raise === true,
-      raisedBy: session.user.name ?? session.user.email ?? "Someone",
+      raisedBy: displayNameOf(session.user),
       authorUserId: session.user.id,
       // A reply anchors into its parent's *body*, exactly as on the doc side
       // (§13p) — that mechanism is container-independent, because an
@@ -648,7 +649,7 @@ export async function postAnnotation(opts: {
       select: { title: true, slug: true, authors: { select: { user: { select: { email: true } } } } },
     });
     if (doc) {
-      const raisedBy = session.user.name ?? session.user.email ?? "Someone";
+      const raisedBy = displayNameOf(session.user);
       const subject = `${raisedBy} raised an annotation on "${docTitleOrFallback(doc.title)}"`;
       const text = `${bodyText}\n\n${appUrl(`/doc/${doc.slug}`)}`;
       // One recipient per byline author, not a single multi-recipient
@@ -978,7 +979,7 @@ export async function getAnnotationHistory(annotationId: string): Promise<Annota
         proseJson: body.proseJson,
         bodyText: body.bodyText,
         createdAt: version.createdAt.toISOString(),
-        authorName: version.user ? (version.user.name ?? version.user.email) : null,
+        authorName: version.user ? displayNameOf(version.user) : null,
         current: version.revisionNo === newestNo,
       };
     })
