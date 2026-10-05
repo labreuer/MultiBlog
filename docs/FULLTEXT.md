@@ -438,6 +438,9 @@ for the same reason `LocalTime` exists: the server's time zone isn't the reader'
   is laid out, and again on `hashchange`.
 - **Each fragment is built by one shared function** that the card uses too, so a link can't
   miss its card.
+- **An annotation's writer is a name, never an email.** `displayNameOf`
+  ([display-name.ts](../src/lib/display-name.ts)) labels an account with no name "Anonymous",
+  on the hit and on the card alike, so the fragment built from it still matches.
 - **A doc hit doesn't land on its passage.** A text fragment (`#:~:text=`) would highlight the
   static first render, which the live editor then replaces (DOCS.md, "The reading view"), so it
   isn't reliable here. Landing on a passage is option B's job.

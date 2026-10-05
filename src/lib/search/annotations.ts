@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { readableAnnotationsWhere } from "@/lib/annotation-authz";
 import { visibleAnnotationEditDates } from "@/lib/annotation-data";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
+import { displayNameOf } from "@/lib/display-name";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { extractMarkedText } from "@/lib/tiptap-schema";
 import { isWithin } from "./dates";
@@ -90,7 +91,7 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
           postedAt: true,
           anchorFrom: true,
           quotedText: true,
-          user: { select: { name: true, email: true } },
+          user: { select: { name: true } },
           doc: { select: { id: true, slug: true, title: true } },
           file: { select: { slug: true, title: true } },
         },
@@ -129,7 +130,7 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
       if (!container) return [];
       // The name its card shows, which is also what the card's permalink id
       // is built from — so the link lands on the card.
-      const writer = row.user.name ?? row.user.email;
+      const writer = displayNameOf(row.user);
       return [
         {
           id,

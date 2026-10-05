@@ -5,6 +5,7 @@ import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { isVersionQuoted, isVisiblyEdited, STALE_EDIT_SESSION_MS, withSupersededAt } from "@/lib/edit-grace";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { postedAnnotationWhere } from "@/lib/annotation-authz";
+import { displayNameOf } from "@/lib/display-name";
 
 // PLAN.md §13c — the doc-side view-model, un-shared from comment-data.ts's
 // ThreadWithComments (§12i's original decision) now that an annotation body
@@ -129,7 +130,7 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
       where: { docId, ...postedAnnotationWhere() },
       orderBy: { createdAt: "asc" },
       include: {
-        user: { select: { name: true, email: true, color: true } },
+        user: { select: { name: true, color: true } },
       },
     }),
   ]);
@@ -234,7 +235,7 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
     where: { fileId, ...postedAnnotationWhere() },
     orderBy: { createdAt: "asc" },
     include: {
-      user: { select: { name: true, email: true, color: true } },
+      user: { select: { name: true, color: true } },
     },
   });
   const versions = await versionContextFor(annotations, annotations);
@@ -289,7 +290,7 @@ type AnnotationRow = {
   editingSince?: Date | null;
   // PLAN.md §22e — the DRAFT -> LIVE moment, where the grace window starts.
   postedAt?: Date | null;
-  user: { name: string | null; email: string; color: string };
+  user: { name: string | null; color: string };
 };
 
 /** editState's first answer on its own: whether the card shows an "edited" marker. */
@@ -439,7 +440,7 @@ function toComment(a: AnnotationRow, context: VersionContext): AnnotationComment
   return {
     id: a.id,
     parentAnnotationId: a.parentAnnotationId,
-    displayName: a.user.name ?? a.user.email,
+    displayName: displayNameOf(a.user),
     bodyText: a.bodyText,
     proseJson: a.proseJson as JSONContent | null,
     createdAt: a.createdAt.toISOString(),
