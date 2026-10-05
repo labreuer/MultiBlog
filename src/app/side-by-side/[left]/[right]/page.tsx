@@ -16,6 +16,7 @@ import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-que
 import { signInPath } from "@/lib/sign-in-redirect";
 import SideBySideView from "@/components/sidebyside/SideBySideView";
 import styles from "./page.module.css";
+import { displayNameOf } from "@/lib/display-name";
 
 // PLAN.md §14c — two path segments, not one `[left]+[right]` segment: Next
 // percent-encodes string params before user code sees them
@@ -165,7 +166,7 @@ export default async function SideBySidePage({
         initialGroups={groups}
         initialOtherDocLinksCount={otherDocLinksCount}
         userId={user.id}
-        userName={user.name ?? user.email ?? "Anonymous"}
+        userName={displayNameOf(user)}
         userColor={user.color}
         userInitials={user.adminInitials}
       />

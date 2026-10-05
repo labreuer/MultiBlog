@@ -366,8 +366,9 @@ can read, or who wrote an annotation they can read, found through those kinds' r
 
 - **Labels are names**, the way public bylines show them. `AuthorByline` leaves out users who
   have no name, and so does the picker.
-- **Never an email.** The admin tables label users with `name ?? email`
-  ([author-filter.ts](../src/lib/author-filter.ts)), and a signed-out reader must never see that.
+- **Never an email.** The admin tables fall back to a nameless account's email for an ADMIN
+  alone (`staffDisplayNameOf`, [display-name.ts](../src/lib/display-name.ts)), and a search
+  reader must never see that.
 - **Slugs in the URL** are checked against this list, the way `/docs` checks its own.
 - **Comments and PDFs take no author.** A comment's name is fixed when its commenter row is
   made, so filtering by an account would tie an old name to a renamed one. A PDF has owners
@@ -438,6 +439,9 @@ for the same reason `LocalTime` exists: the server's time zone isn't the reader'
   is laid out, and again on `hashchange`.
 - **Each fragment is built by one shared function** that the card uses too, so a link can't
   miss its card.
+- **An annotation's writer is a name, never an email.** `displayNameOf`
+  ([display-name.ts](../src/lib/display-name.ts)) labels an account with no name "Anonymous",
+  on the hit and on the card alike, so the fragment built from it still matches.
 - **A doc hit doesn't land on its passage.** A text fragment (`#:~:text=`) would highlight the
   static first render, which the live editor then replaces (DOCS.md, "The reading view"), so it
   isn't reliable here. Landing on a passage is option B's job.

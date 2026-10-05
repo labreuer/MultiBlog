@@ -15,6 +15,8 @@ import { toAuthorOptions, type AuthorOption } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import LinksTable, { type LinkRow, type LinkRowTarget } from "@/components/LinksTable";
+import type { Role } from "@/generated/prisma/enums";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Links" };
 
@@ -111,6 +113,7 @@ function parseDeepLinkWhere(searchParams: URLSearchParams): Prisma.AnchoredLinkW
 async function listCreatorFilterOptions(
   viewerScope: Prisma.AnchoredLinkWhereInput,
   viewerId: string,
+  viewerRole: Role,
 ): Promise<AuthorOption[]> {
   const creators = await prisma.anchoredLink.groupBy({ by: ["createdById"], where: viewerScope });
   if (creators.length === 0) return [];
@@ -118,7 +121,7 @@ async function listCreatorFilterOptions(
     where: { id: { in: creators.map((c) => c.createdById) } },
     select: { id: true, slug: true, name: true, email: true },
   });
-  return toAuthorOptions(users, viewerId);
+  return toAuthorOptions(users, viewerId, viewerRole);
 }
 
 function buildFilterWhere(
@@ -228,7 +231,7 @@ export default async function LinksPage({
   // dropdown of the person it was narrowed to.
   const [prefs, ownerOptions] = await Promise.all([
     getTablePrefs(viewer.id, "links"),
-    listCreatorFilterOptions(viewerScope, viewer.id),
+    listCreatorFilterOptions(viewerScope, viewer.id, viewer.role),
   ]);
   const filters = parseLinksFilters(
     urlSearchParams,
@@ -327,7 +330,7 @@ export default async function LinksPage({
     return {
       id: link.id,
       name: link.name,
-      createdByName: link.createdBy.name ?? link.createdBy.email,
+      createdByName: staffDisplayNameOf(link.createdBy, viewer.role),
       createdAt: link.createdAt,
       mintedAt: link.mintedAt,
       reopened: link.reopenedAt !== null,

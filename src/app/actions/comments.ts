@@ -28,6 +28,7 @@ import { canQuoteTargetInto } from "@/lib/comment-quote-authz";
 import { search } from "@/lib/search";
 import { parseSearchParams } from "@/lib/search/params";
 import { headlineText } from "@/lib/search/headline";
+import { displayNameOf } from "@/lib/display-name";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -71,7 +72,7 @@ export async function submitComment(
     }
     userId = session.user.id;
     email = session.user.email;
-    displayName = session.user.name ?? session.user.email;
+    displayName = displayNameOf(session.user);
   } else {
     const name = formData.get("name");
     const rawEmail = formData.get("email");
@@ -584,7 +585,7 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
       body: revision.body as JSONContent,
       bodyText: commentBodyTextFromJSON(revision.body),
       createdAt: revision.createdAt.toISOString(),
-      authorName: revision.author?.name ?? revision.author?.email ?? null,
+      authorName: revision.author ? displayNameOf(revision.author) : null,
       current: revision.revisionNo === newestNo,
     }))
     .reverse();

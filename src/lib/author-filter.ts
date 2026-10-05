@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import type { AuthorMode } from "@/lib/table-query";
+import type { Role } from "@/generated/prisma/enums";
+import { staffDisplayNameOf } from "@/lib/display-name";
 
 // The /docs and /posts "Authors" filter (PLAN.md §16) — a checkbox panel of
 // eligible authors plus a combining mode, both mirrored into the querystring
@@ -23,17 +25,17 @@ export type AuthorOption = { slug: string; label: string };
 // slug degrades to "unknown, drop it" the same way a renamed slug does
 // (parseSlugListParam, table-query.ts).
 //
-// Sorted in JS, not via Prisma `orderBy`: the sort key is `name ?? email`,
+// Sorted in JS, not via Prisma `orderBy`: the sort key is the shown label,
 // which orderBy can't express — `[{name:"asc"},{email:"asc"}]` puts every
 // named user before every unnamed one instead of interleaving them. The list
 // is small and read once per page load, so there's no cost argument for
 // pushing this into SQL the way there is for a real column sort (CLAUDE.md).
-export async function listAuthorFilterOptions(viewerId: string): Promise<AuthorOption[]> {
+export async function listAuthorFilterOptions(viewerId: string, viewerRole: Role): Promise<AuthorOption[]> {
   const users = await prisma.user.findMany({
     where: { role: { in: BYLINE_ELIGIBLE_ROLES } },
     select: { id: true, slug: true, name: true, email: true },
   });
-  return toAuthorOptions(users, viewerId);
+  return toAuthorOptions(users, viewerId, viewerRole);
 }
 
 /** The shape every person-filter option list is built from — what `listAuthorFilterOptions` selects. */
@@ -44,15 +46,20 @@ export type AuthorOptionUser = { id: string; slug: string; name: string | null; 
 // not "every eligible user" — /links, whose creators have no role floor and
 // so are listed from its own rows (src/app/links/page.tsx) — still reads the
 // same as /docs' and /files' panels without a second copy of this.
-export function toAuthorOptions(users: readonly AuthorOptionUser[], viewerId: string): AuthorOption[] {
+export function toAuthorOptions(
+  users: readonly AuthorOptionUser[],
+  viewerId: string,
+  viewerRole: Role,
+): AuthorOption[] {
   return users
     .map((u) => ({
       slug: u.slug,
-      // The same name-or-email fallback /docs' "Updated by" and /comments'
-      // "Changed by" already use, so one person reads the same way
-      // everywhere in the admin UI. "(me)" is appended before sorting so the
-      // label that gets ordered is the label that's shown.
-      label: `${u.name ?? u.email}${u.id === viewerId ? " (me)" : ""}`,
+      // The same label /docs' "Updated by" and /comments' "Changed by" use
+      // (staffDisplayNameOf: a nameless account's email for an ADMIN only), so
+      // one person reads the same way everywhere in the admin UI. "(me)" is
+      // appended before sorting so the label that gets ordered is the label
+      // that's shown.
+      label: `${staffDisplayNameOf(u, viewerRole)}${u.id === viewerId ? " (me)" : ""}`,
     }))
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
 }

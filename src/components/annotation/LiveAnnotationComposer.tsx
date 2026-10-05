@@ -10,6 +10,7 @@ import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/a
 import type { AnnotationTarget } from "@/lib/annotation-container";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import styles from "./AnnotationComposer.module.css";
+import { displayNameOf } from "@/lib/display-name";
 
 type Props = {
   annotationId: string;
@@ -122,7 +123,7 @@ export default function LiveAnnotationComposer({
   const [visibility, setVisibility] = useState<Visibility>("post");
 
   const userId = session?.user?.id;
-  const userDisplayName = session?.user?.name ?? session?.user?.email ?? "Someone";
+  const userDisplayName = session?.user ? displayNameOf(session.user) : "Someone";
   const userColor = session?.user?.color;
 
   // PLAN.md §13i — publishes "someone is writing an annotation" onto the
@@ -214,7 +215,7 @@ export default function LiveAnnotationComposer({
         provider={provider}
         ydoc={ydoc}
         userId={session.user.id}
-        userName={session.user.name ?? session.user.email ?? "Anonymous"}
+        userName={displayNameOf(session.user)}
         userColor={session.user.color}
         editable={readOnly !== true}
       />

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { displayNameOf } from "@/lib/display-name";
 
 // Looks up display name + color for a set of user ids — used to render
 // author-highlight marks (which only store an authorId) and collab carets.
@@ -18,12 +19,12 @@ export async function GET(request: Request) {
 
   const users = await prisma.user.findMany({
     where: { id: { in: ids } },
-    select: { id: true, name: true, email: true, color: true },
+    select: { id: true, name: true, color: true },
   });
 
   const result: Record<string, { name: string; color: string }> = {};
   for (const user of users) {
-    result[user.id] = { name: user.name ?? user.email, color: user.color };
+    result[user.id] = { name: displayNameOf(user), color: user.color };
   }
   return NextResponse.json(result);
 }

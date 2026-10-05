@@ -14,6 +14,7 @@ import {
 import { useCommentDraft } from "@/lib/use-comment-draft";
 import CommentBodyInput from "./CommentBodyInput";
 import styles from "./CommentForm.module.css";
+import { displayNameOf } from "@/lib/display-name";
 
 const initialState: SubmitCommentState = {};
 
@@ -59,7 +60,7 @@ export default function CommentForm(props: Props) {
   // and the button waits with them.
   const { data: session, status } = useSession();
   const identityKnown = status !== "loading";
-  const userName = session?.user ? (session.user.name ?? session.user.email ?? null) : null;
+  const userName = session?.user ? displayNameOf(session.user) : null;
   const [state, formAction, pending] = useActionState(submitComment, initialState);
 
   // The remembered mode lives in localStorage, which SSR cannot read, and a
