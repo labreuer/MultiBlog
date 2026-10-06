@@ -6,8 +6,13 @@ import { canUserReadDoc } from "@/lib/doc-authz";
 import { isAdmin } from "@/lib/authz";
 import { SAFE_COLOR } from "@/lib/safe-css";
 import type { DocLinkMark } from "@/lib/doc-link-anchor";
-
-const MAX_TEXT_LENGTH = 2000;
+import {
+  MAX_DOC_LINK_TEXT_LENGTH as MAX_TEXT_LENGTH,
+  parseDocLinkEdit,
+  parseDocLinkGroupEdit,
+  type DocLinkEdit,
+  type DocLinkGroupEdit,
+} from "@/lib/doc-link-edit";
 
 // PLAN.md §14i — creating a link requires only canUserReadDoc: a doc link
 // never mutates the document, so the same rule an annotation's composer
@@ -96,19 +101,16 @@ async function requireOwnOrAdminLink(linkId: string) {
 }
 
 // Debounced from the caller (§14i's "debounce-save once already saved at
-// least once") — this action itself always writes immediately.
-export async function updateDocLink(
-  linkId: string,
-  data: { text?: string | null; overrideColor?: string | null },
-): Promise<{ error?: string }> {
+// least once") — this action itself always writes immediately. `data` goes
+// through parseDocLinkEdit, never straight to Prisma: the parameter type is
+// no guarantee of what a server action is sent (src/lib/doc-link-edit.ts).
+export async function updateDocLink(linkId: string, data: DocLinkEdit): Promise<{ error?: string }> {
   await requireOwnOrAdminLink(linkId);
-  if (data.overrideColor && !SAFE_COLOR.test(data.overrideColor)) {
-    return { error: "Invalid color." };
+  const edit = parseDocLinkEdit(data);
+  if ("error" in edit) {
+    return { error: edit.error };
   }
-  if (data.text && data.text.length > MAX_TEXT_LENGTH) {
-    return { error: "Text is too long." };
-  }
-  await prisma.docLink.update({ where: { id: linkId }, data });
+  await prisma.docLink.update({ where: { id: linkId }, data: edit.data });
   return {};
 }
 
@@ -166,19 +168,15 @@ async function requireOwnOrAdminGroup(groupId: string) {
 
 // Owner-or-admin (§14i, matching requireOwnOrAdmin) — a shared group's
 // override_color can recolor every contributor's links in it, so editing
-// it is more consequential than creating a link inside one.
-export async function updateDocLinkGroup(
-  groupId: string,
-  data: { name?: string | null; text?: string | null; overrideColor?: string | null },
-): Promise<{ error?: string }> {
+// it is more consequential than creating a link inside one. `data` goes
+// through parseDocLinkGroupEdit for updateDocLink's reason.
+export async function updateDocLinkGroup(groupId: string, data: DocLinkGroupEdit): Promise<{ error?: string }> {
   await requireOwnOrAdminGroup(groupId);
-  if (data.overrideColor && !SAFE_COLOR.test(data.overrideColor)) {
-    return { error: "Invalid color." };
+  const edit = parseDocLinkGroupEdit(data);
+  if ("error" in edit) {
+    return { error: edit.error };
   }
-  if (data.text && data.text.length > MAX_TEXT_LENGTH) {
-    return { error: "Text is too long." };
-  }
-  await prisma.docLinkGroup.update({ where: { id: groupId }, data });
+  await prisma.docLinkGroup.update({ where: { id: groupId }, data: edit.data });
   return {};
 }
 
