@@ -121,8 +121,7 @@ export default function CommentEntryList({ entries, postId }: Props) {
     // A deleted root with no live descendants renders nothing (see
     // CommentNode) — its quoted-text header would otherwise be left
     // dangling above empty space with no comment underneath it.
-    const rootRendersNothing =
-      entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
+    const rootRendersNothing = entry.root.deleted && !hasNonDeletedDescendant(entry.root);
 
     return (
       // data-thread-id (not id) since sorting can scatter a thread's entries

@@ -43,6 +43,12 @@ above 1180px the cards whose thread still anchors move into the margin rail
 (docs/MARGIN_NOTES.md).
 `/comments` is the site-wide admin table and `/post/[id]/comments` the per-post queue.
 
+**What the page source holds.** The comment list is a client component, so every field the
+loader (`getPostThreadsWithApprovedComments`, `src/lib/comment-data.ts`) hands it is in the
+page's RSC payload, drawn by a card or not. A deleted comment therefore leaves the loader as
+a tombstone — its id, parent, posting date and `deleted`, everything else blank — rather
+than as a row the card declines to show.
+
 ## Identity, moderation and abuse
 
 **Identity.** A signed-out commenter must give a name and an email; a signed-in one is
@@ -490,9 +496,11 @@ navigation that depends on such a write is a `freshGoto`.
   body span, `quoted_text`, the target at the pinned version — to one string;
   `check-tag-constraints.ts` probes the CHECKs. Nothing runs them automatically.
 - **e2e**: `moderation.spec.ts`, `comment-editing.spec.ts`, `comment-markdown.spec.ts`,
-  `comment-quoting.spec.ts`, and `quote-anchoring.spec.ts` for passage threads. Fixtures:
+  `comment-quoting.spec.ts`, `quote-anchoring.spec.ts` for passage threads, and
+  `comment-payload.spec.ts` for what the post page's source holds. Fixtures:
   `createComment()` writes revision 1 and links the commenter to a `User` when one exists
-  with that email (pass `ADMIN_EMAIL` to make "edit your own comment" reachable);
+  with that email (pass `ADMIN_EMAIL` to make "edit your own comment" reachable), and takes
+  a `parentCommentId` for a reply; `softDeleteComment()` writes what `deleteComment` does;
   `createCommentWithQuotes()` runs the real parse → match → rewrite path without the form;
   `getCommentFacts()`, `getCommentQuoteFacts()`, `backdateComment()`.
 - **The grace window is not tested with `page.clock`.** The rule compares two stored

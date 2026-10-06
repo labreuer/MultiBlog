@@ -42,7 +42,9 @@ export type CommentNodeData = {
   // PLAN.md §23h — resolved server-side by the loader; keyed by anchor id.
   citations: CommentQuoteCitations;
   createdAt: string;
-  deletedByUserId: string | null;
+  // A deleted comment is a tombstone, blank but for its id, parent and date
+  // (comment-data.ts's ThreadComment).
+  deleted: boolean;
   commenterUserId: string | null;
   // PLAN.md §22b — resolved by the loader (comment-data.ts), not here: the
   // silence rule needs every revision's timestamp, and a client deciding it
@@ -63,7 +65,7 @@ type Props = {
 // still live — a deleted comment with no live descendants collapses
 // entirely rather than leaving a "[deleted]" placeholder with nothing under it.
 export function hasNonDeletedDescendant(comment: CommentNodeData): boolean {
-  return comment.replies.some((reply) => reply.deletedByUserId === null || hasNonDeletedDescendant(reply));
+  return comment.replies.some((reply) => !reply.deleted || hasNonDeletedDescendant(reply));
 }
 
 export default function CommentNode({ comment, postId, depth = 0 }: Props) {
@@ -110,7 +112,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // nothing and the body has to stay.
   const [historyShown, setHistoryShown] = useState(false);
   const anchorId = commentAnchorName(comment.displayName, comment.createdAt);
-  const isDeleted = comment.deletedByUserId !== null || justDeleted;
+  const isDeleted = comment.deleted || justDeleted;
 
   if (isDeleted && !justDeleted && !hasNonDeletedDescendant(comment)) {
     return null;

@@ -1390,8 +1390,10 @@ export async function createComment(opts: {
   status?: CommentStatus;
   /** ISO timestamp the comment was posted at, revision 1 with it; default now. */
   createdAt?: string;
+  /** A reply to this comment, which must be in the same (general) thread. */
+  parentCommentId?: string;
 }): Promise<{ id: string; commenterId: string }> {
-  const { postId, anchoredEventId, email, displayName, body, status = "PENDING" } = opts;
+  const { postId, anchoredEventId, email, displayName, body, status = "PENDING", parentCommentId } = opts;
   const createdAt = opts.createdAt ? new Date(opts.createdAt) : new Date();
   assertSafe(email);
 
@@ -1427,6 +1429,7 @@ export async function createComment(opts: {
     data: {
       threadId: thread.id,
       commenterId: commenter.id,
+      parentCommentId,
       body: commentDocFromText(body),
       bodyText: body,
       status,
@@ -1438,6 +1441,16 @@ export async function createComment(opts: {
   });
 
   return { id: comment.id, commenterId: commenter.id };
+}
+
+/** Soft-deletes a comment as `byEmail`'s user, writing what deleteComment writes. */
+export async function softDeleteComment(commentId: string, byEmail: string): Promise<void> {
+  assertSafe(byEmail);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: byEmail }, select: { id: true } });
+  await prisma.comment.update({
+    where: { id: commentId },
+    data: { deletedByUserId: user.id, deletedAt: new Date() },
+  });
 }
 
 /**
@@ -2257,6 +2270,7 @@ const handlers = {
   backdateAnnotationPosting,
   setAnnotationEditingSince,
   createComment,
+  softDeleteComment,
   createCommentWithQuotes,
   getCommentQuoteFacts,
   getCommentFacts,

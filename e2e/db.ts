@@ -287,6 +287,9 @@ export const createTestAnnotation = (
 
 export const createComment = (...args: Parameters<DbHandlers["createComment"]>) => call("createComment", ...args);
 
+export const softDeleteComment = (...args: Parameters<DbHandlers["softDeleteComment"]>): Promise<void> =>
+  call("softDeleteComment", ...args);
+
 export const createQuoteThread = (...args: Parameters<DbHandlers["createQuoteThread"]>) =>
   call("createQuoteThread", ...args);
 
