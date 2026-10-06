@@ -256,9 +256,11 @@ Two development slots — separate working trees, each with its own `.env`, data
 
 - `npm run dev:all` — web (Next.js) + collab (Hocuspocus) via concurrently; one Ctrl+C stops
   both. Individually: `npm run dev`, `npm run collab`.
-- `npm run stop:all` — stops a `dev:all` you started, in one command instead of a
-  netstat/parent-trace/taskkill dance. Reads this slot's ports, so run it from the tree you
-  mean to stop; it will not touch the other slot's servers.
+- `npm run stop:all` — stops a `dev:all` you started, the e2e prod server and `web-prod`, in
+  one command instead of a netstat/parent-trace/taskkill dance. Reads this slot's ports, so
+  run it from the tree you mean to stop; it will not touch the other slot's servers. **Use it
+  rather than killing by hand**: its parent walk stops at the first process that isn't this
+  repo's, and a hand-rolled one has climbed into `systemd --user` and logged the user out.
 - **Before switching branches, run `npm run check-ports` — and if a dev server is up, say so
   before you switch.** It is read-only, and names per port whether anything is listening and
   whether it belongs to this repo; whose server it is barely matters, since the user is the one

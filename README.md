@@ -44,7 +44,8 @@ npm run dev:all
 Runs the Next.js app (`:3000`) and the Hocuspocus real-time collab server
 (`:1234`) together via `concurrently` — one `Ctrl+C` stops both. Individually:
 `npm run dev` (web only) or `npm run collab` (collab only). `npm run
-stop:all` stops a `dev:all` you started elsewhere.
+stop:all` stops a `dev:all` you started elsewhere, and any prod server
+(`web-prod`, the e2e target) left running beside it.
 
 ## Checks
 
