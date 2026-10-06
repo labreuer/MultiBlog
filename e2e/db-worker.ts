@@ -760,6 +760,12 @@ export async function deleteTestFile(idOrSlug: string): Promise<void> {
     throw new Error(`Refusing to delete file "${file.title}" — it has a non-throwaway (or missing) owner.`);
   }
 
+  // Captured before the delete cascades the annotation rows away: each one's
+  // body ydoc (§13a) has no FK to follow them, as in deleteTestDoc.
+  const annotationIds = (
+    await prismaIncludingDeleted.annotation.findMany({ where: { fileId: file.id }, select: { id: true } })
+  ).map((a) => a.id);
+
   // Content-addressed storage means another file may share these bytes; only
   // sweep them once nothing points at them — and only under the per-sha lock
   // (withShaLock), or a create in another worker lands between the count and
@@ -769,6 +775,9 @@ export async function deleteTestFile(idOrSlug: string): Promise<void> {
     const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
     await deleteBytesIfUnreferenced(file.sha256, remaining);
   });
+  if (annotationIds.length > 0) {
+    await prisma.ydoc.deleteMany({ where: { id: { in: annotationIds.map(ydocIdForAnnotation) } } });
+  }
 }
 
 // prismaIncludingDeleted, as deleteTestFile above: a test that soft-deletes a
@@ -1241,7 +1250,9 @@ async function quoteMatchesAtStamp(a: {
  * returned id, rather than off any text.
  */
 export async function createTestAnnotation(opts: {
-  docId: string;
+  /** The container: a doc, or (with `fileId` instead) a file. Exactly one. */
+  docId?: string;
+  fileId?: string;
   authorEmail: string;
   bodyText: string;
   anchor?: { from: number; to: number; quotedText: string };
@@ -1260,7 +1271,10 @@ export async function createTestAnnotation(opts: {
    */
   draft?: boolean;
 }): Promise<{ id: string }> {
-  const { docId, authorEmail, bodyText, anchor, ydocUpdateId, draft = false } = opts;
+  const { docId, fileId, authorEmail, bodyText, anchor, ydocUpdateId, draft = false } = opts;
+  if ((docId === undefined) === (fileId === undefined)) {
+    throw new Error("createTestAnnotation: pass exactly one of docId and fileId.");
+  }
   assertSafe(authorEmail);
   const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
   // PLAN.md §22e — a posted annotation comes with a body ydoc, `postedAt`,
@@ -1282,6 +1296,7 @@ export async function createTestAnnotation(opts: {
   const annotation = await prisma.annotation.create({
     data: {
       docId,
+      fileId,
       userId: author.id,
       bodyText,
       proseJson: seed.proseJson as Prisma.InputJsonValue,
@@ -1307,6 +1322,37 @@ export async function createTestAnnotation(opts: {
     },
   });
   return { id: annotation.id };
+}
+
+export type ReplyAnchorFacts = {
+  quotedText: string | null;
+  /**
+   * The parent body's text at the reply's own stamp, between its stored
+   * offsets — what check-annotation-anchors.ts holds a doc reply's quote to.
+   * Null when the reply carries no anchor.
+   */
+  textAtStamp: string | null;
+};
+
+/** The first posted reply to `parentId`: its stored quote, and what its stamp says is there. */
+export async function getReplyAnchorFacts(parentId: string): Promise<ReplyAnchorFacts | null> {
+  const reply = await prisma.annotation.findFirst({
+    where: { parentAnnotationId: parentId, status: { not: "DRAFT" } },
+    orderBy: { createdAt: "asc" },
+    select: { anchorFrom: true, anchorTo: true, quotedText: true, ydocUpdateId: true },
+  });
+  if (!reply) return null;
+  if (reply.anchorFrom === null || reply.anchorTo === null || reply.ydocUpdateId === null) {
+    return { quotedText: reply.quotedText, textAtStamp: null };
+  }
+  const doc = await materializeYdocAt(ydocIdForAnnotation(parentId), reply.ydocUpdateId);
+  try {
+    const json = TiptapTransformer.extensions(annotationContentExtensions).fromYdoc(doc, "default");
+    const node = pmAnnotationContentSchema.nodeFromJSON(json);
+    return { quotedText: reply.quotedText, textAtStamp: node.textBetween(reply.anchorFrom, reply.anchorTo, " ") };
+  } finally {
+    doc.destroy();
+  }
 }
 
 export type AnnotationVersionFacts = {
@@ -2287,6 +2333,7 @@ const handlers = {
   getAnnotationStates,
   markPresentAtStamp,
   createTestAnnotation,
+  getReplyAnchorFacts,
   getAnnotationEditFacts,
   backdateAnnotationPosting,
   setAnnotationEditingSince,

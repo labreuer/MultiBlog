@@ -1141,6 +1141,7 @@ async function postFileAnnotation(opts: {
   raisedBy: string;
   /** Who is posting — PLAN.md §22e's version 1 is attributed to them. */
   authorUserId: string;
+  /** A reply's selection in its parent's body, as the client read it: verification input only. */
   replyAnchor: { from: number; to: number; quotedText: string } | null;
 }): Promise<{ error?: string }> {
   const { annotationId, fileId, parentId, settled, raise, raisedBy, replyAnchor } = opts;
@@ -1160,6 +1161,26 @@ async function postFileAnnotation(opts: {
   // reading (see the doc path's own comment on this).
   const parentStamp = parentId !== null && replyAnchor !== null ? await parentSettledMark(parentId) : null;
 
+  // The reply's anchor resolved against exactly that version, with the
+  // server's own text for the range as its quote — what the doc path does for
+  // a reply, through the same function and the same arguments, since an
+  // annotation body is a ydoc whatever it hangs off. A body is editable once
+  // posted (§22), so a client's offsets can name text the stamped version
+  // doesn't hold; then this is null, and the reply posts without an anchor,
+  // as a doc reply does.
+  const capturedReply =
+    parentId !== null && replyAnchor !== null && parentStamp !== null
+      ? await captureAnchorInYdoc({
+          ydocId: ydocIdForAnnotation(parentId),
+          throughUpdateId: parentStamp,
+          extensions: annotationContentExtensions,
+          schema: pmAnnotationContentSchema,
+          from: replyAnchor.from,
+          to: replyAnchor.to,
+          quotedText: replyAnchor.quotedText,
+        })
+      : null;
+
   // PLAN.md §22e — version 1, exactly as on the doc side. An annotation's
   // body is a ydoc whatever it hangs off, so its history is container-
   // independent: the file path differs in its *anchor*, not in its body.
@@ -1174,25 +1195,20 @@ async function postFileAnnotation(opts: {
       postedAt: now,
       ...(storedTarget ? { pdfTarget: storedTarget as unknown as Prisma.InputJsonValue, quotedText } : {}),
       // A reply's anchor into its parent's body, unchanged from the doc side.
-      ...(replyAnchor
+      ...(capturedReply
         ? {
-            anchorFrom: replyAnchor.from,
-            anchorTo: replyAnchor.to,
-            quotedText: replyAnchor.quotedText,
+            anchorFrom: capturedReply.from,
+            anchorTo: capturedReply.to,
+            quotedText: capturedReply.quotedText,
             // PLAN.md §22e — the same stamp the doc side's anchored reply
             // gets, and for the same reason: an annotation body is a ydoc
             // whatever it hangs off, so once bodies are mutable a reply into
             // one needs to name the version it quoted. This is the only
             // circumstance in which a *file* annotation carries a
             // `ydoc_update_id` at all — it names the parent body's log, never
-            // the file, which has none.
-            //
-            // Still unbuilt on this path: server-side derivation of the quote
-            // itself (captureAnchorInYdoc, which the doc side runs). A file
-            // reply's offsets and quote are taken from the client as they
-            // were before §22e, so its stored triple is not self-consistent
-            // by construction the way a doc reply's is. Pre-existing, and
-            // listed in §22h rather than quietly fixed here.
+            // the file, which has none. The triple was derived against
+            // exactly this version above, so it is self-consistent with it by
+            // construction, as a doc reply's is.
             ydocUpdateId: parentStamp,
           }
         : {}),

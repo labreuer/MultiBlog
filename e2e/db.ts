@@ -34,6 +34,7 @@ import type {
   TestAnchoredLink,
   CommentFacts,
   AnnotationEditFacts,
+  ReplyAnchorFacts,
   CommentQuoteFacts,
 } from "./db-worker";
 
@@ -62,6 +63,7 @@ export type {
   CommentRevisionFacts,
   AnnotationEditFacts,
   AnnotationVersionFacts,
+  ReplyAnchorFacts,
   CommentQuoteFacts,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
@@ -282,6 +284,10 @@ export const backdateAnnotationPosting = (
 export const setAnnotationEditingSince = (
   ...args: Parameters<DbHandlers["setAnnotationEditingSince"]>
 ): Promise<void> => call("setAnnotationEditingSince", ...args);
+
+export const getReplyAnchorFacts = (
+  ...args: Parameters<DbHandlers["getReplyAnchorFacts"]>
+): Promise<ReplyAnchorFacts | null> => call("getReplyAnchorFacts", ...args);
 
 export const createTestAnnotation = (
   ...args: Parameters<DbHandlers["createTestAnnotation"]>

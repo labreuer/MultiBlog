@@ -223,31 +223,6 @@ import and export into an existing doc followed the same day (docs/TABLES.md). S
      set in a wider editor or pasted from a 6.5in Word page (scale proportionally? clamp?),
      and how the drag handle (`.column-resize-handle`, prosemirror-tables) should look
      under the site's tokens. Decide before turning it on, not after.
-## A PDF annotation reply's quote is still client-supplied (PLAN.md §22e; docs/ANNOTATIONS.md)
-
-`postFileAnnotation` stores a reply's `anchorFrom`/`anchorTo`/`quotedText` exactly as the
-client sent them. The doc path does not: it runs `captureAnchorInYdoc`, which materializes the
-parent body at the stamped update, resolves the client's offsets there, and stores *its own*
-`textBetween` — so a doc reply's stored triple is self-consistent with the state it names, by
-construction, forever. That property is what `scripts/integrity/check-annotation-anchors.ts`
-verifies and what §13o's whole design rests on.
-
-**Why it matters more now than it did.** Before §22 nothing could edit a posted annotation
-body, so a client's offsets were resolved against a document that was never going to move and
-the difference was academic. Now a body is mutable, and a PDF reply's quote can drift with
-nothing to check it against.
-
-**Not a hole in the version stamp**, which §22e did add on this path: the reply records its
-parent's newest settled version (the mark of its newest snapshot), so "quoted an earlier
-version" reconstructs the right state on a PDF exactly as it does on a doc. What is missing is only the server's own derivation of the
-quote at post time.
-
-**Why it was left.** It is pre-existing (§19 built it this way), and fixing it means touching
-the PDF surface's anchor path — which has its own spec (`pdf-annotations.spec.ts`) and its own
-anchor mechanism — inside a branch that was already changing the doc path's. The fix itself is
-small: `postFileAnnotation`'s reply branch calls `captureAnchorInYdoc` with the annotation
-schema and the stamp it now computes, the same three arguments the doc branch passes.
-
 ## Author-highlight marks on annotation bodies are unstyled by design-by-accident (PLAN.md §13h)
 
 Annotations carry the same `authorHighlight` mark docs do — same extension
