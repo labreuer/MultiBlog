@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import CommentNode, { hasNonDeletedDescendant, type CommentNodeData } from "./CommentNode";
 import QuoteThreadHeader from "./QuoteThreadHeader";
+import { OwnCommentsProvider } from "./own-comments-context";
 import { useMarginNotesLayout } from "./margin-notes/use-margin-notes-layout";
 import { activatePseudoBorderForHash, refreshPseudoBorders } from "@/lib/pseudo-border";
 import type { ThreadStatus } from "@/generated/prisma/enums";
@@ -38,11 +39,18 @@ function looksAnchored(entry: CommentEntry): boolean {
   return entry.anchorFrom !== null && entry.status === "ACTIVE";
 }
 
+function commentIdsIn(node: CommentNodeData): string[] {
+  return [node.id, ...node.replies.flatMap(commentIdsIn)];
+}
+
 export default function CommentEntryList({ entries, postId }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
   const [anchoredIds, setAnchoredIds] = useState<Set<string>>(
     () => new Set(entries.filter(looksAnchored).map((entry) => entry.root.id)),
   );
+  // Which comments are on the page, as a string so a refresh that brings the
+  // same ones doesn't ask the server again who owns them.
+  const commentIds = useMemo(() => entries.flatMap((entry) => commentIdsIn(entry.root)).join(","), [entries]);
 
   // Puts a pseudo-border next to whatever comment the page loaded pointing
   // at (its timestamp permalink hash), and keeps it in sync as the hash
@@ -149,7 +157,7 @@ export default function CommentEntryList({ entries, postId }: Props) {
   };
 
   return (
-    <>
+    <OwnCommentsProvider postId={postId} commentIds={commentIds}>
       <div style={{ margin: "12px 0" }}>
         <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
           Sort by:{" "}
@@ -179,6 +187,6 @@ export default function CommentEntryList({ entries, postId }: Props) {
           </div>,
           railElement,
         )}
-    </>
+    </OwnCommentsProvider>
   );
 }

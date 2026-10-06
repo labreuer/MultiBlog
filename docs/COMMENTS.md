@@ -47,7 +47,11 @@ above 1180px the cards whose thread still anchors move into the margin rail
 loader (`getPostThreadsWithApprovedComments`, `src/lib/comment-data.ts`) hands it is in the
 page's RSC payload, drawn by a card or not. A deleted comment therefore leaves the loader as
 a tombstone — its id, parent, posting date and `deleted`, everything else blank — rather
-than as a row the card declines to show.
+than as a row the card declines to show. No comment carries its commenter's user id: a
+display name is fixed when the commenter row is made, so the id beside it would tie an old
+name to a renamed account. Which cards are the viewer's own, for Edit and Delete, is a
+client island instead (`OwnCommentsProvider`), asking `getOwnCommentIds` once a session
+exists, as `TagChips` keeps the rest of the viewer out of the static page.
 
 ## Identity, moderation and abuse
 

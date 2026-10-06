@@ -591,6 +591,26 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
     .reverse();
 }
 
+// Which of this post's comments are the signed-in viewer's own: what the post
+// page's cards need to offer Edit and Delete (CommentNode, through
+// OwnCommentsProvider). The page is statically generated, so it can't know the
+// viewer, and it doesn't carry each commenter's user id for the browser to
+// compare instead: a display name is fixed when the commenter row is made, so
+// that id beside it would tie an old name to a renamed account for anyone
+// reading the source. It answers only about the asker, so it needs no gate on
+// the post.
+export async function getOwnCommentIds(postId: string): Promise<string[]> {
+  const session = await auth();
+  if (!session?.user || typeof postId !== "string") {
+    return [];
+  }
+  const rows = await prisma.comment.findMany({
+    where: { thread: { postId }, commenter: { userId: session.user.id } },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id);
+}
+
 // Revalidates the public post page (comment visibility) and its per-post
 // moderation queue for every distinct post touched by a batch — a bulk
 // action can span comments from several posts at once.

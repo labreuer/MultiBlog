@@ -10,7 +10,9 @@ import type { ThreadStatus } from "@/generated/prisma/enums";
 // component and so into the statically generated page's RSC payload. A deleted
 // comment arrives as a tombstone: its id, its parent, when it was posted (the
 // list sorts by that) and `deleted`, with every other field blank — a reader
-// sees "[deleted]", and the page source must hold no more than that.
+// sees "[deleted]", and the page source must hold no more than that. No
+// comment carries its commenter's user id: whether a card is the viewer's own
+// is asked of the server from the browser (getOwnCommentIds).
 export type ThreadComment = {
   id: string;
   parentCommentId: string | null;
@@ -24,7 +26,6 @@ export type ThreadComment = {
   citations: CommentQuoteCitations;
   createdAt: string;
   deleted: boolean;
-  commenterUserId: string | null;
   // PLAN.md §22b — whether this comment's edits are ones readers are told
   // about. Resolved here, on the server, rather than shipping timestamps for
   // the browser to apply the rule to: a silent edit's existence is itself the
@@ -109,7 +110,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         where: { status: "APPROVED" },
         orderBy: { createdAt: "asc" },
         include: {
-          commenter: { select: { userId: true, displayName: true, email: true, user: { select: { color: true } } } },
+          commenter: { select: { displayName: true, email: true, user: { select: { color: true } } } },
           // PLAN.md §22c — timestamps only, never the bodies. This runs for
           // every comment on the page, and all the silence rule needs is when
           // each version was replaced; the text of a superseded version is
@@ -158,7 +159,6 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
               citations: {},
               createdAt: c.createdAt.toISOString(),
               deleted: true,
-              commenterUserId: null,
               visiblyEdited: false,
               editedAt: null,
             };
@@ -173,7 +173,6 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
             citations: citationsByComment.get(c.id) ?? {},
             createdAt: c.createdAt.toISOString(),
             deleted: false,
-            commenterUserId: c.commenter.userId,
             visiblyEdited,
             editedAt: visiblyEdited ? (c.editedAt?.toISOString() ?? null) : null,
           };
