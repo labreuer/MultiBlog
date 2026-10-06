@@ -27,6 +27,7 @@ import {
   type CommentBodyValue,
 } from "@/lib/comment-body-value";
 import { useCommentQuote } from "./comment-quote-context";
+import { useIsOwnComment } from "./own-comments-context";
 import type { JSONContent } from "@tiptap/core";
 import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
 import { commentAnchorName } from "@/lib/comment-anchor-name";
@@ -42,8 +43,9 @@ export type CommentNodeData = {
   // PLAN.md §23h — resolved server-side by the loader; keyed by anchor id.
   citations: CommentQuoteCitations;
   createdAt: string;
-  deletedByUserId: string | null;
-  commenterUserId: string | null;
+  // A deleted comment is a tombstone, blank but for its id, parent and date
+  // (comment-data.ts's ThreadComment).
+  deleted: boolean;
   // PLAN.md §22b — resolved by the loader (comment-data.ts), not here: the
   // silence rule needs every revision's timestamp, and a client deciding it
   // would need them shipped. `editedAt` is null whenever visiblyEdited is
@@ -63,13 +65,13 @@ type Props = {
 // still live — a deleted comment with no live descendants collapses
 // entirely rather than leaving a "[deleted]" placeholder with nothing under it.
 export function hasNonDeletedDescendant(comment: CommentNodeData): boolean {
-  return comment.replies.some((reply) => reply.deletedByUserId === null || hasNonDeletedDescendant(reply));
+  return comment.replies.some((reply) => !reply.deleted || hasNonDeletedDescendant(reply));
 }
 
 export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
-  const viewerId = session?.user?.id ?? null;
+  const isOwnComment = useIsOwnComment(comment.id);
   const isAdmin = !!session?.user && isAdminRole(session.user.role);
   const [replying, setReplying] = useState(false);
   const [posted, setPosted] = useState(false);
@@ -110,13 +112,12 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // nothing and the body has to stay.
   const [historyShown, setHistoryShown] = useState(false);
   const anchorId = commentAnchorName(comment.displayName, comment.createdAt);
-  const isDeleted = comment.deletedByUserId !== null || justDeleted;
+  const isDeleted = comment.deleted || justDeleted;
 
   if (isDeleted && !justDeleted && !hasNonDeletedDescendant(comment)) {
     return null;
   }
 
-  const isOwnComment = viewerId !== null && comment.commenterUserId === viewerId;
   const canDelete = isAdmin || isOwnComment;
   // PLAN.md §22f — the author, or someone who moderates the post. The
   // *action* asks `canUserEditPost`, which also admits an AUTHOR moderating

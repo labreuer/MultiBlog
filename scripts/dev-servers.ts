@@ -64,7 +64,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { COLLAB_PORT, E2E_WEB_PORT, WEB_PORT } from "./dev-ports";
+import { COLLAB_PORT, E2E_WEB_PORT, WEB_PORT, WEB_PROD_PORT } from "./dev-ports";
 
 /**
  * Both spellings of the repo root, so a symlinked checkout matches either way.
@@ -77,12 +77,22 @@ const REPO_ROOT = resolve(process.cwd());
 const REPO_ROOT_REAL = realpathSync(REPO_ROOT);
 
 /**
- * The ports these scripts answer for: the dev server, the e2e prod target and
- * collab. WEB_PROD_PORT (WEB_PORT + 1) is deliberately absent — that one
- * belongs to the preview tool, which has to start and stop it itself
- * (CACHING.md), and Playwright never contends for it.
+ * The ports check-ports answers for: the ones Playwright starts or reuses — the
+ * dev server, the e2e prod target and collab. WEB_PROD_PORT (WEB_PORT + 1) is
+ * deliberately absent: Playwright never contends for it, so whatever holds it
+ * says nothing about whether a run is safe.
  */
 export const SLOT_PORTS = [WEB_PORT, E2E_WEB_PORT, COLLAB_PORT];
+
+/**
+ * The ports stop:all clears: SLOT_PORTS plus `web-prod` on WEB_PROD_PORT, the
+ * preview tool's `next start` (.claude/launch.json). Of a slot's servers it is
+ * the one most often left behind — nothing in the suite stops it, and every
+ * e2e build rewrites the `.next` it serves (CACHING.md) — so the one command
+ * that puts a slot back has to reach it, with the same ownership test and
+ * ancestor walk as the rest rather than a hand-rolled kill.
+ */
+export const STOP_PORTS = [WEB_PORT, WEB_PROD_PORT, E2E_WEB_PORT, COLLAB_PORT];
 
 export interface ProcessInfo {
   pid: number;
@@ -355,6 +365,7 @@ const ANCESTOR_MARKERS = [
   "tsx watch",
   "dev-web.ts",
   "npm run e2e:web",
+  "npm run web-prod",
   "prod-web.ts",
   "next start",
 ];
@@ -411,7 +422,7 @@ export async function stopAll(log: (line: string) => void = console.log): Promis
   const toKill = new Map<number, string>();
   let aborted = false;
 
-  for (const port of SLOT_PORTS) {
+  for (const port of STOP_PORTS) {
     const pids = listeners(port);
     if (pids.length === 0) {
       log(`Port ${port} -- nothing listening.`);
@@ -480,7 +491,7 @@ export async function stopAll(log: (line: string) => void = console.log): Promis
   }
   for (const pid of order) if (!isAlive(pid)) log(`Stopped ${pid}`);
 
-  const still = SLOT_PORTS.filter((port) => listeners(port).length > 0);
+  const still = STOP_PORTS.filter((port) => listeners(port).length > 0);
   if (still.length > 0) {
     log(`WARNING: Still listening after kill attempt: ${still.join(", ")}`);
     return 1;
@@ -489,6 +500,6 @@ export async function stopAll(log: (line: string) => void = console.log): Promis
     log("\nDone, but one port was left alone -- see warnings above.");
     return 1;
   }
-  log(`\nPorts ${SLOT_PORTS.join(", ")} are clear.`);
+  log(`\nPorts ${STOP_PORTS.join(", ")} are clear.`);
   return 0;
 }

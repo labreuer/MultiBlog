@@ -653,7 +653,6 @@ in its columns or `pdfTarget`, and the stamp keeps its overload ("The version st
 - **Presence for a selection or a gutter marker** before a draft row exists.
 - **Live co-editing of a posted body.** Readers see the settled text until Done; the
   awareness-mounted editor design stays available.
-- **A file annotation reply's quote is client-supplied** (TODO.md); the doc side derives it.
 - **No diff between versions**; the history lists them whole.
 - **PDF fuzzy matching and lazy re-anchoring after a `textVersion` bump** (docs/PDF.md §3,
   §4); the quads carry every annotation meanwhile.

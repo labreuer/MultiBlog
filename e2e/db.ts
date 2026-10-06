@@ -34,6 +34,7 @@ import type {
   TestAnchoredLink,
   CommentFacts,
   AnnotationEditFacts,
+  ReplyAnchorFacts,
   CommentQuoteFacts,
 } from "./db-worker";
 
@@ -62,6 +63,7 @@ export type {
   CommentRevisionFacts,
   AnnotationEditFacts,
   AnnotationVersionFacts,
+  ReplyAnchorFacts,
   CommentQuoteFacts,
 } from "./db-worker";
 export { TEST_PASSWORD, ADMIN_EMAIL, uniqueEmail, uniqueTitle, docFromText } from "./naming";
@@ -148,6 +150,8 @@ export const createTestPost = (...args: Parameters<DbHandlers["createTestPost"]>
 
 export const getPostPath = (...args: Parameters<DbHandlers["getPostPath"]>): Promise<string | null> =>
   call("getPostPath", ...args);
+export const unpublishTestPost = (...args: Parameters<DbHandlers["unpublishTestPost"]>): Promise<void> =>
+  call("unpublishTestPost", ...args);
 export const deleteTestPost = (...args: Parameters<DbHandlers["deleteTestPost"]>): Promise<void> =>
   call("deleteTestPost", ...args);
 
@@ -281,11 +285,18 @@ export const setAnnotationEditingSince = (
   ...args: Parameters<DbHandlers["setAnnotationEditingSince"]>
 ): Promise<void> => call("setAnnotationEditingSince", ...args);
 
+export const getReplyAnchorFacts = (
+  ...args: Parameters<DbHandlers["getReplyAnchorFacts"]>
+): Promise<ReplyAnchorFacts | null> => call("getReplyAnchorFacts", ...args);
+
 export const createTestAnnotation = (
   ...args: Parameters<DbHandlers["createTestAnnotation"]>
 ): Promise<{ id: string }> => call("createTestAnnotation", ...args);
 
 export const createComment = (...args: Parameters<DbHandlers["createComment"]>) => call("createComment", ...args);
+
+export const softDeleteComment = (...args: Parameters<DbHandlers["softDeleteComment"]>): Promise<void> =>
+  call("softDeleteComment", ...args);
 
 export const createQuoteThread = (...args: Parameters<DbHandlers["createQuoteThread"]>) =>
   call("createQuoteThread", ...args);

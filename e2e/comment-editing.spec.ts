@@ -1,5 +1,13 @@
 import { test, expect, freshGoto, visibleText } from "./fixtures";
-import { ADMIN_EMAIL, backdateComment, createComment, getCommentFacts, uniqueEmail } from "./db";
+import {
+  ADMIN_EMAIL,
+  backdateComment,
+  createComment,
+  editCommentAt,
+  getCommentFacts,
+  uniqueEmail,
+  unpublishTestPost,
+} from "./db";
 import { EDIT_GRACE_MS } from "../src/lib/edit-grace";
 
 // PLAN.md §22c — editing a posted comment, and §22b's three-minute window.
@@ -198,6 +206,46 @@ test.describe("editing a comment", () => {
       await expect(visibleText(anonymousPage, original)).toBeVisible();
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Edit" })).toHaveCount(0);
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Reply" })).toBeVisible();
+    } finally {
+      await anonymous.close();
+    }
+  });
+
+  // A comment's history is readable by whoever may read the comment, and a
+  // comment on a post that is no longer live is its author's and its
+  // moderators' alone — canUserReadComment's rule, not just "approved and
+  // undeleted". The page is opened while the post is live and the post
+  // unpublished under it: an open page is where a reader still holds the
+  // button that asks.
+  test("a signed-out reader can't fetch a comment's history once its post is unpublished", async ({
+    page,
+    publishedPost,
+  }) => {
+    const original = "E2E wording from before the post came down.";
+    const corrected = "E2E wording from an edit readers were told about.";
+    const { id: commentId } = await createComment({
+      postId: publishedPost.id,
+      anchoredEventId: publishedPost.eventId!,
+      email: uniqueEmail("commenter"),
+      displayName: "Anonymous Person",
+      body: original,
+      status: "APPROVED",
+    });
+    await backdateComment(commentId, PAST_THE_WINDOW);
+    await editCommentAt({ commentId, body: corrected, at: new Date().toISOString() });
+
+    const anonymous = await page.context().browser()!.newContext({ storageState: { cookies: [], origins: [] } });
+    const anonymousPage = await anonymous.newPage();
+    try {
+      await freshGoto(anonymousPage, publishedPost.path);
+      const marker = card(anonymousPage, commentId).getByRole("button", { name: /earlier versions/ });
+      await expect(marker).toBeVisible();
+
+      await unpublishTestPost(publishedPost.id);
+      await marker.click();
+      const history = anonymousPage.locator('[data-edit-history="comment"]');
+      await expect(history).toContainText("No earlier versions are available to you.");
+      await expect(history).not.toContainText(original);
     } finally {
       await anonymous.close();
     }

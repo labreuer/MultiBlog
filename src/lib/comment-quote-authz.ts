@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import type { AnchorTarget } from "./anchors";
 import { isCommentPublic } from "./comment-authz";
+import { isPostPublic } from "./post-status";
 
 // PLAN.md §23e — the audience rule, the one genuinely new permission in §23.
 //
@@ -33,11 +34,11 @@ export async function canQuoteTargetInto(target: AnchorTarget, host: QuoteHost):
     case "post": {
       const post = await prisma.post.findUnique({
         where: { id: target.id },
-        select: { publishedAt: true, publishEventId: true },
+        select: { publishedAt: true, publishEventId: true, deletedByUserId: true },
       });
       // Published, with something to quote against — the same test
       // submitComment applies before accepting a comment at all.
-      return !!post && post.publishedAt !== null && post.publishedAt <= new Date() && post.publishEventId !== null;
+      return !!post && isPostPublic(post);
     }
     case "comment": {
       const comment = await prisma.comment.findUnique({

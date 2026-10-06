@@ -116,7 +116,7 @@ export default async function PublicPostPage({ params }: { params: Params }) {
     // show in the comment list (CommentEntryList hides its header the same
     // way — see hasNonDeletedDescendant), so the inline highlight/badge
     // shouldn't linger over the quoted text either.
-    .filter((t) => t.quotedText !== "" && t.status === "ACTIVE" && t.comments.some((c) => c.deletedByUserId === null))
+    .filter((t) => t.quotedText !== "" && t.status === "ACTIVE" && t.comments.some((c) => !c.deleted))
     .map((t) => ({
       id: t.id,
       // Never null here: getPostThreadsWithApprovedComments always supplies
@@ -125,7 +125,7 @@ export default async function PublicPostPage({ params }: { params: Params }) {
       // (PLAN.md §12i) has no equivalent stored offset.
       from: t.anchorFrom!,
       to: t.anchorTo!,
-      count: t.comments.filter((c) => c.deletedByUserId === null).length,
+      count: t.comments.filter((c) => !c.deleted).length,
       color: t.color,
     }));
 

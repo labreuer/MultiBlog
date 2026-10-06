@@ -1,7 +1,7 @@
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import { canUserEditPost } from "./authz";
-import { publishedPostWhere } from "./post-status";
+import { isPostPublic, publishedPostWhere } from "./post-status";
 
 // PLAN.md §23e — who may read a comment, as one predicate the comment actions
 // and the quote gate share rather than restate.
@@ -23,23 +23,15 @@ export type ReadableComment = {
 /**
  * The public case alone: what a signed-out reader sees. Synchronous, no session.
  *
- * "Published" is `publishedPostWhere()`'s test, row for row: a live
- * publication *and* a go-live date that has arrived. `publishedAt` alone is
- * not enough — unpublishing leaves it set, and scheduling sets it to a future
- * date — and neither post has a page that shows its comments. The post is
- * reached through a relation, which prisma.ts's soft-delete $extends does not
- * follow, so its deletion is checked here too.
+ * "Published" is `isPostPublic`: a live publication *and* a go-live date that
+ * has arrived. `publishedAt` alone is not enough — unpublishing leaves it set,
+ * and scheduling sets it to a future date — and neither post has a page that
+ * shows its comments. The post is reached through a relation, which prisma.ts's
+ * soft-delete $extends does not follow, so `isPostPublic` checks its deletion
+ * too.
  */
 export function isCommentPublic(comment: ReadableComment): boolean {
-  const post = comment.thread.post;
-  return (
-    comment.status === "APPROVED" &&
-    comment.deletedAt === null &&
-    post.deletedByUserId === null &&
-    post.publishEventId !== null &&
-    post.publishedAt !== null &&
-    post.publishedAt <= new Date()
-  );
+  return comment.status === "APPROVED" && comment.deletedAt === null && isPostPublic(comment.thread.post);
 }
 
 /**

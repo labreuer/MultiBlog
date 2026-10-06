@@ -6,6 +6,13 @@ import { loadCommentQuoteCitations } from "@/lib/comment-quote-data";
 import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
 import type { ThreadStatus } from "@/generated/prisma/enums";
 
+// What the public post page is sent for one comment, through a client
+// component and so into the statically generated page's RSC payload. A deleted
+// comment arrives as a tombstone: its id, its parent, when it was posted (the
+// list sorts by that) and `deleted`, with every other field blank — a reader
+// sees "[deleted]", and the page source must hold no more than that. No
+// comment carries its commenter's user id: whether a card is the viewer's own
+// is asked of the server from the browser (getOwnCommentIds).
 export type ThreadComment = {
   id: string;
   parentCommentId: string | null;
@@ -18,8 +25,7 @@ export type ThreadComment = {
   // server, filtered by §23e's rule at render.
   citations: CommentQuoteCitations;
   createdAt: string;
-  deletedByUserId: string | null;
-  commenterUserId: string | null;
+  deleted: boolean;
   // PLAN.md §22b — whether this comment's edits are ones readers are told
   // about. Resolved here, on the server, rather than shipping timestamps for
   // the browser to apply the rule to: a silent edit's existence is itself the
@@ -104,7 +110,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         where: { status: "APPROVED" },
         orderBy: { createdAt: "asc" },
         include: {
-          commenter: { select: { userId: true, displayName: true, email: true, user: { select: { color: true } } } },
+          commenter: { select: { displayName: true, email: true, user: { select: { color: true } } } },
           // PLAN.md §22c — timestamps only, never the bodies. This runs for
           // every comment on the page, and all the silence rule needs is when
           // each version was replaced; the text of a superseded version is
@@ -121,7 +127,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
   });
 
   const citationsByComment = await loadCommentQuoteCitations(
-    threads.flatMap((thread) => thread.comments.map((c) => c.id)),
+    threads.flatMap((thread) => thread.comments.filter((c) => c.deletedByUserId === null).map((c) => c.id)),
   );
 
   return threads
@@ -142,7 +148,21 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
         status: thread.status,
         anchoredEventId: thread.anchoredEventId,
         color,
-        comments: thread.comments.map((c) => {
+        comments: thread.comments.map((c): ThreadComment => {
+          if (c.deletedByUserId !== null) {
+            return {
+              id: c.id,
+              parentCommentId: c.parentCommentId,
+              displayName: "",
+              body: null,
+              bodyText: "",
+              citations: {},
+              createdAt: c.createdAt.toISOString(),
+              deleted: true,
+              visiblyEdited: false,
+              editedAt: null,
+            };
+          }
           const visiblyEdited = isCommentVisiblyEdited(c);
           return {
             id: c.id,
@@ -152,8 +172,7 @@ export async function getPostThreadsWithApprovedComments(postId: string): Promis
             bodyText: c.bodyText,
             citations: citationsByComment.get(c.id) ?? {},
             createdAt: c.createdAt.toISOString(),
-            deletedByUserId: c.deletedByUserId,
-            commenterUserId: c.commenter.userId,
+            deleted: false,
             visiblyEdited,
             editedAt: visiblyEdited ? (c.editedAt?.toISOString() ?? null) : null,
           };

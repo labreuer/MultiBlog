@@ -342,6 +342,27 @@ export async function getPostPath(postId: string): Promise<string | null> {
   return postPath(post);
 }
 
+/**
+ * Unpublishes a post the way unpublishPost does: publishEventId cleared, an
+ * UNPUBLISHED event recorded, and publishedAt left set — the leftover a
+ * `publishedAt`-only test mistakes for a live post. Revalidates nothing, so a
+ * page already open stays as it was, which is the point for a spec asking what
+ * that page can still fetch.
+ */
+export async function unpublishTestPost(postId: string): Promise<void> {
+  const post = await prisma.post.findUniqueOrThrow({
+    where: { id: postId },
+    include: { authors: { include: { user: true } } },
+  });
+  if (post.authors.length === 0 || post.authors.some((a) => !SAFE_EMAIL.test(a.user.email))) {
+    throw new Error(`Refusing to unpublish post "${post.title}" — it has a non-throwaway (or missing) author.`);
+  }
+  await prisma.$transaction([
+    prisma.post.update({ where: { id: postId }, data: { publishEventId: null } }),
+    prisma.postPublicationEvent.create({ data: { postId, type: "UNPUBLISHED", actorId: post.authors[0].userId } }),
+  ]);
+}
+
 export async function deleteTestPost(idOrSlug: string): Promise<void> {
   const post = await prisma.post.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
@@ -739,6 +760,12 @@ export async function deleteTestFile(idOrSlug: string): Promise<void> {
     throw new Error(`Refusing to delete file "${file.title}" — it has a non-throwaway (or missing) owner.`);
   }
 
+  // Captured before the delete cascades the annotation rows away: each one's
+  // body ydoc (§13a) has no FK to follow them, as in deleteTestDoc.
+  const annotationIds = (
+    await prismaIncludingDeleted.annotation.findMany({ where: { fileId: file.id }, select: { id: true } })
+  ).map((a) => a.id);
+
   // Content-addressed storage means another file may share these bytes; only
   // sweep them once nothing points at them — and only under the per-sha lock
   // (withShaLock), or a create in another worker lands between the count and
@@ -748,10 +775,15 @@ export async function deleteTestFile(idOrSlug: string): Promise<void> {
     const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
     await deleteBytesIfUnreferenced(file.sha256, remaining);
   });
+  if (annotationIds.length > 0) {
+    await prisma.ydoc.deleteMany({ where: { id: { in: annotationIds.map(ydocIdForAnnotation) } } });
+  }
 }
 
+// prismaIncludingDeleted, as deleteTestFile above: a test that soft-deletes a
+// doc and fails before restoring it would otherwise leave the row behind.
 export async function deleteTestDoc(idOrSlug: string): Promise<void> {
-  const doc = await prisma.doc.findFirst({
+  const doc = await prismaIncludingDeleted.doc.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
     include: { authors: { include: { user: true } } },
   });
@@ -1218,7 +1250,9 @@ async function quoteMatchesAtStamp(a: {
  * returned id, rather than off any text.
  */
 export async function createTestAnnotation(opts: {
-  docId: string;
+  /** The container: a doc, or (with `fileId` instead) a file. Exactly one. */
+  docId?: string;
+  fileId?: string;
   authorEmail: string;
   bodyText: string;
   anchor?: { from: number; to: number; quotedText: string };
@@ -1237,7 +1271,10 @@ export async function createTestAnnotation(opts: {
    */
   draft?: boolean;
 }): Promise<{ id: string }> {
-  const { docId, authorEmail, bodyText, anchor, ydocUpdateId, draft = false } = opts;
+  const { docId, fileId, authorEmail, bodyText, anchor, ydocUpdateId, draft = false } = opts;
+  if ((docId === undefined) === (fileId === undefined)) {
+    throw new Error("createTestAnnotation: pass exactly one of docId and fileId.");
+  }
   assertSafe(authorEmail);
   const author = await prisma.user.findUniqueOrThrow({ where: { email: authorEmail } });
   // PLAN.md §22e — a posted annotation comes with a body ydoc, `postedAt`,
@@ -1259,6 +1296,7 @@ export async function createTestAnnotation(opts: {
   const annotation = await prisma.annotation.create({
     data: {
       docId,
+      fileId,
       userId: author.id,
       bodyText,
       proseJson: seed.proseJson as Prisma.InputJsonValue,
@@ -1284,6 +1322,37 @@ export async function createTestAnnotation(opts: {
     },
   });
   return { id: annotation.id };
+}
+
+export type ReplyAnchorFacts = {
+  quotedText: string | null;
+  /**
+   * The parent body's text at the reply's own stamp, between its stored
+   * offsets — what check-annotation-anchors.ts holds a doc reply's quote to.
+   * Null when the reply carries no anchor.
+   */
+  textAtStamp: string | null;
+};
+
+/** The first posted reply to `parentId`: its stored quote, and what its stamp says is there. */
+export async function getReplyAnchorFacts(parentId: string): Promise<ReplyAnchorFacts | null> {
+  const reply = await prisma.annotation.findFirst({
+    where: { parentAnnotationId: parentId, status: { not: "DRAFT" } },
+    orderBy: { createdAt: "asc" },
+    select: { anchorFrom: true, anchorTo: true, quotedText: true, ydocUpdateId: true },
+  });
+  if (!reply) return null;
+  if (reply.anchorFrom === null || reply.anchorTo === null || reply.ydocUpdateId === null) {
+    return { quotedText: reply.quotedText, textAtStamp: null };
+  }
+  const doc = await materializeYdocAt(ydocIdForAnnotation(parentId), reply.ydocUpdateId);
+  try {
+    const json = TiptapTransformer.extensions(annotationContentExtensions).fromYdoc(doc, "default");
+    const node = pmAnnotationContentSchema.nodeFromJSON(json);
+    return { quotedText: reply.quotedText, textAtStamp: node.textBetween(reply.anchorFrom, reply.anchorTo, " ") };
+  } finally {
+    doc.destroy();
+  }
 }
 
 export type AnnotationVersionFacts = {
@@ -1388,8 +1457,10 @@ export async function createComment(opts: {
   status?: CommentStatus;
   /** ISO timestamp the comment was posted at, revision 1 with it; default now. */
   createdAt?: string;
+  /** A reply to this comment, which must be in the same (general) thread. */
+  parentCommentId?: string;
 }): Promise<{ id: string; commenterId: string }> {
-  const { postId, anchoredEventId, email, displayName, body, status = "PENDING" } = opts;
+  const { postId, anchoredEventId, email, displayName, body, status = "PENDING", parentCommentId } = opts;
   const createdAt = opts.createdAt ? new Date(opts.createdAt) : new Date();
   assertSafe(email);
 
@@ -1425,6 +1496,7 @@ export async function createComment(opts: {
     data: {
       threadId: thread.id,
       commenterId: commenter.id,
+      parentCommentId,
       body: commentDocFromText(body),
       bodyText: body,
       status,
@@ -1436,6 +1508,16 @@ export async function createComment(opts: {
   });
 
   return { id: comment.id, commenterId: commenter.id };
+}
+
+/** Soft-deletes a comment as `byEmail`'s user, writing what deleteComment writes. */
+export async function softDeleteComment(commentId: string, byEmail: string): Promise<void> {
+  assertSafe(byEmail);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: byEmail }, select: { id: true } });
+  await prisma.comment.update({
+    where: { id: commentId },
+    data: { deletedByUserId: user.id, deletedAt: new Date() },
+  });
 }
 
 /**
@@ -2122,7 +2204,8 @@ export async function sweepTestData(): Promise<{
   // A doc's ydoc row is named ydoc:<docId> — not ydoc:test-<uuid> — so it
   // isn't caught by the ydoc:test- sweep below (same trap PLAN.md §12b
   // documents for scripts/test-doc.ts). Delete each one alongside its doc.
-  const staleDocs = await prisma.doc.findMany({
+  // Soft-deleted ones included, as in deleteTestDoc.
+  const staleDocs = await prismaIncludingDeleted.doc.findMany({
     where: {
       title: { startsWith: E2E_TITLE_PREFIX },
       authors: { every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
@@ -2250,10 +2333,13 @@ const handlers = {
   getAnnotationStates,
   markPresentAtStamp,
   createTestAnnotation,
+  getReplyAnchorFacts,
   getAnnotationEditFacts,
   backdateAnnotationPosting,
   setAnnotationEditingSince,
   createComment,
+  softDeleteComment,
+  unpublishTestPost,
   createCommentWithQuotes,
   getCommentQuoteFacts,
   getCommentFacts,

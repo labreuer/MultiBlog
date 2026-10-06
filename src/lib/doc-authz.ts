@@ -1,6 +1,6 @@
 import type { Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageDocs, canViewDocs } from "@/lib/role-checks";
 
 export { canManageDocs, canViewDocs } from "@/lib/role-checks";
@@ -49,14 +49,30 @@ export function canEditAnySharedDoc(role: Role): boolean {
 // listed authors only. One query reads the visibility and tests author
 // membership together, which is what lets the signature take a bare `docId`
 // instead of making every call site fetch and pass the visibility too.
-export async function canUserEditDoc(userId: string, role: Role, docId: string): Promise<boolean> {
+//
+// A soft-deleted doc answers false by default, through the filtered `prisma`,
+// and some callers have no other deletion check: creating, publishing and
+// scheduling a post from a doc take its id from the client and ask nothing
+// else. `includeDeleted` is for restoring alone (setDocDeleted), which is by
+// definition a question about a deleted row, so the filtered read would refuse
+// every restore as a permission failure. canUserManageFile reads unfiltered
+// unconditionally; this one can't, for the callers above.
+export async function canUserEditDoc(
+  userId: string,
+  role: Role,
+  docId: string,
+  opts: { includeDeleted?: boolean } = {},
+): Promise<boolean> {
   if (!canManageDocs(role)) {
     return false;
   }
-  const doc = await prisma.doc.findUnique({
+  const args = {
     where: { id: docId },
     select: { visibility: true, authors: { where: { userId }, select: { userId: true } } },
-  });
+  } satisfies Prisma.DocFindUniqueArgs;
+  const doc = opts.includeDeleted
+    ? await prismaIncludingDeleted.doc.findUnique(args)
+    : await prisma.doc.findUnique(args);
   if (!doc) return false;
   if (doc.visibility === "SHARED" && canEditAnySharedDoc(role)) {
     return true;

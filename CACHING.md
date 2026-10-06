@@ -167,9 +167,9 @@ enforcement DEPLOY.md §5 warns about.
 so the two `next start`s can coexist as *processes*), but both serve the same `.next`, and
 `next start` reads chunks and manifests from it after boot: a rebuild underneath a running
 server leaves it answering with a mix of old and new assets, observed misbehaving during the
-e2e prod-lane work (docs/playwright-flakiness.html). Stop web-prod first (it's the preview
-tool's process, so stop it there — `npm run stop:all` sweeps :3000/:3002/:1234 but deliberately
-not :3001), or accept that it needs a restart once the build finishes.
+e2e prod-lane work (docs/playwright-flakiness.html). Stop web-prod first — `npm run stop:all`
+sweeps :3001 along with :3000/:3002/:1234, or stop it in the preview tool if that started it —
+or accept that it needs a restart once the build finishes.
 
 ## 2026-09-14 — the browser's HTTP cache *is* involved, on Firefox
 

@@ -1,5 +1,14 @@
-import { test, expect, signIn, gotoOk, annotationEditor, visibleText } from "./fixtures";
-import { ADMIN_EMAIL, createTestFile, deleteTestFile, getFileAnnotationFacts, type TestFile } from "./db";
+import { test, expect, signIn, gotoOk, annotationEditor, selectTextInAnnotation, visibleText } from "./fixtures";
+import {
+  ADMIN_EMAIL,
+  createTestAnnotation,
+  createTestFile,
+  deleteTestFile,
+  getAnnotationEditFacts,
+  getFileAnnotationFacts,
+  getReplyAnchorFacts,
+  type TestFile,
+} from "./db";
 import { NORMALISER_VERSION } from "@/lib/pdf-text";
 
 // PLAN.md §19 Phase 3 — annotating a PDF.
@@ -104,6 +113,62 @@ async function composeAnnotation(page: import("@playwright/test").Page, body: st
 }
 
 test.describe("pdf annotations", () => {
+  // PLAN.md §13p on a file: a reply anchors into its parent's *body*, and the
+  // server resolves the replier's offsets against the version it stamps the
+  // reply with, storing its own text for the range — as on a doc, since a body
+  // is a ydoc whatever it hangs off. The parent is edited in a second tab after
+  // the replier's page loaded it, so the replier's offsets were measured
+  // against text the stamped version has since moved.
+  test("a reply's anchor into an edited parent is re-derived against the version it is stamped with", async ({
+    page,
+  }) => {
+    const file = await makeFile();
+    const parentBody = "alpha bravo charlie delta echo";
+    const { id: parentId } = await createTestAnnotation({ fileId: file.id, authorEmail: ADMIN_EMAIL, bodyText: parentBody });
+    const card = (p: import("@playwright/test").Page) => p.locator(`[data-comment-id="${parentId}"]`);
+    // The parent anchors nowhere in the document, so the panel, which lists
+    // what is on screen, keeps its card out of view until asked.
+    const openPanel = async (p: import("@playwright/test").Page) => {
+      await gotoOk(p, `/pdf/${file.slug}`);
+      await waitForViewer(p);
+      await p.getByRole("button", { name: "Show them all" }).click();
+      await expect(card(p)).toBeVisible();
+    };
+    try {
+      await openPanel(page);
+      await expect(card(page)).toContainText(parentBody);
+
+      // A second tab pushes "charlie" along with a prefix, and settles it.
+      const other = await page.context().newPage();
+      await openPanel(other);
+      await card(other).getByRole("button", { name: "Edit", exact: true }).click();
+      const editor = annotationEditor(other);
+      await expect(editor).toBeVisible();
+      await editor.click();
+      await other.keyboard.press("ControlOrMeta+a");
+      await other.keyboard.type(`zulu yankee ${parentBody}`);
+      await card(other).getByRole("button", { name: "Done" }).click();
+      await expect(editor).toHaveCount(0);
+      await expect.poll(async () => (await getAnnotationEditFacts(parentId))?.versions.length).toBe(2);
+      await other.close();
+
+      // The first tab still shows the version it loaded, which is the premise.
+      await expect(card(page)).not.toContainText("zulu");
+      await selectTextInAnnotation(page, "charlie");
+      await expect(annotationEditor(page)).toBeVisible({ timeout: 15_000 });
+      await annotationEditor(page).click();
+      await annotationEditor(page).pressSequentially("Why charlie?");
+      await page.getByRole("button", { name: "Save" }).click();
+
+      // Stored against the stamped version: the quote is what is there.
+      await expect
+        .poll(() => getReplyAnchorFacts(parentId), { timeout: 15_000 })
+        .toEqual({ quotedText: "charlie", textAtStamp: "charlie" });
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+
   test("anchors a selection, and the highlight survives a reload", async ({ page }) => {
     const file = await makeFile();
     try {

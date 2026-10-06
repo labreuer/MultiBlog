@@ -5,6 +5,7 @@ import { revalidatePostPage } from "@/lib/revalidate-post";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost, isAdmin } from "@/lib/authz";
+import { canUserReadComment, isCommentPublic, type ReadableComment } from "@/lib/comment-authz";
 import { derivePostStatus } from "@/lib/post-status";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
@@ -480,21 +481,22 @@ export async function editComment(
   return { status: isSpam ? "SPAM" : comment.status, body: captured.json, bodyText: captured.text };
 }
 
-// Whether this viewer may read a comment at all — the rule getCommentHistory
-// states: an APPROVED, undeleted comment is public; anything else is its own
-// author's and its post's moderators'. Shared with getCommentMarkdown, which
-// hands the same body back in a different form.
-async function canViewerReadComment(comment: {
-  status: CommentStatus;
-  deletedAt: Date | null;
-  commenter: { userId: string | null };
-  thread: { post: { id: string } };
-}): Promise<boolean> {
-  if (comment.status === "APPROVED" && comment.deletedAt === null) return true;
+// What canUserReadComment needs of a comment's post: whether it is public
+// rather than just its id, since a comment on a draft, unpublished or deleted
+// post is not.
+const READABLE_COMMENT_INCLUDE = {
+  commenter: { select: { userId: true } },
+  thread: { select: { post: { select: { id: true, publishedAt: true, publishEventId: true, deletedByUserId: true } } } },
+} as const;
+
+// Whether this viewer may read a comment at all: canUserReadComment
+// (src/lib/comment-authz.ts), reading the session only when the comment isn't
+// public. Shared by getCommentHistory and getCommentMarkdown, which hand the
+// same body back in two forms.
+async function canViewerReadComment(comment: ReadableComment): Promise<boolean> {
+  if (isCommentPublic(comment)) return true;
   const session = await auth();
-  if (!session?.user) return false;
-  if (comment.commenter.userId === session.user.id) return true;
-  return canUserEditPost(session.user.id, session.user.role, comment.thread.post.id);
+  return canUserReadComment(session?.user ? { id: session.user.id, role: session.user.role } : null, comment);
 }
 
 // PLAN.md §23m — the stored body serialized back to Markdown, for the edit
@@ -502,10 +504,7 @@ async function canViewerReadComment(comment: {
 // one body is exactly the two-copies-that-can-disagree problem §23f's rewrite
 // exists to avoid, and the round trip is a few microseconds.
 export async function getCommentMarkdown(commentId: string): Promise<{ markdown: string } | { error: string }> {
-  const comment = await prisma.comment.findUnique({
-    where: { id: commentId },
-    include: { commenter: { select: { userId: true } }, thread: { select: { post: { select: { id: true } } } } },
-  });
+  const comment = await prisma.comment.findUnique({ where: { id: commentId }, include: READABLE_COMMENT_INCLUDE });
   if (!comment || !(await canViewerReadComment(comment))) {
     return { error: "Comment not found." };
   }
@@ -552,8 +551,7 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
     include: {
-      commenter: { select: { userId: true } },
-      thread: { select: { post: { select: { id: true } } } },
+      ...READABLE_COMMENT_INCLUDE,
       revisions: {
         orderBy: { revisionNo: "asc" },
         include: { author: { select: { name: true, email: true } }, quotedBy: { select: { id: true }, take: 1 } },
@@ -565,10 +563,11 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
   }
 
   // Who may see it: the same people who may see the comment. An APPROVED,
-  // undeleted comment is public, so its history is too — that is the whole
-  // point of a visible edit. Anything else (pending, spam, deleted) is
-  // withheld from everyone but its own author and whoever moderates the post,
-  // matching what the reading views already show of the comment itself.
+  // undeleted comment on a published post is public, so its history is too —
+  // that is the whole point of a visible edit. Anything else (pending, spam,
+  // deleted, or on a post no longer live) is withheld from everyone but its
+  // own author and whoever moderates the post, matching what the reading
+  // views already show of the comment itself.
   if (!(await canViewerReadComment(comment))) {
     return [];
   }
@@ -589,6 +588,26 @@ export async function getCommentHistory(commentId: string): Promise<CommentVersi
       current: revision.revisionNo === newestNo,
     }))
     .reverse();
+}
+
+// Which of this post's comments are the signed-in viewer's own: what the post
+// page's cards need to offer Edit and Delete (CommentNode, through
+// OwnCommentsProvider). The page is statically generated, so it can't know the
+// viewer, and it doesn't carry each commenter's user id for the browser to
+// compare instead: a display name is fixed when the commenter row is made, so
+// that id beside it would tie an old name to a renamed account for anyone
+// reading the source. It answers only about the asker, so it needs no gate on
+// the post.
+export async function getOwnCommentIds(postId: string): Promise<string[]> {
+  const session = await auth();
+  if (!session?.user || typeof postId !== "string") {
+    return [];
+  }
+  const rows = await prisma.comment.findMany({
+    where: { thread: { postId }, commenter: { userId: session.user.id } },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id);
 }
 
 // Revalidates the public post page (comment visibility) and its per-post

@@ -1,6 +1,7 @@
-// `npm run stop:all` — stops this slot's dev:all tree and its e2e prod web
-// server, after checking each port's owner really is this checkout. The
-// ownership rule and the ancestor walk live in scripts/dev-servers.ts.
+// `npm run stop:all` — stops this slot's dev:all tree, its e2e prod web server
+// and the preview tool's web-prod, after checking each port's owner really is
+// this checkout. The ownership rule and the ancestor walk live in
+// scripts/dev-servers.ts.
 import { stopAll } from "./dev-servers";
 
 // No top-level await: without `"type": "module"` tsx runs these scripts as

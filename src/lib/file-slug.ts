@@ -71,6 +71,31 @@ async function fileSlugInUse(
   return live !== null || historic !== null;
 }
 
+// The first key of the two-key advisory lock below, so these locks occupy a
+// space of their own: "file" as four ASCII bytes.
+const FILE_SLUG_LOCK_SPACE = 0x66696c65;
+
+/**
+ * Holds `slug` for the rest of `tx`: every function below that checks a slug is
+ * free and then takes it calls this first, on the slug it is about to check.
+ *
+ * The check alone closes nothing. Transactions run at READ COMMITTED, and no
+ * isolation level shows one transaction another's uncommitted insert, so two
+ * uploads of `report.pdf` would both find `report` free and the second would
+ * die on `file_slug_live_key`. With the lock the second waits until the first
+ * commits, then sees its row and walks on to `report-2`. Transaction-scoped
+ * (`pg_advisory_xact_lock`), so the commit that makes the row visible is what
+ * releases it. Keyed on the slug rather than taken once for all files, since
+ * an upload's transaction also writes every page's text, and unrelated
+ * uploads shouldn't queue behind it; a hash collision only serializes two of
+ * them. What it leaves open is two *different* bases whose walks reach the same
+ * `-N` at once (`report` walking onto `report-2` while `report 2` claims it),
+ * which the unique index still refuses.
+ */
+async function lockFileSlug(tx: Prisma.TransactionClient, slug: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FILE_SLUG_LOCK_SPACE}::int4, hashtext(${slug}))`;
+}
+
 /** `base`, or the first `base-N` that no live file and no live redirect holds. */
 async function nextFreeFileSlug(
   base: string,
@@ -87,27 +112,25 @@ async function nextFreeFileSlug(
 }
 
 /**
- * A free slug for `title`, checked against the global client.
- *
- * **Not safe on its own inside a transaction that is also creating files** —
- * the same caveat `uniqueDocSlug` carries, and the reason the importers use a
- * claim-through-the-transaction helper. The upload route creates one file per
- * request, so the window is a genuine concurrent double-upload of the same
- * filename; `claimFileSlug` below is what closes it.
+ * A free slug for `title`, checked against the global client — a suggestion,
+ * not a claim: nothing holds it between this answer and an insert. Anything
+ * that creates a file goes through `claimFileSlug` below instead.
  */
 export async function uniqueFileSlug(title: string, excludeFileId?: string): Promise<string> {
   return nextFreeFileSlug(slugify(title, "file"), prismaIncludingDeleted, excludeFileId);
 }
 
 /**
- * `uniqueFileSlug` run *inside* a transaction, so a slug taken by a
- * concurrently-created file is visible. The upload route calls this rather than
- * the global version: two people uploading `report.pdf` at the same moment
- * would otherwise both compute `report` and the second insert would die on the
- * unique index with a raw P2002 instead of becoming `report-2`.
+ * `uniqueFileSlug` as a claim, for a transaction about to insert the file: it
+ * holds the base slug (`lockFileSlug`) before looking, so two people uploading
+ * `report.pdf` at the same moment get `report` and `report-2` rather than a
+ * P2002 for the second.
  */
 export async function claimFileSlug(tx: TransactionClient, title: string): Promise<string> {
-  return nextFreeFileSlug(slugify(title, "file"), asBaseTx(tx));
+  const base = slugify(title, "file");
+  const client = asBaseTx(tx);
+  await lockFileSlug(client, base);
+  return nextFreeFileSlug(base, client);
 }
 
 /**
@@ -124,6 +147,7 @@ export async function freeFileSlugFor(
   currentSlug: string,
 ): Promise<string> {
   const client = asBaseTx(tx);
+  await lockFileSlug(client, currentSlug);
   if (!(await fileSlugInUse(currentSlug, client, fileId))) {
     return currentSlug;
   }
@@ -158,6 +182,7 @@ export async function changeFileSlug(fileId: string, newSlugInput: string, updat
     if (file.slug === newSlug) {
       return newSlug;
     }
+    await lockFileSlug(tx, newSlug);
     if (await fileSlugInUse(newSlug, tx)) {
       throw new Error(`Url "${newSlug}" is already in use.`);
     }
@@ -185,6 +210,7 @@ export async function revertFileSlug(fileId: string, updatedByUserId: string): P
     // current one. Refused rather than suffixed — reverting is an explicit
     // request for one particular url, and quietly handing back a different
     // one is not an answer to it.
+    await lockFileSlug(tx, lastHistory.slug);
     if (await fileSlugInUse(lastHistory.slug, tx, fileId)) {
       throw new Error(`Url "${lastHistory.slug}" is in use by another file.`);
     }

@@ -175,23 +175,13 @@ Not yet done:
 
 **Status:** found 2026-10-04 while giving each read rule one exported `where` helper
 (`readableDocsWhere`, `readableFilesWhere`, `readableAnnotationsWhere`, `publicCommentsWhere`).
-Each difference below was kept and named rather than fixed in passing, because none is known to
-be a mistake rather than a choice. Each is a one-line change once decided.
+Kept and named rather than fixed in passing, because it isn't known to be a mistake rather
+than a choice. A one-line change once decided.
 
 - **`/annotations` lists annotations on a soft-deleted doc or PDF.** Its scope passes
   `includeDeletedContainers`; the read rule excludes a deleted container, so `/doc/[slug]` and
   `/pdf/[slug]` 404 on the same rows' containers. Either it is wanted (an admin can still find
   and delete annotations hanging off a deleted doc), or the option goes.
-- **`canViewerReadComment` (`src/app/actions/comments.ts`) never looks at the post.** It calls
-  any `APPROVED`, undeleted comment public, so `getCommentHistory` and `getCommentMarkdown`
-  answer for a comment on a draft, unpublished, scheduled or deleted post to anyone holding its
-  id. `canUserReadComment` (`src/lib/comment-authz.ts`) is the rule it restates.
-- **`describeQuoteTarget`'s post arm (`src/lib/comment-quote-data.ts`) tests `publishedAt`
-  alone.** An unpublished post keeps `publishedAt`, so a citation of it still shows its title
-  and links to a URL that 404s. `canQuoteTargetInto` checks `publishEventId` as well.
-- **`loadCandidates`' host-post check (`src/lib/comment-quote-capture.ts`) tests `publishedAt`
-  alone**, the same way. Reached only by a moderator editing a comment on a post that has since
-  been unpublished.
 
 ## Tables: what is left (docs/TABLES.md; docs/research/tables.md)
 
@@ -233,31 +223,6 @@ import and export into an existing doc followed the same day (docs/TABLES.md). S
      set in a wider editor or pasted from a 6.5in Word page (scale proportionally? clamp?),
      and how the drag handle (`.column-resize-handle`, prosemirror-tables) should look
      under the site's tokens. Decide before turning it on, not after.
-## A PDF annotation reply's quote is still client-supplied (PLAN.md §22e; docs/ANNOTATIONS.md)
-
-`postFileAnnotation` stores a reply's `anchorFrom`/`anchorTo`/`quotedText` exactly as the
-client sent them. The doc path does not: it runs `captureAnchorInYdoc`, which materializes the
-parent body at the stamped update, resolves the client's offsets there, and stores *its own*
-`textBetween` — so a doc reply's stored triple is self-consistent with the state it names, by
-construction, forever. That property is what `scripts/integrity/check-annotation-anchors.ts`
-verifies and what §13o's whole design rests on.
-
-**Why it matters more now than it did.** Before §22 nothing could edit a posted annotation
-body, so a client's offsets were resolved against a document that was never going to move and
-the difference was academic. Now a body is mutable, and a PDF reply's quote can drift with
-nothing to check it against.
-
-**Not a hole in the version stamp**, which §22e did add on this path: the reply records its
-parent's newest settled version (the mark of its newest snapshot), so "quoted an earlier
-version" reconstructs the right state on a PDF exactly as it does on a doc. What is missing is only the server's own derivation of the
-quote at post time.
-
-**Why it was left.** It is pre-existing (§19 built it this way), and fixing it means touching
-the PDF surface's anchor path — which has its own spec (`pdf-annotations.spec.ts`) and its own
-anchor mechanism — inside a branch that was already changing the doc path's. The fix itself is
-small: `postFileAnnotation`'s reply branch calls `captureAnchorInYdoc` with the annotation
-schema and the stamp it now computes, the same three arguments the doc branch passes.
-
 ## Author-highlight marks on annotation bodies are unstyled by design-by-accident (PLAN.md §13h)
 
 Annotations carry the same `authorHighlight` mark docs do — same extension
@@ -1022,47 +987,6 @@ writes, which would put a second round trip on every store debounce.
 **What will not work, so nobody spends an afternoon on it:** `onDelete: SetNull` on the
 relation (`schema.prisma:623`). That governs what happens when a *referenced* row is deleted,
 not what happens when you write a reference to a row that is already gone — which is this case.
-
----
-
-## Two simultaneous uploads of one filename: the second gets a 500, not `-2`
-
-**Status:** found 2026-10-05, when `--repeat-each` ran two copies of `files.spec.ts`'s upload
-test in the same millisecond and both titled their PDF `E2E upload <Date.now()>`. Not fixed.
-
-**What happens.** The upload route (`src/app/api/files/upload/route.ts`) claims the slug inside
-its transaction with `claimFileSlug` (`src/lib/file-slug.ts`), then inserts the `file` row. Both
-uploads compute the same free slug, and the second insert fails on `file_slug_live_key` with
-P2002. The route logs `couldn't record the uploaded file` and answers 500, "Couldn't save that
-file." Nothing is lost: the bytes cleanup counts references before deleting, so a winner that
-shares the sha keeps its bytes. But the user is told the upload failed when the same name
-uploaded twice should become `report` and `report-2`. It needs only the same filename, not the
-same bytes, since the slug comes from the title.
-
-**Why.** `claimFileSlug`'s comment, and the route's comment above its call, say that running
-inside the transaction makes "a slug taken by a concurrently-created file" visible. It doesn't.
-The transaction runs at Postgres's default READ COMMITTED (nothing in `src` sets
-`isolationLevel`), and no isolation level shows a transaction another one's uncommitted insert.
-The check and the insert are a plain check-then-act race. `uniqueFileSlug`'s comment repeats the
-claim ("`claimFileSlug` below is what closes it").
-
-**Fix**, either of:
-
-- **A transaction-scoped advisory lock in `claimFileSlug`** — `pg_advisory_xact_lock` keyed on a
-  hash of the slugified base, before `nextFreeFileSlug`. Two claims for `report` then serialize.
-  The second waits for the first to commit, sees its row, and takes `report-2`. That makes the
-  function do what its comment says, for every caller. A hash collision only serializes two
-  unrelated uploads. Recommended.
-- **Retry on a slug P2002**, as `insertDocRow` (`src/lib/doc-create.ts`) already does for docs:
-  bounded attempts, re-claiming each time.
-
-Either way, correct the three comments. `changeFileSlug` (a rename racing an upload or another
-rename to the same slug) wasn't checked and likely has the same shape.
-
-**Test.** An e2e that sends two uploads of one filename at once from a single `page.evaluate`
-(`Promise.all` over two `fetch`es, as `files.spec.ts`'s `uploadFile` does one). It should get
-two 200s, with slugs `x` and `x-2`. Separately, the existing upload test's `Date.now()` title
-should take a random suffix, so `--repeat-each` stops colliding with itself.
 
 ---
 

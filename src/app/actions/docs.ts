@@ -301,7 +301,7 @@ async function setDocDeleted(docId: string, deleted: boolean): Promise<void> {
   if (!doc) {
     throw new Error("Doc not found.");
   }
-  if (!(await canUserEditDoc(session.user.id, session.user.role, docId))) {
+  if (!(await canUserEditDoc(session.user.id, session.user.role, docId, { includeDeleted: true }))) {
     throw new Error("You don't have permission to delete this doc.");
   }
   await prisma.doc.update({

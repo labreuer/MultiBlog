@@ -30,6 +30,26 @@ export function publishedPostWhere(): Prisma.PostWhereInput {
 }
 
 /**
+ * publishedPostWhere() for one row already in hand, plus the deletion check
+ * that function leaves to prisma.ts's extension — which a post reached through
+ * a relation never passes through, so here it is spelled out. Every per-row
+ * "may the public see this post" goes through it. `publishedAt` alone is not
+ * the test: unpublishing leaves it set.
+ */
+export function isPostPublic(post: {
+  publishEventId: string | null;
+  publishedAt: Date | null;
+  deletedByUserId: string | null;
+}): boolean {
+  return (
+    post.deletedByUserId === null &&
+    post.publishEventId !== null &&
+    post.publishedAt !== null &&
+    post.publishedAt <= new Date()
+  );
+}
+
+/**
  * "Every post this viewer may see" — `publishedPostWhere()` widened by the
  * unpublished ones they may edit.
  *

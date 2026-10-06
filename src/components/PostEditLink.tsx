@@ -21,7 +21,7 @@ import { canEditAnyPost } from "@/lib/role-checks";
 // ADMIN/EDITOR edit any post, an AUTHOR only one they are on the byline of.
 // The author ids it needs are shipped as a prop, which puts them in the
 // page's RSC payload; they are opaque cuids, and the same ids already reach
-// the browser wherever a comment or annotation names its author.
+// the browser wherever an annotation names its author.
 export default function PostEditLink({ postId, authorIds }: { postId: string; authorIds: string[] }) {
   const { data: session } = useSession();
   const user = session?.user;

@@ -17,6 +17,7 @@ import {
 } from "./comment-quote-extract";
 import { isPendingAnchorId, type PendingQuoteHint } from "./comment-quote-pending";
 import { isCommentPublic, publicCommentsWhere } from "./comment-authz";
+import { isPostPublic } from "./post-status";
 import { canQuoteTargetInto } from "./comment-quote-authz";
 
 // PLAN.md §23n — the server half of the matcher: load the immutable targets
@@ -177,9 +178,15 @@ async function loadCandidates(
 
   const post = await prisma.post.findUnique({
     where: { id: host.postId },
-    select: { id: true, publishedAt: true, publishEvent: { select: { id: true, proseJson: true } } },
+    select: {
+      id: true,
+      publishedAt: true,
+      publishEventId: true,
+      deletedByUserId: true,
+      publishEvent: { select: { id: true, proseJson: true } },
+    },
   });
-  if (!post?.publishedAt || post.publishedAt > new Date()) return [];
+  if (!post || !isPostPublic(post)) return [];
 
   // Pinned versions first, so an edit re-pins to what it already quoted.
   for (const row of existing) {
