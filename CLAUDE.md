@@ -329,8 +329,8 @@ running `prisma migrate dev` on anything unusual.
 
 ### Automated
 
-- **`npm run check`** — schema format, sign-in redirects, unit tests, typecheck and lint in
-  one command, in that order (cheapest first). **This is the bar before reporting any change
+- **`npm run check`** — schema format, sign-in redirects, Prisma write data, unit tests,
+  typecheck and lint in one command, in that order (cheapest first). **This is the bar before reporting any change
   as done**, not `tsc` and `eslint` alone: neither of those sees a `schema.prisma` edit, and
   one drifted through that gap within days of the rule being written (TODO.md, "No CI").
   Nothing runs it automatically yet.
@@ -341,6 +341,13 @@ running `prisma migrate dev` on anything unusual.
   for is silent: a new gated route that skips the callbackUrl still compiles, lints, gates and
   passes its tests — only the person who followed the link notices, by landing on /dashboard.
   src/app/sign-in/NOTES.md.
+- `npm run check:prisma-data` (part of `check`) — fails if a Prisma write's `data` is one of
+  its function's parameters, or spreads or aliases one. A server action is sent whatever JSON
+  its caller likes, whatever the parameter's type says, and Prisma follows relations, so
+  passing one through lets a caller write another table: `{ user: { update: { role: "ADMIN"
+  } } }` through a doc-link group made its owner an ADMIN. It compiles and lints, because the
+  type is a subset of Prisma's. Build the data from named fields, or from a parse that does
+  (`src/lib/doc-link-edit.ts`). The script's header lists what it can't see.
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
   and the right home for exactly one kind of thing — pure functions whose *rejection surface*
