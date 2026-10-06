@@ -750,8 +750,10 @@ export async function deleteTestFile(idOrSlug: string): Promise<void> {
   });
 }
 
+// prismaIncludingDeleted, as deleteTestFile above: a test that soft-deletes a
+// doc and fails before restoring it would otherwise leave the row behind.
 export async function deleteTestDoc(idOrSlug: string): Promise<void> {
-  const doc = await prisma.doc.findFirst({
+  const doc = await prismaIncludingDeleted.doc.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
     include: { authors: { include: { user: true } } },
   });
@@ -2122,7 +2124,8 @@ export async function sweepTestData(): Promise<{
   // A doc's ydoc row is named ydoc:<docId> — not ydoc:test-<uuid> — so it
   // isn't caught by the ydoc:test- sweep below (same trap PLAN.md §12b
   // documents for scripts/test-doc.ts). Delete each one alongside its doc.
-  const staleDocs = await prisma.doc.findMany({
+  // Soft-deleted ones included, as in deleteTestDoc.
+  const staleDocs = await prismaIncludingDeleted.doc.findMany({
     where: {
       title: { startsWith: E2E_TITLE_PREFIX },
       authors: { every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
