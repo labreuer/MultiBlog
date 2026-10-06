@@ -342,6 +342,27 @@ export async function getPostPath(postId: string): Promise<string | null> {
   return postPath(post);
 }
 
+/**
+ * Unpublishes a post the way unpublishPost does: publishEventId cleared, an
+ * UNPUBLISHED event recorded, and publishedAt left set — the leftover a
+ * `publishedAt`-only test mistakes for a live post. Revalidates nothing, so a
+ * page already open stays as it was, which is the point for a spec asking what
+ * that page can still fetch.
+ */
+export async function unpublishTestPost(postId: string): Promise<void> {
+  const post = await prisma.post.findUniqueOrThrow({
+    where: { id: postId },
+    include: { authors: { include: { user: true } } },
+  });
+  if (post.authors.length === 0 || post.authors.some((a) => !SAFE_EMAIL.test(a.user.email))) {
+    throw new Error(`Refusing to unpublish post "${post.title}" — it has a non-throwaway (or missing) author.`);
+  }
+  await prisma.$transaction([
+    prisma.post.update({ where: { id: postId }, data: { publishEventId: null } }),
+    prisma.postPublicationEvent.create({ data: { postId, type: "UNPUBLISHED", actorId: post.authors[0].userId } }),
+  ]);
+}
+
 export async function deleteTestPost(idOrSlug: string): Promise<void> {
   const post = await prisma.post.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
@@ -2271,6 +2292,7 @@ const handlers = {
   setAnnotationEditingSince,
   createComment,
   softDeleteComment,
+  unpublishTestPost,
   createCommentWithQuotes,
   getCommentQuoteFacts,
   getCommentFacts,

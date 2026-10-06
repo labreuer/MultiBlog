@@ -2,6 +2,7 @@ import { prisma } from "./prisma";
 import type { CommentStatus } from "@/generated/prisma/enums";
 import { targetFromColumns, type AnchorTarget } from "./anchors";
 import { isCommentPublic } from "./comment-authz";
+import { isPostPublic } from "./post-status";
 import { commentAnchorName } from "./comment-anchor-name";
 import { postPath } from "./post-path";
 import type { CommentQuoteCitation, CommentQuoteCitations } from "./comment-quote-citation";
@@ -29,7 +30,13 @@ type AnchorRow = {
   targetCommentId: string | null;
   anchoredEventId: string | null;
   quotedRevisionId: string | null;
-  post: { title: string; slug: string; publishedAt: Date | null; publishEventId: string | null } | null;
+  post: {
+    title: string;
+    slug: string;
+    publishedAt: Date | null;
+    publishEventId: string | null;
+    deletedByUserId: string | null;
+  } | null;
   targetComment: {
     id: string;
     status: CommentStatus;
@@ -60,8 +67,7 @@ export function describeQuoteTarget(row: AnchorRow, target: AnchorTarget): Comme
   switch (target.kind) {
     case "post": {
       const post = row.post;
-      const isPublic = !!post && post.publishedAt !== null && post.publishedAt <= new Date();
-      if (!post || !isPublic) return { anchorId: row.id, ...UNAVAILABLE };
+      if (!post || !isPostPublic(post)) return { anchorId: row.id, ...UNAVAILABLE };
       return {
         anchorId: row.id,
         label: post.title,
@@ -111,7 +117,7 @@ export async function loadCommentQuoteCitations(commentIds: string[]): Promise<M
       targetCommentId: true,
       anchoredEventId: true,
       quotedRevisionId: true,
-      post: { select: { title: true, slug: true, publishedAt: true, publishEventId: true } },
+      post: { select: { title: true, slug: true, publishedAt: true, publishEventId: true, deletedByUserId: true } },
       targetComment: {
         select: {
           id: true,

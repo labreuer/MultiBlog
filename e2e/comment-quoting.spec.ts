@@ -11,6 +11,7 @@ import {
   getCommentFacts,
   getCommentQuoteFacts,
   uniqueEmail,
+  unpublishTestPost,
 } from "./db";
 
 // PLAN.md §23n / §23f / §23h — a comment quoting what is on the page.
@@ -299,6 +300,35 @@ test.describe("quoting from elsewhere", () => {
       const facts = await getCommentQuoteFacts(id);
       expect(facts[0].targetKind).toBe("post");
       expect(facts[0].targetId).toBe(other.id);
+    } finally {
+      await deleteTestPost(other.id);
+    }
+  });
+
+  // §23h's degradation: the words stay, the citation stops resolving. An
+  // unpublished post keeps its publishedAt, so a test of that alone would go
+  // on naming it and linking to a page that 404s.
+  test("a citation of a post that has since been unpublished no longer names or links it", async ({
+    page,
+    publishedPost,
+  }) => {
+    const other = await createTestPost({ authorEmail: ADMIN_EMAIL, bodyText: OTHER_BODY, publish: true });
+    try {
+      const { id } = await createCommentWithQuotes({
+        postId: publishedPost.id,
+        email: uniqueEmail("quoter"),
+        displayName: "Quoter",
+        markdown: `> migratory birds and their long journeys south\n\nFrom the other piece.`,
+        pending: [{ target: { kind: "post", id: other.id }, text: "migratory birds and their long journeys south" }],
+      });
+      await unpublishTestPost(other.id);
+
+      await freshGoto(page, publishedPost.path);
+      const quote = card(page, id).locator("blockquote[data-anchor-id]");
+      await expect(quote).toContainText("migratory birds");
+      await expect(quote.locator("footer")).toContainText("a source that is no longer available");
+      await expect(quote.locator("footer")).not.toContainText(other.title);
+      await expect(quote.locator("footer a")).toHaveCount(0);
     } finally {
       await deleteTestPost(other.id);
     }
