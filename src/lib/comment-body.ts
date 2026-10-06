@@ -95,9 +95,32 @@ export function commentDocFromText(text: string): JSONContent {
 
 const LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
-/** True for an href a comment may carry. Relative and protocol-less URLs are refused too. */
+// Resolves a relative href for the check below; never fetched, and never a
+// real origin, so "is it still on this origin?" can be asked of the result.
+const RELATIVE_PROBE_ORIGIN = "https://comment-href.invalid";
+
+/**
+ * True for an href a comment may carry: an absolute http, https or mailto URL,
+ * or a root-relative link to a PDF on this site (`/pdf/<slug>…`), which is
+ * how a PDF fragment link is written (docs/PDF_FRAGMENT_LINKS.md §8). Every
+ * other relative or protocol-less URL is refused.
+ *
+ * The `/pdf/` test is made on the path the URL parser settles on, not on the
+ * string, so neither `/pdf/../elsewhere` nor `/pdf/\\host` gets past it. Nothing
+ * renders a comment body off the site (no email carries one, and the RSS feed
+ * has a post's opening text as plain text), so a relative href resolves
+ * wherever it is shown.
+ */
 export function isAllowedCommentHref(href: unknown): href is string {
   if (typeof href !== "string" || !href.trim()) return false;
+  if (href.startsWith("/")) {
+    try {
+      const resolved = new URL(href, RELATIVE_PROBE_ORIGIN);
+      return resolved.origin === RELATIVE_PROBE_ORIGIN && resolved.pathname.startsWith("/pdf/");
+    } catch {
+      return false;
+    }
+  }
   try {
     return LINK_PROTOCOLS.has(new URL(href).protocol);
   } catch {
