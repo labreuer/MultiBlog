@@ -8,6 +8,11 @@ the `anchored-links` branch). UI sketch, drawn in `globals.css`'s own tokens:
 [docs/Anchored_Links.html](Anchored_Links.html) — its "immutable in v1" note predates
 editing.
 
+A single passage of one PDF can also be a **fragment link**, a URL with no row at all
+(`/pdf/<slug>#page=<n>&text=<words>`): [PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md). It is drawn
+with the same outline as a followed link's PDF part, and everything below about rows, the tray,
+the landing route and `/links` is what it does without.
+
 ## What an anchored link is
 
 An **anchored link** is a hyperlink that refers to one or more text selections of a doc

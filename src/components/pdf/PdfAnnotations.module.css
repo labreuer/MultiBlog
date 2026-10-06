@@ -185,7 +185,9 @@
 /* docs/ANCHORED_LINKS.md — the shared "Linked passages" banner, floated
    over the viewer rather than participating in its layout: the viewer's
    grid is pdfjs's own, and the banner is page furniture, not viewer chrome.
-   Below the selection popover's 30 — a live selection outranks wayfinding. */
+   Below the selection popover's 30 — a live selection outranks wayfinding.
+   It holds a followed link's banner and a fragment link's
+   (docs/PDF_FRAGMENT_LINKS.md), stacked, since the two can arrive together. */
 .anchoredLinkOverlay {
   position: fixed;
   top: 4rem;
@@ -193,6 +195,12 @@
   transform: translateX(-50%);
   z-index: 20;
   width: min(480px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.overlayBanner {
   box-shadow: 0 2px 8px var(--shadow-color);
 }
 

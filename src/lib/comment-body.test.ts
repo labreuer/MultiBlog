@@ -103,6 +103,18 @@ test("a javascript: or relative href drops the link and keeps the text", () => {
   assert.deepEqual(hardened.content![0].content![0].marks, [{ type: "bold" }]);
 });
 
+test("a root-relative link to a PDF is allowed, so a fragment link can be quoted in a comment", () => {
+  for (const href of ["/pdf/a-book#page=12&text=could+not+yet", "/pdf/a-book", "/pdf/a-book?sel=abc"]) {
+    const hardened = hardenCommentLinks(doc({ type: "paragraph", content: [{ type: "text", text: "t", marks: [{ type: "link", attrs: { href } }] }] }));
+    assert.equal(hardened.content![0].content![0].marks![0].attrs!.href, href, href);
+  }
+  // Only a path the parser leaves under /pdf/, on this origin.
+  for (const href of ["/pdf/../sign-out", "//elsewhere.invalid/pdf/x", "/\\elsewhere.invalid/pdf/x", "/pdfx", "/doc/x", "/pdf"]) {
+    const hardened = hardenCommentLinks(doc({ type: "paragraph", content: [{ type: "text", text: "t", marks: [{ type: "link", attrs: { href } }] }] }));
+    assert.equal(hardened.content![0].content![0].marks, undefined, href);
+  }
+});
+
 test("mailto links are allowed", () => {
   const result = parseCommentBody(
     doc({ type: "paragraph", content: [{ type: "text", text: "me", marks: [{ type: "link", attrs: { href: "mailto:a@b.invalid" } }] }] }),

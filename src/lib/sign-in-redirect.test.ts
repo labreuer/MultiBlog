@@ -7,6 +7,7 @@ import {
   safeCallbackUrl,
   signInErrorPath,
   signInPath,
+  withArrivalFragment,
 } from "./sign-in-redirect";
 
 // The rejection surface is the whole point here: this value arrives from the
@@ -102,4 +103,13 @@ test("signInErrorPath never echoes anything but the destination", () => {
   // header, and every access log (src/app/actions/sign-in.ts).
   const params = new URL(signInErrorPath("/docs"), "http://example.test").searchParams;
   assert.deepEqual([...params.keys()].sort(), ["callbackUrl", "error"]);
+});
+
+test("withArrivalFragment hands on the fragment the reader arrived with", () => {
+  assert.equal(withArrivalFragment("/pdf/a-book", "#page=12&text=the+words"), "/pdf/a-book#page=12&text=the+words");
+  assert.equal(withArrivalFragment("/pdf/a-book?sel=x", "#page=3"), "/pdf/a-book?sel=x#page=3");
+  // Nothing to hand on, or a destination with a fragment of its own, which wins.
+  assert.equal(withArrivalFragment("/docs", ""), "/docs");
+  assert.equal(withArrivalFragment("/docs", "#"), "/docs");
+  assert.equal(withArrivalFragment("/doc/x#own", "#page=2"), "/doc/x#own");
 });

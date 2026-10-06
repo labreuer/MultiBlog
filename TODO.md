@@ -171,6 +171,23 @@ Not yet done:
 - **The API's search endpoints** (`docs/API.md` on `api-mcp`, which now points them at
   `src/lib/search/`) wait on the API itself.
 
+## PDF fragment links: what is left (docs/PDF_FRAGMENT_LINKS.md)
+
+**Status:** built on `pdf-fragment-links`, 2026-10-06. Tested by its unit tests,
+`e2e/pdf-fragment-links.spec.ts`, and the full chromium suite against a production build (354
+passed, none flaky); also by hand, against a real 190-page book, where all 65 quotes of a
+summary resolved, passed the integrity script after a Markdown import, and drew on their
+glyphs. Not yet done:
+
+- **Copy passage link** in the viewer's selection popover (§8), left for later. It is also the
+  only way a cross-page link could be made from the UI.
+- **The MCP server's use of the check** (MCP.md §8) comes with the MCP server.
+- **The deploy wrapper's integrity checks** should gain `check-pdf-fragment-links.ts` once an
+  instance runs this code; before that the script doesn't exist where the wrapper runs it.
+- **Firefox and WebKit** haven't run `pdf-fragment-links.spec.ts`; only chromium has. The
+  outline's alignment rests on each engine's text layer measuring an item the way the canvas
+  does, which is worth a run on each before relying on it there.
+
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 
 **Status:** found 2026-10-04 while giving each read rule one exported `where` helper

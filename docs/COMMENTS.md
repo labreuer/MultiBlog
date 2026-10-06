@@ -129,7 +129,8 @@ later); **raw HTML in any form** (no extension, so the schema cannot express it)
 through: nesting depth against `MAX_COMMENT_DEPTH` (6 — `> > > > > >` and indented lists
 nest without limit from a textarea), then `nodeFromJSON` over the output of
 `hardenCommentLinks` (every link gets `rel="nofollow noopener"` and `target="_blank"`, and
-an href that is not `http`, `https` or `mailto` is dropped) plus `node.check()`, then the
+an href that is not `http`, `https` or `mailto` is dropped, unless it is a root-relative
+`/pdf/` path, which is how a PDF fragment link is written: docs/PDF_FRAGMENT_LINKS.md §8) plus `node.check()`, then the
 text against `MAX_COMMENT_CHARS` (5,000). Before it, `resolveCommentBody`
 (`comment-body-resolve.ts`) is where the two doors converge and where the wire is bounded:
 rich JSON against `MAX_COMMENT_JSON_CHARS` (60,000), Markdown source against

@@ -237,6 +237,14 @@ ydoc update id is meaningless for a file. Two obligations replace all of that:
   written down once rather than a value anything recomputes, so nothing would notice it
   breaking — `scripts/integrity/check-pdf-anchors.ts` exists to be the thing that does.
 
+**Fragment links are the one reader that finds a passage again on every open**
+([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)): a URL naming a passage by its words, with no
+stored quads, whose viewer measures quads from `getTextContent()` through the `offsets` map
+above (`src/lib/pdf-quads.ts`). It matches by skeleton, letters and digits only, which no step
+of the normaliser changes, so a `NORMALISER_VERSION` bump can't break one. A pdfjs bump that
+extracts different letters, or the same ones in another order, can, and
+`scripts/integrity/check-pdf-fragment-links.ts` is what notices.
+
 ---
 
 ## 5. Coordinates
@@ -666,6 +674,11 @@ which is the coupling that pinning already protects; this is the one it doesn't.
 answers "what does the engine have", the real Safari answers "does the viewer work", and
 neither substitutes for the other: a bump can start using a built-in the probe has never
 heard of.
+
+**And after the bump, run `scripts/upgrade-pdf-text-version.ts`, then
+`scripts/integrity/check-pdf-fragment-links.ts`.** A fragment link finds its passage in freshly
+extracted text on every open (§4), so a change in what pdfjs extracts shows up there first, as
+a passage no longer on its page.
 
 The same asymmetry applies to input. Anything reading `window.getSelection()` must settle on
 `selectionchange` (debounced) as well as `pointerup`, and the reason is **shift+arrow
