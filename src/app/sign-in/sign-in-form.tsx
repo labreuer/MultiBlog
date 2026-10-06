@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { signInAction } from "@/app/actions/sign-in";
-import { DEFAULT_SIGN_IN_DESTINATION } from "@/lib/sign-in-redirect";
+import { DEFAULT_SIGN_IN_DESTINATION, withArrivalFragment } from "@/lib/sign-in-redirect";
 import styles from "@/styles/account.module.css";
 
 export default function SignInForm({
@@ -55,8 +55,10 @@ export default function SignInForm({
     // Leave `pending` set: the button stays disabled through the navigation.
     // `callbackUrl` is already through safeCallbackUrl in page.tsx — it has to
     // be, since `redirect: false` above means Auth.js's own same-origin
-    // `redirect` callback never runs on this path.
-    router.push(callbackUrl ?? DEFAULT_SIGN_IN_DESTINATION);
+    // `redirect` callback never runs on this path. The fragment the reader
+    // arrived with rides along (withArrivalFragment says why); the no-JS path
+    // below can't see it, and can't run the PDF viewer that reads one either.
+    router.push(withArrivalFragment(callbackUrl ?? DEFAULT_SIGN_IN_DESTINATION, window.location.hash));
   }
 
   return (

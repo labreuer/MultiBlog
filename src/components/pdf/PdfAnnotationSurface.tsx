@@ -15,6 +15,8 @@ import { AnnotationReloadProvider } from "@/components/annotation/annotation-rel
 import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-layer";
 import { usePdfPresence } from "./use-pdf-presence";
 import { usePdfOutline } from "./use-pdf-outline";
+import { usePdfFragment } from "./use-pdf-fragment";
+import PdfFragmentBanner from "./PdfFragmentBanner";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
 import {
   JUMP_VIEWPORT_FRACTION,
@@ -267,6 +269,16 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
 
   const presence = usePdfPresence(fileId, handle);
 
+  // docs/PDF_FRAGMENT_LINKS.md — the passages a `#page=…&text=…` fragment
+  // names, found in this document on arrival and on every hashchange. Drawn
+  // with a followed anchored link's outline, and mirrored into a ref for the
+  // layer's callbacks like the link parts above.
+  const fragment = usePdfFragment(handle);
+  const fragmentRegionsRef = useRef(fragment.regions);
+  useEffect(() => {
+    fragmentRegionsRef.current = fragment.regions;
+  }, [fragment.regions]);
+
   // Same mirroring, for the same reason: the layer's callbacks are invoked by
   // pdfjs long after render and must see the current readers without the layer
   // being re-attached every time somebody scrolls.
@@ -325,6 +337,12 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           ...linkPartsRef.current
             .filter(({ part, target }) => target.pageIndex === pageIndex && !openIds.has(part.anchorId))
             .map(({ part, target }): AnnoLayerEntry => ({ id: part.anchorId, target, color: "", variant: "link" })),
+          // A fragment link's passages: the same region a followed link's
+          // part draws, since a reader shouldn't have to know which kind of
+          // link they followed.
+          ...fragmentRegionsRef.current.flatMap(({ id, target }): AnnoLayerEntry[] =>
+            target?.pageIndex === pageIndex ? [{ id, target, color: "", variant: "link" }] : [],
+          ),
           ...draftRegionsRef.current
             .filter(({ target }) => target.pageIndex === pageIndex)
             .map(({ anchorId, target }): AnnoLayerEntry => ({ id: anchorId, target, color: "", variant: "draft-link" })),
@@ -418,7 +436,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   useEffect(() => {
     layerRedrawRef.current?.();
     notify();
-  }, [liveEntries, linkParts, draftRegions, notify]);
+  }, [liveEntries, linkParts, draftRegions, fragment.regions, notify]);
 
   // ---- selection capture --------------------------------------------------
   const capturePageFor = useCallback(async (pageIndex: number): Promise<CapturePage | null> => {
@@ -750,6 +768,26 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     jumpToTarget(first.target);
   }, [ready, jumpToTarget]);
 
+  // docs/PDF_FRAGMENT_LINKS.md §6 — a fragment's jump, once per resolution:
+  // on arrival, and again when a hashchange names new passages. PdfViewer has
+  // already opened at the first `#page=`; this lands the first passage found
+  // the way any jump lands a passage. On arrival a followed ?sel= link keeps
+  // its own jump, and both are drawn.
+  const fragmentJumpedRef = useRef(0);
+  useEffect(() => {
+    if (!ready || fragment.resolution === fragmentJumpedRef.current) return;
+    const firstResolution = fragmentJumpedRef.current === 0;
+    fragmentJumpedRef.current = fragment.resolution;
+    if (firstResolution && linkPartsRef.current.length > 0) return;
+    const first = fragment.regions.find((region) => region.target !== null)?.target;
+    if (first) jumpToTarget(first);
+  }, [ready, fragment, jumpToTarget]);
+
+  const jumpToPage = useCallback((pageIndex: number) => {
+    const current = handleRef.current;
+    if (current) current.viewer.currentPageNumber = Math.min(pageIndex + 1, current.pdf.numPages);
+  }, []);
+
   // One tick per anchored annotation, at its own document fraction.
   const ticks = useMemo((): AnnotationTick[] => {
     if (!handle) return [];
@@ -882,15 +920,33 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
           }
         />
 
-        {anchoredLink && (
-          <AnchoredLinkBanner
-            link={anchoredLink}
-            currentTarget={{ kind: "file", id: fileId }}
-            className={styles.anchoredLinkOverlay}
-            onJumpToPart={(part) => {
-              if (part.selector?.kind === "PDF_TEXT") jumpToTarget(part.selector.selector);
-            }}
-          />
+        {(anchoredLink || fragment.regions.length > 0) && (
+          // One overlay for both banners: a ?sel= visit and a fragment can
+          // arrive together, and two fixed boxes at one spot would cover
+          // each other.
+          <div className={styles.anchoredLinkOverlay}>
+            {anchoredLink && (
+              <AnchoredLinkBanner
+                link={anchoredLink}
+                currentTarget={{ kind: "file", id: fileId }}
+                className={styles.overlayBanner}
+                onJumpToPart={(part) => {
+                  if (part.selector?.kind === "PDF_TEXT") jumpToTarget(part.selector.selector);
+                }}
+              />
+            )}
+            {fragment.regions.length > 0 && (
+              <PdfFragmentBanner
+                // A new fragment is a new arrival: one dismissed before shows again.
+                key={fragment.resolution}
+                regions={fragment.regions}
+                pageLabels={handle?.pageLabels ?? null}
+                className={styles.overlayBanner}
+                onJumpToTarget={(target) => jumpToTarget(target)}
+                onJumpToPage={jumpToPage}
+              />
+            )}
+          </div>
         )}
 
         {popover && (

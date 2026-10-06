@@ -33,7 +33,7 @@ import { uniquePostSlug } from "@/lib/post-slug";
 import { postPath } from "@/lib/post-path";
 import { derivePostStatus } from "@/lib/post-status";
 import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
-import { uniqueFileSlug } from "@/lib/file-slug";
+import { changeFileSlug, uniqueFileSlug } from "@/lib/file-slug";
 import { uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
@@ -484,6 +484,21 @@ export async function renameTestDocSlug(docId: string): Promise<string> {
   });
   assertSafe(author.user.email);
   return changeDocSlug(docId, await uniqueDocSlug(uniqueTitle("renamed")), author.userId);
+}
+
+/**
+ * Gives a test file a new slug through the app's own `changeFileSlug`, so its
+ * old one lands in FileSlugHistory and `/pdf/<old>` redirects, as a rename in
+ * /files leaves it. Returns the new slug. Attributed to the file's first owner.
+ */
+export async function renameTestFileSlug(fileId: string): Promise<string> {
+  const owner = await prisma.fileOwner.findFirstOrThrow({
+    where: { fileId },
+    orderBy: { ownerOrder: "asc" },
+    include: { user: true },
+  });
+  assertSafe(owner.user.email);
+  return changeFileSlug(fileId, await uniqueFileSlug(uniqueTitle("renamed")), owner.userId);
 }
 
 export async function addTestDocAuthor(docId: string, email: string): Promise<void> {
@@ -2304,6 +2319,7 @@ const handlers = {
   createTestDoc,
   addTestDocAuthor,
   renameTestDocSlug,
+  renameTestFileSlug,
   getDocAuthorEmails,
   addTestPostAuthor,
   deleteTestDoc,

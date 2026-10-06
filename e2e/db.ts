@@ -158,6 +158,8 @@ export const deleteTestPost = (...args: Parameters<DbHandlers["deleteTestPost"]>
 export const createTestDoc = (...args: Parameters<DbHandlers["createTestDoc"]>): Promise<TestDoc> =>
   call("createTestDoc", ...args);
 
+export const renameTestFileSlug = (...args: Parameters<DbHandlers["renameTestFileSlug"]>): Promise<string> =>
+  call("renameTestFileSlug", ...args);
 export const addTestDocAuthor = (...args: Parameters<DbHandlers["addTestDocAuthor"]>): Promise<void> =>
   call("addTestDocAuthor", ...args);
 
