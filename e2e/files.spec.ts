@@ -8,6 +8,7 @@ import {
   getFileCreatorEmail,
   deleteTestUser,
   uniqueEmail,
+  uniqueTitle,
 } from "./db";
 import { formatBytes } from "@/lib/file-format";
 import { buildTestPdf } from "../scripts/make-test-pdf";
@@ -55,7 +56,7 @@ test.describe("files", () => {
     await signIn(page, ADMIN_EMAIL);
     await gotoOk(page, "/files");
 
-    const title = `E2E upload ${Date.now()}`;
+    const title = uniqueTitle("upload");
     const pdf = buildTestPdf([[`${title} page one.`, "The quick brown fox jumps over the lazy dog."]]);
     const result = await uploadFile(page, `${title}.pdf`, pdf);
 
@@ -82,6 +83,47 @@ test.describe("files", () => {
     }
   });
 
+  // Several uploads of one filename at the same moment. Each claims its slug
+  // under a lock on it (lockFileSlug, src/lib/file-slug.ts), so the later ones
+  // wait for the earlier to commit and see their rows: `x`, `x-2`, … rather
+  // than a 500 for whichever lost the race to the unique index. Four rather
+  // than two, because two requests only sometimes overlap at the claim.
+  test("simultaneous uploads of one filename all succeed, with suffixed slugs", async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, "/files");
+
+    const title = uniqueTitle("same name");
+    // Different bytes per copy, so no upload is a dedupe of another's.
+    const copies = [1, 2, 3, 4].map((n) => Array.from(buildTestPdf([[`${title} copy ${n}.`]])));
+    const results = await page.evaluate(
+      async ({ name, copies }) =>
+        Promise.all(
+          copies.map(async (data) => {
+            const res = await fetch(`/api/files/upload?filename=${encodeURIComponent(name)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/pdf" },
+              body: new Uint8Array(data),
+            });
+            return { status: res.status, body: await res.text() };
+          }),
+        ),
+      { name: `${title}.pdf`, copies },
+    );
+    const created = results.filter((r) => r.status === 200).map((r) => JSON.parse(r.body) as { id: string; slug: string });
+
+    try {
+      expect(
+        results.map((r) => r.status),
+        results.map((r) => r.body).join("\n"),
+      ).toEqual([200, 200, 200, 200]);
+      const slugs = created.map((c) => c.slug).sort();
+      const base = slugs[0];
+      expect(slugs).toEqual([base, `${base}-2`, `${base}-3`, `${base}-4`]);
+    } finally {
+      for (const file of created) await deleteTestFile(file.id);
+    }
+  });
+
   // PLAN.md §19 — the slug half of a soft delete. Uploading a PDF, noticing it
   // carries embedded annotations, stripping them and re-uploading is the
   // sequence this exists for: `file_slug_live_key` is unique among live files
@@ -92,7 +134,7 @@ test.describe("files", () => {
     await signIn(page, ADMIN_EMAIL);
     await gotoOk(page, "/files");
 
-    const title = `E2E reclaim ${Date.now()}`;
+    const title = uniqueTitle("reclaim");
     const first = await uploadFile(page, `${title}.pdf`, buildTestPdf([[`${title} page one.`]]));
     expect(first.status, first.body).toBe(200);
     const original = JSON.parse(first.body) as { id: string; slug: string };
@@ -270,7 +312,7 @@ test.describe("files", () => {
     await signIn(page, ADMIN_EMAIL);
     await gotoOk(page, "/files");
 
-    const title = `E2E docx ${Date.now()}`;
+    const title = uniqueTitle("docx");
     const docx = buildTestDocx(SAMPLE_DOCX_PARAGRAPHS);
     const result = await uploadFile(page, `${title}.docx`, docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 
@@ -309,7 +351,7 @@ test.describe("files", () => {
     await signIn(page, ADMIN_EMAIL);
     await gotoOk(page, "/files");
 
-    const title = `E2E docx disposition ${Date.now()}`;
+    const title = uniqueTitle("docx disposition");
     const result = await uploadFile(page, `${title}.docx`, buildTestDocx(["Anything."]), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     expect(result.status, result.body).toBe(200);
     const created = JSON.parse(result.body) as { id: string; sha256: string };

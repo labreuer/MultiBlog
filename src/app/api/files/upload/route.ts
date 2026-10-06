@@ -154,9 +154,9 @@ export async function POST(request: Request) {
 
   try {
     const created = await prisma.$transaction(async (tx) => {
-      // Claimed inside the transaction so two simultaneous uploads of
-      // `report.pdf` become `report` and `report-2` rather than one of them
-      // dying on the unique index (see claimFileSlug's own note).
+      // Claimed inside the transaction, under a lock on the slug, so two
+      // simultaneous uploads of `report.pdf` become `report` and `report-2`
+      // rather than one of them dying on the unique index (lockFileSlug).
       const slug = await claimFileSlug(tx, title);
       const file = await tx.storedFile.create({
         data: {

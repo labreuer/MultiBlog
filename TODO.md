@@ -1015,47 +1015,6 @@ not what happens when you write a reference to a row that is already gone — wh
 
 ---
 
-## Two simultaneous uploads of one filename: the second gets a 500, not `-2`
-
-**Status:** found 2026-10-05, when `--repeat-each` ran two copies of `files.spec.ts`'s upload
-test in the same millisecond and both titled their PDF `E2E upload <Date.now()>`. Not fixed.
-
-**What happens.** The upload route (`src/app/api/files/upload/route.ts`) claims the slug inside
-its transaction with `claimFileSlug` (`src/lib/file-slug.ts`), then inserts the `file` row. Both
-uploads compute the same free slug, and the second insert fails on `file_slug_live_key` with
-P2002. The route logs `couldn't record the uploaded file` and answers 500, "Couldn't save that
-file." Nothing is lost: the bytes cleanup counts references before deleting, so a winner that
-shares the sha keeps its bytes. But the user is told the upload failed when the same name
-uploaded twice should become `report` and `report-2`. It needs only the same filename, not the
-same bytes, since the slug comes from the title.
-
-**Why.** `claimFileSlug`'s comment, and the route's comment above its call, say that running
-inside the transaction makes "a slug taken by a concurrently-created file" visible. It doesn't.
-The transaction runs at Postgres's default READ COMMITTED (nothing in `src` sets
-`isolationLevel`), and no isolation level shows a transaction another one's uncommitted insert.
-The check and the insert are a plain check-then-act race. `uniqueFileSlug`'s comment repeats the
-claim ("`claimFileSlug` below is what closes it").
-
-**Fix**, either of:
-
-- **A transaction-scoped advisory lock in `claimFileSlug`** — `pg_advisory_xact_lock` keyed on a
-  hash of the slugified base, before `nextFreeFileSlug`. Two claims for `report` then serialize.
-  The second waits for the first to commit, sees its row, and takes `report-2`. That makes the
-  function do what its comment says, for every caller. A hash collision only serializes two
-  unrelated uploads. Recommended.
-- **Retry on a slug P2002**, as `insertDocRow` (`src/lib/doc-create.ts`) already does for docs:
-  bounded attempts, re-claiming each time.
-
-Either way, correct the three comments. `changeFileSlug` (a rename racing an upload or another
-rename to the same slug) wasn't checked and likely has the same shape.
-
-**Test.** An e2e that sends two uploads of one filename at once from a single `page.evaluate`
-(`Promise.all` over two `fetch`es, as `files.spec.ts`'s `uploadFile` does one). It should get
-two 200s, with slugs `x` and `x-2`. Separately, the existing upload test's `Date.now()` title
-should take a random suffix, so `--repeat-each` stops colliding with itself.
-
----
-
 ## Turbopack traces the whole project through `file-storage.ts`
 
 **Status:** a build warning on every `next build`, since the file-upload work (`44b9d8a`,
