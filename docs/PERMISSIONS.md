@@ -564,6 +564,14 @@ no link, a deleted link, or someone else's unminted draft is a 404, the existenc
 `anchoredLinkForViewer` already applies. `?noredirect=1` changes only whether the route
 redirects; like `?sel=`, it grants nothing.
 
+**A PDF fragment link's fragment grants nothing either**
+([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)). `/pdf/<slug>#page=<n>&text=<words>` meets
+the PDF route's own gate exactly as a bare `/pdf/<slug>` does, and can only name passages
+inside the file that gate allowed. What it does not have is a landing page: its href carries
+the file's slug and the passage's words to everyone who can read the text holding it, where an
+anchored link's id carries neither. The check behind its tooling reads as the operator, so a
+front door that reads as a user must gate on `canUserReadFile` first.
+
 ## Search (docs/FULLTEXT.md)
 
 `/search` finds only what the searcher could open, and states no rule of its own: each kind's

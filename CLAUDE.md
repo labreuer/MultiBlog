@@ -21,6 +21,7 @@ to re-derive the decision from.
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
 | [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. |
 | [docs/ANCHORED_LINKS.md](docs/ANCHORED_LINKS.md) | Anchored links as built: one `/link/<id>` URL for passages across docs and PDFs — schema, the landing route that redirects or excerpts per viewer, the per-target visibility rule, the tray (a draft, or a minted link reopened for editing — one open link per creator), and every deviation from the plan. |
+| [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) | PDF fragment links as built: a link to a PDF passage that is only a URL (`/pdf/<slug>#page=<n>&text=<words>`, no row) — the grammar, the letters-and-digits skeleton match, quads measured from text items, cross-page passages, the check, its integrity script and one-quote CLI, and writing them from a corrected extraction. |
 | [docs/DOCS.md](docs/DOCS.md) | Docs as built: the entity beside its ydoc, the `title`/`prose_json` caches and the live title, roles and visibility, routes, the reading view and its freeze, the editor, what is deferred. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
@@ -199,7 +200,10 @@ before changing the behavior it describes.
   a Safari 26.6.1 reading and broke the viewer outright on an in-baseline iOS 18.6.2. And
   `e2e/pdf-assets.spec.ts` is the only guard that pdfjs's four runtime asset directories are
   served: `scripts/make-test-pdf.ts` generates text-only PDFs, which exercise no image
-  decoder, so no fixture-based test can cover it. docs/PDF.md §10.
+  decoder, so no fixture-based test can cover it. After a bump, run
+  `scripts/upgrade-pdf-text-version.ts` and then `scripts/integrity/check-pdf-fragment-links.ts`:
+  a fragment link finds its passage in freshly extracted text on every open, so an extraction
+  change breaks it with nothing else noticing. docs/PDF.md §10.
 - **`router.refresh()` is not a delivery mechanism behind an `ssr: false` boundary.** It is a
   React transition, and during a transition React holds the old UI rather than dropping to a
   fallback — so a render that never commits is completely silent: no error, no spinner, no

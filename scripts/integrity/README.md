@@ -1,6 +1,6 @@
 # Integrity checks
 
-Nine scripts. Three are about the doc/ydoc chain and are described first; then one about
+Ten scripts. Three are about the doc/ydoc chain and are described first; then two about
 the PDF side, one about the schema itself, the three that arrived with PLAN.md §22 and
 §23 — the two edit-history checks and the quotation check — and the search index's at the
 bottom.
@@ -113,6 +113,29 @@ npx tsx scripts/integrity/check-pdf-anchors.ts [--file <idOrSlug>] [--verbose]
 
 Unlike the other three it does **not** need to run after the ydoc check: it touches no ydoc
 at all, so its findings are never downstream of a bad blob.
+
+## `check-pdf-fragment-links.ts` (docs/PDF_FRAGMENT_LINKS.md §9)
+
+The PDF side's other check, and the only one here that verifies something with no row behind
+it. A fragment link (`/pdf/<slug>#page=<n>&text=<words>`) lives in an href, and the viewer
+finds its passage again on every open, so a link with the wrong page, a word the PDF spells
+differently, or a pdfjs bump that changes what a page extracts shows only when someone
+follows it. This finds every one in docs, posts, comments and annotation bodies, and resolves
+each passage against the file's stored page text with the viewer's own match.
+
+- **ERROR**: a passage not on its page (with where it stops matching, and the page it is on
+  when that is unambiguous), a page past the end, an unknown or deleted file, a `text`
+  parameter that doesn't parse.
+- **warn**: a passage its page holds more than once (the link points at the first), and a
+  link naming a file's past slug, which still works through the slug-history redirect.
+
+It is read-only, never extracting a file's text on a miss as `storedPageText` would. Run it
+after importing a doc that carries fragment links, with `--doc`, and after
+`upgrade-pdf-text-version.ts` on a pdfjs bump.
+
+```
+npx tsx scripts/integrity/check-pdf-fragment-links.ts [--doc <idOrSlug>] [--verbose]
+```
 
 ## `check-tag-constraints.ts` — the odd one out, again
 

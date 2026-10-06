@@ -196,3 +196,23 @@ What differs from a session:
 
 A revised file is best brought in with `--update`, like a grown session: anchored links into
 its doc survive the edit, and would not survive the doc being deleted and imported again.
+
+**Quoting a PDF.** A file's quotations link their passages as PDF fragment links
+([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)), written straight into the Markdown, so the
+import is the only write: `[could not yet 'call his soul his own'](/pdf/<slug>#page=122&text=could+not+yet+call+his+soul+his+own)`.
+
+- **The page is the 1-based sheet number**, never the printed page. A booktext extraction's
+  header gives the mapping ("pdf page = printed page -1").
+- **The words are the quote's letters and digits, joined by `+`**, from the corrected copy
+  rather than the PDF's own text: the match ignores what extraction does to words ("bea tific",
+  "o f").
+- **A quote longer than eight words goes as its first three and last three**,
+  `text=a+direction+in,a+beatific+consummation`, and so does a quote elided with "…": its two
+  ends.
+- **A quote across a page break is two `page`/`text` pairs**, split where the page breaks.
+- **The import stores hrefs as written and checks none of them.** Afterwards, where the import
+  ran, `npx tsx scripts/integrity/check-pdf-fragment-links.ts --doc <slug>` confirms the doc's
+  links. Before writing, `npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"`
+  gives one quote's link, or says where it stops matching.
+- **The href carries the PDF's slug and the passage's words** to everyone who can read the doc
+  (PDF_FRAGMENT_LINKS.md §10).
