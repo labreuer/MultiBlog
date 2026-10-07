@@ -340,6 +340,17 @@ export async function createDraftAnnotation(
   return { id: annotation.id, connection };
 }
 
+// Who a RAISED annotation emails, as a filter on a doc's `DocAuthor` rows or
+// a file's `FileOwner` rows — the two share the `userId`/`user` shape. Never
+// the poster, who already knows what they raised, and never a soft-deleted
+// account: its row stays on the byline, its inbox is no longer ours to write
+// to. The deleted check is spelled out because src/lib/prisma.ts's
+// soft-delete filter applies to top-level User reads only, not to a user
+// reached through a relation.
+function raiseRecipientWhere(posterUserId: string) {
+  return { userId: { not: posterUserId }, user: { deletedByUserId: null } };
+}
+
 // Flips a DRAFT to LIVE (or RAISED — PLAN.md §13d) — the live ydoc editor
 // (AnnotationBody) has already been writing the real content in via the
 // collab server the whole time (server/annotation-cache.ts's store debounce
@@ -646,7 +657,11 @@ export async function postAnnotation(opts: {
   if (opts.raise) {
     const doc = await prisma.doc.findUnique({
       where: { id: docId },
-      select: { title: true, slug: true, authors: { select: { user: { select: { email: true } } } } },
+      select: {
+        title: true,
+        slug: true,
+        authors: { where: raiseRecipientWhere(session.user.id), select: { user: { select: { email: true } } } },
+      },
     });
     if (doc) {
       const raisedBy = displayNameOf(session.user);
@@ -1218,7 +1233,11 @@ async function postFileAnnotation(opts: {
   if (raise) {
     const file = await prisma.storedFile.findUnique({
       where: { id: fileId },
-      select: { title: true, slug: true, owners: { select: { user: { select: { email: true } } } } },
+      select: {
+        title: true,
+        slug: true,
+        owners: { where: raiseRecipientWhere(opts.authorUserId), select: { user: { select: { email: true } } } },
+      },
     });
     if (file) {
       const subject = `${raisedBy} raised an annotation on "${file.title}"`;

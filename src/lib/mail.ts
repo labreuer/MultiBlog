@@ -36,12 +36,16 @@ export type SendMailResult = { delivered: boolean; error?: string };
 
 // Recipients on these domains are never delivered to, in every environment,
 // key or no key. e2e/naming.ts's SAFE_EMAIL guarantees the suite only ever
-// creates @example.com addresses, and scripts/seed-sample-data.ts uses
-// @sample.invalid — so this is what makes "the suite cannot send mail"
-// structural rather than a matter of .env discipline. Without it, the day a
+// creates @example.com addresses, and every account made to hold an address
+// that can't receive mail sits under the RFC 2606 `.invalid` TLD
+// (scripts/seed-sample-data.ts's @sample.invalid,
+// scripts/import-claude-chats.ts's claude@multiblog.invalid) — so the whole
+// TLD is refused, not a list of its subdomains to keep in step. This is what
+// makes "the suite cannot send mail" structural rather than a matter of .env
+// discipline. Without it, the day a
 // live key lands in a dev .env, `npm run e2e` becomes a burst of hard bounces
 // against your own sending domain, which is the fastest way to get throttled.
-const RESERVED_RECIPIENT_DOMAIN = /@(example\.com|sample\.invalid)$/i;
+const RESERVED_RECIPIENT_DOMAIN = /@(example\.com|([^@]+\.)?invalid)$/i;
 
 function describe(content: MailContent): { subject: string; body: string } {
   if (content.template) {

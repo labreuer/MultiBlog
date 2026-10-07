@@ -328,7 +328,9 @@ non-empty and at most 5,000 characters. Then it captures the anchor for the chos
 in one transaction, writes **version 1** — a `ydoc_snapshot` at that mark — the cache columns
 from the same decoded document, `postedAt`, and the status. "Post" is `LIVE`; "Keep private" stays `DRAFT` (`saveDraftAnnotation`,
 reachable again through `OwnDraftsList`); "Post & notify authors" is `RAISED` — one
-`sendMail` per byline author, or per file owner, and `raisedAt` stamped. Any `DRAFT` can be
+`sendMail` per byline author, or per file owner, and `raisedAt` stamped. The poster is never
+among the recipients, nor is a soft-deleted account still on the byline
+(`raiseRecipientWhere`, applied in the query). Any `DRAFT` can be
 posted later, any `LIVE` raised later; a `RAISED` annotation re-notifies nobody on edit.
 
 **Deleting** stamps the soft-delete columns and removes the mark; `deleteAnnotation` is
