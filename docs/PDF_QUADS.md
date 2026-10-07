@@ -1,8 +1,8 @@
 # PDF quads from text items — measured without a browser
 
 **Status: built** (2026-10-06). The server can now compute quads, but nothing on `main` does
-yet. The first caller will be the MCP server, which stores the PDF quads it computes (MCP.md
-§8, on the `api-mcp` branch).
+yet. The first caller will be the MCP server, which stores the PDF quads it computes
+([MCP.md](MCP.md) §8).
 
 `quadsForRange` (`src/lib/pdf-quads.ts`) turns a range of a page's normalised text into quads
 from pdfjs's text items alone, with no rendered text layer. Each item gives its origin, its

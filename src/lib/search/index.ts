@@ -3,8 +3,8 @@
 //
 // **A plain module that takes an explicit actor**, never exported from a
 // `"use server"` file: the page calls it with the session's user, the quote
-// picker with the public scope, and the API's search endpoints will call it
-// with a token's user (§8). Nothing here reads a session.
+// picker with the public scope, and the MCP server's `search` tool will call
+// it with a token's user (§8). Nothing here reads a session.
 //
 // **The index holds no permission data** (§2). Each kind asks Prisma for the
 // ids this viewer may read, under the filters, through the `where` helper

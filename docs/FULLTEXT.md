@@ -469,10 +469,11 @@ in `page.module.css` and use STYLE.md's color tokens, `<mark>` included.
     read (PLAN.md §23e). So the action still needs no session.
   - **The host post and its comments are left out**, through an option, and the picker gets
     eight of each kind, showing the matched passage as plain text.
-- **The API.** The operation is a plain module that takes an explicit actor
-  (`{ userId, role } | null`) and a scope, and is never exported from a `"use server"` file. The
-  API plan (`docs/API.md` on the `api-mcp` branch) sets that rule for every operation, and its
-  search endpoints call this one with the token's user as the actor. Not built.
+- **The MCP server.** The operation is a plain module that takes an explicit actor
+  (`{ userId, role } | null`) and a scope, and is never exported from a `"use server"` file.
+  [MCP.md](MCP.md), a plan that isn't built, sets that rule for every operation. Its `search`
+  tool calls this one with the token's user as the actor, behind a stricter parse than
+  `params.ts`'s, which falls back to a default where a tool should refuse (MCP.md §14).
 - **The admin tables' `?q=`** stays on titles (PLAN.md §16l). Pointing it at bodies is a
   separate decision.
 
