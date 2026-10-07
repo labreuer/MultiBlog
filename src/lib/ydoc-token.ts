@@ -16,6 +16,13 @@ function getSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
+// docs/MCP.md §5 — the audience every ydoc token carries and every verifier
+// checks. The MCP byte grants (src/lib/api/grants.ts) are signed with the same
+// secret and the same algorithm, so without an audience on each a grant shown
+// to the collab server would be stopped only by lacking a `documentName`.
+// Each now names what it is for, and neither passes for the other.
+export const YDOC_TOKEN_AUDIENCE = "multiblog:ydoc";
+
 export type YdocTokenPayload = {
   sub: string;
   documentName: string;
@@ -29,13 +36,14 @@ export type YdocTokenPayload = {
 export async function signYdocToken(payload: YdocTokenPayload): Promise<string> {
   return new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
+    .setAudience(YDOC_TOKEN_AUDIENCE)
     .setIssuedAt()
     .setExpirationTime("2m")
     .sign(getSecret());
 }
 
 export async function verifyYdocToken(token: string): Promise<YdocTokenPayload> {
-  const { payload } = await jwtVerify(token, getSecret());
+  const { payload } = await jwtVerify(token, getSecret(), { audience: YDOC_TOKEN_AUDIENCE });
   const { sub, documentName, role, readOnly } = payload as Record<string, unknown>;
   if (typeof sub !== "string" || typeof documentName !== "string" || typeof role !== "string") {
     throw new Error("Malformed ydoc token.");

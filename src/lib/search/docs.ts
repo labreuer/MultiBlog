@@ -11,7 +11,7 @@ import { readableDocsWhere } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { parseHeadline } from "./headline";
 import { orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
-import { remember, type KindContext, type KindSearch } from "./context";
+import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { DocHit } from "./types";
 
 /**
@@ -32,6 +32,7 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
           ctx.authorIds.length > 0 ? { authors: { some: { userId: { in: ctx.authorIds } } } } : {},
           ctx.created ? { createdAt: ctx.created } : {},
           ctx.updated ? { updatedAt: ctx.updated } : {},
+          taggedWhere(ctx.tagIds),
         ],
       },
       select: { id: true, updatedAt: true },
@@ -59,6 +60,7 @@ export const docsSearch: KindSearch<DocHit> = {
           slug: true,
           title: true,
           updatedAt: true,
+          proseJsonLength: true,
           authors: {
             orderBy: { bylineOrder: "asc" },
             select: { userId: true, user: { select: { slug: true, name: true } } },
@@ -80,6 +82,7 @@ export const docsSearch: KindSearch<DocHit> = {
           title: doc.title.trim() && snippet ? snippet.title : parseHeadline(docTitleOrFallback(doc.title)),
           byline: doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name })),
           updatedAt: doc.updatedAt,
+          chars: doc.proseJsonLength,
           snippet: snippet?.body ?? [],
         },
       ];

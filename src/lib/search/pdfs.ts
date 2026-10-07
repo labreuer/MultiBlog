@@ -6,15 +6,16 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { readableFilesWhere } from "@/lib/file-authz";
 import { currentTextVersion } from "@/lib/pdf-extract";
+import { usablePageLabels } from "@/lib/pdf-page-labels";
 import { parseHeadline, type HeadlineFragment } from "./headline";
 import { bodyHeadlineSql, cleanedText, orderNewest, rankRows, snippetsFor, type TsQuery } from "./sql";
-import { remember, type KindContext, type KindSearch } from "./context";
+import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { PdfHit } from "./types";
 
 /** How many matching pages a file's hit shows (§10, item 6). */
 export const PDF_PAGES_SHOWN = 3;
 
-type PageMatch = { fileId: string; pageIndex: number; textVersion: string; rank: number };
+export type PageMatch = { fileId: string; pageIndex: number; textVersion: string; rank: number };
 
 /**
  * Every matching page of the given files, one row per page, grouped by file
@@ -26,7 +27,7 @@ type PageMatch = { fileId: string; pageIndex: number; textVersion: string; rank:
  * page has it, otherwise its latest other. The correlated lookup rides the
  * primary key, and the outer match still uses the GIN index.
  */
-async function matchPages(fileIds: string[], query: TsQuery): Promise<Map<string, PageMatch[]>> {
+export async function matchPages(fileIds: string[], query: TsQuery): Promise<Map<string, PageMatch[]>> {
   const byFile = new Map<string, PageMatch[]>();
   if (fileIds.length === 0) return byFile;
   const current = await currentTextVersion();
@@ -50,7 +51,7 @@ async function matchPages(fileIds: string[], query: TsQuery): Promise<Map<string
   return byFile;
 }
 
-async function pageSnippets(pages: PageMatch[], query: TsQuery): Promise<Map<string, HeadlineFragment[]>> {
+export async function pageSnippets(pages: PageMatch[], query: TsQuery): Promise<Map<string, HeadlineFragment[]>> {
   if (pages.length === 0) return new Map();
   const rows = await prisma.$queryRaw<{ fileId: string; pageIndex: number; snippet: string }[]>(Prisma.sql`
     SELECT t.file_id AS "fileId", t.page_index AS "pageIndex",
@@ -80,12 +81,28 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
     if (!readable) return new Map();
     const rows = await prisma.storedFile.findMany({
       where: {
-        AND: [readable, ctx.created ? { createdAt: ctx.created } : {}, ctx.updated ? { updatedAt: ctx.updated } : {}],
+        AND: [
+          readable,
+          ctx.created ? { createdAt: ctx.created } : {},
+          ctx.updated ? { updatedAt: ctx.updated } : {},
+          taggedWhere(ctx.tagIds),
+        ],
       },
       select: { id: true, updatedAt: true },
     });
     return new Map(rows.map((file) => [file.id, file.updatedAt]));
   });
+}
+
+/**
+ * A page's label as the viewer shows it, or null where it has none worth
+ * showing (docs/MCP.md §8) — from the stored labels only: search never parses
+ * a PDF, and a file whose labels haven't been read yet shows its numbers.
+ * Display only, so PDF.md's "a label never enters a computation" holds.
+ */
+function labelOf(file: { pageCount: number | null; pageLabels: unknown }, pageIndex: number): string | null {
+  const labels = usablePageLabels(file.pageLabels as string[] | null, file.pageCount ?? 0);
+  return labels ? labels[pageIndex] : null;
 }
 
 export const pdfsSearch: KindSearch<PdfHit> = {
@@ -117,7 +134,10 @@ export const pdfsSearch: KindSearch<PdfHit> = {
       // The title only; a file's "body" is its pages, snippeted per page below.
       snippetsFor("file", ids, query, { body: Prisma.sql`''`, title: Prisma.sql`t.title` }),
       query ? pageSnippets(shown, query) : new Map<string, HeadlineFragment[]>(),
-      prisma.storedFile.findMany({ where: { id: { in: ids } }, select: { id: true, slug: true, updatedAt: true } }),
+      prisma.storedFile.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, slug: true, updatedAt: true, pageCount: true, pageLabels: true },
+      }),
     ]);
     const byId = new Map(rows.map((row) => [row.id, row]));
     return ids.flatMap((id): PdfHit[] => {
@@ -132,6 +152,7 @@ export const pdfsSearch: KindSearch<PdfHit> = {
           updatedAt: file.updatedAt,
           pages: matched.slice(0, PDF_PAGES_SHOWN).map((page) => ({
             page: page.pageIndex + 1,
+            label: labelOf(file, page.pageIndex),
             href: `/pdf/${file.slug}#page=${page.pageIndex + 1}`,
             snippet: snippets.get(`${id}:${page.pageIndex}`) ?? [],
           })),

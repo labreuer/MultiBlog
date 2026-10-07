@@ -364,3 +364,14 @@ export const countAllYdocs = (...args: Parameters<DbHandlers["countAllYdocs"]>):
   call("countAllYdocs", ...args);
 
 export const sweepTestData = (...args: Parameters<DbHandlers["sweepTestData"]>) => call("sweepTestData", ...args);
+
+// docs/MCP.md — tokens and accounts for the MCP server's specs.
+export const createTestApiToken = (...args: Parameters<DbHandlers["createTestApiToken"]>) =>
+  call("createTestApiToken", ...args);
+export const softDeleteTestUser = (...args: Parameters<DbHandlers["softDeleteTestUser"]>) =>
+  call("softDeleteTestUser", ...args);
+export const restoreTestUser = (...args: Parameters<DbHandlers["restoreTestUser"]>) => call("restoreTestUser", ...args);
+export const appendTestDocParagraph = (...args: Parameters<DbHandlers["appendTestDocParagraph"]>) =>
+  call("appendTestDocParagraph", ...args);
+export const renameTestTagSlug = (...args: Parameters<DbHandlers["renameTestTagSlug"]>) =>
+  call("renameTestTagSlug", ...args);

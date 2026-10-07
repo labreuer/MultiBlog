@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { quadSourceItems, type QuadSourceItem } from "./pdf-quads";
 import { normalisePageText, textVersionFor } from "./pdf-text";
+import { destPageTarget, refKey, type PdfOutlineItem } from "./pdf-outline";
 
 // PLAN.md §19 — the server-side half of PDF text extraction: run once per file
 // at upload, its output stored in `file_page_text`.
@@ -212,6 +213,86 @@ export async function extractPageItems(bytes: Uint8Array, pageIndex: number): Pr
     } finally {
       page.cleanup();
     }
+  } finally {
+    await task.destroy();
+  }
+}
+
+/** One outline entry, flattened depth-first: what `file.outline` stores (docs/MCP.md §8). */
+export type StoredOutlineEntry = {
+  title: string;
+  /** 0 for a top-level entry. */
+  depth: number;
+  /** 0-based; null where the destination doesn't resolve to a page of this file. */
+  pageIndex: number | null;
+};
+
+export type PdfMetadata = {
+  /** One label per page, or [] for a PDF that defines none — pdfjs's null, stored as []. */
+  pageLabels: string[];
+  outline: StoredOutlineEntry[];
+};
+
+/**
+ * A PDF's page labels and outline — what the viewer reads in the browser
+ * (`getPageLabels()`, and the Contents pane's `getOutline()` with each
+ * destination resolved to a page, use-pdf-outline.ts), read here once and
+ * stored on `file` (docs/MCP.md §8). The legacy build serves both calls.
+ *
+ * Named destinations are fetched as one dictionary and page refs deduped,
+ * as the hook does, since a 500-entry outline is a real thing.
+ */
+export async function extractPdfMetadata(bytes: Uint8Array): Promise<PdfMetadata> {
+  const { task } = await openPdf(bytes);
+  const pdf = await task.promise;
+  try {
+    const labels = await pdf.getPageLabels().catch(() => null);
+    const items = ((await pdf.getOutline().catch(() => null)) ?? []) as PdfOutlineItem[];
+
+    const flat: { item: PdfOutlineItem; depth: number }[] = [];
+    const collect = (level: readonly PdfOutlineItem[], depth: number) => {
+      for (const item of level) {
+        flat.push({ item, depth });
+        if (item.items?.length) collect(item.items, depth + 1);
+      }
+    };
+    collect(items, 0);
+
+    const named = flat.some(({ item }) => typeof item.dest === "string") ? await pdf.getDestinations().catch(() => null) : null;
+    const destOf = (item: PdfOutlineItem): unknown[] | null => {
+      if (Array.isArray(item.dest)) return item.dest;
+      if (typeof item.dest === "string" && named) {
+        const resolved: unknown = named instanceof Map ? named.get(item.dest) : (named as Record<string, unknown>)[item.dest];
+        return Array.isArray(resolved) ? resolved : null;
+      }
+      return null;
+    };
+    const byRef = new Map<string, Promise<number | null>>();
+    const pageIndexOf = (dest: unknown[]): Promise<number | null> => {
+      const target = destPageTarget(dest);
+      if (target === null) return Promise.resolve(null);
+      if (target.kind === "index") return Promise.resolve(target.pageIndex);
+      const key = refKey(target.ref);
+      let pending = byRef.get(key);
+      if (!pending) {
+        pending = pdf.getPageIndex(target.ref as Parameters<typeof pdf.getPageIndex>[0]).catch(() => null);
+        byRef.set(key, pending);
+      }
+      return pending;
+    };
+
+    const outline = await Promise.all(
+      flat.map(async ({ item, depth }): Promise<StoredOutlineEntry> => {
+        const dest = destOf(item);
+        const pageIndex = dest ? await pageIndexOf(dest) : null;
+        return {
+          title: String(item.title ?? "").replace(/\s+/g, " ").trim(),
+          depth,
+          pageIndex: pageIndex !== null && pageIndex >= 0 && pageIndex < pdf.numPages ? pageIndex : null,
+        };
+      }),
+    );
+    return { pageLabels: Array.isArray(labels) ? labels.map(String) : [], outline };
   } finally {
     await task.destroy();
   }

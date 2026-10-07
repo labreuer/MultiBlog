@@ -5,7 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserAccessAnnotationYdoc, canUserEditAnnotationBody } from "@/lib/annotation-authz";
-import { isVersionQuoted, STALE_EDIT_SESSION_MS, visibleVersions, withSupersededAt } from "@/lib/edit-grace";
+import { STALE_EDIT_SESSION_MS } from "@/lib/edit-grace";
 import { canUserReadFile } from "@/lib/file-authz";
 import { isAdmin } from "@/lib/authz";
 import {
@@ -43,6 +43,8 @@ import type { Role } from "@/generated/prisma/enums";
 import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { displayNameOf } from "@/lib/display-name";
+import { annotationHistoryFor, type AnnotationVersion } from "@/lib/annotation-history";
+import { actorFromSessionUser } from "@/lib/actor";
 
 const MAX_BODY_LENGTH = 5000;
 
@@ -910,95 +912,16 @@ export async function cancelAnnotationEdit(annotationId: string): Promise<{ erro
   }
 }
 
-// PLAN.md §22e — the history behind an annotation's "edited" marker: the
-// body's snapshots, decoded, under §22b's silence rule.
-//
-// Read gate: whoever can read the container can read the history, the same
-// question `canUserAccessAnnotationYdoc` asks for the body itself. Editing is
-// narrower (author or ADMIN); seeing what changed is not, because the current
-// text is already visible to every reader and hiding its predecessor would
-// leave a visible "edited" marker with nothing behind it.
-export type AnnotationVersion = {
-  revisionNo: number;
-  proseJson: unknown;
-  bodyText: string;
-  createdAt: string;
-  authorName: string | null;
-  current: boolean;
-};
+// PLAN.md §22e — the history behind an annotation's "edited" marker. The body
+// is src/lib/annotation-history.ts's, shared with the MCP server's thread read.
+export type { AnnotationVersion } from "@/lib/annotation-history";
 
 export async function getAnnotationHistory(annotationId: string): Promise<AnnotationVersion[]> {
   const session = await auth();
   if (!session?.user) {
     return [];
   }
-  const annotation = await prisma.annotation.findUnique({
-    where: { id: annotationId },
-    select: {
-      userId: true,
-      status: true,
-      postedAt: true,
-      doc: { select: { id: true, visibility: true } },
-      file: { select: { id: true, visibility: true } },
-    },
-  });
-  if (!annotation) {
-    return [];
-  }
-  if (!(await canUserAccessAnnotationYdoc(session.user.id, session.user.role, annotation))) {
-    return [];
-  }
-
-  // The versions are the body's snapshots in mark order (§22e), and the
-  // replies that quote it are the anchored, undeleted ones — the same two
-  // facts annotation-data.ts's loaders hold for a whole page.
-  const [snapshots, replies] = await Promise.all([
-    prisma.ydocSnapshot.findMany({
-      where: { ydocId: ydocIdForAnnotation(annotationId) },
-      orderBy: { lastYdocUpdateId: "asc" },
-      include: { user: { select: { name: true, email: true } } },
-    }),
-    prisma.annotation.findMany({
-      where: { parentAnnotationId: annotationId, anchorFrom: { not: null }, deletedByUserId: null },
-      select: { ydocUpdateId: true },
-    }),
-  ]);
-  const marks = snapshots.map((s) => s.lastYdocUpdateId);
-  const stamps = replies.flatMap((r) => (r.ydocUpdateId === null ? [] : [r.ydocUpdateId]));
-
-  const versions = withSupersededAt(
-    snapshots.map((s, index) => ({ ...s, revisionNo: index + 1 })),
-    (_row, index) => isVersionQuoted(marks, stamps, index),
-  );
-  // `postedAt` is the DRAFT -> LIVE transition — the moment readers could
-  // first have seen anything. Null only for a row the backfill never reached,
-  // for which every version is shown rather than silenced.
-  const postedAt = annotation.postedAt ?? new Date(0);
-  const visible = visibleVersions(versions, postedAt);
-  const newestNo = versions[versions.length - 1]?.revisionNo;
-
-  // Decoded from the snapshot bytes on demand — there is no text copy
-  // anywhere (§22e). A version that will not decode is listed from nothing
-  // rather than dropped, so the count a reader sees is still honest.
-  return visible
-    .map((version) => {
-      let body: { proseJson: unknown; bodyText: string };
-      try {
-        body = decodeAnnotationSnapshot(new Uint8Array(version.ydoc));
-      } catch (err) {
-        console.error(`[annotations] version ${version.revisionNo} of ${annotationId} isn't TipTap-decodable:`, err);
-        body = { proseJson: null, bodyText: "" };
-      }
-      return {
-        revisionNo: version.revisionNo,
-        proseJson: body.proseJson,
-        bodyText: body.bodyText,
-        createdAt: version.createdAt.toISOString(),
-        authorName: version.user ? displayNameOf(version.user) : null,
-        current: version.revisionNo === newestNo,
-      };
-    })
-    .reverse();
+  return annotationHistoryFor(actorFromSessionUser(session.user), annotationId);
 }
 
 // PLAN.md §22e — the state a reply's stored anchor was measured against, for

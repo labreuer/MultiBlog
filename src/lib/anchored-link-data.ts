@@ -208,3 +208,59 @@ export async function anchoredLinkLandingFor(
   if (!link) return { status: "nothing-readable" };
   return { status: "ok", link, createdBy: row.createdBy, mintedAt: row.mintedAt, editedAt: row.editedAt };
 }
+
+/**
+ * docs/MCP.md §10 — the parts of every link that point into one doc or file,
+ * for `read` with `include: ["links"]`: which passages here are already
+ * linked, so a client reuses a link before minting another. Only the parts
+ * into this target are listed, each with its link's id, name and size — a
+ * link's parts elsewhere are a read of the link away.
+ *
+ * **The caller has already run the target's own read gate**, and this adds
+ * each link's own existence rule, the follow view's: deleted reads as absent,
+ * and an unminted draft is its creator's alone. It does not take /links' page
+ * gate (`canManageDocs`), which an AUTHORIZED user who can mint a link doesn't
+ * pass.
+ */
+export type LinkPartInto = {
+  linkId: string;
+  linkName: string | null;
+  linkParts: number;
+  anchorId: string;
+  quotedText: string;
+  from: number | null;
+  to: number | null;
+  selector: AnchorSelector | null;
+};
+
+export async function linkPartsInto(
+  target: { kind: "doc" | "file"; id: string },
+  viewer: { id: string; role: Role },
+): Promise<LinkPartInto[]> {
+  const anchors = await prisma.anchoredLinkAnchor.findMany({
+    where: {
+      ...(target.kind === "doc" ? { docId: target.id } : { fileId: target.id }),
+      link: { deletedAt: null, OR: [{ mintedAt: { not: null } }, { createdById: viewer.id }] },
+    },
+    orderBy: [{ link: { mintedAt: "desc" } }, { partOrder: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      quotedText: true,
+      anchorFrom: true,
+      anchorTo: true,
+      selectorKind: true,
+      selector: true,
+      link: { select: { id: true, name: true, _count: { select: { anchors: true } } } },
+    },
+  });
+  return anchors.map((anchor) => ({
+    linkId: anchor.link.id,
+    linkName: anchor.link.name,
+    linkParts: anchor.link._count.anchors,
+    anchorId: anchor.id,
+    quotedText: anchor.quotedText,
+    from: anchor.anchorFrom,
+    to: anchor.anchorTo,
+    selector: parseSelector(anchor.selectorKind, anchor.selector),
+  }));
+}

@@ -6,7 +6,7 @@ import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { postPath } from "@/lib/post-path";
 import { canApplyTags, canCurateTags } from "@/lib/role-checks";
 import { canUserRemoveAssignment, canUserTagTarget } from "@/lib/tag-authz";
-import { tagNameInUse, uniqueTagSlug } from "@/lib/tag-slug";
+import { changeTagSlug, tagNameInUse, uniqueTagSlug } from "@/lib/tag-slug";
 import { tagsForTarget, listTagOptions, type TagChip, type TagOption } from "@/lib/tag-data";
 import { targetToColumns, targetFromColumns, parseAnchorTargetKind, type AnchorTarget } from "@/lib/anchors";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
@@ -347,9 +347,7 @@ export async function untagObject(assignmentId: string): Promise<void> {
  * Renames a term, and its description with it.
  *
  * ADMIN/EDITOR only: this rewrites every chip site-wide. **The slug does not
- * follow the name** — there is no slug history table (§20c/§20i), so
- * re-slugging here would break every existing `/tag/…` link with nothing
- * to redirect them. Changing the URL is therefore a deliberate separate act
+ * follow the name**: changing a term's URL is a deliberate separate act
  * (`updateTagSlug`) rather than a side effect of fixing a typo.
  */
 export async function renameTag(tagId: string, nameInput: string, descriptionInput?: string): Promise<void> {
@@ -376,17 +374,12 @@ export async function renameTag(tagId: string, nameInput: string, descriptionInp
 }
 
 /**
- * Changes a term's URL, knowingly breaking inbound links to the old one.
- *
- * Separated from `renameTag` precisely so that cost is chosen rather than
- * incurred. The first time a tag URL is shared somewhere durable is the
- * trigger condition for building `tag_slug_history` (§20i), at which point
- * this becomes `changeDocSlug`'s twin and the warning goes away.
+ * Changes a term's URL. The old one goes into `tag_slug_history`, which
+ * /tag/[slug] follows, so inbound links keep landing (docs/MCP.md §11).
  */
 export async function updateTagSlug(tagId: string, slugInput: string): Promise<{ slug: string }> {
   await requireCurator();
-  const slug = await uniqueTagSlug(slugInput, tagId);
-  await prismaIncludingDeleted.tag.update({ where: { id: tagId }, data: { slug } });
+  const slug = await changeTagSlug(tagId, slugInput);
   revalidatePath("/tags");
   return { slug };
 }

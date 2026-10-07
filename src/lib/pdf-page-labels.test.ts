@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pageLabelFor, pageTotalLabel, usablePageLabels } from "./pdf-page-labels";
+import { labelRanges, labelStyle, pagesLabelled } from "./pdf-page-labels";
 
 // PLAN.md §19c. The interesting half of this is what gets *rejected*: a labels
 // array is built from a number tree in someone else's file, and every arm below
@@ -92,4 +93,40 @@ test("a labels array out of step with the page count still answers", () => {
   // Only reachable from a stale handle — usablePageLabels rejects a mismatch —
   // but the read must stay inside the array either way.
   assert.equal(pageTotalLabel(["i", "1"], 6), "6");
+});
+
+// docs/MCP.md §8 — labels as ranges, and a label looked up to its pages.
+
+test("labelRanges folds a counted run into one entry and leaves anything else alone", () => {
+  const labels = ["Cover", "i", "ii", "iii", "1", "2", "3", "A-1", "A-2", "Index"];
+  assert.deepEqual(labelRanges(labels), [
+    { sheets: "1", labels: "Cover" },
+    { sheets: "2-4", labels: "i-iii" },
+    { sheets: "5-7", labels: "1-3" },
+    { sheets: "8-9", labels: "A-1-A-2" },
+    { sheets: "10", labels: "Index" },
+  ]);
+  // A restart, a skip and a change of case each start a new range.
+  assert.deepEqual(labelRanges(["1", "2", "1", "2", "5", "IV", "v"]), [
+    { sheets: "1-2", labels: "1-2" },
+    { sheets: "3-4", labels: "1-2" },
+    { sheets: "5", labels: "5" },
+    { sheets: "6", labels: "IV" },
+    { sheets: "7", labels: "v" },
+  ]);
+  assert.deepEqual(labelRanges([]), []);
+});
+
+test("labelStyle reads arabic and canonical roman numerals with a prefix", () => {
+  assert.deepEqual(labelStyle("xiv"), { prefix: "", kind: "roman", value: 14 });
+  assert.deepEqual(labelStyle("A-12"), { prefix: "A-", kind: "arabic", value: 12 });
+  assert.equal(labelStyle("iiii"), null);
+  assert.equal(labelStyle("Index"), null);
+});
+
+test("pagesLabelled finds every page carrying a label, and a plain number without labels", () => {
+  assert.deepEqual(pagesLabelled(["1", "2", "i", "1"], "1"), [0, 3]);
+  assert.deepEqual(pagesLabelled(["I", "ii"], "i"), [0]);
+  assert.deepEqual(pagesLabelled(null, "12"), [11]);
+  assert.deepEqual(pagesLabelled(null, "xii"), []);
 });

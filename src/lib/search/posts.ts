@@ -14,7 +14,7 @@ import { derivePostStatus, publishedPostWhere, readablePostWhere } from "@/lib/p
 import { postPath } from "@/lib/post-path";
 import { isWithin } from "./dates";
 import { orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
-import { remember, type KindContext, type KindSearch } from "./context";
+import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { PostHit } from "./types";
 
 /**
@@ -46,6 +46,7 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
           readable,
           ctx.authorIds.length > 0 ? { authors: { some: { userId: { in: ctx.authorIds } } } } : {},
           ctx.excludePostId ? { id: { not: ctx.excludePostId } } : {},
+          taggedWhere(ctx.tagIds),
         ],
       },
       select: { id: true, createdAt: true, publishedAt: true, publishEvent: { select: { createdAt: true } } },

@@ -1,8 +1,9 @@
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { tagBySlug } from "@/lib/tag-data";
+import { tagSlugFromHistory } from "@/lib/tag-slug";
 import { browseTag, PAGE_CAP, type TagHit } from "@/lib/tag-browse";
 import styles from "./page.module.css";
 
@@ -27,8 +28,11 @@ export default async function TagPage({ params }: { params: Promise<{ slug: stri
   const { slug } = await params;
   const tag = await tagBySlug(slug);
   // A soft-deleted term reads as absent through the `$extends` filter, so this
-  // 404s for one — which is what a retracted term should do.
+  // 404s for one — which is what a retracted term should do. A past slug
+  // redirects to the term's current one, as /doc/[slug] does for a doc's.
   if (!tag) {
+    const moved = await tagSlugFromHistory(slug);
+    if (moved) permanentRedirect(`/tag/${encodeURIComponent(moved)}`);
     notFound();
   }
 

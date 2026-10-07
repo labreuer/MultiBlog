@@ -1,6 +1,7 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import { getAnnotationAnchorRanges } from "./annotation-highlight-extension";
+import { resolveAnchorInDoc } from "./anchors";
 
 export type AnnotationMarkRange = { from: number; to: number };
 
@@ -70,6 +71,30 @@ export function collectAnnotationMarkRanges(doc: PMNode): Map<string, Annotation
 export function resolveAnnotationRanges(state: EditorState): Map<string, AnnotationMarkRange> {
   const ranges = new Map(getAnnotationAnchorRanges(state));
   for (const [id, range] of collectAnnotationMarkRanges(state.doc)) {
+    ranges.set(id, range);
+  }
+  return ranges;
+}
+
+/**
+ * `resolveAnnotationRanges` for a document with no editor around it — the MCP
+ * server's reads (docs/MCP.md §9), which hold a doc decoded from its stored
+ * row rather than an editor state. Built from the same two halves: the marks
+ * read straight off the document, and each column anchor resolved the way the
+ * reading view's plugin resolves it (`resolveAnchorInDoc`). A mark wins a
+ * collision, for the reason given above.
+ */
+export function resolveAnnotationRangesInNode(
+  doc: PMNode,
+  columnAnchors: readonly { id: string; anchorFrom: number | null; anchorTo: number | null; quotedText: string }[],
+): Map<string, AnnotationMarkRange> {
+  const ranges = new Map<string, AnnotationMarkRange>();
+  for (const anchor of columnAnchors) {
+    if (anchor.anchorFrom === null || anchor.anchorTo === null || !anchor.quotedText) continue;
+    const range = resolveAnchorInDoc(doc, anchor.anchorFrom, anchor.anchorTo, anchor.quotedText);
+    if (range) ranges.set(anchor.id, range);
+  }
+  for (const [id, range] of collectAnnotationMarkRanges(doc)) {
     ranges.set(id, range);
   }
   return ranges;

@@ -14,6 +14,7 @@ import { INVITE_TTL_MS } from "@/lib/invite";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { SITE_TITLE } from "@/lib/site-config";
+import { softDeleteUser } from "@/lib/user-delete";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -251,7 +252,9 @@ export async function deleteUser(userId: string): Promise<void> {
   if (adminId === userId) {
     throw new Error("You can't delete your own account.");
   }
-  await prisma.user.update({ where: { id: userId }, data: { deletedByUserId: adminId, deletedAt: new Date() } });
+  // Revokes the account's API tokens in the same transaction
+  // (src/lib/user-delete.ts); restoring below brings none of them back.
+  await softDeleteUser(userId, adminId);
   revalidatePath("/users");
 }
 

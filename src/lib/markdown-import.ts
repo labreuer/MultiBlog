@@ -5,7 +5,15 @@
 import { MarkdownManager } from "@tiptap/markdown";
 import { decodeHTML } from "entities";
 import { Extension, type JSONContent, type MarkdownParseHelpers, type MarkdownToken } from "@tiptap/core";
-import { commentContentExtensions, contentExtensions } from "./tiptap-schema";
+import {
+  annotationContentExtensions,
+  commentContentExtensions,
+  contentExtensions,
+  pmAnnotationContentSchema,
+  pmSchema,
+  stripMarksFromDoc,
+} from "./tiptap-schema";
+import { blockText } from "./doc-text";
 
 // contentExtensions, and specifically the same exported value the caller
 // encodes the ydoc with — a node type registered here but missing there is
@@ -93,6 +101,38 @@ function headingLevel(node: JSONContent | undefined): number | null {
   }
   const level = node.attrs?.level;
   return typeof level === "number" ? level : null;
+}
+
+// ---------------------------------------------------------------------------
+// docs/MCP.md §6 — the other direction, for the MCP server's reads: a doc's
+// body as Markdown, over the same manager, so a body parsed from Markdown and
+// serialized again re-parses to itself, tables included (GFM). A merged cell
+// and a column's width have no Markdown form and are lost here; the export's
+// JSON keeps them.
+
+/**
+ * A doc body (docContentExtensions JSON) as Markdown. The `annotation` and
+ * `authorHighlight` marks are stripped first: neither has a Markdown form,
+ * and `contentExtensions` would refuse both.
+ */
+export function docContentToMarkdown(json: JSONContent): string {
+  return markdownManager.serialize(stripMarksFromDoc(json, ["annotation", "authorHighlight"]));
+}
+
+/**
+ * Markdown as the text a doc made from it would hold (doc-text.ts's text
+ * form), with no title taken from a leading heading — the quote matcher's
+ * one retry (docs/MCP.md §7), so `the **key** claim` or a quote with a link
+ * in it, copied out of a Markdown read, still lands.
+ */
+export function markdownToText(markdown: string): string {
+  const parsed = decodeNodeEntities(markdownManager.parse(markdown));
+  const blocks = Array.isArray(parsed.content) && parsed.content.length > 0 ? parsed.content : [{ type: "paragraph" }];
+  try {
+    return blockText(pmSchema.nodeFromJSON({ type: "doc", content: blocks }));
+  } catch {
+    return plainText(parsed);
+  }
 }
 
 export function markdownToDocContent(markdown: string): MarkdownImport {
@@ -229,4 +269,37 @@ export function markdownToCommentContent(markdown: string): JSONContent {
  */
 export function commentContentToMarkdown(json: JSONContent): string {
   return commentMarkdownManager.serialize(json);
+}
+
+// ---------------------------------------------------------------------------
+// docs/MCP.md §9 — an annotation body, both ways, for the MCP server: read as
+// Markdown, and written from it.
+//
+// The parse list is the comment's arrangement (§23m above): the schema is
+// `annotationContentExtensions` — StarterKit and the author mark, no tables —
+// and a table, which the manager's fallback would silently delete, is caught
+// by the comment's table shim and kept as its literal source. A heading and a
+// fence need no shim here: StarterKit has both.
+
+const annotationMarkdownManager = new MarkdownManager({
+  extensions: [...annotationContentExtensions, commentMarkdownShims[2]],
+});
+
+/** An annotation body (annotationContentExtensions JSON) as Markdown, the author mark stripped. */
+export function annotationContentToMarkdown(json: JSONContent): string {
+  return annotationMarkdownManager.serialize(stripMarksFromDoc(json, ["authorHighlight"]));
+}
+
+/**
+ * Markdown → an annotation body over `annotationContentExtensions`, checked
+ * against its schema: entities decoded and soft breaks collapsed as a
+ * comment's are, and always a `doc` with at least one block. Throws when the
+ * result isn't a valid body, which the caller answers as `invalid`.
+ */
+export function markdownToAnnotationContent(markdown: string): JSONContent {
+  const parsed = collapseSoftBreaks(decodeNodeEntities(annotationMarkdownManager.parse(markdown)));
+  const blocks = Array.isArray(parsed.content) && parsed.content.length > 0 ? parsed.content : [{ type: "paragraph" }];
+  const json: JSONContent = { type: "doc", content: blocks };
+  pmAnnotationContentSchema.nodeFromJSON(json).check();
+  return json;
 }

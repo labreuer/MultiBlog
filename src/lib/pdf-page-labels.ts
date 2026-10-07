@@ -108,3 +108,105 @@ export function pageTotalLabel(labels: readonly string[] | null, pageCount: numb
   }
   return String(pageCount);
 }
+
+// ---------------------------------------------------------------------------
+// docs/MCP.md §8 — labels as a machine client reads them: as ranges, where a
+// run of sheets whose labels count up by one, in one style and with one
+// prefix, is one entry and any other label stands alone. For a 471-page book
+// with roman front matter that is 28 tokens, against 948 for one string per
+// page.
+
+type LabelStyle = { prefix: string; kind: "arabic" | "roman" | "ROMAN"; value: number } | null;
+
+const ROMAN = [
+  ["m", 1000],
+  ["cm", 900],
+  ["d", 500],
+  ["cd", 400],
+  ["c", 100],
+  ["xc", 90],
+  ["l", 50],
+  ["xl", 40],
+  ["x", 10],
+  ["ix", 9],
+  ["v", 5],
+  ["iv", 4],
+  ["i", 1],
+] as const;
+
+function toRoman(n: number): string {
+  let out = "";
+  for (const [glyph, value] of ROMAN) {
+    while (n >= value) {
+      out += glyph;
+      n -= value;
+    }
+  }
+  return out;
+}
+
+function fromRoman(text: string): number | null {
+  const lower = text.toLowerCase();
+  if (!/^[mdclxvi]+$/.test(lower)) return null;
+  let n = 0;
+  let rest = lower;
+  for (const [glyph, value] of ROMAN) {
+    while (rest.startsWith(glyph)) {
+      n += value;
+      rest = rest.slice(glyph.length);
+    }
+  }
+  // Only the canonical spelling counts, so "iiii" isn't four.
+  return toRoman(n) === lower ? n : null;
+}
+
+/** A label's prefix, numbering style and value, or null for one that isn't a counted label. */
+export function labelStyle(label: string): LabelStyle {
+  const arabic = /^(.*?)(\d+)$/.exec(label);
+  if (arabic) return { prefix: arabic[1], kind: "arabic", value: Number(arabic[2]) };
+  // A roman numeral's prefix ends in something other than a letter, or
+  // "Index" would read as "Inde" and ten.
+  const roman = /^(.*[^A-Za-z])?([ivxlcdm]+|[IVXLCDM]+)$/.exec(label);
+  if (roman) {
+    const value = fromRoman(roman[2]);
+    if (value !== null) {
+      return { prefix: roman[1] ?? "", kind: roman[2] === roman[2].toLowerCase() ? "roman" : "ROMAN", value };
+    }
+  }
+  return null;
+}
+
+export type LabelRange = { sheets: string; labels: string };
+
+/**
+ * Labels as ranges: each run of sheets whose labels count up by one, in one
+ * style with one prefix, is one entry; any other label stands alone.
+ */
+export function labelRanges(labels: readonly string[]): LabelRange[] {
+  const ranges: LabelRange[] = [];
+  let start = 0;
+  while (start < labels.length) {
+    const first = labelStyle(labels[start]);
+    let end = start;
+    if (first) {
+      while (end + 1 < labels.length) {
+        const next = labelStyle(labels[end + 1]);
+        if (!next || next.kind !== first.kind || next.prefix !== first.prefix || next.value !== first.value + (end + 1 - start)) break;
+        end++;
+      }
+    }
+    ranges.push({
+      sheets: start === end ? String(start + 1) : `${start + 1}-${end + 1}`,
+      labels: start === end ? labels[start] : `${labels[start]}-${labels[end]}`,
+    });
+    start = end + 1;
+  }
+  return ranges;
+}
+
+/** Every 0-based page carrying `label` — labels are not unique, so front matter and body can both have a "1". */
+export function pagesLabelled(labels: readonly string[] | null, label: string): number[] {
+  if (!labels) return /^\d+$/.test(label) ? [Number(label) - 1] : [];
+  const wanted = label.trim().toLowerCase();
+  return labels.flatMap((l, index) => (l.toLowerCase() === wanted ? [index] : []));
+}
