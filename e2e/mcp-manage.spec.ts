@@ -1,6 +1,21 @@
 import { test, expect } from "./fixtures";
-import { ADMIN_EMAIL, addTestDocAuthor, createTestDoc, deleteTestDoc, getDocAuthorEmails, getUserIdByEmail } from "./db";
+import {
+  ADMIN_EMAIL,
+  addTestDocAuthor,
+  createTestAnnotation,
+  createTestDoc,
+  createTestFile,
+  createTestPost,
+  deleteTestDoc,
+  deleteTestFile,
+  deleteTestPost,
+  deleteTestTag,
+  getDocAuthorEmails,
+  getUserIdByEmail,
+  setTestFileOwners,
+} from "./db";
 import { createAgent, mcpRequest } from "./mcp";
+import { uniqueTitle } from "./naming";
 
 // docs/MCP.md §3, §15: `manage`, the scope that changes who can see a thing
 // or takes it away. Listed only to a MANAGE token on a client that can be
@@ -81,6 +96,56 @@ test("manage refuses a doc its actor can only read, and hides one it can't", asy
   } finally {
     await deleteTestDoc(shared.id);
     await deleteTestDoc(hidden.id);
+    await agent.dispose();
+  }
+});
+
+test("manage a file's owners, an annotation, a link, and a published post's tags", async ({ request }) => {
+  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"] });
+  const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, pages: [["A page to manage."]] });
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Notes go here." });
+  const draft = await createTestAnnotation({ docId: doc.id, authorEmail: ADMIN_EMAIL, bodyText: "Private thoughts.", draft: true });
+  const published = await createTestPost({ authorEmail: agent.user.email, publish: true });
+  const term = uniqueTitle("public term");
+  let termSlug: string | null = null;
+  try {
+    // The admin's PRIVATE file is invisible to the agent until the admin adds it.
+    expect((await agent.call("manage", { target: `/pdf/${file.slug}`, visibility: "SHARED" })).error.code).toBe("not_found");
+    await setTestFileOwners(file.id, [ADMIN_EMAIL, agent.user.email]);
+    const adminId = (await getUserIdByEmail(ADMIN_EMAIL))!;
+    const reordered = await agent.call("manage", { target: `/pdf/${file.slug}`, owners: [agent.user.id, adminId] });
+    expect(reordered.isError, JSON.stringify(reordered.error)).toBe(false);
+    expect(reordered.result.owners).toBe(`${agent.user.name}, E2E Admin`);
+    expect((await agent.call("manage", { target: file.id, owners: [agent.user.id] })).error.code).toBe("invalid");
+    const renamed = await agent.call("manage", { target: file.id, slug: `${file.slug}-moved` });
+    expect(renamed.result.url).toBe(`/pdf/${file.slug}-moved`);
+    expect((await agent.call("manage", { target: file.id, record: true })).error.code).toBe("invalid");
+
+    const note = await agent.call("annotate", { on: `/doc/${doc.slug}`, body: "Mine to take back." });
+    const gone = await agent.call("manage", { target: String(note.result.id), delete: true });
+    expect(gone.result).toMatchObject({ changed: ["deleted"] });
+    expect((await agent.call("read", { url: String(note.result.id) })).error.code).toBe("not_found");
+    expect((await agent.call("manage", { target: String(note.result.id), restore: true })).isError).toBe(false);
+    // Another writer's DRAFT is theirs alone, here as everywhere.
+    expect((await agent.call("manage", { target: draft.id, delete: true })).error.code).toBe("not_found");
+
+    const minted = await agent.call("create_link", { links: [{ parts: [{ on: `/doc/${doc.slug}`, quote: "Notes go here" }] }] });
+    const link = (minted.result.links as { url: string }[])[0].url;
+    expect((await agent.call("manage", { target: link, delete: true })).result.changed).toEqual(["deleted"]);
+    expect((await agent.call("read", { url: link })).error.code).toBe("not_found");
+    expect((await agent.call("manage", { target: link, restore: true })).result.changed).toEqual(["restored"]);
+
+    expect((await agent.call("tag", { target: published.path!, tags: [term] })).error.code).toBe("forbidden");
+    const tagged = await agent.call("manage", { target: published.path!, tags: [term] });
+    expect(tagged.isError, JSON.stringify(tagged.error)).toBe(false);
+    expect(tagged.result).toMatchObject({ changed: ["tags"], tags: [{ name: term }] });
+    termSlug = (tagged.result.tags as { slug: string }[])[0].slug;
+    expect((await agent.call("manage", { target: published.path!, visibility: "SHARED" })).error.code).toBe("invalid");
+  } finally {
+    if (termSlug) await deleteTestTag(termSlug);
+    await deleteTestPost(published.id);
+    await deleteTestDoc(doc.id);
+    await deleteTestFile(file.id);
     await agent.dispose();
   }
 });

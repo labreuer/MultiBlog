@@ -7,11 +7,9 @@ import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserAccessAnnotationYdoc, canUserEditAnnotationBody } from "@/lib/annotation-authz";
 import { STALE_EDIT_SESSION_MS } from "@/lib/edit-grace";
 import { canUserReadFile } from "@/lib/file-authz";
-import { isAdmin } from "@/lib/authz";
 import {
   applyAnnotationMark,
   flushAnnotationCache,
-  removeAnnotationMark,
   replaceAnnotationBody,
 } from "@/lib/annotation-admin";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -45,6 +43,7 @@ import { displayNameOf } from "@/lib/display-name";
 import { parentSettledMark, settleAnnotationBody, writeSettledBody, type SettledBody } from "@/lib/annotation-settle";
 import { annotationHistoryFor, type AnnotationVersion } from "@/lib/annotation-history";
 import { actorFromSessionUser } from "@/lib/actor";
+import { setAnnotationDeleted } from "@/lib/annotation-manage";
 
 /**
  * `mintAnnotationConnection`, degraded to "no bundle" on any failure.
@@ -560,8 +559,9 @@ export async function discardDraftAnnotation(annotationId: string): Promise<void
 //             the next version and writes the cache from it, clears the stamp.
 //   cancel  — puts the newest version's content back, clears the stamp.
 //
-// **The gate is `requireOwnOrAdmin`**, the same pair that gates deleting an
-// annotation, and deliberately not the doc's read gate: until PR 1 of §22e
+// **The gate is the writer or an ADMIN** (`canUserEditAnnotationBody`), the
+// same pair that gates deleting a posted annotation, and deliberately not
+// the doc's read gate: until PR 1 of §22e
 // every reader of a doc held a writable connection to every annotation on it
 // (docs/COLLAB.md's 2026-08-13 entry called this the real gate on mutable
 // bodies). The token route now refuses to mint a writable token for anyone
@@ -800,56 +800,26 @@ export async function getQuotedParentVersion(
   }
 }
 
-async function requireOwnOrAdmin(annotationId: string) {
+/**
+ * Delete and restore: the writer's, or an ADMIN's for a posted annotation —
+ * never another user's DRAFT (`setAnnotationDeleted`).
+ */
+async function setAnnotationDeletedAction(annotationId: string, deleted: boolean): Promise<void> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
-  const annotation = await prisma.annotation.findUnique({
-    where: { id: annotationId },
-    select: { userId: true, docId: true, fileId: true, status: true },
-  });
-  if (!annotation) {
-    throw new Error("Annotation not found.");
-  }
-  const isOwn = annotation.userId === session.user.id;
-  if (!isAdmin(session.user.role) && !isOwn) {
-    throw new Error("You don't have permission to modify this annotation.");
-  }
-  return { session, annotation };
+  const container = await setAnnotationDeleted(actorFromSessionUser(session.user), annotationId, deleted);
+  for (const path of annotationRevalidationPaths(container)) revalidatePath(path);
+  revalidatePath("/annotations");
 }
 
 export async function deleteAnnotation(annotationId: string): Promise<void> {
-  const { session, annotation } = await requireOwnOrAdmin(annotationId);
-  await prisma.annotation.update({
-    where: { id: annotationId },
-    data: { deletedByUserId: session.user.id, deletedAt: new Date() },
-  });
-  // A DRAFT never had a mark applied (§13d), so there's nothing to remove —
-  // skip the round trip for the common "deleting my own private note" case.
-  // A *file* annotation never has one either, and for a stronger reason: a
-  // file has no ydoc at all, so there is no document to take a mark out of
-  // (PLAN.md §19). Both are the same early exit for different causes.
-  if (annotation.status !== "DRAFT" && annotation.docId !== null) {
-    await removeAnnotationMark({
-      docId: annotation.docId,
-      userId: session.user.id,
-      role: session.user.role,
-      annotationId,
-    });
-  }
-  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
-  revalidatePath("/annotations");
+  await setAnnotationDeletedAction(annotationId, true);
 }
 
 export async function restoreAnnotation(annotationId: string): Promise<void> {
-  const { annotation } = await requireOwnOrAdmin(annotationId);
-  await prisma.annotation.update({
-    where: { id: annotationId },
-    data: { deletedByUserId: null, deletedAt: null },
-  });
-  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
-  revalidatePath("/annotations");
+  await setAnnotationDeletedAction(annotationId, false);
 }
 
 // Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are

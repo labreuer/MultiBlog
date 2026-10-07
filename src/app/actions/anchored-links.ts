@@ -3,21 +3,22 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
-import { canUserReadDoc } from "@/lib/doc-authz";
-import { canUserReadFile } from "@/lib/file-authz";
-import { canUserDeleteAnchoredLink, canUserRenameAnchoredLink } from "@/lib/anchored-link-authz";
-import { normalizeLinkName } from "@/lib/anchored-link-name";
-import { DRAFT_BLOCKS_EDIT_MESSAGE, LAST_PART_MESSAGE } from "@/lib/anchored-link-editing";
+import { DRAFT_BLOCKS_EDIT_MESSAGE } from "@/lib/anchored-link-editing";
+import {
+  canUserLinkTarget,
+  docRangePartRow,
+  pdfPartRow,
+  removeLinkPartsIn,
+  renameLink,
+  reorderLinkPartsIn,
+  setLinkDeleted,
+  stampLinkEdited,
+  type LinkPartRow,
+} from "@/lib/anchored-link-write";
+import { actorFromSessionUser } from "@/lib/actor";
 import { appUrl } from "@/lib/app-url";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
-import {
-  parseAnchorTargetKind,
-  parseSelector,
-  targetFromColumns,
-  targetToColumns,
-  type AnchorSelector,
-  type AnchorTarget,
-} from "@/lib/anchors";
+import { parseAnchorTargetKind, parseSelector, targetFromColumns, type AnchorSelector, type AnchorTarget } from "@/lib/anchors";
 import { captureAnchorInYdoc, capturePdfTextAnchor } from "@/lib/anchors/capture";
 import { docContentExtensions, pmDocContentSchema } from "@/lib/tiptap-schema";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
@@ -54,6 +55,10 @@ import { ydocStore } from "../../../server/ydoc-store";
 // the tag one: no role floor beyond being signed in, because pointing at a
 // passage claims nothing about it. `post`/`annotation` targets are rejected
 // as deferred (the arc columns exist; the writer refuses).
+//
+// The bodies every front door shares — the target gate, a part's row, the
+// part edits, rename and delete — are src/lib/anchored-link-write.ts's; the
+// MCP server's link tools call them with a token's user.
 
 /** One selection, as the client names it. The target's kind picks the shape. */
 export type AnchoredLinkPartInput =
@@ -108,29 +113,6 @@ async function requireSignedIn() {
  */
 function openLinkWhere(userId: string): Prisma.AnchoredLinkWhereInput {
   return { createdById: userId, deletedAt: null, OR: [{ mintedAt: null }, { reopenedAt: { not: null } }] };
-}
-
-/**
- * The read gate, per target kind — an id naming nothing fails as "you may
- * not link this", which is the right answer and reveals nothing about what
- * exists. Doc/file reads are soft-delete-filtered by the prisma $extends.
- */
-async function canUserLinkTarget(userId: string, role: Parameters<typeof canUserReadDoc>[1], target: AnchorTarget): Promise<boolean> {
-  if (target.kind === "doc") {
-    const doc = await prisma.doc.findUnique({
-      where: { id: target.id },
-      select: { id: true, visibility: true },
-    });
-    return !!doc && (await canUserReadDoc(userId, role, doc));
-  }
-  if (target.kind === "file") {
-    const file = await prisma.storedFile.findUnique({
-      where: { id: target.id },
-      select: { id: true, visibility: true },
-    });
-    return !!file && (await canUserReadFile(userId, role, file));
-  }
-  return false;
 }
 
 /**
@@ -280,27 +262,18 @@ export async function addAnchoredLinkPart(
     throw new Error("Malformed part for this target.");
   }
 
-  if (!(await canUserLinkTarget(session.user.id, session.user.role, target))) {
+  if (!(await canUserLinkTarget(actorFromSessionUser(session.user), target))) {
     throw new Error("You don't have permission to link this.");
   }
 
-  const columns = targetToColumns(target);
-  let row: Omit<Prisma.AnchoredLinkAnchorCreateManyInput, "linkId">;
+  let row: LinkPartRow;
 
   if (part.kind === "pdf-text") {
     const captured = await capturePdfTextAnchor({ fileId: target.id, rawTarget: part.target });
     if (!captured) {
       return { error: "That selection couldn't be anchored." };
     }
-    row = {
-      ...columns,
-      selectorKind: "PDF_TEXT",
-      // The blob is the anchor (§19: quads are correct forever); offsets and
-      // stamp stay null — the KNOWN_RESIDUALS shape check-tag-constraints
-      // names as intended.
-      selector: captured.target as unknown as Prisma.InputJsonValue,
-      quotedText: captured.quotedText,
-    };
+    row = pdfPartRow(target.id, captured);
   } else {
     const ydocId = ydocIdForDoc(target.id);
     const stamp = await resolveCaptureStamp(ydocId, atVersion);
@@ -321,15 +294,7 @@ export async function addAnchoredLinkPart(
     if (!captured) {
       return { error: "The selected passage couldn't be anchored — the document may have changed under the selection." };
     }
-    row = {
-      ...columns,
-      selectorKind: "DOC_RANGE",
-      anchorFrom: captured.from,
-      anchorTo: captured.to,
-      quotedText: captured.quotedText,
-      selector: captured.selector as unknown as Prisma.InputJsonValue,
-      ydocUpdateId: stamp,
-    };
+    row = docRangePartRow(target.id, captured, stamp);
   }
 
   const open = await getOrCreateOpenLink(session.user.id);
@@ -339,27 +304,15 @@ export async function addAnchoredLinkPart(
     // of two tabs adding at once (equal orders tie-broken by id).
     const partOrder = await tx.anchoredLinkAnchor.count({ where: { linkId: open.id } });
     await tx.anchoredLinkAnchor.create({ data: { ...row, linkId: open.id, partOrder } });
-    if (open.mintedAt) await stampEdited(tx, open.id);
+    if (open.mintedAt) await stampLinkEdited(tx, open.id);
   });
   return {};
 }
 
-/** The interactive-transaction client, as the integrity scripts spell it. */
-type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
-
-/** A change to a *minted* link's parts is an edit; a draft's changes are not. */
-async function stampEdited(tx: Tx, linkId: string): Promise<void> {
-  await tx.anchoredLink.update({ where: { id: linkId }, data: { editedAt: new Date() } });
-}
-
 /**
- * Removes one part of the viewer's open link — hard delete, no renumbering
- * (an anchor is a part of a record, not a record). On a minted link the
- * last part stays: a shared URL that resolves to nothing is what a delete
- * is for, and the landing route would otherwise render its "no passages"
- * page for a link that used to have one. That rule is count-then-delete,
- * so it runs in a transaction holding the link row — two tabs removing the
- * last two parts at once would each count two otherwise.
+ * Removes one part of the viewer's open link (`removeLinkPartsIn`: hard
+ * delete, and on a minted link the last part stays), in a transaction
+ * holding the link row.
  */
 export async function removeAnchoredLinkPart(anchorId: string): Promise<{ error?: string }> {
   const session = await requireSignedIn();
@@ -377,24 +330,15 @@ export async function removeAnchoredLinkPart(anchorId: string): Promise<{ error?
     }
     if (anchor.link.mintedAt) {
       await tx.$queryRaw`SELECT id FROM anchored_link WHERE id = ${anchor.link.id} FOR UPDATE`;
-      const count = await tx.anchoredLinkAnchor.count({ where: { linkId: anchor.link.id } });
-      if (count <= 1) {
-        return { error: LAST_PART_MESSAGE };
-      }
-      await stampEdited(tx, anchor.link.id);
     }
-    await tx.anchoredLinkAnchor.delete({ where: { id: anchorId } });
-    return {};
+    return removeLinkPartsIn(tx, anchor.link, [anchorId]);
   });
 }
 
 /**
- * Rewrites the open link's part order: the anchor ids in their new order,
- * renumbered 0..n-1. The set has to be exactly the link's current anchors —
- * a tray that has fallen behind another tab (a part added there) is told
- * to reload rather than silently dropping that part to the end. Groups on
- * the landing page and banner follow first-part order, so reordering
- * across targets reorders groups too.
+ * Rewrites the open link's part order (`reorderLinkPartsIn`). Groups on the
+ * landing page and banner follow first-part order, so reordering across
+ * targets reorders groups too.
  */
 export async function reorderAnchoredLinkParts(anchorIds: string[]): Promise<{ error?: string }> {
   const session = await requireSignedIn();
@@ -405,21 +349,12 @@ export async function reorderAnchoredLinkParts(anchorIds: string[]): Promise<{ e
   return prisma.$transaction(async (tx) => {
     const link = await tx.anchoredLink.findFirst({
       where: openLinkWhere(session.user.id),
-      select: { id: true, mintedAt: true, anchors: { select: { id: true } } },
+      select: { id: true, mintedAt: true },
     });
     if (!link) {
       return { error: "There's no open link to reorder." };
     }
-    const current = new Set(link.anchors.map((a) => a.id));
-    const proposed = new Set(anchorIds);
-    if (proposed.size !== anchorIds.length || proposed.size !== current.size || anchorIds.some((id) => !current.has(id))) {
-      return { error: "The link's passages changed — reloaded; try again." };
-    }
-    for (const [index, id] of anchorIds.entries()) {
-      await tx.anchoredLinkAnchor.update({ where: { id }, data: { partOrder: index } });
-    }
-    if (link.mintedAt) await stampEdited(tx, link.id);
-    return {};
+    return reorderLinkPartsIn(tx, link, anchorIds);
   });
 }
 
@@ -554,41 +489,18 @@ export async function closeAnchoredLinkEdit(): Promise<void> {
 }
 
 /**
- * Names, renames or un-names a link (docs/ANCHORED_LINKS.md, "Naming a
- * link"). One write path for both surfaces: the tray's name field passes
- * the open link's id, and the /links Name cell passes its row's. Who may is
- * `canUserRenameAnchoredLink` (src/lib/anchored-link-authz.ts) — the
- * creator at any stage, a moderator once the link is minted, nobody on a
- * deleted row. What is stored is the normalised name or null, never a
- * blank; the CHECK on the column agrees. A rename of a *minted* link
- * stamps `edited_at` — recipients see the name in the banner and on the
- * landing page, so it is a change they can notice — and an unchanged name
- * stamps nothing.
+ * Names, renames or un-names a link (`renameLink`). One write path for both
+ * surfaces: the tray's name field passes the open link's id, and the /links
+ * Name cell passes its row's. A rename of a *minted* link stamps
+ * `edited_at` — recipients see the name in the banner and on the landing
+ * page, so it is a change they can notice.
  */
 export async function renameAnchoredLink(linkId: string, nameInput: string): Promise<void> {
   const session = await requireSignedIn();
   if (typeof linkId !== "string" || linkId === "" || typeof nameInput !== "string") {
     throw new Error("Malformed rename.");
   }
-  const link = await prisma.anchoredLink.findUnique({
-    where: { id: linkId },
-    select: { createdById: true, mintedAt: true, deletedAt: true, name: true },
-  });
-  if (!link || !canUserRenameAnchoredLink(session.user.id, session.user.role, link)) {
-    // One refusal covers "no such id", "not yours" and "someone else's
-    // draft" — none earns a hint that names what the id points at
-    // (openAnchoredLinkForEditing's stance). A deleted row the viewer could
-    // otherwise rename gets the one remedy that is theirs to apply.
-    const restorable =
-      !!link?.deletedAt && canUserRenameAnchoredLink(session.user.id, session.user.role, { ...link, deletedAt: null });
-    throw new Error(restorable ? "Restore the link before renaming it." : "You can't rename this link.");
-  }
-  const name = normalizeLinkName(nameInput);
-  if (name === link.name) return;
-  await prisma.anchoredLink.update({
-    where: { id: linkId },
-    data: { name, ...(link.mintedAt ? { editedAt: new Date() } : {}) },
-  });
+  await renameLink(actorFromSessionUser(session.user), linkId, nameInput);
 }
 
 // docs/ANCHORED_LINKS.md, "The management table" — the /links table's
@@ -603,36 +515,17 @@ export async function renameAnchoredLink(linkId: string, nameInput: string): Pro
 // otherwise collide with whatever the creator opened since.
 //
 // Who may: the creator or ADMIN/EDITOR, and never for a draft
-// (`canUserDeleteAnchoredLink`, src/lib/anchored-link-authz.ts). Plain
-// `prisma.anchoredLink` rather than prismaIncludingDeleted, because this
-// model is outside the soft-delete $extends and the ordinary client already
-// finds a deleted row to restore — the TagAssignment arrangement.
+// (`canUserDeleteAnchoredLink`, src/lib/anchored-link-authz.ts), in
+// `setLinkDeleted`. Plain `prisma.anchoredLink` rather than
+// prismaIncludingDeleted, because this model is outside the soft-delete
+// $extends and the ordinary client already finds a deleted row to restore —
+// the TagAssignment arrangement.
 async function setAnchoredLinkDeleted(linkId: string, deleted: boolean): Promise<void> {
   const session = await requireSignedIn();
   if (typeof linkId !== "string" || linkId === "") {
     throw new Error("Malformed link id.");
   }
-  const link = await prisma.anchoredLink.findUnique({
-    where: { id: linkId },
-    select: { createdById: true, mintedAt: true },
-  });
-  if (!link) {
-    throw new Error("Link not found.");
-  }
-  if (!canUserDeleteAnchoredLink(session.user.id, session.user.role, link)) {
-    // Two refusals with two remedies, so the message names the right one.
-    throw new Error(
-      link.mintedAt === null
-        ? "A draft link is discarded from its tray, not deleted here."
-        : "You don't have permission to delete this link.",
-    );
-  }
-  await prisma.anchoredLink.update({
-    where: { id: linkId },
-    data: deleted
-      ? { deletedByUserId: session.user.id, deletedAt: new Date(), reopenedAt: null }
-      : { deletedByUserId: null, deletedAt: null },
-  });
+  await setLinkDeleted(actorFromSessionUser(session.user), linkId, deleted);
 }
 
 export async function deleteAnchoredLink(linkId: string): Promise<void> {

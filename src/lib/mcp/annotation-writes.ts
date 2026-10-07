@@ -14,6 +14,7 @@ import { mergeDoc } from "@/lib/doc-edit";
 import { viewerOf } from "@/lib/actor";
 import * as Y from "yjs";
 import { captureAnchorInNode } from "@/lib/anchors/capture";
+import type { DocRangeSelector } from "@/lib/anchors";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
 import { displayNameOf } from "@/lib/display-name";
 import { flattenForMatch } from "@/lib/comment-quote-match";
@@ -107,7 +108,10 @@ export type QuoteInput = QuoteSpec & { version?: string; page?: number; label?: 
  * that same node — whose `textBetween` is what is stored, never the agent's
  * quote, so replaying to the stamp reproduces it by construction.
  */
-export async function anchorInDoc(docId: string, quote: QuoteInput): Promise<{ stamp: bigint; from: number; to: number; quotedText: string }> {
+export async function anchorInDoc(
+  docId: string,
+  quote: QuoteInput,
+): Promise<{ stamp: bigint; from: number; to: number; quotedText: string; selector: DocRangeSelector }> {
   const tail = await docLogTail(docId);
   if (tail === null) throw invalid("This doc has no history to anchor into yet.");
   let stamp = tail;
@@ -126,7 +130,7 @@ export async function anchorInDoc(docId: string, quote: QuoteInput): Promise<{ s
       ? { blocks: at.from === at.to ? String(at.from) : `${at.from}-${at.to}`, ...(heading ? { heading: heading.heading!.text } : {}) }
       : {};
   });
-  return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText };
+  return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, selector: captured.selector };
 }
 
 /** A reply's anchor in its parent's body, at the parent's newest settled version — what the replier was reading. */
@@ -170,7 +174,7 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     passage = { text: at.quotedText };
   } else if (container.kind === "doc") {
     const at = await anchorInDoc(container.doc.id, input);
-    anchor = { kind: "range", ...at };
+    anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText };
     passage = { text: at.quotedText };
   } else {
     const at = await anchorPdfQuote(container.file, input);

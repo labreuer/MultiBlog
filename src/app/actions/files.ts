@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserManageFile } from "@/lib/file-authz";
-import { changeFileSlug, freeFileSlugFor, revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
+import { revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
+import { setFileDeleted, setFileSlug, setFileTitle, setFileVisibility } from "@/lib/file-manage";
+import { actorFromSessionUser } from "@/lib/actor";
 import { DocVisibility } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
@@ -13,123 +15,69 @@ import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 // no body to create, edit or seed, so there is no createFile here — uploading
 // *is* creation, and it happens in the route handler that receives the bytes.
 //
-// Deleting is a soft delete only. The bytes stay on disk: they are
-// content-addressed and may be shared with another file (src/lib/file-storage.ts),
-// and a soft delete is meant to be undoable, which it wouldn't be if restoring
-// left a row pointing at bytes that had been swept. A hard delete that also
-// reclaims storage is deliberately not built.
+// The bodies are src/lib/file-manage.ts's, which the MCP server shares; these
+// add the session and the /files revalidation.
 
-async function requireManageableFile(fileId: string) {
+async function sessionActor() {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
-  // prismaIncludingDeleted, so restoring a deleted file can find it — the same
-  // reason setDocDeleted uses it.
-  const file = await prismaIncludingDeleted.storedFile.findUnique({ where: { id: fileId } });
-  if (!file) {
-    throw new Error("File not found.");
-  }
-  if (!(await canUserManageFile(session.user.id, session.user.role, fileId))) {
-    throw new Error("You don't have permission to manage this file.");
-  }
-  return { session, file };
+  return actorFromSessionUser(session.user);
 }
 
 export async function updateFileVisibility(fileId: string, visibility: DocVisibility): Promise<void> {
-  const { session } = await requireManageableFile(fileId);
-  if (!Object.values(DocVisibility).includes(visibility)) {
-    throw new Error("Invalid visibility.");
-  }
-  await prismaIncludingDeleted.storedFile.update({
-    where: { id: fileId },
-    data: { visibility, updatedByUserId: session.user.id },
-  });
+  await setFileVisibility(await sessionActor(), fileId, visibility);
   revalidatePath("/files");
 }
 
 export async function updateFileTitle(fileId: string, title: string): Promise<void> {
-  const { session } = await requireManageableFile(fileId);
-  const trimmed = title.trim();
-  if (!trimmed) {
-    throw new Error("A file needs a title.");
-  }
-  await prismaIncludingDeleted.storedFile.update({
-    where: { id: fileId },
-    data: { title: trimmed.slice(0, 500), updatedByUserId: session.user.id },
-  });
+  await setFileTitle(await sessionActor(), fileId, title);
   revalidatePath("/files");
 }
 
 export async function updateFileSlug(fileId: string, newSlug: string): Promise<{ slug: string }> {
-  const { session } = await requireManageableFile(fileId);
-  const slug = await changeFileSlug(fileId, newSlug, session.user.id);
+  const slug = await setFileSlug(await sessionActor(), fileId, newSlug);
   revalidatePath("/files");
   return { slug };
 }
 
 export async function revertFileSlug(fileId: string): Promise<{ slug: string }> {
-  const { session } = await requireManageableFile(fileId);
-  const slug = await revertFileSlugInDb(fileId, session.user.id);
+  const actor = await sessionActor();
+  const file = await prismaIncludingDeleted.storedFile.findUnique({ where: { id: fileId }, select: { id: true } });
+  if (!file) {
+    throw new Error("File not found.");
+  }
+  if (!(await canUserManageFile(actor.userId, actor.role, fileId))) {
+    throw new Error("You don't have permission to manage this file.");
+  }
+  const slug = await revertFileSlugInDb(fileId, actor.userId);
   revalidatePath("/files");
   return { slug };
 }
 
-/**
- * Soft-deletes or restores, and — on the way back — settles the slug.
- *
- * Deleting a file releases its url (`file_slug_live_key` is unique only among
- * live files, src/lib/file-slug.ts), which is the point: the reason to delete a
- * PDF is usually to upload a corrected copy of it, and that copy should be able
- * to have the name. The other side of that bargain is here. If the url has been
- * taken by the time someone restores, the restored file is **renamed** —
- * `report` comes back as `report-2` — rather than refused. Refusing would leave
- * an admin holding a row they cannot get back without first renaming a file
- * they may not even have permission to touch, and the only thing the rename
- * costs is a url that already belongs to something else.
- *
- * `renamedFrom` is how the caller is told; FilesTable shows it as a notice. A
- * bulk restore drops it (settleBulk keeps only success or failure per row) and
- * lets the refreshed Url column tell that story instead.
- */
-async function setFileDeleted(fileId: string, deleted: boolean): Promise<{ slug: string; renamedFrom: string | null }> {
-  const { session, file } = await requireManageableFile(fileId);
-  if (deleted) {
-    await prismaIncludingDeleted.storedFile.update({
-      where: { id: fileId },
-      data: { deletedByUserId: session.user.id, deletedAt: new Date(), updatedByUserId: session.user.id },
-    });
-    revalidatePath("/files");
-    return { slug: file.slug, renamedFrom: null };
-  }
-
-  const slug = await prismaIncludingDeleted.$transaction(async (tx) => {
-    const claimed = await freeFileSlugFor(tx, fileId, file.slug);
-    await tx.storedFile.update({
-      where: { id: fileId },
-      data: { deletedByUserId: null, deletedAt: null, updatedByUserId: session.user.id, slug: claimed },
-    });
-    return claimed;
-  });
+/** Soft-deletes or restores (`setFileDeleted`, which renames a restored file whose url was taken meanwhile). */
+async function setFileDeletedAction(fileId: string, deleted: boolean): Promise<{ slug: string; renamedFrom: string | null }> {
+  const result = await setFileDeleted(await sessionActor(), fileId, deleted);
   revalidatePath("/files");
-  return { slug, renamedFrom: slug === file.slug ? null : file.slug };
+  return result;
 }
 
 export async function deleteFile(fileId: string): Promise<void> {
-  await setFileDeleted(fileId, true);
+  await setFileDeletedAction(fileId, true);
 }
 
 export async function restoreFile(fileId: string): Promise<{ slug: string; renamedFrom: string | null }> {
-  return setFileDeleted(fileId, false);
+  return setFileDeletedAction(fileId, false);
 }
 
 // Per-row rather than one transaction — see bulkDeletePosts for the rationale.
 export async function bulkDeleteFiles(fileIds: string[]): Promise<BulkResult> {
-  return settleBulk(fileIds, (id) => setFileDeleted(id, true));
+  return settleBulk(fileIds, (id) => setFileDeletedAction(id, true));
 }
 
 export async function bulkRestoreFiles(fileIds: string[]): Promise<BulkResult> {
-  return settleBulk(fileIds, (id) => setFileDeleted(id, false));
+  return settleBulk(fileIds, (id) => setFileDeletedAction(id, false));
 }
 
 export async function bulkSetFileVisibility(fileIds: string[], visibility: DocVisibility): Promise<BulkResult> {

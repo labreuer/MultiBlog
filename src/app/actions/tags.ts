@@ -3,13 +3,20 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
-import { postPath } from "@/lib/post-path";
-import { canApplyTags, canCurateTags } from "@/lib/role-checks";
-import { canUserRemoveAssignment, canUserTagTarget } from "@/lib/tag-authz";
-import { changeTagSlug, tagNameInUse, uniqueTagSlug } from "@/lib/tag-slug";
+import { canCurateTags } from "@/lib/role-checks";
+import { canUserTagTarget } from "@/lib/tag-authz";
+import { changeTagSlug, tagNameInUse } from "@/lib/tag-slug";
 import { tagsForTarget, listTagOptions, type TagChip, type TagOption } from "@/lib/tag-data";
-import { targetToColumns, targetFromColumns, parseAnchorTargetKind, type AnchorTarget } from "@/lib/anchors";
+import { parseAnchorTargetKind, type AnchorTarget } from "@/lib/anchors";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
+import { actorFromSessionUser } from "@/lib/actor";
+import {
+  MAX_TAG_DESCRIPTION_LENGTH,
+  applyTags,
+  mintTag,
+  normalizeTagName,
+  removeTagAssignment,
+} from "@/lib/tag-write";
 
 // PLAN.md §20d — mutations on the tag vocabulary and on individual acts of
 // tagging. Shaped like src/app/actions/files.ts, with one structural
@@ -18,13 +25,8 @@ import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 // tagging, which they own. Every export below belongs to exactly one of those
 // and takes its gate from the matching half of src/lib/tag-authz.ts.
 //
-// PR 1 writes **whole-object anchors only** (§20h): one assignment, one anchor,
-// all four part columns null. Nothing here takes a range, and the
-// tag_anchor_selector_columns_check makes that structural rather than
-// merely true today.
-
-const MAX_NAME_LENGTH = 80;
-const MAX_DESCRIPTION_LENGTH = 500;
+// Minting, applying and retracting are src/lib/tag-write.ts's, which the MCP
+// server's tag tools share; curating the vocabulary is here alone.
 
 async function requireTagger() {
   const session = await auth();
@@ -60,44 +62,6 @@ function toTarget(kind: string, id: string): AnchorTarget {
     throw new Error("Missing the object to tag.");
   }
   return { kind: parsed, id };
-}
-
-/**
- * The page whose chips change when `target` is tagged — what
- * `revalidatePath` is pointed at (§20d's cache rule).
- *
- * `/tag/[slug]` deliberately gets no revalidation: it renders dynamic,
- * because it is permission-shaped per viewer and ISR would be wrong for it
- * whatever the freshness story. An annotation has no page of its own; its
- * container's is the closest thing, and PR 1 has no annotation chip UI anyway.
- */
-async function pathForTarget(target: AnchorTarget): Promise<string | null> {
-  switch (target.kind) {
-    case "doc": {
-      const doc = await prisma.doc.findUnique({ where: { id: target.id }, select: { slug: true } });
-      return doc ? `/doc/${doc.slug}` : null;
-    }
-    case "post": {
-      // A draft has no public page to revalidate (§21): null, same as a miss.
-      const post = await prisma.post.findUnique({ where: { id: target.id }, select: { slug: true, publishedAt: true } });
-      return post?.publishedAt ? postPath(post) : null;
-    }
-    case "file": {
-      const file = await prisma.storedFile.findUnique({ where: { id: target.id }, select: { slug: true } });
-      return file ? `/pdf/${file.slug}` : null;
-    }
-    case "annotation":
-      return null;
-    case "comment": {
-      // A comment's page is its post's (PLAN.md §23c); no chip UI targets a
-      // comment yet, so this is the arm the union demands, not a live path.
-      const comment = await prisma.comment.findUnique({
-        where: { id: target.id },
-        select: { thread: { select: { post: { select: { slug: true, publishedAt: true } } } } },
-      });
-      return comment?.thread.post.publishedAt ? postPath(comment.thread.post) : null;
-    }
-  }
 }
 
 /**
@@ -145,102 +109,11 @@ export async function loadTaggerState(targetKind: string, targetId: string): Pro
   return { canTag: true, options, applied: chips };
 }
 
-/**
- * Mints a term, or returns the existing one that already holds this name.
- *
- * Find-first rather than error-on-collision: from the tagger's side "add the
- * tag Epistemology" means the same thing whether or not somebody typed it
- * first, and making the second person handle an error for succeeding is
- * friction with nothing behind it. The *name* is what identifies a term
- * (case-insensitively, per `tag_name_lower_key`), not the slug.
- */
+/** Mints a term, or returns the existing one that already holds this name (`mintTag`). */
 export async function createTag(nameInput: string, descriptionInput?: string): Promise<{ id: string; slug: string; name: string }> {
   const session = await requireTagger();
-  if (!canApplyTags(session.user.role)) {
-    throw new Error("Your account doesn't have permission to apply tags.");
-  }
-
-  const name = nameInput.trim().replace(/\s+/g, " ").slice(0, MAX_NAME_LENGTH);
-  if (!name) {
-    throw new Error("A tag needs a name.");
-  }
-
-  const existing = await prisma.tag.findFirst({
-    where: { name: { equals: name, mode: "insensitive" } },
-    select: { id: true, slug: true, name: true },
-  });
-  if (existing) return existing;
-
-  // A soft-deleted term still holds its name in the index, so a collision here
-  // is real even though the term is invisible. Reporting it beats letting the
-  // create die on a raw P2002 — and telling the user to ask an admin to
-  // restore it beats silently resurrecting a term somebody deliberately binned.
-  if (await tagNameInUse(name)) {
-    throw new Error(`"${name}" already exists as a deleted tag — an admin or editor can restore it.`);
-  }
-
-  const description = descriptionInput?.trim().slice(0, MAX_DESCRIPTION_LENGTH) || null;
-  const tag = await prisma.tag.create({
-    data: { slug: await uniqueTagSlug(name), name, description, createdById: session.user.id },
-    select: { id: true, slug: true, name: true },
-  });
-  revalidatePath("/tags");
-  return tag;
-}
-
-/**
- * Writes the assignment+anchor pairs for a set of terms on one object.
- *
- * **The one writer of whole-object anchors.** Both exports below reach the
- * database through here, so the shape PR 1 is allowed to write (§20h: every
- * part column unset) is stated once rather than once per entry point — and
- * PR 2's part-tagging adds rows to this transaction rather than a second
- * concept beside it.
- *
- * Callers have already run `canUserTagTarget`; this does no gating of its own.
- *
- * **Dedup is app-level find-first** (§20c): same tag, same object, same user
- * means no second assignment, and re-tagging is a no-op rather than an error.
- * The DB-enforced version needs `tag_id` denormalised onto the anchor for a
- * partial unique index, and is deferred until concurrent tagging of one object
- * by one person is a thing that happens (§20i) — today the losing race just
- * leaves a duplicate chip, which `tagsForTarget` collapses anyway.
- */
-async function writeWholeObjectTags(target: AnchorTarget, userId: string, tagIds: string[]): Promise<void> {
-  const columns = targetToColumns(target);
-  const already = await prisma.tagAnchor.findMany({
-    where: {
-      ...columns,
-      assignment: { tagId: { in: tagIds }, userId, deletedAt: null },
-    },
-    select: { assignment: { select: { tagId: true } } },
-  });
-  const done = new Set(already.map((a) => a.assignment.tagId));
-  const pending = tagIds.filter((id) => !done.has(id));
-  if (pending.length === 0) return;
-
-  // **One transaction for the whole gesture** (§20g), which is what makes
-  // "Add all" all-or-nothing rather than a row-at-a-time bulk with a partial
-  // result to report. Deliberately not `settleBulk`: that shape is for an
-  // admin table acting on rows a user selected independently, where one
-  // failure must not stop the rest. This is one act with several terms in it.
-  await prisma.$transaction(async (tx) => {
-    for (const tagId of pending) {
-      const assignment = await tx.tagAssignment.create({
-        data: { tagId, userId },
-        select: { id: true },
-      });
-      await tx.tagAnchor.create({
-        // Every part column left unset — this is the whole-object row, and the
-        // only shape PR 1 writes.
-        data: { assignmentId: assignment.id, ...columns },
-      });
-    }
-  });
-
-  const path = await pathForTarget(target);
-  if (path) revalidatePath(path);
-  revalidatePath("/tags");
+  const { id, slug, name } = await mintTag(actorFromSessionUser(session.user), nameInput, descriptionInput);
+  return { id, slug, name };
 }
 
 /**
@@ -255,7 +128,8 @@ export async function tagObject(tagId: string, targetKind: string, targetId: str
   const session = await requireTagger();
   const target = toTarget(targetKind, targetId);
 
-  if (!(await canUserTagTarget(session.user.id, session.user.role, target))) {
+  const actor = actorFromSessionUser(session.user);
+  if (!(await canUserTagTarget(actor.userId, actor.role, target))) {
     throw new Error("You don't have permission to tag this.");
   }
 
@@ -264,7 +138,7 @@ export async function tagObject(tagId: string, targetKind: string, targetId: str
     throw new Error("Tag not found.");
   }
 
-  await writeWholeObjectTags(target, session.user.id, [tagId]);
+  await applyTags(actor, target, [tagId]);
 }
 
 /**
@@ -285,7 +159,8 @@ export async function tagObjectMany(tagIds: string[], targetKind: string, target
   const session = await requireTagger();
   const target = toTarget(targetKind, targetId);
 
-  if (!(await canUserTagTarget(session.user.id, session.user.role, target))) {
+  const actor = actorFromSessionUser(session.user);
+  if (!(await canUserTagTarget(actor.userId, actor.role, target))) {
     throw new Error("You don't have permission to tag this.");
   }
 
@@ -295,52 +170,13 @@ export async function tagObjectMany(tagIds: string[], targetKind: string, target
   const terms = await prisma.tag.findMany({ where: { id: { in: wanted } }, select: { id: true } });
   if (terms.length === 0) return;
 
-  await writeWholeObjectTags(target, session.user.id, terms.map((t) => t.id));
+  await applyTags(actor, target, terms.map((t) => t.id));
 }
 
-/**
- * Retracts one act of tagging.
- *
- * Soft-deletes the **assignment** and leaves its anchors alone: an anchor is
- * part of a record rather than a record, and has no soft delete of its own
- * (§20c). Removing one *part* of a multi-part act deletes that anchor row —
- * PR 2's concern, and a different function when it arrives.
- */
+/** Retracts one act of tagging: one's own, or anyone's as ADMIN/EDITOR (`removeTagAssignment`). */
 export async function untagObject(assignmentId: string): Promise<void> {
   const session = await requireTagger();
-
-  const assignment = await prisma.tagAssignment.findFirst({
-    where: { id: assignmentId, deletedAt: null },
-    select: {
-      userId: true,
-      anchors: {
-        select: { docId: true, postId: true, fileId: true, targetAnnotationId: true, targetCommentId: true },
-        take: 1,
-      },
-    },
-  });
-  if (!assignment) {
-    throw new Error("Tag not found.");
-  }
-  if (!canUserRemoveAssignment(session.user.id, session.user.role, assignment.userId)) {
-    throw new Error("You can only remove your own tags.");
-  }
-
-  await prisma.tagAssignment.update({
-    where: { id: assignmentId },
-    data: { deletedByUserId: session.user.id, deletedAt: new Date() },
-  });
-
-  // One anchor is enough to find the page whose chips changed: PR 1 writes
-  // exactly one per assignment. A multi-part act (PR 2) spans several targets
-  // and will need every distinct page revalidated, not the first.
-  const anchor = assignment.anchors[0];
-  const target = anchor ? targetFromColumns(anchor) : null;
-  if (target) {
-    const path = await pathForTarget(target);
-    if (path) revalidatePath(path);
-  }
-  revalidatePath("/tags");
+  await removeTagAssignment(actorFromSessionUser(session.user), assignmentId);
 }
 
 /**
@@ -353,7 +189,7 @@ export async function untagObject(assignmentId: string): Promise<void> {
 export async function renameTag(tagId: string, nameInput: string, descriptionInput?: string): Promise<void> {
   await requireCurator();
 
-  const name = nameInput.trim().replace(/\s+/g, " ").slice(0, MAX_NAME_LENGTH);
+  const name = normalizeTagName(nameInput);
   if (!name) {
     throw new Error("A tag needs a name.");
   }
@@ -367,7 +203,7 @@ export async function renameTag(tagId: string, nameInput: string, descriptionInp
       name,
       ...(descriptionInput === undefined
         ? {}
-        : { description: descriptionInput.trim().slice(0, MAX_DESCRIPTION_LENGTH) || null }),
+        : { description: descriptionInput.trim().slice(0, MAX_TAG_DESCRIPTION_LENGTH) || null }),
     },
   });
   revalidatePath("/tags");

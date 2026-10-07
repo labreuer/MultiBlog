@@ -1,24 +1,10 @@
-import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageFiles } from "@/lib/role-checks";
 import { isAdmin } from "@/lib/authz";
-import { claimFileSlug } from "@/lib/file-slug";
-import {
-  UploadError,
-  deleteBytesIfUnreferenced,
-  maxUploadBytes,
-  storagePathFor,
-  storeUploadStream,
-} from "@/lib/file-storage";
-import { extractPdf } from "@/lib/pdf-extract";
-import {
-  UPLOAD_ACCEPT_LABEL,
-  contentTypeForKind,
-  titleFromFilename,
-  uploadKindForFilename,
-} from "@/lib/file-format";
+import { UploadError, maxUploadBytes } from "@/lib/file-storage";
+import { recordUpload, stageUpload } from "@/lib/file-ingest";
+import { actorFromSessionUser } from "@/lib/actor";
 
 // PLAN.md §19 — file upload.
 //
@@ -89,120 +75,21 @@ export async function POST(request: Request) {
   if (!rawName) {
     return NextResponse.json({ error: "Missing filename." }, { status: 400 });
   }
-  // Strip any directory component a browser or a scripted client might send.
-  // Nothing downstream builds a path from this — the bytes go to a
-  // content-addressed path derived from their own hash — so this is about the
-  // *displayed* name being sane rather than about traversal, which the storage
-  // layout already makes impossible.
-  const filename = rawName.replace(/^.*[\\/]/, "").slice(0, 255);
-  // Which format this claims to be decides which check runs on the stored
-  // bytes below; an unrecognised extension never reaches storage at all.
-  const kind = uploadKindForFilename(filename);
-  if (!kind) {
-    return NextResponse.json({ error: `Only ${UPLOAD_ACCEPT_LABEL} files can be uploaded.` }, { status: 415 });
-  }
-  const title = titleFromFilename(filename, kind);
 
-  let stored;
+  // Everything from here is src/lib/file-ingest.ts's, which the MCP server's
+  // upload route shares: the format check, the streamed write, a PDF's
+  // parse, and the row with its owners and page text — the uploader the sole
+  // owner, the way createDoc makes its creator the sole DocAuthor.
   try {
-    // The kind decides which magic the stream is checked against, mid-flight,
-    // so a mislabelled upload is refused after a few bytes rather than after
-    // the whole transfer.
-    stored = await storeUploadStream(request.body, { kind });
+    const actor = actorFromSessionUser(session.user);
+    const staged = await stageUpload(actor, { body: request.body, filename: rawName });
+    const { file, sha256 } = await recordUpload(actor, staged);
+    return NextResponse.json({ id: file.id, slug: file.slug, title: file.title, sha256 });
   } catch (err) {
     if (err instanceof UploadError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
     console.error("[files/upload] storing the body failed:", err);
-    return NextResponse.json({ error: "Couldn't save that file." }, { status: 500 });
-  }
-
-  // A PDF is parsed after storing; a .docx is not, and that asymmetry is the
-  // whole of the difference between them here.
-  //
-  // The bytes are already safe on disk by this point, so a parse failure is a
-  // clean rollback rather than a lost upload to retry. A PDF earns the parse
-  // because its page text is what a later annotation anchors into — a PDF we
-  // cannot read must not be stored at all. A .docx has no reader yet, so
-  // storeUploadStream's package check above is the whole of its validation
-  // (src/lib/file-storage.ts says why going deeper would only reject documents
-  // we can hold perfectly well).
-  //
-  // The parse is the one place a whole file is held in memory, and it is
-  // deliberate. pdfjs needs the bytes; it is bounded by MAX_UPLOAD_BYTES, brief
-  // (freed as soon as extraction returns), and one-per-upload rather than
-  // one-per-read — exactly the distinction that ruled out a `bytea` column,
-  // which would pay this on *every download*, forever.
-  let pageCount: number | null = null;
-  let pages: { textVersion: string; texts: readonly string[] } | null = null;
-
-  if (kind === "pdf") {
-    try {
-      const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
-      pageCount = parsed.pageCount;
-      pages = { textVersion: parsed.textVersion, texts: parsed.pages };
-    } catch (err) {
-      console.error("[files/upload] couldn't parse the uploaded PDF:", err);
-      // Only remove the bytes if this upload is what put them there. A dedupe
-      // hit means another file already references them and they must survive.
-      if (!stored.deduped) {
-        await deleteBytesIfUnreferenced(stored.sha256, 0);
-      }
-      return NextResponse.json({ error: "That PDF couldn't be read — it may be damaged." }, { status: 415 });
-    }
-  }
-
-  try {
-    const created = await prisma.$transaction(async (tx) => {
-      // Claimed inside the transaction, under a lock on the slug, so two
-      // simultaneous uploads of `report.pdf` become `report` and `report-2`
-      // rather than one of them dying on the unique index (lockFileSlug).
-      const slug = await claimFileSlug(tx, title);
-      const file = await tx.storedFile.create({
-        data: {
-          slug,
-          title,
-          filename,
-          contentType: contentTypeForKind(kind),
-          byteSize: stored.byteSize,
-          sha256: stored.sha256,
-          pageCount,
-          createdByUserId: session.user.id,
-          updatedByUserId: session.user.id,
-          // The uploader becomes the sole owner, the way createDoc makes its
-          // creator the sole DocAuthor — "owner" rather than "author" because
-          // nobody here wrote the PDF (schema.prisma's FileOwner). It is also
-          // what makes the file visible to them at all under PRIVATE, which is
-          // the default.
-          owners: { create: { userId: session.user.id, ownerOrder: 0 } },
-        },
-        select: { id: true, slug: true, title: true },
-      });
-      // Only a parsed format has page text. A .docx stores none — which is
-      // what the null pageCount above says as well.
-      if (pages) {
-        await tx.filePageText.createMany({
-          data: pages.texts.map((text, pageIndex) => ({
-            fileId: file.id,
-            pageIndex,
-            textVersion: pages.textVersion,
-            text,
-          })),
-        });
-      }
-      return file;
-    });
-
-    return NextResponse.json({ id: created.id, slug: created.slug, title: created.title, sha256: stored.sha256 });
-  } catch (err) {
-    console.error("[files/upload] couldn't record the uploaded file:", err);
-    if (!stored.deduped) {
-      // Nothing references these bytes: the row that would have is what just
-      // failed. Counted rather than assumed, because a concurrent upload of the
-      // same PDF could have landed in between.
-      const references = await prismaIncludingDeleted.storedFile.count({ where: { sha256: stored.sha256 } });
-      await deleteBytesIfUnreferenced(stored.sha256, references);
-    }
     return NextResponse.json({ error: "Couldn't save that file." }, { status: 500 });
   }
 }

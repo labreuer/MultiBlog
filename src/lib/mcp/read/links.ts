@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { anchoredLinkLandingFor, linkPartsInto, type AnchoredLinkPart } from "@/lib/anchored-link-data";
 import { anchoredLinkTitle } from "@/lib/anchored-link-name";
+import { linkAnchorIds } from "@/lib/anchored-link-write";
 import { resolveAnchorInDoc } from "@/lib/anchors";
 import { blocksOfRange, headingAbove } from "@/lib/doc-text";
 import { loadDocState, type DocState } from "@/lib/doc-state";
@@ -63,6 +64,11 @@ export async function readLink(ctx: McpContext, linkId: string): Promise<ToolRes
     return { kind: "link", url, groups: [], note: "None of this link's passages are in anything you can read." };
   }
   const creator = landing.createdBy;
+  // The creator edits the parts by number (edit_link), counted over all of
+  // them in the link's order; nobody else is shown one, since a gap would
+  // tell them a part they can't read exists.
+  const numbers = landing.link.canEdit ? new Map((await linkAnchorIds(prisma, linkId)).map((id, i) => [id, i + 1])) : null;
+  const numbered = (anchorId: string) => (numbers?.has(anchorId) ? { n: numbers.get(anchorId)! } : {});
   const groups = await Promise.all(
     landing.link.groups.map(async (group) => {
       if (group.target.kind === "doc") {
@@ -75,7 +81,7 @@ export async function readLink(ctx: McpContext, linkId: string): Promise<ToolRes
           kind: "doc",
           title: docTitleOrFallback(group.label),
           version: state.version?.toString() ?? null,
-          parts: group.parts.map((part) => ({ ...quoteOf(part), ...placeDocPart(state, part) })),
+          parts: group.parts.map((part) => ({ ...numbered(part.anchorId), ...quoteOf(part), ...placeDocPart(state, part) })),
         };
       }
       const labels = await pdfLabels(group.target.id);
@@ -87,6 +93,7 @@ export async function readLink(ctx: McpContext, linkId: string): Promise<ToolRes
         parts: group.parts.map((part) => {
           const pageIndex = part.selector?.kind === "PDF_TEXT" ? part.selector.selector.pageIndex : null;
           return {
+            ...numbered(part.anchorId),
             ...quoteOf(part),
             ...(pageIndex !== null ? { page: pageIndex + 1, ...(labels ? { label: labels[pageIndex] } : {}) } : {}),
           };
