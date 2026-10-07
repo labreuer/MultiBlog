@@ -71,8 +71,8 @@ Dispatch, in order:
 
 | Condition | Behavior | Returns |
 |---|---|---|
+| `to` matches `/@(example\.com\|([^@]+\.)?invalid)$/i` | log, annotated `(not delivered: reserved domain)` | `{ delivered: true }` |
 | `RESEND_API_KEY` or `MAIL_FROM` unset | log in the original format | `{ delivered: true }` |
-| `to` matches `/@(example\.com\|sample\.invalid)$/i` | log, annotated `(not delivered: reserved domain)` | `{ delivered: true }` |
 | otherwise | `POST https://api.resend.com/emails` via `fetch` | `{delivered:true}` / `{delivered:false, error}` |
 
 The logged form degrades gracefully for a `template` call too — there's no `text` to print,
@@ -83,8 +83,11 @@ Three properties are load-bearing:
 
 - **The reserved-domain refusal is unconditional, in every environment — not an env
   flag.** `e2e/naming.ts`'s `SAFE_EMAIL` guarantees the suite only ever creates
-  `@example.com` addresses, and `scripts/seed-sample-data.ts` uses `@sample.invalid`.
-  Without this check, the day a live key lands in a dev `.env`, `npm run e2e` becomes a
+  `@example.com` addresses, and every account given an address that can't receive mail
+  sits under RFC 2606's `.invalid` TLD — `scripts/seed-sample-data.ts`'s `@sample.invalid`,
+  `scripts/import-claude-chats.ts`'s `claude@multiblog.invalid`. The whole TLD is refused,
+  so a new such account needs no edit here. `src/lib/mail.test.ts` pins it with a stubbed
+  `fetch` and a key set. Without this check, the day a live key lands in a dev `.env`, `npm run e2e` becomes a
   burst of hard bounces against your own sending domain — the fastest way to get
   throttled by a provider. Three lines makes "the suite cannot send mail" structural
   rather than a matter of `.env` discipline.
