@@ -240,7 +240,7 @@ ydoc update id is meaningless for a file. Two obligations replace all of that:
 **Fragment links are the one reader that finds a passage again on every open**
 ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)): a URL naming a passage by its words, with no
 stored quads, whose viewer measures quads from `getTextContent()` through the `offsets` map
-above (`src/lib/pdf-quads.ts`). It matches by skeleton, letters and digits only, which no step
+above (`src/lib/pdf-quads.ts`, [PDF_QUADS.md](PDF_QUADS.md)). It matches by skeleton, letters and digits only, which no step
 of the normaliser changes, so a `NORMALISER_VERSION` bump can't break one. A pdfjs bump that
 extracts different letters, or the same ones in another order, can, and
 `scripts/integrity/check-pdf-fragment-links.ts` is what notices.

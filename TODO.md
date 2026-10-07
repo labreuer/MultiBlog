@@ -184,9 +184,30 @@ glyphs. Not yet done:
 - **The MCP server's use of the check** (MCP.md §8) comes with the MCP server.
 - **The deploy wrapper's integrity checks** should gain `check-pdf-fragment-links.ts` once an
   instance runs this code; before that the script doesn't exist where the wrapper runs it.
-- **Firefox and WebKit** haven't run `pdf-fragment-links.spec.ts`; only chromium has. The
-  outline's alignment rests on each engine's text layer measuring an item the way the canvas
-  does, which is worth a run on each before relying on it there.
+- **WebKit fails `pdf-fragment-links.spec.ts` intermittently: 3 of its 8 tests per run, a
+  different three each time.** Every failure is the same: the banner finds the passage, but
+  the page it is on draws no `.annoRectLink`. Two runs on 2026-10-06 failed different sets,
+  one of them on `main`'s code, so the server-quads work (docs/PDF_QUADS.md) didn't cause it.
+  Not yet investigated: a race between the fragment's regions and the page's anno layer
+  being created is the first suspect. Firefox passed all 8 the same day.
+- **Firefox on Windows measures the outline in the wrong font.** pdfjs's text layer draws
+  `sans-serif` items in `Calibri, sans-serif` there (`TextLayer.fontFamilyMap`), but
+  `canvasMeasurer` in `use-pdf-fragment.ts` measures in the raw `fontFamily`, so in that
+  browser it measures Arial against a Calibri selection. Passing the family through the same
+  map is a one-line fix (docs/PDF_QUADS.md §5).
+
+## Server-side quads: what is left (docs/PDF_QUADS.md)
+
+**Status:** built 2026-10-06. Unit-tested, and measured against Chromium's text layer on the e2e
+fixture and four real PDFs (PDF_QUADS.md Appendix A). Nothing on `main` calls it yet.
+
+- **Its first caller is the MCP server's stored PDF quads** (MCP.md §8, on `api-mcp`): that
+  section's steps become `extractPageItems` plus `quadsForRange`, and its spec should assert
+  edges within about 1pt of a selection in Chromium (the fixture's worst was 0.82pt), not mere
+  overlap, which even spacing also passes.
+- **That spec is the only standing check against a real selection** once it exists. Until
+  then, a pdfjs bump that changed how the text layer picks a font family would move
+  server-computed quads with nothing noticing; nothing stores them yet.
 
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 

@@ -232,7 +232,7 @@ and on every `hashchange`, and `PdfAnnotationSurface` draws what it finds. `PdfV
      the item's width by the same measurement, so the outline's edges fall where a selection's
      do. On the e2e fixture, where each line is one item, even spacing missed a real selection
      by 13.5px, while measured spacing is within 2px. Without a canvas (on a server) the
-     function spaces characters evenly.
+     function measures in standard widths instead ([PDF_QUADS.md](PDF_QUADS.md)).
    - **Not a DOM range over pdfjs's text layer.** The jump needs the quads before the page is
      scrolled into view and its text layer exists. Mapping spans to items would also tie the
      outline to which span pdfjs draws for which item, which is not a public API (PDF.md §0,
