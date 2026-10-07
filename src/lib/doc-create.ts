@@ -6,7 +6,12 @@ import type { Prisma } from "@/generated/prisma/client";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { slugify } from "@/lib/slug";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
-import { contentExtensions, titleExtensions } from "@/lib/tiptap-schema";
+import {
+  authorHighlightExtensions,
+  contentExtensions,
+  titleAuthorHighlightExtensions,
+  titleExtensions,
+} from "@/lib/tiptap-schema";
 import { docContentFromYdoc } from "@/lib/doc-content";
 import { ydocStore, encodeYdocState } from "../../server/ydoc-store";
 
@@ -86,42 +91,103 @@ export async function insertDocRow(userId: string, title: string) {
   return insertDocRowSluggedById(userId, title);
 }
 
+/** Every text node of a TipTap JSON body marked as `authorId`'s, except where the parent takes no marks (a code block). */
+function markAuthor(node: JSONContent, authorId: string, marksAllowed = true): JSONContent {
+  const allowed = marksAllowed && node.type !== "codeBlock";
+  if (node.type === "text") {
+    return marksAllowed
+      ? { ...node, marks: [...(node.marks ?? []), { type: "authorHighlight", attrs: { authorId } }] }
+      : node;
+  }
+  return node.content ? { ...node, content: node.content.map((child) => markAuthor(child, authorId, allowed)) } : node;
+}
+
+export type CreateDocOptions = {
+  /** The byline, in order: user ids, the first its lead. The creator alone when absent. */
+  byline?: string[];
+  /**
+   * Whose `authorHighlight` every character of the seed carries — the MCP
+   * server passes its actor, so Claude's text shows in Claude's colour and a
+   * person's later edits in theirs (docs/MCP.md §6). The import and the
+   * importer pass nothing, and their text is unmarked as it always was.
+   */
+  author?: string | null;
+};
+
 // The doc a Markdown import creates: `body` is the parse's (markdownToDocContent),
 // `title` the parse's title or the caller's fallback for it, "" for none.
 //
-// Seeded, and the row inserted only afterwards, per docs/DOC_IMPORT.md §5 —
-// where the title fragment (not just the Doc.title column) and the ordering
-// both matter more than they look. The ydoc row is written straight to
-// Postgres rather than through the collab server, which is safe only because
-// the doc is new: nobody can have it open yet.
-export async function createDocWithContent(userId: string, title: string, body: JSONContent) {
+// Seeded first, then **written in one transaction**: the row with its whole
+// byline, the `ydoc` row and its first update, and the `proseJson` cache. A
+// failure part way through would otherwise leave a doc whose first open seeds
+// an empty document — and a byline written afterwards could fail once the
+// row had committed, leaving a PRIVATE doc only its creator can read. The
+// ydoc is written straight to Postgres rather than through the collab server,
+// which is safe only because the doc is new: nobody can have it open yet
+// (docs/DOC_IMPORT.md §5).
+//
+// The seed's Yjs clients are registered in its `clients` map as the creator,
+// as an annotation's seed is, so the replay view names who wrote the first
+// text.
+export async function createDocWithContent(userId: string, title: string, body: JSONContent, opts: CreateDocOptions = {}) {
+  const author = opts.author ?? null;
   const seed = new Y.Doc();
-  const seededBody = TiptapTransformer.toYdoc(body, "default", contentExtensions);
+  const clientIds: number[] = [];
+  const seededBody = TiptapTransformer.toYdoc(
+    author ? markAuthor(body, author) : body,
+    "default",
+    author ? authorHighlightExtensions : contentExtensions,
+  );
   Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededBody));
+  clientIds.push(seededBody.clientID);
   seededBody.destroy();
   // Only when there's something to say: seeding a textless paragraph instead
   // would make "no title" structurally different from what createDoc leaves.
   if (title) {
+    const titleDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: title }] }] };
     const seededTitle = TiptapTransformer.toYdoc(
-      { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: title }] }] },
+      author ? markAuthor(titleDoc, author) : titleDoc,
       "title",
-      titleExtensions,
+      author ? titleAuthorHighlightExtensions : titleExtensions,
     );
     Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededTitle));
+    clientIds.push(seededTitle.clientID);
     seededTitle.destroy();
   }
+  const clients = seed.getMap<string>("clients");
+  for (const clientId of clientIds) clients.set(String(clientId), userId);
   const { ydoc, stateVector } = encodeYdocState(seed);
   const cached = docContentFromYdoc(seed);
   seed.destroy();
 
-  const doc = await insertDocRow(userId, cached.title);
-  await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
-  return prisma.doc.update({
-    where: { id: doc.id },
-    data: {
-      proseJson: cached.proseJson as Prisma.InputJsonValue,
-      updatedByUserId: userId,
-    },
-    select: { id: true, slug: true },
-  });
+  const byline = [...new Set(opts.byline ?? [userId])];
+  // A slug from the title when it has one (see insertDocRow), claimed in the
+  // transaction; a lost race on it retries the whole create, and the third
+  // try falls back to the cuid, so this always ends.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const slug = attempt < 2 && cached.title && slugify(cached.title, "") ? await uniqueDocSlug(cached.title) : null;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const created = await tx.doc.create({
+          data: {
+            slug: slug ?? crypto.randomUUID(),
+            title: cached.title,
+            createdByUserId: userId,
+            updatedByUserId: userId,
+            proseJson: cached.proseJson as Prisma.InputJsonValue,
+            authors: { create: byline.map((authorId, bylineOrder) => ({ userId: authorId, bylineOrder })) },
+          },
+          select: { id: true, slug: true },
+        });
+        const doc = slug
+          ? created
+          : await tx.doc.update({ where: { id: created.id }, data: { slug: created.id }, select: { id: true, slug: true } });
+        await ydocStore.createInTransaction(tx as unknown as Prisma.TransactionClient, ydocIdForDoc(doc.id), ydoc, stateVector);
+        return doc;
+      });
+    } catch (err) {
+      if (!isSlugTaken(err) || slug === null) throw err;
+    }
+  }
+  throw new Error("Couldn't claim a slug for the new doc.");
 }

@@ -375,3 +375,5 @@ export const appendTestDocParagraph = (...args: Parameters<DbHandlers["appendTes
   call("appendTestDocParagraph", ...args);
 export const renameTestTagSlug = (...args: Parameters<DbHandlers["renameTestTagSlug"]>) =>
   call("renameTestTagSlug", ...args);
+export const getDocMarkFacts = (...args: Parameters<DbHandlers["getDocMarkFacts"]>) => call("getDocMarkFacts", ...args);
+export const setTestDocRecord = (...args: Parameters<DbHandlers["setTestDocRecord"]>) => call("setTestDocRecord", ...args);

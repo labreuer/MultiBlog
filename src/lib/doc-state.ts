@@ -3,7 +3,8 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { prisma } from "@/lib/prisma";
-import { docContentExtensions, pmDocContentSchema } from "@/lib/tiptap-schema";
+import { docContentExtensions, pmDocContentSchema, titleAuthorHighlightExtensions } from "@/lib/tiptap-schema";
+import { titleTextFromJSON } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
@@ -22,6 +23,8 @@ import { docBlocks, type DocBlock } from "@/lib/doc-text";
 
 export type DocState = {
   json: JSONContent;
+  /** The title fragment's text; "" for a doc with none. */
+  title: string;
   node: PMNode;
   blocks: DocBlock[];
   /**
@@ -35,7 +38,12 @@ function stateOf(doc: Y.Doc): Omit<DocState, "version"> {
   const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(doc, "default") as JSONContent;
   const content = Array.isArray(json.content) && json.content.length > 0 ? json : { type: "doc", content: [{ type: "paragraph" }] };
   const node = pmDocContentSchema.nodeFromJSON(content);
-  return { json: content, node, blocks: docBlocks(node) };
+  const titleFragment = doc.getXmlFragment("title");
+  const title =
+    titleFragment.length > 0
+      ? titleTextFromJSON(TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(doc, "title") as JSONContent)
+      : "";
+  return { json: content, title, node, blocks: docBlocks(node) };
 }
 
 /**

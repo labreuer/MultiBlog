@@ -120,6 +120,17 @@ export function docContentToMarkdown(json: JSONContent): string {
 }
 
 /**
+ * Markdown as top-level blocks over `contentExtensions`, with no title taken
+ * from a leading heading — what an edit writes into a doc (docs/MCP.md §6),
+ * where `## Results` means a heading in the body. Entities are decoded as for
+ * an import; the caller validates against the schema.
+ */
+export function markdownToBlocks(markdown: string): JSONContent[] {
+  const parsed = decodeNodeEntities(markdownManager.parse(markdown));
+  return Array.isArray(parsed.content) && parsed.content.length > 0 ? parsed.content : [{ type: "paragraph" }];
+}
+
+/**
  * Markdown as the text a doc made from it would hold (doc-text.ts's text
  * form), with no title taken from a leading heading — the quote matcher's
  * one retry (docs/MCP.md §7), so `the **key** claim` or a quote with a link

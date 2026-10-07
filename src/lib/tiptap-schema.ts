@@ -117,7 +117,7 @@ export const docContentExtensions = [...authorHighlightExtensions, Annotation];
 // The plain prosemirror-model Schema counterpart of docContentExtensions —
 // for server-side code that builds/walks a doc-shaped Node outside a live
 // editor instance (server/ydoc-hooks.ts's annotation-mark endpoint), mirroring
-// pmSchema/pmTitleSchema above.
+// pmSchema above and pmTitleSchema below.
 export const pmDocContentSchema = getSchema(docContentExtensions);
 
 // The schema for an annotation's own body (PLAN.md §13b) — StarterKit plus
@@ -157,6 +157,11 @@ export const titleExtensions = [Document.extend({ content: "paragraph" }), Parag
 // revisions.title (a plain string column, extracted as text on save), so
 // titleExtensions alone stays the schema for saved titles.
 export const titleAuthorHighlightExtensions = [...titleExtensions, AuthorHighlight];
+
+// The plain prosemirror-model Schema of a *working* title, author mark
+// included — what a targeted edit of a doc's title is built and validated
+// against (docs/MCP.md §6), since a title is a Yjs fragment of its own.
+export const pmTitleSchema = getSchema(titleAuthorHighlightExtensions);
 
 // The schema for a contributor's blurb (PLAN.md §17f) — a plain `User`
 // column, not a ydoc: one owner, no history, no concurrent editors, edited

@@ -71,7 +71,7 @@ export type AuthenticatedToken = {
   scopes: readonly ApiScope[];
   client: ApiTokenClient;
   user: TokenPerson & { role: Role };
-  issuer: TokenPerson;
+  issuer: TokenPerson & { role: Role };
 };
 
 /**
@@ -160,7 +160,7 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
     scopes: token.scopes,
     client: token.client,
     user: { id: user.id, name: user.name, slug: user.slug, role: user.role },
-    issuer: { id: issuedBy.id, name: issuedBy.name, slug: issuedBy.slug },
+    issuer: { id: issuedBy.id, name: issuedBy.name, slug: issuedBy.slug, role: issuedBy.role },
   };
 }
 

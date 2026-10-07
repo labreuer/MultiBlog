@@ -43,6 +43,7 @@ import { buildTestPdf, type TestOutlineItem, type TestPageLabelRange } from "../
 import {
   contentExtensions,
   titleExtensions,
+  titleAuthorHighlightExtensions,
   collectMarkAttrValues,
   pmDocContentSchema,
   annotationContentExtensions,
@@ -434,7 +435,9 @@ export async function createTestDoc(opts: {
 
   const seed = new Y.Doc();
   if (bodyText || body) {
-    const seeded = TiptapTransformer.toYdoc(body ?? docFromText(bodyText!), "default", contentExtensions);
+    // docContentExtensions, a superset of contentExtensions, so a `body`
+    // may carry author and annotation marks as an edited doc does.
+    const seeded = TiptapTransformer.toYdoc(body ?? docFromText(bodyText!), "default", docContentExtensions);
     Y.applyUpdate(seed, Y.encodeStateAsUpdate(seeded));
     seeded.destroy();
   }
@@ -2337,6 +2340,64 @@ export async function createTestApiToken(opts: {
   });
 }
 
+/**
+ * A doc's marks as its stored row holds them — after an MCP edit, the collab
+ * server stores the doc as its direct connection closes: how many characters
+ * each author's mark covers (by email), the text each annotation's mark
+ * covers, and the clients map's users (by email).
+ */
+export async function getDocMarkFacts(docId: string): Promise<{
+  text: string;
+  authors: Record<string, string>;
+  annotations: Record<string, string>;
+  clients: string[];
+  title: string;
+}> {
+  const row = await prisma.ydoc.findUniqueOrThrow({ where: { id: ydocIdForDoc(docId) }, select: { ydoc: true } });
+  const ydoc = new Y.Doc();
+  Y.applyUpdate(ydoc, new Uint8Array(row.ydoc));
+  const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(ydoc, "default") as JSONContent;
+  const node = pmDocContentSchema.nodeFromJSON(json);
+  const byAuthor = new Map<string, string>();
+  const byAnnotation = new Map<string, string>();
+  node.descendants((child) => {
+    if (!child.isText) return;
+    for (const mark of child.marks) {
+      if (mark.type.name === "authorHighlight") {
+        const id = mark.attrs.authorId as string;
+        byAuthor.set(id, (byAuthor.get(id) ?? "") + child.text);
+      }
+      if (mark.type.name === "annotation") {
+        const id = mark.attrs.id as string;
+        byAnnotation.set(id, (byAnnotation.get(id) ?? "") + child.text);
+      }
+    }
+  });
+  const clientUserIds = [...new Set([...ydoc.getMap<string>("clients").values()])];
+  const titleFragment = ydoc.getXmlFragment("title");
+  const title = titleFragment.length > 0 ? extractText(TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(ydoc, "title")) : "";
+  ydoc.destroy();
+  const users = await prisma.user.findMany({
+    where: { id: { in: [...byAuthor.keys(), ...clientUserIds] } },
+    select: { id: true, email: true },
+  });
+  const emailOf = new Map(users.map((u) => [u.id, u.email]));
+  return {
+    text: node.textBetween(0, node.content.size, "\n"),
+    authors: Object.fromEntries([...byAuthor].map(([id, text]) => [emailOf.get(id) ?? id, text])),
+    annotations: Object.fromEntries(byAnnotation),
+    clients: clientUserIds.map((id) => emailOf.get(id) ?? id),
+    title,
+  };
+}
+
+/** Marks a test doc a record (docs/MCP.md §6), as the importer marks a chat it imports. */
+export async function setTestDocRecord(docId: string, record: boolean): Promise<void> {
+  const doc = await prisma.doc.findUniqueOrThrow({ where: { id: docId }, select: { title: true } });
+  if (!doc.title.startsWith(E2E_TITLE_PREFIX)) throw new Error("setTestDocRecord: not a test doc.");
+  await prisma.doc.update({ where: { id: docId }, data: { record } });
+}
+
 /** Re-slugs a test term through changeTagSlug, so the old slug lands in tag_slug_history as /tags' rename leaves it. */
 export async function renameTestTagSlug(tagId: string, slug: string): Promise<string> {
   const tag = await prisma.tag.findUniqueOrThrow({ where: { id: tagId }, select: { createdBy: { select: { email: true } } } });
@@ -2486,6 +2547,8 @@ const handlers = {
   restoreTestUser,
   appendTestDocParagraph,
   renameTestTagSlug,
+  getDocMarkFacts,
+  setTestDocRecord,
 };
 
 export type DbHandlers = typeof handlers;

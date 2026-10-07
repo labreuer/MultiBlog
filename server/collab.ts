@@ -9,6 +9,7 @@ import {
   ANNOTATION_FLUSH_PATH,
   ANNOTATION_REPLACE_PATH,
   DOC_APPLY_UPDATE_PATH,
+  DOC_EDIT_PATH,
 } from "../src/lib/ydoc-names";
 import {
   ydocOnAuthenticate,
@@ -25,6 +26,7 @@ import {
   handleApplyDocUpdate,
   send,
 } from "./ydoc-hooks";
+import { handleEditDoc } from "./doc-edit";
 
 const server = new Server({
   // From scripts/dev-ports.ts, the same module every other reader of the slot
@@ -113,6 +115,15 @@ const server = new Server({
       } catch (err) {
         console.error("[collab] doc-apply-update failed:", err);
         send(response, 500, err instanceof Error ? err.message : "Failed to apply update.");
+      }
+      return Promise.reject();
+    }
+    if (request.url?.startsWith(DOC_EDIT_PATH)) {
+      try {
+        await handleEditDoc(request, response, instance);
+      } catch (err) {
+        console.error("[collab] doc-edit failed:", err);
+        send(response, 500, err instanceof Error ? err.message : "Failed to edit the doc.");
       }
       return Promise.reject();
     }

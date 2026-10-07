@@ -33,6 +33,7 @@ import {
 import { materializeYdocAt } from "../src/lib/ydoc-snapshot";
 import { updateDocCache } from "./doc-cache";
 import { updateAnnotationCache } from "./annotation-cache";
+import { settleAppend } from "./edit-appends";
 
 // Every new-stack Hocuspocus hook (PLAN.md §11d). Kept entirely separate from
 // server/collab.ts's post-document hooks — the two stacks share the process
@@ -41,7 +42,12 @@ import { updateAnnotationCache } from "./annotation-cache";
 // ever runs for a post document and nothing in collab.ts's existing bodies
 // changes.
 
-export type YdocContext = { userId: string; role: Role };
+export type YdocContext = {
+  userId: string;
+  role: Role;
+  /** Set by the targeted-edit endpoint's direct connection alone, so onChange can say which row the edit became (edit-appends.ts). */
+  editId?: string;
+};
 
 const EMPTY_STATE = (() => {
   const doc = new Y.Doc();
@@ -108,11 +114,12 @@ function warnDegradedOnce(documentName: string, hook: string): void {
   console.warn(`[ydoc-hooks] ${documentName} is degraded (DB was unavailable at load) — ${hook} is a no-op.`);
 }
 
-export async function ydocOnChange({ documentName, update, connection }: onChangePayload<YdocContext>): Promise<void> {
+export async function ydocOnChange({ documentName, update, connection, context }: onChangePayload<YdocContext>): Promise<void> {
   if (isDegraded(documentName)) {
     warnDegradedOnce(documentName, "onChange");
+    settleAppend(context, null);
   } else {
-    await ydocStore.appendUpdate(documentName, update);
+    settleAppend(context, await ydocStore.appendUpdate(documentName, update));
   }
   await attributeUpdate(documentName, update, connection);
 }
@@ -192,7 +199,7 @@ export function ydocOnDisconnect({ socketId, documentName }: onDisconnectPayload
   socketClientIds.delete(clientIdKey(socketId, documentName));
 }
 
-function getClientsMap(document: Document): Y.Map<string> {
+export function getClientsMap(document: Y.Doc): Y.Map<string> {
   return document.getMap<string>("clients");
 }
 
@@ -760,7 +767,7 @@ export async function handleRemoveAnnotationMark(
   send(response, 204, "");
 }
 
-function readJsonBody(request: IncomingMessage, maxLength = 1_000_000): Promise<unknown> {
+export function readJsonBody(request: IncomingMessage, maxLength = 1_000_000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let raw = "";
     request.on("data", (chunk) => {
