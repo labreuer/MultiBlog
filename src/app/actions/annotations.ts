@@ -344,9 +344,11 @@ export async function createDraftAnnotation(
 // a file's `FileOwner` rows — the two share the `userId`/`user` shape. Never
 // the poster, who already knows what they raised, and never a soft-deleted
 // account: its row stays on the byline, its inbox is no longer ours to write
-// to.
+// to. The deleted check is spelled out because src/lib/prisma.ts's
+// soft-delete filter applies to top-level User reads only, not to a user
+// reached through a relation.
 function raiseRecipientWhere(posterUserId: string) {
-  return { userId: { not: posterUserId }, user: { deletedAt: null } };
+  return { userId: { not: posterUserId }, user: { deletedByUserId: null } };
 }
 
 // Flips a DRAFT to LIVE (or RAISED — PLAN.md §13d) — the live ydoc editor
