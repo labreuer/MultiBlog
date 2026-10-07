@@ -168,8 +168,6 @@ Not yet done:
 - **Semantic search** (FULLTEXT.md §10, item 7) is undecided: hosted Voyage embeddings or an
   open-weights batch on a desktop, and either way option B's passages and pgvector first.
 - **Firefox and WebKit** haven't run `search.spec.ts`; only chromium has.
-- **The MCP server's `search` tool** ([docs/MCP.md](docs/MCP.md) §14) waits on the MCP server
-  itself.
 
 ## PDF fragment links: what is left (docs/PDF_FRAGMENT_LINKS.md)
 
@@ -181,7 +179,6 @@ glyphs. Not yet done:
 
 - **Copy passage link** in the viewer's selection popover (§8), left for later. It is also the
   only way a cross-page link could be made from the UI.
-- **The MCP server's use of the check** (MCP.md §8) comes with the MCP server.
 - **The deploy wrapper's integrity checks** should gain `check-pdf-fragment-links.ts` once an
   instance runs this code; before that the script doesn't exist where the wrapper runs it.
 - **WebKit fails `pdf-fragment-links.spec.ts` intermittently: 3 of its 8 tests per run, a
@@ -196,18 +193,31 @@ glyphs. Not yet done:
   browser it measures Arial against a Calibri selection. Passing the family through the same
   map is a one-line fix (docs/PDF_QUADS.md §5).
 
-## Server-side quads: what is left (docs/PDF_QUADS.md)
+## The MCP server: what is left (docs/MCP.md)
 
-**Status:** built 2026-10-06. Unit-tested, and measured against Chromium's text layer on the e2e
-fixture and four real PDFs (PDF_QUADS.md Appendix A). Nothing on `main` calls it yet.
+**Status:** phases 1–4 of MCP.md §18 built on the local branch `mcp`, 2026-10-07: tokens and
+every read, doc writes and targeted edits, annotations, anchored links, tags, uploads and
+`manage`. Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a
+production build (391 passed, none flaky), with the annotation, snapshot and PDF integrity
+checks clean over MCP-written rows. Not merged or deployed. Not yet done:
 
-- **Its first caller is the MCP server's stored PDF quads.** MCP.md §8 computes them with
-  `extractPageItems` and `quadsForRange`, and its spec asserts each edge within 1pt of a
-  selection in Chromium (the fixture's worst was 0.82pt), not mere overlap, which even spacing
-  also passes.
-- **That spec is the only standing check against a real selection** once it exists. Until
-  then, a pdfjs bump that changed how the text layer picks a font family would move
-  server-computed quads with nothing noticing; nothing stores them yet.
+- **OAuth, so claude.ai can connect** (MCP.md §5, phase 5). Until then only a client that can
+  send a header — Claude Code — reaches the server.
+- **Issuing a token takes the script** (`scripts/create-api-token.ts`). The `/dashboard` panel
+  for one's own tokens and the `/users` action for a bot's (MCP.md §3) aren't built.
+- **MCP.md §17's items 1–3 are still in the UI's annotation paths**: a reader can have the
+  server write a mark into a doc they can't edit, a client's version stamp is parsed and not
+  validated, and a reply's parent is checked for its container only. The MCP server avoids
+  all three; the actions don't.
+- **`/dashboard`'s Recent docs lists a doc to an ineligible name already on its byline**
+  (MCP.md §17, item 5's remainder). The byline actions now refuse to add one.
+- **MCP.md §19's open decisions 5–7**: a PDF Claude can't see, uploaded again, makes a second
+  row; whether `write` may delete what its own account made, and whether `api_write`'s rows
+  are ever cleaned up; provenance for Claude's research docs beyond the record flag.
+- **Passage-level tags** (phase 6), if wanted, after PLAN.md §20f's semantics.
+- **The PDF quads spec runs on chromium only** (`e2e/mcp-files.spec.ts`), and is now the one
+  standing check that server-computed quads still match a real selection: a pdfjs bump that
+  changed how the text layer picks a font family would fail it, and nothing else.
 
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 

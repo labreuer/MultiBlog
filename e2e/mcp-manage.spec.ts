@@ -49,6 +49,7 @@ test("manage a doc: visibility, slug, byline with its removal guard, record, del
     const shared = await agent.call("manage", { target: url, visibility: "SHARED" });
     expect(shared.isError, JSON.stringify(shared.error)).toBe(false);
     expect(shared.result).toMatchObject({ changed: ["visibility"], visibility: "SHARED" });
+    expect(shared.size).toBeLessThan(250);
 
     const renamed = await agent.call("manage", { target: url, slug: `${doc.slug}-renamed` });
     expect(renamed.result.url).toBe(`/doc/${doc.slug}-renamed`);

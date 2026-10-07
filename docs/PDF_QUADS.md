@@ -1,8 +1,8 @@
 # PDF quads from text items — measured without a browser
 
-**Status: built** (2026-10-06). The server can now compute quads, but nothing on `main` does
-yet. The first caller will be the MCP server, which stores the PDF quads it computes
-([MCP.md](MCP.md) §8).
+**Status: built** (2026-10-06). Its caller is the MCP server, which stores the quads it
+computes for a quoted PDF passage, in an annotation or a link part ([MCP.md](MCP.md) §8,
+`src/lib/mcp/pdf-anchoring.ts`).
 
 `quadsForRange` (`src/lib/pdf-quads.ts`) turns a range of a page's normalised text into quads
 from pdfjs's text items alone, with no rendered text layer. Each item gives its origin, its
@@ -141,9 +141,10 @@ re-measures an anchor already stored.
   `sans-serif` items with the font's ascent, which normalise to exactly `extractPdf`'s page
   text. It loads pdfjs, so it takes about half a second, unlike the rest of `test:unit`.
 - **No e2e change.** Nothing visible changes: the viewer still measures with its canvas.
-- **No standing check against a real selection yet.** That is MCP.md §8's spec, which
-  arrives with its first caller. Appendix A sets its tolerance: against Chromium, the e2e
-  fixture's worst edge was 0.82pt.
+- **`e2e/mcp-files.spec.ts` is the standing check against a real selection**: a phrase is
+  selected in the viewer and posted, the same words are annotated through the MCP server, and
+  every corner of the server's quads must land within 1pt of the selection's. Appendix A set
+  that tolerance: against Chromium, the e2e fixture's worst edge was 0.82pt.
 
 ## 5. Limits
 

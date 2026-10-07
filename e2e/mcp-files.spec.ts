@@ -28,6 +28,7 @@ test("upload_url and curl: a PRIVATE file owned by the actor and the issuer; the
     expect(first.status, JSON.stringify(first.body)).toBe(201);
     ids.push(first.body.id);
     expect(first.body).toMatchObject({ title, url: expect.stringMatching(/^\/pdf\//) });
+    expect(JSON.stringify(first.body).length).toBeLessThan(250);
     expect(await getUploadFacts(first.body.id)).toEqual({
       owners: [agent.user.email, ADMIN_EMAIL],
       creator: agent.user.email,

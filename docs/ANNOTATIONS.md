@@ -39,7 +39,8 @@ The row carries:
 - **`postedAt`**, the DRAFT → LIVE moment; **`editingSince`** and `editedAt` for a posted body
   under or after an edit. Its **versions** are `ydoc_snapshot` rows on its own ydoc, not a
   table ("Editing after posting"); `resolvedAt`, declared and never written.
-- Soft-delete columns. Deleting is `requireOwnOrAdmin` and also removes the mark.
+- Soft-delete columns. Deleting is the writer's, or an ADMIN's for a posted annotation, and
+  also removes the mark (`setAnnotationDeleted`, `src/lib/annotation-manage.ts`).
 
 ## Surfaces
 
@@ -333,8 +334,10 @@ among the recipients, nor is a soft-deleted account still on the byline
 (`raiseRecipientWhere`, applied in the query). Any `DRAFT` can be
 posted later, any `LIVE` raised later; a `RAISED` annotation re-notifies nobody on edit.
 
-**Deleting** stamps the soft-delete columns and removes the mark; `deleteAnnotation` is
-`requireOwnOrAdmin`. Nothing is notified. Restoring is the reverse without a re-mark.
+**Deleting** stamps the soft-delete columns and removes the mark. It is the writer's, or an
+ADMIN's once the annotation is posted — a `DRAFT` is its writer's alone, here as when reading
+(`setAnnotationDeleted`, `src/lib/annotation-manage.ts`, which `deleteAnnotation` and the MCP
+server's `manage` share). Nothing is notified. Restoring is the reverse without a re-mark.
 
 **`/annotations` excludes `DRAFT` rows outright** rather than scoping them, because "keep
 private" means private from an `ADMIN` too.

@@ -37,6 +37,7 @@ test("annotate a doc: on the whole, by quote at a version, a reply, a reply quot
     const quoted = await agent.call("annotate", { on: `/doc/${doc.slug}`, body: "Which fox?", quote: "The fox jumps", version });
     expect(quoted.isError, JSON.stringify(quoted.error)).toBe(false);
     expect(quoted.result).toMatchObject({ version, passage: { text: "The fox jumps" } });
+    expect(quoted.size).toBeLessThan(300);
 
     // A repeat of the same call is the same note, not a second one.
     const again = await agent.call("annotate", { on: `/doc/${doc.slug}`, body: "Which fox?", quote: "The fox jumps", version });
@@ -132,6 +133,7 @@ test("edit_annotation: a new version, its marks kept, nothing for an unchanged b
     const edited = await agent.call("edit_annotation", { id, body: "A second thought, **better**." });
     expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
     expect(edited.result.card).toBe(posted.result.card);
+    expect(edited.size).toBeLessThan(200);
     const facts = await getAnnotationEditFacts(id);
     expect(facts).toMatchObject({ bodyText: "A second thought, better.", editingSince: null });
     expect(facts!.versions.map((v) => v.bodyText)).toEqual(["A first thought.", "A second thought, better."]);

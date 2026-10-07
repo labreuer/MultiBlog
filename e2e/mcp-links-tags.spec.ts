@@ -62,6 +62,7 @@ test("create_link mints several links in one call, each part captured by quote; 
     const [theme, pair] = minted.result.links as { url: string; name?: string; parts: number }[];
     expect(theme).toMatchObject({ name: "The theme", parts: 1 });
     expect(pair.parts).toBe(2);
+    expect(minted.size).toBeLessThan(200);
 
     const read = (await agent.call("read", { url: pair.url })).result as LinkRead;
     expect(read.groups.map((g) => g.kind)).toEqual(["doc", "pdf"]);
@@ -136,6 +137,7 @@ test("tag and untag: minted by name, applied once, refused on a published post, 
     expect(applied).toMatchObject({ name: term, new: true });
     slugs.push(applied.url.replace("/tag/", ""));
     expect(tagged.result.tags).toEqual([{ name: term, slug: slugs[0] }]);
+    expect(tagged.size).toBeLessThan(400);
 
     // By another case: the same term, already this agent's on this doc.
     const again = await agent.call("tag", { target: `/doc/${doc.slug}`, tags: [term.toUpperCase()] });

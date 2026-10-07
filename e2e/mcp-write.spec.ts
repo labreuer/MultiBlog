@@ -43,6 +43,7 @@ test("create_doc: PRIVATE, the actor's text and byline, the title from the leadi
     created.push(String(first.result.id));
     expect(first.result).toMatchObject({ title: "A research summary", visibility: "PRIVATE", byline: `${agent.user.name}, E2E Admin` });
     expect(String(first.result.version)).toMatch(/^\d+$/);
+    expect(first.size).toBeLessThan(300);
 
     const facts = await getDocMarkFacts(String(first.result.id));
     expect(facts.title).toBe("A research summary");
@@ -115,6 +116,7 @@ test("edit_doc: surviving words keep their author and their note, new words are 
     expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
     expect(String(edited.result.version)).toMatch(/^\d+$/);
     expect(edited.result.changed).toBe("1-2");
+    expect(edited.size).toBeLessThan(500);
     // The reader's note quoted "opening", which the edit rewrote.
     expect(edited.result.touched).toMatchObject({ annotations: expect.arrayContaining([{ id: column.id, resolves: false }]) });
 

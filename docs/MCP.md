@@ -1,7 +1,10 @@
 # MultiBlog — an MCP server for machine clients
 
-**Status: planned; nothing here is built.** Like [ANCHORED_LINKS.md](ANCHORED_LINKS.md), this
-file is the plan until the build and is then rewritten as built.
+**Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
+annotations, anchored links, tags, uploads and `manage`. Not built: OAuth, so claude.ai can't
+connect yet (§5, phase 5), and passage-level tags (phase 6). The sections below are the design
+the build followed; §20 lists where the build departs from it, and every such point is decided
+there rather than here.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
 docs, PDFs, annotations, anchored links, tags, bylines — and to find and read it again as a
@@ -194,8 +197,8 @@ the rules are:
     a live collab connection is checked only once ([PERMISSIONS.md](PERMISSIONS.md)). A
     deletion or a demotion therefore takes effect on the token's very next call.
 - **Soft-deleting a user revokes their tokens**, in the same transaction. `deleteUser`
-  (`src/app/actions/users.ts`) is a single update today, so it becomes a transaction;
-  `bulkDeleteUsers` calls it once per user and needs nothing of its own. Restoring the account
+  (`src/app/actions/users.ts`) calls `softDeleteUser` (`src/lib/user-delete.ts`), one
+  transaction; `bulkDeleteUsers` calls it once per user and needs nothing of its own. Restoring the account
   brings none of the tokens back, since a token may be why it was deleted; a new one is issued
   instead.
 - **A spec holds both:** a call that works; the user soft-deleted, and the call refused, along
@@ -246,7 +249,9 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
   - `read_only` for an edit to a record (§6);
   - `already_done` for a write that repeats one made within a day, with that one's time and
     result (below);
-  - `too_large`.
+  - `too_large`;
+  - `forbidden` for an object the actor can read but not change, `rate_limited`,
+    `unavailable` when the collab server can't take a write, and `internal`.
 
   The byte routes answer with the HTTP status that fits instead (§5).
 - **An object the actor may not read is `not_found`**, the same as one that does not exist.
@@ -1568,7 +1573,7 @@ checks read access to the container. The UI checks that only when the draft is c
   MCP server, and `/tag/[slug]` follows it as the other reading routes follow theirs.
 - **Passage-level tags do not exist.** `tag_anchor`'s part columns have no writer (PLAN.md §20,
   PR 2). A tool that tags a claim rather than a whole doc would be their first writer. That
-  means settling §20f's semantics first, after reading [multi-anchoring.md](research/multi-anchoring.md).
+  means settling PLAN.md §20f's semantics first, after reading [multi-anchoring.md](research/multi-anchoring.md).
 
 ## 12. Bylines and owners
 
@@ -1626,13 +1631,12 @@ checks read access to the container. The UI checks that only when the draft is c
     access (§3).
 - **File owners** (`file_owner`) are a file's equivalent, gated by `canUserManageFile` and set
   at upload under the same rule, in the upload's own transaction (§8).
-  - **Nothing changes them after upload today**, though [PERMISSIONS.md](PERMISSIONS.md)
-    describes the list as editable. Changing them through `manage` is new, under
-    `setDocByline`'s rules read for a file: the actor can manage it, every owner named is
-    eligible, at least one remains, and the change is one transaction.
-  - **Until then they are changed by hand, in the database.** For a PDF its uploader owns
+  - **`manage` changes them** (`setFileOwners`, `src/lib/file-manage.ts`), under
+    `setDocByline`'s rules read for a file: the actor can manage it, everyone added is in
+    `FILE_MANAGER_ROLES`, at least one owner remains, a removal takes `allowRemovals`, and the
+    change is one transaction. Nothing in the UI changes them. For a PDF its uploader owns
     alone, that is the one way to let Claude read it, or the notes on it, short of making it
-    SHARED. Nothing adds Claude as an owner by default.
+    SHARED; nothing adds Claude as an owner by default.
 - **A user lookup**, `find_users`, matches byline-eligible users by name or slug, or one user
   by exact email. It returns id, slug and name: enough to set a byline without exposing the
   user table. A nameless account's slug is made from its email, so it is returned only to the
@@ -2062,15 +2066,18 @@ the `mcpServers` entry, the token's file, and the settings that keep the token f
 
 ## 17. Existing gaps the MCP server must not inherit
 
-Each of these is in the UI's own paths today, and the MCP server avoids every one by construction.
+The MCP server avoids every one by construction, and building it fixed three in the UI's paths
+as well:
 
-- **Items 1–3.** The MCP server uses only the column mechanism, validates stamps, and
-  re-checks a reply's parent.
-- **Items 4 and 5.** Its deletes and restores are the extracted ones, fixed as they are
-  extracted, and its byline checks eligibility (§12).
-- **Item 6.** Its replacement of an annotation's body refuses a read-only token (§9).
+- **Items 1–3 remain in the UI's paths.** The MCP server uses only the column mechanism,
+  validates stamps, and re-checks a reply's parent.
+- **Item 4 is fixed for both**: the delete and restore are `setAnnotationDeleted`
+  (`src/lib/annotation-manage.ts`), which the actions wrap.
+- **Item 5's byline half is fixed for both**: the byline actions wrap `setDocByline` (§12).
+  `/dashboard`'s Recent docs still lists a doc to an ineligible name already on its byline.
+- **Item 6 is fixed**: `/admin/annotation-replace` refuses a read-only token.
 
-All of them should still be fixed on their own account.
+Items 1–3 should still be fixed on their own account (TODO.md).
 
 1. **A reader can have the server write into a doc they cannot edit.**
    - `postAnnotation` takes `anchorMode` from the client for a root annotation. For
@@ -2159,8 +2166,11 @@ All of them should still be fixed on their own account.
    URL tools; PDF roots anchored by quote, their quads from `extractPageItems` and
    `quadsForRange`, with the spec that holds each edge within 1pt of a selection (§8); and the
    file half of `manage`, owner changes included (§12).
-5. **OAuth, for claude.ai** (§5).
-6. **If wanted:** passage-level tags (§20 PR 2).
+5. **OAuth, for claude.ai** (§5). Not built.
+6. **If wanted:** passage-level tags (PLAN.md §20, PR 2). Not built.
+
+Phases 1–4 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
+checks.
 
 Each phase ships with four things:
 
@@ -2203,3 +2213,81 @@ Each phase ships with four things:
    - whether `api_write`'s rows are ever deleted (§4).
 7. **Provenance beyond records.** Whether Claude's research docs carry a tag that search can
    filter on, beside the record flag that already marks transcripts (§6).
+
+## 20. As built: where it departs from the plan
+
+Each of these is a decision the build made where the plan was silent or turned out wrong. The
+code beside each says why as well.
+
+**Reads**
+
+- **`read` declares no detailed output schema.** Its result's shape depends on the URL's kind,
+  so its `outputSchema` is a loose object with an optional `kind`; the other tools declare
+  theirs.
+- **A doc's sections, for `search`'s `within`, end at the next heading of any level**, not the
+  next of the same level or above, so a hit names the smallest section holding it.
+- **A card's URL that two notes share is `ambiguous`.** A card's name is its writer and the
+  second the note was opened, so one writer's two notes in one second share it; the page jumps
+  to the first, and a reply or a delete could reach the wrong one. The answer lists both ids.
+- **A schema refusal inside a union names the union's forms** and the issues of the branch that
+  came closest (`src/lib/mcp/issues.ts`), since zod reports only "Invalid input" there.
+
+**Tokens**
+
+- **A token whose issuer has been deleted is refused**, as one whose user has been: the issuer
+  decides who a `write` may name, and a deleted account decides nothing.
+
+**Docs**
+
+- **An insertion after a heading takes `atEnd`**, to put the new blocks at the end of that
+  heading's section rather than just under it.
+- **A revert works in block-level hunks**, and a reverted title carries the actor's mark, as
+  any title the actor writes does.
+- **The merge compares finer tokens than the diff shows.** An edit merges word by word with
+  punctuation split off (so a comma after an annotated word doesn't inherit its note), while a
+  `since` read's diff splits on whitespace only, which reads better.
+
+**Annotations**
+
+- **`edit_annotation` gives new words the actor's mark only once the body has two writers**,
+  which is when the editor turns the author mark on (`AnnotationBody`). Nothing backfills the
+  first writer's words with a mark when a second arrives, as the editor doesn't either.
+- **A reply's result carries no `version`.** A reply quoting its parent is stamped in the
+  parent's body log, so the number would read as the doc's version and isn't.
+
+**Bylines and owners**
+
+- **Eligibility applies to the people a byline or owner list adds**, not to everyone on it
+  (§12 said "every user named"). Someone already on it — an account since demoted or deleted —
+  stays eligible to stay, or a byline holding one could never be reordered again.
+
+**Links**
+
+- **`edit_link` names parts by number**, 1-based in the link's order, counted over all its
+  parts. A read shows the numbers to the link's creator only: to anyone else a gap would say a
+  part they can't read exists.
+- **A part's `on` is a doc or PDF**, not a fragment link; a fragment link's passage is quoted
+  with `page` instead.
+- **The `/links` page's query is unchanged.** The links into a target come from
+  `linkPartsInto` (`src/lib/anchored-link-data.ts`), a query of its own beside the page's.
+
+**Tags**
+
+- **`untag` removes the actor's own assignments**, and with `anyone` everyone's, for an ADMIN
+  or EDITOR. Every term is found before anything is removed.
+- **`tag` and `untag` take no idempotency key**: a term is found by name and an assignment by
+  tagger, so a repeat changes nothing.
+
+**Files**
+
+- **A repeated upload of bytes the actor can read answers 200 with `existing: true`**, a new
+  one 201. A byte route maps an upload's refusal to a code by its status: 400 and 415 are
+  `invalid`, 403 `forbidden`, 413 `too_large`.
+
+**The importer**
+
+- **Earlier imports are marked as records by `--mark-records`**, a pass of its own rather than
+  a side effect of every run, though any run that matches a session's doc marks it too.
+- **A Markdown file's key is its name without its directory.** Two files of one name in
+  different directories would be one doc's source; the match refuses a key two docs share.
+
