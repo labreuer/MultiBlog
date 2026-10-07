@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { quadsBounds } from "./pdf-anchor";
 import { normalisePageText } from "./pdf-text";
-import { quadsForRange, type QuadSourceItem } from "./pdf-quads";
+import { quadSourceItems, quadsForRange, type QuadSourceItem } from "./pdf-quads";
 
-// docs/PDF_FRAGMENT_LINKS.md §6 — quads from text items alone. The items are
+// docs/PDF_QUADS.md — quads from text items alone. The items are
 // shaped like pdfjs's: an upright 10pt font is transform [10, 0, 0, 10, x, y],
 // and `width` is the whole item's advance in PDF user space.
 
@@ -25,7 +25,7 @@ const quadsOf = (items: QuadSourceItem[], needle: string, measure?: Parameters<t
   return quadsForRange(items, page.offsets, start, start + needle.length, measure);
 };
 
-test("a run inside one item is placed by even spacing without a measurer", () => {
+test("a run inside one item is placed by even spacing when the item names no font family", () => {
   // Ten characters over 100pt: each is 10pt wide.
   const [quad] = quadsOf([item("abcdefghij", 50, 700, 100)], "cde");
   const box = quadsBounds([quad])!;
@@ -44,6 +44,34 @@ test("a measurer places the run where the text layer would", () => {
   // Without a font family the measurer has nothing to measure in, and even spacing stands.
   const even = quadsBounds(quadsOf([item("iimm", 0, 700, 80)], "mm", (s) => advance(s)))!;
   assert.deepEqual([even.x0, even.x1], [40, 80]);
+});
+
+test("with no measurer, a run is placed in the standard widths of the item's family", () => {
+  // Liberation Sans, Arial's metrics: "i" is 455 units and "m" 1,706, so "ii"
+  // is 910 of the 4,322 units "iimm" spans.
+  const sans = quadsBounds(quadsOf([item("iimm", 0, 700, 80, { fontFamily: "sans-serif" })], "mm"))!;
+  assert.ok(Math.abs(sans.x0 - (80 * 910) / 4322) < 1e-9, `${sans.x0}`);
+  assert.equal(sans.x1, 80);
+  // In monospace even spacing is exact, and it is what the measurer gives.
+  const mono = quadsBounds(quadsOf([item("iimm", 0, 700, 80, { fontFamily: "monospace" })], "mm"))!;
+  assert.deepEqual([mono.x0, mono.x1], [40, 80]);
+});
+
+test("items are copied from getTextContent with their fonts' metrics, marked content skipped", () => {
+  const items = quadSourceItems({
+    items: [
+      { type: "beginMarkedContent" },
+      { str: "Hello", transform: [10, 0, 0, 10, 0, 700], width: 25, height: 10, hasEOL: false, fontName: "g_f1" },
+      { type: "endMarkedContent" },
+      { str: "world", transform: [10, 0, 0, 10, 30, 700], width: 25, height: 10, hasEOL: true, fontName: "g_f9" },
+    ],
+    styles: { g_f1: { ascent: 0.9, descent: -0.2, fontFamily: "serif" } },
+  });
+  assert.deepEqual(items, [
+    { str: "Hello", transform: [10, 0, 0, 10, 0, 700], width: 25, height: 10, hasEOL: false, ascent: 0.9, descent: -0.2, fontFamily: "serif" },
+    // A font with no style entry: no metrics, and so even spacing and pdfjs's default ascent.
+    { str: "world", transform: [10, 0, 0, 10, 30, 700], width: 25, height: 10, hasEOL: true, ascent: undefined, descent: undefined, fontFamily: undefined },
+  ]);
 });
 
 test("items on one line become one quad, and each line its own", () => {

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { PdfViewerHandle } from "./PdfViewer";
 import { parseFragmentPassages, resolvePassage, type FragmentPassage } from "@/lib/pdf-fragment";
 import { normalisePageText, textVersionFor, type NormalisedPage } from "@/lib/pdf-text";
-import { quadsForRange, type MeasureText, type QuadSourceItem } from "@/lib/pdf-quads";
+import { quadSourceItems, quadsForRange, type MeasureText, type QuadSourceItem } from "@/lib/pdf-quads";
 import { QUOTE_CONTEXT_LENGTH, type PdfTarget } from "@/lib/pdf-anchor";
 import { PDFJS_VERSION } from "@/lib/pdfjs-client";
 
@@ -117,22 +117,7 @@ async function targetFor(
 async function pageTextFor(handle: PdfViewerHandle, pageIndex: number): Promise<PageText | null> {
   try {
     const page = await handle.pdf.getPage(pageIndex + 1);
-    const content = await page.getTextContent();
-    const items: QuadSourceItem[] = [];
-    for (const item of content.items) {
-      if (!("str" in item)) continue;
-      const style = content.styles[item.fontName];
-      items.push({
-        str: item.str,
-        transform: item.transform,
-        width: item.width,
-        height: item.height,
-        hasEOL: item.hasEOL,
-        ascent: style?.ascent,
-        descent: style?.descent,
-        fontFamily: style?.fontFamily,
-      });
-    }
+    const items = quadSourceItems(await page.getTextContent());
     return { items, normalised: normalisePageText(items) };
   } catch (error) {
     // The same fail-closed stance as the selection capture: a page pdfjs

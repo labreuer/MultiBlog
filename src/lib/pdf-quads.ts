@@ -1,9 +1,11 @@
 import { rectToQuad, type Quad } from "./pdf-anchor";
+import { standardWidths } from "./pdf-font-widths";
 import type { PdfTextItemLike, SourceOffset } from "./pdf-text";
 
-// docs/PDF_FRAGMENT_LINKS.md §6 (and docs/MCP.md §8's server-side quads) — the
-// quads of a range of a page's normalised text, from the page's text items
-// alone, with no rendered text layer.
+// docs/PDF_QUADS.md — the quads of a range of a page's normalised text, from
+// the page's text items alone, with no rendered text layer. Fragment links
+// draw with it in the browser (docs/PDF_FRAGMENT_LINKS.md §6), and a server
+// can compute a stored anchor's quads with it.
 //
 // `normalisePageText`'s `offsets` exist for exactly this: each character of
 // the normalised text names the item and the character within it that it came
@@ -15,9 +17,11 @@ import type { PdfTextItemLike, SourceOffset } from "./pdf-text";
 // text layer pdfjs draws answers it by measuring the item's string in a CSS
 // font and scaling the span to fit `width`, so a selection in the viewer has
 // its edges where that measurement puts them. Given a `measure` (the browser
-// passes a canvas's `measureText`), this does the same and lands where a
-// selection would. Without one (a server) it spaces the characters evenly,
-// which is as close as anything can get without a font.
+// passes a canvas's `measureText`, in the reader's own fonts), this does the
+// same and lands where a selection would. Without one (a server) it measures
+// in `standardWidths`, the fonts Windows and the Mac draw those families in.
+// Characters are spaced evenly only in an item that names no family, and in
+// `monospace`, where even spacing is exact.
 
 /**
  * A pdfjs text item as the normaliser takes it, with the font metrics
@@ -33,6 +37,42 @@ export type QuadSourceItem = PdfTextItemLike & {
 
 /** The advance of `text` in `fontFamily`, at any one size; only ratios are used. */
 export type MeasureText = (text: string, fontFamily: string) => number;
+
+/** The parts of pdfjs's `getTextContent()` result that items are copied from. */
+export type TextContentLike = {
+  items: readonly ((PdfTextItemLike & { fontName: string }) | { type: string })[];
+  styles: Readonly<Record<string, { ascent?: number; descent?: number; fontFamily?: string } | undefined>>;
+};
+
+/**
+ * One page's text items with their fonts' metrics, from `getTextContent()`.
+ * The browser and the server both copy through this, so the item list that
+ * `normalisePageText`'s offsets index is the same list on both sides. Marked
+ * content carries no text and is skipped, as pdfjs's text layer skips it, so
+ * an item's index here is also its span's index in `TextLayer.textDivs`.
+ *
+ * Copied field by field into our own shape, which doubles as the explicit
+ * statement of what the normaliser and the quads depend on: a pdfjs field
+ * rename shows up here rather than as subtly different text.
+ */
+export function quadSourceItems(content: TextContentLike): QuadSourceItem[] {
+  const items: QuadSourceItem[] = [];
+  for (const item of content.items) {
+    if (!("str" in item)) continue;
+    const style = content.styles[item.fontName];
+    items.push({
+      str: item.str,
+      transform: item.transform,
+      width: item.width,
+      height: item.height,
+      hasEOL: item.hasEOL,
+      ascent: style?.ascent,
+      descent: style?.descent,
+      fontFamily: style?.fontFamily,
+    });
+  }
+  return items;
+}
 
 // pdfjs's own fallback when a font reports no ascent (DEFAULT_FONT_ASCENT in
 // its text layer), and the descent that leaves a 1em box.
@@ -60,7 +100,7 @@ export function quadsForRange(
   offsets: readonly SourceOffset[],
   start: number,
   end: number,
-  measure?: MeasureText,
+  measure: MeasureText = standardWidths,
 ): Quad[] {
   // The run each item contributes, as [lo, hi) within its own string.
   const runs = new Map<number, { lo: number; hi: number }>();
@@ -120,7 +160,7 @@ export function quadsForRange(
 type Geometry = { kind: "box"; box: Box } | { kind: "rotated"; quad: Quad };
 
 /** Where characters [lo, hi) of one item sit. */
-function itemGeometry(item: QuadSourceItem, lo: number, hi: number, measure?: MeasureText): Geometry {
+function itemGeometry(item: QuadSourceItem, lo: number, hi: number, measure: MeasureText): Geometry {
   const [a = 1, b = 0, c = 0, d = 1, e = 0, f = 0] = item.transform;
   const size = Math.hypot(c, d) || item.height || 1;
   const along = Math.hypot(a, b);
@@ -142,10 +182,10 @@ function itemGeometry(item: QuadSourceItem, lo: number, hi: number, measure?: Me
   return { kind: "rotated", quad: [...at(t0, s1), ...at(t1, s1), ...at(t0, s0), ...at(t1, s0)] as Quad };
 }
 
-/** Characters [lo, hi) as fractions of the item's advance: measured when a measurer and a font are known, even otherwise. */
-function runFractions(item: QuadSourceItem, lo: number, hi: number, measure?: MeasureText): [number, number] {
+/** Characters [lo, hi) as fractions of the item's advance: measured in the item's font family, even when it names none. */
+function runFractions(item: QuadSourceItem, lo: number, hi: number, measure: MeasureText): [number, number] {
   const length = item.str.length || 1;
-  if (measure && item.fontFamily) {
+  if (item.fontFamily) {
     const whole = measure(item.str, item.fontFamily);
     if (whole > 0) {
       return [measure(item.str.slice(0, lo), item.fontFamily) / whole, measure(item.str.slice(0, hi), item.fontFamily) / whole];

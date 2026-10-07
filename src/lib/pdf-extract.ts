@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { normalisePageText, textVersionFor, type PdfTextItemLike } from "./pdf-text";
+import { quadSourceItems, type QuadSourceItem } from "./pdf-quads";
+import { normalisePageText, textVersionFor } from "./pdf-text";
 
 // PLAN.md §19 — the server-side half of PDF text extraction: run once per file
 // at upload, its output stored in `file_page_text`.
@@ -119,14 +120,13 @@ export type ExtractedPdf = {
 };
 
 /**
- * Parses a PDF's structure and text. Throws on a file pdfjs can't open at all,
- * which the upload route turns into a 415 — a file that passed the `%PDF-`
- * magic check but is truncated or corrupt gets caught here rather than being
- * stored and failing later in someone's browser.
+ * Opens a PDF for reading, with the options every parse here shares. One
+ * function so that `extractPdf` and `extractPageItems` can't drift apart: an
+ * option that changed the extracted text would change every offset an anchor
+ * stores against it.
  */
-export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPdf> {
+async function openPdf(bytes: Uint8Array) {
   const pdfjs = await loadPdfjs();
-
   const task = pdfjs.getDocument({
     // A copy, because pdfjs transfers ownership of the buffer it is given and
     // the caller may still be holding the original (the upload route hashes it
@@ -150,7 +150,17 @@ export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPdf> {
     // a trailing slash — pdfjs concatenates a filename onto it directly.
     standardFontDataUrl: standardFontDataUrl(),
   });
+  return { task, textVersion: textVersionFor(pdfjs.version) };
+}
 
+/**
+ * Parses a PDF's structure and text. Throws on a file pdfjs can't open at all,
+ * which the upload route turns into a 415 — a file that passed the `%PDF-`
+ * magic check but is truncated or corrupt gets caught here rather than being
+ * stored and failing later in someone's browser.
+ */
+export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPdf> {
+  const { task, textVersion } = await openPdf(bytes);
   const pdf = await task.promise;
   try {
     const pageCount = pdf.numPages;
@@ -158,30 +168,12 @@ export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPdf> {
     for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       try {
-        const content = await page.getTextContent();
-        // getTextContent returns (TextItem | TextMarkedContent)[]; only the
-        // former carries text. Narrowed by structure rather than by pdfjs's
-        // exported type names, and copied field by field into our own shape —
-        // which doubles as the explicit statement of exactly what the
-        // normaliser depends on, so a pdfjs field rename shows up here rather
-        // than as subtly different text.
-        const items: PdfTextItemLike[] = [];
-        for (const item of content.items) {
-          if (!("str" in item)) continue;
-          items.push({
-            str: item.str,
-            transform: item.transform,
-            width: item.width,
-            height: item.height,
-            hasEOL: item.hasEOL,
-          });
-        }
-        pages.push(normalisePageText(items).text);
+        pages.push(normalisePageText(quadSourceItems(await page.getTextContent())).text);
       } finally {
         page.cleanup();
       }
     }
-    return { pageCount, textVersion: textVersionFor(pdfjs.version), pages };
+    return { pageCount, textVersion, pages };
   } finally {
     // Releases the worker's copy of the document. Skipping this leaks a worker
     // per upload, which on a long-lived server is the difference between
@@ -193,6 +185,34 @@ export async function extractPdf(bytes: Uint8Array): Promise<ExtractedPdf> {
     // wrong one throws `pdf.destroy is not a function` at runtime with nothing
     // at build time to catch it, which is docs/PDF.md §10's version-coupling
     // warning arriving in the least dramatic possible way.
+    await task.destroy();
+  }
+}
+
+export type PageItems = {
+  textVersion: string;
+  /** The page's text items with their fonts' metrics, as `quadsForRange` takes them. */
+  items: QuadSourceItem[];
+};
+
+/**
+ * One page's text items, for computing quads on the server
+ * (docs/PDF_QUADS.md §3): the same items, in the same order, that the page's
+ * stored text was normalised from. Null when the page is out of range. Throws,
+ * as `extractPdf` does, on a file pdfjs can't open.
+ */
+export async function extractPageItems(bytes: Uint8Array, pageIndex: number): Promise<PageItems | null> {
+  const { task, textVersion } = await openPdf(bytes);
+  const pdf = await task.promise;
+  try {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdf.numPages) return null;
+    const page = await pdf.getPage(pageIndex + 1);
+    try {
+      return { textVersion, items: quadSourceItems(await page.getTextContent()) };
+    } finally {
+      page.cleanup();
+    }
+  } finally {
     await task.destroy();
   }
 }
