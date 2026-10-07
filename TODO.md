@@ -187,6 +187,22 @@ glyphs. Not yet done:
 - **Firefox and WebKit** haven't run `pdf-fragment-links.spec.ts`; only chromium has. The
   outline's alignment rests on each engine's text layer measuring an item the way the canvas
   does, which is worth a run on each before relying on it there.
+- **Firefox on Windows measures the outline in the wrong font.** pdfjs's text layer draws
+  `sans-serif` items in `Calibri, sans-serif` there (`TextLayer.fontFamilyMap`), but
+  `canvasMeasurer` in `use-pdf-fragment.ts` measures in the raw `fontFamily`, so in that
+  browser it measures Arial against a Calibri selection. Passing the family through the same
+  map is a one-line fix (docs/PDF_QUADS.md §6).
+
+## Server-side quads: measured, not evenly spaced (docs/PDF_QUADS.md)
+
+**Status:** planned 2026-10-06, nothing built. Its one consumer is the MCP server's stored PDF
+quads (MCP.md §8, on `api-mcp`), so nothing on `main` needs it yet.
+
+- **The build:** width tables for Liberation Serif and Sans, generated from the font files,
+  become `quadsForRange`'s default measurer; one item copier serves both sides; and
+  `extractPageItems` gives the server one page's items (§2, §3).
+- **The measurement** (§5) runs once, against real selections, before MCP.md §8's tolerance is
+  set from it.
 
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 
