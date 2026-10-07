@@ -1,6 +1,6 @@
 import type * as Y from "yjs";
 import type { Extensions } from "@tiptap/core";
-import type { Schema } from "@tiptap/pm/model";
+import type { Node as PMNode, Schema } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { parsePdfTarget, type PdfTarget } from "../pdf-anchor";
 import { storedPageText } from "../pdf-page-text";
@@ -75,14 +75,7 @@ export async function captureAnchorInYdoc(opts: {
   try {
     doc = await materializeYdocAt(ydocId, throughUpdateId);
     const json = TiptapTransformer.extensions(extensions).fromYdoc(doc, "default");
-    const node = schema.nodeFromJSON(json);
-    const range = resolveAnchorInDoc(node, from, to, quotedText);
-    if (!range) return null;
-    return {
-      ...range,
-      quotedText: node.textBetween(range.from, range.to, " "),
-      selector: deriveDocRangeSelector(node, range.from, range.to),
-    };
+    return captureAnchorInNode(schema.nodeFromJSON(json), from, to, quotedText);
   } catch (err) {
     // Best-effort, same stance applyAnnotationMark takes on an unreachable
     // collab server: the annotation row is valid either way, and posting
@@ -94,6 +87,30 @@ export async function captureAnchorInYdoc(opts: {
   } finally {
     doc?.destroy();
   }
+}
+
+/**
+ * `captureAnchorInYdoc` over a node already built at the stamp — what the MCP
+ * server's anchoring uses (docs/MCP.md §7), since it has rebuilt the doc once
+ * to find the quote and a second replay for the capture would be the same
+ * work twice: one replay per doc and version, never one per part. The same
+ * rule exactly: verify the range against `quotedText`, re-find it if it
+ * moved, and store the node's own `textBetween` at what that resolves to.
+ */
+export function captureAnchorInNode(
+  node: PMNode,
+  from: number,
+  to: number,
+  quotedText: string,
+): { from: number; to: number; quotedText: string; selector: DocRangeSelector } | null {
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to <= from || !quotedText.trim()) return null;
+  const range = resolveAnchorInDoc(node, from, to, quotedText);
+  if (!range) return null;
+  return {
+    ...range,
+    quotedText: node.textBetween(range.from, range.to, " "),
+    selector: deriveDocRangeSelector(node, range.from, range.to),
+  };
 }
 
 /**

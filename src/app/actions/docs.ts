@@ -4,8 +4,10 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import * as Y from "yjs";
 import { auth } from "@/lib/auth";
-import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
-import { changeDocSlug, revertDocSlug as revertDocSlugInDb } from "@/lib/doc-slug";
+import { prisma } from "@/lib/prisma";
+import { revertDocSlug as revertDocSlugInDb } from "@/lib/doc-slug";
+import { docBylineIds, setDocByline, setDocDeleted, setDocSlug, setDocVisibility } from "@/lib/doc-manage";
+import { actorFromSessionUser } from "@/lib/actor";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import {
   canManageDocs,
@@ -196,20 +198,12 @@ export async function importMarkdownDocAction(
   redirect(`/doc/${doc.slug}/edit`);
 }
 
-// Every write below that moves Doc.updatedAt also names who moved it
-// (Doc.updatedByUserId). updatedAt is @updatedAt, so Prisma bumps it on any
-// update to the row whether or not the column is named — leaving updatedBy
-// out would let "Updated" advance while "Updated by" still credited an older
-// edit, which reads worse on /docs than either value alone.
+// The bodies of these live in src/lib/doc-manage.ts, shared with the MCP
+// server's `manage` tool; each action here is the session, the call, and the
+// UI's own revalidation.
 export async function updateDocVisibility(docId: string, visibility: DocVisibility): Promise<void> {
   const { session } = await requireEditableDocSession(docId);
-  if (!Object.values(DocVisibility).includes(visibility)) {
-    throw new Error("Invalid visibility.");
-  }
-  await prisma.doc.update({
-    where: { id: docId },
-    data: { visibility, updatedByUserId: session.user.id },
-  });
+  await setDocVisibility(actorFromSessionUser(session.user), docId, visibility);
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath(`/doc/${docId}`);
 }
@@ -217,7 +211,7 @@ export async function updateDocVisibility(docId: string, visibility: DocVisibili
 export async function updateDocSlug(docId: string, newSlug: string): Promise<{ slug: string }> {
   const { session, doc } = await requireEditableDocSession(docId);
   const oldSlug = doc.slug;
-  const slug = await changeDocSlug(docId, newSlug, session.user.id);
+  const slug = await setDocSlug(actorFromSessionUser(session.user), docId, newSlug);
 
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath(`/doc/${docId}/slug`);
@@ -246,24 +240,19 @@ export async function revertDocSlug(docId: string): Promise<{ slug: string }> {
   return { slug };
 }
 
-// Adds/removes a single DocAuthor row — see updatePostAuthor
-// (src/app/actions/posts.ts) for the identical rationale.
+// Adds or removes one byline author, through setDocByline
+// (src/lib/doc-manage.ts) — which checks the person added can carry a
+// byline at all, where this used to take any user id and leave eligibility
+// to the edit page's picker. A removal is explicit here, so it is allowed.
 export async function updateDocAuthor(docId: string, userId: string, included: boolean): Promise<void> {
-  await requireEditableDocSession(docId);
-
-  if (included) {
-    const existing = await prisma.docAuthor.findUnique({ where: { docId_userId: { docId, userId } } });
-    if (existing) return;
-    const maxOrder = await prisma.docAuthor.aggregate({ where: { docId }, _max: { bylineOrder: true } });
-    await prisma.docAuthor.create({
-      data: { docId, userId, bylineOrder: (maxOrder._max.bylineOrder ?? -1) + 1 },
-    });
-  } else {
-    const count = await prisma.docAuthor.count({ where: { docId } });
-    if (count <= 1) {
-      throw new Error("A doc must have at least one author.");
-    }
-    await prisma.docAuthor.delete({ where: { docId_userId: { docId, userId } } }).catch(() => {});
+  const { session } = await requireEditableDocSession(docId);
+  const current = await docBylineIds(docId);
+  const next = included ? (current.includes(userId) ? current : [...current, userId]) : current.filter((id) => id !== userId);
+  if (next.length === 0) {
+    throw new Error("A doc must have at least one author.");
+  }
+  if (next.length !== current.length || next.some((id, i) => id !== current[i])) {
+    await setDocByline(actorFromSessionUser(session.user), docId, next, { allowRemovals: true });
   }
 
   revalidatePath(`/doc/${docId}/edit`);
@@ -271,64 +260,47 @@ export async function updateDocAuthor(docId: string, userId: string, included: b
 }
 
 export async function updateDocAuthorOrder(docId: string, orderedUserIds: string[]): Promise<void> {
-  await requireEditableDocSession(docId);
+  const { session } = await requireEditableDocSession(docId);
 
-  const current = await prisma.docAuthor.findMany({ where: { docId }, select: { userId: true } });
-  const currentIds = new Set(current.map((a) => a.userId));
+  const currentIds = new Set(await docBylineIds(docId));
   if (orderedUserIds.length !== currentIds.size || orderedUserIds.some((id) => !currentIds.has(id))) {
     throw new Error("Author list changed — please retry.");
   }
-
-  await prisma.$transaction(
-    orderedUserIds.map((userId, bylineOrder) =>
-      prisma.docAuthor.update({ where: { docId_userId: { docId, userId } }, data: { bylineOrder } }),
-    ),
-  );
+  await setDocByline(actorFromSessionUser(session.user), docId, orderedUserIds);
 
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath("/docs");
 }
 
 // Soft delete/restore double as each other's undo — see setPostDeleted
-// (src/app/actions/posts.ts) for the identical rationale, including why this
-// goes through prismaIncludingDeleted rather than requireEditableDocSession.
-async function setDocDeleted(docId: string, deleted: boolean): Promise<void> {
+// (src/app/actions/posts.ts) for the identical rationale; the body is
+// src/lib/doc-manage.ts's, which reads through prismaIncludingDeleted so a
+// restore can find the row it restores.
+async function setDocDeletedAction(docId: string, deleted: boolean): Promise<void> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
-  const doc = await prismaIncludingDeleted.doc.findUnique({ where: { id: docId } });
-  if (!doc) {
-    throw new Error("Doc not found.");
-  }
-  if (!(await canUserEditDoc(session.user.id, session.user.role, docId, { includeDeleted: true }))) {
-    throw new Error("You don't have permission to delete this doc.");
-  }
-  await prisma.doc.update({
-    where: { id: docId },
-    data: deleted
-      ? { deletedByUserId: session.user.id, deletedAt: new Date(), updatedByUserId: session.user.id }
-      : { deletedByUserId: null, deletedAt: null, updatedByUserId: session.user.id },
-  });
+  await setDocDeleted(actorFromSessionUser(session.user), docId, deleted);
   revalidatePath("/docs");
 }
 
 export async function deleteDoc(docId: string): Promise<void> {
-  await setDocDeleted(docId, true);
+  await setDocDeletedAction(docId, true);
 }
 
 export async function restoreDoc(docId: string): Promise<void> {
-  await setDocDeleted(docId, false);
+  await setDocDeletedAction(docId, false);
 }
 
 // Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are
 // per-row rather than one transaction.
 export async function bulkDeleteDocs(docIds: string[]): Promise<BulkResult> {
-  return settleBulk(docIds, (id) => setDocDeleted(id, true));
+  return settleBulk(docIds, (id) => setDocDeletedAction(id, true));
 }
 
 export async function bulkRestoreDocs(docIds: string[]): Promise<BulkResult> {
-  return settleBulk(docIds, (id) => setDocDeleted(id, false));
+  return settleBulk(docIds, (id) => setDocDeletedAction(id, false));
 }
 
 export async function bulkSetDocVisibility(docIds: string[], visibility: DocVisibility): Promise<BulkResult> {

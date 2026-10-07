@@ -404,11 +404,23 @@ export async function handleFlushAnnotationCache(
 // POST /admin/annotation-replace (PLAN.md §22e) — replaces an annotation
 // body's "default" fragment with the supplied TipTap JSON, as one update.
 //
-// Cancel on an edit session is the only caller: it puts the last settled
-// revision's content back. Writing the old text *forward* is not a
-// workaround for Yjs having no undo — it is the truthful record. The
-// abandoned attempt happened, `ydoc_update` says so, and the revision
-// sequence stays a list of states readers were actually shown.
+// Two callers. Cancel on an edit session puts the last settled revision's
+// content back — writing the old text *forward* is not a workaround for Yjs
+// having no undo, it is the truthful record: the abandoned attempt happened,
+// `ydoc_update` says so, and the revision sequence stays a list of states
+// readers were actually shown. And the MCP server's edit_annotation writes a
+// new body (docs/MCP.md §9), with `attribute: true`.
+//
+// **A read-only token is refused**, as doc-apply-update refuses one: any
+// reader of a container can mint a read-only token for each annotation on it,
+// and that must not be enough to rewrite one.
+//
+// With `attribute`, the change is built on a scratch copy and applied with
+// its Yjs client mapped to the token's user in `clients` — doc-apply-update's
+// attribution. Written through the direct connection itself, the update would
+// be unattributed: the in-memory document's own client is shared by every
+// server-side write, and attributeUpdate skips a direct connection. Cancel
+// writes as it always has.
 //
 // Rejects anything that is not an annotation's own ydoc. The transformer pair
 // is the annotation schema (annotationContentExtensions), never the doc's:
@@ -423,6 +435,7 @@ export async function handleReplaceAnnotationBody(
     token: string;
     documentName: string;
     proseJson: unknown;
+    attribute: boolean;
   }>;
   const { token, documentName, proseJson } = body;
   if (typeof token !== "string" || typeof documentName !== "string" || !proseJson || typeof proseJson !== "object") {
@@ -431,8 +444,8 @@ export async function handleReplaceAnnotationBody(
   }
 
   const payload = await verifyYdocToken(token).catch(() => null);
-  if (!payload || payload.documentName !== documentName) {
-    send(response, 403, "Invalid or mismatched ydoc token.");
+  if (!payload || payload.documentName !== documentName || payload.readOnly) {
+    send(response, 403, "Invalid, mismatched or read-only ydoc token.");
     return;
   }
   if (!annotationIdFromYdocId(documentName)) {
@@ -448,15 +461,34 @@ export async function handleReplaceAnnotationBody(
     return;
   }
 
-  const connection = await instance.openDirectConnection(documentName);
+  const context: YdocContext = { userId: payload.sub, role: payload.role };
+  const connection = await instance.openDirectConnection(documentName, body.attribute ? context : undefined);
   try {
     await connection.transact((document) => {
       // prosemirrorToYXmlFragment diffs the node against the fragment and
       // writes the difference, so restoring a body that is already correct is
       // a genuine no-op rather than a churn of deletes and inserts — the same
       // property handleApplyAnnotationMark relies on.
-      prosemirrorToYXmlFragment(node, document.getXmlFragment("default"));
+      if (!body.attribute) {
+        prosemirrorToYXmlFragment(node, document.getXmlFragment("default"));
+        return;
+      }
+      const scratch = new Y.Doc();
+      try {
+        Y.applyUpdate(scratch, Y.encodeStateAsUpdate(document));
+        const before = Y.encodeStateVector(scratch);
+        prosemirrorToYXmlFragment(node, scratch.getXmlFragment("default"));
+        const update = Y.encodeStateAsUpdate(scratch, before);
+        Y.applyUpdate(document, update);
+        if (Y.parseUpdateMeta(update).from.has(scratch.clientID)) {
+          const clients = getClientsMap(document);
+          if (!clients.has(String(scratch.clientID))) clients.set(String(scratch.clientID), payload.sub);
+        }
+      } finally {
+        scratch.destroy();
+      }
     });
+    if (body.attribute) await new Promise((resolve) => setImmediate(resolve));
   } finally {
     await connection.disconnect();
   }

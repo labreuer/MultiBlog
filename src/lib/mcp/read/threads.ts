@@ -559,6 +559,14 @@ export async function annotationByFragment(
     where: { ...container, ...postedAnnotationWhere(), createdAt: { gte: at, lt: new Date(at.getTime() + 1000) } },
     select: { id: true, createdAt: true, user: { select: { name: true } } },
   });
-  const found = candidates.find((c) => annotationAnchorName(displayNameOf(c.user), c.createdAt) === fragment);
-  return found?.id ?? null;
+  const found = candidates.filter((c) => annotationAnchorName(displayNameOf(c.user), c.createdAt) === fragment);
+  // A card's name is its writer and the second it was opened, so two notes
+  // one writer opened within a second share it; the page jumps to the first,
+  // and a guess here could reply to the wrong one.
+  if (found.length > 1) {
+    throw new ApiError("ambiguous", "Two notes share that card's name; use the annotation's id instead.", {
+      ids: found.map((c) => c.id).slice(0, ERROR_LIST_CAP),
+    });
+  }
+  return found[0]?.id ?? null;
 }

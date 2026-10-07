@@ -285,6 +285,22 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
   return markNew(next, options);
 }
 
+/**
+ * One whole document merged into another, top-level block by block — what
+ * planEdits does after its Transform, for a caller that has the new document
+ * whole: the MCP server's edit_annotation, whose body is short enough to send
+ * entire and whose surviving words must still keep their marks.
+ */
+export function mergeDoc(old: PMNode, next: PMNode, options: MergeOptions): PMNode {
+  const oc = childrenOf(old);
+  const nc = childrenOf(next);
+  const pairs = alignBlocks(oc.map(blockText), nc.map(blockText), { old: oc.map(blockKey), new: nc.map(blockKey) });
+  const merged = pairs.flatMap((pair) =>
+    pair.new === null ? [] : pair.old === null ? [markNew(nc[pair.new], options)] : [mergeBlock(oc[pair.old], nc[pair.new], options)],
+  );
+  return old.type.create(old.attrs, merged, old.marks);
+}
+
 /** Text in pasted Markdown keeps a soft line break as "\n"; in an edit it is the space CommonMark means by one. */
 function collapseSoftBreaks(json: JSONContent): JSONContent {
   return {

@@ -29,7 +29,7 @@ import { MAX_READ_CHARS, type ReadArgs } from "./args";
 const SURROUNDINGS = 300;
 
 /** The page text at the current text version, extracting the file once on a miss (storedPageText). */
-async function pageTexts(fileId: string, pageIndexes: readonly number[]): Promise<Map<number, string>> {
+export async function pageTexts(fileId: string, pageIndexes: readonly number[]): Promise<Map<number, string>> {
   const version = await currentTextVersion();
   const read = () =>
     prisma.filePageText.findMany({

@@ -30,3 +30,33 @@ export function seedAnnotationYdoc(text: string): {
 
   return { ...state, proseJson: doc.toJSON() as JSONContent };
 }
+
+/**
+ * docs/MCP.md §9 — the initial state for an annotation the MCP server writes
+ * whole: the body parsed from Markdown, seeded straight into the ydoc rather
+ * than typed over a websocket.
+ *
+ * **The seed carries no `authorHighlight` mark**, as a solo body typed in the
+ * UI carries none: AnnotationBody turns the mark on only once the body's
+ * `clients` map holds two distinct users, and PLAN.md §13h's one-time
+ * backfill then marks everything already there as the annotation's author's.
+ *
+ * **Its Yjs client is registered in `clients` as `userId`.** The UI's seed is
+ * empty and its first writer arrives over the websocket, where
+ * attributeUpdate registers them; this seed is the whole body, written
+ * directly, which registers nobody — and without the entry a person who later
+ * joins would be the body's first distinct user rather than its second, and
+ * the backfill would never run.
+ */
+export function seedAnnotationYdocFromJson(
+  json: JSONContent,
+  userId: string,
+): { ydoc: Uint8Array; stateVector: Uint8Array; proseJson: JSONContent } {
+  const node = pmAnnotationContentSchema.nodeFromJSON(json);
+  const ydoc = new Y.Doc();
+  prosemirrorToYXmlFragment(node, ydoc.getXmlFragment("default"));
+  ydoc.getMap<string>("clients").set(String(ydoc.clientID), userId);
+  const state = { ydoc: Y.encodeStateAsUpdate(ydoc), stateVector: Y.encodeStateVector(ydoc) };
+  ydoc.destroy();
+  return { ...state, proseJson: node.toJSON() as JSONContent };
+}

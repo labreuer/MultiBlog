@@ -183,7 +183,8 @@ export async function flushAnnotationCache(opts: {
  * Puts `proseJson` back as an annotation body's whole content, through the
  * collab server so every connected client sees it (PLAN.md §22e).
  *
- * Cancel on an edit session is the only caller. **Not best-effort**, unlike
+ * Cancel on an edit session, and the MCP server's edit_annotation, which
+ * passes `attribute`. **Not best-effort**, unlike
  * its neighbours here: a failed mark leaves an annotation document-level,
  * which the system already renders sensibly, but a failed restore leaves the
  * *abandoned draft* as the live body while the row says the session was
@@ -195,6 +196,8 @@ export async function replaceAnnotationBody(opts: {
   role: Role;
   annotationId: string;
   proseJson: unknown;
+  /** Attribute the write to `userId` in the body's `clients` (docs/MCP.md §9): the MCP server's edit, not Cancel's restore. */
+  attribute?: boolean;
 }): Promise<{ replaced: boolean; updateId: string | null }> {
   const { userId, role, annotationId, proseJson } = opts;
   const documentName = ydocIdForAnnotation(annotationId);
@@ -204,7 +207,7 @@ export async function replaceAnnotationBody(opts: {
     const response = await fetch(`${collabHttpOrigin()}${ANNOTATION_REPLACE_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, documentName, proseJson }),
+      body: JSON.stringify({ token, documentName, proseJson, ...(opts.attribute ? { attribute: true } : {}) }),
     });
     if (!response.ok) {
       console.error(`[annotation-admin] annotation-replace returned ${response.status} for ${documentName}`);
