@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
@@ -18,7 +17,7 @@ import {
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
-import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS, tableExtensions } from "@/lib/tiptap-schema";
+import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS, StarterKit, tableExtensions } from "@/lib/tiptap-schema";
 import { codecForFile } from "@/lib/table-codecs";
 import { insertTableFromFile } from "@/lib/table-file-editor";
 import { useAuthorColors } from "@/lib/use-author-colors";

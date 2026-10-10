@@ -33,6 +33,24 @@ const eslintConfig = defineConfig([
       "react-hooks/rules-of-hooks": "off",
     },
   },
+  {
+    // docs/TIPTAP.md "Inline code takes other marks": StarterKit and Code come
+    // from src/lib/tiptap-schema.ts, whose code mark lets code carry other
+    // marks. A surface built from either package would refuse them there and
+    // nowhere else, and nothing else would notice.
+    ignores: ["src/lib/tiptap-schema.ts", "src/lib/tiptap-schema.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: ["@tiptap/starter-kit", "@tiptap/extension-code"].map((name) => ({
+            name,
+            message: "Import StarterKit or Code from @/lib/tiptap-schema, whose code mark lets code carry other marks (docs/TIPTAP.md).",
+          })),
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

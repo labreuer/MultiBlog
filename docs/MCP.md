@@ -752,10 +752,14 @@ targeted edits and the title.
   The Yjs `clients` map is a different thing: it maps each Yjs client to the user whose session
   wrote with it (PLAN.md §11d), which the replay view and an annotation's co-authoring switch
   read, and it gives highlighting nothing to color.
-- **`createDocWithContent` gains an optional author.** Given one, it marks every text node and
-  seeds through `authorHighlightExtensions` and `titleAuthorHighlightExtensions`, since
-  `contentExtensions` and `titleExtensions` have no such mark and would refuse it. The MCP
-  server passes the actor. `/docs`' import and the importer pass nothing, and stay as they are.
+- **`createDocWithContent` gains an optional author.** Given one, it marks the seed as an edit
+  marks a block that is all new (`markNew`), and seeds through `authorHighlightExtensions` and
+  `titleAuthorHighlightExtensions`, since `contentExtensions` and `titleExtensions` have no
+  such mark and would refuse it. The MCP server passes the actor. `/docs`' import and the
+  importer pass nothing, and stay as they are.
+- **Inline code carries it too**, and keeps a link or bold beside it, because this app's
+  code mark excludes only itself ([TIPTAP.md](TIPTAP.md), "Inline code takes other marks").
+  A code block takes no marks, so its text carries none.
 - **So Claude's text shows in Claude's color**, and a person's later edits in theirs.
 
 **Editing is targeted, never a whole-body replace.** An edit changes what it means to change,

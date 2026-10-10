@@ -4,7 +4,7 @@ import * as Y from "yjs";
 import { prosemirrorToYXmlFragment, yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { pmDocContentSchema } from "./tiptap-schema";
-import { planEdits, type EditSpec } from "./doc-edit";
+import { markNew, planEdits, type EditSpec } from "./doc-edit";
 import { writeBackDoc } from "./doc-edit-yjs";
 import { markdownToBlocks, markdownToText } from "./markdown-import";
 
@@ -217,4 +217,43 @@ test("the write-back changes only the blocks the edit changed, and the result de
   assert.equal(after[2], second);
   assert.equal(after[3], third);
   ydoc.destroy();
+});
+
+/** Every text node's text with the names of its marks, in order. */
+const marked = (node: PMNode) => {
+  const out: [string, string][] = [];
+  node.descendants((child) => {
+    if (child.isText) out.push([child.text!, child.marks.map((m) => m.type.name).join(",")]);
+  });
+  return out;
+};
+
+test("inline code carries the author mark like any text: in a block that is all new, and in an edit's new words", () => {
+  const d = doc(
+    { type: "paragraph", content: [{ type: "text", text: "Run " }, { type: "text", text: "wf_1", marks: [{ type: "code" }] }, { type: "text", text: " first." }] },
+    { type: "codeBlock", content: [{ type: "text", text: "npm run check" }] },
+    p("A plain sentence."),
+  );
+  const seeded = markNew(d, { schema, authorId: LUKE });
+  seeded.check();
+  assert.deepEqual(
+    runs(seeded).map((r) => [r.text, r.author]),
+    [["Run ", LUKE], ["wf_1", LUKE], [" first.", LUKE], ["npm run check", null], ["A plain sentence.", LUKE]],
+  );
+
+  // An edit elsewhere is planned against a doc whose code carries an author.
+  const { next } = plan(seeded, [{ kind: "replace", target: { quote: "A plain sentence." }, blocks: md("A sentence with `npm`.") }]);
+  assert.equal(next.child(0), seeded.child(0));
+  assert.deepEqual(marked(next.child(2)).find(([text]) => text === "npm"), ["npm", "code,authorHighlight"]);
+  assert.equal(runs(next.child(2)).find((r) => r.text === "npm")?.author, CLAUDE);
+});
+
+test("bold and linked code keep both marks through an edit to their paragraph", () => {
+  const d = markNew(doc(...md("Run [`wf_1`](https://example.com) and **`npm`** first.")), { schema, authorId: LUKE });
+  d.check();
+  const { next } = plan(d, [{ kind: "replace", target: { quote: "first." }, blocks: md("last.") }]);
+  assert.deepEqual(marked(next).filter(([text]) => text === "wf_1" || text === "npm"), [
+    ["wf_1", "link,code,authorHighlight"],
+    ["npm", "bold,code,authorHighlight"],
+  ]);
 });

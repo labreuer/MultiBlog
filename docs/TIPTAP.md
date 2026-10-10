@@ -28,6 +28,69 @@ nodes and the annotation row deliberately does not, so a table pasted into a mar
 flattens to paragraphs rather than rendering in a 340px card. `AnnotationBody.tsx`'s own
 list mirrors it, and neither may quietly be re-derived from the other.
 
+## Inline code takes other marks, so `StarterKit` and `Code` come from the schema file
+
+TipTap's code mark ships with `excludes: "_"`: code text can carry no other mark at all.
+ProseMirror's default is a mark that excludes only its own kind, and `tiptap-schema.ts` puts
+it back. Its `Code` is the package's with `excludes: "code"`, and its `StarterKit` carries
+that `Code`. The package's mark costs three things:
+
+- **Author colours skip code**, whether typed in the editor or written by the MCP server, and
+  so does an MCP read's "who wrote what" (MCP.md §6).
+- **An annotation made in the editor has a hole wherever its passage has inline code.**
+  `addMark` passes over text whose marks exclude the new one, so the highlight skips the
+  code. The annotation's quote, read back out of the doc (`extractMarkedText`), loses the
+  code's words.
+- **Markdown's bold and linked code**, `` **`x`** `` and `` [`x`](url) ``, parse to text
+  marked both ways, which the schema refuses. The MCP server checks what it writes and
+  refuses them outright. A doc an import stored them in refuses every targeted edit, because
+  an edit checks the whole doc it writes (MCP.md §6).
+
+**Import both from `@/lib/tiptap-schema`, never from their packages.** A live editor built
+from the package's StarterKit would refuse the marks on its own surface and nowhere else, and
+nothing would notice: y-prosemirror builds nodes from the ydoc without checking their marks,
+so the doc still renders as before. `eslint.config.mjs` refuses either import outside the
+schema file and its test.
+
+**Code is the innermost mark with a Markdown form, and is split where its formatting
+changes.** Inside backticks, Markdown is literal: `` `**wf**_1234` `` is code whose text
+contains asterisks. So every Markdown export has to keep the other marks' delimiters outside
+the backticks, or a round trip writes them into the code. The comment edit box, every MCP
+read, and an MCP edit written from what it read are all round trips. Two things together keep
+the delimiters outside:
+
+- **The rank.** A mark's position in the extension list is its rank: the order a mark set is
+  sorted in, and the order `@tiptap/markdown` nests delimiters in. The `StarterKit` moves
+  code to the end of its list, and the comment list puts it after `quote`, so whole-span
+  italic code is `` *`x`* `` and not `` `*x*` ``. The author and annotation marks still come
+  after code, but they have no Markdown form and are stripped before any export, so nothing
+  depends on that.
+- **The split.** Bold on part of a span still can't sit outside one pair of backticks. So
+  before serializing, `splitCodeAtFormatting` (`markdown-import.ts`) gives each run of code a
+  number that changes wherever the other marks on it change. The serializer treats two marks
+  of one type with different attributes as two marks, so it closes the span there and opens
+  another: `` **`wf`**`_1234` ``. Two spans never touch, because the marks they differ by
+  open or close between them. Nothing reads the number back.
+
+`tiptap-schema.test.ts` checks the exclusion and the rank in every schema.
+`markdown-inline-code.test.ts` takes each combination through all three exporters (doc,
+comment, annotation) and back. It is what notices a `@tiptap/markdown` release that stops
+treating attributes as distinguishing marks.
+
+**The HTML nests a text's marks one way in the editor and the other in a static render.**
+ProseMirror puts the lowest-ranked mark outermost, so the editor draws bold code as
+`<strong><code>`. `@tiptap/static-renderer`, which draws comments, posts and the other
+read-only bodies, wraps the text in each mark in turn, so its first mark is innermost and
+the same text is `<code><strong>`. Nothing styles inline code itself (it is only the browser's
+monospace), so the two look alike, and a highlight shows on either side of `<code>`. Don't
+write CSS or a test that depends on the nesting: `e2e/inline-code.spec.ts` matches bold code
+either way round.
+
+**Giving any mark an `excludes` that names another mark changes data, not just the schema.**
+Docs that already hold both marks on one character become docs the schema refuses. Nothing
+that decodes them checks, so they read and render as before, but every targeted edit to such
+a doc is refused, wherever in the doc it falls.
+
 ## Never add StarterKit's own extensions beside it
 
 TipTap v3's StarterKit already bundles Link, Bold and Italic (among others) and undo/redo.

@@ -111,12 +111,49 @@ function headingLevel(node: JSONContent | undefined): number | null {
 // JSON keeps them.
 
 /**
+ * `json` with each run of inline code numbered (`attrs.run`) afresh wherever
+ * the other marks on it change, so the serializer closes the code span there
+ * and opens another. Inline code may carry any other mark (docs/TIPTAP.md,
+ * "Inline code takes other marks"), so part of a span can be bold. As one
+ * span, the bold's `**` would land inside the backticks, where Markdown reads
+ * it as literal text, and a round trip would write the asterisks into the
+ * code. Split, `wf_1234` with `wf` bold is `` **`wf`**`_1234` ``, which parses
+ * back to what it was. Two spans never touch: the marks they differ by open
+ * or close between them, outside the backticks, because code is the innermost
+ * mark (StarterKit, tiptap-schema.ts). The split relies on @tiptap/markdown
+ * treating two marks of one type with different attributes as two marks.
+ * Nothing reads the number: the parse makes a plain code mark. The
+ * `markdown-inline-code` tests pin all of this.
+ */
+function splitCodeAtFormatting(json: JSONContent): JSONContent {
+  if (!json.content) return json;
+  let run = 0;
+  let previous: string | null = null;
+  const content = json.content.map((child) => {
+    const code = child.type === "text" ? child.marks?.find((mark) => mark.type === "code") : undefined;
+    if (!code) {
+      previous = null;
+      return splitCodeAtFormatting(child);
+    }
+    const others = child
+      .marks!.filter((mark) => mark !== code)
+      .map((mark) => JSON.stringify(mark))
+      .sort()
+      .join();
+    if (others !== previous) run += 1;
+    previous = others;
+    return { ...child, marks: child.marks!.map((mark) => (mark === code ? { ...mark, attrs: { ...mark.attrs, run } } : mark)) };
+  });
+  return { ...json, content };
+}
+
+/**
  * A doc body (docContentExtensions JSON) as Markdown. The `annotation` and
  * `authorHighlight` marks are stripped first: neither has a Markdown form,
  * and `contentExtensions` would refuse both.
  */
 export function docContentToMarkdown(json: JSONContent): string {
-  return markdownManager.serialize(stripMarksFromDoc(json, ["annotation", "authorHighlight"]));
+  return markdownManager.serialize(splitCodeAtFormatting(stripMarksFromDoc(json, ["annotation", "authorHighlight"])));
 }
 
 /**
@@ -279,7 +316,7 @@ export function markdownToCommentContent(markdown: string): JSONContent {
  * a body parsed from Markdown and serialized again re-parses to itself.
  */
 export function commentContentToMarkdown(json: JSONContent): string {
-  return commentMarkdownManager.serialize(json);
+  return commentMarkdownManager.serialize(splitCodeAtFormatting(json));
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +335,7 @@ const annotationMarkdownManager = new MarkdownManager({
 
 /** An annotation body (annotationContentExtensions JSON) as Markdown, the author mark stripped. */
 export function annotationContentToMarkdown(json: JSONContent): string {
-  return annotationMarkdownManager.serialize(stripMarksFromDoc(json, ["authorHighlight"]));
+  return annotationMarkdownManager.serialize(splitCodeAtFormatting(stripMarksFromDoc(json, ["authorHighlight"])));
 }
 
 /**

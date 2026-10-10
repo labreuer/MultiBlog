@@ -1,11 +1,11 @@
-import StarterKit from "@tiptap/starter-kit";
+import BaseStarterKit from "@tiptap/starter-kit";
 import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import Bold from "@tiptap/extension-bold";
 import Italic from "@tiptap/extension-italic";
 import Strike from "@tiptap/extension-strike";
-import Code from "@tiptap/extension-code";
+import BaseCode from "@tiptap/extension-code";
 import Blockquote from "@tiptap/extension-blockquote";
 import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
@@ -17,6 +17,32 @@ import { getSchema, mergeAttributes, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
 import { Annotation } from "./annotation-extension";
+
+// docs/TIPTAP.md "Inline code takes other marks" — TipTap's code mark
+// excludes every other mark (`excludes: "_"`). This one excludes only itself,
+// which is ProseMirror's default. An author colour and an annotation say who
+// wrote a passage and what a note covers, and so belong on code as on any
+// text. And Markdown's `**`x`**` and `[`x`](url)` are bold code and linked
+// code. Every schema and live editor takes code from here, StarterKit below
+// included, and eslint.config.mjs refuses either package anywhere else.
+export const Code = BaseCode.extend({ excludes: "code" });
+
+// StarterKit with the Code above in place of its own, moved to the end of its
+// list. A mark's position is its rank: the order a mark set is sorted in, and
+// the order the Markdown serializer nests delimiters in. So code is the
+// innermost of the marks with a Markdown form, and its backticks never close
+// around a `**` or a `*`, which Markdown would read as literal text
+// (markdown-import.ts says the rest). The author and annotation marks come
+// after it, being added after StarterKit in every list; they have no Markdown
+// form, so nothing depends on where. `configure` works as on the original:
+// `code`'s options reach this Code, and `code: false` leaves it out.
+export const StarterKit = BaseStarterKit.extend({
+  addExtensions() {
+    const extensions = this.parent?.() ?? [];
+    const others = extensions.filter((extension) => extension.name !== "code");
+    return others.length < extensions.length ? [...others, Code.configure(this.options.code || {})] : extensions;
+  },
+});
 
 // StarterKit's Link options for a *live* editor. CollabEditorBody and
 // AnnotationBody each build their own StarterKit (undo/redo off, since
@@ -238,9 +264,11 @@ export const commentContentExtensions = [
   Bold,
   Italic,
   Strike,
-  Code,
   CommentBlockquote,
   Quote,
+  // After every mark with a Markdown form, `quote` included (StarterKit's
+  // comment above says why).
+  Code,
   BulletList,
   OrderedList,
   ListItem,

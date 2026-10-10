@@ -1,6 +1,7 @@
 import * as Y from "yjs";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
+import type { Schema } from "@tiptap/pm/model";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { uniqueDocSlug } from "@/lib/doc-slug";
@@ -9,9 +10,12 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import {
   authorHighlightExtensions,
   contentExtensions,
+  pmDocContentSchema,
+  pmTitleSchema,
   titleAuthorHighlightExtensions,
   titleExtensions,
 } from "@/lib/tiptap-schema";
+import { markNew } from "@/lib/doc-edit";
 import { docContentFromYdoc } from "@/lib/doc-content";
 import { ydocStore, encodeYdocState } from "../../server/ydoc-store";
 
@@ -91,15 +95,16 @@ export async function insertDocRow(userId: string, title: string) {
   return insertDocRowSluggedById(userId, title);
 }
 
-/** Every text node of a TipTap JSON body marked as `authorId`'s, except where the parent takes no marks (a code block). */
-function markAuthor(node: JSONContent, authorId: string, marksAllowed = true): JSONContent {
-  const allowed = marksAllowed && node.type !== "codeBlock";
-  if (node.type === "text") {
-    return marksAllowed
-      ? { ...node, marks: [...(node.marks ?? []), { type: "authorHighlight", attrs: { authorId } }] }
-      : node;
-  }
-  return node.content ? { ...node, content: node.content.map((child) => markAuthor(child, authorId, allowed)) } : node;
+/**
+ * A seed's text marked as `authorId`'s, by the rule an edit marks a block
+ * that is all new with (`markNew`): everywhere the schema allows the mark, so
+ * not in a code block, which takes no marks. One rule for both, because a
+ * mark added here that the schema refuses is checked by nothing on the way
+ * into the ydoc, and then refuses every edit to the doc, since an edit checks
+ * the whole doc it writes.
+ */
+function markAuthor(json: JSONContent, schema: Schema, authorId: string): JSONContent {
+  return markNew(schema.nodeFromJSON(json), { schema, authorId }).toJSON();
 }
 
 export type CreateDocOptions = {
@@ -138,7 +143,7 @@ export async function createDocWithContent(userId: string, title: string, body: 
   const seed = new Y.Doc();
   const clientIds: number[] = [];
   const seededBody = TiptapTransformer.toYdoc(
-    author ? markAuthor(body, author) : body,
+    author ? markAuthor(body, pmDocContentSchema, author) : body,
     "default",
     author ? authorHighlightExtensions : contentExtensions,
   );
@@ -150,7 +155,7 @@ export async function createDocWithContent(userId: string, title: string, body: 
   if (title) {
     const titleDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: title }] }] };
     const seededTitle = TiptapTransformer.toYdoc(
-      author ? markAuthor(titleDoc, author) : titleDoc,
+      author ? markAuthor(titleDoc, pmTitleSchema, author) : titleDoc,
       "title",
       author ? titleAuthorHighlightExtensions : titleExtensions,
     );

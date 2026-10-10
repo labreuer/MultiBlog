@@ -143,6 +143,28 @@ test("edit_doc: surviving words keep their author and their note, new words are 
   }
 });
 
+test("inline code carries the author mark, takes a link or bold, and leaves an edit elsewhere free to land", async ({ request }) => {
+  const agent = await createAgent(request);
+  let created: string | null = null;
+  try {
+    const markdown = "Run [`wf_1`](https://example.com/) first.\n\nA plain sentence.";
+    const doc = await agent.call("create_doc", { markdown });
+    expect(doc.isError, JSON.stringify(doc.error)).toBe(false);
+    created = String(doc.result.id);
+    expect((await getDocMarkFacts(created)).authors[agent.user.email]).toBe("Run wf_1 first.A plain sentence.");
+
+    const url = String(doc.result.url);
+    const edited = await agent.call("edit_doc", { url, edits: [{ old: "A plain sentence.", new: "A **`bold`** sentence." }] });
+    expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
+    expect(edited.result.changed).toBe("2");
+    const read = await agent.call("read", { url });
+    expect(read.result.markdown).toBe("Run [`wf_1`](https://example.com/) first.\n\nA **`bold`** sentence.");
+  } finally {
+    if (created) await deleteTestDoc(created);
+    await agent.dispose();
+  }
+});
+
 test("edit_doc lands in an open editor while its writer types elsewhere, and a revert puts the edit back", async ({ request, page }) => {
   const agent = await createAgent(request);
   const doc = await createTestDoc({
