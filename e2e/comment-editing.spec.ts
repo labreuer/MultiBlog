@@ -1,4 +1,4 @@
-import { test, expect, freshGoto, visibleText } from "./fixtures";
+import { test, expect, freshGoto, visibleText, freshGotoComment } from "./fixtures";
 import {
   ADMIN_EMAIL,
   backdateComment,
@@ -24,8 +24,10 @@ import { EDIT_GRACE_MS } from "../src/lib/edit-grace";
 // edit still writes a revision row, so "no marker appeared" alone would pass
 // just as well against an implementation that had thrown the old version away.
 //
-// **Every navigation to the post page here is a `freshGoto`, including the
-// first one of a test.** `createComment` writes straight to the database, so
+// **Every navigation to the post page here is a `freshGoto`, and the first
+// one of a test a `freshGotoComment`, which repeats it until the seeded
+// comment is there (fixtures.ts says why once isn't always enough).**
+// `createComment` writes straight to the database, so
 // nothing revalidates the post page — and against the prod target that page
 // is ISR (`revalidate = 60`), which serves whatever render is already cached
 // for that path. Any earlier request fills it: a landing page in another
@@ -69,7 +71,7 @@ test.describe("editing a comment", () => {
       status: "APPROVED",
     });
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, commentId);
     await expect(visibleText(page, original)).toBeVisible();
 
     await editTo(page, commentId, corrected);
@@ -100,7 +102,7 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, commentId);
     await editTo(page, commentId, corrected);
 
     // This one is a freshGoto for a second reason on top of the header's: the
@@ -177,7 +179,7 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, commentId);
     await editTo(page, commentId, corrected);
 
     const facts = await getCommentFacts(commentId);
@@ -202,7 +204,7 @@ test.describe("editing a comment", () => {
     const anonymous = await page.context().browser()!.newContext({ storageState: { cookies: [], origins: [] } });
     const anonymousPage = await anonymous.newPage();
     try {
-      await freshGoto(anonymousPage, publishedPost.path);
+      await freshGotoComment(anonymousPage, publishedPost.path, commentId);
       await expect(visibleText(anonymousPage, original)).toBeVisible();
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Edit" })).toHaveCount(0);
       await expect(card(anonymousPage, commentId).getByRole("button", { name: "Reply" })).toBeVisible();
@@ -266,7 +268,7 @@ test.describe("editing a comment", () => {
     });
     await backdateComment(commentId, PAST_THE_WINDOW);
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, commentId);
     await editTo(page, commentId, original);
 
     // The point of the no-op branch: a Save with nothing changed must not

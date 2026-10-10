@@ -506,6 +506,23 @@ export async function freshGoto(page: Page, path: string): Promise<void> {
 }
 
 /**
+ * freshGoto, repeated until the comment `commentId` is on the page: the first
+ * visit to a comment a fixture wrote straight to the database
+ * (`createComment`, `createCommentWithQuotes`). One revalidation is not always
+ * enough on the prod target. A render of the page already under way when the
+ * path is revalidated, such as another worker's prefetch of the landing page's
+ * links, can finish afterwards and put the page from before the write back in
+ * the cache. The page then reads "No comments yet." for its whole revalidate
+ * window: two specs met that in one full run (2026-10-10).
+ */
+export async function freshGotoComment(page: Page, path: string, commentId: string): Promise<void> {
+  await expect(async () => {
+    await freshGoto(page, path);
+    await expect(page.locator(`[data-comment-id="${commentId}"]`).first()).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
+/**
  * Text as a reader actually sees it on a public post page.
  *
  * AnnotatableArticle keeps two copies of the body in the DOM — a server-

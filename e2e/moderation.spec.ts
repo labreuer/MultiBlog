@@ -1,4 +1,4 @@
-import { test, expect, freshGoto } from "./fixtures";
+import { test, expect, freshGoto, freshGotoComment } from "./fixtures";
 import { createComment, getCommentStatus, uniqueEmail } from "./db";
 
 test.describe("comment moderation", () => {
@@ -45,7 +45,7 @@ test.describe("comment moderation", () => {
       status: "APPROVED",
     });
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, commentId);
     await expect(page.getByText(body)).toBeVisible();
 
     await page.goto(`/comments?post=${publishedPost.id}`);

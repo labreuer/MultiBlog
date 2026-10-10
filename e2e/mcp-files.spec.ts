@@ -69,7 +69,16 @@ test("upload_url and curl: a PRIVATE file owned by the actor and the issuer; the
   }
 });
 
-test("the server's quads for a quote land within a point of a Chromium selection of the same words", async ({ page, request }) => {
+test("the server's quads for a quote land within a point of a Chromium selection of the same words", async ({
+  page,
+  request,
+  browserName,
+}) => {
+  // The server measures with the Liberation widths Chromium's text layer
+  // uses on Linux. Firefox there takes fontconfig's own generics
+  // (docs/PDF_QUADS.md, "Who it doesn't match"), and Playwright's WebKit
+  // lands as far off: about three points, against this test's one.
+  test.skip(browserName !== "chromium", "the server's widths are the ones Chromium's text layer measures with");
   const agent = await createAgent(request);
   const phrase = "brown fox jumps over";
   const file = await createTestFile({
