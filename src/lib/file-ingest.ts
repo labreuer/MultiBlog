@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageFiles } from "@/lib/role-checks";
 import { claimFileSlug } from "@/lib/file-slug";
 import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storeUploadStream, type StoredBytes } from "@/lib/file-storage";
-import { extractPdf } from "@/lib/pdf-extract";
+import { extractPdf, extractPdfMetadata, type PdfMetadata } from "@/lib/pdf-extract";
 import { UPLOAD_ACCEPT_LABEL, contentTypeForKind, titleFromFilename, uploadKindForFilename, type UploadKind } from "@/lib/file-format";
 import type { Actor } from "@/lib/actor";
 
@@ -20,9 +21,9 @@ import type { Actor } from "@/lib/actor";
 // 1. `stageUpload`: the role check, the filename and its format, and the
 //    streamed write, hashed, its magic checked mid-flight — so a mislabelled
 //    upload is refused after a few bytes rather than after the whole transfer.
-// 2. `recordUpload`: a PDF's parse, then the row with its owner and page
-//    text in one transaction. A failure removes the bytes if this upload is
-//    what put them there.
+// 2. `recordUpload`: a PDF's parse, then the row with its owner, page text,
+//    labels and outline in one transaction. A failure removes the bytes if
+//    this upload is what put them there.
 
 export type StagedUpload = { stored: StoredBytes; kind: UploadKind; filename: string };
 
@@ -76,9 +77,11 @@ export async function recordUpload(
   // one-per-upload rather than one-per-read.
   let pageCount: number | null = null;
   let pages: { textVersion: string; texts: readonly string[] } | null = null;
+  let metadata: PdfMetadata | null = null;
   if (kind === "pdf") {
+    let bytes: Uint8Array;
     try {
-      const bytes = await readFile(storagePathFor(stored.sha256));
+      bytes = await readFile(storagePathFor(stored.sha256));
       const parsed = await extractPdf(bytes);
       pageCount = parsed.pageCount;
       pages = { textVersion: parsed.textVersion, texts: parsed.pages };
@@ -87,6 +90,12 @@ export async function recordUpload(
       await discardStagedUpload(staged);
       throw new UploadError("That PDF couldn't be read — it may be damaged.", 415);
     }
+    // Labels and the outline are stored now (docs/MCP.md §8); one that can't
+    // be read is left NULL, which a first read fills lazily (pdf-metadata.ts).
+    metadata = await extractPdfMetadata(bytes).catch((err) => {
+      console.error("[files/upload] couldn't read the PDF's labels and outline:", err);
+      return null;
+    });
   }
 
   const title = opts.title?.trim().slice(0, 500) || titleFromFilename(filename, kind);
@@ -105,6 +114,9 @@ export async function recordUpload(
           byteSize: stored.byteSize,
           sha256: stored.sha256,
           pageCount,
+          ...(metadata
+            ? { pageLabels: metadata.pageLabels as Prisma.InputJsonValue, outline: metadata.outline as unknown as Prisma.InputJsonValue }
+            : {}),
           createdByUserId: actor.userId,
           updatedByUserId: actor.userId,
           // "Owner" rather than "author" because nobody here wrote the PDF

@@ -3,8 +3,10 @@
 //
 // Types only, so the page's components can import them without Prisma. A hit
 // holds no permission data and no ids beyond its own: everything here has
-// already passed its kind's read rule, and a field is on a hit only because
-// the page shows it.
+// already passed its kind's read rule, and a field is on a hit only because a
+// front door shows it, or needs it to reach the row or to decide how to read
+// it — a doc hit's `chars` (docs/MCP.md §14). The page ignores what it
+// doesn't show.
 
 import type { Role } from "@/generated/prisma/enums";
 import type { PostStatus } from "@/lib/post-status";
@@ -34,6 +36,8 @@ export type DocHit = {
   title: HeadlineFragment[];
   byline: SearchByline;
   updatedAt: Date;
+  /** The doc's size in characters, `Doc.proseJsonLength`, so a reader can choose between whole and outline. */
+  chars: number;
   snippet: HeadlineFragment[];
 };
 
@@ -51,6 +55,8 @@ export type PostHit = {
 export type PdfPageHit = {
   /** 1-based, as the viewer's page box and `#page=` count. */
   page: number;
+  /** What the PDF calls the page, where it has labels worth showing; null otherwise. */
+  label: string | null;
   href: string;
   snippet: HeadlineFragment[];
 };
@@ -69,9 +75,14 @@ export type PdfHit = {
 export type AnnotationHit = {
   id: string;
   href: string;
-  container: { kind: "doc" | "pdf"; title: string };
+  container: { kind: "doc" | "pdf"; title: string; href: string };
   /** The name the annotation's card shows. */
   writer: string;
+  /** The writer's slug, for a writer with a name; null otherwise, since a nameless account's slug is made from its email. */
+  writerSlug: string | null;
+  /** The annotation it replies to, so hits group into threads; null for a thread's root. */
+  parentId: string | null;
+  status: "LIVE" | "RAISED";
   postedAt: Date;
   /** The edit readers are told about (PLAN.md §22b), or null. */
   editedAt: Date | null;

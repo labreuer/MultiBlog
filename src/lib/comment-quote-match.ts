@@ -316,3 +316,178 @@ export function matchQuoteAcross<T>(
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// docs/MCP.md §7 — the entry points a machine client's anchoring needs, built
+// from the pieces above. `findQuoteInTarget` answers with one hit at most: its
+// exact tier takes the first or the nearest of several (`pickNearest`), and a
+// comment can afford that, where an annotation's highlight cannot. So these
+// answer with *every* occurrence, verified, and leave refusing an ambiguous
+// one to the caller.
+//
+// **Only an exact match counts here.** The `ends` tier above accepts a long
+// quote whose middle differs, and stores the real text in its place; for a
+// write that would anchor a model's misremembering somewhere it didn't mean,
+// so it only ever *suggests* (`nearMisses`).
+
+/** Every occurrence of `query` in `target`, each verified against `textBetween`. */
+export function findAllExact(target: FlatTarget, query: string): QuoteMatch[] {
+  const normalizedQuery = normalizeForMatch(query).text;
+  if (!normalizedQuery) return [];
+  const found: QuoteMatch[] = [];
+  for (const start of allIndexesOf(target.text, normalizedQuery)) {
+    const hit = verifyExact(target, rangeFromFlat(target, start, start + normalizedQuery.length), normalizedQuery);
+    if (hit && !found.some((other) => other.from === hit.from && other.to === hit.to)) found.push(hit);
+  }
+  return found;
+}
+
+/**
+ * The matches whose neighbouring text agrees with a `prefix` before them or a
+ * `suffix` after, under the same folding — the W3C TextQuoteSelector's
+ * disambiguators. Compared in the flattened text, so a block boundary between
+ * the prefix and the quote reads as the space it normalizes to.
+ */
+export function filterByContext(
+  target: FlatTarget,
+  matches: QuoteMatch[],
+  context: { prefix?: string; suffix?: string },
+): QuoteMatch[] {
+  const prefix = context.prefix ? normalizeForMatch(context.prefix).text : "";
+  const suffix = context.suffix ? normalizeForMatch(context.suffix).text : "";
+  if (!prefix && !suffix) return matches;
+  return matches.filter((match) => {
+    const start = flatIndexOf(target, match.from);
+    const end = flatIndexAfter(target, match.to);
+    if (start === null || end === null) return false;
+    if (prefix && !target.text.slice(0, start).trimEnd().endsWith(prefix)) return false;
+    if (suffix && !target.text.slice(end).trimStart().startsWith(suffix)) return false;
+    return true;
+  });
+}
+
+/** The flat index of the first character at or after position `pos`. */
+function flatIndexOf(target: FlatTarget, pos: number): number | null {
+  const index = target.positions.findIndex((p) => p >= pos);
+  return index === -1 ? null : index;
+}
+
+/** The flat index just past the last character before position `pos`. */
+function flatIndexAfter(target: FlatTarget, pos: number): number | null {
+  for (let i = target.positions.length - 1; i >= 0; i--) {
+    if (target.positions[i] < pos) return i + 1;
+  }
+  return null;
+}
+
+/**
+ * A passage named by its ends (docs/MCP.md §7): from each occurrence of
+ * `start` to the end of the first occurrence of `end` after it, verified like
+ * any other hit — its folded text must begin with `start` and end with `end`.
+ * The words between are not checked here, since they weren't sent: an anchor
+ * derives its stored quote from the document, and an edit checks them against
+ * the version it was read at (§6).
+ */
+export function findByEnds(target: FlatTarget, start: string, end: string): QuoteMatch[] {
+  const head = normalizeForMatch(start).text;
+  const tail = normalizeForMatch(end).text;
+  if (!head || !tail) return [];
+  const found: QuoteMatch[] = [];
+  for (const at of allIndexesOf(target.text, head)) {
+    const tailAt = target.text.indexOf(tail, at + head.length);
+    if (tailAt === -1) continue;
+    const range = rangeFromFlat(target, at, tailAt + tail.length);
+    const quotedText = quotedTextAt(target.node, range.from, range.to);
+    const normalized = normalizeForMatch(quotedText).text;
+    if (!normalized.startsWith(head) || !normalized.endsWith(tail)) continue;
+    // A later `start` inside a passage already found is the same passage.
+    if (found.some((other) => other.from <= range.from && range.from < other.to)) continue;
+    found.push({ ...range, tier: "exact", quotedText });
+  }
+  return found;
+}
+
+/** A suggestion for a quote that matched nowhere: where something like it is, and what it says there. */
+export type NearMiss = QuoteRange & { quotedText: string };
+
+/** The `ends` tier suggests only for a quote this long once normalized. */
+export const NEAR_MISS_ENDS_MIN = 65;
+
+/**
+ * Up to `limit` places where something like `query` is, for a `no_match`
+ * answer — never an anchor. Two sources: the `ends` tier above, for a long
+ * quote whose first and last 32 characters are right; and, since a shorter
+ * quote or one wrong anywhere in either end gets nothing from that, the
+ * windows of the flattened text whose words best overlap the quote's,
+ * case folded. A window needs half the quote's words to be offered at all.
+ */
+export function nearMisses(target: FlatTarget, query: string, limit = 3): NearMiss[] {
+  const normalizedQuery = normalizeForMatch(query).text;
+  if (!normalizedQuery) return [];
+  const misses: NearMiss[] = [];
+  const add = (range: QuoteRange) => {
+    if (misses.length >= limit) return;
+    if (misses.some((other) => range.from < other.to && other.from < range.to)) return;
+    misses.push({ ...range, quotedText: quotedTextAt(target.node, range.from, range.to) });
+  };
+
+  if (normalizedQuery.length >= NEAR_MISS_ENDS_MIN) {
+    const ends = findQuoteInTarget(target, query, { tiers: ["ends"] });
+    if (ends) add(ends);
+  }
+
+  for (const window of overlapWindows(target.text, normalizedQuery, limit)) {
+    add(rangeFromFlat(target, window.start, window.end));
+  }
+  return misses;
+}
+
+/** The character trigrams of a text, letters and digits only, case folded, words kept apart by a space. */
+function trigramsOf(text: string): Set<string> {
+  const folded = ` ${[...text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map((m) => m[0]).join(" ")} `;
+  const grams = new Set<string>();
+  for (let i = 0; i + 3 <= folded.length; i++) grams.add(folded.slice(i, i + 3));
+  return grams;
+}
+
+/**
+ * The stretches of `text` most like `query`, best first and never
+ * overlapping: windows starting on a word, about as long as the query,
+ * scored by the share of the query's character trigrams they hold. Trigrams
+ * rather than whole words, so a misremembered word ("egotism" for "egoism")
+ * still counts for most of itself, and a window of common words ("of the")
+ * counts for little. A window needs half the query's trigrams to be offered.
+ * Offsets into `text`. What `nearMisses` offers a quote that matched nowhere,
+ * and the PDF locator's equivalent over a page.
+ */
+export function overlapWindows(
+  text: string,
+  query: string,
+  limit: number,
+): { start: number; end: number; score: number }[] {
+  const wanted = trigramsOf(query);
+  if (wanted.size === 0) return [];
+  const words = [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ start: m.index!, end: m.index! + m[0].length }));
+  const length = [...query.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => m[0]).join(" ").length;
+  const scored: { start: number; end: number; score: number }[] = [];
+  let last = 0;
+  for (let first = 0; first < words.length; first++) {
+    if (last < first) last = first;
+    // The last word whose end is nearest the query's length from here.
+    while (last + 1 < words.length && words[last + 1].end - words[first].start <= length) last++;
+    const start = words[first].start;
+    const end = words[last].end;
+    const grams = trigramsOf(text.slice(start, end));
+    let shared = 0;
+    for (const gram of wanted) if (grams.has(gram)) shared++;
+    scored.push({ start, end, score: shared / wanted.size });
+  }
+  scored.sort((a, b) => b.score - a.score || a.start - b.start);
+  const windows: { start: number; end: number; score: number }[] = [];
+  for (const window of scored) {
+    if (window.score < 0.5 || windows.length >= limit) break;
+    if (windows.some((w) => window.start < w.end && w.start < window.end)) continue;
+    windows.push(window);
+  }
+  return windows;
+}

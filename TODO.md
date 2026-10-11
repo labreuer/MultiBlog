@@ -168,8 +168,6 @@ Not yet done:
 - **Semantic search** (FULLTEXT.md §10, item 7) is undecided: hosted Voyage embeddings or an
   open-weights batch on a desktop, and either way option B's passages and pgvector first.
 - **Firefox and WebKit** haven't run `search.spec.ts`; only chromium has.
-- **The MCP server's `search` tool** ([docs/MCP.md](docs/MCP.md) §14) waits on the MCP server
-  itself.
 
 ## PDF fragment links: what is left (docs/PDF_FRAGMENT_LINKS.md)
 
