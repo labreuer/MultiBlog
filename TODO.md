@@ -1247,6 +1247,36 @@ Whatever lands, keep the two tests as they are: they are the only thing that see
 
 ---
 
+## An unpublished post can still answer 200 for up to a minute
+
+**Status:** seen once, 2026-10-11: `publish.spec.ts:326` ("unpublishing takes the post back to a
+404") got a 200 in a full chromium run on the prod target (371 passed, 1 failed, on the MCP
+search PR's branch, which touches neither publishing nor the post page). A rerun of the spec three
+times passed. Not investigated beyond that.
+
+The test unpublishes through the edit page, waits for "Unpublished.", then visits the post's
+public path. `unpublishPost` (`src/app/actions/posts.ts`) revalidates that path
+(`revalidatePublicPaths`), and the post page is statically generated with `revalidate = 60`, so a
+200 means a cached render from before the unpublish was served after it.
+
+**The likely mechanism** is the one `freshGotoComment` (`e2e/fixtures.ts`) works around for
+seeded comments: a render of the page already under way when the path is revalidated finishes
+afterwards and puts the page from before the change back in the cache, for its whole revalidate
+window. Under the suite, another worker's visit to the landing page, whose post links prefetch,
+is a ready source of such a render. If that is it, this is not only a test flake. A post
+unpublished while someone's render of it is in flight stays readable for up to 60 seconds.
+
+To decide:
+
+- **Confirm the mechanism first.** The failed run's trace would show which request rendered the
+  page last. Keep `test-results/` from the next occurrence, since a rerun replaces it.
+- **Whether the minute matters** for an unpublish.
+- **The test's fix, which isn't a retry.** If the stale page stays for the whole window, a
+  retry bounded under 60 seconds fails as well. `freshGoto`'s forced revalidation would pass
+  even if `unpublishPost` revalidated nothing.
+
+---
+
 ## `DocSettingsPanel`'s smooth scroll into view sometimes never lands on Firefox
 
 **Status:** found 2026-09-14; about 1 firefox run in 16 under load, and 3 of 20 targeted
