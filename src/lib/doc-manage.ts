@@ -113,7 +113,11 @@ export async function setDocSlug(actor: Actor, docId: string, slug: string): Pro
   try {
     return await changeDocSlug(docId, slug, actor.userId);
   } catch (err) {
-    throw new ApiError("conflict", err instanceof Error ? err.message : "That slug is in use.");
+    // changeDocSlug's own refusals (taken, gone) are plain Errors written
+    // for the reader. Anything else, a Prisma rejection included, is a
+    // fault, and its message is no answer to give.
+    if (err instanceof Error && err.name === "Error") throw new ApiError("conflict", err.message);
+    throw err;
   }
 }
 

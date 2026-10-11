@@ -47,7 +47,11 @@ export async function setFileSlug(actor: Actor, fileId: string, slug: string): P
   try {
     return await changeFileSlug(fileId, slug, actor.userId);
   } catch (err) {
-    throw new ApiError("conflict", err instanceof Error ? err.message : "That slug is in use.");
+    // changeFileSlug's own refusals (taken, gone) are plain Errors written
+    // for the reader. Anything else, a Prisma rejection included, is a
+    // fault, and its message is no answer to give.
+    if (err instanceof Error && err.name === "Error") throw new ApiError("conflict", err.message);
+    throw err;
   }
 }
 
