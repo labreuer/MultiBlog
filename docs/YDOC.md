@@ -188,7 +188,9 @@ Each request carries a ydoc token (`src/lib/ydoc-token.ts`) that Next mints for 
 after authorizing the write, and every handler checks it with **`verifyAdminToken`**
 (`server/ydoc-hooks.ts`):
 
-- **Signature and expiry.**
+- **Signature, expiry and audience.** The audience is `multiblog:ydoc`. The MCP server's byte
+  grants (`src/lib/api/grants.ts`) are signed with the same `AUTH_SECRET`, and each kind
+  requires its own audience, so neither passes for the other.
 - **The document**, which must be the one the request names.
 - **Writable.** A read-only token is what the token routes give a reader's browser for its
   websocket, so it never authorizes a write here, even one made on a reader's behalf:

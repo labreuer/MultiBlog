@@ -379,7 +379,8 @@ the deliverability argument, and the invite feature: [docs/EMAIL.md](docs/EMAIL.
 
 `AUTH_SECRET` also signs the short-lived ydoc tokens the collab server checks
 (`src/lib/ydoc-token.ts`), so the app and collab services **must share the same value** — both
-units point at this one `.env`.
+units point at this one `.env`. It signs the MCP server's byte grants too
+(`src/lib/api/grants.ts`), which only the app checks.
 
 ---
 

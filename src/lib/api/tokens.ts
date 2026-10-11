@@ -3,7 +3,8 @@ import type { ApiScope, ApiTokenClient, Role } from "@/generated/prisma/enums";
 import { prisma, type TransactionClient } from "@/lib/prisma";
 
 // docs/MCP.md §3 — API tokens: issuing one, and the one check that
-// authenticates every request to the MCP endpoint.
+// authenticates every request to the MCP endpoint and its byte routes,
+// whether the request carries the token or a grant made from it.
 //
 // Server-only (node:crypto, Prisma).
 
@@ -89,6 +90,11 @@ export function bearerSecret(request: Request): string | null {
 export async function authenticateSecret(secret: string): Promise<AuthenticatedToken | null> {
   if (!secret.startsWith(TOKEN_SECRET_PREFIX)) return null;
   return authenticate({ tokenHash: hashTokenSecret(secret) });
+}
+
+/** §3's one check, from a token id a byte grant carries (src/lib/api/grants.ts). */
+export async function authenticateTokenId(id: string): Promise<AuthenticatedToken | null> {
+  return authenticate({ id });
 }
 
 /**

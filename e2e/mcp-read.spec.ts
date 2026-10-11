@@ -1,14 +1,17 @@
-import { test, expect, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
+import { test, expect, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   ADMIN_EMAIL,
   appendTestDocParagraph,
+  createComment,
   createTestAnchoredLink,
   createTestAnnotation,
   createTestDoc,
+  createTestFile,
   createTestTag,
   createTestUser,
   deleteTestAnchoredLink,
   deleteTestDoc,
+  deleteTestFile,
   deleteTestTag,
   deleteTestUser,
   renameTestTagSlug,
@@ -16,8 +19,10 @@ import {
   softDeleteTestUser,
   tagWithTestTag,
   uniqueEmail,
+  uniqueTitle,
 } from "./db";
 import { callTool, createAgent, mcpRequest } from "./mcp";
+import { readTar } from "../src/lib/tar";
 
 // docs/MCP.md, phase 1 (§18): tokens, the endpoint, and every read — driven
 // from below the UI through Playwright's `request` fixture, as a machine
@@ -52,7 +57,7 @@ test("a token authenticates, names its actor and issuer, and lists only what its
       _meta: Record<string, unknown>;
       annotations: Record<string, unknown>;
     }[];
-    expect(readerTools.map((t) => t.name)).toEqual(["search", "read", "find_users", "find_tags"]);
+    expect(readerTools.map((t) => t.name)).toEqual(["search", "read", "find_users", "find_tags", "download_url"]);
     const read = readerTools.find((t) => t.name === "read")!;
     expect(read._meta["anthropic/alwaysLoad"]).toBe(true);
     expect(read._meta["anthropic/maxResultSizeChars"]).toBe(200000);
@@ -77,17 +82,25 @@ test("a token authenticates, names its actor and issuer, and lists only what its
   }
 });
 
-test("a deleted account's token stops working, and restoring the account doesn't bring it back", async ({ request }) => {
+test("a deleted account's token and its grants stop working, and restoring the account brings neither back", async ({ request }) => {
   const agent = await createAgent(request);
+  const file = await createTestFile({ ownerEmail: agent.user.email });
   try {
     expect((await agent.call("search", { q: "anything", exact: true })).isError).toBe(false);
+    const grant = await agent.call("download_url", { file: `/pdf/${file.slug}` });
+    expect(grant.isError).toBe(false);
+    const url = String(grant.result.url);
+    expect((await request.get(url)).status()).toBe(200);
 
     await softDeleteTestUser(agent.user.email, ADMIN_EMAIL);
     expect((await mcpRequest(request, agent.secret, "tools/list")).status).toBe(401);
+    expect((await request.get(url)).status()).toBe(401);
 
     await restoreTestUser(agent.user.email);
     expect((await mcpRequest(request, agent.secret, "tools/list")).status).toBe(401);
+    expect((await request.get(url)).status()).toBe(401);
   } finally {
+    await deleteTestFile(file.id);
     await agent.dispose();
   }
 });
@@ -222,6 +235,50 @@ test("reading a doc: whole, its outline, a section, blocks, around a quote, text
   }
 });
 
+test("reading a PDF: the file with its labels and outline, pages, around a quote, and a fragment link as its passage", async ({ request }) => {
+  const agent = await createAgent(request, { scopes: ["READ"] });
+  const file = await createTestFile({
+    ownerEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    pages: [["Front matter page."], ["The first chapter opens here.", "Distinctive phrase: xylophone marmalade."], ["Second chapter text."]],
+    pageLabels: [{ from: 1, style: "r" }, { from: 2, style: "D" }],
+    outline: [{ title: "Chapter one", page: 2 }, { title: "Chapter two", page: 3 }],
+  });
+  try {
+    const meta = await agent.call("read", { url: `/pdf/${file.slug}` });
+    expect(meta.result).toMatchObject({ kind: "pdf", id: file.id, pages: 3 });
+    expect(meta.result.labels).toEqual([
+      { sheets: "1", labels: "i" },
+      { sheets: "2-3", labels: "1-2" },
+    ]);
+    expect((meta.result.outline as { entries: unknown[] }).entries).toEqual([
+      { depth: 1, title: "Chapter one", page: 2, label: "1", pages: 1 },
+      { depth: 1, title: "Chapter two", page: 3, label: "2", pages: 1 },
+    ]);
+
+    const page = await agent.call("read", { url: `/pdf/${file.slug}#page=2` });
+    expect((page.result.pages as { page: number; label: string; text: string }[])[0]).toMatchObject({ page: 2, label: "1" });
+    const byLabel = await agent.call("read", { url: `/pdf/${file.slug}`, label: "2" });
+    expect((byLabel.result.pages as { page: number }[]).map((p) => p.page)).toEqual([3]);
+    const entry = await agent.call("read", { url: `/pdf/${file.slug}`, entry: "Chapter two" });
+    expect((entry.result.pages as { text: string }[])[0].text).toContain("Second chapter");
+
+    const around = await agent.call("read", { url: `/pdf/${file.slug}`, around: "xylophone marmalade" });
+    expect(around.result).toMatchObject({ kind: "pdf-around", total: 1 });
+    expect((around.result.occurrences as { page: number; text: string }[])[0]).toMatchObject({ page: 2, text: "xylophone marmalade" });
+
+    const passage = await agent.call("read", { url: `/pdf/${file.slug}#page=2&text=xylophone%20marmalade` });
+    expect(passage.result.kind).toBe("pdf-passages");
+    expect((passage.result.passages as { text: string; before: string }[])[0]).toMatchObject({ text: "xylophone marmalade" });
+    const missed = await agent.call("read", { url: `/pdf/${file.slug}#page=3&text=xylophone%20marmalade` });
+    expect(missed.error.code).toBe("no_match");
+    expect(missed.error.foundOnPage).toBe(2);
+  } finally {
+    await deleteTestFile(file.id);
+    await agent.dispose();
+  }
+});
+
 test("annotation threads: on a doc, filtered, at /annotations, and one alone by id and by its card", async ({ request, sharedDoc }) => {
   const agent = await createAgent(request, { scopes: ["READ"] });
   const otherEmail = uniqueEmail("mcp-other");
@@ -295,6 +352,35 @@ test("a link reads as its parts, and a doc lists the links into it", async ({ re
   }
 });
 
+test("a post, its comments, and a comment with its history", async ({ request, publishedPost }) => {
+  const agent = await createAgent(request, { scopes: ["READ"] });
+  const comment = await createComment({
+    postId: publishedPost.id,
+    anchoredEventId: publishedPost.eventId!,
+    email: uniqueEmail("mcp-commenter"),
+    displayName: "Jane Commenter",
+    body: "A public comment.",
+    status: "APPROVED",
+  });
+  try {
+    const post = await agent.call("read", { url: publishedPost.path, include: ["comments"] });
+    expect(post.result).toMatchObject({ kind: "post", url: publishedPost.path, status: "published", byline: "E2E Admin" });
+    // A post's byline grants nothing over its doc, and an AUTHOR who isn't on
+    // a PRIVATE doc's byline can't read it, so it isn't named.
+    expect(post.result).not.toHaveProperty("doc");
+    const threads = post.result.comments as { comments: { url: string; by: string; body: string }[] }[];
+    const listed = threads.flatMap((t) => t.comments);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ by: "Jane Commenter", body: "A public comment." });
+
+    const one = await agent.call("read", { url: listed[0].url, history: true });
+    expect(one.result).toMatchObject({ kind: "comment", id: comment.id, by: "Jane Commenter" });
+    expect((one.result.history as unknown[]).length).toBe(1);
+  } finally {
+    await agent.dispose();
+  }
+});
+
 test("a tag reads with what carries it, and keeps reading under a past slug", async ({ request, sharedDoc }) => {
   const agent = await createAgent(request, { scopes: ["READ"] });
   const tag = await createTestTag({ creatorEmail: ADMIN_EMAIL, description: "For the MCP spec." });
@@ -312,6 +398,51 @@ test("a tag reads with what carries it, and keeps reading under a past slug", as
     expect((found.result.tags as { slug: string }[]).map((t) => t.slug)).toContain(renamed);
   } finally {
     await deleteTestTag(tag.id);
+    await agent.dispose();
+  }
+});
+
+test("download_url: a file's bytes and the export, through a grant and never the token", async ({ request }) => {
+  const agent = await createAgent(request, { scopes: ["READ"] });
+  const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+  const tag = await createTestTag({ creatorEmail: ADMIN_EMAIL });
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", title: uniqueTitle("export"), bodyText: QUOTED_BODY });
+  try {
+    await tagWithTestTag({ tagId: tag.id, target: { kind: "doc", id: doc.id }, taggerEmail: ADMIN_EMAIL });
+
+    const download = await agent.call("download_url", { file: `/pdf/${file.slug}` });
+    const bytes = await request.get(String(download.result.url));
+    expect(bytes.status()).toBe(200);
+    expect(bytes.headers()["content-type"]).toBe("application/pdf");
+    expect((await bytes.body()).length).toBe(file.byteSize);
+    // A grant opens its one route: the same grant on another file's route is refused.
+    const elsewhere = String(download.result.url).replace(`/api/mcp/files/${file.id}`, "/api/mcp/files/cnotthisfile0000000000000");
+    expect((await request.get(elsewhere)).status()).toBe(401);
+
+    const exportUrl = String((await agent.call("download_url", { export: true })).result.url);
+    const catalog = await request.get(`${exportUrl}&catalog=1&tags=${tag.slug}`);
+    expect(catalog.status()).toBe(200);
+    const entries = (await catalog.json()).docs as { id: string; slug: string; version: string; chars: number }[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ id: doc.id, slug: doc.slug });
+    expect(entries[0].version).toMatch(/^\d+$/);
+
+    const tar = await request.get(`${exportUrl}&tags=${tag.slug}`);
+    const files = readTar(new Uint8Array(await tar.body()));
+    expect(files.get(`${doc.id}.md`)).toContain(QUOTED_BODY);
+    expect(files.get(`${doc.id}.md`)).toContain(`id: ${doc.id}`);
+    expect(JSON.parse(files.get("manifest.json")!).docs[0]).toMatchObject({ id: doc.id, tags: [tag.slug] });
+
+    const listed = await request.post(exportUrl, { data: { docs: [`/doc/${doc.slug}`, "/doc/no-such-doc"] } });
+    const listedFiles = readTar(new Uint8Array(await listed.body()));
+    expect(JSON.parse(listedFiles.get("manifest.json")!).missing).toEqual(["/doc/no-such-doc"]);
+
+    const badFilter = await request.get(`${exportUrl}&kinds=pdfs`);
+    expect(badFilter.status()).toBe(400);
+  } finally {
+    await deleteTestTag(tag.id);
+    await deleteTestDoc(doc.id);
+    await deleteTestFile(file.id);
     await agent.dispose();
   }
 });

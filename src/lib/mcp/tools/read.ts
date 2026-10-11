@@ -6,11 +6,14 @@ import { displayNameOf } from "@/lib/display-name";
 import type { DocState } from "@/lib/doc-state";
 import type { BlockSpan } from "@/lib/doc-text";
 import { defineTool, type McpContext, type ToolResult } from "../tool";
-import { parse, readableDocByParam, refuseRef } from "../resolve";
+import { parse, readableDocByParam, readableFileBySlug, refuseRef } from "../resolve";
+import { isViewerFragment } from "../url";
 import { MAX_READ_CHARS, readInput, type ReadArgs } from "../read/args";
 import { readDoc } from "../read/doc";
+import { readPdf } from "../read/pdf";
 import { allThreads, annotationByFragment, containerThreads, oneThread } from "../read/threads";
 import { linksInto, readLink } from "../read/links";
+import { readPost } from "../read/posts";
 import { runSearch } from "./search";
 
 // docs/MCP.md §15, "What `read` takes" — any MultiBlog URL on this instance,
@@ -84,16 +87,20 @@ async function readAuthor(ctx: McpContext, slug: string): Promise<ToolResult> {
   return { kind: "author", url: `/authors/${user.slug}`, name: displayNameOf(user), slug: user.slug, ...listing };
 }
 
-/** A bare id: an annotation's thread, a link or a doc — whichever kind holds it. */
+/** A bare id: an annotation's thread, a link, a doc, a file or a post — whichever kind holds it. */
 async function readById(ctx: McpContext, id: string, args: ReadArgs): Promise<ToolResult> {
-  const [annotation, link, doc] = await Promise.all([
+  const [annotation, link, doc, file, post] = await Promise.all([
     prisma.annotation.findUnique({ where: { id }, select: { id: true } }),
     prisma.anchoredLink.findUnique({ where: { id }, select: { id: true } }),
     prisma.doc.findUnique({ where: { id }, select: { id: true } }),
+    prisma.storedFile.findUnique({ where: { id }, select: { id: true } }),
+    prisma.post.findUnique({ where: { id }, select: { id: true } }),
   ]);
   if (annotation) return oneThread(ctx, id, args);
   if (link) return readLink(ctx, id);
   if (doc) return readDocRef(ctx, id, "", args);
+  if (file) return readFileRef(ctx, id, "", args);
+  if (post) return readPost(ctx, { id }, "", args);
   throw notFound("Anything with that id");
 }
 
@@ -105,6 +112,16 @@ async function readDocRef(ctx: McpContext, param: string, fragment: string, args
     return oneThread(ctx, id, args);
   }
   return readDoc(ctx, doc, args, (state, span) => containerExtras(ctx, { kind: "doc", id: doc.id, state }, args, span));
+}
+
+async function readFileRef(ctx: McpContext, slug: string, fragment: string, args: ReadArgs): Promise<ToolResult> {
+  const file = await readableFileBySlug(ctx.actor, slug);
+  if (fragment && !isViewerFragment(fragment)) {
+    const id = await annotationByFragment({ fileId: file.id }, fragment);
+    if (!id) throw notFound("An annotation with that card fragment");
+    return oneThread(ctx, id, args);
+  }
+  return readPdf(ctx, file, args, fragment, () => containerExtras(ctx, { kind: "file", id: file.id }, args, null));
 }
 
 export const readTool = defineTool({
@@ -125,14 +142,17 @@ export const readTool = defineTool({
       case "doc":
         return readDocRef(ctx, parsed.param, parsed.fragment, args);
       case "pdf":
+        return readFileRef(ctx, parsed.slug, parsed.fragment, args);
       case "file":
-      case "post":
-      case "post-id":
-        throw invalid("This server doesn't read PDFs, files or posts yet.");
+        return readFileRef(ctx, parsed.slug, "", args);
       case "annotations":
         return allThreads(ctx, args);
       case "link":
         return readLink(ctx, parsed.id);
+      case "post":
+        return readPost(ctx, { slug: parsed.slug }, parsed.fragment, args);
+      case "post-id":
+        return readPost(ctx, { id: parsed.id }, parsed.fragment, args);
       case "tag":
         return readTag(ctx, parsed.slug);
       case "author":
