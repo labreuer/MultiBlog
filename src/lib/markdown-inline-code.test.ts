@@ -2,8 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JSONContent } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
-import { commentContentToMarkdown, markdownToCommentContent } from "./markdown-import";
-import { pmCommentContentSchema } from "./tiptap-schema";
+import {
+  annotationContentToMarkdown,
+  commentContentToMarkdown,
+  docContentToMarkdown,
+  markdownToAnnotationContent,
+  markdownToBlocks,
+  markdownToCommentContent,
+} from "./markdown-import";
+import { pmAnnotationContentSchema, pmCommentContentSchema, pmDocContentSchema } from "./tiptap-schema";
 
 // docs/TIPTAP.md "Inline code takes other marks" — inline code with other
 // marks on all or part of it, through each Markdown exporter and back. The
@@ -36,7 +43,9 @@ const cases: Record<string, JSONContent[]> = {
 };
 
 const exporters: [string, Schema, (json: JSONContent) => string, (markdown: string) => JSONContent][] = [
+  ["doc", pmDocContentSchema, docContentToMarkdown, (md) => ({ type: "doc", content: markdownToBlocks(md) })],
   ["comment", pmCommentContentSchema, commentContentToMarkdown, markdownToCommentContent],
+  ["annotation", pmAnnotationContentSchema, annotationContentToMarkdown, markdownToAnnotationContent],
 ];
 
 for (const [kind, schema, toMarkdown, fromMarkdown] of exporters) {
@@ -52,7 +61,7 @@ for (const [kind, schema, toMarkdown, fromMarkdown] of exporters) {
 
 test("a split code span's other marks sit outside its backticks", () => {
   const json = { type: "doc", content: [{ type: "paragraph", content: cases["code bolded at its start"] }] };
-  assert.equal(commentContentToMarkdown(json), "Run **`wf`**`_1234` first.");
+  assert.equal(docContentToMarkdown(json), "Run **`wf`**`_1234` first.");
   // A quotation around code, in a comment: the quotes stay outside, as the matcher reads them.
   const quoted = { type: "doc", content: [{ type: "paragraph", content: [t("wf_1234", { type: "quote", attrs: { anchorId: "q1" } }, code)] }] };
   assert.equal(commentContentToMarkdown(quoted), '"`wf_1234`"');

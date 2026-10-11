@@ -4,14 +4,13 @@ import { slugify } from "@/lib/slug";
 // PLAN.md §20c — tag slugs, with **their own uniqueness namespace**: a
 // tag, a doc, a file and a post may all carry the same slug and resolve to
 // four different URLs, since /tag/*, /doc/*, /pdf/* and /yyyy/mm/dd/* can't
-// collide. So `tagSlugInUse` checks `tag` and nothing else.
+// collide. So `tagSlugInUse` checks `tag` and its history, and nothing else.
 //
-// **No slug history table in v1**, deliberately (§20i). Docs, posts, files and
-// users each have one because their URLs are shared outward and a rename must
-// not break an inbound link; a tag's browse page is an internal navigation
-// aid before it is a citable address. Renaming one breaks inbound /tag/…
-// links until it earns a history table, and the named trigger condition for
-// building one is the first time a tag URL is shared somewhere durable.
+// **A re-slugged term keeps its old slug in `tag_slug_history`**
+// (docs/MCP.md §11), the shape of the other four kinds' histories: an MCP
+// client holds `/tag/<slug>` URLs from earlier reads, and /tag/[slug] follows
+// a past slug as the other reading routes follow theirs. A slug in history
+// stays reserved, so it never comes to name another term.
 //
 // The uniqueness Prisma *cannot* express is the important half: a hand-written
 // `CREATE UNIQUE INDEX … ON tag (lower(name))` in add_tags, because
@@ -23,11 +22,17 @@ async function tagSlugInUse(slug: string, excludeTagId?: string): Promise<boolea
   // it: a slug stays DB-unique even for a soft-deleted row, so pretending one
   // is free would trade a friendly "already exists" for a raw P2002 at create
   // time.
-  const live = await prismaIncludingDeleted.tag.findFirst({
-    where: excludeTagId ? { slug, id: { not: excludeTagId } } : { slug },
-    select: { id: true },
-  });
-  return live !== null;
+  const [live, historic] = await Promise.all([
+    prismaIncludingDeleted.tag.findFirst({
+      where: excludeTagId ? { slug, id: { not: excludeTagId } } : { slug },
+      select: { id: true },
+    }),
+    prismaIncludingDeleted.tagSlugHistory.findFirst({
+      where: excludeTagId ? { slug, tagId: { not: excludeTagId } } : { slug },
+      select: { id: true },
+    }),
+  ]);
+  return live !== null || historic !== null;
 }
 
 export async function uniqueTagSlug(name: string, excludeTagId?: string): Promise<string> {
@@ -62,4 +67,33 @@ export async function tagNameInUse(name: string, excludeTagId?: string): Promise
     select: { id: true },
   });
   return existing !== null;
+}
+
+/**
+ * Changes a term's slug, recording the old one in TagSlugHistory so its
+ * `/tag/…` URL still lands (docs/MCP.md §11) — changeDocSlug's twin. A slug
+ * this term held before comes back out of its history rather than being
+ * refused. No-ops when the slug is unchanged.
+ */
+export async function changeTagSlug(tagId: string, slugInput: string): Promise<string> {
+  const slug = slugify(slugInput, "tag");
+  return prismaIncludingDeleted.$transaction(async (tx) => {
+    const tag = await tx.tag.findUnique({ where: { id: tagId }, select: { slug: true } });
+    if (!tag) throw new Error("Tag not found.");
+    if (tag.slug === slug) return slug;
+    if (await tagSlugInUse(slug, tagId)) throw new Error(`The slug "${slug}" is already in use.`);
+    await tx.tagSlugHistory.deleteMany({ where: { tagId, slug } });
+    await tx.tagSlugHistory.create({ data: { tagId, slug: tag.slug } });
+    await tx.tag.update({ where: { id: tagId }, data: { slug } });
+    return slug;
+  });
+}
+
+/** The term a past slug now belongs to, for /tag/[slug]'s miss: its current slug, or null. */
+export async function tagSlugFromHistory(slug: string): Promise<string | null> {
+  const entry = await prismaIncludingDeleted.tagSlugHistory.findUnique({
+    where: { slug },
+    select: { tag: { select: { slug: true, deletedAt: true } } },
+  });
+  return entry && entry.tag.deletedAt === null ? entry.tag.slug : null;
 }

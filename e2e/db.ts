@@ -371,4 +371,8 @@ export const createTestApiToken = (...args: Parameters<DbHandlers["createTestApi
 export const softDeleteTestUser = (...args: Parameters<DbHandlers["softDeleteTestUser"]>) =>
   call("softDeleteTestUser", ...args);
 export const restoreTestUser = (...args: Parameters<DbHandlers["restoreTestUser"]>) => call("restoreTestUser", ...args);
+export const appendTestDocParagraph = (...args: Parameters<DbHandlers["appendTestDocParagraph"]>) =>
+  call("appendTestDocParagraph", ...args);
+export const renameTestTagSlug = (...args: Parameters<DbHandlers["renameTestTagSlug"]>) =>
+  call("renameTestTagSlug", ...args);
 export const getDocMarkFacts = (...args: Parameters<DbHandlers["getDocMarkFacts"]>) => call("getDocMarkFacts", ...args);

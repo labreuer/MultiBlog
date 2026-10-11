@@ -34,7 +34,7 @@ import { postPath } from "@/lib/post-path";
 import { derivePostStatus } from "@/lib/post-status";
 import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
 import { changeFileSlug, uniqueFileSlug } from "@/lib/file-slug";
-import { uniqueTagSlug } from "@/lib/tag-slug";
+import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
@@ -60,6 +60,7 @@ import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
+import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
@@ -2389,6 +2390,13 @@ export async function getDocMarkFacts(docId: string): Promise<{
   };
 }
 
+/** Re-slugs a test term through changeTagSlug, so the old slug lands in tag_slug_history as /tags' rename leaves it. */
+export async function renameTestTagSlug(tagId: string, slug: string): Promise<string> {
+  const tag = await prisma.tag.findUniqueOrThrow({ where: { id: tagId }, select: { createdBy: { select: { email: true } } } });
+  assertSafe(tag.createdBy.email);
+  return changeTagSlug(tagId, slug);
+}
+
 /** Soft-deletes an account through the body /users' Delete runs (src/lib/user-delete.ts). */
 export async function softDeleteTestUser(email: string, byEmail: string): Promise<void> {
   assertSafe(email);
@@ -2403,6 +2411,49 @@ export async function softDeleteTestUser(email: string, byEmail: string): Promis
 export async function restoreTestUser(email: string): Promise<void> {
   assertSafe(email);
   await prismaIncludingDeleted.user.update({ where: { email }, data: { deletedByUserId: null, deletedAt: null } });
+}
+
+/**
+ * Appends a paragraph to a doc's body, written straight to its log and its
+ * row — safe only while no page has the doc open, as for createTestDoc's
+ * seed. With `authorEmail` the text carries that author's mark, as typing in
+ * the editor leaves it. Returns the update's id.
+ */
+export async function appendTestDocParagraph(opts: { docId: string; text: string; authorEmail?: string }): Promise<string> {
+  const ydocId = ydocIdForDoc(opts.docId);
+  const row = await prisma.ydoc.findUniqueOrThrow({ where: { id: ydocId }, select: { ydoc: true } });
+  const doc = await prisma.doc.findUniqueOrThrow({ where: { id: opts.docId }, select: { authors: { select: { user: { select: { email: true } } } } } });
+  if (!doc.authors.some((a) => SAFE_EMAIL.test(a.user.email))) throw new Error("appendTestDocParagraph: not a test doc.");
+  const authorId = opts.authorEmail
+    ? (await prisma.user.findUniqueOrThrow({ where: { email: opts.authorEmail }, select: { id: true } })).id
+    : null;
+
+  const scratch = new Y.Doc();
+  Y.applyUpdate(scratch, new Uint8Array(row.ydoc));
+  const before = Y.encodeStateVector(scratch);
+  const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(scratch, "default") as JSONContent;
+  const paragraph = {
+    type: "paragraph",
+    content: [
+      { type: "text", text: opts.text, ...(authorId ? { marks: [{ type: "authorHighlight", attrs: { authorId } }] } : {}) },
+    ],
+  };
+  const next = pmDocContentSchema.nodeFromJSON({ ...json, content: [...(json.content ?? []), paragraph] });
+  prosemirrorToYXmlFragment(next, scratch.getXmlFragment("default"));
+  const update = Y.encodeStateAsUpdate(scratch, before);
+  const created = await prisma.ydocUpdate.create({ data: { ydocId, update: Buffer.from(update) }, select: { id: true } });
+  const { ydoc, stateVector } = encodeYdocState(scratch);
+  const cached = docContentFromYdoc(scratch);
+  scratch.destroy();
+  await prisma.ydoc.update({
+    where: { id: ydocId },
+    data: { ydoc: Buffer.from(ydoc), stateVector: Buffer.from(stateVector), lastUpdateId: created.id },
+  });
+  await prisma.doc.update({
+    where: { id: opts.docId },
+    data: { proseJson: cached.proseJson as Prisma.InputJsonValue, proseJsonUpdateId: created.id },
+  });
+  return created.id.toString();
 }
 
 // ---------------------------------------------------------------------------
@@ -2486,6 +2537,8 @@ const handlers = {
   createTestApiToken,
   softDeleteTestUser,
   restoreTestUser,
+  appendTestDocParagraph,
+  renameTestTagSlug,
   getDocMarkFacts,
 };
 

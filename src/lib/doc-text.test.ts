@@ -14,6 +14,7 @@ import {
   sectionOf,
   textSize,
 } from "./doc-text";
+import { docContentToMarkdown, markdownToDocContent, markdownToText } from "./markdown-import";
 
 // docs/MCP.md §6 — a doc as a machine client reads it: the text form, block
 // numbers, the outline's sizes, leads and depth, sections, and the passages
@@ -160,4 +161,31 @@ test("search sections end at the next heading of any level and split long runs o
     { from: 1, to: 1 },
     { from: 2, to: 2 },
   ]);
+});
+
+test("a doc's Markdown drops the marks Markdown can't say and re-parses to the same body", () => {
+  const marked = {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "kept ", marks: [{ type: "authorHighlight", attrs: { authorId: "u1" } }] },
+          { type: "text", text: "bold", marks: [{ type: "bold" }, { type: "annotation", attrs: { id: "a1" } }] },
+        ],
+      },
+    ],
+  };
+  const markdown = docContentToMarkdown(marked);
+  assert.equal(markdown.trim(), "kept **bold**");
+  assert.deepEqual(markdownToDocContent(markdown).body, {
+    type: "doc",
+    content: [{ type: "paragraph", content: [text("kept "), { type: "text", text: "bold", marks: [{ type: "bold" }] }] }],
+  });
+});
+
+test("markdownToText is the text a doc made from the Markdown would hold, with no title taken", () => {
+  assert.equal(markdownToText("the **key** claim"), "the key claim");
+  assert.equal(markdownToText("[the paper](/link/abc) says"), "the paper says");
+  assert.equal(markdownToText("# Heading\n\nbody"), "Heading\nbody");
 });
