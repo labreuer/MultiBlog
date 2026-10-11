@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect, freshGoto, selectTextInBody } from "./fixtures";
+import { test, expect, freshGoto, selectTextInBody, freshGotoComment } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createComment,
@@ -44,7 +44,7 @@ test.describe("quoting into a comment", () => {
       displayName: "Quoter",
       markdown: `> ${POST_BODY}\n\nIndeed it does.`,
     });
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, id);
     const quote = card(page, id).locator("blockquote[data-anchor-id]");
     await expect(quote).toContainText(POST_BODY);
     await expect(quote.locator("footer")).toContainText(publishedPost.title);
@@ -83,7 +83,7 @@ test.describe("quoting into a comment", () => {
       // stores the source's words (§23f), so the reader sees them corrected.
       markdown: `> Precision matters more than speed in this argumnet, evrey single time, without any exception at all.\n\nAgreed.`,
     });
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, id);
     const quote = card(page, id).locator("blockquote[data-anchor-id]");
     await expect(quote).toContainText(original);
     await expect(quote).not.toContainText("argumnet");
@@ -104,7 +104,7 @@ test.describe("quoting into a comment", () => {
       displayName: "Quoter",
       markdown: `> Something nobody on this page has written, from a book.\n\nA thought.`,
     });
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, id);
     const quote = card(page, id).locator("blockquote");
     await expect(quote).toContainText("from a book");
     await expect(quote).not.toHaveAttribute("data-anchor-id", /.+/);
@@ -119,7 +119,7 @@ test.describe("quoting into a comment", () => {
       displayName: "Quoter",
       markdown: `The line "jumps over the lazy dog" is the whole point.`,
     });
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, id);
     const q = card(page, id).locator("q[data-anchor-id]");
     await expect(q).toHaveText("jumps over the lazy dog");
     await expect(q).toHaveAttribute("title", publishedPost.title);
@@ -151,7 +151,7 @@ test.describe("quoting into a comment", () => {
 
     // The author edits the quoted words away, well inside the three-minute
     // window — which would be silent (§22b) if nothing quoted the version.
-    await authorPage.goto(publishedPost.path);
+    await freshGotoComment(authorPage, publishedPost.path, quotedId);
     const own = card(authorPage, quotedId);
     await own.getByRole("button", { name: "Edit" }).click();
     const box = own.getByRole("textbox", { name: "Edit comment" });
@@ -160,7 +160,7 @@ test.describe("quoting into a comment", () => {
     await own.getByRole("button", { name: "Save" }).click();
     await expect(box).toHaveCount(0);
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, quotingId);
     // The quoted comment shows its history despite the edit being inside the window.
     await expect(card(page, quotedId).getByRole("button", { name: /earlier versions/ })).toBeVisible();
     // The quoting comment keeps the words it quoted and says the source moved on.
@@ -203,10 +203,10 @@ test.describe("quoting into a comment", () => {
       body: parentText,
       status: "APPROVED",
     });
-    // freshGoto: that comment went straight into the database, so the post
-    // page's ISR entry knows nothing about it, and the selection below has
-    // nothing to land in.
-    await freshGoto(page, publishedPost.path);
+    // freshGotoComment: that comment went straight into the database, so the
+    // post page's ISR entry knows nothing about it, and the selection below
+    // has nothing to land in.
+    await freshGotoComment(page, publishedPost.path, parentId);
     // Rich mode, remembered for this context, so the reply form opens rich
     // and the gesture inserts an anchored blockquote with a pending hint.
     await page.getByRole("button", { name: "Rich text" }).click();
@@ -292,7 +292,7 @@ test.describe("quoting from elsewhere", () => {
         markdown: `> migratory birds and their long journeys south\n\nFrom the other piece.`,
         pending: [{ target: { kind: "post", id: other.id }, text: "migratory birds and their long journeys south" }],
       });
-      await freshGoto(page, publishedPost.path);
+      await freshGotoComment(page, publishedPost.path, id);
       const quote = card(page, id).locator("blockquote[data-anchor-id]");
       await expect(quote).toContainText("migratory birds");
       await expect(quote.locator("footer a")).toHaveAttribute("href", other.path!);
@@ -323,7 +323,7 @@ test.describe("quoting from elsewhere", () => {
       });
       await unpublishTestPost(other.id);
 
-      await freshGoto(page, publishedPost.path);
+      await freshGotoComment(page, publishedPost.path, id);
       const quote = card(page, id).locator("blockquote[data-anchor-id]");
       await expect(quote).toContainText("migratory birds");
       await expect(quote.locator("footer")).toContainText("a source that is no longer available");
@@ -343,7 +343,7 @@ test.describe("quoting from elsewhere", () => {
         displayName: "Quoter",
         markdown: `> migratory birds and their long journeys south\n\nFrom the other piece.`,
       });
-      await freshGoto(page, publishedPost.path);
+      await freshGotoComment(page, publishedPost.path, id);
       await expect(card(page, id).locator("blockquote")).toContainText("migratory birds");
       expect(await getCommentQuoteFacts(id)).toHaveLength(0);
     } finally {
@@ -418,7 +418,7 @@ test.describe("quoting a PDF", () => {
         markdown: `> Page one of a throwaway PDF.\n\nFrom a file nobody may quote yet.`,
         pending: [{ id: "pending:file-probe", target: { kind: "file", id: file.id }, text: "Page one of a throwaway PDF." }],
       });
-      await freshGoto(page, publishedPost.path);
+      await freshGotoComment(page, publishedPost.path, id);
       const quote = card(page, id).locator("blockquote");
       await expect(quote).toContainText("Page one of a throwaway PDF.");
       await expect(quote).not.toHaveAttribute("data-anchor-id", /.+/);

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect, freshGoto } from "./fixtures";
+import { test, expect, freshGoto, freshGotoComment } from "./fixtures";
 import { createComment, getCommentFacts } from "./db";
 
 // PLAN.md §23m — the two front doors of the comment form, and what the
@@ -229,12 +229,12 @@ test.describe("comment bodies", () => {
       body: "E2E comment to be edited into shape.",
       status: "APPROVED",
     });
-    // freshGoto, not goto: the row went straight into the database, so the
+    // freshGotoComment, not goto: the row went straight into the database, so the
     // page's ISR entry — which another worker's landing-page prefetch may
     // already have filled — knows nothing about it. The failure is a page
     // reading "No comments yet." and a 60s wait for a card that is never
     // coming.
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, commentId);
     const card = page.locator(`[data-comment-id="${commentId}"]`);
     await card.getByRole("button", { name: "Edit" }).click();
     const box = card.getByRole("textbox", { name: "Edit comment" });
