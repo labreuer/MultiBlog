@@ -650,7 +650,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
-| Doc mutations (visibility, byline, slug, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
+| Doc mutations (visibility, byline, slug, record, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
 | File mutations (visibility, title, slug, delete) and the upload | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
 | Annotation create / delete / restore | `src/app/actions/annotations.ts`; delete and restore in `src/lib/annotation-manage.ts` |
 | Doc links | `src/app/actions/doc-links.ts` |

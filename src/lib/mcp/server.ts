@@ -4,6 +4,7 @@ import { ApiError, ERROR_LIST_CAP } from "@/lib/api/errors";
 import { takeRateLimit } from "@/lib/api/rate-limit";
 import type { AuthenticatedToken } from "@/lib/api/tokens";
 import { instructionsFor } from "./instructions";
+import { issueLines } from "./issues";
 import { jsonSchemaOf, type McpContext, type McpTool } from "./tool";
 import { TOOLS } from "./tools";
 
@@ -76,11 +77,11 @@ export async function callTool(tool: McpTool, rawArgs: unknown, ctx: McpContext)
   const parsed = tool.input.safeParse(rawArgs ?? {});
   if (!parsed.success) {
     audit(ctx, tool.name, "invalid", startedAt);
-    const issues = parsed.error.issues;
+    const issues = issueLines(parsed.error.issues, tool.input);
     return errorResult({
       code: "invalid",
       message: `The arguments to ${tool.name} don't fit its schema.`,
-      issues: issues.slice(0, ERROR_LIST_CAP).map((issue) => `${issue.path.join(".") || "(arguments)"}: ${issue.message}`),
+      issues: issues.slice(0, ERROR_LIST_CAP),
       ...(issues.length > ERROR_LIST_CAP ? { moreIssues: issues.length - ERROR_LIST_CAP } : {}),
     });
   }

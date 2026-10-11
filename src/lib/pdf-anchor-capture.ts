@@ -1,8 +1,9 @@
 "use client";
 
 import type { PageViewport } from "pdfjs-dist";
-import { QUOTE_CONTEXT_LENGTH, rectToQuad, type PdfTarget, type Quad } from "./pdf-anchor";
+import { rectToQuad, type PdfTarget, type Quad } from "./pdf-anchor";
 import { normalisePageText, textVersionFor, type NormalisedPage, type PdfTextItemLike } from "./pdf-text";
+import { buildQuote, normaliseNeedle } from "./pdf-quote";
 
 // PLAN.md §19 / docs/PDF.md §5 — turning a browser `Selection` (or a drag
 // rectangle) into a stored `PdfTarget`.
@@ -164,36 +165,4 @@ function locateInNormalised(page: NormalisedPage, selected: string): { start: nu
   const start = page.text.indexOf(needle);
   if (start < 0) return null;
   return { start, end: start + needle.length };
-}
-
-/**
- * The same collapse-and-trim `normalisePageText`'s final step applies, so a
- * needle taken from the DOM can be compared against a normalised haystack.
- *
- * Runs the raw string through the same normaliser by wrapping it as a single
- * synthetic text item — rather than reimplementing the pipeline — so the two
- * cannot drift. The transform matrix is a plain identity: no separator can be
- * inserted with only one item, which is exactly what is wanted here.
- */
-function normaliseNeedle(selected: string): string {
-  return normalisePageText([{ str: selected, transform: [1, 0, 0, 1, 0, 0], width: 0, height: 1 }]).text;
-}
-
-/** prefix/suffix around the match, per docs/PDF.md §2. Empty when there's no position to take them from. */
-function buildQuote(
-  pageText: string,
-  position: { start: number; end: number } | null,
-  fallbackExact: string,
-): PdfTarget["quote"] {
-  if (!position) {
-    // No position means the text wasn't found in the normalised page. The
-    // normalised *selection* is still the most honest `exact` available — it is
-    // what the reader highlighted — but there is nothing to take context from.
-    return { exact: normaliseNeedle(fallbackExact), prefix: "", suffix: "" };
-  }
-  return {
-    exact: pageText.slice(position.start, position.end),
-    prefix: pageText.slice(Math.max(0, position.start - QUOTE_CONTEXT_LENGTH), position.start),
-    suffix: pageText.slice(position.end, position.end + QUOTE_CONTEXT_LENGTH),
-  };
 }
