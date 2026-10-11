@@ -205,10 +205,9 @@ checks clean over MCP-written rows. Not merged or deployed. Not yet done:
   send a header — Claude Code — reaches the server.
 - **Issuing a token takes the script** (`scripts/create-api-token.ts`). The `/dashboard` panel
   for one's own tokens and the `/users` action for a bot's (MCP.md §3) aren't built.
-- **MCP.md §17's items 1–3 are still in the UI's annotation paths**: a reader can have the
-  server write a mark into a doc they can't edit, a client's version stamp is parsed and not
-  validated, and a reply's parent is checked for its container only. The MCP server avoids
-  all three; the actions don't.
+- **MCP.md §17's items 1–3 are still in the UI's annotation paths.** The MCP server avoids all
+  three; the actions don't. They have their own entry below, "Posting an annotation trusts
+  three things the client sends".
 - **`/dashboard`'s Recent docs lists a doc to an ineligible name already on its byline**
   (MCP.md §17, item 5's remainder). The byline actions now refuse to add one.
 - **MCP.md §19's open decisions 5–7**: a PDF Claude can't see, uploaded again, makes a second
@@ -218,6 +217,71 @@ checks clean over MCP-written rows. Not merged or deployed. Not yet done:
 - **The PDF quads spec runs on chromium only** (`e2e/mcp-files.spec.ts`), and is now the one
   standing check that server-computed quads still match a real selection: a pdfjs bump that
   changed how the text layer picks a font family would fail it, and nothing else.
+
+## Posting an annotation trusts three things the client sends (MCP.md §17, items 1–3)
+
+**Status:** found 2026-10-07 while planning the MCP server, and present on `main`. The MCP
+server avoids all three (`src/lib/mcp/annotation-writes.ts`); the UI's server actions in
+`src/app/actions/annotations.ts` don't. The UI never sends the bad value, so each needs a
+hand-made call to the action, which any signed-in reader of the container can make.
+
+1. **A reader can have the server write a mark into a doc they can't edit.** `postAnnotation`
+   takes `anchorMode` from the client for a root annotation, and for `"mark"` calls
+   `applyAnnotationMark`, which writes into the doc's ydoc through `/admin/annotation-mark`.
+   The token `src/lib/annotation-admin.ts` mints for that is writable whoever the poster is,
+   and nothing in the action calls `canUserEditDoc`. ANNOTATIONS.md's "why the reading views
+   stopped writing marks" holds only because the reading views send `"columns"`.
+   **Fix:** refuse `"mark"` unless `canUserEditDoc` passes for the poster. Only the editor
+   sends it, and its users can edit.
+2. **The client's version stamp is parsed, not validated.** `postAnnotation` turns
+   `opts.ydocUpdateId` into a `BigInt` and anchors at it. Nothing checks that the id is in the
+   target's log or not past its tail, so a stamp from another doc, or from the future, breaks
+   "replay to the stamp and `textBetween` is `quotedText`" (`check-annotation-anchors.ts`) as
+   soon as the doc changes. **Fix:** the MCP server's check, `docLogTail` and `isDocVersion`
+   (`src/lib/doc-state.ts`), as `annotation-writes.ts` applies them. A reply's stamp is in its
+   parent's body log (`ydoc:annotation:<parentId>`), not the doc's, so `isDocVersion` needs a
+   form that takes a ydoc id.
+3. **A reply's parent is checked for its container only.** `createDraftAnnotation` selects
+   the parent's `docId` and `fileId` and nothing about its status or deletion, so a reply can
+   hang off someone else's DRAFT, and an anchored reply then searches that private body for
+   its quote. **Fix:** refuse a parent that is a DRAFT or deleted, as `annotation-writes.ts`'s
+   target check does. Check whether `postAnnotation` needs the same.
+
+**Shape of the fix:** the three checks can go into the actions as they stand. Or the UI's
+posting can move onto `src/lib/annotation-post.ts`, which the MCP server already uses, so each
+rule exists once (CLAUDE.md, "A write the UI and the MCP server share is a function in
+`src/lib/`"). The second is more work and is what that invariant asks for.
+
+**Tests:** each fix wants a refusal test, made as a reader on a shared doc, asserting that no
+row or mark was written. `e2e/annotation-readonly.spec.ts` has those fixtures. Whether a spec
+can call the server action directly, or the gate has to move into `src/lib/` to be testable,
+is part of the work.
+
+## Two scrub-position tests fail on the dev target (`e2e/doc.spec.ts`)
+
+**Status:** found 2026-10-11 on `~/git/MultiBlog-claude` (`npm run e2e:dev`, one worker,
+against a `next dev` running since 2026-10-10). Not caused by that day's `/admin` token
+change: they fail the same way with the previous server code. Every production-build run in
+the session scratchpads passes them, on chromium, firefox and webkit, through 2026-10-10.
+
+- **Tests:** "the scrub position in the URL › a URL naming a position opens frozen at it,
+  without waiting to be touched", and "› 'at this revision' links to the revision, and seeks
+  in place once the bar is loaded".
+- **Symptom:** `/doc/<slug>?at=<update id>` opens on the live doc. The slider sits at its far
+  end, and the "Switch to live view" button never appears in 15s. The sibling test that
+  focuses and drags the bar passes, so the history loads; what fails is the eager load
+  `?at=` is meant to start.
+- **Next:**
+  1. Run the two on a production build
+     (`npm run e2e -- e2e/doc.spec.ts -g "scrub position"`) to confirm it's dev-only. Restart
+     `dev:all` afterwards (CLAUDE.md: the build writes into the dev server's `.next`).
+  2. Rerun on a fresh dev server (`npm run stop:all`, remove `.next`, `npm run dev:all`), to
+     rule out one that had been running for a day.
+  3. If it survives both, look at how `?at=` reaches the bar on first render under
+     `next dev`. `src/app/doc/[slug]/page.tsx` validates it, `DocView.tsx` passes it on, and
+     `DocScrubBar.tsx` activates from an effect. Dev-only double effects are a suspect.
+  4. If it's dev-only for good, have the two tests say so (skipped on the dev target, with
+     the reason) rather than leaving two known failures in every `e2e:dev` run.
 
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 
