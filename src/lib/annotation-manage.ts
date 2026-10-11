@@ -5,8 +5,10 @@ import { ApiError, forbidden } from "@/lib/api/errors";
 import type { Actor } from "@/lib/actor";
 
 /**
- * Soft-deletes or restores an annotation, as its writer or an ADMIN. The
- * actions behind the margin and /annotations
+ * Soft-deletes or restores an annotation, as its writer or an ADMIN — and a
+ * DRAFT as its writer alone: a DRAFT is its owner's alone, and an ADMIN's
+ * role reaches no further into one here than it does when reading
+ * (docs/MCP.md §17, item 4). The actions behind the margin and /annotations
  * (src/app/actions/annotations.ts) wrap it with the session, and the MCP
  * server's `manage` with a token's user; callers revalidate.
  *
@@ -25,7 +27,7 @@ export async function setAnnotationDeleted(
   });
   if (!annotation) throw new ApiError("not_found", "Annotation not found.");
   const isOwn = annotation.userId === actor.userId;
-  if (!isOwn && !isAdmin(actor.role)) {
+  if (!isOwn && (annotation.status === "DRAFT" || !isAdmin(actor.role))) {
     throw forbidden("You don't have permission to modify this annotation.");
   }
   await prisma.annotation.update({

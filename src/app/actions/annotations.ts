@@ -800,7 +800,10 @@ export async function getQuotedParentVersion(
   }
 }
 
-/** Delete and restore: the writer's, or an ADMIN's (`setAnnotationDeleted`). */
+/**
+ * Delete and restore: the writer's, or an ADMIN's for a posted annotation —
+ * never another user's DRAFT (`setAnnotationDeleted`).
+ */
 async function setAnnotationDeletedAction(annotationId: string, deleted: boolean): Promise<void> {
   const session = await auth();
   if (!session?.user) {
