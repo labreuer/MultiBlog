@@ -117,6 +117,10 @@ export type CreateDocOptions = {
    * importer pass nothing, and their text is unmarked as it always was.
    */
   author?: string | null;
+  /** An imported chat: a record of what was said, which edit_doc refuses (docs/MCP.md §6). */
+  record?: boolean;
+  /** What the importer matches its source to this doc by: a chat's id, a summary's file name. */
+  importKey?: string;
 };
 
 // The doc a Markdown import creates: `body` is the parse's (markdownToDocContent),
@@ -180,6 +184,8 @@ export async function createDocWithContent(userId: string, title: string, body: 
             createdByUserId: userId,
             updatedByUserId: userId,
             proseJson: cached.proseJson as Prisma.InputJsonValue,
+            record: opts.record === true,
+            importKey: opts.importKey ?? null,
             authors: { create: byline.map((authorId, bylineOrder) => ({ userId: authorId, bylineOrder })) },
           },
           select: { id: true, slug: true },

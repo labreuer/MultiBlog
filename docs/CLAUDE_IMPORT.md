@@ -49,8 +49,15 @@ Things about the data that the importer is built around:
    `check-ydoc-integrity.ts`.
 
 `MB_EMAIL` names the importing account, which needs `canManageDocs`. `BYLINE_EMAILS` is the
-byline to give every doc, in order; include the importing account, which the import has
-already put on it. `HUMAN_NAME` is the heading over each prompt.
+byline to give every doc, in order; it defaults to `claude@multiblog.invalid,labreuer@gmail.com`,
+Claude first, since the bulk of an imported chat is Claude's writing. The importing account is
+on the byline whatever the list says — appended if the list leaves it off — as the creator of
+any doc always is. `HUMAN_NAME` is the heading over each prompt.
+
+`--mark-records` (with `--export`) marks every doc a session made as a record and gives it its
+import key (§3), matched by the chat link its first block holds, and writes nothing else. Run it
+once on an instance whose chats were imported before either existed; a later import or update
+of a session does the same for that session's doc.
 
 **On a deployed instance**, run the script in that instance's own checkout, on its server.
 Everything comes from that checkout's `.env`: the database, the collab server `--update` writes
@@ -62,10 +69,13 @@ costs about four times its size.
 ## 3. What happens to each session
 
 1. It is converted to Markdown (§4). A session with nothing to show is skipped.
-2. If a doc already opens with the session's link, the two are compared: the session's
+2. If a doc already carries the session's id as its **import key** (`doc.import_key`), or — for
+   a doc imported before keys — opens with the session's link, the two are compared: the session's
    Markdown is parsed and round-tripped through Yjs exactly as an import would store it, and
    compared with the stored body regardless of JSON key order (jsonb doesn't keep it). The same
-   is up to date; a difference is listed, or with `--update` applied in place.
+   is up to date; a difference is listed, or with `--update` applied in place — unless the doc
+   has been edited in MultiBlog since (§5). A doc found by its link is given the key, and marked
+   a record, on the way.
 3. Otherwise the doc is created as `/docs`' Import Markdown creates one: the same parse, then
    the same `createDocWithContent` (`src/lib/doc-create.ts`) the import action calls, which
    seeds the ydoc, inserts the row and derives the slug from the title. Nothing about the
@@ -74,8 +84,14 @@ costs about four times its size.
    which the script doesn't send; it still applies so the script creates no doc `/docs`
    couldn't. The new doc's ydoc row is written straight to the database, which is safe only
    because nobody can have the doc open yet. An existing doc goes through the collab server
-   (§5).
-4. It then sets the byline and the doc's dates directly in the database.
+   (§5). The create takes the byline, the **record** flag and the import key, and writes them
+   in its one transaction.
+4. It then records the update the import left the doc at (`doc.imported_update_id`) and sets
+   the doc's dates directly in the database.
+
+**A session's doc is a record** ([MCP.md](MCP.md) §6): evidence of what was said, which the
+MCP server's `edit_doc` refuses. Nothing else consults the flag — the editor doesn't — and the
+`manage` tool, or `--mark-records`, sets it.
 
 Docs are created `PRIVATE`, so the byline is who can read them (PERMISSIONS.md).
 
@@ -127,6 +143,17 @@ them.
 
 ## 5. Updating a doc in place
 
+**Once a doc is imported, MultiBlog is its source.** The plan below replaces every run of blocks
+that differs from the conversion, so updating a doc someone has since edited in MultiBlog — a
+person in the editor, or Claude through the MCP server — would undo the edit and drop the marks
+in those blocks. So each doc records the update the importer left it at
+(`doc.imported_update_id`: the seed's on a create, the applied update's after `--update`), and
+`--update` refuses a doc whose log has moved past it, listing it as *edited in MultiBlog since
+its import*, with when. `--force` overrides, for a source that has taken in the doc's edits by
+hand. A doc imported before the column existed has none, so its next `--update` applies as
+before and records one. Revise a summary where it lives, through `edit_doc` or the editor; a
+local copy to read comes from the MCP server's export.
+
 **An imported doc is never deleted and imported again.** Other docs' anchored links point
 into imported docs, deleting a doc cascades away every anchor into it, and a doc imported
 again gets a new id. `--update` edits the doc instead:
@@ -138,8 +165,8 @@ again gets a new id. `--update` edits the doc instead:
 3. The edit goes to the running collab server as one Yjs update
    (`/admin/doc-apply-update`, `server/ydoc-hooks.ts`), signed as the importing account. The
    server applies it to the live doc, so anyone with the doc open sees it arrive. It stores
-   the doc and answers with the update's id. Updated is then set back to the session's last
-   activity. The edit is one more entry in the doc's history, so the scrub bar shows it, and
+   the doc and answers with the update's id, which becomes `imported_update_id`. Updated is
+   then set back to the session's last activity. The edit is one more entry in the doc's history, so the scrub bar shows it, and
    its new blocks are attributed to the importing account.
 4. Every anchored-link anchor on the doc is re-captured through `captureAnchorInYdoc`
    (`src/lib/anchors/capture.ts`), against the new version, as minting a link would. An anchor
@@ -185,12 +212,15 @@ a deployed instance, copy the files to the server and run the script there.
 
 What differs from a session:
 
-- **A file is matched to its doc by title**, because it has no link to be matched by. The
-  match is a doc carrying the title the import takes from the file (DOC_IMPORT.md §4), not in
-  the trash, with the importing account on its byline. So a file whose title changes imports
-  as a new doc beside the old one. A file the import would title from its file name — one
-  without a leading heading — is refused, since no later run could find its doc. So is a title
-  two such docs share, rather than one of them being guessed.
+- **A file is matched to its doc by its import key, the file's name** (without its directory),
+  because it has no link to be matched by. So a doc whose title has since changed in MultiBlog
+  is still found. A doc imported before keys has none, and is matched by title instead: a doc
+  carrying the title the import takes from the file (DOC_IMPORT.md §4), with no key, not in the
+  trash, with the importing account on its byline — and is given the key. A file the import
+  would title from its file name — one without a leading heading — is refused. So is a key or
+  title two docs share, rather than one of them being guessed.
+- **Its doc is not a record.** A summary is writing to be revised, by the MCP server's
+  `edit_doc` among others.
 - **The dates are the import's.** Created is when the file was imported and Updated moves with
   each update, since a file has no activity of its own to date the doc by.
 
