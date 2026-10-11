@@ -170,6 +170,8 @@ model User {
   tagAssignmentDeletions TagAssignment[]        @relation("TagAssignmentDeletedBy")
   anchoredLinksCreated   AnchoredLink[]         @relation("AnchoredLinkCreatedBy")
   anchoredLinkDeletions  AnchoredLink[]         @relation("AnchoredLinkDeletedBy")
+  apiTokens              ApiToken[]             @relation("ApiTokenUser")
+  apiTokensIssued        ApiToken[]             @relation("ApiTokenCreatedBy")
 
   @@map("user")
 }
@@ -791,6 +793,20 @@ model Doc {
   updatedByUserId   String?                  @map("updated_by_user_id")
   deletedByUserId   String?                  @map("deleted_by_user_id")
   deletedAt         DateTime?                @map("deleted_at")
+  // docs/MCP.md §6 — evidence of what was said, which the MCP server's
+  // edit_doc refuses with `read_only`: the importer sets it on every doc it
+  // makes from a chat transcript. The editor doesn't consult it, so a person
+  // can still correct a record by hand. Changing it is the `manage` scope.
+  record            Boolean                  @default(false)
+  // docs/MCP.md §6 — the update the importer last wrote to this doc, on a
+  // create or an `--update`. `--update` refuses a doc whose log has moved
+  // past it, since the planner would undo whatever was written in between.
+  // Null for a doc the importer never touched, or imported before the column.
+  importedUpdateId  BigInt?                  @map("imported_update_id")
+  // What the importer matches a source to this doc by: a transcript's chat
+  // id, a summary's file name. A title can change through the editor or
+  // edit_doc, and a match by title would then import the source again.
+  importKey         String?                  @map("import_key")
 
   authors             DocAuthor[]
   createdBy           User?                  @relation("DocCreatedBy", fields: [createdByUserId], references: [id])
@@ -807,6 +823,7 @@ model Doc {
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
 
   @@index([searchVector], type: Gin)
+  @@index([importKey])
   @@map("doc")
 }
 
@@ -1204,6 +1221,17 @@ model StoredFile {
   // maintained by the file_sync_search_vector trigger; never assign to it.
   // The pages' text has its own, on FilePageText.
   searchVector    Unsupported("tsvector")? @map("search_vector")
+  // docs/MCP.md §8 — pdfjs's getPageLabels(), one string per page: NULL is
+  // "not computed", [] "the PDF defines none". A property of the bytes, so
+  // here rather than on FilePageText, whose rows are per text version.
+  // Filled lazily on first read, with raw SQL so `updatedAt` doesn't move
+  // (src/lib/pdf-metadata.ts).
+  pageLabels      Json?                    @map("page_labels")
+  // docs/MCP.md §8 — the Contents pane's outline, flattened: each entry's
+  // title, depth and 0-based page index (null where its destination doesn't
+  // resolve). NULL and [] mean what they mean on pageLabels, and it is
+  // filled the same way.
+  outline         Json?
 
   owners              FileOwner[]
   slugHistory         FileSlugHistory[]
@@ -1363,8 +1391,9 @@ model SearchLexeme {
 // bug rather than a display one.
 //
 // Slugs are their own namespace (`/tag/*`), like docs' and files' —
-// `tagSlugInUse` checks `tag` only. **No slug history table in v1**: a
-// renamed tag breaks inbound `/tag/…` links until it earns one (§20i).
+// `tagSlugInUse` checks `tag` and its history only. A re-slugged term keeps
+// its old slug in TagSlugHistory, which `/tag/[slug]` follows, as the other
+// four kinds' reading routes follow theirs (docs/MCP.md §11).
 model Tag {
   id          String  @id @default(cuid())
   slug        String  @unique
@@ -1377,10 +1406,11 @@ model Tag {
   deletedByUserId String?   @map("deleted_by_user_id")
   deletedAt       DateTime? @map("deleted_at")
 
-  createdBy   User            @relation("TagCreatedBy", fields: [createdById], references: [id])
-  deletedBy   User?           @relation("TagDeletedBy", fields: [deletedByUserId], references: [id])
+  createdBy   User             @relation("TagCreatedBy", fields: [createdById], references: [id])
+  deletedBy   User?            @relation("TagDeletedBy", fields: [deletedByUserId], references: [id])
   assignments TagAssignment[]
   metrics     TagMetrics?
+  slugHistory TagSlugHistory[]
 
   @@index([createdById])
   @@map("tag")
@@ -1757,4 +1787,117 @@ model YdocSnapshot {
 
   @@index([ydocId, lastYdocUpdateId])
   @@map("ydoc_snapshot")
+}
+
+// Redirect sources for a tag's past slugs — the shape of DocSlugHistory. An
+// MCP client holds `/tag/<slug>` URLs from earlier reads, and without this a
+// re-slug would make every one of them find nothing (docs/MCP.md §11). Its own
+// namespace, like the tag slugs it records.
+model TagSlugHistory {
+  id        String   @id @default(cuid())
+  tagId     String   @map("tag_id")
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tag Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@index([tagId])
+  @@map("tag_slug_history")
+}
+
+// docs/MCP.md §3 — what a token may do, intersected with its user's own
+// permissions: it can never do what that user's session couldn't.
+enum ApiScope {
+  READ
+  WRITE
+  MANAGE
+
+  @@map("api_scope")
+}
+
+// docs/MCP.md §3 — the client a token was issued for, set at issue. Only a
+// CLAUDE_CODE token lists the tools that force a prompt, since Claude Code is
+// the one client documented to honor the flag; the token decides rather than
+// the request, because a stateless server sees the client's name only in
+// `initialize`.
+enum ApiTokenClient {
+  CLAUDE_CODE
+  CLAUDE_AI
+  OTHER
+
+  @@map("api_token_client")
+}
+
+// docs/MCP.md §3 — a bearer token for the MCP endpoint and its byte routes.
+//
+// The secret is `mb_` and 32 random bytes, shown once at issue; only its
+// SHA-256 is stored, and a request is a single unique-index hit on it. A
+// 256-bit random secret gives key stretching nothing to protect.
+//
+// **The user is read in a query of its own, never through an include**
+// (src/lib/api/tokens.ts): prisma.ts's soft-delete filter intercepts
+// top-level reads only, and it is what makes a deleted user's token stop
+// working on its very next call. Soft-deleting a user also revokes their
+// tokens, in the same transaction, and restoring the account brings none
+// back.
+//
+// `createdByUserId` is the issuer: the person a bot's token works for. It
+// decides who else `write` may put on a new byline or owner list.
+model ApiToken {
+  id              String         @id @default(cuid())
+  userId          String         @map("user_id")
+  name            String
+  tokenHash       String         @unique @map("token_hash")
+  // The secret's first characters, for telling tokens apart in a listing.
+  prefix          String
+  scopes          ApiScope[]
+  client          ApiTokenClient @default(OTHER)
+  expiresAt       DateTime?      @map("expires_at")
+  revokedAt       DateTime?      @map("revoked_at")
+  // Written at most once a minute, so a busy token isn't a write per call.
+  lastUsedAt      DateTime?      @map("last_used_at")
+  createdByUserId String         @map("created_by_user_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  user      User       @relation("ApiTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User       @relation("ApiTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  writes    ApiWrite[]
+
+  @@index([userId])
+  @@map("api_token")
+}
+
+// docs/MCP.md §4 — one row per write that adds something (create_doc, the
+// upload routes, annotate, create_link, add_link_parts, edit_doc), so a retry
+// within a day is answered `already_done` rather than run twice.
+//
+// **Inserting the row is the claim**: a covered write inserts it RUNNING
+// before it does anything, and the unique (token_id, key) refuses a second.
+// `key` is a SHA-256 of the operation and its canonical arguments, or of a
+// caller's own idempotencyKey, and is nulled once its day is up — Postgres
+// lets any number of rows share a null in a unique index, so the row stays.
+// `result` is what the write answered, ids and URLs, never a body.
+model ApiWrite {
+  id         String        @id @default(cuid())
+  tokenId    String        @map("token_id")
+  key        String?
+  operation  String
+  state      ApiWriteState @default(RUNNING)
+  result     Json?
+  createdAt  DateTime      @default(now()) @map("created_at")
+  finishedAt DateTime?     @map("finished_at")
+
+  token ApiToken @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@unique([tokenId, key])
+  @@index([tokenId, createdAt])
+  @@map("api_write")
+}
+
+enum ApiWriteState {
+  RUNNING
+  DONE
+  FAILED
+
+  @@map("api_write_state")
 }
