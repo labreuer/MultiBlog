@@ -8,14 +8,14 @@ import { LAST_PART_MESSAGE } from "@/lib/anchored-link-editing";
 import type { AnchorTarget, DocRangeSelector } from "@/lib/anchors";
 import { targetToColumns } from "@/lib/anchors";
 import type { PdfTarget } from "@/lib/pdf-anchor";
-import { ApiError, forbidden } from "@/lib/api/errors";
+import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import type { Actor } from "@/lib/actor";
 
 // docs/ANCHORED_LINKS.md, docs/MCP.md §10 — the writes on anchored links
 // that take an explicit actor, so the tray's actions (src/app/actions/
 // anchored-links.ts) and the MCP server's link tools share one body for
-// each: the target gate, a part's row, removing and reordering parts,
-// renaming, and the soft delete.
+// each: the target gate, a part's row, minting, adding parts to a minted
+// link, removing and reordering parts, renaming, and the soft delete.
 //
 // Two front doors, two shapes of answer: the tray's part edits report a
 // refusal as `{ error }` for the tray to show, so those bodies return one;
@@ -78,9 +78,66 @@ export function pdfPartRow(fileId: string, captured: { target: PdfTarget; quoted
   };
 }
 
+/**
+ * Minted links, without the tray (docs/MCP.md §10): every link and its parts
+ * in one transaction, each part numbered 0..n−1, the name normalised, minted
+ * now. Legal beside the tray because `anchored_link_one_open_per_user`
+ * covers only links that are unminted or reopened. Callers have captured
+ * every part first and run the gate on each target.
+ */
+export async function mintLinks(actor: Actor, links: { name: string | null; parts: LinkPartRow[] }[]): Promise<string[]> {
+  if (links.some((link) => link.parts.length === 0)) throw invalid("A link needs at least one passage.");
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const ids: string[] = [];
+    for (const link of links) {
+      const row = await tx.anchoredLink.create({
+        data: {
+          createdById: actor.userId,
+          name: link.name === null ? null : normalizeLinkName(link.name),
+          mintedAt: now,
+          anchors: { create: link.parts.map((part, partOrder) => ({ ...part, partOrder })) },
+        },
+        select: { id: true },
+      });
+      ids.push(row.id);
+    }
+    return ids;
+  });
+}
+
 /** A change to a *minted* link's parts is an edit; a draft's changes are not. */
 export async function stampLinkEdited(tx: Tx, linkId: string): Promise<void> {
   await tx.anchoredLink.update({ where: { id: linkId }, data: { editedAt: new Date() } });
+}
+
+/**
+ * The creator's own minted, live link, locked for the rest of the
+ * transaction: adding, removing and reordering a minted link's parts are its
+ * creator's alone. One refusal covers "not yours", "a draft", "deleted" and
+ * "no such id", none of which earns a hint naming what the id points at.
+ */
+async function ownMintedLink(tx: Tx, actor: Actor, linkId: string): Promise<{ id: string; mintedAt: Date }> {
+  const link = await tx.anchoredLink.findFirst({
+    where: { id: linkId, createdById: actor.userId, mintedAt: { not: null }, deletedAt: null },
+    select: { id: true, mintedAt: true },
+  });
+  if (!link) throw new ApiError("not_found", "That isn't one of your links.");
+  await tx.$queryRaw`SELECT id FROM anchored_link WHERE id = ${link.id} FOR UPDATE`;
+  return { id: link.id, mintedAt: link.mintedAt! };
+}
+
+/** More parts on a minted link of the actor's, after its last. */
+export async function addLinkParts(actor: Actor, linkId: string, parts: LinkPartRow[]): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const link = await ownMintedLink(tx, actor, linkId);
+    const last = await tx.anchoredLinkAnchor.aggregate({ where: { linkId: link.id }, _max: { partOrder: true } });
+    const start = (last._max.partOrder ?? -1) + 1;
+    for (const [index, part] of parts.entries()) {
+      await tx.anchoredLinkAnchor.create({ data: { ...part, linkId: link.id, partOrder: start + index } });
+    }
+    await stampLinkEdited(tx, link.id);
+  });
 }
 
 /**
@@ -125,6 +182,51 @@ export async function reorderLinkPartsIn(
   }
   if (link.mintedAt) await stampLinkEdited(tx, link.id);
   return {};
+}
+
+/** A minted link's anchor ids in part order — what a part's number counts. */
+export async function linkAnchorIds(tx: Tx | typeof prisma, linkId: string): Promise<string[]> {
+  const anchors = await tx.anchoredLinkAnchor.findMany({
+    where: { linkId },
+    orderBy: [{ partOrder: "asc" }, { id: "asc" }],
+    select: { id: true },
+  });
+  return anchors.map((a) => a.id);
+}
+
+/**
+ * edit_link's part changes (docs/MCP.md §10), by 1-based part number in the
+ * link's order: the removals, then the new order of what is left. One
+ * transaction, the creator's alone, the last-part rule kept.
+ */
+export async function editLinkParts(
+  actor: Actor,
+  linkId: string,
+  change: { remove?: readonly number[]; order?: readonly number[] },
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const link = await ownMintedLink(tx, actor, linkId);
+    const ids = await linkAnchorIds(tx, link.id);
+    const outOfRange = [...(change.remove ?? []), ...(change.order ?? [])].filter((n) => n < 1 || n > ids.length);
+    if (outOfRange.length > 0) {
+      throw invalid(`This link has ${ids.length} part(s); read it again for their numbers.`, { parts: outOfRange.slice(0, 5) });
+    }
+    if (change.remove && change.remove.length > 0) {
+      const removed = await removeLinkPartsIn(tx, link, [...new Set(change.remove)].map((n) => ids[n - 1]));
+      if (removed.error) throw invalid(removed.error);
+    }
+    if (change.order) {
+      const gone = new Set(change.remove ?? []);
+      const kept = ids.filter((_, i) => !gone.has(i + 1));
+      if (change.order.some((n) => gone.has(n))) throw invalid("order names a part that remove takes away.");
+      const ordered = change.order.map((n) => ids[n - 1]);
+      if (ordered.length !== kept.length) {
+        throw invalid(`order lists every part that remains, each once: ${kept.length} of them.`);
+      }
+      const reordered = await reorderLinkPartsIn(tx, link, ordered);
+      if (reordered.error) throw invalid(reordered.error);
+    }
+  });
 }
 
 /**

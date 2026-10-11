@@ -34,7 +34,7 @@ const POST_SELECT = {
 } as const;
 
 /** A post by its public path's slug (past slugs followed) or its id, through `readablePostWhere`. */
-async function readablePost(ctx: McpContext, by: { slug: string } | { id: string }) {
+export async function readablePost(ctx: McpContext, by: { slug: string } | { id: string }) {
   const readable = readablePostWhere(ctx.actor.userId, ctx.actor.role);
   if ("id" in by) {
     return prisma.post.findFirst({ where: { AND: [{ id: by.id }, readable] }, select: POST_SELECT });
@@ -173,26 +173,40 @@ async function postComments(post: { id: string; publishEventId: string | null },
  * IP: a display name is fixed when the commenter row is made, and an id beside
  * it would tie an old name to a renamed account.
  */
+/**
+ * The comment a card's fragment names on a post, by the commenter row's name
+ * and the second it was posted, or null. Nothing is read-checked here.
+ */
+export async function commentIdByFragment(postId: string, fragment: string): Promise<string | null> {
+  const match = /-(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})$/.exec(fragment);
+  if (!match) return null;
+  const [, y, mo, d, h, mi, s] = match;
+  const at = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`);
+  if (Number.isNaN(at.getTime())) return null;
+  const candidates = await prisma.comment.findMany({
+    where: { thread: { postId }, createdAt: { gte: at, lt: new Date(at.getTime() + 1000) } },
+    select: { id: true, createdAt: true, commenter: { select: { displayName: true } } },
+  });
+  return candidates.find((c) => commentAnchorName(c.commenter.displayName, c.createdAt) === fragment)?.id ?? null;
+}
+
 async function readComment(
   ctx: McpContext,
   post: { id: string; slug: string; publishedAt: Date | null; publishEventId: string | null },
   fragment: string,
   args: ReadArgs,
 ): Promise<ToolResult> {
-  const match = /-(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})$/.exec(fragment);
-  if (!match) throw notFound("That comment");
-  const [, y, mo, d, h, mi, s] = match;
-  const at = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`);
-  if (Number.isNaN(at.getTime())) throw notFound("That comment");
-  const candidates = await prisma.comment.findMany({
-    where: { thread: { postId: post.id }, createdAt: { gte: at, lt: new Date(at.getTime() + 1000) } },
-    include: {
-      ...READABLE_COMMENT_INCLUDE,
-      commenter: { select: { userId: true, displayName: true } },
-      revisions: { orderBy: { revisionNo: "asc" }, select: { createdAt: true, quotedBy: { select: { id: true }, take: 1 } } },
-    },
-  });
-  const comment = candidates.find((c) => commentAnchorName(c.commenter.displayName, c.createdAt) === fragment);
+  const id = await commentIdByFragment(post.id, fragment);
+  const comment = id
+    ? await prisma.comment.findUnique({
+        where: { id },
+        include: {
+          ...READABLE_COMMENT_INCLUDE,
+          commenter: { select: { userId: true, displayName: true } },
+          revisions: { orderBy: { revisionNo: "asc" }, select: { createdAt: true, quotedBy: { select: { id: true }, take: 1 } } },
+        },
+      })
+    : null;
   if (!comment || !(await canUserReadComment(viewerOf(ctx.actor), comment))) throw notFound("That comment");
 
   const format = args.format ?? "markdown";

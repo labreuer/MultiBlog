@@ -1,11 +1,12 @@
-import { prismaIncludingDeleted } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserManageFile } from "@/lib/file-authz";
 import { changeFileSlug, freeFileSlugFor } from "@/lib/file-slug";
+import { FILE_MANAGER_ROLES } from "@/lib/role-checks";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import type { Actor } from "@/lib/actor";
 
-// Managing an uploaded file — its visibility, title, slug and soft
+// Managing an uploaded file — its visibility, title, slug, owners and soft
 // deletion — as plain functions taking an explicit actor, the file
 // counterpart of src/lib/doc-manage.ts: /files' actions
 // (src/app/actions/files.ts) wrap them with the session, and the MCP
@@ -53,6 +54,52 @@ export async function setFileSlug(actor: Actor, fileId: string, slug: string): P
     if (err instanceof Error && err.name === "Error") throw new ApiError("conflict", err.message);
     throw err;
   }
+}
+
+/**
+ * A file's owners, as the ordered list `orderedUserIds` — `setDocByline`'s
+ * rules read for a file (docs/MCP.md §12): the actor can manage it; everyone
+ * it adds is a live account in `FILE_MANAGER_ROLES`, and someone already on
+ * it stays eligible to stay; at least one owner remains; a removal takes
+ * `allowRemovals`, since on a PRIVATE file the owners are who can read it;
+ * one transaction.
+ */
+export async function setFileOwners(
+  actor: Actor,
+  fileId: string,
+  orderedUserIds: readonly string[],
+  opts: { allowRemovals?: boolean } = {},
+): Promise<void> {
+  await requireManageable(actor, fileId);
+  const wanted = [...new Set(orderedUserIds)];
+  if (wanted.length === 0) throw invalid("A file must have at least one owner.");
+  if (wanted.length !== orderedUserIds.length) throw invalid("An owner list names each person once.");
+
+  await prisma.$transaction(async (tx) => {
+    const current = new Set((await tx.fileOwner.findMany({ where: { fileId }, select: { userId: true } })).map((o) => o.userId));
+    const added = wanted.filter((id) => !current.has(id));
+    const users = await tx.user.findMany({ where: { id: { in: added } }, select: { id: true, role: true } });
+    const eligible = new Set(users.filter((u) => FILE_MANAGER_ROLES.includes(u.role)).map((u) => u.id));
+    const ineligible = added.filter((id) => !eligible.has(id));
+    if (ineligible.length > 0) {
+      throw invalid("Only an admin, editor or author account can own a file.", { userIds: ineligible.slice(0, 5) });
+    }
+    const removed = [...current].filter((id) => !wanted.includes(id));
+    if (removed.length > 0 && !opts.allowRemovals) {
+      throw invalid("That owner list leaves someone off it, which on a PRIVATE file takes their access away; pass allowRemovals to mean it.", {
+        removing: removed,
+      });
+    }
+    if (removed.length > 0) await tx.fileOwner.deleteMany({ where: { fileId, userId: { in: removed } } });
+    for (const [ownerOrder, userId] of wanted.entries()) {
+      await tx.fileOwner.upsert({
+        where: { fileId_userId: { fileId, userId } },
+        create: { fileId, userId, ownerOrder },
+        update: { ownerOrder },
+      });
+    }
+    await tx.storedFile.update({ where: { id: fileId }, data: { updatedByUserId: actor.userId } });
+  });
 }
 
 /**
