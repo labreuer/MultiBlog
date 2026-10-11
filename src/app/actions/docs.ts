@@ -241,7 +241,9 @@ export async function revertDocSlug(docId: string): Promise<{ slug: string }> {
 }
 
 // Adds or removes one byline author, through setDocByline
-// (src/lib/doc-manage.ts). A removal is explicit here, so it is allowed.
+// (src/lib/doc-manage.ts), which checks that the person added can carry a
+// byline at all rather than leaving that to the edit page's picker. A
+// removal is explicit here, so it is allowed.
 export async function updateDocAuthor(docId: string, userId: string, included: boolean): Promise<void> {
   const { session } = await requireEditableDocSession(docId);
   const current = await docBylineIds(docId);

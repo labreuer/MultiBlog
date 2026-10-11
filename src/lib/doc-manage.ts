@@ -1,6 +1,7 @@
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserEditDoc } from "@/lib/doc-authz";
 import { changeDocSlug } from "@/lib/doc-slug";
+import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import type { Actor } from "@/lib/actor";
@@ -31,6 +32,10 @@ async function requireEditable(actor: Actor, docId: string, opts: { includeDelet
  * every byline change goes through (docs/MCP.md §12). Its rules:
  *
  * - the actor can edit the doc;
+ * - everyone it adds is a live account in `BYLINE_ELIGIBLE_ROLES`, the ones
+ *   the edit page's picker offers, whatever id a request sends. Someone
+ *   already on it stays eligible to stay, so a byline holding a
+ *   since-demoted or deleted account can still be reordered;
  * - at least one author remains;
  * - **removing someone takes `allowRemovals`**: on a PRIVATE doc the byline
  *   is the access list, so a removal revokes their access, the actor's own
@@ -50,6 +55,13 @@ export async function setDocByline(
 
   await prisma.$transaction(async (tx) => {
     const current = new Set((await tx.docAuthor.findMany({ where: { docId }, select: { userId: true } })).map((a) => a.userId));
+    const added = wanted.filter((id) => !current.has(id));
+    const users = await tx.user.findMany({ where: { id: { in: added } }, select: { id: true, role: true } });
+    const eligible = new Set(users.filter((u) => BYLINE_ELIGIBLE_ROLES.includes(u.role)).map((u) => u.id));
+    const ineligible = added.filter((id) => !eligible.has(id));
+    if (ineligible.length > 0) {
+      throw invalid("Only an admin, editor or author account can be added to a byline.", { userIds: ineligible.slice(0, 5) });
+    }
     const removed = [...current].filter((id) => !wanted.includes(id));
     if (removed.length > 0 && !opts.allowRemovals) {
       throw invalid("That byline leaves someone off it, which on a PRIVATE doc takes their access away; pass allowRemovals to mean it.", {
