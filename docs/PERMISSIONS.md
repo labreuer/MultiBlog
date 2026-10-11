@@ -572,6 +572,27 @@ the file's slug and the passage's words to everyone who can read the text holdin
 anchored link's id carries neither. The check behind its tooling reads as the operator, so a
 front door that reads as a user must gate on `canUserReadFile` first.
 
+## API tokens (docs/MCP.md §3)
+
+A token acts as its account, with that account's current role, **intersected with its
+scopes**: it can never do what the account's session couldn't. Every rule above applies to it
+unchanged, through the same functions; the scopes only take away.
+
+| Scope | Allows |
+|---|---|
+| `read` | every read, every search, the export, a file's bytes |
+| `write` | creating a doc or file (PRIVATE, its byline or owners the actor and the token's issuer, or the issuer alone), an annotation, a link or a tag; editing a doc's text and title, an annotation's body, a link's name and parts, a file's title; tagging and untagging — but not a published or scheduled post |
+| `manage` | a doc's or file's visibility, slug, byline or owners, a doc's record flag; tagging a published or scheduled post; deleting and restoring a doc, file, annotation or link |
+
+- **Claude's token never has `manage`**: what it reads includes text other people wrote, and an
+  instruction planted there must not change who can see something.
+- **The tools that force a prompt** (`edit_link`, `edit_file`, `manage`) are listed only to a
+  token issued for Claude Code, the one client documented to honor the flag.
+- **A token is refused once its account or its issuer is deleted**, and soft-deleting an
+  account revokes its tokens in the same transaction.
+- **A record** — an imported chat (`doc.record`) — is read-only to `edit_doc` whatever the
+  byline; the editor doesn't consult the flag.
+
 ## Search (docs/FULLTEXT.md)
 
 `/search` finds only what the searcher could open, and states no rule of its own: each kind's

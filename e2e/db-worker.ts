@@ -58,6 +58,9 @@ import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { issueApiToken } from "@/lib/api/tokens";
+import { softDeleteUser } from "@/lib/user-delete";
+import type { ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
 import { generateToken } from "@/lib/tokens";
@@ -2308,6 +2311,34 @@ export async function sweepTestData(): Promise<{
   };
 }
 
+// ---------------------------------------------------------------------------
+// docs/MCP.md — the MCP server's specs: tokens, an account's deletion and
+// restore as /users does them, and a doc changed behind the collab server's
+// back for a read of what changed since a version.
+// ---------------------------------------------------------------------------
+
+/** A token for `email`, issued by `issuerEmail` — the secret is returned so a spec can send it. */
+export async function createTestApiToken(opts: {
+  email: string;
+  issuerEmail: string;
+  scopes: ApiScope[];
+  client?: ApiTokenClient;
+}): Promise<{ id: string; secret: string }> {
+  assertSafe(opts.email);
+  assertSafe(opts.issuerEmail);
+  const [user, issuer] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { email: opts.email }, select: { id: true } }),
+    prisma.user.findUniqueOrThrow({ where: { email: opts.issuerEmail }, select: { id: true } }),
+  ]);
+  return issueApiToken({
+    userId: user.id,
+    issuerId: issuer.id,
+    name: "e2e",
+    scopes: opts.scopes,
+    client: opts.client ?? "OTHER",
+  });
+}
+
 /**
  * A doc's marks as its stored row holds them: how many characters each
  * author's mark covers (by email), the text each annotation's mark covers,
@@ -2356,6 +2387,22 @@ export async function getDocMarkFacts(docId: string): Promise<{
     clients: clientUserIds.map((id) => emailOf.get(id) ?? id),
     title,
   };
+}
+
+/** Soft-deletes an account through the body /users' Delete runs (src/lib/user-delete.ts). */
+export async function softDeleteTestUser(email: string, byEmail: string): Promise<void> {
+  assertSafe(email);
+  const [user, by] = await Promise.all([
+    prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email }, select: { id: true } }),
+    prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: byEmail }, select: { id: true } }),
+  ]);
+  await softDeleteUser(user.id, by.id);
+}
+
+/** Restores an account as /users' Restore does: the row alone, no token comes back. */
+export async function restoreTestUser(email: string): Promise<void> {
+  assertSafe(email);
+  await prismaIncludingDeleted.user.update({ where: { email }, data: { deletedByUserId: null, deletedAt: null } });
 }
 
 // ---------------------------------------------------------------------------
@@ -2436,6 +2483,9 @@ const handlers = {
   createTestInvite,
   createTestAnchoredLink,
   deleteTestAnchoredLink,
+  createTestApiToken,
+  softDeleteTestUser,
+  restoreTestUser,
   getDocMarkFacts,
 };
 
