@@ -2,13 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { AuthorHighlight } from "@/lib/author-highlight-extension";
-import { EDITOR_LINK_OPTIONS } from "@/lib/tiptap-schema";
+import { EDITOR_LINK_OPTIONS, StarterKit } from "@/lib/tiptap-schema";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
 import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";

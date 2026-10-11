@@ -43,6 +43,7 @@ import { buildTestPdf, type TestOutlineItem, type TestPageLabelRange } from "../
 import {
   contentExtensions,
   titleExtensions,
+  titleAuthorHighlightExtensions,
   collectMarkAttrValues,
   pmDocContentSchema,
   annotationContentExtensions,
@@ -409,8 +410,10 @@ export async function createTestDoc(opts: {
   title?: string;
   visibility?: DocVisibility;
   bodyText?: string;
+  /** A body as TipTap JSON, for a doc that needs headings or lists — in place of `bodyText`. */
+  body?: JSONContent;
 }): Promise<TestDoc> {
-  const { authorEmail, title = uniqueTitle("doc"), visibility = "PRIVATE", bodyText } = opts;
+  const { authorEmail, title = uniqueTitle("doc"), visibility = "PRIVATE", bodyText, body } = opts;
   assertSafe(authorEmail);
 
   const author = await prisma.user.findUnique({ where: { email: authorEmail } });
@@ -427,8 +430,10 @@ export async function createTestDoc(opts: {
   });
 
   const seed = new Y.Doc();
-  if (bodyText) {
-    const seeded = TiptapTransformer.toYdoc(docFromText(bodyText), "default", contentExtensions);
+  if (bodyText || body) {
+    // docContentExtensions, a superset of contentExtensions, so a `body`
+    // may carry author and annotation marks as an edited doc does.
+    const seeded = TiptapTransformer.toYdoc(body ?? docFromText(bodyText!), "default", docContentExtensions);
     Y.applyUpdate(seed, Y.encodeStateAsUpdate(seeded));
     seeded.destroy();
   }
@@ -2303,6 +2308,56 @@ export async function sweepTestData(): Promise<{
   };
 }
 
+/**
+ * A doc's marks as its stored row holds them: how many characters each
+ * author's mark covers (by email), the text each annotation's mark covers,
+ * and the clients map's users (by email).
+ */
+export async function getDocMarkFacts(docId: string): Promise<{
+  text: string;
+  authors: Record<string, string>;
+  annotations: Record<string, string>;
+  clients: string[];
+  title: string;
+}> {
+  const row = await prisma.ydoc.findUniqueOrThrow({ where: { id: ydocIdForDoc(docId) }, select: { ydoc: true } });
+  const ydoc = new Y.Doc();
+  Y.applyUpdate(ydoc, new Uint8Array(row.ydoc));
+  const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(ydoc, "default") as JSONContent;
+  const node = pmDocContentSchema.nodeFromJSON(json);
+  const byAuthor = new Map<string, string>();
+  const byAnnotation = new Map<string, string>();
+  node.descendants((child) => {
+    if (!child.isText) return;
+    for (const mark of child.marks) {
+      if (mark.type.name === "authorHighlight") {
+        const id = mark.attrs.authorId as string;
+        byAuthor.set(id, (byAuthor.get(id) ?? "") + child.text);
+      }
+      if (mark.type.name === "annotation") {
+        const id = mark.attrs.id as string;
+        byAnnotation.set(id, (byAnnotation.get(id) ?? "") + child.text);
+      }
+    }
+  });
+  const clientUserIds = [...new Set([...ydoc.getMap<string>("clients").values()])];
+  const titleFragment = ydoc.getXmlFragment("title");
+  const title = titleFragment.length > 0 ? extractText(TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(ydoc, "title")) : "";
+  ydoc.destroy();
+  const users = await prisma.user.findMany({
+    where: { id: { in: [...byAuthor.keys(), ...clientUserIds] } },
+    select: { id: true, email: true },
+  });
+  const emailOf = new Map(users.map((u) => [u.id, u.email]));
+  return {
+    text: node.textBetween(0, node.content.size, "\n"),
+    authors: Object.fromEntries([...byAuthor].map(([id, text]) => [emailOf.get(id) ?? id, text])),
+    annotations: Object.fromEntries(byAnnotation),
+    clients: clientUserIds.map((id) => emailOf.get(id) ?? id),
+    title,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // stdio dispatch. One JSON request per line in, one JSON response per line
 // out; stderr is inherited from the parent so Prisma's own warnings still
@@ -2381,6 +2436,7 @@ const handlers = {
   createTestInvite,
   createTestAnchoredLink,
   deleteTestAnchoredLink,
+  getDocMarkFacts,
 };
 
 export type DbHandlers = typeof handlers;

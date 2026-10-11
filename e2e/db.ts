@@ -364,3 +364,5 @@ export const countAllYdocs = (...args: Parameters<DbHandlers["countAllYdocs"]>):
   call("countAllYdocs", ...args);
 
 export const sweepTestData = (...args: Parameters<DbHandlers["sweepTestData"]>) => call("sweepTestData", ...args);
+
+export const getDocMarkFacts = (...args: Parameters<DbHandlers["getDocMarkFacts"]>) => call("getDocMarkFacts", ...args);
