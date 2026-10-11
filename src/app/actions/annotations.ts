@@ -5,13 +5,11 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserAccessAnnotationYdoc, canUserEditAnnotationBody } from "@/lib/annotation-authz";
-import { isVersionQuoted, STALE_EDIT_SESSION_MS, visibleVersions, withSupersededAt } from "@/lib/edit-grace";
+import { STALE_EDIT_SESSION_MS } from "@/lib/edit-grace";
 import { canUserReadFile } from "@/lib/file-authz";
-import { isAdmin } from "@/lib/authz";
 import {
   applyAnnotationMark,
   flushAnnotationCache,
-  removeAnnotationMark,
   replaceAnnotationBody,
 } from "@/lib/annotation-admin";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -37,199 +35,15 @@ import {
   pmDocContentSchema,
 } from "@/lib/tiptap-schema";
 import { ydocIdForAnnotation, ydocIdForDoc } from "@/lib/ydoc-names";
-import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
+import { ydocStore } from "../../../server/ydoc-store";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
-import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { displayNameOf } from "@/lib/display-name";
-
-const MAX_BODY_LENGTH = 5000;
-
-type SettledBody = {
-  /** The drained tail of the body's own update log — what the snapshot is taken at. */
-  mark: bigint;
-  /** The body materialised at `mark`, encoded as `ydoc_snapshot` stores it. */
-  snapshot: { ydoc: Uint8Array; stateVector: Uint8Array };
-  /** The same document, decoded exactly as the cache columns hold it. */
-  proseJson: JSONContent;
-  bodyText: string;
-  /** Whether the text is the cached (last settled) text — the no-op check. */
-  unchanged: boolean;
-};
-
-/**
- * PLAN.md §22e — a body's settled state, ready to record as a version.
- *
- * Asks the collab server for the drained tail of the body's own update log
- * (`flushAnnotationCache` with `writeCache: false`, falling back to the
- * database's own reading of the tail if the collab server cannot be reached),
- * materialises the body *at* that mark, and decodes it with the same function
- * the cache writer uses. Everything a version is — its bytes, its mark, and
- * the two cache columns — comes from that one decoded document, which is what
- * lets `writeSettledBody` below make the cache and the newest snapshot agree
- * by construction rather than by a later check.
- *
- * Validated **before** anything is written: an emptied or over-long body
- * returns an error and touches no column, so a reader keeps seeing the last
- * settled text and the session stays open for the author to fix it.
- *
- * The bounded retry is the same one posting has always had, for the same
- * reason: the collab server's Y.Doc only holds what has actually arrived over
- * the websocket, and a keystroke followed immediately by a click can outrun
- * that delivery. `expectChange` is what "outran" means for the caller — a post
- * retries while the body is empty, a Done also retries while it still reads
- * as the cached text, since opening the editor and closing it again is a
- * legitimate no-op there and a race here.
- *
- * `unchanged` is compared on `bodyText` rather than on `proseJson`: two
- * settled states with identical text but a different mark structure are the
- * same thing to a reader, and a version nobody could tell from its
- * predecessor would still cost the author their grace window (§22b).
- *
- * Deliberately returns *data* rather than writing: every caller needs the
- * write to be part of its own transaction (post sets the status alongside it,
- * Done clears `editingSince` alongside it), and a helper that wrote on its own
- * would make both of those two statements that can half-happen.
- */
-async function settleAnnotationBody(
-  annotationId: string,
-  actor: { id: string; role: Role },
-  opts: { expectChange: boolean },
-): Promise<SettledBody | { error: string }> {
-  const annotation = await prisma.annotation.findUnique({
-    where: { id: annotationId },
-    select: { bodyText: true },
-  });
-  if (!annotation) {
-    return { error: "Annotation not found." };
-  }
-  const ydocId = ydocIdForAnnotation(annotationId);
-
-  let settled: SettledBody | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const mark =
-      (await flushAnnotationCache({ userId: actor.id, role: actor.role, annotationId, writeCache: false })) ??
-      (await ydocStore.maxUpdateId(ydocId));
-    if (mark === null) {
-      return { error: "This annotation's body has no history to record." };
-    }
-    let doc;
-    try {
-      doc = await materializeYdocAt(ydocId, mark);
-    } catch (err) {
-      console.error(`[annotations] couldn't materialize ${ydocId} at ${mark}:`, err);
-      return { error: "Couldn't read the annotation's body right now — try again shortly." };
-    }
-    try {
-      const { proseJson, bodyText } = decodeAnnotationBody(doc);
-      settled = {
-        mark,
-        snapshot: encodeYdocState(doc),
-        proseJson,
-        bodyText,
-        unchanged: bodyText === annotation.bodyText,
-      };
-    } catch (err) {
-      console.error(`[annotations] ${ydocId} at ${mark} isn't TipTap-decodable:`, err);
-      return { error: "Couldn't read the annotation's body." };
-    } finally {
-      doc.destroy();
-    }
-    const outran = !settled.bodyText.trim() || (opts.expectChange && settled.unchanged);
-    if (!outran) break;
-    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-
-  if (!settled!.bodyText.trim()) {
-    return { error: "Annotation can't be empty." };
-  }
-  if (settled!.bodyText.length > MAX_BODY_LENGTH) {
-    return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
-  }
-  return settled!;
-}
-
-/**
- * The settle transaction (PLAN.md §22e): one `ydoc_snapshot` on the body's
- * own ydoc at the settled mark, and the annotation's cache columns written
- * from the same decoded document, plus whatever the caller settles alongside
- * (status and `postedAt` for a post, `editingSince`/`editedAt` for a Done).
- *
- * One transaction, so a posted annotation with no version 1 — or a version
- * with a cache that disagrees with it — cannot exist even briefly. The
- * snapshot's `createdAt` is the caller's `at`, the same instant it stamps on
- * the row, so `postedAt` and version 1's timestamp are one moment and §22b's
- * window is measured between values that agree.
- *
- * `userId` is who settled it: the acting user, which is the ADMIN when an
- * ADMIN edited (§22f), and why callers pass the session's id rather than the
- * annotation's author.
- *
- * A snapshot already sitting at the mark is reused rather than duplicated —
- * nothing legitimate produces one (the debug button refuses annotation ydocs
- * and an unchanged body settles nothing), so this is a guard, not a path.
- */
-async function writeSettledBody(opts: {
-  annotationId: string;
-  settled: SettledBody;
-  userId: string;
-  at: Date;
-  alongside: Prisma.AnnotationUpdateInput;
-}): Promise<void> {
-  const { annotationId, settled, userId, at, alongside } = opts;
-  const ydocId = ydocIdForAnnotation(annotationId);
-  await prisma.$transaction(async (tx) => {
-    const existing = await tx.ydocSnapshot.findFirst({
-      where: { ydocId, lastYdocUpdateId: settled.mark },
-      select: { id: true },
-    });
-    if (!existing) {
-      await tx.ydocSnapshot.create({
-        data: {
-          ydocId,
-          ydoc: Buffer.from(settled.snapshot.ydoc),
-          stateVector: Buffer.from(settled.snapshot.stateVector),
-          lastYdocUpdateId: settled.mark,
-          userId,
-          createdAt: at,
-        },
-      });
-    }
-    await tx.annotation.update({
-      where: { id: annotationId },
-      data: {
-        proseJson: settled.proseJson as Prisma.InputJsonValue,
-        bodyText: settled.bodyText,
-        proseJsonUpdateId: settled.mark,
-        ...alongside,
-      },
-    });
-  });
-}
-
-/**
- * PLAN.md §22e — the version of a parent body an anchored reply is measured
- * against: the mark of the parent's newest snapshot, which is the last
- * settled body and therefore exactly what the replier was reading (a reader
- * of a body sees settled text, never keystrokes). The log's tail is the
- * fallback for a parent with no snapshot at all — a row the backfill missed.
- *
- * Not `Annotation.proseJsonUpdateId`: that is the cache's own checkpoint and
- * can trail a Done (the flush writes content without an id, and the debounce
- * skips a body under edit), so a reply stamped from it could name a state its
- * quote does not reproduce.
- */
-async function parentSettledMark(parentId: string): Promise<bigint | null> {
-  const ydocId = ydocIdForAnnotation(parentId);
-  const newest = await prisma.ydocSnapshot.findFirst({
-    where: { ydocId },
-    orderBy: { lastYdocUpdateId: "desc" },
-    select: { lastYdocUpdateId: true },
-  });
-  return newest?.lastYdocUpdateId ?? (await ydocStore.maxUpdateId(ydocId));
-}
-
+import { parentSettledMark, settleAnnotationBody, writeSettledBody, type SettledBody } from "@/lib/annotation-settle";
+import { annotationHistoryFor, type AnnotationVersion } from "@/lib/annotation-history";
+import { actorFromSessionUser } from "@/lib/actor";
+import { setAnnotationDeleted } from "@/lib/annotation-manage";
 
 /**
  * `mintAnnotationConnection`, degraded to "no bundle" on any failure.
@@ -745,8 +559,9 @@ export async function discardDraftAnnotation(annotationId: string): Promise<void
 //             the next version and writes the cache from it, clears the stamp.
 //   cancel  — puts the newest version's content back, clears the stamp.
 //
-// **The gate is `requireOwnOrAdmin`**, the same pair that gates deleting an
-// annotation, and deliberately not the doc's read gate: until PR 1 of §22e
+// **The gate is the writer or an ADMIN** (`canUserEditAnnotationBody`), the
+// same pair that gates deleting a posted annotation, and deliberately not
+// the doc's read gate: until PR 1 of §22e
 // every reader of a doc held a writable connection to every annotation on it
 // (docs/COLLAB.md's 2026-08-13 entry called this the real gate on mutable
 // bodies). The token route now refuses to mint a writable token for anyone
@@ -910,95 +725,16 @@ export async function cancelAnnotationEdit(annotationId: string): Promise<{ erro
   }
 }
 
-// PLAN.md §22e — the history behind an annotation's "edited" marker: the
-// body's snapshots, decoded, under §22b's silence rule.
-//
-// Read gate: whoever can read the container can read the history, the same
-// question `canUserAccessAnnotationYdoc` asks for the body itself. Editing is
-// narrower (author or ADMIN); seeing what changed is not, because the current
-// text is already visible to every reader and hiding its predecessor would
-// leave a visible "edited" marker with nothing behind it.
-export type AnnotationVersion = {
-  revisionNo: number;
-  proseJson: unknown;
-  bodyText: string;
-  createdAt: string;
-  authorName: string | null;
-  current: boolean;
-};
+// PLAN.md §22e — the history behind an annotation's "edited" marker. The body
+// is src/lib/annotation-history.ts's, shared with the MCP server's thread read.
+export type { AnnotationVersion } from "@/lib/annotation-history";
 
 export async function getAnnotationHistory(annotationId: string): Promise<AnnotationVersion[]> {
   const session = await auth();
   if (!session?.user) {
     return [];
   }
-  const annotation = await prisma.annotation.findUnique({
-    where: { id: annotationId },
-    select: {
-      userId: true,
-      status: true,
-      postedAt: true,
-      doc: { select: { id: true, visibility: true } },
-      file: { select: { id: true, visibility: true } },
-    },
-  });
-  if (!annotation) {
-    return [];
-  }
-  if (!(await canUserAccessAnnotationYdoc(session.user.id, session.user.role, annotation))) {
-    return [];
-  }
-
-  // The versions are the body's snapshots in mark order (§22e), and the
-  // replies that quote it are the anchored, undeleted ones — the same two
-  // facts annotation-data.ts's loaders hold for a whole page.
-  const [snapshots, replies] = await Promise.all([
-    prisma.ydocSnapshot.findMany({
-      where: { ydocId: ydocIdForAnnotation(annotationId) },
-      orderBy: { lastYdocUpdateId: "asc" },
-      include: { user: { select: { name: true, email: true } } },
-    }),
-    prisma.annotation.findMany({
-      where: { parentAnnotationId: annotationId, anchorFrom: { not: null }, deletedByUserId: null },
-      select: { ydocUpdateId: true },
-    }),
-  ]);
-  const marks = snapshots.map((s) => s.lastYdocUpdateId);
-  const stamps = replies.flatMap((r) => (r.ydocUpdateId === null ? [] : [r.ydocUpdateId]));
-
-  const versions = withSupersededAt(
-    snapshots.map((s, index) => ({ ...s, revisionNo: index + 1 })),
-    (_row, index) => isVersionQuoted(marks, stamps, index),
-  );
-  // `postedAt` is the DRAFT -> LIVE transition — the moment readers could
-  // first have seen anything. Null only for a row the backfill never reached,
-  // for which every version is shown rather than silenced.
-  const postedAt = annotation.postedAt ?? new Date(0);
-  const visible = visibleVersions(versions, postedAt);
-  const newestNo = versions[versions.length - 1]?.revisionNo;
-
-  // Decoded from the snapshot bytes on demand — there is no text copy
-  // anywhere (§22e). A version that will not decode is listed from nothing
-  // rather than dropped, so the count a reader sees is still honest.
-  return visible
-    .map((version) => {
-      let body: { proseJson: unknown; bodyText: string };
-      try {
-        body = decodeAnnotationSnapshot(new Uint8Array(version.ydoc));
-      } catch (err) {
-        console.error(`[annotations] version ${version.revisionNo} of ${annotationId} isn't TipTap-decodable:`, err);
-        body = { proseJson: null, bodyText: "" };
-      }
-      return {
-        revisionNo: version.revisionNo,
-        proseJson: body.proseJson,
-        bodyText: body.bodyText,
-        createdAt: version.createdAt.toISOString(),
-        authorName: version.user ? displayNameOf(version.user) : null,
-        current: version.revisionNo === newestNo,
-      };
-    })
-    .reverse();
+  return annotationHistoryFor(actorFromSessionUser(session.user), annotationId);
 }
 
 // PLAN.md §22e — the state a reply's stored anchor was measured against, for
@@ -1064,56 +800,23 @@ export async function getQuotedParentVersion(
   }
 }
 
-async function requireOwnOrAdmin(annotationId: string) {
+/** Delete and restore: the writer's, or an ADMIN's (`setAnnotationDeleted`). */
+async function setAnnotationDeletedAction(annotationId: string, deleted: boolean): Promise<void> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
-  const annotation = await prisma.annotation.findUnique({
-    where: { id: annotationId },
-    select: { userId: true, docId: true, fileId: true, status: true },
-  });
-  if (!annotation) {
-    throw new Error("Annotation not found.");
-  }
-  const isOwn = annotation.userId === session.user.id;
-  if (!isAdmin(session.user.role) && !isOwn) {
-    throw new Error("You don't have permission to modify this annotation.");
-  }
-  return { session, annotation };
+  const container = await setAnnotationDeleted(actorFromSessionUser(session.user), annotationId, deleted);
+  for (const path of annotationRevalidationPaths(container)) revalidatePath(path);
+  revalidatePath("/annotations");
 }
 
 export async function deleteAnnotation(annotationId: string): Promise<void> {
-  const { session, annotation } = await requireOwnOrAdmin(annotationId);
-  await prisma.annotation.update({
-    where: { id: annotationId },
-    data: { deletedByUserId: session.user.id, deletedAt: new Date() },
-  });
-  // A DRAFT never had a mark applied (§13d), so there's nothing to remove —
-  // skip the round trip for the common "deleting my own private note" case.
-  // A *file* annotation never has one either, and for a stronger reason: a
-  // file has no ydoc at all, so there is no document to take a mark out of
-  // (PLAN.md §19). Both are the same early exit for different causes.
-  if (annotation.status !== "DRAFT" && annotation.docId !== null) {
-    await removeAnnotationMark({
-      docId: annotation.docId,
-      userId: session.user.id,
-      role: session.user.role,
-      annotationId,
-    });
-  }
-  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
-  revalidatePath("/annotations");
+  await setAnnotationDeletedAction(annotationId, true);
 }
 
 export async function restoreAnnotation(annotationId: string): Promise<void> {
-  const { annotation } = await requireOwnOrAdmin(annotationId);
-  await prisma.annotation.update({
-    where: { id: annotationId },
-    data: { deletedByUserId: null, deletedAt: null },
-  });
-  for (const path of annotationRevalidationPaths(annotation)) revalidatePath(path);
-  revalidatePath("/annotations");
+  await setAnnotationDeletedAction(annotationId, false);
 }
 
 // Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are
