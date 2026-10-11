@@ -5,19 +5,17 @@ import { revalidatePostPage } from "@/lib/revalidate-post";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canUserEditPost, isAdmin } from "@/lib/authz";
-import { canUserReadComment, isCommentPublic, type ReadableComment } from "@/lib/comment-authz";
 import { derivePostStatus } from "@/lib/post-status";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
 import { getClientIp } from "@/lib/request-ip";
 import { isCommentEditRateLimited, isCommentRateLimited } from "@/lib/rate-limit";
 import { checkSpam } from "@/lib/spam-check";
-import { visibleVersions, withSupersededAt } from "@/lib/edit-grace";
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
-import { commentBodyTextFromJSON, isCommentBodyError } from "@/lib/comment-body";
+import { isCommentBodyError } from "@/lib/comment-body";
 import { resolveCommentBody } from "@/lib/comment-body-resolve";
 import type { CommentBodyInput } from "@/lib/comment-body-value";
 import { commentContentToMarkdown } from "@/lib/markdown-import";
@@ -30,6 +28,7 @@ import { search } from "@/lib/search";
 import { parseSearchParams } from "@/lib/search/params";
 import { headlineText } from "@/lib/search/headline";
 import { displayNameOf } from "@/lib/display-name";
+import { commentHistoryFor, commentMarkdownFor, type CommentVersion } from "@/lib/comment-reading";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -481,34 +480,17 @@ export async function editComment(
   return { status: isSpam ? "SPAM" : comment.status, body: captured.json, bodyText: captured.text };
 }
 
-// What canUserReadComment needs of a comment's post: whether it is public
-// rather than just its id, since a comment on a draft, unpublished or deleted
-// post is not.
-const READABLE_COMMENT_INCLUDE = {
-  commenter: { select: { userId: true } },
-  thread: { select: { post: { select: { id: true, publishedAt: true, publishEventId: true, deletedByUserId: true } } } },
-} as const;
-
-// Whether this viewer may read a comment at all: canUserReadComment
-// (src/lib/comment-authz.ts), reading the session only when the comment isn't
-// public. Shared by getCommentHistory and getCommentMarkdown, which hand the
-// same body back in two forms.
-async function canViewerReadComment(comment: ReadableComment): Promise<boolean> {
-  if (isCommentPublic(comment)) return true;
+// The viewer as canUserReadComment takes one, or null when signed out.
+async function sessionViewer(): Promise<{ id: string; role: Role } | null> {
   const session = await auth();
-  return canUserReadComment(session?.user ? { id: session.user.id, role: session.user.role } : null, comment);
+  return session?.user ? { id: session.user.id, role: session.user.role } : null;
 }
 
-// PLAN.md §23m — the stored body serialized back to Markdown, for the edit
-// box in Markdown mode. On demand rather than stored: a second stored form of
-// one body is exactly the two-copies-that-can-disagree problem §23f's rewrite
-// exists to avoid, and the round trip is a few microseconds.
+// PLAN.md §23m — the stored body as Markdown, for the edit box in Markdown
+// mode (src/lib/comment-reading.ts).
 export async function getCommentMarkdown(commentId: string): Promise<{ markdown: string } | { error: string }> {
-  const comment = await prisma.comment.findUnique({ where: { id: commentId }, include: READABLE_COMMENT_INCLUDE });
-  if (!comment || !(await canViewerReadComment(comment))) {
-    return { error: "Comment not found." };
-  }
-  return { markdown: commentContentToMarkdown(comment.body as JSONContent) };
+  const markdown = await commentMarkdownFor(await sessionViewer(), commentId);
+  return markdown === null ? { error: "Comment not found." } : { markdown };
 }
 
 // PLAN.md §23m — switching the composer's mode with content in it. Both
@@ -527,67 +509,15 @@ export async function convertCommentBody(
   return to === "markdown" ? { markdown: commentContentToMarkdown(parsedBody.json) } : { json: parsedBody.json };
 }
 
-// PLAN.md §22c — the history one comment's "edited" marker opens.
-//
-// **The silence rule is applied here, on the server**, so a silent version
-// never reaches the browser at all. The alternative — shipping every revision
-// and hiding some in the client — would put the text of an edit nobody is
-// meant to know about into a payload anyone can read.
-//
-// Fetched on open rather than rendered into the page for the reason
-// `TagChips` is: the post page is statically generated (§21), and a dynamic
-// read there throws at build (§12f).
-export type CommentVersion = {
-  revisionNo: number;
-  body: JSONContent;
-  bodyText: string;
-  createdAt: string;
-  authorName: string | null;
-  /** The text currently on screen, i.e. the newest version. */
-  current: boolean;
-};
+// PLAN.md §22c — the history one comment's "edited" marker opens, under the
+// silence rule, on the server (src/lib/comment-reading.ts). Fetched on open
+// rather than rendered into the page for the reason `TagChips` is: the post
+// page is statically generated (§21), and a dynamic read there throws at
+// build (§12f).
+export type { CommentVersion } from "@/lib/comment-reading";
 
 export async function getCommentHistory(commentId: string): Promise<CommentVersion[]> {
-  const comment = await prisma.comment.findUnique({
-    where: { id: commentId },
-    include: {
-      ...READABLE_COMMENT_INCLUDE,
-      revisions: {
-        orderBy: { revisionNo: "asc" },
-        include: { author: { select: { name: true, email: true } }, quotedBy: { select: { id: true }, take: 1 } },
-      },
-    },
-  });
-  if (!comment) {
-    return [];
-  }
-
-  // Who may see it: the same people who may see the comment. An APPROVED,
-  // undeleted comment on a published post is public, so its history is too —
-  // that is the whole point of a visible edit. Anything else (pending, spam,
-  // deleted, or on a post no longer live) is withheld from everyone but its
-  // own author and whoever moderates the post, matching what the reading
-  // views already show of the comment itself.
-  if (!(await canViewerReadComment(comment))) {
-    return [];
-  }
-
-  // §22b's other clause: a version a comment_quote_anchor pins is never
-  // silent, so the reader of the quote has something to find.
-  const versions = withSupersededAt(comment.revisions, (revision) => revision.quotedBy.length > 0);
-  const visible = visibleVersions(versions, comment.createdAt);
-  const newestNo = versions[versions.length - 1]?.revisionNo;
-
-  return visible
-    .map((revision) => ({
-      revisionNo: revision.revisionNo,
-      body: revision.body as JSONContent,
-      bodyText: commentBodyTextFromJSON(revision.body),
-      createdAt: revision.createdAt.toISOString(),
-      authorName: revision.author ? displayNameOf(revision.author) : null,
-      current: revision.revisionNo === newestNo,
-    }))
-    .reverse();
+  return commentHistoryFor(await sessionViewer(), commentId);
 }
 
 // Which of this post's comments are the signed-in viewer's own: what the post

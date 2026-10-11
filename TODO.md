@@ -168,8 +168,8 @@ Not yet done:
 - **Semantic search** (FULLTEXT.md §10, item 7) is undecided: hosted Voyage embeddings or an
   open-weights batch on a desktop, and either way option B's passages and pgvector first.
 - **Firefox and WebKit** haven't run `search.spec.ts`; only chromium has.
-- **The API's search endpoints** (`docs/API.md` on `api-mcp`, which now points them at
-  `src/lib/search/`) wait on the API itself.
+- **The MCP server's `search` tool** ([docs/MCP.md](docs/MCP.md) §14) waits on the MCP server
+  itself.
 
 ## PDF fragment links: what is left (docs/PDF_FRAGMENT_LINKS.md)
 
@@ -201,10 +201,10 @@ glyphs. Not yet done:
 **Status:** built 2026-10-06. Unit-tested, and measured against Chromium's text layer on the e2e
 fixture and four real PDFs (PDF_QUADS.md Appendix A). Nothing on `main` calls it yet.
 
-- **Its first caller is the MCP server's stored PDF quads** (MCP.md §8, on `api-mcp`): that
-  section's steps become `extractPageItems` plus `quadsForRange`, and its spec should assert
-  edges within about 1pt of a selection in Chromium (the fixture's worst was 0.82pt), not mere
-  overlap, which even spacing also passes.
+- **Its first caller is the MCP server's stored PDF quads.** MCP.md §8 computes them with
+  `extractPageItems` and `quadsForRange`, and its spec asserts each edge within 1pt of a
+  selection in Chromium (the fixture's worst was 0.82pt), not mere overlap, which even spacing
+  also passes.
 - **That spec is the only standing check against a real selection** once it exists. Until
   then, a pdfjs bump that changed how the text layer picks a font family would move
   server-computed quads with nothing noticing; nothing stores them yet.
@@ -319,6 +319,31 @@ question has to be answered first.
 **Not this.** `AnnotationColorStyles` colors the annotation *highlight in the doc's prose* by
 thread; it has nothing to do with attributed text inside a body.
 
+## Annotation threads can't be resolved (`Annotation.resolvedAt` is never written)
+
+A thread has no way to say it is done. `resolvedAt` is in the schema, and nothing writes or
+reads it (docs/ANNOTATIONS.md, "Not built, deferred"). Comment threads have the same gap: the
+`RESOLVED` thread status is in the enum, and nothing writes it.
+
+**Why it matters now.** The MCP server (docs/MCP.md §9) gives Claude a queue of threads to
+answer: those whose latest activity isn't Claude's. Without resolving, that is the only queue,
+so a reply of "thanks" puts a thread back on it, and a thread nobody means to pursue stays in
+the rail for good.
+
+**What to build.**
+
+- **Resolve and Reopen** on a root's card, wherever one renders: both margin rails, the list
+  below the article, the editor's rail and the PDF panel. Resolving writes `resolvedAt` and a
+  new `resolvedByUserId`.
+- **Who may resolve** is undecided. The natural set is the thread's writer, the container's
+  authors or owners, and an ADMIN. It isn't `canUserEditAnnotationBody`'s question, since
+  resolving is about the thread rather than its body.
+- **How a resolved thread shows**: probably collapsed in the rails, with its highlight dropped,
+  and still listed below the article.
+- **Whether a new reply reopens it.**
+- **The MCP server reads it and filters on it, and never writes it.** Claude doesn't resolve
+  (MCP.md §9).
+
 ## No CI: nothing runs the checks except the committer
 
 **Status:** open as of 2026-09-04. `npm run check` (schema format, sign-in redirects, unit
@@ -411,8 +436,9 @@ Next's own error handling never sees it. Two consequences follow, and they pull 
 directions:
 
 - The admin sees a filtered message. A plain `Error` (this codebase's own authorization
-  guards) is shown verbatim; anything else — a Prisma rejection carrying the failing query
-  and absolute source paths — collapses to `"Something went wrong on the server."`
+  guards) or an `ApiError` (the operation layer's refusals, `src/lib/api/errors.ts`) is shown
+  verbatim; anything else — a Prisma rejection carrying the failing query and absolute source
+  paths — collapses to `"Something went wrong on the server."`
 - Because nothing throws, **Next logs nothing**. Under the previous `Promise.all` the first
   rejection propagated out of the server action and Next logged it server-side (with a digest
   in production, precisely so a generic client message could be correlated back).
@@ -487,6 +513,33 @@ not a fault, and logging every refused authorization at error level would bury t
 reporter inside `settleBulk`. That puts both classes of error — the ones Next handles and the
 ones this code deliberately swallows — through one seam that can later point at a provider,
 without committing to one now. Item 1 is independent and worth checking on the box regardless.
+
+---
+
+## A bulk result shows a refusal only from an error class `settleBulk` knows
+
+**Status:** found 2026-10-11, reviewing the operation layer before it merged, and fixed on main
+with it. Two things are left, below.
+
+`settleBulk` (`src/lib/bulk-result.ts`, the section above) shows a failed row's message only for
+an error it trusts to have been written for the person who tripped it, and redacts the rest. It
+knew one such class, a plain `Error`. The operation layer (docs/MCP.md §1) throws `ApiError`
+(`src/lib/api/errors.ts`) instead, so as the doc, file, annotation and link bodies moved into
+`src/lib`, every refused row of a bulk delete, restore or visibility change on /docs, /files,
+/annotations and /links came to read "Something went wrong on the server.", with its reason
+only in the journal. Anyone but an ADMIN who selects their own rows beside other people's meets
+that, so it is the common case of a refusal, not an edge. `describeFailure` now shows an
+`ApiError` as it shows a plain `Error`. That makes an `ApiError`'s message something a person
+reads, so it is never another error's message rewrapped: `setDocSlug` and `setFileSlug` pass on
+only their own refusals.
+
+1. **explore shows the generic message until it runs main's code.** It runs the `mcp` branch,
+   which moved the bodies without the fix.
+2. **No spec would catch it coming back.** `e2e/bulk-partial.spec.ts`, the one bulk spec that
+   reads a refusal's text, refuses through `deleteUser` on /users, a plain `Error`. A second on
+   /docs would cover the operation layer's: an AUTHOR bulk-deletes their own doc beside one they
+   can see but not edit, and the second row's title says "You don't have permission to edit this
+   doc." It fails the day another error class reaches `settleBulk` without its knowing.
 
 ---
 

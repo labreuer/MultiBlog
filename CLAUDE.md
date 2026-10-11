@@ -34,6 +34,7 @@ to re-derive the decision from.
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Markdown → TipTap: creating a doc (file import, paste box), and §11, the comment box's parse with its conform shims. |
 | [docs/CLAUDE_IMPORT.md](docs/CLAUDE_IMPORT.md) | A claude.ai data export → one doc per session, Markdown files → one doc each (`--markdown`), and updating imported docs in place without breaking the anchors other docs hold into them. |
 | [docs/FULLTEXT.md](docs/FULLTEXT.md) | Full-text search as built: a trigger-maintained vector per row over docs, posts, annotations, comments and PDF pages, per-kind queries that rank only inside the viewer's readable ids, accent folding and a typo correction that leaks nothing, filters by kind, author and date, the page and the quote picker; the decisions, and the other options in an appendix. |
+| [docs/MCP.md](docs/MCP.md) | The token-authenticated MCP server for machine clients (Claude first), landing on main in stages (its status line says how far) — one endpoint at `/api/mcp`, plus plain HTTP routes for a PDF's bytes, a Markdown draft and a bulk export, over one operation layer the server actions share, so nothing is written twice; reading any MultiBlog URL whole or in pieces, in answers sized for a model's context; targeted doc edits through the collab server; anchoring by quote; PDF page labels and server-side quads; Usage, which says where to configure a client and what a session spends; the gaps in the UI's actions it avoids; §20, where the build departs from the plan. |
 | [docs/ENV.md](docs/ENV.md) | Every environment variable, and the restart-vs-rebuild rule. |
 | [docs/DEV_SLOTS.md](docs/DEV_SLOTS.md) | Two working trees side by side: ports, hosts, databases. |
 | [docs/DATABASE.md](docs/DATABASE.md) | The Postgres cluster, what 18 doesn't change, migration recipes. |
@@ -238,6 +239,14 @@ before changing the behavior it describes.
   moving the flatten into the reader fails no check and makes a later xlsx codec inherit
   CSV's losses. Same reason the cell cap sits on the grid after decode rather than in any
   parser. docs/TABLES.md, "CSV in and out of an existing doc".
+- **A write the UI and the MCP server share is a function in `src/lib/` taking an `Actor`; the
+  server action is a wrapper.** `doc-manage.ts`, `file-manage.ts`, `file-ingest.ts`,
+  `annotation-manage.ts`, `anchored-link-write.ts`, `tag-write.ts` and `doc-create.ts` hold the
+  gate and the rule. The action adds the session and, where it knows the path, the
+  revalidation: `tag-write.ts` revalidates for itself, since a tagged object's path is worked
+  out there. The MCP tool adds its token. A rule added to the action alone binds one front door
+  and not the other, which is exactly the duplication the layer exists to prevent. docs/MCP.md
+  §1, §2.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**

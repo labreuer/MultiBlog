@@ -66,7 +66,7 @@ export function requireDocAnnotationId(row: AnnotationContainerColumns, context:
 /**
  * Paths to revalidate after an annotation is created, posted, deleted or
  * restored — for the actions that are genuinely container-agnostic (delete and
- * restore are `requireOwnOrAdmin` and never consult the container at all, per
+ * restore are `setAnnotationDeleted`'s and never consult the container at all, per
  * docs/PERMISSIONS.md), so they get a real branch here rather than the guard
  * above.
  *

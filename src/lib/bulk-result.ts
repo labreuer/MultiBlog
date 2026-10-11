@@ -1,3 +1,5 @@
+import { ApiError } from "@/lib/api/errors";
+
 // What a batched admin-table action reports back (PLAN.md §16f/§16g).
 //
 // These actions delegate to the per-row action once per id and are
@@ -25,10 +27,11 @@ export type BulkResult = { failed: BulkFailure[] };
  *
  * The discriminator is that this codebase's own authorization guards throw
  * plain `new Error("You can't delete your own account.")`, whose `name` is
- * exactly `"Error"`, while anything from a library (`PrismaClientKnownRequest-
- * Error`, `TypeError`, …) carries its own name. So a plain Error is treated as
- * a message written to be read by the person who tripped it, and everything
- * else collapses to a generic string.
+ * exactly `"Error"`, or an `ApiError`, the operation layer's refusal
+ * (src/lib/api/errors.ts), while anything from a library (`PrismaClientKnown-
+ * RequestError`, `TypeError`, …) carries its own name. So either of the first
+ * two is treated as a message written to be read by the person who tripped
+ * it, and everything else collapses to a generic string.
  *
  * `redacted` says which happened, because the generic branch is the one whose
  * real reason has to be logged instead of shown — see settleBulk. Erring
@@ -38,7 +41,7 @@ export type BulkResult = { failed: BulkFailure[] };
 const GENERIC_MESSAGE = "Something went wrong on the server.";
 
 function describeFailure(reason: unknown): { message: string; redacted: boolean } {
-  if (reason instanceof Error && reason.name === "Error" && reason.message) {
+  if (reason instanceof Error && (reason.name === "Error" || reason instanceof ApiError) && reason.message) {
     return { message: reason.message, redacted: false };
   }
   return { message: GENERIC_MESSAGE, redacted: true };

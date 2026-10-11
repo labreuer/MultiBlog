@@ -1,8 +1,8 @@
 # PDF fragment links — a link to a passage, with no row
 
 **Status: built** (2026-10-06), except "Copy passage link" (§8) and the MCP server's use of
-the check, which comes with the MCP server. MCP.md, the MCP server's plan, is on the `api-mcp`
-branch until it merges; fragment links share its PDF locator rule and its server-side quads.
+the check, which comes with the MCP server. Fragment links share the PDF locator rule and the
+server-side quads of [MCP.md](MCP.md), the MCP server's plan.
 
 A **fragment link** is a URL that names a passage of a PDF by its words:
 

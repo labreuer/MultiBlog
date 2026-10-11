@@ -135,8 +135,8 @@ export async function canUserTagTarget(userId: string, role: Role, target: Ancho
  * Deliberately not "whoever may tag the object may untag it": an act of tagging
  * is attributable (`tag_assignment.user_id`), and letting any AUTHORIZED
  * reader retract someone else's reading of a document is a moderation power,
- * not a tagging one. Same shape as `requireOwnOrAdmin` for annotations
- * (src/app/actions/annotations.ts), widened to EDITOR because curating shared
+ * not a tagging one. Same shape as `setAnnotationDeleted` for annotations
+ * (src/lib/annotation-manage.ts), widened to EDITOR because curating shared
  * vocabulary is exactly what an EDITOR is for.
  */
 export function canUserRemoveAssignment(userId: string, role: Role, assignmentUserId: string): boolean {
