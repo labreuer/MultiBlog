@@ -96,7 +96,7 @@ export function readableAnnotationsWhere(
 
 // PLAN.md §22e/§22f — who may *write* a posted annotation's body, as opposed
 // to who may open a connection to it at all (above). Author or ADMIN — the
-// same `requireOwnOrAdmin` pair that already gates deleting one, deliberately
+// same pair `setAnnotationDeleted` lets delete one, deliberately
 // rather than a new predicate: whoever may remove an annotation outright is
 // exactly who may reword it, and an EDITOR who can merely read the container
 // can do neither.

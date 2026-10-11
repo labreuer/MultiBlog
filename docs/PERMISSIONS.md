@@ -155,10 +155,10 @@ inconsistencies" below, both of which are visible here.
 
 Two of these are worth not mistaking for doc rules. **Creating a doc** is `canManageDocs`
 with no doc to scope against yet, so it sits outside all four tables. **Deleting or
-restoring an annotation** is `requireOwnOrAdmin` (`src/app/actions/annotations.ts`) — ADMIN
-or the annotation's own author — and never consults the doc, which is why that row reads
-identically in all four tables and why an ADMIN retains it even where the doc is otherwise
-invisible to them (the † in table 2).
+restoring an annotation** is `setAnnotationDeleted` (`src/lib/annotation-manage.ts`) — ADMIN
+or the annotation's own author, and a `DRAFT` its author alone — and never consults the doc,
+which is why that row reads identically in all four tables and why an ADMIN retains it, for a
+posted annotation, even where the doc is otherwise invisible to them (the † in table 2).
 
 ## Editing what is already posted (PLAN.md §22)
 
@@ -289,9 +289,9 @@ structural difference:
 |---|---|
 | Read `/doc/[slug]` | Read `/pdf/[slug]` and `/files/[slug]`, download via `/files/[slug]/download`, fetch bytes from `/api/files/…` |
 | Edit `/doc/[slug]/edit` | **No equivalent** — a file has no editable content |
-| Visibility / owners / slug / delete | `canUserManageFile` (`src/app/actions/files.ts`) |
+| Visibility / owners / slug / delete | `canUserManageFile` (`src/lib/file-manage.ts`) |
 | Listed in `/docs` (+ ADMIN "Show all docs") | Listed in `/files` (+ ADMIN "Show all files") |
-| Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same `requireOwnOrAdmin` |
+| Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same delete rule (`setAnnotationDeleted`) |
 | Collab connection | Presence only, and **always read-only** (`/api/file/[id]/token`) |
 
 Three consequences worth stating plainly, because they are what the user-facing rule asked for:
@@ -629,13 +629,14 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
-| Doc mutations (visibility, byline, slug, delete) | `src/app/actions/docs.ts` |
-| Annotation create / delete / restore | `src/app/actions/annotations.ts` |
+| Doc mutations (visibility, byline, slug, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
+| File mutations (visibility, title, slug, delete) and the upload | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
+| Annotation create / delete / restore | `src/app/actions/annotations.ts`; delete and restore in `src/lib/annotation-manage.ts` |
 | Doc links | `src/app/actions/doc-links.ts` |
 | Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |
 | Who may tag which object; who may retract an assignment | `src/lib/tag-authz.ts` |
 | Which posts a viewer may see at all (published + own unpublished) | `src/lib/post-status.ts` |
-| Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts` |
+| Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts`; create, tag and untag in `src/lib/tag-write.ts` |
 | `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
 | `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |
 | Anchored-link follow filter (per-target, silent omission) | `src/lib/anchored-link-data.ts` |
