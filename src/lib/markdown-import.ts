@@ -95,6 +95,43 @@ function headingLevel(node: JSONContent | undefined): number | null {
   return typeof level === "number" ? level : null;
 }
 
+/**
+ * `json` with each run of inline code numbered (`attrs.run`) afresh wherever
+ * the other marks on it change, so the serializer closes the code span there
+ * and opens another. Inline code may carry any other mark (docs/TIPTAP.md,
+ * "Inline code takes other marks"), so part of a span can be bold. As one
+ * span, the bold's `**` would land inside the backticks, where Markdown reads
+ * it as literal text, and a round trip would write the asterisks into the
+ * code. Split, `wf_1234` with `wf` bold is `` **`wf`**`_1234` ``, which parses
+ * back to what it was. Two spans never touch: the marks they differ by open
+ * or close between them, outside the backticks, because code is the innermost
+ * mark (StarterKit, tiptap-schema.ts). The split relies on @tiptap/markdown
+ * treating two marks of one type with different attributes as two marks.
+ * Nothing reads the number: the parse makes a plain code mark. The
+ * `markdown-inline-code` tests pin all of this.
+ */
+function splitCodeAtFormatting(json: JSONContent): JSONContent {
+  if (!json.content) return json;
+  let run = 0;
+  let previous: string | null = null;
+  const content = json.content.map((child) => {
+    const code = child.type === "text" ? child.marks?.find((mark) => mark.type === "code") : undefined;
+    if (!code) {
+      previous = null;
+      return splitCodeAtFormatting(child);
+    }
+    const others = child
+      .marks!.filter((mark) => mark !== code)
+      .map((mark) => JSON.stringify(mark))
+      .sort()
+      .join();
+    if (others !== previous) run += 1;
+    previous = others;
+    return { ...child, marks: child.marks!.map((mark) => (mark === code ? { ...mark, attrs: { ...mark.attrs, run } } : mark)) };
+  });
+  return { ...json, content };
+}
+
 export function markdownToDocContent(markdown: string): MarkdownImport {
   const parsed = decodeNodeEntities(markdownManager.parse(markdown));
   const blocks = Array.isArray(parsed.content) ? [...parsed.content] : [];
@@ -228,5 +265,5 @@ export function markdownToCommentContent(markdown: string): JSONContent {
  * a body parsed from Markdown and serialized again re-parses to itself.
  */
 export function commentContentToMarkdown(json: JSONContent): string {
-  return commentMarkdownManager.serialize(json);
+  return commentMarkdownManager.serialize(splitCodeAtFormatting(json));
 }

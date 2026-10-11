@@ -8,7 +8,7 @@
 // Every post-page navigation is a `freshGoto`, for the reason
 // comment-editing.spec.ts gives: the fixtures write comments straight to the
 // database, which revalidates nothing.
-import { test, expect, freshGoto, visibleText } from "./fixtures";
+import { test, expect, visibleText, freshGotoComment } from "./fixtures";
 import { ADMIN_EMAIL, createComment, softDeleteComment, uniqueEmail } from "./db";
 
 test.describe("the post page's comment payload", () => {
@@ -40,7 +40,7 @@ test.describe("the post page's comment payload", () => {
     });
     await softDeleteComment(deletedId, ADMIN_EMAIL);
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, deletedId);
     await expect(page.locator(`[data-comment-id="${deletedId}"]`)).toHaveText("[deleted]");
     await expect(visibleText(page, reply)).toBeVisible();
 
@@ -84,7 +84,7 @@ test.describe("the post page's comment payload", () => {
       status: "APPROVED",
     });
 
-    await freshGoto(page, publishedPost.path);
+    await freshGotoComment(page, publishedPost.path, otherId);
     const own = page.locator(`[data-comment-id="${ownId}"]`);
     const other = page.locator(`[data-comment-id="${otherId}"]`);
     await expect(own.getByRole("button", { name: "Edit" })).toBeVisible();
