@@ -1,13 +1,13 @@
-// Naming convention for the standalone ydoc stack (PLAN.md §11a). A document's
+// Naming convention for the ydoc stack (PLAN.md §11a). A document's
 // Hocuspocus documentName IS its `ydoc.id` — there is no separate lookup table
-// mapping one to the other — so routing a connection to server/ydoc-hooks.ts
-// instead of the legacy post_collab path has to be decidable from the name
-// alone, with no database round-trip. Post documents are bare cuids; every
-// ydoc-stack document is prefixed, which makes that a string check.
+// mapping one to the other — so what a document is has to be decidable from
+// its name alone, with no database round-trip. Every name is `ydoc:`-prefixed,
+// and a PDF's presence channel and an annotation body each add a prefix of
+// their own below.
 //
 // Shared between the Next app and the collab server (server/collab.ts,
-// server/ydoc-hooks.ts) so the two processes can't drift on what the prefix
-// is — the same reason collab-admin.ts shares REPLACE_DOC_PATH.
+// server/ydoc-hooks.ts) so the two processes can't drift on what a prefix
+// is, or on the /admin paths further down.
 export const YDOC_PREFIX = "ydoc:";
 
 // Prefix for throwaway documents created by scripts/test-ydoc.ts or the e2e
