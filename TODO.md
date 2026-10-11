@@ -168,8 +168,8 @@ Not yet done:
 - **Semantic search** (FULLTEXT.md §10, item 7) is undecided: hosted Voyage embeddings or an
   open-weights batch on a desktop, and either way option B's passages and pgvector first.
 - **Firefox and WebKit** haven't run `search.spec.ts`; only chromium has.
-- **The API's search endpoints** (`docs/API.md` on `api-mcp`, which now points them at
-  `src/lib/search/`) wait on the API itself.
+- **The MCP server's `search` tool** ([docs/MCP.md](docs/MCP.md) §14) waits on the MCP server
+  itself.
 
 ## PDF fragment links: what is left (docs/PDF_FRAGMENT_LINKS.md)
 
@@ -201,10 +201,10 @@ glyphs. Not yet done:
 **Status:** built 2026-10-06. Unit-tested, and measured against Chromium's text layer on the e2e
 fixture and four real PDFs (PDF_QUADS.md Appendix A). Nothing on `main` calls it yet.
 
-- **Its first caller is the MCP server's stored PDF quads** (MCP.md §8, on `api-mcp`): that
-  section's steps become `extractPageItems` plus `quadsForRange`, and its spec should assert
-  edges within about 1pt of a selection in Chromium (the fixture's worst was 0.82pt), not mere
-  overlap, which even spacing also passes.
+- **Its first caller is the MCP server's stored PDF quads.** MCP.md §8 computes them with
+  `extractPageItems` and `quadsForRange`, and its spec asserts each edge within 1pt of a
+  selection in Chromium (the fixture's worst was 0.82pt), not mere overlap, which even spacing
+  also passes.
 - **That spec is the only standing check against a real selection** once it exists. Until
   then, a pdfjs bump that changed how the text layer picks a font family would move
   server-computed quads with nothing noticing; nothing stores them yet.
@@ -318,6 +318,31 @@ question has to be answered first.
 
 **Not this.** `AnnotationColorStyles` colors the annotation *highlight in the doc's prose* by
 thread; it has nothing to do with attributed text inside a body.
+
+## Annotation threads can't be resolved (`Annotation.resolvedAt` is never written)
+
+A thread has no way to say it is done. `resolvedAt` is in the schema, and nothing writes or
+reads it (docs/ANNOTATIONS.md, "Not built, deferred"). Comment threads have the same gap: the
+`RESOLVED` thread status is in the enum, and nothing writes it.
+
+**Why it matters now.** The MCP server (docs/MCP.md §9) gives Claude a queue of threads to
+answer: those whose latest activity isn't Claude's. Without resolving, that is the only queue,
+so a reply of "thanks" puts a thread back on it, and a thread nobody means to pursue stays in
+the rail for good.
+
+**What to build.**
+
+- **Resolve and Reopen** on a root's card, wherever one renders: both margin rails, the list
+  below the article, the editor's rail and the PDF panel. Resolving writes `resolvedAt` and a
+  new `resolvedByUserId`.
+- **Who may resolve** is undecided. The natural set is the thread's writer, the container's
+  authors or owners, and an ADMIN. It isn't `canUserEditAnnotationBody`'s question, since
+  resolving is about the thread rather than its body.
+- **How a resolved thread shows**: probably collapsed in the rails, with its highlight dropped,
+  and still listed below the article.
+- **Whether a new reply reopens it.**
+- **The MCP server reads it and filters on it, and never writes it.** Claude doesn't resolve
+  (MCP.md §9).
 
 ## No CI: nothing runs the checks except the committer
 
