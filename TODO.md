@@ -436,8 +436,9 @@ Next's own error handling never sees it. Two consequences follow, and they pull 
 directions:
 
 - The admin sees a filtered message. A plain `Error` (this codebase's own authorization
-  guards) is shown verbatim; anything else — a Prisma rejection carrying the failing query
-  and absolute source paths — collapses to `"Something went wrong on the server."`
+  guards) or an `ApiError` (the operation layer's refusals, `src/lib/api/errors.ts`) is shown
+  verbatim; anything else — a Prisma rejection carrying the failing query and absolute source
+  paths — collapses to `"Something went wrong on the server."`
 - Because nothing throws, **Next logs nothing**. Under the previous `Promise.all` the first
   rejection propagated out of the server action and Next logged it server-side (with a digest
   in production, precisely so a generic client message could be correlated back).
@@ -512,6 +513,33 @@ not a fault, and logging every refused authorization at error level would bury t
 reporter inside `settleBulk`. That puts both classes of error — the ones Next handles and the
 ones this code deliberately swallows — through one seam that can later point at a provider,
 without committing to one now. Item 1 is independent and worth checking on the box regardless.
+
+---
+
+## A bulk result shows a refusal only from an error class `settleBulk` knows
+
+**Status:** found 2026-10-11, reviewing the operation layer before it merged, and fixed on main
+with it. Two things are left, below.
+
+`settleBulk` (`src/lib/bulk-result.ts`, the section above) shows a failed row's message only for
+an error it trusts to have been written for the person who tripped it, and redacts the rest. It
+knew one such class, a plain `Error`. The operation layer (docs/MCP.md §1) throws `ApiError`
+(`src/lib/api/errors.ts`) instead, so as the doc, file, annotation and link bodies moved into
+`src/lib`, every refused row of a bulk delete, restore or visibility change on /docs, /files,
+/annotations and /links came to read "Something went wrong on the server.", with its reason
+only in the journal. Anyone but an ADMIN who selects their own rows beside other people's meets
+that, so it is the common case of a refusal, not an edge. `describeFailure` now shows an
+`ApiError` as it shows a plain `Error`. That makes an `ApiError`'s message something a person
+reads, so it is never another error's message rewrapped: `setDocSlug` and `setFileSlug` pass on
+only their own refusals.
+
+1. **explore shows the generic message until it runs main's code.** It runs the `mcp` branch,
+   which moved the bodies without the fix.
+2. **No spec would catch it coming back.** `e2e/bulk-partial.spec.ts`, the one bulk spec that
+   reads a refusal's text, refuses through `deleteUser` on /users, a plain `Error`. A second on
+   /docs would cover the operation layer's: an AUTHOR bulk-deletes their own doc beside one they
+   can see but not edit, and the second row's title says "You don't have permission to edit this
+   doc." It fails the day another error class reaches `settleBulk` without its knowing.
 
 ---
 
