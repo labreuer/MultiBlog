@@ -97,6 +97,8 @@ export type SearchOptions = {
    * (the quote picker). Any author slugs requested are then ignored.
    */
   authorOptions?: boolean;
+  /** Tag ids every hit must carry one of (docs/MCP.md §11): the MCP server's filter, which the page doesn't offer. */
+  tagIds?: string[];
 };
 
 export async function search(
@@ -132,7 +134,8 @@ export async function search(
     pageSize,
   };
 
-  if (!params.q && !hasFilters(params)) return { ...result, status: "idle" };
+  const tagIds = opts.tagIds ?? [];
+  if (!params.q && !hasFilters(params) && tagIds.length === 0) return { ...result, status: "idle" };
   // Every kind asked for is one this viewer can't search: nothing to run, and
   // nothing for typo correction to look through.
   if (kinds.length === 0) return { ...result, status: "ok" };
@@ -150,6 +153,7 @@ export async function search(
     created: dayRangeToInstants(params.created, params.tz),
     updated: dayRangeToInstants(params.updated, params.tz),
     excludePostId: opts.excludePostId ?? null,
+    tagIds,
     memo: new Map(),
   };
   const window = { offset: paginated ? (params.page - 1) * pageSize : 0, limit: pageSize };

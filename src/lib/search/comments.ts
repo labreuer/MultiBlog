@@ -15,7 +15,7 @@ import { commentAnchorName } from "@/lib/comment-anchor-name";
 import { postPath } from "@/lib/post-path";
 import { isWithin } from "./dates";
 import { orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
-import { remember, type KindContext, type KindSearch } from "./context";
+import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { CommentHit } from "./types";
 
 /**
@@ -35,6 +35,7 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
           publicCommentsWhere(),
           ctx.created ? { createdAt: ctx.created } : {},
           ctx.excludePostId ? { thread: { postId: { not: ctx.excludePostId } } } : {},
+          taggedWhere(ctx.tagIds),
         ],
       },
       select: { id: true, createdAt: true },

@@ -1,5 +1,17 @@
 import { test, expect } from "./fixtures";
-import { ADMIN_EMAIL, createTestUser, deleteTestUser, restoreTestUser, softDeleteTestUser, uniqueEmail } from "./db";
+import {
+  ADMIN_EMAIL,
+  createTestDoc,
+  createTestTag,
+  createTestUser,
+  deleteTestDoc,
+  deleteTestTag,
+  deleteTestUser,
+  restoreTestUser,
+  softDeleteTestUser,
+  tagWithTestTag,
+  uniqueEmail,
+} from "./db";
 import { callTool, createAgent, mcpRequest } from "./mcp";
 
 // docs/MCP.md, phase 1 (§18): tokens, the endpoint, and every read — driven
@@ -32,7 +44,7 @@ test("a token authenticates, names its actor and issuer, and lists only what its
       _meta: Record<string, unknown>;
       annotations: Record<string, unknown>;
     }[];
-    expect(readerTools.map((t) => t.name)).toEqual(["find_users", "find_tags"]);
+    expect(readerTools.map((t) => t.name)).toEqual(["search", "find_users", "find_tags"]);
     const findUsers = readerTools.find((t) => t.name === "find_users")!;
     expect(findUsers.annotations.readOnlyHint).toBe(true);
     expect(findUsers.annotations.openWorldHint).toBe(false);
@@ -58,7 +70,7 @@ test("a token authenticates, names its actor and issuer, and lists only what its
 test("a deleted account's token stops working, and restoring the account doesn't bring it back", async ({ request }) => {
   const agent = await createAgent(request);
   try {
-    expect((await agent.call("find_users", { query: "E2E Admin" })).isError).toBe(false);
+    expect((await agent.call("search", { q: "anything", exact: true })).isError).toBe(false);
 
     await softDeleteTestUser(agent.user.email, ADMIN_EMAIL);
     expect((await mcpRequest(request, agent.secret, "tools/list")).status).toBe(401);
@@ -66,6 +78,56 @@ test("a deleted account's token stops working, and restoring the account doesn't
     await restoreTestUser(agent.user.email);
     expect((await mcpRequest(request, agent.secret, "tools/list")).status).toBe(401);
   } finally {
+    await agent.dispose();
+  }
+});
+
+test("search: a strict parse, one handle per hit, sizes, exact, authors and tags", async ({ request }) => {
+  const agent = await createAgent(request, { scopes: ["READ"] });
+  const word = `zygomorph${Math.random().toString(36).replace(/[^a-z]/g, "").slice(0, 6)}`;
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: `A paragraph mentioning ${word} once.` });
+  const tag = await createTestTag({ creatorEmail: ADMIN_EMAIL });
+  try {
+    await tagWithTestTag({ tagId: tag.id, target: { kind: "doc", id: doc.id }, taggerEmail: ADMIN_EMAIL });
+
+    const found = await agent.call("search", { q: word, kinds: ["docs"], exact: true });
+    expect(found.isError).toBe(false);
+    const section = (found.result.sections as { kind: string; total: number; hits: Record<string, unknown>[] }[])[0];
+    expect(section.total).toBe(1);
+    const hit = section.hits[0];
+    expect(hit.url).toBe(`/doc/${doc.slug}`);
+    expect(hit).not.toHaveProperty("id");
+    expect(hit.chars).toBeGreaterThan(0);
+    expect(hit.byline).toBe("E2E Admin");
+    expect(String(hit.snippet)).toContain(`**${word}**`);
+    // One hit, lean: well under what the page's own hit object costs.
+    expect(found.size).toBeLessThan(700);
+
+    // What the page's parse would quietly change, refused instead.
+    expect((await agent.call("search", { q: word, kinds: ["doc"] })).error.code).toBe("invalid");
+    expect((await agent.call("search", { q: word, created_from: "2026-02-30" })).error.code).toBe("invalid");
+    expect((await agent.call("search", { q: word, tz: "Mars/Olympus" })).error.code).toBe("invalid");
+    expect((await agent.call("search", { q: word, extra: 1 })).error.code).toBe("invalid");
+    const unknown = await agent.call("search", { q: word, authors: ["nobody-at-all-here"] });
+    expect(unknown.error.code).toBe("unknown_author");
+    expect(unknown.error.slugs).toEqual(["nobody-at-all-here"]);
+
+    // An author filter leaves out the kinds that name no author, and says so.
+    const byAdmin = await agent.call("search", { q: word, authors: ["e2e-admin"] });
+    expect(byAdmin.isError).toBe(false);
+    expect(byAdmin.result.withoutAuthors).toEqual(expect.arrayContaining(["pdfs", "comments"]));
+
+    // Listing by tag: no q, what carries the term.
+    const tagged = await agent.call("search", { tags: [tag.slug], kinds: ["docs"] });
+    expect((tagged.result.sections as { hits: { url: string }[] }[])[0].hits.map((h) => h.url)).toEqual([`/doc/${doc.slug}`]);
+
+    // A miss with exact stays a miss; nothing is corrected behind the reader's back.
+    const misspelt = await agent.call("search", { q: `${word}x`, kinds: ["docs"], exact: true });
+    expect((misspelt.result.sections as { total: number }[])[0].total).toBe(0);
+    expect(misspelt.result.corrected).toBeUndefined();
+  } finally {
+    await deleteTestTag(tag.id);
+    await deleteTestDoc(doc.id);
     await agent.dispose();
   }
 });

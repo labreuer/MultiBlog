@@ -19,7 +19,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { extractMarkedText } from "@/lib/tiptap-schema";
 import { isWithin } from "./dates";
 import { headlineTexts, orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
-import { remember, type KindContext, type KindSearch } from "./context";
+import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { AnnotationHit } from "./types";
 
 /**
@@ -40,6 +40,7 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
           { deletedByUserId: null },
           ctx.authorIds.length > 0 ? { userId: { in: ctx.authorIds } } : {},
           ctx.created ? { postedAt: ctx.created } : {},
+          taggedWhere(ctx.tagIds),
         ],
       },
       select: { id: true, postedAt: true },
@@ -91,7 +92,9 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
           postedAt: true,
           anchorFrom: true,
           quotedText: true,
-          user: { select: { name: true } },
+          parentAnnotationId: true,
+          status: true,
+          user: { select: { name: true, slug: true } },
           doc: { select: { id: true, slug: true, title: true } },
           file: { select: { slug: true, title: true } },
         },
@@ -135,8 +138,13 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
         {
           id,
           href: `${container.path}/${container.slug}#${annotationAnchorName(writer, row.createdAt)}`,
-          container: { kind: container.kind, title: container.title },
+          container: { kind: container.kind, title: container.title, href: `${container.path}/${container.slug}` },
           writer,
+          // A nameless account's slug is made from its email (user-slug.ts),
+          // so it goes out only beside a name.
+          writerSlug: row.user.name?.trim() ? row.user.slug : null,
+          parentId: row.parentAnnotationId,
+          status: row.status === "RAISED" ? "RAISED" : "LIVE",
           postedAt: row.postedAt,
           editedAt: edited.get(id) ?? null,
           snippet: snippets.get(id)?.body ?? [],
