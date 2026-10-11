@@ -239,6 +239,12 @@ before changing the behavior it describes.
   moving the flatten into the reader fails no check and makes a later xlsx codec inherit
   CSV's losses. Same reason the cell cap sits on the grid after decode rather than in any
   parser. docs/TABLES.md, "CSV in and out of an existing doc".
+- **A write the UI and the MCP server share is a function in `src/lib/` taking an `Actor`;
+  the server action is a wrapper.** `doc-manage.ts`, `file-manage.ts`, `file-ingest.ts`,
+  `annotation-manage.ts`, `anchored-link-write.ts`, `tag-write.ts` and `doc-create.ts` hold
+  the gate and the rule; the action adds the session and its revalidation, the MCP tool its
+  token. A rule added to the action alone binds one front door and not the other, which is
+  exactly the duplication the layer exists to prevent. docs/MCP.md §1, §2.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**
