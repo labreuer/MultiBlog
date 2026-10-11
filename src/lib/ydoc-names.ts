@@ -138,3 +138,11 @@ export const ANNOTATION_REPLACE_PATH = "/admin/annotation-replace";
 // made to the stored rows behind its back is overwritten by its next store,
 // and never reaches anyone who has the doc open.
 export const DOC_APPLY_UPDATE_PATH = "/admin/doc-apply-update";
+
+// Path the collab server's onRequest hook listens on for a targeted edit of a
+// doc (docs/MCP.md §6): edits named by the text they change, planned and
+// applied inside one transaction on the live document, written back block by
+// block, and attributed to the token's user. A sibling of doc-apply-update
+// and built on its guards: a read-only token is refused, and so is a name
+// that isn't a doc's.
+export const DOC_EDIT_PATH = "/admin/doc-edit";

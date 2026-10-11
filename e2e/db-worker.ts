@@ -2341,9 +2341,10 @@ export async function createTestApiToken(opts: {
 }
 
 /**
- * A doc's marks as its stored row holds them: how many characters each
- * author's mark covers (by email), the text each annotation's mark covers,
- * and the clients map's users (by email).
+ * A doc's marks as its stored row holds them — after an MCP edit, the collab
+ * server stores the doc as its direct connection closes: how many characters
+ * each author's mark covers (by email), the text each annotation's mark
+ * covers, and the clients map's users (by email).
  */
 export async function getDocMarkFacts(docId: string): Promise<{
   text: string;
@@ -2388,6 +2389,13 @@ export async function getDocMarkFacts(docId: string): Promise<{
     clients: clientUserIds.map((id) => emailOf.get(id) ?? id),
     title,
   };
+}
+
+/** Marks a test doc a record (docs/MCP.md §6), as the importer marks a chat it imports. */
+export async function setTestDocRecord(docId: string, record: boolean): Promise<void> {
+  const doc = await prisma.doc.findUniqueOrThrow({ where: { id: docId }, select: { title: true } });
+  if (!doc.title.startsWith(E2E_TITLE_PREFIX)) throw new Error("setTestDocRecord: not a test doc.");
+  await prisma.doc.update({ where: { id: docId }, data: { record } });
 }
 
 /** Re-slugs a test term through changeTagSlug, so the old slug lands in tag_slug_history as /tags' rename leaves it. */
@@ -2540,6 +2548,7 @@ const handlers = {
   appendTestDocParagraph,
   renameTestTagSlug,
   getDocMarkFacts,
+  setTestDocRecord,
 };
 
 export type DbHandlers = typeof handlers;

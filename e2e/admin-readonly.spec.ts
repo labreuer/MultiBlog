@@ -6,6 +6,7 @@ import {
   ANNOTATION_REPLACE_PATH,
   ANNOTATION_UNMARK_PATH,
   DOC_APPLY_UPDATE_PATH,
+  DOC_EDIT_PATH,
   YDOC_SNAPSHOT_PATH,
 } from "../src/lib/ydoc-names";
 import { test, expect } from "./fixtures";
@@ -16,7 +17,7 @@ import { getDocState } from "./db";
 // routes hand one to any reader's browser, and the admin paths share the
 // websocket's port, so the token is the gate wherever that port is reachable.
 //
-// One reader's token for a doc goes to all six, each with a body shaped well
+// One reader's token for a doc goes to all seven, each with a body shaped well
 // enough to pass the handler's own 400 check, so only the token can be what
 // refuses it: every handler checks the token before it looks at what the name
 // is for. A writable token on a harmless request then shows the refusal is
@@ -29,6 +30,7 @@ const ENDPOINTS: { path: string; body: Record<string, unknown> }[] = [
   { path: ANNOTATION_FLUSH_PATH, body: { writeCache: false } },
   { path: ANNOTATION_REPLACE_PATH, body: { proseJson: { type: "doc", content: [{ type: "paragraph" }] } } },
   { path: DOC_APPLY_UPDATE_PATH, body: { update: "AA==", stateVector: "AA==" } },
+  { path: DOC_EDIT_PATH, body: { edits: [] } },
 ];
 
 type TokenResponse = { token: string; documentName: string; readOnly: boolean };

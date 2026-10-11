@@ -245,8 +245,10 @@ before changing the behavior it describes.
   gate and the rule. The action adds the session and, where it knows the path, the
   revalidation: `tag-write.ts` revalidates for itself, since a tagged object's path is worked
   out there. The MCP tool adds its token. A rule added to the action alone binds one front door
-  and not the other, which is exactly the duplication the layer exists to prevent. docs/MCP.md
-  §1, §2.
+  and not the other, which is exactly the duplication the layer exists to prevent. And an MCP
+  edit to a doc's text goes through the collab server (`/admin/doc-edit`), never into the
+  `ydoc` row: a write beside a live session is overwritten at its next store. docs/MCP.md §1,
+  §2, §6.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**

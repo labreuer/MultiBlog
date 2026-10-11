@@ -10,6 +10,7 @@ import {
 } from "./fixtures";
 import {
   ADMIN_EMAIL,
+  addTestDocAuthor,
   createComment,
   createTestDoc,
   deleteTestDoc,
@@ -17,12 +18,14 @@ import {
   getDocMarkFacts,
   getUserIdByEmail,
 } from "./db";
+import { createAgent } from "./mcp";
 
 // docs/TIPTAP.md "Inline code takes other marks" — inline code carries any
 // other mark: bold on all or part of it, the author mark of whoever typed it,
 // and an annotation's mark over a passage it is in. And every Markdown export
 // keeps the other marks' delimiters outside the backticks, so a round trip
-// through the comment edit box leaves the code as it was.
+// through the comment edit box or an MCP read and edit leaves the code as it
+// was.
 
 const code = { type: "code" };
 const t = (text: string, ...marks: object[]) => ({ type: "text", text, ...(marks.length ? { marks } : {}) });
@@ -50,8 +53,13 @@ async function selectParagraph(page: Page, start: string): Promise<void> {
   }, start);
 }
 
-test("bold goes on part of a code span in the editor", async ({ page }) => {
+test("bold goes on part of a code span in the editor, and the doc's Markdown keeps it outside the backticks", async ({
+  page,
+  request,
+}) => {
   const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, body: { type: "doc", content: [p(t("Run "), t("wf_1234", code), t(" now."))] } });
+  const agent = await createAgent(request);
+  await addTestDocAuthor(doc.id, agent.user.email);
   try {
     await page.goto(`/doc/${doc.id}/edit`);
     await waitForDocCollabReady(page);
@@ -60,8 +68,21 @@ test("bold goes on part of a code span in the editor", async ({ page }) => {
     const body = bodyEditor(page);
     await expect(body.locator(BOLD_CODE)).toHaveText("wf");
     await expect(body.locator("code")).toHaveText(["wf", "_1234"]);
+
+    const url = `/doc/${doc.slug}`;
+    const markdown = async () => String((await agent.call("read", { url })).result.markdown);
+    await expect.poll(markdown, { timeout: 15_000 }).toBe("Run **`wf`**`_1234` now.");
+
+    // An edit written from that Markdown, as Claude writes one, leaves the code as it was.
+    const edited = await agent.call("edit_doc", { url, edits: [{ old: "Run **`wf`**`_1234` now.", new: "Run **`wf`**`_1234` later." }] });
+    expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
+    await expect(body).toContainText("later.");
+    await expect(body.locator(BOLD_CODE)).toHaveText("wf");
+    await expect(body.locator("code")).toHaveText(["wf", "_1234"]);
+    expect(await markdown()).toBe("Run **`wf`**`_1234` later.");
   } finally {
     await deleteTestDoc(doc.id);
+    await agent.dispose();
   }
 });
 
