@@ -243,7 +243,9 @@ export async function revertDocSlug(docId: string): Promise<{ slug: string }> {
 // Adds or removes one byline author, through setDocByline
 // (src/lib/doc-manage.ts), which checks that the person added can carry a
 // byline at all rather than leaving that to the edit page's picker. A
-// removal is explicit here, so it is allowed.
+// removal is explicit here, so it is allowed. The byline read here goes
+// along as `expected`, so a change someone else made in between is refused
+// rather than overwritten.
 export async function updateDocAuthor(docId: string, userId: string, included: boolean): Promise<void> {
   const { session } = await requireEditableDocSession(docId);
   const current = await docBylineIds(docId);
@@ -252,7 +254,7 @@ export async function updateDocAuthor(docId: string, userId: string, included: b
     throw new Error("A doc must have at least one author.");
   }
   if (next.length !== current.length || next.some((id, i) => id !== current[i])) {
-    await setDocByline(actorFromSessionUser(session.user), docId, next, { allowRemovals: true });
+    await setDocByline(actorFromSessionUser(session.user), docId, next, { allowRemovals: true, expected: current });
   }
 
   revalidatePath(`/doc/${docId}/edit`);
@@ -262,11 +264,12 @@ export async function updateDocAuthor(docId: string, userId: string, included: b
 export async function updateDocAuthorOrder(docId: string, orderedUserIds: string[]): Promise<void> {
   const { session } = await requireEditableDocSession(docId);
 
-  const currentIds = new Set(await docBylineIds(docId));
+  const current = await docBylineIds(docId);
+  const currentIds = new Set(current);
   if (orderedUserIds.length !== currentIds.size || orderedUserIds.some((id) => !currentIds.has(id))) {
     throw new Error("Author list changed — please retry.");
   }
-  await setDocByline(actorFromSessionUser(session.user), docId, orderedUserIds);
+  await setDocByline(actorFromSessionUser(session.user), docId, orderedUserIds, { expected: current });
 
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath("/docs");

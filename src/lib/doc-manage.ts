@@ -40,13 +40,20 @@ async function requireEditable(actor: Actor, docId: string, opts: { includeDelet
  * - **removing someone takes `allowRemovals`**: on a PRIVATE doc the byline
  *   is the access list, so a removal revokes their access, the actor's own
  *   included, and a caller has to mean it;
- * - the change is one transaction, and sets `updatedByUserId`.
+ * - with `expected`, the byline the caller worked its list out from, the
+ *   change is refused if the byline is no longer that. The edit page's add,
+ *   remove and reorder pass it, so of two people editing one byline the
+ *   second is told to retry rather than quietly undoing the first: a
+ *   reorder would otherwise put back someone just removed, which on a
+ *   PRIVATE doc gives back their access;
+ * - the change is one transaction, holding the doc's row so two byline
+ *   changes can't interleave, and sets `updatedByUserId`.
  */
 export async function setDocByline(
   actor: Actor,
   docId: string,
   orderedUserIds: readonly string[],
-  opts: { allowRemovals?: boolean } = {},
+  opts: { allowRemovals?: boolean; expected?: readonly string[] } = {},
 ): Promise<void> {
   await requireEditable(actor, docId);
   const wanted = [...new Set(orderedUserIds)];
@@ -54,7 +61,15 @@ export async function setDocByline(
   if (wanted.length !== orderedUserIds.length) throw invalid("A byline names each person once.");
 
   await prisma.$transaction(async (tx) => {
-    const current = new Set((await tx.docAuthor.findMany({ where: { docId }, select: { userId: true } })).map((a) => a.userId));
+    await tx.$queryRaw`SELECT id FROM doc WHERE id = ${docId} FOR UPDATE`;
+    const byline = (
+      await tx.docAuthor.findMany({ where: { docId }, orderBy: { bylineOrder: "asc" }, select: { userId: true } })
+    ).map((a) => a.userId);
+    const { expected } = opts;
+    if (expected && (expected.length !== byline.length || expected.some((id, i) => id !== byline[i]))) {
+      throw new ApiError("conflict", "Author list changed — please retry.");
+    }
+    const current = new Set(byline);
     const added = wanted.filter((id) => !current.has(id));
     const users = await tx.user.findMany({ where: { id: { in: added } }, select: { id: true, role: true } });
     const eligible = new Set(users.filter((u) => BYLINE_ELIGIBLE_ROLES.includes(u.role)).map((u) => u.id));
