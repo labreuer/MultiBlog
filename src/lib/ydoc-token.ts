@@ -1,13 +1,11 @@
 import { SignJWT, jwtVerify } from "jose";
 import type { Role } from "@/generated/prisma/enums";
 
-// Parallel to collab-token.ts, deliberately not a shared/generic token: the
-// two stacks are kept fully independent (PLAN.md §11) so a change to one
-// payload shape can never accidentally affect the other's verification. Same
-// secret and expiry as collab-token.ts purely because both are short-lived
-// bearer tokens minted by an already-authorized Next server action/route and
-// consumed once by the collab server's onAuthenticate — there's no shared
-// behavior worth factoring out, just a coincidentally identical policy.
+// The collab server's credential (docs/YDOC.md, "The /admin endpoints"): a
+// bearer token the Next process mints once it has authorized a user for one
+// document, which server/ydoc-hooks.ts then trusts, on a websocket attach and
+// on every /admin request. Two minutes is enough because each is spent at
+// once: a connection is checked when it attaches, and a reconnect mints anew.
 function getSecret(): Uint8Array {
   const secret = process.env.AUTH_SECRET;
   if (!secret) {

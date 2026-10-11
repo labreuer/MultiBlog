@@ -174,6 +174,35 @@ Two things to know before reading its numbers:
 
 The `forward`/`rebuild` marker at the head of the status line is what tells the two apart.
 
+## The `/admin` endpoints
+
+Besides the websocket, the collab process serves plain HTTP on the same port for server-side
+work on a live document: `/admin/ydoc-snapshot`, `/admin/annotation-mark`, `-unmark`, `-flush`
+and `-replace`, `/admin/doc-apply-update` and `/admin/doc-edit`. Going through the collab
+process is what lets a write reach every connected client, where a write to the stored rows
+behind its back would be overwritten at its next store. Each path is a constant in
+`src/lib/ydoc-names.ts`, routed by `server/collab.ts`'s `onRequest`. The Next process calls
+them over loopback (next section), and so does `scripts/import-claude-chats.ts`.
+
+Each request carries a ydoc token (`src/lib/ydoc-token.ts`) that Next mints for its actor
+after authorizing the write, and every handler checks it with **`verifyAdminToken`**
+(`server/ydoc-hooks.ts`):
+
+- **Signature, expiry and audience.** The audience is `multiblog:ydoc`. The MCP server's byte
+  grants (`src/lib/api/grants.ts`) are signed with the same `AUTH_SECRET`, and each kind
+  requires its own audience, so neither passes for the other.
+- **The document**, which must be the one the request names.
+- **Writable.** A read-only token is what the token routes give a reader's browser for its
+  websocket, so it never authorizes a write here, even one made on a reader's behalf:
+  `/admin/annotation-mark` exists so a reader can annotate, and Next mints that request a
+  writable token of its own.
+
+A new endpoint calls `verifyAdminToken`. `verifyYdocToken` alone is the websocket's check
+(`ydocOnAuthenticate`), which lets a read-only token through and narrows the connection
+instead. Behind DEPLOY.md's nginx these paths answer only on the loopback, since the public
+`/collab/admin/…` never matches; the token is the gate wherever the port itself is reachable,
+as it is in development. `e2e/admin-readonly.spec.ts` sends a reader's token to every one.
+
 ## The server→collab HTTP origin, and the production-only bug it caused
 
 Moved here from PLAN.md §13m on 2026-09-17, near-verbatim; the section references inside it
@@ -183,10 +212,10 @@ Found 2026-08-11 on the dev deployment, reported as *"Annotation can't be empty.
 attempt to annotate a selection. Worth recording in full, because nothing about the symptom
 pointed at the cause and the whole class was invisible to every local check.
 
-**The mechanism.** Four endpoints are served by the collab process over plain HTTP on its
-websocket port — `/admin/ydoc-snapshot` (§11d), `/admin/annotation-mark` (§12i),
+**The mechanism.** At the time, four endpoints were served by the collab process over plain
+HTTP on its websocket port — `/admin/ydoc-snapshot` (§11d), `/admin/annotation-mark` (§12i),
 `/admin/annotation-unmark` (§13d), `/admin/annotation-flush` (§13j Phase 3). The Next process
-calls them server-to-server. Both callers (`src/lib/annotation-admin.ts`,
+called them server-to-server. Both callers (`src/lib/annotation-admin.ts`,
 `src/lib/ydoc-admin.ts`) derived the origin from **`NEXT_PUBLIC_COLLAB_URL`** by rewriting the
 scheme:
 

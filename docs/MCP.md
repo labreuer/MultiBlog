@@ -437,10 +437,9 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     - It is a JWT signed as the collab server's ydoc token is (`jose`, HS256, `AUTH_SECRET`;
       `src/lib/ydoc-token.ts`), with an audience of its own. It carries the token's id, the
       route and the expiry, and nothing else.
-    - **The ydoc token gains an audience too**, checked wherever it is verified, so neither
-      passes for the other. It has none today, so a grant shown to the collab server would be
-      stopped only by lacking a `documentName`. Both processes take the change in one deploy,
-      and a ydoc token lives two minutes.
+    - **The ydoc token has an audience too**, `multiblog:ydoc`, checked wherever it is
+      verified, so neither passes for the other. Without it, a grant shown to the collab
+      server would be stopped only by lacking a `documentName`.
     - The route checks the signature and the expiry, then runs §3's one check on the token it
       names. So revoking the token, or deleting its user, ends its grants at once.
     - A grant in a URL lands in access logs. It opens one route for ten minutes, where a
@@ -2087,7 +2086,8 @@ Items 1–3 should still be fixed on their own account (TODO.md).
    - `postAnnotation` takes `anchorMode` from the client for a root annotation. For
      `"mark"`, it applies a mark through the collab server.
    - Nothing in `src/app/actions/annotations.ts` calls `canUserEditDoc`.
-   - `/admin/annotation-mark` does not check the token's `readOnly`.
+   - `/admin/annotation-mark` refuses a read-only token, but the token `annotation-admin.ts`
+     mints for the poster is writable whatever the poster may do to the doc.
    - So [ANNOTATIONS.md](ANNOTATIONS.md)'s "why the reading views stopped writing marks" holds
      only because the reading views send `"columns"`.
 2. **The client's version stamp is parsed, not validated.** `postAnnotation` turns

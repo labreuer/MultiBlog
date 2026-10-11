@@ -332,9 +332,9 @@ RESEND_INVITE_TEMPLATE_ID="tmpl_..."        # optional — invite email only; om
 > anything else `NEXT_PUBLIC_`, including `NEXT_PUBLIC_SITE_TITLE` below.
 
 > **`NEXT_PUBLIC_COLLAB_URL` describes how the *browser* reaches collab, and nothing else.**
-> The Next server also talks to the collab process directly, over plain HTTP, for four
-> endpoints (`/admin/ydoc-snapshot`, `/admin/annotation-mark`, `/admin/annotation-unmark`,
-> `/admin/annotation-flush`). Those go to `COLLAB_INTERNAL_URL`, defaulting to
+> The Next server also talks to the collab process directly, over plain HTTP, for its
+> `/admin/*` endpoints (each path is a constant in `src/lib/ydoc-names.ts`), and so does
+> `scripts/import-claude-chats.ts`. Those go to `COLLAB_INTERNAL_URL`, defaulting to
 > `http://127.0.0.1:${COLLAB_PORT}` — **leave it unset** in the standard single-box layout
 > above; set it only if the collab server runs on a different host. It is bare, not
 > `NEXT_PUBLIC_`, so changing it is a restart, not a rebuild.
@@ -377,8 +377,10 @@ exact TXT records once the domain is added there, and this is the single biggest
 of whether mail reaches an inbox rather than a spam folder or a hard rejection. Full design,
 the deliverability argument, and the invite feature: [docs/EMAIL.md](docs/EMAIL.md).
 
-`AUTH_SECRET` also signs the short-lived collab JWTs (`src/lib/collab-token.ts`), so the app
-and collab services **must share the same value** — both units point at this one `.env`.
+`AUTH_SECRET` also signs the short-lived ydoc tokens the collab server checks
+(`src/lib/ydoc-token.ts`), so the app and collab services **must share the same value** — both
+units point at this one `.env`. It signs the MCP server's byte grants too
+(`src/lib/api/grants.ts`), which only the app checks.
 
 ---
 

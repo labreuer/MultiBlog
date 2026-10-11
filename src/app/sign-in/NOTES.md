@@ -8,9 +8,9 @@ docs, and kept collecting auth detail that had nowhere else to live.
 Scope note: this file is **authentication** (establishing a session). It is deliberately not
 about **authorization** — `canManagePosts`/`canManageDocs`/`isAdmin`/`canViewDocs`
 (`src/lib/role-checks.ts`) are per-surface gates and stay documented with their surfaces
-(§3b, §3c, §12e). It is also not about the **collab JWT** (`src/lib/collab-token.ts`,
-`signCollabToken`), which is a separate short-lived credential for the Hocuspocus connection
-— see §12g and CLAUDE.md.
+(§3b, §3c, §12e). It is also not about the **ydoc token** (`src/lib/ydoc-token.ts`,
+`signYdocToken`), which is a separate short-lived credential for the Hocuspocus connection
+— see §12g and docs/YDOC.md.
 
 ## What's built
 

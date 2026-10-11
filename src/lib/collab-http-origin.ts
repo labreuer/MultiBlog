@@ -1,10 +1,9 @@
 // The origin the **Next server process** uses to reach the Hocuspocus
-// server's plain-HTTP admin endpoints (`/admin/ydoc-snapshot`,
-// `/admin/annotation-mark`, `/admin/annotation-unmark`,
-// `/admin/annotation-flush`). Server-to-server only — nothing client-side
-// ever calls these; the browser's websocket URL is `collab-url.ts`'s
-// `getCollabUrl()`, which is a different thing entirely and must stay that
-// way.
+// server's plain-HTTP `/admin/*` endpoints (each path is a constant in
+// ydoc-names.ts; docs/YDOC.md, "The /admin endpoints"). Server-to-server
+// only — nothing client-side ever calls these; the browser's websocket URL
+// is `collab-url.ts`'s `getCollabUrl()`, which is a different thing entirely
+// and must stay that way.
 //
 // **Deliberately NOT derived from NEXT_PUBLIC_COLLAB_URL**, which is what
 // `annotation-admin.ts` and `ydoc-admin.ts` both used to do

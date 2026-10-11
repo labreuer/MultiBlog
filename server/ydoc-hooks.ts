@@ -17,7 +17,7 @@ import { Transform } from "@tiptap/pm/transform";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
-import { verifyYdocToken } from "../src/lib/ydoc-token";
+import { verifyYdocToken, type YdocTokenPayload } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
 import { resolveAnchorInDoc } from "../src/lib/anchors";
 import { annotationIdFromYdocId, docIdFromYdocId } from "../src/lib/ydoc-names";
@@ -279,8 +279,7 @@ async function backfillAnnotationHighlight(annotationId: string, document: Docum
   });
 }
 
-// POST /admin/ydoc-snapshot — the new-stack twin of collab-admin.ts's
-// replace-doc endpoint (PLAN.md §11d). Snapshots by replaying the log up to
+// POST /admin/ydoc-snapshot (PLAN.md §11d). Snapshots by replaying the log up to
 // the current high-water mark, the same way src/lib/ydoc-snapshot.ts snapshots
 // a *historical* mark for a publish (PLAN.md §15b) — not by encoding the live
 // document via openDirectConnection. The two used to diverge: the live doc can
@@ -299,9 +298,9 @@ export async function handleYdocSnapshot(
     return;
   }
 
-  const payload = await verifyYdocToken(token).catch(() => null);
-  if (!payload || payload.documentName !== documentName) {
-    send(response, 403, "Invalid or mismatched ydoc token.");
+  const payload = await verifyAdminToken(token, documentName);
+  if (!payload) {
+    send(response, 403, ADMIN_TOKEN_REFUSED);
     return;
   }
   // PLAN.md §22e — an annotation body's snapshots are its versions, written
@@ -371,9 +370,9 @@ export async function handleFlushAnnotationCache(
     return;
   }
 
-  const payload = await verifyYdocToken(token).catch(() => null);
-  if (!payload || payload.documentName !== documentName) {
-    send(response, 403, "Invalid or mismatched ydoc token.");
+  const payload = await verifyAdminToken(token, documentName);
+  if (!payload) {
+    send(response, 403, ADMIN_TOKEN_REFUSED);
     return;
   }
 
@@ -411,9 +410,9 @@ export async function handleFlushAnnotationCache(
 // readers were actually shown. And the MCP server's edit_annotation writes a
 // new body (docs/MCP.md §9), with `attribute: true`.
 //
-// **A read-only token is refused**, as doc-apply-update refuses one: any
-// reader of a container can mint a read-only token for each annotation on it,
-// and that must not be enough to rewrite one.
+// **A read-only token is refused**, as on every /admin endpoint
+// (verifyAdminToken): any reader of a container can mint a read-only token
+// for each annotation on it, and that must not be enough to rewrite one.
 //
 // With `attribute`, the change is built on a scratch copy and applied with
 // its Yjs client mapped to the token's user in `clients` — doc-apply-update's
@@ -443,9 +442,9 @@ export async function handleReplaceAnnotationBody(
     return;
   }
 
-  const payload = await verifyYdocToken(token).catch(() => null);
-  if (!payload || payload.documentName !== documentName || payload.readOnly) {
-    send(response, 403, "Invalid, mismatched or read-only ydoc token.");
+  const payload = await verifyAdminToken(token, documentName);
+  if (!payload) {
+    send(response, 403, ADMIN_TOKEN_REFUSED);
     return;
   }
   if (!annotationIdFromYdocId(documentName)) {
@@ -510,9 +509,9 @@ export async function handleReplaceAnnotationBody(
 // exact state, so a merge into anything else could leave the doc matching
 // neither.
 //
-// A writable token only, unlike annotation-mark, which exists for readers.
-// The update's new Yjs clients are attributed to the token's user in the same
-// transaction: ydocOnChange's attributeUpdate skips a direct connection.
+// A writable token only (verifyAdminToken). The update's new Yjs clients
+// are attributed to the token's user in the same transaction: ydocOnChange's
+// attributeUpdate skips a direct connection.
 //
 // Answers `{ updateId }`, the id the update was appended as. Before the
 // direct connection closes (which stores the document immediately), one
@@ -542,9 +541,9 @@ export async function handleApplyDocUpdate(
     return;
   }
 
-  const payload = await verifyYdocToken(token).catch(() => null);
-  if (!payload || payload.documentName !== documentName || payload.readOnly) {
-    send(response, 403, "Invalid, mismatched or read-only ydoc token.");
+  const payload = await verifyAdminToken(token, documentName);
+  if (!payload) {
+    send(response, 403, ADMIN_TOKEN_REFUSED);
     return;
   }
   if (!docIdFromYdocId(documentName)) {
@@ -626,7 +625,11 @@ export async function handleApplyDocUpdate(
 // POST /admin/annotation-mark (PLAN.md §12i) — applies a mark carrying
 // annotationId over [from, to) in documentName's "default" fragment, via
 // the collab server so a read-only reader (§12g) can annotate without a
-// writable connection. Row-first-mark-second is the caller's job
+// writable connection. The token is Next's, minted writable for the poster
+// (src/lib/annotation-admin.ts); a reader's own read-only token is refused
+// here as anywhere else (verifyAdminToken).
+//
+// Row-first-mark-second is the caller's job
 // (src/lib/annotation-admin.ts): if this returns applied:false — offsets no
 // longer match and no unique fallback occurrence exists — the annotation
 // row already inserted simply renders document-level, which the system
@@ -634,7 +637,7 @@ export async function handleApplyDocUpdate(
 //
 // prosemirrorToYXmlFragment diffs the new tree against the fragment's
 // current content (the same mechanism y-prosemirror's own live binding
-// uses, and the same one handleReplaceDoc above already relies on) rather
+// uses, and the same one handleReplaceAnnotationBody above relies on) rather
 // than replacing it outright, so unrelated text, other annotations' marks,
 // and item identities elsewhere in the document are undisturbed — only the
 // text run(s) in [from, to) actually change.
@@ -665,9 +668,9 @@ export async function handleApplyAnnotationMark(
     return;
   }
 
-  const payload = await verifyYdocToken(token).catch(() => null);
-  if (!payload || payload.documentName !== documentName) {
-    send(response, 403, "Invalid or mismatched ydoc token.");
+  const payload = await verifyAdminToken(token, documentName);
+  if (!payload) {
+    send(response, 403, ADMIN_TOKEN_REFUSED);
     return;
   }
 
@@ -767,9 +770,9 @@ export async function handleRemoveAnnotationMark(
     return;
   }
 
-  const payload = await verifyYdocToken(token).catch(() => null);
-  if (!payload || payload.documentName !== documentName) {
-    send(response, 403, "Invalid or mismatched ydoc token.");
+  const payload = await verifyAdminToken(token, documentName);
+  if (!payload) {
+    send(response, 403, ADMIN_TOKEN_REFUSED);
     return;
   }
 
@@ -815,6 +818,21 @@ export function readJsonBody(request: IncomingMessage, maxLength = 1_000_000): P
     });
     request.on("error", reject);
   });
+}
+
+/** What an /admin endpoint answers, with a 403, when verifyAdminToken refuses. */
+export const ADMIN_TOKEN_REFUSED = "Invalid, mismatched or read-only ydoc token.";
+
+/**
+ * The token check every /admin endpoint makes (docs/YDOC.md, "The /admin
+ * endpoints"): a ydoc token for exactly `documentName`, and a writable one.
+ * Next mints these for its actor after authorizing the write, never with
+ * `readOnly`. A read-only token is a reader's websocket credential, which the
+ * token routes hand to browsers, so it is no license to write through here.
+ */
+export async function verifyAdminToken(token: string, documentName: string): Promise<YdocTokenPayload | null> {
+  const payload = await verifyYdocToken(token).catch(() => null);
+  return payload && payload.documentName === documentName && !payload.readOnly ? payload : null;
 }
 
 export function send(response: ServerResponse, status: number, message: string): void {

@@ -6,7 +6,6 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { verifyYdocToken } from "../src/lib/ydoc-token";
 import { docIdFromYdocId } from "../src/lib/ydoc-names";
 import {
   docContentExtensions,
@@ -20,7 +19,7 @@ import { markdownToText } from "../src/lib/markdown-import";
 import { resolveAnchorInDoc } from "../src/lib/anchors/resolve";
 import { collectAnnotationMarkRanges } from "../src/lib/annotation-marks";
 import { ydocStore, UNAVAILABLE, isDegraded } from "./ydoc-store";
-import { getClientsMap, readJsonBody, send, type YdocContext } from "./ydoc-hooks";
+import { ADMIN_TOKEN_REFUSED, getClientsMap, readJsonBody, send, verifyAdminToken, type YdocContext } from "./ydoc-hooks";
 import { expectAppend } from "./edit-appends";
 
 // POST /admin/doc-edit (docs/MCP.md §6) — a targeted edit of a doc: each
@@ -130,9 +129,9 @@ export async function handleEditDoc(request: IncomingMessage, response: ServerRe
   }
   const editRequest = body as EditRequest;
   const documentName = editRequest.documentName;
-  const payload = await verifyYdocToken(editRequest.token).catch(() => null);
-  if (!payload || payload.documentName !== documentName || payload.readOnly) {
-    send(response, 403, "Invalid, mismatched or read-only ydoc token.");
+  const payload = await verifyAdminToken(editRequest.token, documentName);
+  if (!payload) {
+    send(response, 403, ADMIN_TOKEN_REFUSED);
     return;
   }
   if (!docIdFromYdocId(documentName)) {

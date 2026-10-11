@@ -62,10 +62,9 @@ derivation.
 
 ### `COLLAB_INTERNAL_URL` (optional, bare) — "how does the *Next server* reach collab?"
 
-The Next server calls the collab process directly over plain HTTP:
-`/admin/ydoc-snapshot`, `/admin/annotation-mark`, `/admin/annotation-unmark`,
-`/admin/annotation-flush`, `/admin/annotation-replace` — and
-`scripts/import-claude-chats.ts` calls `/admin/doc-apply-update` the same way. That origin
+The Next server calls the collab process's `/admin/*` endpoints directly over plain HTTP
+(each path is a constant in `src/lib/ydoc-names.ts`), and `scripts/import-claude-chats.ts`
+calls `/admin/doc-apply-update` the same way. That origin
 comes from `src/lib/collab-http-origin.ts` —
 `COLLAB_INTERNAL_URL` falling back to `http://127.0.0.1:${COLLAB_PORT}` — and must
 **never** be derived from `NEXT_PUBLIC_COLLAB_URL`. The full account of the bug is docs/YDOC.md,
