@@ -24,7 +24,7 @@ to re-derive the decision from.
 | [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) | PDF fragment links as built: a link to a PDF passage that is only a URL (`/pdf/<slug>#page=<n>&text=<words>`, no row) — the grammar, the letters-and-digits skeleton match, quads measured from text items, cross-page passages, the check, its integrity script and one-quote CLI, and writing them from a corrected extraction. |
 | [docs/PDF_QUADS.md](docs/PDF_QUADS.md) | Quads from text items without a selection: where an edge inside an item falls, the browser's canvas measurer, the Liberation width tables a server measures with and their generator, `extractPageItems`, and how close each lands to a real selection. |
 | [docs/DOCS.md](docs/DOCS.md) | Docs as built: the entity beside its ydoc, the `title`/`prose_json` caches and the live title, roles and visibility, routes, the reading view and its freeze, the editor, what is deferred. |
-| [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, restarts, IndexedDB. |
+| [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, the `/admin` endpoints and the token they take, restarts, IndexedDB. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
 | [docs/mobile/coordinates.html](docs/mobile/coordinates.html) | Fixed popovers vs. the iOS keyboard: the two coordinate spaces, and what changed on desktop. |
@@ -525,8 +525,9 @@ working on.
   date with nothing in it is a 200, not a 404. Trailing slashes are Next's default 308 and
   need no handling. PLAN.md §21a, §21h.
 - **One document stack, one Hocuspocus process, two sub-namespaces within it.** Every
-  `documentName` is `ydoc:`-prefixed; `onAuthenticate` rejects anything else outright.
-  docs/YDOC.md.
+  `documentName` is `ydoc:`-prefixed; `onAuthenticate` rejects anything else outright. An
+  `/admin/*` endpoint checks its token with `verifyAdminToken`, which refuses a read-only one;
+  `verifyYdocToken` alone is the websocket's check. docs/YDOC.md.
 
 ## Conventions
 
