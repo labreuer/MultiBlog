@@ -141,9 +141,10 @@ re-measures an anchor already stored.
   `sans-serif` items with the font's ascent, which normalise to exactly `extractPdf`'s page
   text. It loads pdfjs, so it takes about half a second, unlike the rest of `test:unit`.
 - **No e2e change.** Nothing visible changes: the viewer still measures with its canvas.
-- **No standing check against a real selection yet.** That is MCP.md §8's spec, which
-  arrives with the MCP server's file tools. Appendix A sets its tolerance: against Chromium, the e2e
-  fixture's worst edge was 0.82pt.
+- **`e2e/mcp-files.spec.ts` is the standing check against a real selection**: a phrase is
+  selected in the viewer and posted, the same words are annotated through the MCP server, and
+  every corner of the server's quads must land within 1pt of the selection's. Appendix A set
+  that tolerance: against Chromium, the e2e fixture's worst edge was 0.82pt.
 
 ## 5. Limits
 
