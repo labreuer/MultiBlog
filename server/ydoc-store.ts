@@ -126,7 +126,14 @@ function enqueue<T>(id: string, task: () => Promise<T>): Promise<T> {
 export interface YdocStore {
   load(id: string): Promise<LoadResult>;
   createIfAbsent(id: string, ydoc: Uint8Array, stateVector: Uint8Array): Promise<CreateIfAbsentResult>;
-  appendUpdate(id: string, update: Uint8Array): Promise<void>;
+  /**
+   * A new document's row and its first update, inside the caller's
+   * transaction — for a create whose other writes must land with it or not
+   * at all (src/lib/doc-create.ts). No race to lose: the id is new.
+   */
+  createInTransaction(tx: Prisma.TransactionClient, id: string, ydoc: Uint8Array, stateVector: Uint8Array): Promise<void>;
+  /** Resolves to the id the update was appended as, or null when it wasn't (degraded, or the doc is gone). */
+  appendUpdate(id: string, update: Uint8Array): Promise<bigint | null>;
   storeState(id: string, ydoc: Uint8Array, stateVector: Uint8Array, lastUpdateId?: bigint | null): Promise<void>;
   createSnapshot(
     id: string,
@@ -196,9 +203,15 @@ class PrismaYdocStore implements YdocStore {
     }
   }
 
-  async appendUpdate(id: string, update: Uint8Array): Promise<void> {
-    if (isCircuitOpen(id)) return;
-    await enqueue(id, async () => {
+  async createInTransaction(tx: Prisma.TransactionClient, id: string, ydoc: Uint8Array, stateVector: Uint8Array): Promise<void> {
+    await tx.ydoc.create({ data: { id, ydoc: Buffer.from(ydoc), stateVector: Buffer.from(stateVector) } });
+    // Row #1 of ydoc_update is always a full state (invariant 1, PLAN.md §11b).
+    await tx.ydocUpdate.create({ data: { ydocId: id, update: Buffer.from(ydoc) } });
+  }
+
+  async appendUpdate(id: string, update: Uint8Array): Promise<bigint | null> {
+    if (isCircuitOpen(id)) return null;
+    return enqueue(id, async (): Promise<bigint | null> => {
       try {
         const row = await prisma.ydocUpdate.create({ data: { ydocId: id, update: Buffer.from(update) } });
         // PLAN.md §13q — the id Postgres just assigned, which this used to
@@ -215,16 +228,18 @@ class PrismaYdocStore implements YdocStore {
         // the content it describes, and a consumer replaying to it would see
         // less than the cache shows.
         lastAppendedId.set(id, row.id);
+        return row.id;
       } catch (err) {
         if (isMissingDocError(err)) {
           console.warn(`[ydoc-store] ${id} no longer exists; dropping its pending update.`);
-          return;
+          return null;
         }
         if (isConnectionError(err)) {
           tripCircuit(id);
-          return;
+          return null;
         }
         console.error(`[ydoc-store] appendUpdate(${id}) failed:`, err);
+        return null;
       }
     });
   }
@@ -417,8 +432,13 @@ class NullYdocStore implements YdocStore {
     return { won: true };
   }
 
-  async appendUpdate(id: string): Promise<void> {
+  async createInTransaction(_tx: Prisma.TransactionClient, id: string): Promise<void> {
+    this.warn(id, "createInTransaction");
+  }
+
+  async appendUpdate(id: string): Promise<bigint | null> {
     this.warn(id, "appendUpdate");
+    return null;
   }
 
   async storeState(id: string): Promise<void> {

@@ -65,10 +65,19 @@ function tokenize(text: string): string[] {
   return text.match(/\S+|\s+/g) ?? [];
 }
 
+/**
+ * Words, runs of whitespace, and each punctuation mark on its own — for a
+ * diff whose tokens carry marks (src/lib/doc-edit.ts), where a comma typed
+ * after an annotated word must not count as rewriting the word.
+ */
+export function tokenizeFine(text: string): string[] {
+  return text.match(/[\p{L}\p{N}]+|\s+|[^\p{L}\p{N}\s]/gu) ?? [];
+}
+
 // Word-level LCS diff. O(n*m) — fine at the doc sizes a hobby blog produces.
-export function diffText(oldText: string, newText: string): DiffToken[] {
-  const a = tokenize(oldText);
-  const b = tokenize(newText);
+export function diffText(oldText: string, newText: string, split: (text: string) => string[] = tokenize): DiffToken[] {
+  const a = split(oldText);
+  const b = split(newText);
   const n = a.length;
   const m = b.length;
 

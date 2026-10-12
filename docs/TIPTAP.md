@@ -35,14 +35,16 @@ ProseMirror's default is a mark that excludes only its own kind, and `tiptap-sch
 it back. Its `Code` is the package's with `excludes: "code"`, and its `StarterKit` carries
 that `Code`. The package's mark costs three things:
 
-- **Author colours skip code.** Code typed in the editor carries no author mark, so it shows
-  in no one's colour.
+- **Author colours skip code**, whether typed in the editor or written by the MCP server, and
+  so does an MCP read's "who wrote what" (MCP.md §6).
 - **An annotation made in the editor has a hole wherever its passage has inline code.**
   `addMark` passes over text whose marks exclude the new one, so the highlight skips the
   code. The annotation's quote, read back out of the doc (`extractMarkedText`), loses the
   code's words.
 - **Markdown's bold and linked code**, `` **`x`** `` and `` [`x`](url) ``, parse to text
-  marked both ways, which the schema refuses.
+  marked both ways, which the schema refuses. The MCP server checks what it writes and
+  refuses them outright. A doc an import stored them in refuses every targeted edit, because
+  an edit checks the whole doc it writes (MCP.md §6).
 
 **Import both from `@/lib/tiptap-schema`, never from their packages.** A live editor built
 from the package's StarterKit would refuse the marks on its own surface and nowhere else, and
@@ -53,9 +55,9 @@ schema file and its test.
 **Code is the innermost mark with a Markdown form, and is split where its formatting
 changes.** Inside backticks, Markdown is literal: `` `**wf**_1234` `` is code whose text
 contains asterisks. So every Markdown export has to keep the other marks' delimiters outside
-the backticks, or a round trip writes them into the code. The comment edit box is one: it
-shows a stored body as Markdown and saves what comes back. Two things together keep the
-delimiters outside:
+the backticks, or a round trip writes them into the code. The comment edit box, every MCP
+read, and an MCP edit written from what it read are all round trips. Two things together keep
+the delimiters outside:
 
 - **The rank.** A mark's position in the extension list is its rank: the order a mark set is
   sorted in, and the order `@tiptap/markdown` nests delimiters in. The `StarterKit` moves

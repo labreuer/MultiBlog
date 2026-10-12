@@ -178,7 +178,7 @@ The `forward`/`rebuild` marker at the head of the status line is what tells the 
 
 Besides the websocket, the collab process serves plain HTTP on the same port for server-side
 work on a live document: `/admin/ydoc-snapshot`, `/admin/annotation-mark`, `-unmark`, `-flush`
-and `-replace`, and `/admin/doc-apply-update`. Going through the collab
+and `-replace`, `/admin/doc-apply-update` and `/admin/doc-edit`. Going through the collab
 process is what lets a write reach every connected client, where a write to the stored rows
 behind its back would be overwritten at its next store. Each path is a constant in
 `src/lib/ydoc-names.ts`, routed by `server/collab.ts`'s `onRequest`. The Next process calls

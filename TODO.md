@@ -179,7 +179,6 @@ glyphs. Not yet done:
 
 - **Copy passage link** in the viewer's selection popover (§8), left for later. It is also the
   only way a cross-page link could be made from the UI.
-- **The MCP server's use of the check** (MCP.md §8) comes with the MCP server.
 - **The deploy wrapper's integrity checks** should gain `check-pdf-fragment-links.ts` once an
   instance runs this code; before that the script doesn't exist where the wrapper runs it.
 - **WebKit fails `pdf-fragment-links.spec.ts` intermittently: 3 of its 8 tests per run, a

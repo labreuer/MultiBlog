@@ -12,9 +12,13 @@ import { minuteOf } from "../shape";
 // curl. So nothing in Claude's shell ever holds the token, and a forced
 // prompt guarding a tool can't be sidestepped by a shell posting the same
 // call itself.
+//
+// Both change nothing themselves — an upload happens when its bytes arrive —
+// so both are read-only in MCP's sense.
 
 /** The byte routes' paths, which a grant names exactly. */
 export const BYTE_ROUTES = {
+  createDoc: "/api/mcp/docs",
   exportDocs: "/api/mcp/export",
   downloadFile: (fileId: string) => `/api/mcp/files/${fileId}`,
 } as const;
@@ -52,5 +56,23 @@ export const downloadUrlTool = defineTool({
       method: "GET or POST",
       usage: "curl -fsSL '<url>&catalog=1' > catalog.json; curl -fsSL '<url>&tags=<slug>' | tar -x -C docs/",
     };
+  },
+});
+
+export const uploadUrlTool = defineTool({
+  name: "upload_url",
+  scope: "WRITE",
+  description:
+    "A URL, good for ten minutes, for sending bytes with curl --data-binary: a PDF or a .docx (kind file; add &filename=<name>, and &title= or &issuerOnly=1 as wanted), or a Markdown draft that becomes a doc (kind doc; add &title= unless the file's leading heading is the title, and &issuerOnly=1 to leave yourself off the byline). Either is PRIVATE, like everything you create. Answers with the new file's or doc's URL.",
+  input: z.strictObject({
+    kind: z.enum(["doc"]).describe("doc: a Markdown body becoming a doc."),
+  }),
+  output: urlOutput,
+  readOnly: true,
+  destructive: false,
+  searchHint: "upload pdf docx markdown draft file bytes curl grant",
+  async run(args, ctx) {
+    const granted = await grantedUrl(ctx.token.id, BYTE_ROUTES.createDoc);
+    return { ...granted, method: "POST", usage: "curl -fsS --data-binary @summary.md '<url>&title=…'" };
   },
 });

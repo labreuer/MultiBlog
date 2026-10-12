@@ -5,14 +5,23 @@
 // directly, as the importing account, with no web server involved.
 //
 // Then, per doc:
-//   - the byline becomes BYLINE_EMAILS in that order (what updateDocAuthor +
-//     updateDocAuthorOrder would leave);
+//   - the byline is BYLINE_EMAILS in that order — Claude first by default,
+//     since the bulk of an imported chat is Claude's writing — written in the
+//     creating transaction (src/lib/doc-create.ts), with the importing account
+//     on it whatever the list says;
+//   - a session's doc is a **record** (docs/MCP.md §6): evidence of what was
+//     said, which the MCP server's edit_doc refuses. A summary imported with
+//     --markdown is not one;
+//   - its **import key** is stored: the chat's id for a session, the file's
+//     name for a summary — what a later run matches the source to its doc
+//     by, so a title changed in MultiBlog doesn't import the file again;
 //   - createdAt/updatedAt become the session's first and last message activity.
 //     The export's times are UTC, and so are these columns (Prisma writes UTC);
 //     the tables render them in local time (src/lib/format-date.ts), so no
 //     timezone shift happens here — one would be applied twice.
 //
-// A session whose claude.ai link already heads a doc is not imported again, so a
+// A session whose key (or, for a doc imported before keys, whose claude.ai
+// link heading the doc) is already a doc's is not imported again, so a
 // re-run, or an older export overlapping this one, doesn't duplicate anything.
 // Instead it is compared with that doc, and one that differs — a session that
 // has grown since, say — is listed, or with --update edited in place. Never
@@ -35,8 +44,22 @@
 // --markdown takes Markdown files instead — an analysis or a summary written
 // elsewhere — and gives each the same treatment as a session: imported once,
 // then compared, and with --update edited in place. A file is matched to its
-// doc by title (see markdownSources), and its doc keeps the dates the import
-// gives it, since a file has no activity to date it by.
+// doc by its key, the file's name (see markdownSources), and its doc keeps the
+// dates the import gives it, since a file has no activity to date it by.
+//
+// **Once a doc is imported, MultiBlog is its source** (docs/MCP.md §6). The
+// planner replaces every block that differs from the file, so a re-import
+// would undo an edit made in MultiBlog in between — by the MCP server or by a
+// person — along with the marks in those blocks. So each doc records the
+// update the importer left it at (Doc.importedUpdateId), and --update refuses
+// a doc whose log has moved past it; --plan reports it, with when. --force
+// overrides, for a file that has taken in the doc's edits by hand. A doc
+// imported before the column has none: its next --update applies as before
+// and records one. Revise a summary where it lives, through edit_doc or the
+// editor; a local copy for reading comes from the MCP export.
+//
+// --mark-records, with --export, marks every doc a session made as a record
+// and gives it its key, for docs imported before either existed.
 // Env: MB_EMAIL (the importing account, default the Claude one; it needs
 // canManageDocs), BYLINE_EMAILS (comma-separated), HUMAN_NAME. --update writes
 // through the collab server, so that has to be running for it; nothing else
@@ -47,7 +70,7 @@
 
 import "dotenv/config";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -111,20 +134,22 @@ const dryRun = args.includes("--dry-run");
 const plan = args.includes("--plan");
 const update = plan || args.includes("--update");
 const markdownMode = args.includes("--markdown");
+const force = args.includes("--force");
+const markRecords = args.includes("--mark-records");
 // Session uuids, or with --markdown the files.
-const ids = args.filter((a) => !["--dry-run", "--plan", "--update", "--markdown"].includes(a));
+const ids = args.filter((a) => !["--dry-run", "--plan", "--update", "--markdown", "--force", "--mark-records"].includes(a));
 if (markdownMode ? exportPath || framesDir || outDir || dryRun || !ids.length : !exportPath || (dryRun && !outDir)) {
   console.error(
     [
-      "Usage: npx tsx scripts/import-claude-chats.ts --export <conversations.json> [--frames <dir>] [--out <dir>] [--dry-run | --update | --plan] [<uuid>...]",
-      "       npx tsx scripts/import-claude-chats.ts --markdown [--update | --plan] <file.md>...",
+      "Usage: npx tsx scripts/import-claude-chats.ts --export <conversations.json> [--frames <dir>] [--out <dir>] [--dry-run | --update [--force] | --plan | --mark-records] [<uuid>...]",
+      "       npx tsx scripts/import-claude-chats.ts --markdown [--update [--force] | --plan] <file.md>...",
     ].join("\n"),
   );
   process.exit(1);
 }
 
 const IMPORTER_EMAIL = process.env.MB_EMAIL || "claude@multiblog.invalid";
-const BYLINE_EMAILS = (process.env.BYLINE_EMAILS || "labreuer@gmail.com,claude@multiblog.invalid").split(",");
+const BYLINE_EMAILS = (process.env.BYLINE_EMAILS || "claude@multiblog.invalid,labreuer@gmail.com").split(",");
 const HUMAN = process.env.HUMAN_NAME || "Luke Breuer";
 const ASSISTANT = "Claude";
 const chatUrl = (uuid: string) => `https://claude.ai/chat/${uuid}`;
@@ -437,19 +462,24 @@ async function bylineForImports(): Promise<string[]> {
   const database = new URL(process.env.DATABASE_URL!).pathname.slice(1);
   console.log(`importing into ${database} as ${IMPORTER_EMAIL} (${role})`);
   const users = await prisma.user.findMany({ where: { email: { in: BYLINE_EMAILS } }, select: { id: true, email: true } });
-  byline = BYLINE_EMAILS.map((e) => {
+  const listed = BYLINE_EMAILS.map((e) => {
     const u = users.find((x) => x.email === e);
     if (!u) throw new Error(`no user ${e}`);
     return u.id;
   });
+  // The importing account is on the byline whatever the list says, as the
+  // create's creator always is.
+  const { id: importer } = await importingAccount();
+  byline = listed.includes(importer) ? listed : [...listed, importer];
   return byline;
 }
 
 // Creates the doc as /docs' import action would, under the same size limit,
-// then sets its byline and dates; returns its slug. The action's
-// revalidatePath("/docs") has no equivalent here and needs none: /docs reads
-// the session, so it renders per request.
-async function importDoc(md: string, span?: Span): Promise<string> {
+// with its byline, record flag and key in the creating transaction, then
+// records the update it left the doc at and, for a session, its dates;
+// returns its slug. The action's revalidatePath("/docs") has no equivalent
+// here and needs none: /docs reads the session, so it renders per request.
+async function importDoc(md: string, opts: { span?: Span; record: boolean; importKey: string }): Promise<string> {
   const bytes = Buffer.byteLength(md, "utf8");
   if (bytes > MAX_MARKDOWN_BYTES) {
     throw new Error(`${Math.round(bytes / 1024)} KB is over the import limit of ${Math.round(MAX_MARKDOWN_BYTES / 1024)} KB`);
@@ -457,24 +487,26 @@ async function importDoc(md: string, span?: Span): Promise<string> {
   const bylineIds = await bylineForImports();
   const { id: userId } = await importingAccount();
   const { title, body } = markdownToDocContent(md);
-  const doc = await createDocWithContent(userId, title ?? "", body);
-  await finishDoc(doc.id, bylineIds, span);
+  const doc = await createDocWithContent(userId, title ?? "", body, {
+    byline: bylineIds,
+    record: opts.record,
+    importKey: opts.importKey,
+  });
+  await finishDoc(doc.id, await ydocStore.maxUpdateId(ydocIdForDoc(doc.id)), opts.span);
   return doc.slug;
 }
 
-// The byline, and for a session the dates; a file's doc keeps the import's.
-async function finishDoc(docId: string, bylineIds: string[], span?: Span) {
-  await prisma.$transaction([
-    ...bylineIds.map((userId, bylineOrder) =>
-      prisma.docAuthor.upsert({
-        where: { docId_userId: { docId, userId } },
-        create: { docId, userId, bylineOrder },
-        update: { bylineOrder },
-      }),
-    ),
-    // Last, and with updatedAt named explicitly, so @updatedAt doesn't stamp now().
-    ...(span ? [prisma.doc.update({ where: { id: docId }, data: { createdAt: span.first, updatedAt: span.last } })] : []),
-  ]);
+// The update the import left the doc at, and for a session the dates; a
+// file's doc keeps the import's.
+async function finishDoc(docId: string, importedUpdateId: bigint | null, span?: Span) {
+  await prisma.doc.update({
+    where: { id: docId },
+    // With updatedAt named explicitly, so @updatedAt doesn't stamp now().
+    data: {
+      importedUpdateId,
+      ...(span ? { createdAt: span.first, updatedAt: span.last } : {}),
+    },
+  });
 }
 
 // What an import of this Markdown would store: the parse, then the same Yjs
@@ -654,7 +686,7 @@ async function planInPlace(docId: string, docTitle: string, md: string): Promise
 // and re-captures each anchor against the version the update became. Returns
 // why nothing was written if the doc moved on after it was planned, and throws
 // on anything else.
-async function applyInPlace(plan: Plan, span?: Span): Promise<string | null> {
+async function applyInPlace(plan: Plan, span?: Span): Promise<{ refused: string } | { updateId: bigint }> {
   const ydocId = ydocIdForDoc(plan.docId);
   const { id: sub, role } = await importingAccount();
   const token = await signYdocToken({ sub, documentName: ydocId, role });
@@ -676,7 +708,7 @@ async function applyInPlace(plan: Plan, span?: Span): Promise<string | null> {
     throw new Error(`no collab server answers at ${endpoint}`);
   }
   const text = await res.text();
-  if (res.status === 409) return "it was edited after the plan was made; run again";
+  if (res.status === 409) return { refused: "it was edited after the plan was made; run again" };
   if (!res.ok) throw new Error(`the collab server refused the update (${res.status}): ${text}`);
   // A collab server older than the endpoint answers every path with a 200
   // "Welcome to Hocuspocus!" and writes nothing.
@@ -689,8 +721,12 @@ async function applyInPlace(plan: Plan, span?: Span): Promise<string | null> {
   if (!updateId) throw new Error("the collab server applied the update but has no id for it");
   const lastUpdateId = BigInt(updateId);
   // The server's store stamped Updated with the time of the edit, which a
-  // file's doc keeps and a session's gives back to its last activity.
-  if (span) await prisma.doc.update({ where: { id: plan.docId }, data: { updatedAt: span.last } });
+  // file's doc keeps and a session's gives back to its last activity. The
+  // update is where this import leaves the doc, for the guard next time.
+  await prisma.doc.update({
+    where: { id: plan.docId },
+    data: { importedUpdateId: lastUpdateId, ...(span ? { updatedAt: span.last } : {}) },
+  });
 
   for (const a of plan.anchors) {
     const captured = await captureAnchorInYdoc({
@@ -714,12 +750,20 @@ async function applyInPlace(plan: Plan, span?: Span): Promise<string | null> {
       },
     });
   }
-  return null;
+  return { updateId: lastUpdateId };
 }
 
 // --------------------------------------------------------------------- Main
 
-type ExistingDoc = { id: string; slug: string; title: string; body: unknown };
+type ExistingDoc = {
+  id: string;
+  slug: string;
+  title: string;
+  body: unknown;
+  importedUpdateId: bigint | null;
+  importKey: string | null;
+  record: boolean;
+};
 
 // One thing to bring into step with its doc: a session, or a Markdown file.
 type Source = {
@@ -727,6 +771,8 @@ type Source = {
   md: string;
   span?: Span; // a session's first and last activity
   doc: ExistingDoc | null; // the doc it was imported as, if it has been
+  record: boolean; // a session's doc is a record; a summary's isn't
+  importKey: string; // what a later run matches it by
 };
 
 // Each chosen session, matched to its doc by the link the doc opens with (see
@@ -736,13 +782,20 @@ async function sessionSources(): Promise<{ sources: Source[]; empty: number } | 
   const chosen = ids.length ? ids.map((id) => all.find((c) => c.uuid === id) ?? id) : all;
   if (outDir) mkdirSync(outDir, { recursive: true });
 
-  const existing = new Map<string, ExistingDoc>();
+  // Matched by key, and for a doc imported before keys by the chat link its
+  // first block holds (see conversationToMarkdown).
+  const byKey = new Map<string, ExistingDoc>();
+  const byHref = new Map<string, ExistingDoc>();
   if (!dryRun) {
     const rows = await prisma.$queryRaw<(ExistingDoc & { href: string | null })[]>`
       SELECT prose_json->'content'->0->'content'->0->'marks'->0->'attrs'->>'href' AS href,
-             id, slug, title, prose_json AS body
-        FROM doc`;
-    for (const r of rows) if (r.href) existing.set(r.href, r);
+             id, slug, title, prose_json AS body, imported_update_id AS "importedUpdateId",
+             import_key AS "importKey", record
+        FROM doc WHERE deleted_at IS NULL`;
+    for (const r of rows) {
+      if (r.importKey) byKey.set(r.importKey, r);
+      if (r.href) byHref.set(r.href, r);
+    }
   }
 
   const sources: Source[] = [];
@@ -763,7 +816,9 @@ async function sessionSources(): Promise<{ sources: Source[]; empty: number } | 
       label: `${conv.uuid} ${JSON.stringify(conv.name)}`,
       md,
       span: activitySpan(conv),
-      doc: existing.get(chatUrl(conv.uuid)) ?? null,
+      doc: byKey.get(conv.uuid) ?? byHref.get(chatUrl(conv.uuid)) ?? null,
+      record: true,
+      importKey: conv.uuid,
     });
   }
   if (dryRun) {
@@ -773,29 +828,44 @@ async function sessionSources(): Promise<{ sources: Source[]; empty: number } | 
   return { sources, empty };
 }
 
-// Each file, matched to its doc by title: the doc titled exactly as the
-// file's leading heading, not in the trash, with the importing account on its
-// byline — the import puts it there. A file has nothing else to be matched
-// by, so a file whose heading changes imports as a new doc. One with no
-// heading is refused, because the app would title it from the file's name and
-// nothing could match it afterwards; so is one whose title two docs share.
+// Each file, matched to its doc by its key — the file's name — and, for a doc
+// imported before keys, by title: the doc titled exactly as the file's
+// leading heading, not in the trash, with the importing account on its
+// byline (the import puts it there), which is then given the key. A file with
+// no heading is refused, because the app would title it from the file's name;
+// so is one whose title two docs share.
 async function markdownSources(): Promise<{ sources: Source[]; empty: number }> {
   const importer = await importingAccount();
   const sources: Source[] = [];
+  const select = {
+    id: true,
+    slug: true,
+    title: true,
+    proseJson: true,
+    importedUpdateId: true,
+    importKey: true,
+    record: true,
+  } as const;
   for (const file of ids) {
     const md = readFileSync(file, "utf8");
+    const importKey = basename(file);
     const { title } = markdownToDocContent(md);
     if (!title) {
       console.error(`${file}: no leading heading to title the doc by`);
       process.exitCode = 1;
       continue;
     }
-    const docs = await prisma.doc.findMany({
-      where: { title, deletedAt: null, authors: { some: { userId: importer.id } } },
-      select: { id: true, slug: true, title: true, proseJson: true },
-    });
+    const keyed = await prisma.doc.findMany({ where: { importKey, deletedAt: null }, select });
+    const docs =
+      keyed.length > 0
+        ? keyed
+        : await prisma.doc.findMany({
+            where: { title, importKey: null, deletedAt: null, authors: { some: { userId: importer.id } } },
+            select,
+          });
     if (docs.length > 1) {
-      console.error(`${file}: ${docs.length} docs are titled ${JSON.stringify(title)}: ${docs.map((d) => `/doc/${d.slug}`).join(", ")}`);
+      const what = keyed.length > 0 ? `have the key ${JSON.stringify(importKey)}` : `are titled ${JSON.stringify(title)}`;
+      console.error(`${file}: ${docs.length} docs ${what}: ${docs.map((d) => `/doc/${d.slug}`).join(", ")}`);
       process.exitCode = 1;
       continue;
     }
@@ -803,13 +873,59 @@ async function markdownSources(): Promise<{ sources: Source[]; empty: number }> 
     sources.push({
       label: file,
       md,
-      doc: doc ? { id: doc.id, slug: doc.slug, title: doc.title, body: doc.proseJson } : null,
+      doc: doc
+        ? {
+            id: doc.id,
+            slug: doc.slug,
+            title: doc.title,
+            body: doc.proseJson,
+            importedUpdateId: doc.importedUpdateId,
+            importKey: doc.importKey,
+            record: doc.record,
+          }
+        : null,
+      record: false,
+      importKey,
     });
   }
   return { sources, empty: 0 };
 }
 
+/**
+ * --mark-records: every doc a session made, marked as a record and given its
+ * key — for docs imported before either existed. Matched by the chat link the
+ * doc's first block holds; the flag and the key are the only writes.
+ */
+async function markEarlierRecords(): Promise<void> {
+  const rows = await prisma.$queryRaw<{ id: string; slug: string; href: string | null; importKey: string | null; record: boolean }[]>`
+    SELECT id, slug, prose_json->'content'->0->'content'->0->'marks'->0->'attrs'->>'href' AS href,
+           import_key AS "importKey", record
+      FROM doc WHERE deleted_at IS NULL`;
+  let marked = 0;
+  for (const row of rows) {
+    const match = row.href ? /^https:\/\/claude\.ai\/chat\/([0-9a-f-]{36})$/.exec(row.href) : null;
+    if (!match || (row.record && row.importKey)) continue;
+    await prisma.$executeRaw`UPDATE doc SET record = true, import_key = COALESCE(import_key, ${match[1]}) WHERE id = ${row.id}`;
+    marked++;
+  }
+  console.log(`marked ${marked} imported chat(s) as records`);
+}
+
+/** When a doc's log last moved, for --plan's report of an edit made in MultiBlog. */
+async function lastEdited(docId: string): Promise<{ id: bigint; at: Date } | null> {
+  const row = await prisma.ydocUpdate.findFirst({
+    where: { ydocId: ydocIdForDoc(docId) },
+    orderBy: { id: "desc" },
+    select: { id: true, createdAt: true },
+  });
+  return row ? { id: row.id, at: row.createdAt } : null;
+}
+
 async function main() {
+  if (markRecords) {
+    await markEarlierRecords();
+    return;
+  }
   const found = markdownMode ? await markdownSources() : await sessionSources();
   if (!found) return;
   const { sources, empty } = found;
@@ -821,6 +937,11 @@ async function main() {
   for (const source of sources) {
     const { doc, md, label, span } = source;
     if (doc) {
+      // An earlier import matched by title or link gets its key and its
+      // record flag (no other write: the content is compared below).
+      if (!plan && (doc.importKey !== source.importKey || (source.record && !doc.record))) {
+        await prisma.$executeRaw`UPDATE doc SET import_key = ${source.importKey}, record = ${doc.record || source.record} WHERE id = ${doc.id}`;
+      }
       const fresh = importedDoc(md);
       fresh.ydoc.destroy();
       if (fresh.title === doc.title && canonical(fresh.body) === canonical(doc.body)) {
@@ -831,16 +952,24 @@ async function main() {
         differing.push(`/doc/${doc.slug}  ${label}`);
         continue;
       }
+      // The guard: an edit made in MultiBlog since the import would be undone.
+      const edited = doc.importedUpdateId === null ? null : await lastEdited(doc.id);
+      if (edited && edited.id > doc.importedUpdateId! && !force) {
+        differing.push(
+          `/doc/${doc.slug}  ${label}  (not updated: edited in MultiBlog since its import, last ${edited.at.toISOString()}; --force to overwrite)`,
+        );
+        continue;
+      }
       const result = await planInPlace(doc.id, doc.title, md);
       if (typeof result === "string") {
         differing.push(`/doc/${doc.slug}  ${label}  (not updated: ${result})`);
         continue;
       }
       const summary = `${result.blocksChanged} block(s) replaced or added, ${result.anchors.length} anchor(s) moved`;
-      const refused = plan ? null : await applyInPlace(result, span);
+      const applied = plan ? null : await applyInPlace(result, span);
       result.ydoc.destroy();
-      if (refused) {
-        differing.push(`/doc/${doc.slug}  ${label}  (not updated: ${refused})`);
+      if (applied && "refused" in applied) {
+        differing.push(`/doc/${doc.slug}  ${label}  (not updated: ${applied.refused})`);
         continue;
       }
       updated++;
@@ -852,7 +981,7 @@ async function main() {
       continue;
     }
     try {
-      const slug = await importDoc(md, span);
+      const slug = await importDoc(md, { span, record: source.record, importKey: source.importKey });
       imported++;
       console.log(`${slug}  (${Math.round(Buffer.byteLength(md) / 1024)} KB)`);
     } catch (err) {

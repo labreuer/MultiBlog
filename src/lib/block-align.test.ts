@@ -5,22 +5,54 @@ import { alignBlocks, diffRuns, renderWordDiff } from "./block-align";
 // docs/MCP.md §6 — the block alignment an edit, a read of changes and a
 // revert share, and the word diff within a pair.
 
-test("identical blocks anchor, and the blocks between two anchors pair in order", () => {
+test("identical blocks anchor, and the blocks between two anchors pair by likeness", () => {
   assert.deepEqual(alignBlocks(["a", "b", "c"], ["a", "B", "c"]), [
     { old: 0, new: 0 },
     { old: 1, new: 1 },
     { old: 2, new: 2 },
   ]);
-  // An insertion between two changed blocks: the changed ones still pair with
-  // each other, and the new one is added whole, which y-prosemirror's own
-  // greedy pairing gets wrong (docs/MCP.md §6, step 3).
-  assert.deepEqual(alignBlocks(["h", "p1", "p2", "t"], ["h", "p1'", "new", "p2'", "t"]), [
+  // An insertion between two changed blocks: the changed ones pair with
+  // their rewrites by likeness, and the new one is added whole — where
+  // pairing in order, as y-prosemirror's own greedy pairing does, would
+  // diff the second paragraph against the new one (docs/MCP.md §6, step 3).
+  const before = ["Heading", "The first paragraph says one thing.", "The second paragraph says another.", "Tail"];
+  const after = [
+    "Heading",
+    "The first paragraph says one thing, now reworded.",
+    "An entirely new paragraph between them.",
+    "The second paragraph says another, also reworded.",
+    "Tail",
+  ];
+  assert.deepEqual(alignBlocks(before, after), [
+    { old: 0, new: 0 },
+    { old: 1, new: 1 },
+    { old: null, new: 2 },
+    { old: 2, new: 3 },
+    { old: 3, new: 4 },
+  ]);
+});
+
+test("keys anchor the alignment where text alone would, and unlike blocks in a gap aren't paired", () => {
+  // Same text, different keys (a mark changed): not an anchor, but still a pair.
+  assert.deepEqual(alignBlocks(["a b c", "d e f"], ["a b c", "d e f"], { old: ["k1", "k2"], new: ["k1", "k2*"] }), [
+    { old: 0, new: 0 },
+    { old: 1, new: 1 },
+  ]);
+  assert.deepEqual(alignBlocks(["x", "apples and pears", "y"], ["x", "nothing in common here", "y"]), [
     { old: 0, new: 0 },
     { old: 1, new: 1 },
     { old: 2, new: 2 },
-    { old: null, new: 3 },
-    { old: 3, new: 4 },
   ]);
+  assert.deepEqual(
+    alignBlocks(["x", "apples and pears", "plums", "y"], ["x", "nothing in common here", "y"]),
+    [
+      { old: 0, new: 0 },
+      { old: 1, new: null },
+      { old: 2, new: null },
+      { old: null, new: 1 },
+      { old: 3, new: 2 },
+    ],
+  );
 });
 
 test("a block that moved is a deletion and an addition, not a rewrite of its neighbours", () => {
