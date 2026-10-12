@@ -265,8 +265,7 @@ later resize to a ≥2 GB plan, the swap is harmless to leave in place.)
 > every build on this box, not just the first — `deploy/deploy.sh` sets it already (§10).
 > 3072 is the number for a box running **one** instance. With a second instance beside it
 > (§11), a build that size pushes the running neighbour into swap: cap it at 1536 and run
-> it under `nice -n 10`. `deploy.sh` can't be told to yet (TODO.md, "`deploy.sh`'s build
-> heap is fixed at 3072").
+> it under `nice -n 10`, with `BUILD_HEAP_MB=1536 BUILD_NICE=10 ./deploy/deploy.sh` (§10).
 
 ### 2i. certbot and its renewal hook
 
@@ -830,23 +829,50 @@ the same care as `.env`, not merely as application data.
 
 ```bash
 cd /srv/multiblog
-git pull
-npm ci
-npx prisma generate
-npx prisma migrate deploy          # applies any new migrations, no-op if none
-npm run build                      # re-inline NEXT_PUBLIC_* if any changed
+./deploy/deploy.sh                                  # as `deploy`
+BUILD_HEAP_MB=1536 BUILD_NICE=10 ./deploy/deploy.sh # on a box with a second instance (§11)
+```
+
+The script never empties anything the running site reads from. In order:
+
+1. `git pull`, then it runs the pulled copy of itself, so a change to the script takes effect
+   on the deploy that brings it.
+2. `npm ci` into `.deploy/`, against copies of `package.json` and `package-lock.json`. The
+   new `node_modules` is swapped in by rename, and the old one waits in `.deploy/prev/`.
+3. `npx prisma generate`, then `npx prisma migrate deploy` (a no-op when nothing is new).
+4. `npm run build` into `.next-build/` (`NEXT_DIST_DIR`, next.config.ts), with the heap and
+   niceness from `BUILD_HEAP_MB` (default 3072) and `BUILD_NICE` (default 0).
+5. The new build is swapped in for `.next` by rename, the old one goes to `.deploy/prev/`, and
+   both units restart.
+6. It waits for the app to answer, then deletes `.deploy/`.
+
+A failure in steps 3–4 puts the old `node_modules` back and leaves `.next` alone, so the site
+keeps serving the previous build. The tree is at the pulled commit, so fix forward and deploy
+again; don't restart the units in between. The live site is down only for the restart itself,
+a few seconds, and no zero-downtime story is needed at hobby scale. (Docker Compose remains an
+easy later upgrade for reproducibility, per PLAN.md §7.)
+
+**Rolling back** a deploy whose restart never answers. The script's last message names the
+commit it started from, and `.deploy/prev/` still holds that commit's build and
+`node_modules`:
+
+```bash
+cd /srv/multiblog
+mv .next .deploy/failed-next && mv .deploy/prev/next .next
+mv node_modules .deploy/failed-node_modules && mv .deploy/prev/node_modules node_modules
+git reset --keep <the commit it started from>  # --keep, not --hard: local edits survive
+npx prisma generate                           # the collab server runs the source tree
 sudo systemctl restart multiblog-web multiblog-collab
 ```
 
+A migration the deploy applied stays applied, so roll back only to code that works against the
+new schema; an additive migration usually leaves the old code working. The next deploy starts
+by deleting `.deploy/`.
+
 **Changing the site icon** (docs/FAVICON.md) isn't part of this flow — it's not triggered by a
 code change, so `git pull` won't touch it. Replace `site-icons/master.png` and run
-`npx tsx scripts/build-icons.ts` *before* the `npm run build` step above; the icon hash is
-computed at build time, so a redeploy that skips this just rebuilds with the same icons.
-
-These steps are packaged as `deploy/deploy.sh` (run it from `/srv/multiblog` as `deploy`). No
-zero-downtime story is needed at hobby scale — the restart blip is seconds. (Docker Compose
-remains an easy later upgrade for
-reproducibility, per PLAN.md §7.)
+`npx tsx scripts/build-icons.ts` *before* `deploy.sh`; the icon hash is computed at build time,
+so a redeploy that skips this just rebuilds with the same icons.
 
 **Deploying a branch other than `main`** is a supported thing to do — `/srv/thicketry` has
 run feature branches — but `git checkout <branch>` is a step *before* `deploy.sh`, never
@@ -874,6 +900,7 @@ time (§4), so two hostnames can never share one build:
 | `/etc/sudoers.d/*` NOPASSWD grant      | scoped to that instance's unit names |
 | `.env` (own `AUTH_SECRET`, DB, ports, URLs) | —                                |
 | Backup cron entry                      | —                                    |
+| Build heap, niceness (`deploy.sh`)     | `3072` / `0`; `1536` / `10` once a second instance shares the box (§2h) |
 
 Follow §2g and §3-§10 again with a new directory, DB name, port pair, unit names, and hostname —
 `deploy/deploy.sh` needs no edits and no env vars: it derives `WEB_UNIT`/`COLLAB_UNIT` from
