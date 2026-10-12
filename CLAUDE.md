@@ -277,30 +277,21 @@ Two development slots — separate working trees, each with its own `.env`, data
   run it from the tree you mean to stop; it will not touch the other slot's servers. **Use it
   rather than killing by hand**: its parent walk stops at the first process that isn't this
   repo's, and a hand-rolled one has climbed into `systemd --user` and logged the user out.
-- **Before switching branches, run `npm run check-ports` — and if a dev server is up, say so
-  before you switch.** It is read-only, and names per port whether anything is listening and
-  whether it belongs to this repo; whose server it is barely matters, since the user is the one
-  who will hit the breakage either way. **A running `next dev` does not survive a branch switch
-  that changes which route files exist.** Git deletes the file, Turbopack unregisters the route,
-  and git restoring it a second later does not bring it back — so checking out a branch that
-  predates a merge, *then* pulling, leaves routes permanently missing from a server that looks
-  perfectly healthy. The tell is a **404 on a route whose file is plainly on disk** while its
-  siblings still answer, and it is worth knowing because a permission problem never looks like
-  this: an anonymous request to a gated route 307s to `/sign-in`, an unregistered one 404s. The
-  same delete-and-restore under `git stash push -u` takes untracked files with it and surfaces
-  instead as `Module not found` for a path that exists. Related, same tree: `npm run e2e` runs
-  `next build`, which writes production artifacts into the `.next` a running dev server is using.
-  **Restart afterwards rather than leaving it** — `npm run stop:all`, remove `.next`, start
-  again — and say that you did.
+- **The dev server is disposable: stop and start it silently, as the work needs, and leave
+  `dev:all` running when you finish, however you found it** (and `web-prod` stopped). The user
+  watches the ports with a monitor of their own, so a stop or a start needs neither asking
+  about nor reporting. A branch switch, a pull, `git stash push -u`, `prisma generate`, a
+  schema change and `npm run e2e` (which builds into the same `.next`) can each leave a running
+  `next dev` broken while it looks healthy. So stop it before any of them (`npm run stop:all`)
+  and start it fresh afterwards: `rm -rf .next`, then `npm run dev:all` detached so it outlives
+  your session (on Linux, `setsid nohup npm run dev:all > <log outside the tree> 2>&1 &`), or
+  the preview tool. Don't diagnose a server that lived through one of those; restart it. The
+  tells, for a failure you didn't cause: a 404 on a route whose file is on disk (unregistered;
+  a gated route 307s to `/sign-in` instead), `Module not found` for a path that exists, and a
+  start stuck at `Compiling /api/auth/[...nextauth]` (Checks, below).
 - `.claude/launch.json` defines `web`, `collab` and `web-prod` for the preview tool. Its
   numbers are **slot A's** and cannot be computed — in slot B, drive from `npm run dev:all` and
   open the pane on `http://b.localhost:3005` directly.
-- The user often runs `dev:all` themselves. **You may stop it** when the work needs it —
-  `npm run stop:all`, then restart via the preview tool. Standing permission, no need to ask
-  each time. Prefer attaching to what's already running when that would answer the question,
-  since a restart costs a cold recompile and can poison `.next` (see Checks); but a schema
-  change or a new Prisma model *requires* the restart, and asking is worse than doing it. Say
-  that you did.
 
 ## Database
 
