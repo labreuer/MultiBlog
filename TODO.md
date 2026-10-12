@@ -701,6 +701,22 @@ not reading from, and swap — closes both windows at once, which is a reason to
 over the cheaper two despite its size. Until then, expect a few seconds of 500s on cold
 routes per deploy, and don't read them as a broken build.
 
+## `deploy.sh`'s build heap is fixed at 3072
+
+**Status:** open, and worked around by hand on every deploy to a box with two instances.
+
+`deploy/deploy.sh` builds with `NODE_OPTIONS="--max-old-space-size=3072"` written inline, so
+nothing outside the script can change it. 3072 is DEPLOY.md §2h's number for a 1-2 GB box
+running one instance. On a box running a second instance, a build that size pushes the
+running neighbour into swap, so those deploys run a `sed`-edited temporary copy of the script
+with `--max-old-space-size=1536` and `nice -n 10`, and check that the edit took.
+
+**Fix:** let the script take the heap and a niceness from the environment
+(`BUILD_HEAP_MB`, defaulting to 3072, and an optional `BUILD_NICE`), and record the per-box
+values in DEPLOY.md §11. Whatever rewrites the build line today has to change with it: its
+check that the edit took fails loudly on a new line, so the two must land together, and a
+box still on the old script needs the old edit.
+
 ## `/users/[id]/slug` still hangs off the plural table (PLAN.md §3d)
 
 On 2026-09-15 a post's own pages moved from `/posts/[id]/…` to `/post/[id]/…`, and PLAN.md
