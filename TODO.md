@@ -523,8 +523,8 @@ equals the 390px viewport everywhere, and the elements reaching 857px are inside
 
 ## Observability of swallowed bulk-action failures
 
-**Status:** partly resolved. The failures *are* logged and *are* retrievable in production.
-What is missing is retention, structure, and any path off the box.
+**Status:** partly resolved. The failures *are* logged, are retrievable in production, and
+survive a reboot. What is missing is structure and any path off the box.
 
 ### Background — why there is anything to log
 
@@ -584,17 +584,12 @@ not a fault, and logging every refused authorization at error level would bury t
 
 ### What is actually open
 
-1. **Journal retention is unverified.** `journald`'s `Storage=auto` is persistent only if
-   `/var/log/journal` exists, and volatile (`/run/log/journal`, lost on reboot) otherwise.
-   Ubuntu usually ships the persistent directory, but nothing in DEPLOY.md confirms it for
-   this box. Check `journalctl --disk-usage` and `systemd-analyze cat-config systemd/journald.conf`;
-   if it is volatile, a reboot discards every `[bulk]` line and the 500 diagnostics §8 relies
-   on. One-line fix (`sudo mkdir -p /var/log/journal && sudo systemd-tmpfiles --create --prefix /var/log/journal`).
+1. **Nothing ships off the box.** DEPLOY.md §9's backups stay on the box, and the logs aren't
+   in them. Logs die with the instance — the same instance whose failure is the case you
+   would most want them for. (They do survive a reboot: the journal is persistent on every
+   box, which DEPLOY.md §8 says how to confirm.)
 
-2. **Nothing ships off the box.** DEPLOY.md §9 backs up Postgres only. Logs die with the
-   instance — the same instance whose failure is the case you would most want them for.
-
-3. **`instrumentation.ts` would not capture these — the trap worth writing down.** Adding
+2. **`instrumentation.ts` would not capture these — the trap worth writing down.** Adding
    Sentry/OTel via Next's `onRequestError` hook looks like it would cover this and would not:
    that hook fires for errors Next *handles* (uncaught in rendering, route handlers, server
    actions). `settleBulk` catches them and returns a value, so they never reach Next as
@@ -602,8 +597,8 @@ not a fault, and logging every refused authorization at error level would bury t
    `console.error` sits, or the bulk failures are precisely the ones missing from the
    dashboard.
 
-4. **The log line is unstructured.** `console.error` with an interpolated id is greppable but
-   not queryable. Worth revisiting only alongside (2) — structure is cheap to add when
+3. **The log line is unstructured.** `console.error` with an interpolated id is greppable but
+   not queryable. Worth revisiting only alongside (1) — structure is cheap to add when
    something is consuming it and pointless before.
 
 ### Suggested smallest step
@@ -611,7 +606,7 @@ not a fault, and logging every refused authorization at error level would bury t
 `instrumentation.ts` with `onRequestError` wired to a no-op reporter, plus a call to that same
 reporter inside `settleBulk`. That puts both classes of error — the ones Next handles and the
 ones this code deliberately swallows — through one seam that can later point at a provider,
-without committing to one now. Item 1 is independent and worth checking on the box regardless.
+without committing to one now.
 
 ---
 

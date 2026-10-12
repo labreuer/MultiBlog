@@ -680,6 +680,14 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost (§4)
+
+        # Uploads: the UI's and the MCP server's (/api/mcp/files, /api/mcp/docs).
+        # nginx's default 1m refuses them with its own HTML page before Next sees
+        # them; keep this at or above FILE_MAX_UPLOAD_BYTES. "Uploaded files",
+        # below, and deploy/nginx-app.conf.sample say why each line is here.
+        client_max_body_size 64m;
+        client_body_timeout  300s;
+        proxy_request_buffering off;
     }
 
     # Hocuspocus collab websocket. The document id travels in-band (not in the
@@ -720,7 +728,11 @@ Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
 ## 8. Verify
 
 - `systemctl status multiblog-web multiblog-collab` — both active. Logs:
-  `journalctl -u multiblog-web -f`.
+  `journalctl -u multiblog-web -f`. Both units log to the journal, which survives a reboot
+  only if `/var/log/journal` exists. Ubuntu 26.04 creates it, so `journalctl --list-boots`
+  should list earlier boots once the box has rebooted. If the directory is missing, the
+  journal lives in `/run` and a reboot discards it: create it with
+  `sudo mkdir -p /var/log/journal && sudo systemd-tmpfiles --create --prefix /var/log/journal`.
 - `curl -I https://<app-host>/` → 200, home page renders.
 - Sign in as the seeded admin — confirms auth + `trustHost` + DB.
 - Open a post editor, type — confirms the collab WebSocket (`wss://`) connects (status line
