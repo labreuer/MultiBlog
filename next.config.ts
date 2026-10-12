@@ -6,6 +6,11 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 // and a production build.
 export default function nextConfig(phase: string): NextConfig {
   return {
+    // Where a build is written. Unset everywhere but `deploy/deploy.sh`, which
+    // builds into .next-build while the live site keeps serving .next, then
+    // swaps the two by rename (DEPLOY.md §10). `next start` runs with it unset,
+    // so it always serves .next.
+    distDir: process.env.NEXT_DIST_DIR || ".next",
     // Next's server compiler builds separate bundles per layer (RSC, SSR), each of
     // which would otherwise get its own copy of yjs's module scope. yjs guards
     // against being loaded twice in the same JS realm via a globalThis flag

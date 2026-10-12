@@ -23,6 +23,10 @@
 # next.js
 /.next/
 /out/
+# deploy/deploy.sh's staging: the build before it is swapped in, and the
+# install with the previous node_modules and build (DEPLOY.md §10)
+/.next-build/
+/.deploy/
 
 # production
 /build
