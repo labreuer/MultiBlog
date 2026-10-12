@@ -71,6 +71,8 @@ test("a token authenticates, names its actor and issuer, and lists only what its
     });
     expect(String(writerInit.body.result?.instructions)).toContain("Writing:");
     expect(String(writerInit.body.result?.instructions).length).toBeLessThanOrEqual(2048);
+    const writerTools = ((await mcpRequest(request, writer.secret, "tools/list")).body.result?.tools as { name: string }[]).map((t) => t.name);
+    expect(writerTools).toContain("upload_url");
 
     // A tool the token doesn't list is refused as a tool, not run.
     const refused = await reader.call("upload_url", { kind: "doc" });

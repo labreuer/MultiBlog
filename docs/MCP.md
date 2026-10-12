@@ -1,13 +1,10 @@
 # MultiBlog — an MCP server for machine clients
 
-**Status: built through §18's phase 4 on the `mcp` branch**: tokens and every read, doc writes
-and targeted edits, annotations, anchored links, tags, uploads and `manage`. **It lands on main
-in stages, and main has so far:** the operation layer the server actions share (§1, §2);
-tokens, the endpoint and its envelope (§3–§5); every read (phase 1); doc writes (§6); and
-annotations, `annotate` and `edit_annotation`, with `manage` for docs (§9, §12). Not built:
-OAuth, so claude.ai can't connect yet (§5, phase 5), and passage-level tags (phase 6). The
-sections below are the design the build followed; §20 lists where the build departs from it,
-and every such point is decided there rather than here.
+**Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
+annotations, anchored links, tags, uploads and `manage`. Not built: OAuth, so claude.ai can't
+connect yet (§5, phase 5), and passage-level tags (phase 6). The sections below are the design
+the build followed; §20 lists where the build departs from it, and every such point is decided
+there rather than here.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
 docs, PDFs, annotations, anchored links, tags, bylines — and to find and read it again as a

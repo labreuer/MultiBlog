@@ -2470,7 +2470,48 @@ export async function appendTestDocParagraph(opts: { docId: string; text: string
 // surface. Nothing else may write to stdout from here.
 // ---------------------------------------------------------------------------
 
+/** Each posted annotation on a file, with its quads, by the stored body's text — for comparing two captures of one passage. */
+export async function getFileAnnotationQuads(fileId: string): Promise<{ bodyText: string; quotedText: string; quads: number[][] }[]> {
+  const rows = await prisma.annotation.findMany({
+    where: { fileId, status: { not: "DRAFT" } },
+    orderBy: { createdAt: "asc" },
+    select: { bodyText: true, quotedText: true, pdfTarget: true },
+  });
+  return rows.map((row) => ({ bodyText: row.bodyText, quotedText: row.quotedText, quads: parsePdfTarget(row.pdfTarget)?.quads ?? [] }));
+}
+
+/** What an upload wrote beyond the bytes: who owns and made the file, its visibility, and the page labels stored with it (null until computed). */
+export async function getUploadFacts(fileId: string): Promise<{ owners: string[]; creator: string | null; visibility: string; pageLabels: unknown } | null> {
+  const file = await prismaIncludingDeleted.storedFile.findUnique({
+    where: { id: fileId },
+    select: {
+      visibility: true,
+      pageLabels: true,
+      createdBy: { select: { email: true } },
+      owners: { orderBy: { ownerOrder: "asc" }, select: { user: { select: { email: true } } } },
+    },
+  });
+  return file
+    ? { owners: file.owners.map((o) => o.user.email), creator: file.createdBy?.email ?? null, visibility: file.visibility, pageLabels: file.pageLabels }
+    : null;
+}
+
+/** Replaces a file's owners with these accounts, in order — what nothing in the UI does (docs/MCP.md §12). */
+export async function setTestFileOwners(fileId: string, emails: string[]): Promise<void> {
+  emails.forEach(assertSafe);
+  const users = await prisma.user.findMany({ where: { email: { in: emails } }, select: { id: true, email: true } });
+  await prisma.$transaction([
+    prisma.fileOwner.deleteMany({ where: { fileId } }),
+    ...emails.map((email, ownerOrder) =>
+      prisma.fileOwner.create({ data: { fileId, userId: users.find((u) => u.email === email)!.id, ownerOrder } }),
+    ),
+  ]);
+}
+
 const handlers = {
+  setTestFileOwners,
+  getUploadFacts,
+  getFileAnnotationQuads,
   createTestUser,
   setTestUserRole,
   deleteTestUser,

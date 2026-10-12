@@ -289,7 +289,7 @@ structural difference:
 |---|---|
 | Read `/doc/[slug]` | Read `/pdf/[slug]` and `/files/[slug]`, download via `/files/[slug]/download`, fetch bytes from `/api/files/…` |
 | Edit `/doc/[slug]/edit` | **No equivalent** — a file has no editable content |
-| Visibility / owners / slug / delete | `canUserManageFile` (`src/lib/file-manage.ts`) |
+| Visibility / owners / slug / delete | `canUserManageFile` (`src/lib/file-manage.ts`); owners change only through the MCP server's `manage` (docs/MCP.md §12) |
 | Listed in `/docs` (+ ADMIN "Show all docs") | Listed in `/files` (+ ADMIN "Show all files") |
 | Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same delete rule (`setAnnotationDeleted`) |
 | Collab connection | Presence only, and **always read-only** (`/api/file/[id]/token`) |
@@ -651,7 +651,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
 | Doc mutations (visibility, byline, slug, record, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
-| File mutations (visibility, title, slug, delete) and the upload | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
+| File mutations (visibility, title, slug, owners, delete) and the upload | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
 | Annotation create / delete / restore | `src/app/actions/annotations.ts`; delete and restore in `src/lib/annotation-manage.ts` |
 | Doc links | `src/app/actions/doc-links.ts` |
 | Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |

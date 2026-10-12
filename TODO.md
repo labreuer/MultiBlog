@@ -193,18 +193,120 @@ glyphs. Not yet done:
   browser it measures Arial against a Calibri selection. Passing the family through the same
   map is a one-line fix (docs/PDF_QUADS.md §5).
 
-## Server-side quads: what is left (docs/PDF_QUADS.md)
+## The MCP server: what is left (docs/MCP.md)
 
-**Status:** built 2026-10-06. Unit-tested, and measured against Chromium's text layer on the e2e
-fixture and four real PDFs (PDF_QUADS.md Appendix A). Nothing on `main` calls it yet.
+**Status:** phases 1–4 of MCP.md §18 built 2026-10-07, and merged in stages: tokens and every
+read, doc writes and targeted edits, annotations, anchored links, tags, uploads and `manage`.
+Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a production
+build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
+yet done:
 
-- **Its first caller is the MCP server's stored PDF quads.** MCP.md §8 computes them with
-  `extractPageItems` and `quadsForRange`, and its spec asserts each edge within 1pt of a
-  selection in Chromium (the fixture's worst was 0.82pt), not mere overlap, which even spacing
-  also passes.
-- **That spec is the only standing check against a real selection** once it exists. Until
-  then, a pdfjs bump that changed how the text layer picks a font family would move
-  server-computed quads with nothing noticing; nothing stores them yet.
+- **OAuth, so claude.ai can connect** (MCP.md §5, phase 5). Until then only a client that can
+  send a header — Claude Code — reaches the server.
+- **Issuing a token takes the script** (`scripts/create-api-token.ts`). The `/dashboard` panel
+  for one's own tokens and the `/users` action for a bot's (MCP.md §3) aren't built.
+- **MCP.md §17's items 1–3 are still in the UI's annotation paths.** The MCP server avoids all
+  three; the actions don't. They have their own entry below, "Posting an annotation trusts
+  three things the client sends".
+- **`/dashboard`'s Recent docs lists a doc to an ineligible name already on its byline**
+  (MCP.md §17, item 5's remainder). The byline actions now refuse to add one.
+- **MCP.md §19's open decisions 5–7**: a PDF Claude can't see, uploaded again, makes a second
+  row; whether `write` may delete what its own account made, and whether `api_write`'s rows
+  are ever cleaned up; provenance for Claude's research docs beyond the record flag.
+- **Passage-level tags** (phase 6), if wanted, after PLAN.md §20f's semantics.
+- **The PDF quads spec runs on chromium only** (`e2e/mcp-files.spec.ts`), and is now the one
+  standing check that server-computed quads still match a real selection: a pdfjs bump that
+  changed how the text layer picks a font family would fail it, and nothing else.
+
+## Posting an annotation trusts three things the client sends (MCP.md §17, items 1–3)
+
+**Status:** found 2026-10-07 while planning the MCP server, and present on `main`. The MCP
+server avoids all three (`src/lib/mcp/annotation-writes.ts`); the UI's server actions in
+`src/app/actions/annotations.ts` don't. The UI never sends the bad value, so each needs a
+hand-made call to the action, which any signed-in reader of the container can make.
+
+1. **A reader can have the server write a mark into a doc they can't edit.** `postAnnotation`
+   takes `anchorMode` from the client for a root annotation, and for `"mark"` calls
+   `applyAnnotationMark`, which writes into the doc's ydoc through `/admin/annotation-mark`.
+   The token `src/lib/annotation-admin.ts` mints for that is writable whoever the poster is,
+   and nothing in the action calls `canUserEditDoc`. ANNOTATIONS.md's "why the reading views
+   stopped writing marks" holds only because the reading views send `"columns"`.
+   **Fix:** refuse `"mark"` unless `canUserEditDoc` passes for the poster. Only the editor
+   sends it, and its users can edit.
+2. **The client's version stamp is parsed, not validated.** `postAnnotation` turns
+   `opts.ydocUpdateId` into a `BigInt` and anchors at it. Nothing checks that the id is in the
+   target's log or not past its tail, so a stamp from another doc, or from the future, breaks
+   "replay to the stamp and `textBetween` is `quotedText`" (`check-annotation-anchors.ts`) as
+   soon as the doc changes. **Fix:** the MCP server's check, `docLogTail` and `isDocVersion`
+   (`src/lib/doc-state.ts`), as `annotation-writes.ts` applies them. A reply's stamp is in its
+   parent's body log (`ydoc:annotation:<parentId>`), not the doc's, so `isDocVersion` needs a
+   form that takes a ydoc id.
+3. **A reply's parent is checked for its container only.** `createDraftAnnotation` selects
+   the parent's `docId` and `fileId` and nothing about its status or deletion, so a reply can
+   hang off someone else's DRAFT, and an anchored reply then searches that private body for
+   its quote. **Fix:** refuse a parent that is a DRAFT or deleted, as `annotation-writes.ts`'s
+   target check does. Check whether `postAnnotation` needs the same.
+
+**Shape of the fix:** the three checks can go into the actions as they stand. Or the UI's
+posting can move onto `src/lib/annotation-post.ts`, which the MCP server already uses, so each
+rule exists once (CLAUDE.md, "A write the UI and the MCP server share is a function in
+`src/lib/`"). The second is more work and is what that invariant asks for.
+
+**Tests:** each fix wants a refusal test, made as a reader on a shared doc, asserting that no
+row or mark was written. `e2e/annotation-readonly.spec.ts` has those fixtures. Whether a spec
+can call the server action directly, or the gate has to move into `src/lib/` to be testable,
+is part of the work.
+
+## A comment's card URL names the first of two comments that share it
+
+**Status:** found 2026-10-12 while preparing the MCP server's last PR. Rare, but `tag` can act
+on the wrong comment.
+
+A comment's card name is its commenter's display name and the second it was posted
+(`commentAnchorName`), so two comments on one post under one name in one second share it. A
+name with no Latin letters or digits becomes `comment`, so any two such names collide.
+`commentIdByFragment` (`src/lib/mcp/read/posts.ts`) takes the first candidate, so:
+
+- `read` of the card URL can show the other comment, or answer `not_found` when the first is
+  one the reader can't see;
+- `tag` can tag the other comment.
+
+`annotationByFragment` refuses the same case for annotations as `ambiguous`, naming the ids to
+use instead. That fix doesn't carry over as it is:
+
+- **The candidates aren't read-checked.** A comment that isn't public, one awaiting
+  moderation say, is readable only by its commenter and by those who can edit the post, so an
+  `ambiguous` answer could reveal it to anyone else. Filter the candidates
+  through `canUserReadComment` before counting them.
+- **There is no id to retry with.** `read` and `tag` take a comment only by its card URL,
+  though a post's read lists each comment's `id`. Let both take a comment's id, then name the
+  ids in the refusal.
+
+## Two scrub-position tests fail on the dev target (`e2e/doc.spec.ts`)
+
+**Status:** found 2026-10-11 on `~/git/MultiBlog-claude` (`npm run e2e:dev`, one worker,
+against a `next dev` running since 2026-10-10). Not caused by that day's `/admin` token
+change: they fail the same way with the previous server code. Every production-build run in
+the session scratchpads passes them, on chromium, firefox and webkit, through 2026-10-10.
+
+- **Tests:** "the scrub position in the URL › a URL naming a position opens frozen at it,
+  without waiting to be touched", and "› 'at this revision' links to the revision, and seeks
+  in place once the bar is loaded".
+- **Symptom:** `/doc/<slug>?at=<update id>` opens on the live doc. The slider sits at its far
+  end, and the "Switch to live view" button never appears in 15s. The sibling test that
+  focuses and drags the bar passes, so the history loads; what fails is the eager load
+  `?at=` is meant to start.
+- **Next:**
+  1. Run the two on a production build
+     (`npm run e2e -- e2e/doc.spec.ts -g "scrub position"`) to confirm it's dev-only. Restart
+     `dev:all` afterwards (CLAUDE.md: the build writes into the dev server's `.next`).
+  2. Rerun on a fresh dev server (`npm run stop:all`, remove `.next`, `npm run dev:all`), to
+     rule out one that had been running for a day.
+  3. If it survives both, look at how `?at=` reaches the bar on first render under
+     `next dev`. `src/app/doc/[slug]/page.tsx` validates it, `DocView.tsx` passes it on, and
+     `DocScrubBar.tsx` activates from an effect. Dev-only double effects are a suspect.
+  4. If it's dev-only for good, have the two tests say so (skipped on the dev target, with
+     the reason) rather than leaving two known failures in every `e2e:dev` run.
 
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 

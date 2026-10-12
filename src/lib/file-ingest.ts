@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageFiles } from "@/lib/role-checks";
+import { readableFilesWhere } from "@/lib/file-authz";
 import { claimFileSlug } from "@/lib/file-slug";
 import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storeUploadStream, type StoredBytes } from "@/lib/file-storage";
 import { extractPdf, extractPdfMetadata, type PdfMetadata } from "@/lib/pdf-extract";
@@ -21,15 +22,18 @@ import type { Actor } from "@/lib/actor";
 // 1. `stageUpload`: the role check, the filename and its format, and the
 //    streamed write, hashed, its magic checked mid-flight — so a mislabelled
 //    upload is refused after a few bytes rather than after the whole transfer.
-// 2. `recordUpload`: a PDF's parse, then the row with its owner, page text,
-//    labels and outline in one transaction. A failure removes the bytes if
-//    this upload is what put them there.
+// 2. `recordUpload`: a PDF's parse, then the row with its owners, page text,
+//    labels and outline in one transaction — or, when asked, the file the
+//    actor can already read that holds these bytes. A failure removes the
+//    bytes if this upload is what put them there.
 
 export type StagedUpload = { stored: StoredBytes; kind: UploadKind; filename: string };
 
 export type RecordedUpload = {
   file: { id: string; slug: string; title: string };
   sha256: string;
+  /** The bytes were already a file this actor can read, which is returned in place of a new one. */
+  existing: boolean;
 };
 
 export async function stageUpload(actor: Actor, opts: { body: ReadableStream<Uint8Array>; filename: string }): Promise<StagedUpload> {
@@ -61,9 +65,25 @@ export async function recordUpload(
   opts: {
     /** The title, by default the filename's (`titleFromFilename`). */
     title?: string;
+    /** The owners, in order; by default the actor alone, as the uploader always was. */
+    owners?: readonly string[];
+    /** Return a live file the actor can read that already holds these bytes, rather than make another row. */
+    reuseReadable?: boolean;
   } = {},
 ): Promise<RecordedUpload> {
   const { stored, kind, filename } = staged;
+
+  if (opts.reuseReadable) {
+    const readable = readableFilesWhere(actor.userId, actor.role);
+    const existing = readable
+      ? await prisma.storedFile.findFirst({
+          where: { AND: [{ sha256: stored.sha256 }, readable] },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, slug: true, title: true },
+        })
+      : null;
+    if (existing) return { file: existing, sha256: stored.sha256, existing: true };
+  }
 
   // A PDF is parsed after storing; a .docx is not, and that asymmetry is the
   // whole of the difference between them here. The bytes are already safe on
@@ -99,6 +119,7 @@ export async function recordUpload(
   }
 
   const title = opts.title?.trim().slice(0, 500) || titleFromFilename(filename, kind);
+  const owners = opts.owners && opts.owners.length > 0 ? [...new Set(opts.owners)] : [actor.userId];
   try {
     const file = await prisma.$transaction(async (tx) => {
       // Claimed inside the transaction, under a lock on the slug, so two
@@ -122,7 +143,7 @@ export async function recordUpload(
           // "Owner" rather than "author" because nobody here wrote the PDF
           // (schema.prisma's FileOwner). It is also what makes the file
           // visible to them at all under PRIVATE, which is the default.
-          owners: { create: { userId: actor.userId, ownerOrder: 0 } },
+          owners: { create: owners.map((userId, ownerOrder) => ({ userId, ownerOrder })) },
         },
         select: { id: true, slug: true, title: true },
       });
@@ -135,7 +156,7 @@ export async function recordUpload(
       }
       return created;
     });
-    return { file, sha256: stored.sha256 };
+    return { file, sha256: stored.sha256, existing: false };
   } catch (err) {
     console.error("[files/upload] couldn't record the uploaded file:", err);
     await discardStagedUpload(staged);
