@@ -173,7 +173,7 @@ export function exportTar(selection: ExportSelection, format: ExportFormat): Rea
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       if (done) return;
-      if (index < selection.docIds.length) {
+      while (index < selection.docIds.length) {
         const id = selection.docIds[index++];
         const row = await prisma.doc.findUnique({
           where: { id },
@@ -185,7 +185,10 @@ export function exportTar(selection: ExportSelection, format: ExportFormat): Rea
             authors: { orderBy: { bylineOrder: "asc" }, select: { user: { select: { name: true } } } },
           },
         });
-        if (!row) return;
+        // Deleted since it was selected: on to the next. A pull that enqueues
+        // nothing is never called again, so returning here would hang the
+        // download.
+        if (!row) continue;
         const [state, chips] = await Promise.all([loadDocState(id), tagsForTarget({ kind: "doc", id })]);
         const version = state.version?.toString() ?? null;
         const title = docTitleOrFallback(row.title);
