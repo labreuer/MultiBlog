@@ -6,8 +6,8 @@ import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import type { Actor } from "@/lib/actor";
 
-// Managing a doc — its byline, visibility, slug, and soft deletion — as
-// plain functions taking an explicit actor (docs/MCP.md §1):
+// Managing a doc — its byline, visibility, slug, record flag, and soft
+// deletion — as plain functions taking an explicit actor (docs/MCP.md §1):
 // /doc/[slug]/edit's and /docs' actions (src/app/actions/docs.ts) wrap them
 // with the session, and the MCP server's `manage` tool with a token's user.
 // Each refusal is an ApiError, whose message reads the same in either front
@@ -119,6 +119,16 @@ export async function setDocSlug(actor: Actor, docId: string, slug: string): Pro
     if (err instanceof Error && err.name === "Error") throw new ApiError("conflict", err.message);
     throw err;
   }
+}
+
+/**
+ * Whether a doc is a record (docs/MCP.md §6): an imported chat, evidence of
+ * what was said, which edit_doc refuses. Marking or unmarking one is the
+ * `manage` scope; the editor doesn't consult the flag.
+ */
+export async function setDocRecord(actor: Actor, docId: string, record: boolean): Promise<void> {
+  await requireEditable(actor, docId);
+  await prisma.doc.update({ where: { id: docId }, data: { record, updatedByUserId: actor.userId } });
 }
 
 /**
