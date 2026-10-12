@@ -257,6 +257,31 @@ row or mark was written. `e2e/annotation-readonly.spec.ts` has those fixtures. W
 can call the server action directly, or the gate has to move into `src/lib/` to be testable,
 is part of the work.
 
+## A comment's card URL names the first of two comments that share it
+
+**Status:** found 2026-10-12 while preparing the MCP server's last PR. Rare, but `tag` can act
+on the wrong comment.
+
+A comment's card name is its commenter's display name and the second it was posted
+(`commentAnchorName`), so two comments on one post under one name in one second share it. A
+name with no Latin letters or digits becomes `comment`, so any two such names collide.
+`commentIdByFragment` (`src/lib/mcp/read/posts.ts`) takes the first candidate, so:
+
+- `read` of the card URL can show the other comment, or answer `not_found` when the first is
+  one the reader can't see;
+- `tag` can tag the other comment.
+
+`annotationByFragment` refuses the same case for annotations as `ambiguous`, naming the ids to
+use instead. That fix doesn't carry over as it is:
+
+- **The candidates aren't read-checked.** A comment that isn't public, one awaiting
+  moderation say, is readable only by its commenter and by those who can edit the post, so an
+  `ambiguous` answer could reveal it to anyone else. Filter the candidates
+  through `canUserReadComment` before counting them.
+- **There is no id to retry with.** `read` and `tag` take a comment only by its card URL,
+  though a post's read lists each comment's `id`. Let both take a comment's id, then name the
+  ids in the refusal.
+
 ## Two scrub-position tests fail on the dev target (`e2e/doc.spec.ts`)
 
 **Status:** found 2026-10-11 on `~/git/MultiBlog-claude` (`npm run e2e:dev`, one worker,
