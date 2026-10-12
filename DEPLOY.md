@@ -101,7 +101,10 @@ Do **not** open 1234 or 5432 — both stay localhost-only behind nginx / the loo
 > box being right. Either add inbound TCP 80/443 (`0.0.0.0/0`, `::/0`) rules to the Cloud
 > Firewall, or detach it and rely on `ufw`. A quick way to tell it apart from a
 > box-local problem: from any other machine, `curl -sv --max-time 8 http://<box-ip>/` — a
-> hang/timeout points upstream (Cloud Firewall), a connection *refused* points at the box.
+> hang/timeout points upstream (Cloud Firewall), a connection *refused* means packets reach
+> the box. The probe is sharpest **now, before nginx is installed** (§2f), with 80 allowed in
+> `ufw` (the `80,443/tcp` form above): nothing listens yet, so *refused* is the expected
+> answer and proves the path is open.
 
 ### 2d. Install Node 24 (NodeSource)
 
@@ -203,8 +206,9 @@ sudo apt install -y postgresql postgresql-contrib
 systemctl status postgresql      # should be active + enabled
 ```
 
-26.04's default repo ships a current major (16/17-class). That's fine for a fresh DB — you do
-**not** need to match dev's PG 18, and you do **not** need the PGDG apt repo. The default
+26.04's default repo ships Postgres 18 (`18.6-0ubuntu0.26.04.1` as of 2026-09), the same major
+as dev, so dumps move between boxes and dev with no version skew, and you do **not** need the
+PGDG apt repo. The default
 cluster already listens only on `localhost:5432` (`listen_addresses = 'localhost'`), and
 Ubuntu's default `pg_hba.conf` accepts password auth on `127.0.0.1/32` (`scram-sha-256`), so
 the app connects over the loopback with a password and no `pg_hba` edits are required.
@@ -229,15 +233,18 @@ sudo chown deploy:deploy /srv/multiblog
 ### 2h. Swap (required on the 1 GB Nanode)
 
 `next build` peaks well above 1 GB of RAM; on a 1 GB instance it will be OOM-killed partway
-through with no useful error. Add 2 GB of swap once, up front:
+through with no useful error. Add 2 GB of swap once, up front. A stock Linode image already
+has a small swap *partition* (about 500 MB, `/dev/sdb`; `swapon --show` lists it): add the
+swapfile alongside it and leave that partition's `/etc/fstab` line alone.
 
 ```bash
+swapon --show                                                 # the stock partition, if any
 sudo fallocate -l 2G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile
 sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab   # persist across reboots
-free -h                                                       # confirm Swap: 2.0Gi
+free -h                                                       # Swap: ~2.5Gi with the partition
 ```
 
 Swap only has to cover the build; steady-state runtime stays comfortably under 1 GB. (If you
@@ -256,6 +263,40 @@ later resize to a ≥2 GB plan, the swap is harmless to leave in place.)
 > 3072 MB fits inside the ~3.4 GB combined RAM+swap with headroom left for Postgres/nginx/
 > sshd. The build runs slower once it's actually swapping, but completes. This applies to
 > every build on this box, not just the first — `deploy/deploy.sh` sets it already (§10).
+> 3072 is the number for a box running **one** instance. With a second instance beside it
+> (§11), a build that size pushes the running neighbour into swap: cap it at 1536 and run
+> it under `nice -n 10`. `deploy.sh` can't be told to yet (TODO.md, "`deploy.sh`'s build
+> heap is fixed at 3072").
+
+### 2i. certbot and its renewal hook
+
+Once per box: a cert is per hostname (§7a), but the tool, its renewal timer and the hook that
+reloads nginx are shared, so they belong here and can go in before any hostname resolves.
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+systemctl list-timers | grep certbot      # the package's renewal timer
+```
+
+Make every renewal reload nginx:
+
+```bash
+# certbot creates /etc/letsencrypt/renewal-hooks/ on its FIRST run, not at install: the
+# package ships only cli.ini. Creating it here lets the hook go in before any cert exists.
+sudo install -d /etc/letsencrypt/renewal-hooks/deploy
+cd /etc/letsencrypt/renewal-hooks/deploy
+printf '#!/bin/sh\nsystemctl reload nginx\n' | sudo tee reload-nginx.sh
+sudo chmod +x reload-nginx.sh
+ls -l                                     # expect -rwxr-xr-x root root 33
+cd -
+```
+
+No `sudo` inside the hook: certbot runs deploy hooks as root. The lines are short on purpose.
+A one-line `printf … | sudo tee <long path>` pasted into an SSH session has been cut off after
+`sudo tee`, and `tee` with no file just echoes its input, so it looks as if it worked while
+writing nothing. Without the `install -d`, the `tee` fails with `No such file or directory` on
+a box with no cert yet, which reads like a typo in the path rather than a missing step.
+`certbot renew --dry-run` needs a cert to test against, so it comes with the first one (§7a).
 
 ---
 
@@ -581,10 +622,9 @@ no DNS-API plumbing (an HTTP-01 challenge over port 80 is enough). The full conf
    > one. It shows up as certbot's HTTP-01 check 404ing (via the other site's redirect-to-https)
    > even though this block's `server_name` and IPv4 config are completely correct.
 
-2. **Issue the cert:**
+2. **Issue the cert** (certbot itself is installed in §2i):
 
    ```bash
-   sudo apt install -y certbot python3-certbot-nginx
    sudo certbot certonly --nginx -d <app-host>
    ```
 
@@ -597,12 +637,10 @@ the paths the config below points at. (Alternatively `certbot --nginx` *without*
 rewrites the server block for you in one shot — fine too, but then certbot owns the TLS
 lines instead of this file, and you'd skip step 3.)
 
-Renewal is automatic: the certbot package installs a systemd timer. Ensure nginx reloads on
-renew and verify the whole path:
+Renewal is automatic: §2i installed the timer and the hook that reloads nginx. Now that a cert
+exists, verify the whole path once, on the box's first cert:
 
 ```bash
-echo 'sudo systemctl reload nginx' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
-sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 sudo certbot renew --dry-run
 ```
 
@@ -642,6 +680,14 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;   # required for NextAuth trustHost (§4)
+
+        # Uploads: the UI's and the MCP server's (/api/mcp/files, /api/mcp/docs).
+        # nginx's default 1m refuses them with its own HTML page before Next sees
+        # them; keep this at or above FILE_MAX_UPLOAD_BYTES. "Uploaded files",
+        # below, and deploy/nginx-app.conf.sample say why each line is here.
+        client_max_body_size 64m;
+        client_body_timeout  300s;
+        proxy_request_buffering off;
     }
 
     # Hocuspocus collab websocket. The document id travels in-band (not in the
@@ -682,7 +728,11 @@ Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
 ## 8. Verify
 
 - `systemctl status multiblog-web multiblog-collab` — both active. Logs:
-  `journalctl -u multiblog-web -f`.
+  `journalctl -u multiblog-web -f`. Both units log to the journal, which survives a reboot
+  only if `/var/log/journal` exists. Ubuntu 26.04 creates it, so `journalctl --list-boots`
+  should list earlier boots once the box has rebooted. If the directory is missing, the
+  journal lives in `/run` and a reboot discards it: create it with
+  `sudo mkdir -p /var/log/journal && sudo systemd-tmpfiles --create --prefix /var/log/journal`.
 - `curl -I https://<app-host>/` → 200, home page renders.
 - Sign in as the seeded admin — confirms auth + `trustHost` + DB.
 - Open a post editor, type — confirms the collab WebSocket (`wss://`) connects (status line
@@ -698,30 +748,81 @@ Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
 
 ## 9. Backups
 
-Daily `pg_dump` off-box (cron), and **test a restore once** — an untested backup isn't one.
+Daily, per instance: a script that cron runs as `deploy` dumps Postgres and tars the files
+`pg_dump` can't see, keeping 14 days in a directory only `deploy` can read. Then **test a
+restore once** — an untested backup isn't one — and ship the dumps somewhere off the box
+(Linode Object Storage / another host).
+
+Create the directory and the log first, both owned by `deploy`. `/var/backups` and `/var/log`
+are root's, so the cron job can't create either itself:
 
 ```bash
-# /etc/cron.d/multiblog-backup  (adjust destination)
-0 3 * * *  deploy  pg_dump "postgresql://multiblog:<pw>@127.0.0.1:5432/multiblog" | gzip > /var/backups/multiblog-$(date +\%F).sql.gz
+sudo install -d -m 700 -o deploy -g deploy /var/backups/multiblog
+sudo install -m 600 -o deploy -g deploy /dev/null /var/log/multiblog-backup.log
 ```
 
-Ship the dumps somewhere off the box (Linode Object Storage / another host). The `postCollab`
-BYTEA and `postCollabUpdate` log are included in a normal `pg_dump`, so live editing state
-survives a restore. So are contributor avatars (`user_avatar.bytes`, PLAN.md §17n) — roughly
-5KB each, and deliberately in Postgres rather than object storage so one dump remains the
-whole backup at this scale.
+`-m 700` matters: `install -d` defaults to 0755, world-readable, and these dumps are as
+sensitive as `.env` (below).
+
+`/usr/local/bin/multiblog-backup.sh` (root-owned, mode 755; one per instance, with `INST`
+changed):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+INST=multiblog
+SRC=/srv/$INST
+DEST=/var/backups/$INST
+KEEP_DAYS=14
+STAMP=$(date +%F)
+
+umask 077
+mkdir -p "$DEST"
+
+# The password is read from .env at run time, so no credential sits in /etc/cron.d. Prisma's
+# ?schema= query string is not libpq syntax, and pg_dump refuses the URL until it is stripped.
+URL=$(grep -m1 '^DATABASE_URL' "$SRC/.env" | sed 's/^DATABASE_URL=//; s/^"//; s/"$//; s/?.*$//')
+
+pg_dump "$URL" | gzip > "$DEST/$INST-db-$STAMP.sql.gz"
+
+# What pg_dump can't see. A path that doesn't exist is skipped, so adding a banner later needs
+# no edit here.
+tar czf "$DEST/$INST-files-$STAMP.tar.gz" -C "$SRC" \
+    $( cd "$SRC" && for p in .env site-icons public/banner.png public/banner.jpg public/banner.webp .file-storage; do
+           [ -e "$p" ] && printf '%s\n' "$p"
+       done )
+
+find "$DEST" -name "$INST-*.gz" -mtime +$KEEP_DAYS -delete
+
+echo "$(date -Is) backup ok: $(du -ch "$DEST/$INST-db-$STAMP.sql.gz" "$DEST/$INST-files-$STAMP.tar.gz" | tail -1 | cut -f1)"
+```
+
+`/etc/cron.d/multiblog-backup` (on a box with several instances, give each its own minute):
+
+```bash
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+17 3 * * *  deploy  /usr/local/bin/multiblog-backup.sh >> /var/log/multiblog-backup.log 2>&1
+```
+
+The tar covers whatever lives only on the box's filesystem:
+
+- `.env`
+- `public/banner.*` (the landing-page banner, PLAN.md §17b)
+- `site-icons/` (the icon master, docs/FAVICON.md)
+- `.file-storage/`, the uploaded PDFs (see "Uploaded files" below). If `FILE_STORAGE_DIR`
+  points elsewhere, put that path in the list instead.
+
+The dump covers the rest. The `ydoc` state and the `ydoc_update` log are in it, so live
+editing state survives a restore. So are contributor avatars (`user_avatar.bytes`, PLAN.md
+§17n) — roughly 5KB each, and deliberately in Postgres rather than object storage so one dump
+remains the whole database backup at this scale.
 
 `user_invite.token` holds a live invite's raw link in plaintext (docs/EMAIL.md §5's
 deliberate trade — the value is nulled once accepted/revoked, but a pending invite's dump
 carries a working credential for as long as it stays unconsumed), so treat these dumps with
-the same care as `.env` below, not merely as application data.
-
-A `pg_dump`-only backup strategy misses whatever lives only on the box's filesystem, not in
-Postgres — a full recovery needs these backed up too:
-
-- `.env`
-- `public/banner.*` (the landing-page banner, PLAN.md §17b)
-- `site-icons/master.png` (site icons, docs/FAVICON.md)
+the same care as `.env`, not merely as application data.
 
 ---
 
@@ -757,8 +858,8 @@ nothing left to fetch.
 
 ## 11. Running a second instance on the same box
 
-Node, Postgres, nginx, ufw, swap, and certbot are all shared, host-level installs (§2b-§2h) —
-none of that repeats. Everything else is **per instance** and needs its own copy, because
+Node, Postgres, nginx, ufw, swap, and certbot with its renewal hook are all shared, host-level
+installs (§2b-§2f, §2h, §2i) — none of that repeats. Everything else is **per instance** and needs its own copy, because
 `NEXT_PUBLIC_COLLAB_URL` (and any other `NEXT_PUBLIC_*`) is baked into the build at compile
 time (§4), so two hostnames can never share one build:
 
@@ -774,7 +875,7 @@ time (§4), so two hostnames can never share one build:
 | `.env` (own `AUTH_SECRET`, DB, ports, URLs) | —                                |
 | Backup cron entry                      | —                                    |
 
-Follow §2g-§10 again with a new directory, DB name, port pair, unit names, and hostname —
+Follow §2g and §3-§10 again with a new directory, DB name, port pair, unit names, and hostname —
 `deploy/deploy.sh` needs no edits and no env vars: it derives `WEB_UNIT`/`COLLAB_UNIT` from
 its own directory's name (`/srv/uniblog` → `uniblog-web`/`uniblog-collab`), so naming the
 directory after the instance is what makes the table above self-consistent. Only set
@@ -818,8 +919,8 @@ arrived. Running it once is cheaper than discovering the limit with somebody's r
 bytes live on disk, content-addressed by sha256 (`src/lib/file-storage.ts`) — see PLAN.md §19
 for why they are not a `bytea` column. A database restore without the matching storage
 directory leaves every `file` row pointing at bytes that aren't there; the download route
-answers 503 and logs the sha256, but the file is gone. Back the directory up alongside the
-database dump, and restore the two together.
+answers 503 and logs the sha256, but the file is gone. §9's script tars the directory beside
+each database dump; restore the two together.
 
 `scripts/copy-pdfjs-assets.ts` runs from `prebuild`, so pdfjs's fonts and cmaps land in
 `public/` as part of any normal build. It needs no deploy step of its own — but if a build is
