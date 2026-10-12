@@ -119,9 +119,17 @@ echo "==> Building Next.js app into .next-build/ (heap ${BUILD_HEAP_MB} MB, nice
 # build links its external packages as ../../node_modules/<pkg>, which only
 # resolve after the rename from a directory at the same depth.
 #
+# It starts from a copy of .next/cache, which a build reads back: TypeScript's
+# incremental record (.tsbuildinfo), the Server Actions encryption key
+# (.rscinfo, kept 14 days so pages already open keep working across a deploy),
+# the preview-mode keys and optimised images. Built in place, `next build`
+# keeps that directory; a .next-build without it type-checks every file cold
+# (3 min against 54s on a 1-vCPU box) and mints a new key on every deploy.
+#
 # The heap: V8 sizes its ceiling from physical RAM alone and ignores swap, so
 # on a small box the default is too low to get through the build even with
 # swap free (DEPLOY.md §2h).
+if [ -d .next/cache ]; then mkdir -p .next-build && cp -a .next/cache .next-build/cache; fi
 time nice -n "$BUILD_NICE" env NODE_OPTIONS="--max-old-space-size=$BUILD_HEAP_MB" NEXT_DIST_DIR=.next-build npm run build
 trap - ERR
 

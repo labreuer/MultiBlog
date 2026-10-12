@@ -841,7 +841,10 @@ The script never empties anything the running site reads from. In order:
    new `node_modules` is swapped in by rename, and the old one waits in `.deploy/prev/`.
 3. `npx prisma generate`, then `npx prisma migrate deploy` (a no-op when nothing is new).
 4. `npm run build` into `.next-build/` (`NEXT_DIST_DIR`, next.config.ts), with the heap and
-   niceness from `BUILD_HEAP_MB` (default 3072) and `BUILD_NICE` (default 0).
+   niceness from `BUILD_HEAP_MB` (default 3072) and `BUILD_NICE` (default 0). It starts from
+   a copy of `.next/cache`, the state a build in place would have found there: TypeScript's
+   incremental record, and the Server Actions encryption key that keeps open pages working
+   across a deploy.
 5. The new build is swapped in for `.next` by rename, the old one goes to `.deploy/prev/`, and
    both units restart.
 6. It waits for the app to answer, then deletes `.deploy/`.
