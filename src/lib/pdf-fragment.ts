@@ -239,7 +239,13 @@ export function countPassageOccurrences(page: string, passage: PassageText, sk: 
   return resolveAll(page, passage, sk, false).length;
 }
 
-function resolveAll(page: string, passage: PassageText, sk: Skeleton, firstOnly: boolean): TextRange[] {
+/**
+ * Every place on the page a passage resolves to, in page order, counted apart
+ * (never one inside another) — or only the first, with `firstOnly`. What the
+ * MCP server's quote locator uses for `ambiguous` and for `read`'s `around`
+ * (docs/MCP.md §8), where `resolvePassage` above answers with the first.
+ */
+export function resolveAll(page: string, passage: PassageText, sk: Skeleton = skeletonOf(page), firstOnly = false): TextRange[] {
   const startKey = skeletonOf(passage.start).text;
   const endKey = passage.end !== null ? skeletonOf(passage.end).text : null;
   const prefixKey = passage.prefix !== null ? skeletonOf(passage.prefix).text : null;
