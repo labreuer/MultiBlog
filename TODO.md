@@ -202,13 +202,9 @@ build, with the annotation, snapshot and PDF integrity checks clean over MCP-wri
 yet done:
 
 - **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Until then only a
-  client that can send a header — Claude Code — reaches the server. The plan's first step
-  isn't OAuth, and claude.ai needs it as well: moving the server from
-  `@modelcontextprotocol/sdk` 1.32.1 to v2 (`@modelcontextprotocol/server`). v1 refuses
-  claude.ai's first request (`MCP-Protocol-Version: 2026-07-28`) in a form claude.ai doesn't
-  recover from, and v1 won't gain that revision. The move ships on its own, with `e2e/mcp.ts`
-  learning to read the `text/event-stream` answers v2 gives 2025-era requests. A shim on v1 is
-  held until needed.
+  client that can send a header — Claude Code — reaches the server. The plan's first step,
+  which isn't OAuth, is built: the server is on SDK v2 (`@modelcontextprotocol/server`), which
+  answers the 2026-07-28 revision claude.ai opens in as well as every 2025-era client.
 
   The second step renames the tools, each with a `multiblog_` prefix, since claude.ai drops
   the server's instructions and shows its model only a tool's name until it searches; the

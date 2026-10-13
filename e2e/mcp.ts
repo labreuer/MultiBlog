@@ -20,13 +20,21 @@ export type ToolAnswer = {
 
 let nextId = 1;
 
-/** One JSON-RPC request to /api/mcp, its HTTP status, and its parsed body. */
+type RpcBody = { id?: unknown; result?: Record<string, unknown>; error?: unknown };
+
+/**
+ * One 2025-era JSON-RPC request to /api/mcp, its HTTP status, and its parsed
+ * body. The server answers such a request with a one-event stream rather than
+ * JSON (MCP.md §21, "Moving to SDK v2"), so the response is taken from the
+ * event that carries this request's id; any other body is parsed whole.
+ */
 export async function mcpRequest(
   request: APIRequestContext,
   secret: string | null,
   method: string,
   params: unknown = {},
-): Promise<{ status: number; body: { result?: Record<string, unknown>; error?: unknown } }> {
+): Promise<{ status: number; body: RpcBody }> {
+  const id = nextId++;
   const res = await request.post("/api/mcp", {
     headers: {
       ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
@@ -34,15 +42,27 @@ export async function mcpRequest(
       "Content-Type": "application/json",
       "MCP-Protocol-Version": "2025-06-18",
     },
-    data: { jsonrpc: "2.0", id: nextId++, method, params },
+    data: { jsonrpc: "2.0", id, method, params },
     maxRetries: 2,
   });
   const text = await res.text();
-  let body: { result?: Record<string, unknown>; error?: unknown } = {};
+  let body: RpcBody = { error: text };
   try {
-    body = JSON.parse(text);
+    if (res.headers()["content-type"]?.startsWith("text/event-stream")) {
+      const events = text.split(/\r?\n\r?\n/).map((event) =>
+        event
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n"),
+      );
+      const response = events.filter(Boolean).map((data) => JSON.parse(data) as RpcBody).find((message) => message.id === id);
+      if (response) body = response;
+    } else {
+      body = JSON.parse(text);
+    }
   } catch {
-    body = { error: text };
+    // Not JSON-RPC: a refusal the route wrote itself keeps its text as `error`.
   }
   return { status: res.status(), body };
 }

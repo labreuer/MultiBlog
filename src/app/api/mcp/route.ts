@@ -1,38 +1,52 @@
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { authenticateSecret, bearerSecret } from "@/lib/api/tokens";
+import { createMcpHandler, type AuthInfo } from "@modelcontextprotocol/server";
+import { authenticateSecret, bearerSecret, type AuthenticatedToken } from "@/lib/api/tokens";
 import { unauthorizedResponse } from "@/lib/api/request-auth";
 import { buildMcpServer } from "@/lib/mcp/server";
 
 // docs/MCP.md §5 — the MCP endpoint: stateless Streamable HTTP, a fresh
-// server and transport per request, in this same Next process, each tool
-// calling its operation in-process.
+// server per request, in this same Next process, each tool calling its
+// operation in-process. One handler serves both protocol eras (§21, "Moving
+// to SDK v2"): 2026-07-28's per-request envelope, and every 2025-era client
+// through the SDK's stateless fallback.
 //
 // Bearer only. The session cookie is never read, so there is no CSRF surface
 // to defend, and nothing under /api/mcp answers a browser.
 //
-// JSON responses rather than an SSE stream: a stateless server has nothing to
-// push, and every call answers once.
+// JSON responses on the 2026-07-28 leg: a stateless server has nothing to
+// push, and every call answers once. The 2025-era fallback answers with a
+// one-event stream, which every client reads.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Made once for the process. `responseMode: "json"` makes the SDK warn, at
+// this line, that mid-call notifications are dropped — so the warning prints
+// in `next build` and at each start. It is expected: no tool sends any.
+const handler = createMcpHandler((ctx) => buildMcpServer(tokenOf(ctx.authInfo)), {
+  legacy: "stateless",
+  responseMode: "json",
+});
+
+/** The token POST checked, which `authInfo` carries to the factory. */
+function tokenOf(authInfo: AuthInfo | undefined): AuthenticatedToken {
+  const token = authInfo?.extra?.token as AuthenticatedToken | undefined;
+  if (!token) throw new Error("The MCP handler ran without an authenticated token.");
+  return token;
+}
+
 export async function POST(request: Request): Promise<Response> {
   const secret = bearerSecret(request);
   const token = secret ? await authenticateSecret(secret) : null;
-  if (!token) return unauthorizedResponse();
+  if (!secret || !token) return unauthorizedResponse();
 
-  const server = buildMcpServer(token);
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-  await server.connect(transport);
-  try {
-    return await transport.handleRequest(request);
-  } finally {
-    await server.close();
-  }
+  return handler.fetch(request, {
+    authInfo: { token: secret, clientId: token.prefix, scopes: [...token.scopes], extra: { token } },
+  });
 }
 
 // No sessions, so nothing to stream on a GET or end on a DELETE (the
-// transport's spec allows a stateless server to refuse both).
+// transport's spec allows a stateless server to refuse both). Answered here
+// rather than by the handler, whose 405 carries a JSON-RPC body and no Allow.
 function methodNotAllowed(): Response {
   return new Response(JSON.stringify({ code: "invalid", message: "This MCP server is stateless: POST only." }), {
     status: 405,

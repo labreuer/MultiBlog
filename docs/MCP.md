@@ -405,10 +405,10 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
 
 - **MCP at `/api/mcp` is the contract**, in the same Next process.
   - Each tool calls its operation in-process.
-  - It uses stateless Streamable HTTP: a fresh server and transport per request, the official
-    SDK's stateless mode. The SDK, `@modelcontextprotocol/sdk`, is a new dependency; §21 moves
-    the server to v2, `@modelcontextprotocol/server`, which serves the 2026-07-28 revision as
-    well. The server is built after the token is checked and lists only the tools that token's
+  - It uses stateless Streamable HTTP: a fresh server per request, built by the official SDK's
+    `createMcpHandler`. The SDK is v2, `@modelcontextprotocol/server`, which serves claude.ai's
+    2026-07-28 revision and every 2025-era client from the one endpoint (§21, "Moving to SDK
+    v2"). The server is built after the token is checked and lists only the tools that token's
     scopes allow, so Claude's token never sees `manage` (§3).
   - Each tool carries MCP's hints, and the few whose actions can't be undone force a prompt in
     Claude Code (§15).
@@ -2335,13 +2335,14 @@ code beside each says why as well.
 
 ## 21. OAuth, for claude.ai
 
-**Status: planned, not built** (§18's phase 5). claude.ai's custom connectors authenticate with
-OAuth, short of a request-header beta that serves for a trial and not as a connection (§5), so
-this makes MultiBlog an OAuth authorization server for its own MCP endpoint, as small a one as
-claude.ai needs and the MCP authorization spec allows. It is written to the spec's newest
-revision, 2026-07-28, and to what claude.ai does as a client: Anthropic documents that under
-claude.com/docs/connectors/building, and server logs posted to `anthropics/claude-ai-mcp` fill
-in the rest. Three trials on explore check each point the plan leans on (Build order):
+**Status: planned; the first step, the move to SDK v2, is built** (§18's phase 5). claude.ai's
+custom connectors authenticate with OAuth, short of a request-header beta that serves for a
+trial and not as a connection (§5), so this makes MultiBlog an OAuth authorization server for
+its own MCP endpoint, as small a one as claude.ai needs and the MCP authorization spec allows.
+It is written to the spec's newest revision, 2026-07-28, and to what claude.ai does as a
+client: Anthropic documents that under claude.com/docs/connectors/building, and server logs
+posted to `anthropics/claude-ai-mcp` fill in the rest. Three trials on explore check each point
+the plan leans on (Build order):
 
 - **the header trial**, right after the move to SDK v2 and the renamed tools, where claude.ai's
   connector dialog offers request headers: claude.ai against both, before any OAuth is built;
@@ -3136,24 +3137,23 @@ endpoint.
     `create_doc`'s largest Markdown fits, unless its client escapes nearly every character as
     `\uXXXX`. `edit_doc`'s schema accepts far more than either version takes, which is a gap
     of its own (TODO.md).
-- **A 2025-era answer becomes a stream.** `responseMode: "json"` governs the 2026-07-28 leg
-  only. The stateless fallback builds its transport with nothing but
-  `sessionIdGenerator: undefined`, so it answers with `text/event-stream`, one `message` event,
-  where the route answers with JSON today. The route's comment about JSON responses goes with
-  it.
+- **A 2025-era answer is a stream.** `responseMode: "json"` governs the 2026-07-28 leg only.
+  The stateless fallback builds its transport with nothing but `sessionIdGenerator: undefined`,
+  so it answers with `text/event-stream`, one `message` event.
   - **Claude Code reads either.**
-  - **`e2e/mcp.ts` learns to read a stream.** `mcpRequest` takes the JSON-RPC response from the
-    event's `data:` line when the content type is `text/event-stream`, and parses the body
-    whole otherwise, so it reads both servers while the move is under way.
+  - **`e2e/mcp.ts` reads a stream.** `mcpRequest` takes the JSON-RPC response from the event
+    carrying its request's id when the content type is `text/event-stream`, and parses the body
+    whole otherwise.
   - **Not routing 2025-era requests through a JSON transport of their own.** v2 documents that
     pattern (`isLegacyRequest`, in front of a strict handler), and it would keep the JSON, at
     the cost of a second path through the route.
 - **Checked before it merges**, since the scratch project didn't cover them:
-  - the existing `e2e/mcp-*.spec.ts`, changed only in their helper, and one new spec driving a
-    2026-07-28 client (`@modelcontextprotocol/client`, a dev dependency). It asserts that
-    `server/discover` brings the same instructions as `initialize` does for the same token,
-    which `e2e/mcp-read.spec.ts` already checks name the actor and the issuer. It also asserts
-    that `server/discover` and `tools/list` both come back private with a TTL of 0;
+  - the existing `e2e/mcp-*.spec.ts`, changed only in their helper, and one new spec,
+    `e2e/mcp-modern.spec.ts`, driving a 2026-07-28 client (`@modelcontextprotocol/client`, a
+    dev dependency). It asserts that `server/discover` brings the same instructions as
+    `initialize` does for the same token, which `e2e/mcp-read.spec.ts` already checks name the
+    actor and the issuer. It also asserts that `server/discover` and `tools/list` both come
+    back private with a TTL of 0;
     - **the client is pinned to 2026-07-28**, and the spec asserts the version it negotiated.
       Left to its default, v2's client negotiates the 2025 protocol (`versionNegotiation`),
       and the spec would pass while testing the old leg;
@@ -3173,8 +3173,6 @@ endpoint.
     already built changes to meet what they require (below).
   - **v2's authorization-server helpers** live in `@modelcontextprotocol/server-legacy`, which
     is deprecated and bound to Express, so the authorization server stays hand-written.
-- **No shim meanwhile.** Patching v1 to answer the 2026-07-28 header is held until it's
-  needed (Open, below).
 
 ### The bearer check, on v2's terms
 
@@ -3292,6 +3290,11 @@ tests pass (Build order).
   gives.
 - **A read-only mode in the query string**, as Supabase has (`?read_only=true`), for the reason
   "The read-only endpoint" gives for a path.
+- **A shim on v1** in place of the move: the route answering an `MCP-Protocol-Version` that
+  v1 doesn't know with a 400 carrying `-32022`, after which claude.ai has been seen to fall
+  back to `initialize` on 2025-11-25 (#1110). About 20 lines, but it rests on server logs, not
+  on anything Anthropic has published; it may cost a probe before many calls; and it leaves the
+  server on v1, the maintenance line.
 - **A guide tool** the model calls for the conventions, as Claude Docs has (`guide`).
   Anthropic's review criteria refuse a description that directs Claude "to pull behavioral
   instructions from external sources", and Claude Docs is first-party and pairs its tool with
@@ -3546,13 +3549,4 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    The drift check is what announces the change.
 3. **A revocation endpoint** (RFC 7009), if the full trial shows claude.ai calls one when a
    connector is removed.
-4. **A shim on v1, held until it's needed**: if the move to v2 stalls, for instance on result
-   validation.
-   - **What it would do.** The route would answer an `MCP-Protocol-Version` that v1 doesn't
-     know with a 400 carrying `-32022` (unsupported protocol version), with the SDK's newest
-     version as `data.supported` and the header's as `data.requested`.
-   - **Why it would work.** claude.ai has been seen to fall back to `initialize` on
-     2025-11-25 after that answer (#1110).
-   - **What it would cost.** About 20 lines. But it rests on server logs, not on anything
-     Anthropic has published, and it may cost a probe before many calls.
 

@@ -1,5 +1,4 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { Server, type CallToolResult } from "@modelcontextprotocol/server";
 import { ApiError, ERROR_LIST_CAP } from "@/lib/api/errors";
 import { takeRateLimit } from "@/lib/api/rate-limit";
 import type { AuthenticatedToken } from "@/lib/api/tokens";
@@ -8,9 +7,10 @@ import { issueLines } from "./issues";
 import { jsonSchemaOf, type McpContext, type McpTool } from "./tool";
 import { TOOLS } from "./tools";
 
-// docs/MCP.md §5 — one MCP server per request, in the SDK's stateless mode,
-// built after the token has been checked so that it can list only what that
-// token may call and name, in its instructions, whose account it acts as.
+// docs/MCP.md §5 — one MCP server per request, built by the route's handler
+// after the token has been checked, so that it can list only what that token
+// may call and name, in its instructions, whose account it acts as. The same
+// server answers both protocol eras (§21, "Moving to SDK v2").
 //
 // **The low-level `Server`, not `McpServer`.** McpServer validates a tool's
 // arguments itself and answers a refusal as a bare sentence, where every
@@ -114,10 +114,20 @@ export function buildMcpServer(token: AuthenticatedToken): Server {
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {} }, instructions: instructionsFor(token) },
+    {
+      capabilities: { tools: {} },
+      instructions: instructionsFor(token),
+      // Both answers are per token: the instructions name the actor and the
+      // issuer, and the tool list follows the token's client and scopes. So
+      // neither may sit in a shared cache, whatever the SDK's default.
+      cacheHints: {
+        "server/discover": { ttlMs: 0, cacheScope: "private" },
+        "tools/list": { ttlMs: 0, cacheScope: "private" },
+      },
+    },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.map(definitionOf) }));
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler("tools/list", async () => ({ tools: tools.map(definitionOf) }));
+  server.setRequestHandler("tools/call", async (request) => {
     const tool = byName.get(request.params.name);
     if (!tool) {
       return errorResult({
