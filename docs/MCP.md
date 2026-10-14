@@ -545,7 +545,7 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     (§15), and never `manage`, which is outside their scopes.
   - **Research gets no endpoint of its own.** §21 designs `/api/mcp/read`, listing only the
     reads, for a second connector a person would turn on there. It isn't built, since Research
-    honors each tool's "Needs approval" and "Blocked" (§21, "The read-only endpoint").
+    calls no connector at all (§21, "The slice trial" and "The read-only endpoint").
 - **Server instructions say whose account, and when to reach for the server; each tool's
   description carries its own conventions.** An MCP server returns `instructions` when a client
   connects, and Claude Code loads them at session start, before any tool's definition. Shipped
@@ -2019,8 +2019,8 @@ The prompt has two limits, and the plan answers each:
   treat these tools like any other, with an approval its user can set to always allow, so
   only a token issued for `claude-code` lists them (§3). From claude.ai, renaming a link,
   retitling a file and `manage` are done in the UI. §21 keeps it so for claude.ai, whose
-  Research calls tools without asking at all, until the two are auditable and revertible
-  (TODO.md).
+  Research is documented to call tools without asking at all, until the two are auditable and
+  revertible (TODO.md).
 - **The prompt guards the tool, not the endpoint.** A shell holding the token could post the
   same call itself, which is why the token stays out of Claude's shell (§5).
 
@@ -2420,10 +2420,12 @@ code beside each says why as well.
 descriptions with the skill, the bearer check on v2's terms, and the thin slice: Discovery,
 the consent page, `/token` for the `authorization_code` grant, the access token, and Claude's
 pinned identity (§18's phase 5; §20 says where the slice departs from this plan). Step 3, the
-header trial, ran on 2026-10-14 ("The header trial"). Step 6, the slice trial, is next. claude.ai's
-custom connectors authenticate with OAuth, short of a request-header beta that serves for a
-trial and not as a connection (§5), so this makes MultiBlog an OAuth authorization server for
-its own MCP endpoint, as small a one as claude.ai needs and the MCP authorization spec allows.
+header trial, and step 6, the slice trial, ran on 2026-10-14 ("The header trial", "The slice
+trial"): claude.ai connects through OAuth on the web and on iOS. Step 7, refresh tokens, is
+next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
+that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
+authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
+authorization spec allows.
 It is written to the spec's newest revision, 2026-07-28, and to what claude.ai does as a
 client: Anthropic documents that under claude.com/docs/connectors/building, and server logs
 posted to `anthropics/claude-ai-mcp` fill in the rest. Three trials check each point the plan
@@ -2983,19 +2985,19 @@ and the first item decides whether it works at all.
   lists them.
   - **claude.ai's prompt doesn't stand in for Claude Code's.** claude.ai asks before a write or
     a delete by default, by the category its hints put a tool in. But it lets a person set any
-    tool or category to "Always allow", which holds in Research too. Anthropic's help center
-    says Research calls a connector's tools "without further approval", but in the header
-    trial it asked for each call on "Needs approval" and left out a Blocked tool. After an
-    "Always allow", an instruction planted in text Claude reads could rename a link, reorder or
-    remove its parts, or retitle a file. None of that keeps a history, and removing a part
-    deletes its captured quote.
+    tool or category to "Always allow". Anthropic's help center says Research calls a
+    connector's tools "without further approval", though in the trials Research called none
+    ("The slice trial"). After an "Always allow", an instruction planted in text Claude reads
+    could rename a link, reorder or remove its parts, or retitle a file. None of that keeps a
+    history, and removing a part deletes its captured quote.
   - **Everything else a connection can write can be undone in MultiBlog**: a doc's text
     reverted, a note's earlier wording kept, a doc, a file, a note or a link deleted, a tag
     removed (§15).
   - **Undoing doesn't unsee.** A note on a shared doc, or a tag on a shared object, is visible
     until someone removes it. That is the case for an endpoint with no writes at all ("The
-    read-only endpoint", below), rather than relying on undo. It isn't built: Research honors
-    "Needs approval", which is where a person keeps a write they don't want run unasked.
+    read-only endpoint", below), rather than relying on undo. It isn't built while Research
+    calls no connector, and an ordinary chat honors "Needs approval", which is where a person
+    keeps a write they don't want run unasked.
 - **A deploy that changes the tools reaches claude.ai late, and asks again.**
   - **A connector keeps its old tool list until the person refreshes it** (#1044). In the
     header trial it kept the list from before a deploy through two chats and a changed
@@ -3150,22 +3152,23 @@ when it is needed:
 
 ### The read-only endpoint
 
-**Designed, and not built**, by Luke's decision after the header trial (2026-10-14). Research
-asks for each call on "Needs approval" and leaves out a Blocked tool, so a person who keeps the
-writes on "Needs approval" already has the per-chat switch this endpoint was for. It would still
-guard a write set to "Always allow" for ordinary chats, which carries into Research; that is the
-reason to build it later. Where another section names `/api/mcp/read` (a connection's endpoint,
-its metadata document and 401, the consent page's `read`-only offer, the second audience, the
-tests), it describes what this endpoint would add, and none of it is built without it.
+**Designed, and not built**, by Luke's decision (2026-10-14). In every trial Research called no
+connector, neither this one nor a directory connector ("The slice trial"), so there is nothing
+yet for it to guard there. In an ordinary chat claude.ai asks for each call on "Needs approval" and leaves out
+a Blocked tool ("The header trial"), so a person who keeps the writes on "Needs approval"
+already has a switch. It is the answer if Research starts calling connectors "without further
+approval", as Anthropic's help center says it does. Where another section names
+`/api/mcp/read` (a connection's endpoint, its metadata document and 401, the consent page's
+`read`-only offer, the second audience, the tests), it describes what this endpoint would add,
+and none of it is built without it.
 
 The design, as planned: Research is where text from the open web meets a connector's tools, and
-claude.ai's Research was said to call them "without further approval". Its help center's only advice is "Disable any tools
-that can take write actions", unchanged since before per-tool settings existed. Those settings
-apply to every chat, per connector, and a single chat can only switch a whole connector on or
-off. Whether "Needs approval" or "Blocked" holds inside Research isn't documented. In the early
-trial Research never called the connector at all; in the header trial it did, and honored each
-tool's setting, asking for each call on "Needs approval" and leaving out a Blocked tool. So the
-endpoint guards only against a write a person set to "Always allow".
+claude.ai's Research is said to call them "without further approval". Its help center's only
+advice is "Disable any tools that can take write actions", unchanged since before per-tool
+settings existed. Those settings apply to every chat, per connector, and a single chat can only
+switch a whole connector on or off. Whether "Needs approval" or "Blocked" holds inside Research
+isn't documented, and the trials couldn't see, since Research never called the connector. So
+the endpoint is the one guard that doesn't depend on what Research honors.
 
 Servers that write draw the line themselves: GitHub serves a `/readonly` URL, Linear a separate
 `/mcp/readonly`, and Cloudflare offers read-only access at consent, chosen by default. MCP's
@@ -3409,11 +3412,11 @@ tests pass (Build order).
   write, which the spec recommends (SHOULD). Here a token never meets a tool its scopes don't
   allow, since the list leaves it out, so there is nothing to answer that way: a call naming an
   unlisted tool is a tool result saying the token has no tool by that name. And `write`
-  granted at a step-up would last as long as the connection, so a later Research run could
-  write anyway. Research's own per-tool settings do that job ("The header trial").
+  granted at a step-up would last as long as the connection, so a later chat could write
+  unasked anyway. claude.ai's per-tool settings do that job ("The header trial").
 - **Writes held for a person to confirm in MultiBlog**, as Stripe holds a refund. It would hold
-  even in Research, but it changes every write path, for what "Needs approval" already gives
-  there.
+  even in Research, should Research call connectors, but it changes every write path, for what
+  "Needs approval" already gives in a chat.
 - **A read-only mode in the query string**, as Supabase has (`?read_only=true`), for the reason
   "The read-only endpoint" gives for a path.
 - **A shim on v1** in place of the move: the route answering an `MCP-Protocol-Version` that
@@ -3521,13 +3524,15 @@ tests pass (Build order).
     - Research, with one tool set to "Needs approval" and another to "Blocked", to see whether
       either setting holds there, if Research calls the connector at all. A token that
       can only read puts nothing at stake;
-  - **the slice trial**: claude.ai on the web and on iOS connecting through OAuth, listing the
-    tools and calling one, and showing the connector as connected (#1110, Open); whether it
-    reopens `subscriptions/listen` in a loop; and whether Research calls the connector, which
-    step 10 waits on. Without a header trial before it, it also checks what that one would have;
+  - **the slice trial** (run on 2026-10-14: "The slice trial"): claude.ai on the web and on
+    iOS connecting through OAuth, listing the tools and calling one, and showing the connector
+    as connected (#1110, Open); whether it reopens `subscriptions/listen` in a loop; and
+    whether Research calls the connector. Without a header trial before it, it also checks what
+    that one would have;
   - **the full trial, with everything**:
     - claude.ai on the web and on iOS refreshing after an hour without asking the person to
       reconnect, a revoke, and a reconnect replacing the connection before it;
+    - whether Research calls the connector by then (Open);
     - the read-only connector beside the full one: a Research run with it alone turned on,
       calling only the reads;
     - after a deploy that changes a tool's description, how long claude.ai takes to show it
@@ -3556,10 +3561,10 @@ its answer (`/etc/nginx/conf.d/mcp-log.conf` there).
   said it couldn't tell: it saw the connector with five tool names, and "their schemas and
   descriptions aren't loaded".
 - **The connector's display name does reach the model**, which "What the model is told" says it
-  doesn't. A chat knew the connector by its display name, and Research named its tools
-  `mcp__<display name>__search` and so on. Whether claude.ai builds the names from it, or the
-  model only wrote them so, was step 3's to check; it builds them ("The header trial"). The
-  server can't see it: a call names the bare tool.
+  doesn't. A chat knew the connector by its display name, and named its tools
+  `mcp__<display name>__search` and so on in the request it passed to Research. Whether
+  claude.ai builds the names from it, or the model only wrote them so, was step 3's to check;
+  it builds them ("The header trial"). The server can't see it: a call names the bare tool.
 - **claude.ai keeps the tool list per connector, not per chat.** A chat that calls no tool sends
   no request. One that does opens with `server/discover` and calls from the list it holds,
   whatever the TTL of 0 says: four of eight connections fetched `tools/list` again. That bears
@@ -3568,9 +3573,9 @@ its answer (`/etc/nginx/conf.d/mcp-log.conf` there).
 - **Research never called the connector.** With `read` on "Needs approval" and `find_tags` on
   "Blocked", and again with every tool on "Always allow" in a chat that had just used the
   connector, Research reported it unavailable and sent no request, not even `server/discover`.
-  It knew the tools' names, less the blocked one. So the question is no longer which setting
-  holds in Research but whether Research calls a custom connector at all. In the header trial
-  it did.
+  The chat that launched it knew the tools' names, less the blocked one, and passed them on.
+  So the question is no longer which setting holds in Research but whether Research calls a
+  connector at all. It didn't in the later trials either ("The slice trial").
 - **Its largest answer, a `read`, was 69,729 bytes**, far from the bound the header trial looks
   for. The instance had no doc that long, so the header trial reads one made for it (Build
   order, step 3).
@@ -3634,12 +3639,12 @@ size.
   - "Is acedia the same thing as laziness?" was answered from general knowledge both times.
   - The skill, once added in claude.ai, appeared in a Claude Code session as
     `anthropic-skills:multiblog`.
-- **Research calls a header connector, and honors each tool's setting.** `search`, on Always
-  allow, ran unasked; each of four `read`s, on Needs approval, waited for its own approval;
-  `find_tags`, Blocked, was missing from its list. In the early trial Research sent nothing at
-  all; whether claude.ai changed or the renamed tools did, the server can't tell. A first run in
-  claude.ai's auto mode approved the reads unasked, and ran as a plain chat rather than
-  Research.
+- **A chat honors each tool's setting.** `search`, on Always allow, ran unasked; each of four
+  `read`s, on Needs approval, waited for its own approval; `find_tags`, Blocked, was missing
+  from its list. This was a chat with Research mode on, but claude.ai's data export shows the
+  model calling the connector itself rather than launching Research, which Research mode
+  allows; Research proper called nothing ("The slice trial"). A first run in claude.ai's auto
+  mode approved the reads unasked.
 - **iOS** sent the same `server/discover` and call, under 2026-07-28.
 - **No `subscriptions/listen`** in any request from claude.ai.
 - **Findings for TODO.md**: search's dates are UTC unless `tz` is passed, which read as a day
@@ -3647,6 +3652,64 @@ size.
   description says the catalog gives a "size" where the field is `chars`; and four of
   the instance's docs had no `prose_json`, so their bodies were missing from search and the
   catalog counted them as 0, until each was opened in the editor the same day.
+
+### The slice trial
+
+On 2026-10-14 claude.ai was connected to the trial instance at step 5's build (9d91866) through
+OAuth: a new connector at `/api/mcp` with Claude's published identity, approved by Luke on the
+consent page for Claude's account, which works for him. nginx's `mcp.log`, its access log for
+`/authorize` and `/token`, and the app's `{"at":"oauth"}` and `{"at":"mcp"}` lines gave each
+request.
+
+- **claude.ai connects through OAuth, on the web and on iOS, and shows as connected.** #1110's
+  symptom didn't appear (Open): the tools loaded in a chat on both, and the connector's settings
+  showed it connected while its token was good.
+  - **Adding the connector probes, as in the header trial**: a `python-httpx` request with no
+    token, under 2025-11-25, got the 401, then
+    `/.well-known/oauth-protected-resource/api/mcp` and `/.well-known/oauth-authorization-server`
+    answered 200. With the first found, it asked for no other path.
+  - **Connect opened `/authorize`** with `client_id`
+    `https://claude.ai/oauth/mcp-oauth-client-metadata`, `redirect_uri`
+    `https://claude.ai/api/mcp/auth_callback`, S256, `scope=read write`, and `resource` the
+    endpoint's URL exactly. The page offered `write` unchecked; approved as it stood, the
+    connection got `read` alone. `/token` was redeemed from Anthropic's servers within a second
+    of the decision.
+  - **Then 2026-07-28 throughout**: `server/discover`, `tools/list` and each call, answered in
+    JSON. iOS sent the same.
+- **No `subscriptions/listen`** in any request.
+- **A connection ends with its hour, and claude.ai finds out from a refusal.** With no refresh
+  token until step 7, the connector's settings offer Connect again once the hour is up. The next
+  chat sent the expired token and got 401 `invalid_token`, retried with no token and got a 401
+  again, then read both documents and asked the person to connect. Approving made a new
+  connection and the chat carried on. The old connection's row stays unrevoked until step 7's
+  migration revokes the slice's connections. It happened twice, the same way each time.
+- **A chat that reconnects stays on 2025-11-25.** After each reconnect, claude.ai fetched
+  `server/discover` and `tools/list` under 2026-07-28 and then made that chat's calls through
+  the 2025-11-25 fallback: `initialize` answered as a stream, `notifications/initialized`, and
+  each `tools/call` as a stream. The same chat's later calls stayed there, and a new chat went
+  back to 2026-07-28. The server answers both, so nothing failed.
+- **Research called no connector.** Ten Research runs sent the server nothing, not even a
+  `server/discover`: in auto mode and in manual, with every tool on Always allow, after
+  "Refresh tool list", and with a header connector beside the OAuth one.
+  - **How a run goes**, from claude.ai's data export: the chat model calls
+    `launch_extended_search_task` with the request as text, and a separate agent does the
+    research. That agent listed its tools as web search, web fetch, a helper agent, a draft
+    checker and the step that submits its report. No connector was among them, Dropbox's
+    included, though it was on in those chats; a run asking for Dropbox alone, in either mode
+    and in a second browser, found none either.
+  - **The approval never appeared.** Anthropic's help center asks a person to review an
+    approval request before Research calls a connector's tools; claude.ai shows it as a dialog
+    that picks the connectors a run may use. Luke has seen it before, but not in the week these
+    runs fell in.
+  - **The same was reported in `anthropics/claude-ai-mcp#21`**, which Anthropic closed in May as
+    fixed on the web and desktop.
+  - **Research mode doesn't force a launch.** With it on, the model sometimes answers with the
+    connector directly, which is what the header trial saw.
+
+  Nothing in this server decides whether Research calls a connector (Open).
+- **For TODO.md**: the consent page renders the site header, whose links were prefetched as the
+  page loaded, about 20 requests, one of them `/sign-in?callbackUrl=%2Fauthorize` with the
+  request's query dropped.
 
 ### Build order
 
@@ -3745,8 +3808,8 @@ connection at all.
    through OAuth,
    lists the tools and calls one, under 2026-07-28, and shows the connector as connected.
    Nothing more is built until it does. If claude.ai shows #1110's symptom (Open), a client
-   registered by hand is tried next. It also runs Research with the connector on, to see that
-   Research treats an OAuth connection as the header trial saw it treat a header one.
+   registered by hand is tried next. It also runs Research with the connector on, to see
+   whether Research calls it.
 7. **Refresh tokens**: `oauth_refresh_token`, the grant with its rotation and its check of
    `resource`, and `refresh_token` and `offline_access` in the metadata. With them:
    - a new claude.ai connection replacing the bot's last one, and the consent page saying so
@@ -3805,12 +3868,19 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    completes and claude.ai lists the tools with its new token. Yet the connector keeps showing
    Connect, and no tools load in a chat, under 2026-07-28 and after its fallback to
    2025-11-25 alike. #1067 shows the same Settings symptom with a client registered by hand,
-   though there the tools did load. The slice trial (Build order) is how this plan finds out
-   whether it happens here, before most of it is built.
-2. **Claude as a confidential client**, should Anthropic make it one. Its documentation says
+   though there the tools did load. **It didn't happen in the slice trial**: the tools loaded
+   and the connector showed connected ("The slice trial"). But #1110's server also issues
+   rotating refresh tokens, which the slice doesn't, so the full trial looks again once step 7
+   has added them.
+2. **Whether claude.ai's Research calls a connector at all.** In every trial it called neither
+   this one nor a directory connector, and the approval its help center describes never
+   appeared ("The slice trial"). Nothing in this server decides it. If it does start calling
+   connectors, which of a tool's settings hold there decides whether the read-only endpoint is
+   built ("The read-only endpoint").
+3. **Claude as a confidential client**, should Anthropic make it one. Its documentation says
    that dynamic registration and a client document both register Claude as a public client. A
    confidential Claude's document would name a key, and the token endpoint would verify
    `private_key_jwt` against it (`jose`'s `createRemoteJWKSet`, from the pinned `jwks_uri`).
    The drift check is what announces the change.
-3. **A revocation endpoint** (RFC 7009), if the full trial shows claude.ai calls one when a
+4. **A revocation endpoint** (RFC 7009), if the full trial shows claude.ai calls one when a
    connector is removed.
