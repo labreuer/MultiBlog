@@ -134,6 +134,12 @@ model User {
   orcid               String? @map("orcid")
   website             String? @map("website")
 
+  // docs/MCP.md §21, "Whose account" — a bot, an AI agent's account, works
+  // for one person, who issues every token it holds. A hand-written CHECK
+  // (oauth_slice) keeps a bot from having a password: sign-in is by password
+  // alone, so a password is what makes an account a person's.
+  worksForUserId String? @map("works_for_user_id")
+
   avatar                 UserAvatar?
   accounts               Account[]
   sessions               Session[]
@@ -172,7 +178,12 @@ model User {
   anchoredLinkDeletions  AnchoredLink[]         @relation("AnchoredLinkDeletedBy")
   apiTokens              ApiToken[]             @relation("ApiTokenUser")
   apiTokensIssued        ApiToken[]             @relation("ApiTokenCreatedBy")
+  worksFor               User?                  @relation("UserWorksFor", fields: [worksForUserId], references: [id], onDelete: SetNull)
+  bots                   User[]                 @relation("UserWorksFor")
+  oauthCodes             OauthCode[]            @relation("OauthCodeUser")
+  oauthCodesIssued       OauthCode[]            @relation("OauthCodeIssuer")
 
+  @@index([worksForUserId])
   @@map("user")
 }
 
@@ -1847,8 +1858,16 @@ model ApiToken {
   id              String         @id @default(cuid())
   userId          String         @map("user_id")
   name            String
-  tokenHash       String         @unique @map("token_hash")
-  // The secret's first characters, for telling tokens apart in a listing.
+  // A header token's secret, as its SHA-256. An OAuth connection has none:
+  // it is reached through an hour's access token signed with its id
+  // (docs/MCP.md §21, "A connection"), so an `mb_` lookup never finds it.
+  tokenHash       String?        @unique @map("token_hash")
+  // A connection's client_id: a pinned identity's URL or an oauth_client
+  // row's id, so no foreign key. A hand-written CHECK (oauth_slice) keeps a
+  // row one kind or the other, a hash or this, never both.
+  oauthClientId   String?        @map("oauth_client_id")
+  // The secret's first characters, for telling tokens apart in a listing;
+  // a connection's is `oa_` and the end of its id.
   prefix          String
   scopes          ApiScope[]
   client          ApiTokenClient @default(OTHER)
@@ -1861,12 +1880,58 @@ model ApiToken {
   createdByUserId String         @map("created_by_user_id")
   createdAt       DateTime       @default(now()) @map("created_at")
 
-  user      User       @relation("ApiTokenUser", fields: [userId], references: [id], onDelete: Cascade)
-  createdBy User       @relation("ApiTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
-  writes    ApiWrite[]
+  user               User        @relation("ApiTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy          User        @relation("ApiTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  writes             ApiWrite[]
+  authorizationCodes OauthCode[]
 
   @@index([userId])
   @@map("api_token")
+}
+
+// docs/MCP.md §21, "Which clients" — an OAuth client registered by hand:
+// claude.ai's fallback ("Use your own OAuth client"), or anything else a
+// person connects. Claude's published identity is pinned in the code and has
+// no row. Every client is public, so there is no secret. `client` is the
+// `api_token.client` its connections get, CLAUDE_AI or OTHER by a
+// hand-written CHECK (oauth_slice): OAuth never issues a claude-code token.
+// `id` is the client_id.
+model OauthClient {
+  id           String         @id @default(cuid())
+  name         String
+  redirectUris String[]       @map("redirect_uris")
+  client       ApiTokenClient
+  createdAt    DateTime       @default(now()) @map("created_at")
+  revokedAt    DateTime?      @map("revoked_at")
+
+  @@map("oauth_client")
+}
+
+// docs/MCP.md §21, "The consent page" — a code minted by Approve, kept as its
+// SHA-256: good for two minutes and one use. `usedAt` is the claim, made in
+// the transaction that creates the connection; `apiTokenId` is that
+// connection, which a second presentation of the code revokes. Pruned a day
+// after it expires (src/lib/oauth/grant.ts).
+model OauthCode {
+  id            String     @id @default(cuid())
+  codeHash      String     @unique @map("code_hash")
+  clientId      String     @map("client_id")
+  redirectUri   String     @map("redirect_uri")
+  codeChallenge String     @map("code_challenge")
+  scopes        ApiScope[]
+  userId        String     @map("user_id")
+  issuerId      String     @map("issuer_id")
+  expiresAt     DateTime   @map("expires_at")
+  usedAt        DateTime?  @map("used_at")
+  apiTokenId    String?    @map("api_token_id")
+  createdAt     DateTime   @default(now()) @map("created_at")
+
+  user     User      @relation("OauthCodeUser", fields: [userId], references: [id], onDelete: Cascade)
+  issuer   User      @relation("OauthCodeIssuer", fields: [issuerId], references: [id], onDelete: Cascade)
+  apiToken ApiToken? @relation(fields: [apiTokenId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@map("oauth_authorization_code")
 }
 
 // docs/MCP.md §4 — one row per write that adds something (create_doc, the

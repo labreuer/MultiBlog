@@ -2342,6 +2342,32 @@ export async function createTestApiToken(opts: {
   });
 }
 
+/**
+ * A bot: an account with no password, working for `worksForEmail`
+ * (docs/MCP.md §21, "Whose account"). An OAuth connection needs one, since
+ * the consent page offers only the bots that work for whoever is signed in.
+ * `createTestUser` always sets a password, which a CHECK refuses on a bot.
+ */
+export async function createTestBot(opts: { email: string; worksForEmail: string; name?: string; role?: Role }): Promise<TestUser> {
+  const { email, worksForEmail, name = `E2E Bot ${Math.random().toString(36).slice(2, 7)}`, role = "AUTHOR" } = opts;
+  assertSafe(email);
+  assertSafe(worksForEmail);
+  await deleteTestUser(email);
+  const person = await prisma.user.findUniqueOrThrow({ where: { email: worksForEmail }, select: { id: true } });
+  const user = await prisma.user.create({
+    data: {
+      email,
+      slug: await uniqueUserSlug(name, email),
+      name,
+      role,
+      color: colorForSeed(email),
+      adminInitials: name.slice(0, 2).toUpperCase(),
+      worksForUserId: person.id,
+    },
+  });
+  return { id: user.id, email: user.email, name, role, slug: user.slug };
+}
+
 /** Backdates a token's expiry to a minute ago, for the bearer check's refusal of an expired token. */
 export async function expireTestApiToken(id: string): Promise<void> {
   const token = await prisma.apiToken.findUniqueOrThrow({ where: { id }, select: { user: { select: { email: true } } } });
@@ -2594,6 +2620,7 @@ const handlers = {
   deleteTestAnchoredLink,
   createTestApiToken,
   expireTestApiToken,
+  createTestBot,
   softDeleteTestUser,
   restoreTestUser,
   appendTestDocParagraph,

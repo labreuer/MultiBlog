@@ -201,9 +201,8 @@ Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a pr
 build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
 yet done:
 
-- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Until then only a
-  client that can send a header — Claude Code — reaches the server. Three of the plan's steps,
-  none of them OAuth, are built:
+- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Four of the plan's
+  steps are built:
   - the server is on SDK v2 (`@modelcontextprotocol/server`), which answers the 2026-07-28
     revision claude.ai opens in as well as every 2025-era client;
   - every tool is listed with a `multiblog_` prefix, since claude.ai drops the server's
@@ -212,13 +211,26 @@ yet done:
     (`scripts/mcp-skill.ts` writes its ZIP);
   - `/api/mcp` authenticates through v2's own bearer check, which refuses a token with no
     expiry. So every header token has one: a year by default from the script, and a year from
-    the `api_token_expiry` migration for each token issued before it.
+    the `api_token_expiry` migration for each token issued before it;
+  - a thin slice of OAuth (step 5): the discovery documents, the consent page, `/token` for the
+    `authorization_code` grant, an hour's access token, and Claude's pinned identity. A
+    connection acts as a bot that works for whoever approves it (`user.works_for_user_id`).
+    With no refresh token yet, it lasts its access token's hour.
 
-  The third step, the header trial, ran on the trial instance on 2026-10-14 (MCP.md §21, "The
-  header trial"). Next is a thin slice, just enough for claude.ai to connect, tried on explore
-  before the rest is built, because an open claude.ai bug (`anthropics/claude-ai-mcp#1110`)
-  leaves a server shaped like this one showing Connect with no tools loaded. A read-only
-  endpoint for Research is designed and not built (MCP.md §21, "The read-only endpoint").
+  The header trial ran on the trial instance on 2026-10-14 (MCP.md §21, "The header trial").
+  Next is the slice trial, on that instance too, because an open claude.ai bug
+  (`anthropics/claude-ai-mcp#1110`) leaves a server shaped like this one showing Connect with
+  no tools loaded. Before it:
+  - deploy `mcp-oauth` there, whose `oauth_slice` migration needs no backfill;
+  - give the trial instance's Claude account its person, once, by hand (MCP.md §21, "Whose
+    account"): `UPDATE "user" SET works_for_user_id = (SELECT id FROM "user" WHERE email =
+    'labreuer@gmail.com') WHERE email = 'claude@multiblog.invalid';`. The CHECK refuses it if
+    the account has a password;
+  - revoke the header trial's two tokens and remove their connectors ("The claude.ai trial:
+    what to undo", below), so the OAuth connector can be added at `/api/mcp` exactly.
+
+  A read-only endpoint for Research is designed and not built (MCP.md §21, "The read-only
+  endpoint").
 - **The header trial's findings** (MCP.md §21, "The header trial"), each small:
   - **Dates are UTC unless `tz` is passed**, so claude.ai read a doc updated that evening as a
     day ahead. Nothing tells claude.ai the person's zone. Perhaps say in `search`'s and `read`'s
@@ -270,12 +282,12 @@ the slice trial, which runs there as well and needs the two connectors and their
 first:
 
 - **A trial token**, `cmv77tijd0000gts6g0bj8vir`: read-only, client `claude-ai`, acting as the
-  instance's Claude account and issued by Luke, expiring 2026-10-20. Revoke it
-  (`npx tsx scripts/create-api-token.ts --revoke=cmv77tijd0000gts6g0bj8vir` in the instance's
-  directory) and remove the connector in claude.ai, once the header trial is done. claude.ai
-  can't change a connector's authentication, so the slice trial adds a new one. The account
-  itself, `claude@multiblog.invalid` (AUTHOR, no password), stays: it is what §21's Claude
-  connection acts as.
+  instance's Claude account and issued by Luke, expiring 2026-10-20. Revoke it (`npx tsx
+  scripts/create-api-token.ts --revoke=cmv77tijd0000gts6g0bj8vir` in the instance's directory)
+  and remove the connector in claude.ai, once the header trial is done. claude.ai can't change
+  a connector's authentication, so the slice trial adds a new one. The account itself,
+  `claude@multiblog.invalid` (AUTHOR, no password), stays: it is what §21's Claude connection
+  acts as.
 - **A second trial token**, `cmv7ig9je00000os6kby7k92t` (read-only, `claude-ai`, expiring
   2026-10-21), for the header trial's second connector, the one with the long display name, at
   `/api/mcp?probe=1`. Revoke it as the first, and remove that connector too.
@@ -285,9 +297,9 @@ first:
 - **The read-bound test doc**, `/doc/read-bound-test-for-the-claude-ai-trial`, PRIVATE to
   Claude's account and Luke, imported for the header trial's `read` near its bound. Delete it
   in MultiBlog once that is measured.
-- **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks `origin/mcp-oauth`,
-  so the deploy wrapper's plain pull keeps it there. Switch it back (`git switch main`) when
-  `mcp-oauth`'s first PR merges, or before deploying main there.
+- **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks
+  `origin/mcp-oauth`, so the deploy wrapper's plain pull keeps it there. Switch it back
+  (`git switch main`) when `mcp-oauth`'s first PR merges, or before deploying main there.
 - **`deploy` on the instance's server is in the `adm` group**, so the trial could read nginx's
   access log. Keep it, or undo it with `sudo gpasswd -d deploy adm`.
 

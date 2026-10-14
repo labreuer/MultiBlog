@@ -1,0 +1,52 @@
+/* The consent page (docs/MCP.md §21). The card, the label-over-input field
+   and the buttons are account.module.css's; this holds only what that file
+   doesn't set: the column's width, wider than the auth pages' 360px for the
+   warning's sake, and the page's own parts. */
+
+.main {
+  max-width: 30rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+  font-family: sans-serif;
+}
+
+.lead {
+  margin-bottom: 0.75rem;
+}
+
+.warning {
+  margin-bottom: 1rem;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--warning);
+  font-size: 0.9rem;
+}
+
+/* account.module.css styles a field's <input>; this is its <select>. */
+.select {
+  font: inherit;
+  font-size: 1rem;
+  color: var(--foreground);
+  background: var(--surface);
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.scopes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border: none;
+  font-size: 0.9rem;
+}
+
+.scopes legend {
+  margin-bottom: 0.25rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+}

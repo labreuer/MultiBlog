@@ -1,10 +1,11 @@
 # MultiBlog — an MCP server for machine clients
 
 **Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
-annotations, anchored links, tags, uploads and `manage`. Not built: OAuth, so claude.ai can't
-connect yet (phase 5, planned in §21, whose steps 1, 2 and 4 are built: the move to SDK v2,
-the tools' names and descriptions with a skill for claude.ai, and the bearer check on v2's
-terms), and passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
+annotations, anchored links, tags, uploads and `manage`. Not built: OAuth beyond a thin slice
+(phase 5, planned in §21, whose steps 1, 2, 4 and 5 are built: the move to SDK v2, the tools'
+names and descriptions with a skill for claude.ai, the bearer check on v2's terms, and enough
+OAuth for claude.ai to connect for an hour at a time, not yet tried with claude.ai), and
+passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
 every such point is decided there rather than here. §21 is the plan for OAuth and SDK v2.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
@@ -2227,8 +2228,8 @@ Items 1–3 should still be fixed on their own account (TODO.md).
    `quadsForRange`, with the spec that holds each edge within 1pt of a selection (§8); and the
    file half of `manage`, owner changes included (§12).
 5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own. Its
-   steps 1, 2 and 4 are built: SDK v2, the tools' names and descriptions, and the bearer
-   check.
+   steps 1, 2, 4 and 5 are built: SDK v2, the tools' names and descriptions, the bearer
+   check, and the thin slice of OAuth.
 6. **If wanted:** passage-level tags (PLAN.md §20, PR 2). Not built.
 
 Phases 1–4 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
@@ -2378,18 +2379,55 @@ code beside each says why as well.
 - **The e2e fixture's tokens expire in a day**, and a second fixture backdates one for the
   expired-token spec.
 
+**The thin slice** (§21, step 5)
+
+- **Nothing of the read-only endpoint's is built**, so there is no `api_token.oauth_resource`
+  and a code's row holds no endpoint: `/api/mcp` is the only resource, and every `resource` a
+  request sends is checked against it. The column comes with that endpoint, if it is built.
+- **A connection's prefix is `oa_` and the end of its id**, not the start. A cuid starts with
+  its timestamp, so two connections made in the same second would share a prefix, and the
+  audit line names a token by its prefix alone. The id isn't known until the row is created,
+  so the prefix is written in the same transaction, after it.
+- **Where it lives.** `src/lib/oauth/`: `discovery.ts` (the issuer, the endpoint's URL and both
+  documents), `clients.ts` (Claude's pinned document and the lookup), `authorize-request.ts`
+  (the page's parse, which the decision runs again), `consent.ts`, `grant.ts` (`/token`),
+  `access-token.ts`, `pkce.ts` and `resource.ts`. Every pure one has unit tests. The routes are
+  `src/app/.well-known/…`, `src/app/authorize/` with `decide/`, and `src/app/token/`.
+- **`authenticateBearer` is the bearer check's verifier** (`src/lib/api/tokens.ts`, beside §3's
+  check). It tells an `mb_` secret from an access token by the prefix, and refuses an access
+  token whose subject is a header token's row. `access-token.ts` signs and verifies without a
+  database, so the three audiences signed with `AUTH_SECRET` are unit-tested against each
+  other.
+- **`@modelcontextprotocol/core` is a dev dependency.** Only the tests use its schemas; the
+  server takes the types from `@modelcontextprotocol/server`.
+- **`/token` ignores any client authentication** rather than refusing it, since every client is
+  public and claude.ai's own-client option may send an empty secret. It answers an unknown
+  client `invalid_client` with a 400, since no client authenticated and a 401 needs a
+  `WWW-Authenticate`. It takes a form body alone, of at most 16 KiB, and refuses a repeated
+  parameter but `resource`.
+- **The page shows a refusal with a 200**, since a Next page can set no other status but 404.
+- **An S256 challenge must be 43 base64url characters**, which is the only shape one can have,
+  and a decision without Approve is Cancel. The write box appears only when the client asked
+  for `write`.
+- **A person with no bot** sees a sentence saying so, and Cancel alone. Step 9's sentence
+  replaces it.
+- **The e2e fixture `createTestBot`** makes a bot with no password, working for a given
+  person. `createAgent` (`e2e/mcp.ts`) is unchanged until step 8.
+
 ## 21. OAuth, for claude.ai
 
-**Status: planned; steps 1, 2 and 4 are built**: the move to SDK v2, the tools' names and
-descriptions with the skill, and the bearer check on v2's terms (§18's phase 5). Step 3, the
-header trial, ran on 2026-10-14 ("The header trial"). claude.ai's custom connectors
-authenticate with OAuth, short of a request-header beta that serves for a trial and not as a
-connection (§5), so this makes MultiBlog an OAuth authorization server for its own MCP
-endpoint, as small a one as claude.ai needs and the MCP authorization spec allows. It is
-written to the spec's newest revision, 2026-07-28, and to what claude.ai does as a client:
-Anthropic documents that under claude.com/docs/connectors/building, and server logs posted to
-`anthropics/claude-ai-mcp` fill in the rest. Three trials check each point the plan leans on
-(Build order), the first two on a trial instance and the last on explore:
+**Status: planned; steps 1, 2, 4 and 5 are built**: the move to SDK v2, the tools' names and
+descriptions with the skill, the bearer check on v2's terms, and the thin slice: Discovery,
+the consent page, `/token` for the `authorization_code` grant, the access token, and Claude's
+pinned identity (§18's phase 5; §20 says where the slice departs from this plan). Step 3, the
+header trial, ran on 2026-10-14 ("The header trial"). Step 6, the slice trial, is next. claude.ai's
+custom connectors authenticate with OAuth, short of a request-header beta that serves for a
+trial and not as a connection (§5), so this makes MultiBlog an OAuth authorization server for
+its own MCP endpoint, as small a one as claude.ai needs and the MCP authorization spec allows.
+It is written to the spec's newest revision, 2026-07-28, and to what claude.ai does as a
+client: Anthropic documents that under claude.com/docs/connectors/building, and server logs
+posted to `anthropics/claude-ai-mcp` fill in the rest. Three trials check each point the plan
+leans on (Build order), the first two on a trial instance and the last on explore:
 
 - **the header trial**, right after the move to SDK v2 and the renamed tools, where claude.ai's
   connector dialog offers request headers: claude.ai against both, before any OAuth is built;
@@ -3304,9 +3342,9 @@ tests pass (Build order).
   - a header token is re-issued with the script before its year is up, and Claude Code picks
     up the new file at its next connection (§5).
 - **`/api/mcp`'s 401 is v2's challenge and OAuth's error object** (Discovery), where it was
-  `Bearer realm="multiblog"` and §4's `{ code, message }`. Until Discovery is built (step 5) it
-  names no `resource_metadata`, since there is no document to point at. The byte routes keep
-  theirs, and `bearerSecret` with them; v2 parses `/api/mcp`'s header itself.
+  `Bearer realm="multiblog"` and §4's `{ code, message }`, and it names the endpoint's
+  `resource_metadata`. The byte routes keep theirs, and `bearerSecret` with them; v2 parses
+  `/api/mcp`'s header itself.
 - **Tested before anything continues:**
   - unit tests for the verifier's pure half: the `AuthInfo` it reports for an authenticated
     token, `expiresAt` in seconds included, and a refusal thrown as `OAuthError` with
@@ -3582,10 +3620,10 @@ size.
     that way and found the body's end. A later turn can't.
   - **The same with code execution off.**
 - **The byte routes are reachable from claude.ai once the instance is an allowed domain.** By
-  default code execution's egress proxy refused the connection
-  (`curl: (56) CONNECT tunnel failed, response 403`), and nothing reached the server. With the
-  instance's host added to the allowed domains, a `download` and then a `GET` of the export's
-  catalog, from Anthropic's sandbox, answered 200.
+  default code execution's egress proxy refused the connection (`curl: (56) CONNECT tunnel
+  failed, response 403`), and nothing reached the server. With the instance's host added to
+  the allowed domains, a `download` and then a `GET` of the export's catalog, from Anthropic's
+  sandbox, answered 200.
 - **The skill changed no tool use** in three questions, each asked with it off and then on:
   - "What did we conclude about whether God is a control freak?" went to claude.ai's memory and
     past-chat search both times, never to MultiBlog, so it missed the group's discussion summary
@@ -3606,9 +3644,9 @@ size.
 - **No `subscriptions/listen`** in any request from claude.ai.
 - **Findings for TODO.md**: search's dates are UTC unless `tz` is passed, which read as a day
   ahead; results give site-relative URLs, which claude.ai can't make clickable; `download`'s
-  description says the catalog gives a "size" where the field is `chars`; and four of the
-  instance's docs had no `prose_json`, so their bodies were missing from search and the catalog
-  counted them as 0, until each was opened in the editor the same day.
+  description says the catalog gives a "size" where the field is `chars`; and four of
+  the instance's docs had no `prose_json`, so their bodies were missing from search and the
+  catalog counted them as 0, until each was opened in the editor the same day.
 
 ### Build order
 
@@ -3702,8 +3740,9 @@ connection at all.
    CHECK refuses on a bot, and step 8's `createAgent` builds on the fixture.
 6. **The slice trial, on the trial instance**, for step 3's reasons, through a new connector at
    `/api/mcp` exactly, since a resource carries no query. The header trial's two connectors are
-   removed and their tokens revoked first: claude.ai can't change a connector's authentication,
-   and allows one connector per URL. claude.ai on the web and on iOS connects through OAuth,
+   removed and their tokens revoked first: claude.ai can't change a connector's
+   authentication, and allows one connector per URL. claude.ai on the web and on iOS connects
+   through OAuth,
    lists the tools and calls one, under 2026-07-28, and shows the connector as connected.
    Nothing more is built until it does. If claude.ai shows #1110's symptom (Open), a client
    registered by hand is tried next. It also runs Research with the connector on, to see that
