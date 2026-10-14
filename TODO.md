@@ -230,14 +230,6 @@ yet done:
     group's own discussion summary in MultiBlog. Its description could say what MultiBlog holds
     that memory doesn't: other people's notes and discussion summaries, and the docs
     themselves rather than recollections of a chat.
-- **Four of the instance's docs have no `prose_json`**: "C.S. Lewis: our desires are not too
-  strong, but too weak", "2 Sam 12 + James", "The 'Traditional Family'…" and "Claude on Lewis &
-  MacDonald", created 2026-07-26/27 and never opened in the editor since. Their ydocs and posts
-  hold their text, but a doc's search vector and `chars` come from that cache, so search finds
-  only their titles and the export's catalog counts them as 0. `check-doc-integrity.ts` warns
-  of exactly this ("the store debounce has never written this doc's cache"), but the deploy
-  wrapper doesn't run it. The check's own remedy is opening each in the editor; run it again
-  afterwards to confirm. No other instance has such a doc.
 - **Header tokens issued before `api_token_expiry` expire a year after it runs on their
   instance**, Claude Code's files under `~/.config/multiblog/` among them. Re-issue each with
   the script (`--write-to`) before then; nothing warns as the date nears, and an expired token
@@ -274,7 +266,8 @@ yet done:
 claude.ai connected to the trial instance on 2026-10-13 through a request-header connector,
 ahead of MCP.md §21's header trial (step 3), to see whether it reaches SDK v2 at all. The
 header trial ran there too, on 2026-10-14 (MCP.md §21, "The header trial"). Left in place until
-the slice trial:
+the slice trial, which runs there as well and needs the two connectors and their tokens gone
+first:
 
 - **A trial token**, `cmv77tijd0000gts6g0bj8vir`: read-only, client `claude-ai`, acting as the
   instance's Claude account and issued by Luke, expiring 2026-10-20. Revoke it

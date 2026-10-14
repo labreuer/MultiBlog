@@ -2389,7 +2389,7 @@ endpoint, as small a one as claude.ai needs and the MCP authorization spec allow
 written to the spec's newest revision, 2026-07-28, and to what claude.ai does as a client:
 Anthropic documents that under claude.com/docs/connectors/building, and server logs posted to
 `anthropics/claude-ai-mcp` fill in the rest. Three trials check each point the plan leans on
-(Build order), the first on a trial instance and the other two on explore:
+(Build order), the first two on a trial instance and the last on explore:
 
 - **the header trial**, right after the move to SDK v2 and the renamed tools, where claude.ai's
   connector dialog offers request headers: claude.ai against both, before any OAuth is built;
@@ -2533,12 +2533,13 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
     Nothing is mailed to a `.invalid` address, and it shows nowhere but ADMIN surfaces.
   - **Moving a bot to another person revokes the tokens the previous person issued for it.**
     The check would refuse them anyway; revoking keeps a move back from reviving them.
-- **Explore's Claude account gets its person once, by hand.** One `UPDATE` sets its
-  `works_for_user_id` to Luke's account. That comes before the slice trial, since the consent
-  page offers only a bot that works for whoever is signed in, and so before the works-for rule
-  ships, which would refuse the header tokens already issued for it.
+- **The Claude accounts on the trial instance and explore get their person once, by hand.** One
+  `UPDATE` on each sets its `works_for_user_id` to Luke's account: the trial instance's before
+  the slice trial, which runs there, since the consent page offers only a bot that works for
+  whoever is signed in; explore's before the works-for rule ships there (step 8), which would
+  refuse the header tokens already issued for it.
   - Luke is the only person using Claude, so nothing needs checking first. The CHECK above
-    refuses the update if the account still has a password, and explore's has none (§3).
+    refuses the update if the account still has a password, and neither has one (§3).
   - **Its address stays `claude@multiblog.invalid`.** The importer's `MB_EMAIL` and
     `BYLINE_EMAILS` default to it, and a bot's address is an identifier, never a mailbox.
   - A Claude account on another instance gets its person in the web interface when Claude is
@@ -3463,8 +3464,8 @@ tests pass (Build order).
 
   Claude Code's pinned identity, with its loopback redirect URI on an arbitrary port, covers
   that path and the page's warning. A client the fixture registers by hand covers that kind.
-- **By hand, in three trials** (Build order): the header trial on the trial instance, the other
-  two on explore.
+- **By hand, in three trials** (Build order): the header and slice trials on the trial
+  instance, the full trial on explore.
   - **the header trial, after SDK v2 and the renamed tools** (run on 2026-10-14: "The header
     trial"), where claude.ai's connector
     dialog offers request headers, with a token that can only read:
@@ -3606,15 +3607,16 @@ size.
 - **Findings for TODO.md**: search's dates are UTC unless `tz` is passed, which read as a day
   ahead; results give site-relative URLs, which claude.ai can't make clickable; `download`'s
   description says the catalog gives a "size" where the field is `chars`; and four of the
-  instance's docs have no `prose_json`, so their bodies are missing from search and the catalog
-  counts them as 0.
+  instance's docs had no `prose_json`, so their bodies were missing from search and the catalog
+  counted them as 0, until each was opened in the editor the same day.
 
 ### Build order
 
 What this server can't test locally is whether claude.ai connects to it at all, and an open
 claude.ai bug puts that in doubt (Open). So a thin slice, just enough for claude.ai to connect,
-is built and tried on explore before the rest. Where claude.ai offers request headers, a
-header token tries v2 and the renamed tools there before that, while no OAuth exists yet.
+is built and tried on the trial instance before the rest. Where claude.ai offers request
+headers, a header token tries v2 and the renamed tools there before that, while no OAuth exists
+yet.
 
 Each step can deploy on its own. The client registry comes with the consent page, in the
 slice, so the slice's metadata advertises CIMD only beside the one identity it pins, Claude's.
@@ -3679,8 +3681,8 @@ connection at all.
 5. **A thin slice, enough for claude.ai to connect:**
    - the schema it uses: `oauth_authorization_code` and `oauth_client`; `api_token`'s nullable
      `token_hash` and its `oauth_client_id`, with the CHECK that a row is one kind or the
-     other; and `user.works_for_user_id`, with the CHECK that a bot has no password. Explore's
-     Claude account gets its person by the one-time update ("Whose account");
+     other; and `user.works_for_user_id`, with the CHECK that a bot has no password. The trial
+     instance's Claude account gets its person by the one-time update ("Whose account");
    - Discovery: both documents, and the 401's `resource_metadata`;
    - the consent page and its decision, bare in what they show (the client's name and the host
      of its redirect URI, which the spec requires on every consent page; the bot, the scopes,
@@ -3698,7 +3700,10 @@ connection at all.
    redirected and not. A connection needs a bot, so a fixture makes one: an account with no
    password, working for the suite's user. `createTestUser` always sets a password, which the
    CHECK refuses on a bot, and step 8's `createAgent` builds on the fixture.
-6. **The slice trial, on explore**: claude.ai on the web and on iOS connects through OAuth,
+6. **The slice trial, on the trial instance**, for step 3's reasons, through a new connector at
+   `/api/mcp` exactly, since a resource carries no query. The header trial's two connectors are
+   removed and their tokens revoked first: claude.ai can't change a connector's authentication,
+   and allows one connector per URL. claude.ai on the web and on iOS connects through OAuth,
    lists the tools and calls one, under 2026-07-28, and shows the connector as connected.
    Nothing more is built until it does. If claude.ai shows #1110's symptom (Open), a client
    registered by hand is tried next. It also runs Research with the connector on, to see that
@@ -3728,8 +3733,9 @@ connection at all.
    - a bot's token with the `manage` scope, listing no `manage`;
    - the web interface refusing to make a person work for anyone, and to invite a bot.
 
-   It deploys after explore's one-time update (step 5), or the header tokens issued for its
-   Claude account are refused.
+   It deploys to an instance only after that instance's Claude account has its person, or the
+   header tokens issued for it are refused: the trial instance's by step 5's one-time update,
+   explore's by the same update made there first.
 9. **The consent page in full** (the host of the client's `client_id`; who is signed in, with a
    way to switch; the loopback warning; what the connection can do; the sentence for a person
    with no bot); **Claude Code's pinned identity**; the drift check over both identities, run
