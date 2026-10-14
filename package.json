@@ -41,7 +41,7 @@
     "@hocuspocus/provider": "^4.3.0",
     "@hocuspocus/server": "^4.3.0",
     "@hocuspocus/transformer": "^4.3.0",
-    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/server": "^2.3.1",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "@tabler/icons-react": "^3.45.0",
@@ -83,6 +83,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.3.1",
     "@playwright/test": "^1.62.0",
     "@types/node": "^24",
     "@types/react": "^19",

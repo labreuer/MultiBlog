@@ -201,10 +201,28 @@ Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a pr
 build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
 yet done:
 
-- **OAuth, so claude.ai can connect** (MCP.md §5, phase 5). Until then only a client that can
-  send a header — Claude Code — reaches the server.
-- **Issuing a token takes the script** (`scripts/create-api-token.ts`). The `/dashboard` panel
-  for one's own tokens and the `/users` action for a bot's (MCP.md §3) aren't built.
+- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Until then only a
+  client that can send a header — Claude Code — reaches the server. The plan's first step,
+  which isn't OAuth, is built: the server is on SDK v2 (`@modelcontextprotocol/server`), which
+  answers the 2026-07-28 revision claude.ai opens in as well as every 2025-era client.
+
+  The second step renames the tools, each with a `multiblog_` prefix, since claude.ai drops
+  the server's instructions and shows its model only a tool's name until it searches; the
+  conventions move into the descriptions, and a skill the person installs carries the rest.
+  The third is a trial: where claude.ai's connector dialog offers request headers (a beta), a
+  read-only header token good for a week tries claude.ai against v2 and the new names on
+  explore, before any OAuth is built. The fourth changes what is built. `/api/mcp`
+  authenticates through v2's own bearer check, which refuses a token with no expiry. So every
+  header token gets one: a year by default from the script, and a year from the migration for
+  each token already issued. Then a thin slice, just enough for claude.ai to connect, is tried
+  on explore before the rest is built, because an open claude.ai bug
+  (`anthropics/claude-ai-mcp#1110`) leaves a server shaped like this one showing Connect with
+  no tools loaded. Research, which calls a connector's tools without asking, gets a read-only
+  endpoint of its own, `/api/mcp/read`.
+- **Issuing a token takes the script** (`scripts/create-api-token.ts`), and always will: nothing
+  in the app issues an `mb_` token. The `/dashboard` panel for one's own tokens (MCP.md §3)
+  isn't built; MCP.md §21 plans it for listing and revoking only, and anyone without a shell
+  on the server connects through OAuth instead.
 - **MCP.md §17's items 1–3 are still in the UI's annotation paths.** The MCP server avoids all
   three; the actions don't. They have their own entry below, "Posting an annotation trusts
   three things the client sends".
@@ -217,6 +235,122 @@ yet done:
 - **The PDF quads spec runs on chromium only** (`e2e/mcp-files.spec.ts`), and is now the one
   standing check that server-computed quads still match a real selection: a pdfjs bump that
   changed how the text layer picks a font family would fail it, and nothing else.
+- **`edit_doc` accepts more than the endpoint takes.** The MCP transport refuses a body over
+  4 MiB with a 413 (`-32000`) before any tool runs, in SDK v1 and v2 alike, since the route
+  sets no `maxRequestBodySize`. `edit_doc`'s schema allows 50 edits, each with up to 786,432
+  characters of new Markdown (`MAX_MARKDOWN_BYTES`) and a passage of up to 20,000. So a call
+  its own schema accepts can fail as a transport error rather than with MCP.md §4's
+  `too_large`, and `create_doc`'s largest body fails the same way from a client that escapes
+  nearly every character as `\uXXXX`. Bound the text across all of a call's edits at
+  `MAX_MARKDOWN_BYTES`, as `create_doc` bounds its one body, and give the handler a
+  `maxRequestBodySize` of 8 MiB, which holds that much text however a client escapes it (six
+  bytes a character at worst).
+- **`search`'s description doesn't say a call needs `q` or a filter.** A call with neither is
+  refused as `invalid`: "Give q, or a filter (kinds, authors, tags or a date) to list by."
+  (`src/lib/mcp/tools/search.ts`). claude.ai's model made exactly that call first in its first
+  trial, and retried correctly from the refusal. Step 2 of MCP.md §21 rewrites the descriptions
+  ("What the model is told"); `search`'s says it there.
+
+## The claude.ai trial: what to undo
+
+claude.ai connected to the trial instance on 2026-10-13 through a request-header connector,
+ahead of MCP.md §21's header trial (step 3), to see whether it reaches SDK v2 at all. Left in
+place for as long as the trial runs:
+
+- **A trial token**, `cmv77tijd0000gts6g0bj8vir`: read-only, client `claude-ai`, acting as the
+  instance's Claude account and issued by Luke, expiring 2026-10-20. Revoke it
+  (`npx tsx scripts/create-api-token.ts --revoke=cmv77tijd0000gts6g0bj8vir` in the instance's
+  directory) and remove the connector in claude.ai. claude.ai can't change a connector's
+  authentication, so step 3 adds a new one either way. The account itself,
+  `claude@multiblog.invalid` (AUTHOR, no password), stays: it is what §21's Claude connection
+  acts as.
+- **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks `origin/mcp-oauth`,
+  so the deploy wrapper's plain pull keeps it there. Switch it back (`git switch main`) when
+  `mcp-oauth`'s first PR merges, or before deploying main there.
+- **`deploy` on the instance's server is in the `adm` group**, so the trial could read nginx's
+  access log. Keep it, or undo it with `sudo gpasswd -d deploy adm`.
+
+## Markdown out of a body writes `&`, `<` and `>` as entities, and an entity in it comes back changed
+
+Both halves are in `src/lib/markdown-import.ts`, in all three of its `MarkdownManager`s (docs,
+comments, annotations).
+
+- **Out.** `@tiptap/markdown` writes every `&`, `<` and `>` in text as `&amp;`, `&lt;` and
+  `&gt;` (`encodeTextForMarkdown`, through `@tiptap/core`'s `encodeHtmlEntities`). So the MCP
+  server's `read` and its export give "new heavens &amp; earth" for a doc that says "new
+  heavens & earth", and so do the Markdown edit boxes for a comment
+  (`src/app/actions/comments.ts`) and an annotation. It is valid CommonMark, and parses back to
+  the same text. But a model reads the raw Markdown: claude.ai's Claude reported it as a bug in
+  the first claude.ai trial, and a model may copy the entity into what it writes.
+- **Back in, decoded twice.** Text that holds an entity literally, such as "Tom &amp; Jerry" or
+  "&copy;", goes out as `&amp;amp;` and `&amp;copy;` and comes back as "Tom & Jerry" and "©":
+  `@tiptap/markdown` decodes `&lt; &gt; &quot; &amp;`, and then `decodeNodeEntities` decodes
+  what that left. So a comment holding one, saved again from its Markdown edit box, is stored
+  changed, and nothing says so.
+- **The fix**, as one change, since the escaping out has to match the decoding in:
+  - take over `encodeTextForMarkdown` on the three managers so that it backslash-escapes `&`
+    only where it starts something that would parse as an entity reference, `<` only where it
+    could open HTML or an autolink, and `>` only where it starts a line and would open a
+    blockquote (CommonMark allows `\&`, `\<` and `\>`), leaving every other one as written;
+  - make the way in decode each reference once;
+  - unit tests (`src/lib/markdown-import`'s) for text with `&`, `<`, `>`, `&amp;` and
+    `&copy;` making the round trip unchanged through all three managers, and for the Markdown
+    each writes.
+
+## `edit_link` and `edit_file` can't be audited or undone (MCP.md §15, §21)
+
+**Status:** decided 2026-10-12 with the OAuth plan, and not yet built. Only a `claude-code`
+token lists the two tools, because nothing they change can be undone and Claude Code's forced
+prompt is the safeguard. MCP.md §21 keeps them off every OAuth connection, claude.ai's
+included, until this item is done; then every client lists them.
+
+claude.ai's prompt can't stand in for Claude Code's. It asks before each call to a tool marked
+destructive, but a person can set a tool, or a whole group of tools, to "Always allow". The
+likely route there is not these two tools but the destructive ones a research session calls
+constantly: `edit_doc` and `edit_annotation` prompt on every call, and "Always allow" on the
+group that holds them would cover `edit_link` and `edit_file` too. And Research calls a
+connector's tools without asking at all. After either, an instruction planted in text Claude
+reads could make these changes unseen. The UI's own paths have the same gap today.
+
+What can't be undone, in the functions both front doors call (the actions in
+`src/app/actions/anchored-links.ts` and `src/app/actions/files.ts`, and the MCP tools):
+
+1. **A link's name.** `renameLink` (`src/lib/anchored-link-write.ts`) overwrites
+   `anchored_link.name`. A minted link stamps `edited_at`; nothing keeps the old name or who
+   changed it.
+2. **A link's part order.** `reorderLinkPartsIn` rewrites each part's `part_order` in place.
+3. **A removed part.** `removeLinkPartsIn` hard-deletes the `anchored_link_anchor` row, and its
+   target, captured quote and version stamp go with it. Every page that carries the link keeps
+   it, now without that passage.
+4. **A file's title.** `setFileTitle` (`src/lib/file-manage.ts`) overwrites `stored_file.title`
+   and keeps only `updated_by_user_id`.
+
+**What done looks like:**
+
+- **Audited.** Each change records who made it and when; the front door, and for an MCP call
+  the token's id, so a connection's changes can be told apart; and the value before and after.
+  That could be a history table per kind, as `comment_revision` is for comments, or one shared
+  table if the shapes fit.
+- **Revertible.**
+  - A removed part of a minted link is soft-deleted, with `deleted_at` and the user who removed
+    it, and can be restored to its place with its anchor and quote intact.
+  - A name and an order are restored from the history, and so is a file's title.
+  - Undoing is offered in the UI (the `/links` table, the file's page) and through MCP, as
+    `edit_doc` reverts an edit (MCP.md §6).
+- **Then the forced prompt goes.** `edit_link` and `edit_file` lose `requiresUserInteraction`,
+  and the "keeps no history" line in their descriptions and in `file-manage.ts`'s comment.
+  MCP.md §15's list of what can't be undone shrinks to `manage`, and every client lists the
+  two, a claude.ai connection included (`toolsFor`, `src/lib/mcp/server.ts`).
+
+**Watch for:**
+
+- **"A minted link never drops to zero parts"** counts rows under `FOR UPDATE`. Once parts
+  soft-delete, it must count live parts only.
+- **Every read of a link's parts filters removed ones out**: `anchoredLinkForViewer`, the
+  landing route, `linkPartsInto` and the tray.
+- **`anchored_link_anchor` shares its column shape with the other anchor tables** (CLAUDE.md,
+  "One anchor row shape"). A `deleted_at` on this one table is the consumer's own column, not
+  part of the shared envelope; keep it out of `src/lib/anchors/`.
 
 ## Posting an annotation trusts three things the client sends (MCP.md §17, items 1–3)
 

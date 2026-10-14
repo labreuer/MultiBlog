@@ -1,10 +1,10 @@
 # MultiBlog — an MCP server for machine clients
 
 **Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
-annotations, anchored links, tags, uploads and `manage`. Not built: OAuth, so claude.ai can't
-connect yet (§5, phase 5), and passage-level tags (phase 6). The sections below are the design
-the build followed; §20 lists where the build departs from it, and every such point is decided
-there rather than here.
+annotations, anchored links, tags, uploads and `manage`. Not built: OAuth and the move to SDK
+v2, so claude.ai can't connect yet (phase 5, planned in §21), and passage-level tags (phase
+6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
+every such point is decided there rather than here. §21 is the plan for OAuth and SDK v2.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
 docs, PDFs, annotations, anchored links, tags, bylines — and to find and read it again as a
@@ -150,11 +150,13 @@ the rules are:
   own token, that person; for a bot's, the person the bot works for. It decides who else
   `write` may give access to (below).
 - **So is the client it was issued for.** `client` is `claude-code`, `claude-ai` or `other`,
-  set at issue: by the script's `--client`, which defaults to `other`, or by the OAuth consent
-  page, which sets `claude-ai` (§5). Only a `claude-code` token lists the tools that force a
-  prompt, since Claude Code is the one client documented to honor the flag (§15). The token
-  decides rather than the request, because a stateless server sees the client's `clientInfo`
-  only in `initialize`, never in the `tools/list` and `tools/call` that follow (§5).
+  set at issue: by the script's `--client`, which defaults to `other`, or by an OAuth
+  connection, which is `claude-ai` for Claude's published identity or a client registered by
+  hand as claude.ai's, and `other` for any other client (§21). Only a `claude-code` token lists
+  the tools that force a prompt, since Claude Code is the one client documented to honor the
+  flag (§15). The token decides rather than the request, because a stateless server sees the
+  client's `clientInfo` only in `initialize`, never in the `tools/list` and `tools/call` that
+  follow (§5).
 - **SHA-256, not bcrypt.** A 256-bit random secret gives key stretching nothing to protect,
   and a fast hash makes the lookup a single unique-index hit.
 - **Bound to a user, narrowed by scope.** The binding follows WordPress's Application
@@ -196,6 +198,10 @@ the rules are:
     session JWT bakes the role in at sign-in ([sign-in notes](../src/app/sign-in/NOTES.md)), and
     a live collab connection is checked only once ([PERMISSIONS.md](PERMISSIONS.md)). A
     deletion or a demotion therefore takes effect on the token's very next call.
+  - §21 adds a step: a token's issuer must be its account's person,
+    `works_for_user_id ?? the account's own id`, whichever way the token was issued; and a
+    bot's token is refused while its person is a COMMENTER or the bot outranks them. §21 also
+    lists `manage` to no bot's token, whatever its scopes.
 - **Soft-deleting a user revokes their tokens**, in the same transaction. `deleteUser`
   (`src/app/actions/users.ts`) calls `softDeleteUser` (`src/lib/user-delete.ts`), one
   transaction; `bulkDeleteUsers` calls it once per user and needs nothing of its own. Restoring the account
@@ -210,8 +216,11 @@ the rules are:
   after the same predicate `/api/doc/[id]/token` checks, and calls `/admin/*` over loopback
   (`collabHttpOrigin`).
 - **Tokens are issued by a script first**: `scripts/create-api-token.ts --email …
-  --issued-by … --name … --scopes … --client …`. Later come a `/dashboard` panel for your
-  own tokens and a `/users` action for an admin issuing one to a bot account.
+  --issued-by … --name … --scopes … --client …`. Later comes a `/dashboard` panel for your
+  own tokens, which §21 builds for listing and revoking but never issuing. The script stays the
+  only way to issue a header token; everyone else connects through OAuth (§21). §21 also makes
+  an expiry required, a year unless the script is told otherwise, since SDK v2's bearer check
+  refuses a token without one.
 - **Claude gets its own account, an AUTHOR, and never a person's token.** That keeps
   attribution honest: bylines, `userId` columns and Yjs `clients` entries all name Claude. It
   also keeps the anchored-link tray from colliding. A person's open link includes a minted
@@ -224,8 +233,12 @@ the rules are:
     needs only `canManageDocs`, and an AUTHOR has it. Its role is also the only role limit its
     tokens have, since a token acts with its account's current role: promoting the account
     widens every token issued for it.
-- **If OAuth comes, it is a way of issuing rows in this table**, not a second auth system
-  (§5).
+  - **It works for one person** (`user.works_for_user_id`), who is the issuer of every token it
+    holds, by whichever route it was issued: the header, Claude Code's own identity or
+    claude.ai (§21).
+- **OAuth is a way of issuing rows in this table**, not a second auth system. A connection's
+  row is reached through an hour's access token and a rotating refresh token, rather than a
+  secret of its own (§21).
 
 Ghost's design, in which the client signs a five-minute JWT from its key so the secret never
 travels, buys nothing over an HTTPS bearer token here and is not adopted.
@@ -382,7 +395,9 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
   - **The ceiling's cost.** 200,000 characters is about 50,000 tokens, a quarter of a
     200,000-token window in one call. It is room for a long doc a task needs whole: the longest
     imported chat is 88,000 characters.
-  - **claude.ai's limit isn't documented**, so it is measured before phase 5 (§18).
+  - **claude.ai's limit is about 150,000 characters**, by Anthropic's connector documentation,
+    and it honors none of Claude Code's `_meta` keys. So a `claude-ai` token's `read` stops
+    below that limit (§21).
 - **Lists** take `limit`, 20 by default and at most 100, and an opaque `cursor`. Search pages
   by rank, at most 20 at a time (§14).
 
@@ -390,10 +405,11 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
 
 - **MCP at `/api/mcp` is the contract**, in the same Next process.
   - Each tool calls its operation in-process.
-  - It uses stateless Streamable HTTP: a fresh server and transport per request, the official
-    SDK's stateless mode. The SDK, `@modelcontextprotocol/sdk`, is a new dependency. The
-    server is built after the token is checked and lists only the tools that token's scopes
-    allow, so Claude's token never sees `manage` (§3).
+  - It uses stateless Streamable HTTP: a fresh server per request, built by the official SDK's
+    `createMcpHandler`. The SDK is v2, `@modelcontextprotocol/server`, which serves claude.ai's
+    2026-07-28 revision and every 2025-era client from the one endpoint (§21, "Moving to SDK
+    v2"). The server is built after the token is checked and lists only the tools that token's
+    scopes allow, so Claude's token never sees `manage` (§3).
   - Each tool carries MCP's hints, and the few whose actions can't be undone force a prompt in
     Claude Code (§15).
   - Claude Code's configuration names the server, and a `headersHelper` supplies the header,
@@ -497,25 +513,35 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
 - **There is no sidecar process.** [DEPLOY.md](../DEPLOY.md)'s target is a 1 GB instance,
   where memory is what runs out, and a second Node process costs tens of MiB before it does
   anything.
-- **claude.ai comes after Claude Code, and needs OAuth.** It is where the research
+- **claude.ai comes after Claude Code, and needs OAuth** (§21). It is where the research
   conversations happen, so it is the client that makes the round trip seamless. Claude Code
   comes first only because a header is all it needs, and Claude Desktop reaches the server
-  through a local bridge that adds the header.
+  through a local bridge that adds the header. Desktop and the mobile apps also share
+  claude.ai's connectors.
   - **What it takes.** claude.ai's custom connectors authenticate with OAuth: PKCE, plus one
     of dynamic client registration, a client ID metadata document, or a client registered by
     hand. Supporting them makes MultiBlog an OAuth authorization server, consent page included.
-  - **Neither shortcut is open.** Anthropic's connector documentation lists a static header
-    only as a beta for a limited set of organizations. A secret in the connector's URL would
-    put a credential where URLs get logged, which is why the MCP authorization spec forbids
-    one in a query string.
-  - **The consent page issues the token for Claude's account**, not for whoever is signed in.
+    §21 takes the metadata document, Claude's published identity, with a client registered by
+    hand as its fallback.
+  - **Neither shortcut is a connection.** Anthropic's connector documentation lists a static
+    header only as a beta for a limited set of organizations. Where an account has it, it
+    serves §21's header trial, with a read-only token good for a week, and nothing more: as a
+    connection, the secret would sit in claude.ai's settings and travel on every call for its
+    whole life. A secret in the connector's URL would put a credential where URLs get logged,
+    which is why the MCP authorization spec forbids one in a query string.
+  - **The consent page issues the token for a bot account**, not for whoever is signed in.
     The natural grant would bind it to the person approving, and everything claude.ai wrote
-    would then carry that person's name (§3). So the page offers the accounts its user may
-    issue for, as the `/users` action does, and records the user as the issuer.
-  - **What it issues is an `api_token` row** (§3), with the same scopes, expiry and
-    revocation: OAuth is a way of issuing rows in that table, not a second auth system.
-  - **Its tokens are issued for `claude-ai`**, so they list none of the tools that force a
-    prompt (§15).
+    would then carry that person's name (§3). So the page offers the bots that work for its
+    user, and records the user as the issuer (§21).
+  - **What it issues is an `api_token` row** (§3), with the same scopes and revocation. The
+    row is reached through an hour's access token and a rotating refresh token: OAuth is a way
+    of issuing rows in that table, not a second auth system.
+  - **Its tokens are issued for `claude-ai`**, which sets `read`'s bound for claude.ai (§21).
+    They list neither `edit_link` nor `edit_file`, whose forced prompt only Claude Code honors
+    (§15), and never `manage`, which is outside their scopes.
+  - **Research gets an endpoint of its own.** claude.ai's Research calls a connector's tools
+    without asking, so §21 adds `/api/mcp/read`, which lists only the reads, for a second
+    connector that a person turns on there.
 - **Server instructions carry the conventions.** An MCP server returns `instructions` when a
   client connects, and Claude Code loads them at session start, before any tool's definition,
   so they also tell Claude when to reach for these tools. Shipped that way they deploy with
@@ -527,6 +553,8 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
   - **Claude Code cuts them off at 2,048 characters**, and each tool's description at the
     same length. The cap is on the description string alone: a tool's input schema reaches the
     model whole, so the detail of `read`'s URL forms and options goes on its parameters.
+  - **claude.ai never passes them to its model** (§21). So §21 moves what they say about one
+    tool into that tool's description, and leaves the rest to a skill the person installs.
 
   So the instructions are short and lead with what matters most:
   - whose account the session acts as, and who issued its token (below);
@@ -1920,6 +1948,10 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 Uploading, downloading and exporting are §5's byte routes, not tools, reached at the URLs
 `upload_url` and `download_url` answer with.
 
+§21 renames every tool for claude.ai, which shows its model a tool's name and nothing of the
+server it comes from: each name gains a `multiblog_` prefix, and six gain a new verb (§21,
+"What the model is told").
+
 **Hints.** Every tool carries MCP's annotations, which a client may use to decide how to
 present a call:
 
@@ -1967,7 +1999,9 @@ The prompt has two limits, and the plan answers each:
 - **Only Claude Code is documented to honor the flag**, from v2.1.199. Another client may
   treat these tools like any other, with an approval its user can set to always allow, so
   only a token issued for `claude-code` lists them (§3). From claude.ai, renaming a link,
-  retitling a file and `manage` are done in the UI.
+  retitling a file and `manage` are done in the UI. §21 keeps it so for claude.ai, whose
+  Research calls tools without asking at all, until the two are auditable and revertible
+  (TODO.md).
 - **The prompt guards the tool, not the endpoint.** A shell holding the token could post the
   same call itself, which is why the token stays out of Claude's shell (§5).
 
@@ -2045,6 +2079,9 @@ the `mcpServers` entry, the token's file, and the settings that keep the token f
   sessions included, and loads `search` and `read` there up front (§15). A project's
   `.mcp.json` keeps both to the sessions that use them, and the allow rules (§15) go in that
   project's `.claude/settings.json`.
+  - **A claude.ai connection would undo this**, by following its account into every Claude Code
+    session. The project's own entry outranks it there, and denying it by name keeps it out of
+    the rest (§21).
 - **What a session spends**, as Claude Code 2.1.292 does it, measured with a probe server:
   - **in every session**: the instructions, cut at 2,048 characters (§5), and the schemas of
     `search` and `read`;
@@ -2170,7 +2207,8 @@ Items 1–3 should still be fixed on their own account (TODO.md).
    URL tools; PDF roots anchored by quote, their quads from `extractPageItems` and
    `quadsForRange`, with the spec that holds each edge within 1pt of a selection (§8); and the
    file half of `manage`, owner changes included (§12).
-5. **OAuth, for claude.ai** (§5). Not built.
+5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own. Not
+   built.
 6. **If wanted:** passage-level tags (PLAN.md §20, PR 2). Not built.
 
 Phases 1–4 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
@@ -2198,8 +2236,8 @@ Each phase ships with four things:
 
 1. **The shape.** The shared operation layer, which means refactoring the actions the MCP
    server touches, rather than a parallel set of handlers. §1 recommends the shared layer.
-2. **claude.ai.** When OAuth comes (§5). claude.ai is where the research conversations
-   happen, so it is a target; what is open is the timing.
+2. **claude.ai.** §21 is the plan for OAuth. claude.ai is where the research conversations
+   happen, so it is a target; what is open is the timing, and the questions §21 leaves.
 3. **Tag granularity.** Passage-level tags now, or whole-object tags only.
 4. **The gaps.** Whether §17's gaps are fixed first, separately.
 5. **Files Claude can't see.** A PDF the user uploaded alone is invisible to Claude's account
@@ -2294,4 +2332,1294 @@ code beside each says why as well.
   a side effect of every run, though any run that matches a session's doc marks it too.
 - **A Markdown file's key is its name without its directory.** Two files of one name in
   different directories would be one doc's source; the match refuses a key two docs share.
+
+## 21. OAuth, for claude.ai
+
+**Status: planned; the first step, the move to SDK v2, is built** (§18's phase 5). claude.ai's
+custom connectors authenticate with OAuth, short of a request-header beta that serves for a
+trial and not as a connection (§5), so this makes MultiBlog an OAuth authorization server for
+its own MCP endpoint, as small a one as claude.ai needs and the MCP authorization spec allows.
+It is written to the spec's newest revision, 2026-07-28, and to what claude.ai does as a
+client: Anthropic documents that under claude.com/docs/connectors/building, and server logs
+posted to `anthropics/claude-ai-mcp` fill in the rest. Three trials on explore check each point
+the plan leans on (Build order):
+
+- **the header trial**, right after the move to SDK v2 and the renamed tools, where claude.ai's
+  connector dialog offers request headers: claude.ai against both, before any OAuth is built;
+- **the slice trial**, as soon as claude.ai can connect through OAuth, before most of the plan
+  is built, because an open claude.ai bug puts that in doubt (Open);
+- **the full trial**, once everything is built.
+
+An early trial on the same instance, against the move to SDK v2 alone, has answered the header
+trial's questions about the protocol, and raised two of its own ("The early trial").
+
+Claude Code keeps §5's header and its token file. Nothing here changes how it connects: a
+`headersHelper` that supplies `Authorization` takes precedence over OAuth in Claude Code.
+
+The phase also moves the server to SDK v2, which comes first. claude.ai opens in a protocol
+revision that v1 refuses, and it can't list the tools without the move (below). The tools are
+renamed next, since claude.ai drops the server's instructions and shows its model nothing of
+a tool but its name until it searches ("What the model is told"). Research gets an endpoint
+that lists only the reads ("The read-only endpoint").
+
+### A connection
+
+- **A connection is an `api_token` row** (§3). What the script's flags decide is decided here
+  too: the account, the issuer and the scopes on the consent page, and the `client` column by
+  the identity that asked (below). One thing is new: the endpoint the connection is for,
+  `/api/mcp` or the read-only `/api/mcp/read`, from the request's `resource`, kept as its path
+  in `api_token.oauth_resource`. Everything that keys on a token keys on the row, and none of
+  it changes: §3's one check, the tool list, `api_write`'s claims (§4), the rate limit,
+  `last_used_at`, the audit line, byte grants (§5) and revocation.
+- **Only the credential differs.** A script's row has one secret for life. A connection's row
+  has none of its own: `token_hash` becomes nullable, so an `mb_` lookup never reaches it, and
+  its `prefix` is `oa_` and the start of its id. A CHECK keeps the two kinds apart: a row has a
+  `token_hash` or an `oauth_client_id`, one and never both,
+  `(token_hash IS NULL) <> (oauth_client_id IS NULL)`. A connection's row is reached through
+  two credentials minted from it:
+  - **An access token, good for an hour.** It is a JWT signed as a byte grant is (`jose`,
+    HS256, `AUTH_SECRET`), with its endpoint's URL as its audience and the row's id as its
+    subject. Nothing else in it decides anything. The endpoint's bearer check verifies it ("The
+    bearer check", below), then runs §3's one check on the row it names, as a byte route does
+    with a grant. So revoking the row, or deleting its account or its issuer, ends it on the
+    next call, however much of its hour is left.
+  - **A refresh token**: `mbr_` and 32 random bytes, kept as its SHA-256 in
+    `oauth_refresh_token`. It is rotated on every use, as the spec requires for a public client,
+    and is good for 90 days from its issue. A connection unused for 90 days ends; reconnecting
+    is one click in claude.ai.
+- **A rotated refresh token presented again revokes the connection.** Either the client or a
+  thief holds a copy, and the row can't tell which (OAuth 2.1 §4.3.1).
+  - **The exception is a retry.** A rotated token is answered again, with a new pair, only
+    while none of the refresh tokens issued from it has been used, and for at most two
+    minutes. claude.ai gives a refresh 30 seconds before abandoning it, and a client that
+    retries after losing the answer, or sends two refreshes at once, is not a thief. This
+    departs on purpose from OAuth 2.1 §4.3.1, under which a rotated token is simply invalid.
+  - **An access token's use never closes the window.** When an hour runs out, every call in
+    flight can get a 401 at once, and nothing documents claude.ai refreshing only once for
+    them. Were the first new access token's use to count, a second refresh a few seconds later
+    would be a replay, and would revoke a healthy connection.
+  - **The window closes early the moment any of its children is spent**, that is, the moment
+    one of the refresh tokens issued from it is used in turn. The old token presented after
+    that is a copy, and is caught at once rather than when the split below comes to light.
+  - **Using either new token retires the other, and a retired token counts as a replay.**
+    Presented later, it revokes the connection rather than getting `invalid_grant`. Whoever
+    lost the split presents theirs sooner or later, and that is how the split is found.
+    Answered with `invalid_grant`, the loser would only reconnect, and the winner, perhaps a
+    thief, would keep the connection unnoticed.
+  - **What the window leaves open.** A thief who presents a just-rotated token inside the two
+    minutes gets an access token good for an hour. If they never use the refresh token that
+    came with it, the split never comes to light. That hour is the price of answering retries.
+- **Rotating `AUTH_SECRET` ends every access token at once.** Each client then refreshes, since
+  a refresh token is a hash in the database, not a signature.
+- **`mb_` tokens stay valid, at both endpoints.** The spec's "MUST NOT accept or transit any
+  other tokens" is about tokens issued for another audience. An `mb_` token is this server's own
+  credential for its endpoints, from its own table.
+- **Why a JWT and not a second hashed secret.** The row is read on every call anyway (§3), so a
+  stored access token would buy nothing its signature doesn't, at a write an hour per
+  connection. Its audience keeps it apart from the two tokens already signed with the same
+  secret: a byte grant or a ydoc token is never an access token, and an access token is
+  neither of them.
+- **Why not an `mb_` secret.** claude.ai would keep one, and the spec's MUSTs hold when no
+  refresh token is issued. But the secret would travel on every call, from a server we don't
+  run, for the whole of its year ("The bearer check", below). The spec asks for short-lived
+  access tokens for that reason, and honoring it costs one table.
+
+### Whose account
+
+- **A connection acts as a bot account, never as the person approving it.** §5 decided this for
+  attribution: what claude.ai writes carries Claude's name, not its user's. It also keeps
+  Claude's reading to what has been shared with Claude (§12).
+  - **That holds even for a read-only connection.** §3's "never a person's token" is about what
+    Claude can see as well as what it signs, so the page offers no connection as oneself.
+- **A bot is an AI agent's account.** It works for one person, recorded as
+  `user.works_for_user_id`: "the person the bot works for", in §3's words. The consent page
+  offers only the bots that work for whoever is signed in, and that §3's check would accept.
+  That person becomes the connection's issuer, as `--issued-by` makes them for a script's token.
+- **Only an account with no password may work for someone, and only for an account with one.**
+  Sign-in is by password alone (`src/lib/auth.ts`), so a password is what makes an account a
+  person's.
+  - **So a person can't be made to work for another.** If one could, the second could connect
+    as the first and read their PRIVATE docs. That would get past CLAUDE.md's rule that a
+    PRIVATE doc is its byline's alone, ADMINs included, and without even the email an invite
+    sends to the account's owner. Nor can a bot work for a bot.
+  - **A CHECK keeps a bot from gaining a password later:**
+    `works_for_user_id IS NULL OR password_hash IS NULL`. An ADMIN's invite is how a bot would
+    get one (§3): `sendMail` reports a `.invalid` address delivered, so `/users` shows the
+    invite's link. `/users` refuses to invite a bot, and the CHECK refuses a password set any
+    other way, `set-user-password.ts`'s included.
+  - **The web interface never turns an existing account into a bot.** It sets a person only on
+    a bot it is creating, and moves a bot that already has one. An account that was imported
+    and never claimed has no password either, and it is still a person's.
+- **A COMMENTER has no bot, and a bot never outranks its person.** Rank is the order `Role`
+  is declared in, ADMIN down to COMMENTER, which is privilege order (`users-query.ts`). A bot's
+  tokens act with its own role (§3), so a bot above its person would let the person do through
+  it what their own role forbids: a COMMENTER's AUTHOR bot would create docs the COMMENTER
+  can't.
+  - **The web interface refuses either** when a bot is made, promoted, or given a person.
+  - **§3's check refuses a bot's token while either holds**, so demoting a person takes effect
+    on their bot's next call, as demoting the bot itself does. The check reads both rows
+    already.
+- **Why one person.** A bot reads whatever any list names it on (§12). Two people using one
+  Claude, by any route, would each read through it what the other's Claude had written, since
+  Claude is on both bylines. The issuer also decides who `write` may put on a byline (§12). A
+  second person who wants Claude gets a second bot ("Claude (Alice)"), and nothing passes
+  between the two unless someone shares it on purpose.
+- **It holds for every token, the header's included**, because §3's one check enforces it:
+  - **The check:** a token is accepted only if its issuer is its account's person,
+    `works_for_user_id ?? the account's own id`: for a bot's token, the person the bot works
+    for; for a person's own token, that person. It is one comparison, on a row the check reads
+    anyway. A rule that looked only at a token whose account isn't its issuer would accept a
+    bot's token issued by the bot itself.
+  - **At issue:** the script refuses a token that wouldn't pass, so the operator gets an error
+    rather than a token that never works.
+  - **So each person needs their own bot, whatever the route.** A header token for Alice's
+    Claude Code is issued for "Claude (Alice)", with Alice as its issuer, exactly as her OAuth
+    connection would be.
+- **The web interface makes bots.** An ADMIN, on `/users`, creates one: a name, its person,
+  and a role no higher than theirs. It can later give the bot another person, and the person is
+  a column of the table, the one thing about tokens that page touches.
+  - **There is no script for it.** The interface does every bot task, and the one task that
+    needs a shell, issuing a header token, already has `create-api-token.ts`.
+  - **The rules live in `src/lib/`**, in a function taking an `Actor`, with the action as its
+    wrapper (CLAUDE.md), so the e2e fixtures and the action hold bots to the same rules.
+  - **A bot's address is `<slug>@multiblog.invalid`**, after `claude@multiblog.invalid`.
+    Nothing is mailed to a `.invalid` address, and it shows nowhere but ADMIN surfaces.
+  - **Moving a bot to another person revokes the tokens the previous person issued for it.**
+    The check would refuse them anyway; revoking keeps a move back from reviving them.
+- **Explore's Claude account gets its person once, by hand.** One `UPDATE` sets its
+  `works_for_user_id` to Luke's account. That comes before the slice trial, since the consent
+  page offers only a bot that works for whoever is signed in, and so before the works-for rule
+  ships, which would refuse the header tokens already issued for it.
+  - Luke is the only person using Claude, so nothing needs checking first. The CHECK above
+    refuses the update if the account still has a password, and explore's has none (§3).
+  - **Its address stays `claude@multiblog.invalid`.** The importer's `MB_EMAIL` and
+    `BYLINE_EMAILS` default to it, and a bot's address is an identifier, never a mailbox.
+  - A Claude account on another instance gets its person in the web interface when Claude is
+    first connected there.
+- **Otherwise a bot is as §3 describes Claude's account.** Its tokens act with its own role,
+  which its person's only bounds.
+- **Scopes: `read`, or `read` and `write`.** The person chooses on the page, never more than
+  the client asked for.
+  - **`read` alone is chosen until the person changes it**, so `write` is granted on purpose
+    and never by default.
+  - **`write` implies `read`**: the spec requires a server to treat a broader scope as
+    including the narrower ones. So a request naming `write` alone asks for both, and so does a
+    request naming neither.
+  - **A connection to the read-only endpoint is offered `read` alone** ("The read-only
+    endpoint", below).
+  - **Never `manage`** (§3): the page doesn't offer it, and no metadata lists it.
+- **The client is `claude-ai` for Claude's published identity**, and for a client registered by
+  hand as claude.ai's fallback (`--kind=claude-ai`, "Which clients", below). It is `other` for
+  anything else. OAuth never issues a `claude-code` token, since a client's claim to be Claude
+  Code rests on a loopback redirect, which any program on the machine can answer. So no
+  connection lists `edit_link` or `edit_file`, which stay a `claude-code` token's ("What else
+  changes for claude.ai", below), and `manage` is outside every connection's scopes.
+- **Deleting a person revokes the tokens they issued**, in the transaction that revokes their
+  own (`softDeleteUser`). §3's check already refuses those tokens, but restoring the account
+  would bring them back; this way a restore brings none back, as §3 says of the account's own.
+
+### Which clients
+
+A request names its client by `client_id`, and an unknown one is refused before anything else.
+**Every client is public**: none has a secret. PKCE is the proof on the code, and rotation
+guards the refresh token. The metadata lists `none` as the only authentication method at the
+token endpoint, which is also what makes claude.ai choose its published identity (below). There
+are three kinds:
+
+- **Claude's published identity**, a client ID metadata document (CIMD), which the spec
+  prefers. Its `client_id` is `https://claude.ai/oauth/mcp-oauth-client-metadata`: a public
+  client named "Claude" whose one redirect URI is `https://claude.ai/api/mcp/auth_callback`.
+  - **Every Claude app uses it**: claude.ai on the web, Desktop and mobile.
+  - **claude.ai picks it** over registering itself when the server's metadata sets
+    `client_id_metadata_document_supported` and lists `none` among the token endpoint's
+    authentication methods. Its connector dialog calls this "Use Claude's published identity"
+    and recommends it.
+  - **Pinned, not fetched.** The document's fields are a constant in the code, and a request
+    naming that URL is answered from the constant. The authorize path makes no outbound
+    request, and nobody can make the server fetch anything, so CLAUDE.md's rule against
+    fetching a user-supplied URL holds by construction.
+    - The spec says an authorization server SHOULD fetch the document, and this departs from
+      that on purpose. The client-metadata draft allows it: its newest revision lets an
+      authorization server register a client's URL ahead of time instead of fetching the
+      document on each request, and asks only that the document be fetched when that is done
+      (draft -02, §7.2), as both pins were.
+    - **The two pins are an allowlist.** `client_id_metadata_document_supported` tells every
+      client that a URL may serve as its `client_id`, but any URL other than these two is an
+      unknown client. The draft lets an authorization server keep a trust policy of its own,
+      and this is one.
+    - The cost is that Anthropic can change the document. `scripts/check-oauth-clients.ts`
+      fetches each pinned document and compares it with the constant, and a change is then a
+      one-line edit. The change that would matter most is Claude becoming a confidential
+      client (Open, below).
+    - **It compares only what the server acts on**: `client_id`, `redirect_uris`,
+      `token_endpoint_auth_method`, `grant_types` and `response_types`, and a `jwks_uri` or
+      `jwks` appearing, which would announce the switch to a confidential client. A difference
+      there is a warning. A difference anywhere else, a reworded `client_name` or a new
+      `logo_uri` or `tos_uri`, is a note. Compared whole, every cosmetic edit would raise the
+      warning, and a warning that keeps proving false gets skimmed past.
+    - **An answer that isn't the document is a warning too**, a 404 say, since the URL is the
+      client's identity. A fetch that can't complete is a note: it says nothing about the
+      document.
+    - **It follows no redirect.** The draft forbids an authorization server to follow one
+      when it fetches a document (-02, §5), so a redirect is an answer that isn't the
+      document.
+    - **A Cloudflare challenge is a fetch that can't complete.** Claude's documents sit behind
+      Cloudflare, which has answered fetches from some datacenters with a 403 challenge page
+      (`anthropics/claude-ai-mcp#650`), and Linode is a datacenter. So a 403 carrying
+      `cf-mitigated: challenge` is a note.
+    - **`deploy/deploy.sh` runs it on every deploy**, once the new build answers, and prints
+      what it finds without failing the deploy. Nothing else would run it, there being no CI
+      or cron, and drift would otherwise first show as claude.ai failing to connect.
+- **Claude Code's published identity**, `https://claude.ai/oauth/claude-code-client-metadata`,
+  pinned the same way and checked by the same script. It is a public client whose redirect
+  URIs are `http://localhost/callback` and `http://127.0.0.1/callback`, on any port. Claude
+  Code uses it when a person signs in to the server with `/mcp`, instead of configuring §5's
+  header.
+  - **Its connections are `other`, never `claude-code`.** Any program on the machine can answer
+    a loopback redirect, so a claim to be Claude Code can't be checked, and such a connection
+    lists neither `edit_link` nor `edit_file`. A session connected this way renames a link or
+    a file in the UI, or through the header (§5).
+  - **The consent page warns** that the connection goes to a program on the person's own
+    computer, and to approve it only if they started it from Claude Code. The spec asks for a
+    warning on a client whose redirect URIs are all loopback.
+  - **Its token is stored on the machine**: in `~/.claude/.credentials.json`, mode 0600, on
+    Linux, and in the Keychain on macOS.
+    - A sandboxed command can read that file by default. So the settings that keep §5's token
+      file from the model deny it too, in `sandbox.credentials` and a Read deny rule.
+    - Whether a sandboxed command can read the macOS Keychain isn't documented.
+- **Clients registered by hand**, with `scripts/oauth-client.ts --name=… --redirect-uri=…
+  --kind=claude-ai|other`: a row in `oauth_client`, listed and revoked by the same script.
+  - **The script refuses a redirect URI** that isn't absolute, that has a fragment, or that is
+    plain `http` on any host but a loopback address, as OAuth 2.1 and the MCP spec require. A
+    code sent over plain `http` to another machine can be read on the way.
+  - **claude.ai's fallback.** Its "Use your own OAuth client" option takes such a client's id
+    with the secret left blank. That keeps claude.ai connecting if its published identity
+    stops matching the pin before the pin is fixed.
+  - **Anything else a person wants to connect**, such as the MCP Inspector while testing.
+  - **Revoking a client revokes its connections.**
+- **No dynamic client registration.** claude.ai doesn't need it, and the 2026-07-28 revision
+  deprecates it in favour of CIMD. An open endpoint that writes a row per request would need a
+  rate limit, pruning and a policy on redirect URIs of its own, for nothing the three kinds
+  above don't already cover; claude.ai registers anew on every connection. The metadata lists
+  no `registration_endpoint`.
+- **So Claude Code has three ways in, all allowed:**
+  - **The header (§5)**, for a research project of one's own. Its token is one the operator
+    issues, it can carry `manage` for a person's own token, and nothing in it depends on the
+    proxy or on OAuth.
+  - **Its own identity**, for anyone without shell access to the server. It gets the same
+    `read` bound and the same scoping to one project, but neither `edit_link` nor `edit_file`,
+    and it puts a token on the machine, which the sandbox must deny.
+  - **The claude.ai connection**, through Anthropic's proxy ("What else changes for
+    claude.ai", below). No token is stored on the machine. But it appears in every Claude Code
+    session unless denied by name, it has claude.ai's `read` bound and neither `edit_link` nor
+    `edit_file`, and its allow rules are named `mcp__claude_ai_<Name>__*`.
+- **Nobody issues themselves a header token.** `/dashboard` mints no `mb_` secret ("Seeing and
+  ending a connection", below), and nothing else in the app does either: a header token comes
+  only from the operator's script (§3). What a person can start for themselves is an OAuth
+  connection, by either of the two OAuth ways above, and it reaches them through the consent
+  page, not as a secret to copy.
+
+### Discovery
+
+This is what claude.ai reads before it opens the consent page.
+
+- **One issuer string**: `APP_URL`'s origin, exactly, with no trailing slash. A client compares
+  issuers as strings, and refuses the metadata on any difference. So the resource's
+  `authorization_servers`, the metadata's `issuer` and the `iss` on every authorization response
+  all use that one value: `new URL(APP_URL).origin`, never `.href`, which adds a slash. No
+  document is built from the request's `Host`.
+- **A 401 from either endpoint says where to look.** It is SDK v2's challenge,
+  `bearerAuthChallengeResponse` ("The bearer check", below). `/api/mcp`'s is:
+
+  ```
+  WWW-Authenticate: Bearer error="invalid_token", error_description="Missing Authorization header", scope="read write", resource_metadata="<origin>/.well-known/oauth-protected-resource/api/mcp"
+  ```
+
+  The read-only endpoint's names its own document, and `scope="read"`.
+  - **Every 401 carries `error="invalid_token"`**, a request with no token included. OAuth 2.1
+    §5.3.2 says a request that sent no credential SHOULD get no error code, but v2 has no way
+    to leave it out. Anthropic's connector documentation shows the 401 both ways: with the
+    code in its example of lazy authentication, and without it on its authentication page. A
+    token that was sent and refused gets the code too, and the client refreshes rather than
+    starting over.
+  - **Its body is OAuth's error object**, `{"error":"invalid_token","error_description":…}`, not
+    §4's `{ code, message }`, which is for refusals inside a call.
+  - **It names the scopes**, as the spec asks. Without a scope in the 401 or the resource's
+    metadata, claude.ai has been seen asking for `openid profile email` instead
+    (`anthropics/claude-ai-mcp#1077`).
+  - **The byte routes' 401 is unchanged, and they take no access token.** A grant, not OAuth,
+    is how a shell reaches them (§5), and no shell holds an access token.
+- **v2 serves the three documents**, through `oauthMetadataResponse`, with CORS open as it sets
+  it. Each path is a route handler of its own that hands its request to that one function.
+  - **Each exports `OPTIONS` as well as `GET`.** Next answers a preflight to a route that
+    exports no `OPTIONS` by itself, with an `Allow` header and no CORS headers. A browser
+    client whose request needs a preflight, because it sends a header of its own, could then
+    never read the document.
+- **Each endpoint's metadata** (RFC 9728) is the one v2 builds
+  (`buildOAuthProtectedResourceMetadata`): `resource` is that endpoint's URL,
+  `authorization_servers` the issuer, and `scopes_supported` `read` and `write`, or `read`
+  alone for the read-only endpoint. It has no `bearer_methods_supported`, which RFC 9728 makes
+  optional. v2 serves each at the path its 401 names,
+  `/.well-known/oauth-protected-resource/api/mcp` and
+  `/.well-known/oauth-protected-resource/api/mcp/read`, and nowhere else, so not at the root.
+  A document there would describe the origin rather than an endpoint, and every client reads
+  the 401's pointer first.
+  - **v2 refuses to build it for an `http:` issuer** other than `localhost` or `127.0.0.1`.
+    Slot B's `http://b.localhost` is neither, so `dangerouslyAllowInsecureIssuerUrl` is set
+    exactly when `APP_URL` is `http:`, which no instance's is.
+- **The authorization server's metadata** (RFC 8414) is at
+  `/.well-known/oauth-authorization-server`, passed through by v2 as written and typed as its
+  `OAuthMetadata`. It lists:
+  - the issuer, and the authorization and token endpoints (below);
+  - `code` as the only response type, and `authorization_code` and `refresh_token` as the
+    grants;
+  - `S256` as the only PKCE method, and `none` as the only token-endpoint authentication;
+  - `read`, `write` and `offline_access` as its scopes;
+  - `client_id_metadata_document_supported: true` and
+    `authorization_response_iss_parameter_supported: true`.
+
+  `offline_access` is listed here and nowhere else, as the spec asks. A client that sees it may
+  add it to its request, which changes nothing: a refresh token comes with every grant.
+
+  There is no OpenID configuration: nothing here issues an ID token, and an authorization server
+  needs only one of the two documents.
+- **The endpoints are `/authorize` and `/token`**, the paths the spec's 2025-03-26 revision gave
+  as defaults for a client that finds no metadata. claude.ai has fallen back to
+  `<origin>/authorize` when a server's metadata named an authorization server on another origin
+  (`anthropics/claude-ai-mcp#341`, #706). With the server on the endpoint's own origin, and
+  its endpoints at the defaults, every path claude.ai might take leads to the same place. Both
+  are static routes, so `/[year]` never sees them.
+- **A connector's URL is `<APP_URL>/api/mcp`, or `<APP_URL>/api/mcp/read`, exactly.** The
+  resource's metadata must name the URL the user typed, and claude.ai strips a trailing slash.
+- **No nginx change.** Its `location /` forwards `/.well-known/` to Next, where route handlers
+  under `src/app/.well-known/` answer.
+- **claude.ai caches these documents for about five minutes**, so a change to one takes that
+  long to show.
+
+### The consent page
+
+`/authorize` is a page, not a route under `/api/`, because sign-in returns only to a page
+(`safeCallbackUrl` refuses `/api/`). It checks, in this order:
+
+1. **The client and its redirect URI.** An unknown `client_id`, or a `redirect_uri` that isn't
+   exactly one the client registered, is answered on the page itself and never redirected, or
+   the endpoint would be an open redirector. A loopback redirect URI matches on any port, as
+   OAuth 2.1 requires.
+   - **A request with no `redirect_uri`** takes the client's one registered URI. It is
+     refused on the page when the client has more than one, as Claude Code's identity does,
+     since OAuth 2.1 then requires the parameter (§4.1.1).
+2. **The session.** A signed-out visitor goes to `signInPath()` with the whole authorize URL as
+   the destination, and comes back to it (`check:sign-in`).
+   - **It comes before any refusal that redirects.** OAuth 2.1 requires the person to be
+     authenticated before the server redirects them anywhere (§7.12.2), so that a malformed
+     request can't send a visitor to a client's redirect URI unseen. With every redirect URI
+     pinned or registered by hand the risk is small, and the order costs nothing.
+3. **The rest of the request.** Each of these refusals is redirected back to the client with
+   `error`, `state` and `iss` (RFC 9207):
+   - a `response_type` other than `code`;
+   - no `code_challenge`, or a method other than `S256`. A missing method is refused too,
+     since it would mean `plain`;
+   - a `resource` that isn't one of the two endpoints after canonicalization, or that has a
+     fragment, which RFC 8707 forbids (`invalid_target`). A fragment is refused, never
+     stripped. A request with no `resource` is taken as naming `/api/mcp`.
+
+   A scope other than `read` and `write` is ignored rather than refused: `offline_access`, or
+   whatever a client asks for by mistake.
+4. **The page.** It shows:
+   - the client's name; the host of its `client_id`, when that is a URL; and the host of its
+     redirect URI, where the connection will go. The spec requires the redirect URI's host, and
+     a host is the part of a client's identity that its own document can't make up;
+   - the warning to approve only a connection they have just started themselves, since a link
+     someone else sent would connect that someone's Claude to their account (below);
+   - for a loopback redirect URI, the warning that the connection goes to a program on the
+     person's own computer;
+   - who is signed in, with a way to switch;
+   - the bots that work for them, to choose from, or a sentence saying there are none and that
+     an ADMIN makes one;
+   - which endpoint the connection is for, the full one or the read-only one;
+   - the scopes, with `read` alone chosen ("Whose account");
+   - for Claude's identity, beside each bot that already has a connection through it to this
+     endpoint, that approving replaces that connection ("The token endpoint", below);
+   - what the connection will be able to do, and that `/dashboard` ends it;
+   - Approve and Cancel.
+
+- **The decision posts to `/authorize/decide`**, a route handler answering 303 to the redirect
+  URI. An OAuth response is an HTTP redirect to another origin: a route handler returns one as
+  it is, where a server action's redirect is an instruction the client router turns into one.
+  It works without JavaScript.
+- **It trusts nothing the form sends.**
+  - It refuses an `Origin` that isn't `APP_URL`'s.
+  - It re-parses every parameter through the page's own parse.
+  - It re-checks that the bot works for the person signed in.
+  - A cross-site post carries no session to begin with, since Auth.js's cookie is
+    `SameSite=Lax`.
+- **Approving mints a code**: 32 random bytes, kept as its SHA-256 in
+  `oauth_authorization_code`. The row holds the client, the redirect URI, the challenge, the
+  endpoint, the scopes, the bot and the issuer. A code is good for two minutes, and for one
+  use. Cancel redirects with `access_denied`.
+- **Every request asks.** No consent is remembered, for claude.ai or anyone else. A connection
+  is made rarely, and a remembered one would let a flow someone else started finish without
+  the person seeing what it grants.
+- **The page warns against a flow someone else started.** Every claude.ai user presents
+  Claude's one `client_id` and redirect URI, so an authorize URL begun from someone else's
+  claude.ai account looks exactly like one's own. Approved, its code goes to claude.ai in this
+  person's browser carrying the other account's `state`. Whether claude.ai then refuses it
+  rests on claude.ai tying `state` to the browser session, which MultiBlog can't check. So the
+  page tells everyone, whatever the client, to approve only a connection they have just
+  started themselves.
+- **The page can't be framed.** `next.config.ts`'s `headers()` sends
+  `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` for it, since a
+  framed Approve button is a clickjacking target. Nothing sets either today.
+  - **`/sign-in` gets the same headers**, since a signed-out visitor passes through it on the
+    way to the page, and OAuth 2.1 names the login page beside the authorization page
+    (§7.10).
+- **A content security policy added later must allow the clients' origins in `form-action`**
+  on `/authorize`. Chrome applies `form-action` to a form's redirects as well as to its target.
+
+### The token endpoint
+
+`POST /token` takes a form-encoded body. It answers JSON with `Cache-Control: no-store`, and its
+errors are RFC 6749 §5.2's.
+
+- **`authorization_code`.** The code is claimed in the transaction that uses it, and must be
+  unexpired. It must come with the same client, and `S256(code_verifier)` must equal the
+  challenge. A `resource`, if sent, must be the endpoint the code was issued for, with no
+  fragment, as at `/authorize`. The bot must still work for the issuer, and both accounts must
+  still be live.
+  - **A `redirect_uri` is checked only when it is sent**, and must then be the one the code
+    was issued for. OAuth 2.1 drops the parameter from this request, since PKCE is what binds a
+    code to its client, and a client that follows OAuth 2.1 alone doesn't send it (§10.2). A
+    client that follows OAuth 2.0 does, and has it checked as RFC 6749 asks.
+  - **It creates the connection's row**, with the account, issuer, scopes, client,
+    `oauth_client_id`, endpoint, and a name made from the client and the day.
+  - **A new claude.ai connection replaces the bot's last one.** For Claude's identity, the
+    grant revokes the bot's other connections through it to the same endpoint, from the same
+    issuer. Reconnecting is how claude.ai recovers from most failures, and each reconnect
+    would otherwise leave the old refresh token good for up to 90 days, wherever claude.ai
+    keeps it.
+    - **The consent page says so** before the person approves.
+    - **Claude Code's identity is left alone**, since one person may sign in from more than
+      one machine.
+    - **One bot connected from two claude.ai accounts keeps only the newer connection.** A
+      person who wants both makes a second bot.
+  - **It answers with both tokens**, `token_type: "Bearer"`, which OAuth 2.1 requires,
+    `expires_in` and the granted `scope`.
+  - **A code presented again revokes the row its first use made**, since someone else had it
+    (RFC 6749 §4.1.2), but only when the request is otherwise valid: the same client, and a
+    `code_verifier` that matches. A replay that fails either check is `invalid_grant`, and
+    revokes nothing. Its sender has the code without the verifier, and revoking for that would
+    let anyone who saw a code end the connection (OAuth 2.1 §7.5.3).
+- **`refresh_token`.**
+  - The token must be unexpired and of the same client.
+  - A `resource`, if sent, must be the connection's endpoint, with no fragment, or the
+    refresh is `invalid_target`. The new access token names that endpoint whatever is sent.
+  - Then §3's one check runs on the row, so a refresh can't outlive what a call couldn't, and
+    then the rotation above.
+  - A `scope` asking for more than the row's is refused, and the answer always carries the
+    row's.
+  - A dead refresh token is `invalid_grant`, which is what claude.ai expects.
+- **Any other grant is refused.** That includes the `jwt-bearer` grant Claude's document also
+  lists, presumably for the spec's enterprise-managed authorization extension, which this
+  server doesn't offer.
+- **The rate limit is §4's token bucket, keyed on the connection**, and taken only once a
+  refresh token has resolved to its row. A code needs no bucket: it is good once, and only a
+  person approving on the consent page makes one.
+  - **A code or refresh token that matches no row is refused for the cost of a hash and an
+    index lookup**, as an unknown `mb_` token is at `/api/mcp`, and takes from no bucket.
+  - **Not per client.** Claude's `client_id` is public and comes with no secret. Anyone could
+    keep a bucket keyed on it empty with junk requests, and while they did, every claude.ai
+    connection on the instance would fail to refresh or to connect.
+  - **Not per address** either: all of claude.ai arrives from Anthropic's `160.79.104.0/21`.
+- **Each grant, refresh and revocation logs one line**, beside §4's audit line: the client, the
+  row's prefix, the account and the issuer. A revocation for a replayed token, or for a
+  connection replaced, says so.
+- **Spent rows are pruned as it goes**, at most once an hour: codes a day after they expire,
+  and refresh tokens past their 90 days, except each connection's newest, which dates its lapse
+  (below).
+  - **The pruning runs after the answer is sent**, through Next's `after()`, never before it.
+    claude.ai waits 10 seconds for `/token`'s answer, and a flow whose answer comes later
+    fails even when the token was issued (Anthropic's connector troubleshooting).
+- **CORS is open**, without credentials, on this endpoint and the metadata documents, for a
+  browser client such as the MCP Inspector. Each exports `OPTIONS`, as Discovery says. CORS is
+  never open on the consent page.
+- **There is no revocation endpoint.** Nothing documents claude.ai calling one, and a person
+  revokes on `/dashboard` (below).
+
+### Seeing and ending a connection
+
+- **A Connections card on `/dashboard`** lists the tokens a person issued or acts as: name,
+  client, endpoint, account, scopes, created, last used, and Revoke.
+  - **It offers what claude.ai needs besides a connection**: the skill, as a ZIP to upload, and
+    the paragraph for a Project's instructions ("What the model is told", below).
+  - It is §3's "panel for your own tokens", listing and revoking only. It issues no token:
+    an `mb_` secret stays the script's, and an OAuth connection comes from the consent page.
+  - Revoke re-derives from the session that the viewer is the token's issuer or its account,
+    as every write on the page re-derives its permission.
+  - **A lapsed connection shows as lapsed**, with the day it lapsed and no Revoke, since
+    nothing it holds still works. A connection lapses when its newest refresh token passes its
+    90 days. The lapse writes nothing: a connection's row has no `expires_at` ("The bearer
+    check") and isn't revoked, so its state comes from that refresh token, which the pruner
+    keeps for this. A header token past its `expires_at` shows as expired, as the script
+    already lists one.
+  - It is a plain `<table>`, as Recent docs is ([DASHBOARD.md](DASHBOARD.md)).
+- **The script lists and revokes connections** as it does any token (`create-api-token.ts
+  --list`, `--revoke`), and lists a lapsed one as lapsed.
+- **claude.ai notices a revocation on its next call.** A 401 pauses the call and offers its
+  inline Connect card. It has also been seen reporting a revoked token as "server isn't
+  responding" (#744).
+- **Removing the connector in claude.ai ends nothing here**: the connection lapses with its
+  refresh token.
+
+### What else changes for claude.ai
+
+OAuth gets claude.ai a token. What follows decides how a connection behaves once it has one,
+and the first item decides whether it works at all.
+
+- **claude.ai speaks the 2026-07-28 protocol first, and SDK v1 can't.** claude.ai opens with
+  `server/discover` under `MCP-Protocol-Version: 2026-07-28`. SDK 1.32.1, the newest v1, refuses
+  that header in its transport, before any method runs, with an HTTP 400 and code `-32000`.
+  After that answer, claude.ai has been seen never to list the tools
+  (`anthropics/claude-ai-mcp#1064`, #919). So the server moves to SDK v2 (below).
+- **`read`'s bound depends on the client.**
+  - **The limit.** claude.ai takes a tool result inline up to about 150,000 characters. Past
+    that, with code execution on, it writes the result to the sandbox's files instead. What it
+    does with code execution off isn't documented.
+  - **What it counts isn't documented either**: the text block, the structured content, or
+    both. Counting both would halve the limit.
+  - **So a `claude-ai` token's `whole: true` gets a bound of its own**, which a trial on
+    explore sets under whichever count holds (Testing). The 40,000 default doesn't change.
+  - **claude.ai honors none of Claude Code's `_meta` keys**, `maxResultSizeChars` included
+    (§4).
+- **A call may take 240 seconds** on claude.ai. Nothing measured here comes near that.
+- **`edit_link` and `edit_file` stay a `claude-code` token's**, as §3 and §15 have them, until
+  both keep a history (TODO.md). Once they do, they need no forced prompt, and every client
+  lists them.
+  - **claude.ai's prompt doesn't stand in for Claude Code's.** claude.ai asks before a write or
+    a delete by default, by the category its hints put a tool in. But it lets a person set any
+    tool or category to "Always allow", and Research calls a connector's tools "without
+    further approval" (Anthropic's help center). After either, an instruction planted in text
+    Claude reads could rename a link, reorder or remove its parts, or retitle a file. None of
+    that keeps a history, and removing a part deletes its captured quote.
+  - **Everything else a connection can write can be undone in MultiBlog**: a doc's text
+    reverted, a note's earlier wording kept, a doc, a file, a note or a link deleted, a tag
+    removed (§15).
+  - **Undoing doesn't unsee.** A note on a shared doc, or a tag on a shared object, is visible
+    until someone removes it. That is why Research gets an endpoint with no writes at all
+    ("The read-only endpoint", below), rather than relying on undo.
+- **A deploy that changes the tools reaches claude.ai late, and asks again.**
+  - **A connector can keep an old tool list for hours** after the server's changes, though
+    claude.ai fetches the new one (`anthropics/claude-ai-mcp#1044`).
+  - **A person's "Always allow" is stored per tool**, under its name and a hash of its
+    description and its parameters' descriptions (#1032). So renaming a tool, or rewording
+    its description, asks again for it.
+- **A claude.ai connection follows its account into Claude Code.**
+  - It shows up as a server named `claude.ai <connector name>`, reached through Anthropic's
+    proxy on the same grant, and no token is stored on the machine.
+  - **A server configured at the same URL outranks it**, so §16's project keeps the header.
+  - **Everywhere else, the connector would bring its instructions and tools into every
+    session**, coding included. `deniedMcpServers` in `~/.claude/settings.json`, naming the
+    connector, keeps it out. That is what §16 does for the server by configuring it per
+    project.
+    - **The deny is the one setting that fits.** `/mcp` switches a connector off for one
+      project at a time, and `disableClaudeAiConnectors` switches off every connector at
+      once. The deny names this one, for every project, new ones included, and §16's project
+      entry still brings the server into the research project.
+    - **It names the connector rather than its URL**, since a URL pattern would deny §16's
+      entry too, which points at the same URL.
+    - **It reaches only the sessions that fetch connectors themselves**: the terminal, the
+      IDEs and the Agent SDK. The desktop app hands its local sessions their connectors
+      in-process, and no setting reaches them there.
+
+### What the model is told
+
+claude.ai never passes a server's instructions to its model, on the 2026-07-28 path as on the
+old one (`anthropics/claude-ai-mcp#93`, a wire test with SDK v2 on 2026-10-09). It defers every
+tool of a custom connector, `alwaysLoad` notwithstanding, and shows its model each one as a bare
+name, `mcp__<connector uuid>__<tool>`, with no connector name and no description until a tool
+search loads it (#1105). In that report's three chats that didn't name the connector, the model
+answered from its own knowledge and never called the server. The early trial confirmed #93 and
+#1105, but saw the connector's display name reach the model, which step 3 checks (Open). So
+nothing in §5's instructions reaches claude.ai: whose account a session acts as, the byline's
+order, searching before creating. And `search` and `read`, by name alone, say nothing of
+MultiBlog.
+
+The instructions aren't routed to the model by some other way. Instructions honored in every
+chat where a connector is on would let any server write into those chats' system prompts, which
+raises prompt-injection and context-budget questions, and that is a plausible reason claude.ai
+drops them. So each kind of guidance goes in the narrowest place that still reaches the model
+when it is needed:
+
+- **Names are always present, and say only what a tool is.** About 100 tokens of names is all
+  MultiBlog puts into a chat where its connector is on.
+- **A description loads only when the model picks its tool**, so a chat that never touches
+  MultiBlog sees none. It holds MultiBlog's own fixed text and the two names the token gives,
+  never anything a reader wrote.
+- **What belongs to no one tool is the person's to say**, such as "my research lives in
+  MultiBlog; look there first". It goes in a skill they install, or in a Project's
+  instructions.
+
+**The names:**
+
+- **Every tool's name starts with `multiblog_`.** claude.ai has shown its model a tool's
+  connector three ways this year, as `<display name>:`, then `mcp__<uuid>__`, then
+  `mcp_<hash>_`, and none of those in use now names the connector. So only the tool's own name
+  says where it comes from, which is what Anthropic's tool-use guide asks: "prefix names with
+  the service … especially important when using tool search".
+- **A plain verb and noun**, in the words a person would use.
+- **At most 21 characters.** claude.ai builds each name as `mcp__<connector id>__<tool>`, 43
+  characters before the tool's own. A new chat fails validation when one connector's built
+  name is longer than 64 characters, and the whole session's tool list fails with it
+  (`anthropics/claude-code` #76775 and #60429). Claude Code has an open 64-character cutoff on
+  names built the same way (`anthropics/claude-code#97616`). No dots, and nothing starting
+  with `mcp_`, which has broken requests elsewhere.
+
+| Now | Renamed | Why the verb changes |
+|---|---|---|
+| `search`, `read`, `find_users`, `find_tags`, `create_doc`, `edit_doc`, `create_link`, `edit_link`, `tag`, `untag`, `manage` | the same, after `multiblog_` | — |
+| `download_url`, `upload_url` | `multiblog_download`, `multiblog_upload` | `multiblog_download_url` would take 22 characters, and the pair stays a pair; each description says it answers with a URL |
+| `edit_file` | `multiblog_rename_file` | it only retitles, and "edit" suggests changing the file |
+| `annotate`, `edit_annotation` | `multiblog_add_note`, `multiblog_edit_note` | `multiblog_edit_annotation` would take 25 characters, and "note" is the word the descriptions and a person use |
+| `add_link_parts` | `multiblog_extend_link` | `multiblog_add_link_parts` would take 24 characters |
+
+- **The prefix is added in `server.ts` alone**: where the tools are listed (`definitionOf`) and
+  where `tools/call` looks one up. Inside the code a tool keeps its short name, in `api_write`'s
+  `operation` and in the audit line too. Every name a model reads is the listed one: another
+  tool's name in a description, in the instructions or in an error's message.
+- **`e2e/mcp.ts` adds the prefix too**, so the specs change only where a verb does.
+- **Claude Code shows the prefix twice**, `mcp__multiblog__multiblog_search`, which is harmless.
+  §15's suggested allow rules change once.
+- **Until the rename is built, this document names the tools as they are now**, §21 included.
+
+**The descriptions:**
+
+- **Each leads with the words a person searches by.** claude.ai's tool search matches a
+  description as well as a name, and doesn't read `searchHint` (§15). `multiblog_search`'s, for
+  one, opens "Search MultiBlog, this person's research archive: docs, PDFs, their notes on
+  passages, links, tags, posts, comments and imported Claude chats." A tool's `searchHint`
+  words go into its description as well, and the key stays for Claude Code.
+- **`multiblog_search`'s and `multiblog_create_doc`'s name the actor and the issuer**, in the
+  sentence that opens the instructions today (§5), built per token as the instructions are.
+  One is the tool a session starts with; the other puts names on a byline.
+- **A convention moves to the tool it governs**, where today the instructions alone carry it:
+  - citing by URL, to `multiblog_search` and `multiblog_read`;
+  - `exact=1` whenever the question is whether something exists, to `multiblog_search`;
+  - a summary doc's shape, the prompt quoted at the top, the byline's order and which kind of
+    link for what, to `multiblog_create_doc`;
+  - anchoring a section by its heading and a claim by its sentence, and reusing a link before
+    minting one, to the tools that anchor.
+
+  What `already_done` means is in that error's message already, which arrives when it's needed.
+- **The instructions keep the rest**, for Claude Code, which still reads them: whose account,
+  what the server holds, and to search it first. Claude Code has the server only where the
+  person configured it, in a research project (§16), so there that last is theirs to say too.
+- **Each description stays under 1,200 characters**, held there by a spec as results are held to
+  a budget (§4), with long names for the actor and the issuer. Claude Code cuts one at 2,048.
+- **They follow Anthropic's review criteria for directory connectors**, which a custom connector
+  isn't held to. A description is refused there if it would "interfere with Claude calling
+  other tools", or "direct Claude to pull behavioral instructions from external sources". "Look
+  in MultiBlog first" is that kind of sentence, and it is the person's to say.
+
+**The skill:**
+
+- **A skill the person installs carries the cold start.** claude.ai keeps only a skill's
+  description in context, up to 1,024 characters, and reads its `SKILL.md` once a request
+  matches the description. Anthropic's guidance for connectors says as much: "A connector
+  alone leaves Claude to work out your workflow from tool names. The skill is where you put the
+  sequence, the defaults, and what good output looks like."
+- **It is generated from the instructions' source**, so it moves with the tools. It holds what
+  belongs to no one tool: that the person's research lives in MultiBlog and is searched first,
+  and how a research session goes. Its description says when it applies, in the words a request
+  would use: the person's own notes, docs, PDFs, earlier conversations.
+- **It names no account.** The descriptions do that per token, so one skill serves every bot.
+- **The Connections card offers it as a ZIP**, `multiblog/SKILL.md` inside, which the person
+  uploads under Customize > Skills and turns on ("Seeing and ending a connection").
+- **Skills need code execution.** claude.ai runs them in its sandbox, so "Code execution and file
+  creation" must be on, on a Pro, Max, Team or Enterprise plan. Without it, the card's paragraph
+  for a Project's instructions does the same work in that Project's chats.
+- **A skill added in claude.ai follows the account into Claude Code**, so its description sits
+  in every session there too. It applies only when a request matches it, and the tools it names
+  are the research project's.
+
+### The read-only endpoint
+
+Research is where text from the open web meets a connector's tools, and claude.ai's Research
+calls them "without further approval". Its help center's only advice is "Disable any tools
+that can take write actions", unchanged since before per-tool settings existed. Those settings
+apply to every chat, per connector, and a single chat can only switch a whole connector on or
+off. Whether "Needs approval" or "Blocked" holds inside Research isn't documented. In the early
+trial Research never called the connector at all, so whether this endpoint is needed waits on
+the slice trial (Open).
+
+Servers that write draw the line themselves: GitHub serves a `/readonly` URL, Linear a separate
+`/mcp/readonly`, and Cloudflare offers read-only access at consent, chosen by default. MCP's
+hints, `readOnlyHint` among them, are only hints, which the spec tells a client not to trust
+from a server it doesn't. OpenAI draws the line in its client instead: ChatGPT's deep research
+uses a connector "for read/fetch actions only". A connection with `read` alone already lists no
+write, whatever claude.ai does about approvals. What is missing is a way to choose it per chat,
+since a connection's scopes are fixed when it is made.
+
+- **`/api/mcp/read` is the same server, listing only the `read` scope's tools**: `search`,
+  `read`, `find_users`, `find_tags` and `download_url`, whatever the token allows. Its
+  instructions and descriptions are a read-only token's. A call to any other tool there is
+  refused as one the token doesn't list.
+- **Added as a second claude.ai connector, it is the per-chat switch claude.ai lacks**: the
+  read-only connector on in a Research chat, the full one in an ordinary chat. With both on in
+  one chat, the model would see each read twice under one name, so the two are kept to
+  separate chats, which §16 says once this is built.
+- **It is a resource of its own**, with its own metadata document and 401 (Discovery), and its
+  own connection, made through the same consent page and offered `read` alone. Its access
+  tokens name it as their audience, so `/api/mcp` refuses them ("The bearer check").
+- **A path, not a query string.** RFC 8707 asks that a resource carry no query, and claude.ai
+  compares the resource with the connector's URL exactly.
+- **An `mb_` header token is accepted there too**, listing the reads alone, so Claude Code can be
+  pointed at it for a project that should never write.
+- **The route is `src/app/api/mcp/read/route.ts`**, handing its request to the same handler with
+  the endpoint named. `toolsFor` takes the endpoint beside the token.
+
+### Moving to SDK v2
+
+The server moves from `@modelcontextprotocol/sdk` 1.32.1 to `@modelcontextprotocol/server`
+2.3.1, which exports the types it uses as well. `@modelcontextprotocol/core` supplies only the
+three OAuth schemas (below). v2 serves claude.ai's 2026-07-28 and every 2025-era client from one
+endpoint.
+
+- **Why now.** v1 is the maintenance line. Its README says support for 2026-07-28 "is not
+  planned for v1.x", and v1 gets bug and security fixes for at least six months after v2's
+  release on 2026-07-27, so through about late January 2027.
+- **The SDK is imported in two files, and the change to each is small.**
+  - **`src/lib/mcp/server.ts`** keeps the low-level `Server` rather than `McpServer`, for the
+    reason its header gives: every refusal is a `{ code, message, … }` body (§4). Its two
+    handlers are registered by method name, `'tools/list'` and `'tools/call'`, rather than by
+    zod schema, and take v2's `ctx` where v1 passed `extra`.
+  - **`src/app/api/mcp/route.ts`** runs §3's check, as it does now and from the build's fourth
+    step through v2's bearer check (below), then hands the request to one
+    `createMcpHandler(factory, options)` for the process, passing the token as `authInfo`. Its
+    options are `{ legacy: "stateless", responseMode: "json" }`. The factory builds each
+    request's server from `ctx.authInfo`, whose `extra` carries the authenticated token, and
+    later the endpoint ("The read-only endpoint").
+  - **GET and DELETE keep the route's own handlers**, which answer 405 with `Allow: POST` before
+    any bearer check, as they do now. v2's own 405 has a JSON-RPC body and no `Allow`.
+  - **`responseMode: "json"` makes v2 log a warning** when the handler is created. The handler
+    is made once, at module scope, so the warning prints in `next build` and at each start.
+    It is expected, and the route's comment says so.
+- **No `subscriptions/listen` stream stays open.** v2 holds one only for a notification the
+  server can send, and this server declares no list-changed capability. So every listen gets
+  its acknowledgement and its result and closes at once, and never counts against v2's
+  `maxSubscriptions`, which keeps its default. Checked against 2.3.1: with the cap set to 16,
+  seventeen listens all completed.
+  - **Each listen still costs a bearer check and a server build**, for a client that opens
+    one. Claude Code doesn't: on a 2026-07-28 connection to a server that declares no
+    list-changed capability, 2.1.296 opens none. Nothing documents what claude.ai does; it opened
+    none in the early trial, and the later trials watch for a loop.
+- **The cache hints are set, not left to v2's default.** On the 2026-07-28 leg,
+  `server/discover` and `tools/list` are cacheable results, each carrying a `ttlMs` and a
+  `cacheScope`. Both answers here are per token: the instructions name the actor and the issuer
+  (§5), and the tool list follows the token's client and scopes (§3). A shared cache holding
+  either would hand one person's to another.
+  - **v2 answers `ttlMs: 0` and `cacheScope: "private"` when nothing is set**, but a default
+    can change in a minor release, and nothing here would notice.
+  - **So `buildMcpServer` passes `cacheHints`**, beside the `instructions` that make it
+    necessary: `{ ttlMs: 0, cacheScope: "private" }` for each of the two methods, with a
+    comment saying both answers are per token.
+- **What has been checked**, in a scratch project against 2.3.1 with this shape:
+  - It typechecks under the repo's pinned TypeScript 5.9.3, library checks included. v2 needs
+    Node 20 and zod 4.2 or later, which the repo has.
+  - One endpoint served two clients, with the token reaching the handler both times:
+    - a v2 client negotiating 2026-07-28, which listed the tools and called one;
+    - a bare 2025-era `tools/call`, sent as `e2e/mcp.ts` sends one.
+  - That client read the server's instructions from `server/discover` (`getInstructions()`).
+    `server/discover` and `tools/list` answered `ttlMs: 0` and `cacheScope: "private"` with no
+    `cacheHints`, and a hint changed both.
+  - A route of this shape builds under Next 16.2.11 with Turbopack, and served both clients
+    over HTTP.
+  - **v2 refuses nothing `callTool` returns.** Its `Server` checks a `tools/call` result only
+    against `CallToolResult`'s shape, never against the tool's `outputSchema`. So both of what
+    `callTool` answers on purpose pass, on either leg (`src/lib/mcp/server.ts`): a result
+    outside its schema, which is logged and answered anyway, and an error with no
+    `structuredContent`. A client that has listed the tools refuses the first, v2's as v1's
+    does, and accepts the second.
+  - **The body cap doesn't change.** v2 refuses a body over 4 MiB with a 413 (`-32000`), before
+    any tool runs, and so does v1 today, since the route sets no `maxRequestBodySize`.
+    `create_doc`'s largest Markdown fits, unless its client escapes nearly every character as
+    `\uXXXX`. `edit_doc`'s schema accepts far more than either version takes, which is a gap
+    of its own (TODO.md).
+- **A 2025-era answer is a stream.** `responseMode: "json"` governs the 2026-07-28 leg only.
+  The stateless fallback builds its transport with nothing but `sessionIdGenerator: undefined`,
+  so it answers with `text/event-stream`, one `message` event.
+  - **Claude Code reads either.**
+  - **`e2e/mcp.ts` reads a stream.** `mcpRequest` takes the JSON-RPC response from the event
+    carrying its request's id when the content type is `text/event-stream`, and parses the body
+    whole otherwise.
+  - **Not routing 2025-era requests through a JSON transport of their own.** v2 documents that
+    pattern (`isLegacyRequest`, in front of a strict handler), and it would keep the JSON, at
+    the cost of a second path through the route.
+- **Checked before it merges**, since the scratch project didn't cover them:
+  - the existing `e2e/mcp-*.spec.ts`, changed only in their helper, and one new spec,
+    `e2e/mcp-modern.spec.ts`, driving a 2026-07-28 client (`@modelcontextprotocol/client`, a
+    dev dependency). It asserts that `server/discover` brings the same instructions as
+    `initialize` does for the same token, which `e2e/mcp-read.spec.ts` already checks name the
+    actor and the issuer. It also asserts that `server/discover` and `tools/list` both come
+    back private with a TTL of 0;
+    - **the client is pinned to 2026-07-28**, and the spec asserts the version it negotiated.
+      Left to its default, v2's client negotiates the 2025 protocol (`versionNegotiation`),
+      and the spec would pass while testing the old leg;
+    - **it lists the tools before calling one**, so that the client checks each result
+      against its tool's `outputSchema`, as a v2 client does once it has the list;
+    - **a 2026-07-28 request built by hand carries `Mcp-Method`**, and `Mcp-Name` for a
+      `tools/call`, or v2 refuses it (`-32020`);
+  - Claude Code against the dev server. Since 2.1.274 it asks every HTTP server for
+    2026-07-28 first (2.1.232 where it fetches feature flags), so it takes the new leg.
+    Checked with 2.1.296 and a `headersHelper`: `server/discover`, `tools/list` and a
+    `tools/call`, each under 2026-07-28 with a JSON answer, and no `subscriptions/listen`.
+- **The OAuth work is written against v2.**
+  - **The documents' zod schemas** come from `@modelcontextprotocol/core`:
+    `OAuthMetadataSchema`, `OAuthProtectedResourceMetadataSchema` and `OAuthTokensSchema`.
+    Their types, `OAuthMetadata` among them, come from `@modelcontextprotocol/server`.
+  - **v2's resource-server helpers do the resource side**: `verifyBearerToken` and
+    `bearerAuthChallengeResponse` the bearer check (below), and `oauthMetadataResponse` the
+    documents (Discovery). Discovery is written to what they produce, and the token code
+    already built changes to meet what they require (below).
+  - **v2's authorization-server helpers** live in `@modelcontextprotocol/server-legacy`, which
+    is deprecated and bound to Express, so the authorization server stays hand-written.
+
+### The bearer check, on v2's terms
+
+`/api/mcp` authenticates through v2's own helpers, and what is already built changes to meet
+what they require. It is the fourth step of the build, and nothing after it starts until its
+tests pass (Build order).
+
+- **The gate is `verifyBearerToken`**, with §3's one check as its verifier. A refusal is
+  answered by `bearerAuthChallengeResponse`, whose 401 is Discovery's.
+- **The verifier** takes the bearer value and:
+  - runs §3's one check by the hash, for an `mb_` token;
+  - from the thin slice on, verifies anything else as an access token with `jose`: its
+    signature, its expiry, and an audience that is one of the two endpoints' URLs, which no
+    byte grant or ydoc token has ("A connection", above). Then it runs §3's one check on the
+    row the token names;
+  - throws v2's `OAuthError` with `invalid_token` when either refuses, which v2 answers with
+    the 401;
+  - otherwise reports the token's scopes; `resource`, which is an access token's own audience,
+    or for an `mb_` token the endpoint it was sent to; `expiresAt` (below); `clientId`, a
+    connection's `client_id` or a header token's prefix; and the authenticated token in
+    `extra`, where the factory reads it ("Moving to SDK v2", above).
+- **`expectedResource` is the endpoint's URL**, so v2 refuses an access token made for the
+  other endpoint, as the spec requires. That is what keeps a read-only connection's token out
+  of `/api/mcp`: the verifier accepts either audience, and the endpoint decides. Were the
+  verifier to report the endpoint's URL as a constant, the check could never fail.
+- **The scopes go to the challenge alone.** Given to the verification as `requiredScopes`,
+  `["read", "write"]` would refuse a read-only token with a 403. The tool list is what narrows a
+  token by scope (§3). `bearerAuthChallengeResponse` takes them only to name them in the 401:
+  `read` and `write` at `/api/mcp`, `read` at the read-only endpoint. So the gate is these two
+  calls rather than `requireBearerAuth`, which passes one set of options to both.
+- **Every token has an expiry, because v2 requires one.** `verifyBearerToken` refuses a token
+  whose verifier reports no `expiresAt`, as v1's helper did. An access token reports its JWT's
+  `exp`. A header token reports its row's `expires_at`, and that is where what is built changes:
+  - `issueApiToken` takes `expiresAt` as required, and `create-api-token.ts`'s
+    `--expires-days` defaults to 365, with no way to ask for none;
+  - a migration gives every row without an expiry one 365 days from the migration, so no token
+    already issued is refused when the gate ships;
+  - a CHECK keeps it so: `token_hash IS NULL OR expires_at IS NOT NULL`. A connection's row,
+    with no hash of its own from the thin slice on, has no expiry either, since its access
+    token carries one;
+  - the e2e fixture `createTestApiToken` issues with an expiry;
+  - a header token is re-issued with the script before its year is up, and Claude Code picks
+    up the new file at its next connection (§5).
+- **`/api/mcp`'s 401 changes** from `Bearer realm="multiblog"` and §4's `{ code, message }` to
+  v2's challenge and OAuth's error object (Discovery). The specs assert only its status. The
+  byte routes keep theirs, and `bearerSecret` with them; v2 parses `/api/mcp`'s header itself.
+- **Tested before anything continues:**
+  - unit tests for the verifier's pure half: the `AuthInfo` it reports for an authenticated
+    token, `expiresAt` in seconds included, and a refusal thrown as `OAuthError` with
+    `invalid_token`;
+  - the whole of `e2e/mcp-*.spec.ts` through the new gate. It already refuses no token, an
+    unknown one, and a deleted account's, which stays revoked once the account is restored;
+  - a new spec: a token past its `expires_at`, backdated by a fixture, refused; and the 401's
+    `WWW-Authenticate`, with and without a token sent;
+  - `npx prisma migrate status` clean, and no `api_token` row left with a hash and no expiry;
+  - Claude Code against the dev server, with a header token issued under the new default.
+
+### What it costs
+
+- **Schema:**
+  - new tables `oauth_client`, `oauth_authorization_code` and `oauth_refresh_token`;
+  - `api_token.token_hash` becomes nullable, and `api_token.oauth_client_id` holds the
+    connection's `client_id`. It is no foreign key, since a pinned identity has no row;
+  - `api_token.oauth_resource`, the path of the endpoint a connection is for;
+  - a CHECK that a row is one kind or the other:
+    `(token_hash IS NULL) <> (oauth_client_id IS NULL)`;
+  - a CHECK that a row with a `token_hash` has an `expires_at`, after a migration gives every
+    row without one a year;
+  - `user.works_for_user_id`, with a CHECK that a bot has no password.
+- **About 1,350 lines**, specs aside:
+  - the tools' names and descriptions, the instructions' shared source, and the skill's
+    generator and script (~150);
+  - the read-only endpoint, its document and its tool list (~40);
+  - the discovery documents, which v2 serves (~40);
+  - the consent page and its decision (~250);
+  - the token endpoint with its rotation (~220);
+  - the bearer check on v2's helpers, and the access token (~60);
+  - header tokens' expiry, in the script, `issueApiToken` and the e2e fixture (~20);
+  - bots in the web interface, with their rules in `src/lib/` and the check (~150);
+  - the clients (~60);
+  - the move to SDK v2, with the e2e helper reading a stream (~60);
+  - the per-client bound on `read` (~10);
+  - the Connections card, lapsed connections included (~130);
+  - two scripts, `oauth-client.ts` and `check-oauth-clients.ts`, and the drift check's lines
+    in `deploy.sh` (~140).
+- **One dependency swapped, one added for tests.** `@modelcontextprotocol/sdk` gives way to
+  `@modelcontextprotocol/server` and `@modelcontextprotocol/core`, and
+  `@modelcontextprotocol/client` joins as a dev dependency. Otherwise `jose` signs and verifies,
+  and `node:crypto` hashes.
+
+### Alternatives rejected
+
+- **Another authorization server**, whether a hosted one (Auth0, WorkOS, Stytch) or Keycloak.
+  What a consent decides, which bot and issued by whom, is MultiBlog's, against its own users,
+  and the result has to be an `api_token` row. A hosted one is an outside dependency for each of
+  five instances. Keycloak is a JVM beside Next on a 1–2 GB box (§5's "no sidecar").
+- **`oidc-provider`**, the certified Node provider, and what SDK v2's upgrade guide points an
+  authorization server towards. It is right for a general OpenID provider. But it brings its own
+  Koa stack, interaction flow, storage adapter and token formats, each of which would have to be
+  bridged back to `api_token` and Auth.js, for a subset this small.
+- **`mcp-handler`** covers the resource side only, which v2's own helpers already do.
+- **Auth.js** signs people in to MultiBlog. It authorizes no other client, and stays what the
+  consent page asks "who is this?".
+- **Acting as the person approving.** It is the simplest choice, and the natural reading of
+  OAuth. But everything claude.ai wrote would carry that person's name, and Claude would read
+  with their access (§3, §5).
+- **Step-up authorization**: a 403 with `insufficient_scope` that asks for `write` at the first
+  write, which the spec recommends (SHOULD). Here a token never meets a tool its scopes don't
+  allow, since the list leaves it out, so there is nothing to answer that way: a call naming an
+  unlisted tool is a tool result saying the token has no tool by that name. And `write`
+  granted at a step-up would last as long as the connection, so a later Research run could
+  write anyway. The read-only endpoint does that job per chat.
+- **Writes held for a person to confirm in MultiBlog**, as Stripe holds a refund. It would hold
+  even in Research, but it changes every write path, for what the read-only endpoint already
+  gives.
+- **A read-only mode in the query string**, as Supabase has (`?read_only=true`), for the reason
+  "The read-only endpoint" gives for a path.
+- **A shim on v1** in place of the move: the route answering an `MCP-Protocol-Version` that
+  v1 doesn't know with a 400 carrying `-32022`, after which claude.ai has been seen to fall
+  back to `initialize` on 2025-11-25 (#1110). About 20 lines, but it rests on server logs, not
+  on anything Anthropic has published; it may cost a probe before many calls; and it leaves the
+  server on v1, the maintenance line.
+- **A guide tool** the model calls for the conventions, as Claude Docs has (`guide`).
+  Anthropic's review criteria refuse a description that directs Claude "to pull behavioral
+  instructions from external sources", and Claude Docs is first-party and pairs its tool with
+  a skill. The descriptions and a skill do that work here ("What the model is told").
+
+### Testing
+
+- **Unit tests** (`npm run test:unit`):
+  - PKCE against RFC 7636's own example;
+  - the authorize parse's refusals, each with whether it redirects, a `resource` with a
+    fragment and a missing `redirect_uri` among them;
+  - the canonical resource, for each endpoint;
+  - the rotation, as a function of a row's state: fresh; rotated within two minutes with none
+    of its children spent, answered; rotated within two minutes with a child spent, past the two
+    minutes, or retired by its sibling, each revoking the connection;
+  - the token endpoint's bucket: a refresh's keyed on its connection, and a code or token that
+    matches no row taking from none;
+  - the 401's header at each endpoint, with and without a token sent;
+  - the scopes the page offers: `read` alone chosen, `write` implying `read`, and `read` alone
+    for the read-only endpoint;
+  - the bot rules, as a function of the account's row and its person's: the issuer a token
+    must have, a bot with a password, a person who is a COMMENTER, and a bot that outranks its
+    person;
+  - the tool list at each endpoint for each kind of token: at `/api/mcp`, `edit_link` and
+    `edit_file` for a `claude-code` token alone, and `manage` only for a person's
+    `claude-code` token with the scope; at `/api/mcp/read`, the reads alone, whatever the
+    token's scopes;
+  - an access token refused at the other endpoint, a byte grant and a ydoc token refused as
+    access tokens, and an access token refused as a byte grant and as a ydoc token.
+- **An e2e spec** (`e2e/mcp-oauth.spec.ts`), using Claude's real identity. The spec redeems each
+  code itself, from the `Location` of the decision's 303: claude.ai's callback with the code,
+  read and never followed.
+  - **Approving goes through the real page once.** The signed-in browser opens the authorize
+    URL and clicks Approve. `page.route` holds the form's post to `/authorize/decide`, sends it
+    on with `route.fetch({ maxRedirects: 0 })`, reads `Location` from the answer, and fulfills
+    the page with a stub, so the browser never reaches claude.ai. That exercises the form's
+    hidden fields, and its `Origin` and session cookie as the browser sends them. A route on
+    claude.ai's URL would catch nothing, since Playwright calls a route's handler only for the
+    first URL of a redirect.
+  - **The other cases post the decision directly**, through the request API with the suite's
+    cookie and `maxRedirects: 0`.
+  - **The spec reads the issuer and the endpoint's URL from the documents**, as a client
+    would, and sends them as `Origin` and `resource`; it never computes them. The e2e server's
+    `APP_URL` is its own origin, which `scripts/prod-web.ts` sets, so the documents name the
+    server the spec talks to. The Playwright worker's `appUrl()` reads `.env` instead, which
+    names the dev server, so a value computed in the worker would be wrong.
+    `e2e/invite.spec.ts` meets the same split.
+
+  It covers:
+  - the documents and the 401, at each endpoint;
+  - a signed-out visitor through sign-in and back to the page, and a signed-out visitor's
+    malformed request sent to sign in rather than redirected to the client;
+  - approve, code, token with its `token_type`, then `tools/list` without `edit_link`,
+    `edit_file` or `manage`;
+  - a code redeemed with no `redirect_uri`, and one refused for a `redirect_uri` that isn't
+    its own;
+  - a connection to the read-only endpoint: offered `read` alone, listing the reads alone, and
+    its access token refused at `/api/mcp`;
+  - a second claude.ai connection of the same bot to the same endpoint, revoking the first,
+    and one to the other endpoint, leaving it;
+  - a refresh, and its rotation;
+  - a refresh naming the other endpoint's `resource`, refused;
+  - a replay within the two minutes, answered, even after the new access token has been used;
+  - a replay within the two minutes after the new refresh token has been spent, revoking the
+    connection;
+  - a replay past them, revoking the connection. The rotation is backdated by a fixture rather
+    than waited for;
+  - a token retired by its sibling, presented after the sibling's use, revoking the
+    connection;
+  - Revoke on `/dashboard` refusing the next call;
+  - a replayed code with its verifier, revoking the connection, and one with a wrong verifier,
+    refused with the connection left alone;
+  - an unknown client, and a wrong redirect URI, answered on the page;
+  - Cancel;
+  - a person with no bot;
+  - the frame headers, on the page and on `/sign-in`;
+  - a preflight to `/token` and to each document, answered with CORS headers;
+  - the 2026-07-28 client calling with an access token, as well as the 2025-era helper.
+
+  Claude Code's pinned identity, with its loopback redirect URI on an arbitrary port, covers
+  that path and the page's warning. A client the fixture registers by hand covers that kind.
+- **By hand, on explore, in three trials** (Build order):
+  - **the header trial, after SDK v2 and the renamed tools**, where claude.ai's connector
+    dialog offers request headers, with a token that can only read:
+    - claude.ai on the web and on iOS reaching the endpoint at the path it was given (#382
+      reports `/api/mcp` saved as `/Api/mcp`), negotiating 2026-07-28, listing the tools and
+      calling one;
+    - whether its requests carry a `Content-Type`, without which v2 answers 415 (#1135);
+    - what the model is given: whether the server's instructions reach it (#93), how the tools
+      appear before a tool search (#1105), and whether a question that doesn't name MultiBlog
+      finds them, with the skill turned on and with it off;
+    - whether claude.ai reopens `subscriptions/listen` in a loop;
+    - whether claude.ai builds each tool's name from the connector's display name (Open);
+    - `read` near its bound, to find where claude.ai stops passing a result inline;
+    - Research, with one tool set to "Needs approval" and another to "Blocked", to see whether
+      either setting holds there, if Research calls the connector at all (Open). A token that
+      can only read puts nothing at stake;
+  - **the slice trial**: claude.ai on the web and on iOS connecting through OAuth, listing the
+    tools and calling one, and showing the connector as connected (#1110, Open); whether it
+    reopens `subscriptions/listen` in a loop; and whether Research calls the connector, which
+    step 10 waits on. Without a header trial before it, it also checks what that one would have;
+  - **the full trial, with everything**:
+    - claude.ai on the web and on iOS refreshing after an hour without asking the person to
+      reconnect, a revoke, and a reconnect replacing the connection before it;
+    - the read-only connector beside the full one: a Research run with it alone turned on,
+      calling only the reads;
+    - after a deploy that changes a tool's description, how long claude.ai takes to show it
+      (#1044);
+    - Claude Code signing in through its own identity with `/mcp`, and a sandboxed command
+      refused its token file.
+
+### The early trial
+
+On 2026-10-13 claude.ai was connected to the trial instance, running step 1's build, through
+the request-header beta: a read-only `claude-ai` token acting as its Claude account and issued
+by Luke (TODO.md, "The claude.ai trial: what to undo"). It came before step 2's names, so it
+answers the header trial's questions about the protocol and leaves what the model is told to
+step 3. nginx logged each request to `/api/mcp` with its `MCP-Protocol-Version` and the type of
+its answer (`/etc/nginx/conf.d/mcp-log.conf` there).
+
+- **SDK v2 serves claude.ai.** On the web and on iOS, every connection opened with
+  `server/discover` under 2026-07-28 and was answered in JSON. It listed the tools and called
+  each of them. Nothing was refused but twice by `search`'s own `invalid`, and once a probe
+  from Anthropic's servers without the token, answered 401, after which they looked for OAuth's
+  metadata (a 404, since there is none yet).
+- **The path stayed `/api/mcp`, and every request carried a `Content-Type`** (#382, #1135).
+- **No `subscriptions/listen` was opened**, so there was no loop to find.
+- **The instructions don't reach the model (#93), and before a tool search it has only the
+  names (#1105).** Asked, without calling a tool, whose account the connector acts as, Claude
+  said it couldn't tell: it saw the connector with five tool names, and "their schemas and
+  descriptions aren't loaded".
+- **The connector's display name does reach the model**, which "What the model is told" says it
+  doesn't. A chat knew the connector by its display name, and Research named its tools
+  `mcp__<display name>__search` and so on. Whether claude.ai builds the names from it, or the
+  model only wrote them so, is step 3's to check (Open). The server can't see it: a call names
+  the bare tool.
+- **claude.ai keeps the tool list per connector, not per chat.** A chat that calls no tool sends
+  no request. One that does opens with `server/discover` and calls from the list it holds,
+  whatever the TTL of 0 says: four of eight connections fetched `tools/list` again. That bears
+  on how long a changed description takes to show (#1044, the full trial).
+- **`download_url` was called twice, and nothing fetched the link it answered.**
+- **Research never called the connector.** With `read` on "Needs approval" and `find_tags` on
+  "Blocked", and again with every tool on "Always allow" in a chat that had just used the
+  connector, Research reported it unavailable and sent no request, not even `server/discover`.
+  It knew the tools' names, less the blocked one. So the question is no longer which setting
+  holds in Research but whether Research calls a custom connector at all (Open).
+- **Its largest answer, a `read`, was 69,729 bytes**, far from the bound the header trial looks
+  for. The instance has no doc long enough, so that waits for explore.
+- **Two findings went to TODO.md**: a Markdown read writes `&` as `&amp;` (and an entity in a
+  body's text comes back changed), and `search`'s description should say that a call needs `q`
+  or a filter.
+
+### Build order
+
+What this server can't test locally is whether claude.ai connects to it at all, and an open
+claude.ai bug puts that in doubt (Open). So a thin slice, just enough for claude.ai to connect,
+is built and tried on explore before the rest. Where claude.ai offers request headers, a
+header token tries v2 and the renamed tools there before that, while no OAuth exists yet.
+
+Each step can deploy on its own. The client registry comes with the consent page, in the
+slice, so the slice's metadata advertises CIMD only beside the one identity it pins, Claude's.
+Claude Code's identity is an unknown client until step 9, which costs nothing while Claude Code
+connects by its header. And an instance whose Claude account has no person offers no
+connection at all.
+
+1. **SDK v2**, before any of the OAuth work, and shipped on its own: the two files, `e2e/mcp.ts`
+   reading a stream, the checks above, and the spec with a 2026-07-28 client. That spec checks
+   the instructions and the cache hints here, since this is the first build that answers
+   `server/discover`. The suite as it stands is its proof, and Claude Code keeps working
+   throughout.
+2. **The tools' names and descriptions** ("What the model is told"), shipped on their own:
+   - the `multiblog_` names, added where the tools are listed and looked up, and the six new
+     verbs;
+   - descriptions that lead with what a person searches by and carry the conventions, with
+     `search`'s and `create_doc`'s naming the actor and the issuer;
+   - the instructions cut to what belongs to no one tool, from a source the skill shares;
+   - the skill's generator, and a script that writes its ZIP, so the header trial can try the
+     skill before the Connections card offers it (step 10).
+
+   Its specs: `e2e/mcp.ts` adding the prefix, so the specs change only where a verb does;
+   every listed name within 21 characters; every description within 1,200, with long names
+   for the actor and the issuer; and the instructions within their cap still. The docs that
+   name a tool take the new names in the same change, since they describe what is built:
+   MCP.md, §15's suggested allow rules included, PERMISSIONS.md, PDF_FRAGMENT_LINKS.md and
+   TODO.md.
+3. **The header trial, on explore**, if claude.ai's Add custom connector dialog offers Request
+   headers, a beta only some accounts have (§5). It tries claude.ai against v2 and the renamed
+   tools before any OAuth is built, and checks what Testing lists for it. The early trial has
+   answered its questions about the protocol, on step 1's build.
+   - **The token** acts as Claude's account and is issued by Luke, with `read` alone and the
+     `claude-ai` client, good for a week: `create-api-token.ts --scopes=read --client=claude-ai
+     --expires-days=7`, with the account, the issuer and a name. The connector is added with
+     "No sign-in" and one request header, `Authorization`, whose value includes `Bearer `.
+   - **The skill** is uploaded from step 2's ZIP, with code execution on, for the question that
+     doesn't name MultiBlog.
+   - **It tests nothing of OAuth's**, #1110 included, so the slice and its trial stay.
+   - **Afterwards the token is revoked and the connector removed.** claude.ai can't change a
+     connector's authentication once it is added, so the slice trial adds it anew.
+
+   Without Request headers, the build goes on to step 4, and the slice trial checks what this
+   one would have.
+4. **The bearer check, on v2's terms** ("The bearer check", above): every header token given an
+   expiry, by the migration and the script, and `/api/mcp` authenticating through
+   `verifyBearerToken` and refusing through `bearerAuthChallengeResponse`. Nothing after it
+   starts until the tests listed there pass.
+5. **A thin slice, enough for claude.ai to connect:**
+   - the schema it uses: `oauth_authorization_code` and `oauth_client`; `api_token`'s nullable
+     `token_hash` and its `oauth_client_id`, with the CHECK that a row is one kind or the
+     other; and `user.works_for_user_id`, with the CHECK that a bot has no password. Explore's
+     Claude account gets its person by the one-time update ("Whose account");
+   - Discovery: both documents, and the 401's `resource_metadata`;
+   - the consent page and its decision, bare in what they show (the client's name and the host
+     of its redirect URI, which the spec requires on every consent page; the bot, the scopes,
+     the warning against a flow someone else started, Approve and Cancel) but not in what they
+     check: the client and its redirect URI, the session, the rest of the request, `Origin`,
+     and the frame headers, on the page and on `/sign-in`;
+   - `/token` for the `authorization_code` grant alone, so a connection lasts its access token's
+     hour. Until step 7 the metadata lists neither `refresh_token` nor `offline_access`;
+   - the access token, accepted by the bearer check;
+   - Claude's published identity, pinned. A client registered by hand is a row put in by hand
+     until step 9's script.
+
+   Its e2e: the documents and the 401; approve, code, token, then `tools/list` from both eras'
+   clients; the page naming the client and the host of its redirect URI; and the refusals,
+   redirected and not. A connection needs a bot, so a fixture makes one: an account with no
+   password, working for the suite's user. `createTestUser` always sets a password, which the
+   CHECK refuses on a bot, and step 8's `createAgent` builds on the fixture.
+6. **The slice trial, on explore**: claude.ai on the web and on iOS connects through OAuth,
+   lists the tools and calls one, under 2026-07-28, and shows the connector as connected.
+   Nothing more is built until it does. If claude.ai shows #1110's symptom (Open), a client
+   registered by hand is tried next. It also runs Research with the connector on, since
+   step 10's read-only endpoint is built only if Research calls it.
+7. **Refresh tokens**: `oauth_refresh_token`, the grant with its rotation and its check of
+   `resource`, and `refresh_token` and `offline_access` in the metadata. With them:
+   - a new claude.ai connection replacing the bot's last one, and the consent page saying so
+     ("The token endpoint");
+   - the slice's connections revoked, in the migration that adds the table. They have no
+     refresh token, and a connection's lapse is dated by its newest one ("Seeing and ending a
+     connection"), so they would otherwise show as live for good.
+8. **The rest of bot accounts**:
+   - the web interface that makes bots and moves them to another person, with their rules: no
+     password, a person who has one and isn't a COMMENTER, a role no higher than theirs, and no
+     invite to a bot;
+   - `softDeleteUser` revoking what its user issued;
+   - the works-for rule and the role rule, in §3's check and in `create-api-token.ts`;
+   - no `manage` in a bot's tool list, whatever its token's scopes.
+
+   Its e2e:
+   - `createAgent` (`e2e/mcp.ts`) makes its bot with step 5's fixture, with no password and
+     working for its issuer, or every MCP spec's token is refused. A spec that calls `manage`
+     asks `createAgent` for a person's token instead, issued by the person themselves, since a
+     bot's lists no `manage` (`e2e/mcp-manage.spec.ts`);
+   - a token for a bot, issued by someone it doesn't work for, refused at issue and at a call;
+   - a bot's token refused once its person is demoted below it, or to COMMENTER;
+   - a bot's token with the `manage` scope, listing no `manage`;
+   - the web interface refusing to make a person work for anyone, and to invite a bot.
+
+   It deploys after explore's one-time update (step 5), or the header tokens issued for its
+   Claude account are refused.
+9. **The consent page in full** (the host of the client's `client_id`; who is signed in, with a
+   way to switch; the loopback warning; what the connection can do; the sentence for a person
+   with no bot); **Claude Code's pinned identity**; the drift check over both identities, run
+   by `deploy/deploy.sh`; and `scripts/oauth-client.ts`, which checks each redirect URI.
+10. **The read-only endpoint, the per-client bound on `read`, and the Connections card:**
+    - the read-only endpoint, if the slice trial saw Research call the connector: its route,
+      its document and 401, `toolsFor` taking the endpoint, the second audience, and the
+      consent page offering it `read` alone. A migration adds `api_token.oauth_resource`, set
+      to `/api/mcp` for every connection made before it;
+    - the per-client bound on `read`;
+    - the Connections card, with the endpoint as a column, and the skill and the paragraph for
+      a Project to take.
+11. **The full trial, on explore**, then the other four instances. Those run fb56178, from
+    before the MCP server, so this is also their first deploy of §18's phases 1–4 and every
+    migration those carry. A Claude account there gets its person in the web interface when
+    Claude is first connected, or is made there as a bot.
+12. **The docs**: PERMISSIONS.md's "API tokens" (who connects, as whom, the rules for bots, and
+    the tools each kind of token lists at each endpoint), DASHBOARD.md (the card), DEPLOY.md
+    (the drift check `deploy.sh` runs), §16 (Claude Code's three ways in, claude.ai's two
+    connectors and the skill), and §20 here, for wherever the build departs from this.
+
+Each step ships as §18's phases did: with specs, unit tests and `npm run check`.
+
+### Open
+
+1. **Whether claude.ai treats the connector as signed in at all**
+   (`anthropics/claude-ai-mcp#1110`, open since 2026-10-05). It reports a server shaped much
+   like this one: Claude's published identity, the authorization server on the same host,
+   S256, rotating refresh tokens, stateless JSON responses, and `scope` in the 401. OAuth
+   completes and claude.ai lists the tools with its new token. Yet the connector keeps showing
+   Connect, and no tools load in a chat, under 2026-07-28 and after its fallback to
+   2025-11-25 alike. #1067 shows the same Settings symptom with a client registered by hand,
+   though there the tools did load. The slice trial (Build order) is how this plan finds out
+   whether it happens here, before most of it is built.
+2. **Claude as a confidential client**, should Anthropic make it one. Its documentation says
+   that dynamic registration and a client document both register Claude as a public client. A
+   confidential Claude's document would name a key, and the token endpoint would verify
+   `private_key_jwt` against it (`jose`'s `createRemoteJWKSet`, from the pinned `jwks_uri`).
+   The drift check is what announces the change.
+3. **A revocation endpoint** (RFC 7009), if the full trial shows claude.ai calls one when a
+   connector is removed.
+4. **Whether Research calls a custom connector at all.** In the early trial it never called the
+   header connector, whatever its tools' settings, and reported it unavailable. Either Research
+   leaves out a connector that authenticates by request headers, a beta, or it leaves out
+   custom connectors altogether. The slice trial runs Research against an OAuth connection to
+   tell the two apart. If it calls none, the read-only endpoint has nothing to guard, and
+   step 10 keeps only the per-client bound on `read` and the Connections card.
+5. **Whether a tool's name carries the connector's display name.** The early trial's model knew
+   the connector by its display name, and Research wrote its tools as
+   `mcp__<display name>__search`, where "What the model is told" has a uuid and no name. If
+   claude.ai builds names from the display name:
+   - the `multiblog_` prefix matters less for telling the model where a tool comes from,
+     though a tool search still finds the tools by it;
+   - the 21-character limit, worked out from the 43 characters a uuid's prefix takes, becomes
+     a limit on the display name a person types: 36 characters beside a 21-character tool
+     name, which the Connections card would say.
+
+   The server never sees the built names, so step 3 tells the two apart by the model's own
+   account in a chat and in Research, and by a connector given a display name long enough
+   that its longest built name passes 64 characters, which would fail the session's tool list.
 
