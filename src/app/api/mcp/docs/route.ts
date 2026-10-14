@@ -10,7 +10,7 @@ import { createDocFor } from "@/lib/mcp/doc-writes";
 // (`curl --data-binary @summary.md`), so a draft refined in a local file isn't
 // typed out a second time through the model. It is create_doc's operation —
 // PRIVATE, the byline's choice included — with the `write` scope, through a
-// grant from `upload_url` or the bearer token. The title is `?title=`, or the
+// grant from `upload` or the bearer token. The title is `?title=`, or the
 // file's leading heading as the importer takes it; `?issuerOnly=1` leaves the
 // actor off the byline.
 

@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { onceWithin } from "@/lib/api/idempotency";
 import { LINK_NAME_MAX_LENGTH } from "@/lib/anchored-link-name";
-import { defineTool, objectRef, quoteFields, versionString } from "../tool";
+import { defineTool, listedName, objectRef, quoteFields, versionString } from "../tool";
 import { addLinkPartsFor, createLinksFor, editLinkFor } from "../link-writes";
 
-// docs/MCP.md §10, §15 — create_link, add_link_parts, edit_link.
+// docs/MCP.md §10, §15 — create_link, extend_link, edit_link.
 
 const part = z.strictObject({
   on: objectRef.describe("The doc or PDF the passage is in."),
@@ -20,7 +20,7 @@ export const createLinkTool = defineTool({
   name: "create_link",
   scope: "WRITE",
   description:
-    "Mint anchored links — one /link/<id> URL per citation, each pointing at one or more passages in docs or PDFs, for a summary to cite before it is written. Each part is a passage by quote, as for annotate. Every part is checked first and one that isn't there refuses the call, naming it. Check read's include:[\"links\"] for a link that already anchors a passage before minting another.",
+    `Cite passages: mint anchored links, one /link/<id> URL per citation, each pointing at one or more passages in docs or PDFs, for a summary to cite before it is written. Reuse before minting: ${listedName("read")} with include:["links"] lists the links that already anchor a doc's or PDF's passages. Each part is a passage by quote, copied from a format:"text" read: a section by its heading's text, a claim by its sentence, a long passage by its first and last words (start, end); on a doc, send the read's version. Every part is checked first, and one that isn't there refuses the call, naming it.`,
   input: z.strictObject({
     links: z
       .array(z.strictObject({ name: name.optional(), parts: z.array(part).min(1).max(20) }))
@@ -38,10 +38,10 @@ export const createLinkTool = defineTool({
   },
 });
 
-export const addLinkPartsTool = defineTool({
-  name: "add_link_parts",
+export const extendLinkTool = defineTool({
+  name: "extend_link",
   scope: "WRITE",
-  description: "Add passages, by quote, to the end of a link you minted. Everyone following the link sees them at once.",
+  description: `Extend a link you minted: add passages, by quote as for ${listedName("create_link")}, to the end of its parts. Everyone following the link sees them at once.`,
   input: z.strictObject({
     link: objectRef.describe("The link: its /link/<id> URL or id."),
     parts: z.array(part).min(1).max(20),
@@ -53,7 +53,7 @@ export const addLinkPartsTool = defineTool({
   searchHint: "anchored link add passage part",
   async run(args, ctx) {
     const { idempotencyKey, ...rest } = args;
-    return onceWithin(ctx.token.id, "add_link_parts", rest, idempotencyKey, () => addLinkPartsFor(ctx, rest)) as Promise<never>;
+    return onceWithin(ctx.token.id, "extend_link", rest, idempotencyKey, () => addLinkPartsFor(ctx, rest)) as Promise<never>;
   },
 });
 
@@ -61,7 +61,7 @@ export const editLinkTool = defineTool({
   name: "edit_link",
   scope: "WRITE",
   description:
-    "Rename a link (an empty name un-names it), or remove and reorder its parts by the numbers a read of the link shows you as its creator — order lists every part that remains. A link keeps at least one part. Nothing here keeps history, so each call prompts the person.",
+    "Rename a link you minted (an empty name un-names it), or remove and reorder its parts by the numbers a read of the link shows you as its creator — order lists every part that remains. A link keeps at least one part. Nothing here keeps history, so each call prompts the person.",
   input: z.strictObject({
     link: objectRef.describe("The link: its /link/<id> URL or id."),
     name: name.optional(),

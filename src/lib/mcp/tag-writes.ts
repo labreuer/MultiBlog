@@ -6,7 +6,7 @@ import { tagsForTarget } from "@/lib/tag-data";
 import { tagSlugFromHistory } from "@/lib/tag-slug";
 import { applyTags, mintTag, normalizeTagName, removeTagAssignment } from "@/lib/tag-write";
 import { ApiError, forbidden, invalid, notFound } from "@/lib/api/errors";
-import type { McpContext, ToolResult } from "./tool";
+import { listedName, type McpContext, type ToolResult } from "./tool";
 import { parse, readableDocByParam, readableFileBySlug } from "./resolve";
 import { isViewerFragment } from "./url";
 import { annotationByFragment } from "./read/threads";
@@ -103,7 +103,7 @@ export async function resolveTagTarget(ctx: McpContext, ref: string): Promise<Ta
       throw notFound("Anything with that id");
     }
     default:
-      throw invalid("tag takes a doc, a PDF or file, a post, an annotation (its id or card URL) or a comment (its card URL).");
+      throw invalid(`${listedName("tag")} takes a doc, a PDF or file, a post, an annotation (its id or card URL) or a comment (its card URL).`);
   }
 }
 
@@ -152,7 +152,7 @@ export async function untagFor(ctx: McpContext, input: { target: string; tags: s
       where: { OR: [{ name: { equals: normalizeTagName(ref), mode: "insensitive" } }, { slug: moved ?? ref }] },
       select: { id: true, name: true },
     });
-    if (!tag) throw new ApiError("not_found", `No tag is called "${ref}"; find_tags lists them.`);
+    if (!tag) throw new ApiError("not_found", `No tag is called "${ref}"; ${listedName("find_tags")} lists them.`);
     if (!terms.some((t) => t.id === tag.id)) terms.push(tag);
   }
   const removed: string[] = [];

@@ -6,6 +6,7 @@ import { resolveFileParam } from "@/lib/file-slug";
 import { appUrl } from "@/lib/app-url";
 import type { Actor } from "@/lib/actor";
 import { ApiError, invalid, notFound } from "@/lib/api/errors";
+import { listedName } from "./tool";
 import { parseRef, type ParsedRef } from "./url";
 
 // docs/MCP.md §15 — what a URL or id names, followed through slug history as
@@ -107,7 +108,7 @@ export async function readableFileBySlug(actor: Actor, slugOrId: string): Promis
 export type ResolvedContainer = { kind: "doc"; doc: ResolvedDoc } | { kind: "file"; file: ResolvedFile };
 
 /**
- * A doc or a PDF, by URL or id: what `annotate`, `create_link`, `tag` and
+ * A doc or a PDF, by URL or id: what `add_note`, `create_link`, `tag` and
  * `search`'s `within` take. A bare id is tried as a doc, then as a file.
  */
 export async function readableContainer(actor: Actor, ref: string): Promise<ResolvedContainer> {
@@ -145,7 +146,7 @@ export async function readableFile(actor: Actor, ref: string): Promise<ResolvedF
 /** Refuses a URL that `read` doesn't take, naming the tool that answers it where one does. */
 export function refuseRef(parsed: ParsedRef, ref: string): never {
   if (parsed.kind === "elsewhere") {
-    throw invalid(`${parsed.path} is answered by the \`${parsed.tool}\` tool, not by \`read\`.`);
+    throw invalid(`${parsed.path} is answered by the \`${listedName(parsed.tool)}\` tool, not by \`${listedName("read")}\`.`);
   }
   throw new ApiError("invalid", `${ref} isn't a MultiBlog URL this server reads.`, {
     reads: "/doc/<slug>, /pdf/<slug>, /files/<slug>, /annotations, /link/<id>, a post's path, /post/<id>/edit, /tag/<slug>, /authors/<slug>, or an id",

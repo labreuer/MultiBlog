@@ -7,6 +7,8 @@
 // hit or an earlier result can be passed straight back. A bare id is
 // accepted too, and resolve.ts tries each kind that has one.
 
+import type { ToolName } from "./tool";
+
 export type ParsedRef =
   /** /doc/<slug or id>, with or without /edit. */
   | { kind: "doc"; param: string; fragment: string }
@@ -27,7 +29,7 @@ export type ParsedRef =
   /** Something with no URL of its own: an id, which resolve.ts looks up by kind. */
   | { kind: "id"; id: string }
   /** A URL some other tool answers: `search` for /search and the date archives. */
-  | { kind: "elsewhere"; tool: string; path: string }
+  | { kind: "elsewhere"; tool: ToolName; path: string }
   | { kind: "unknown"; path: string };
 
 /** A cuid, the shape every id here has: lowercase letters and digits, about 25 long. */

@@ -2,16 +2,16 @@ import { z } from "zod";
 import { appUrl } from "@/lib/app-url";
 import { GRANT_PARAM, signByteGrant } from "@/lib/api/grants";
 import { invalid } from "@/lib/api/errors";
-import { defineTool, objectRef } from "../tool";
+import { defineTool, listedName, objectRef } from "../tool";
 import { readableFile } from "../resolve";
 import { minuteOf } from "../shape";
 
-// docs/MCP.md §5 — the byte routes are reached through these, never with the
-// token: each answers a route's URL with a grant good for ten minutes in its
-// query string, and Claude adds the route's own parameters and body and runs
-// curl. So nothing in Claude's shell ever holds the token, and a forced
-// prompt guarding a tool can't be sidestepped by a shell posting the same
-// call itself.
+// docs/MCP.md §5 — download and upload: the byte routes are reached through
+// these, never with the token. Each answers a route's URL with a grant good
+// for ten minutes in its query string, and Claude adds the route's own
+// parameters and body and runs curl. So nothing in Claude's shell ever holds
+// the token, and a forced prompt guarding a tool can't be sidestepped by a
+// shell posting the same call itself.
 //
 // Both change nothing themselves — an upload happens when its bytes arrive —
 // so both are read-only in MCP's sense.
@@ -31,11 +31,11 @@ async function grantedUrl(tokenId: string, route: string): Promise<{ url: string
 
 const urlOutput = z.object({ url: z.string(), expires: z.string(), method: z.string(), usage: z.string() });
 
-export const downloadUrlTool = defineTool({
-  name: "download_url",
+export const downloadTool = defineTool({
+  name: "download",
   scope: "READ",
   description:
-    "A URL, good for ten minutes, for a file's bytes (any file you can read: a PDF, a .docx) or for the export of docs. Fetch it with curl; the token is never needed in a shell. The export: GET with search's filters as query parameters (tags, authors, created_from…, kinds is docs only), or POST a JSON list of doc URLs or ids as {\"docs\": […]}; add format=markdown (default), text or json; catalog=1 answers only each doc's id, slug, title, size and newest version — save it, and Grep it to find docs by title before reading any.",
+    `Download a file's bytes (any PDF or .docx you can read) or an export of docs as a tar: answers with a URL, carrying a grant good for ten minutes, to fetch with curl. The token is never needed in a shell. The export: GET with ${listedName("search")}'s filters as query parameters (tags, authors, created_from…; kinds is docs only), or POST a JSON list of doc URLs or ids as {"docs": […]}; add format=markdown (default), text or json. catalog=1 answers only each doc's id, slug, title, size and newest version: save it, and Grep it to find docs by title before reading any. For a sweep that must read every doc, take the export or its catalog and Grep locally rather than reading each.`,
   input: z.strictObject({
     file: objectRef.optional().describe("The file to download: /pdf/<slug>, /files/<slug> or an id."),
     export: z.boolean().optional().describe("The export route instead of a file."),
@@ -60,11 +60,11 @@ export const downloadUrlTool = defineTool({
   },
 });
 
-export const uploadUrlTool = defineTool({
-  name: "upload_url",
+export const uploadTool = defineTool({
+  name: "upload",
   scope: "WRITE",
   description:
-    "A URL, good for ten minutes, for sending bytes with curl --data-binary: a PDF or a .docx (kind file; add &filename=<name>, and &title= or &issuerOnly=1 as wanted), or a Markdown draft that becomes a doc (kind doc; add &title= unless the file's leading heading is the title, and &issuerOnly=1 to leave yourself off the byline). Either is PRIVATE, like everything you create. Answers with the new file's or doc's URL.",
+    `Upload a PDF or a .docx, or a Markdown draft from a local file that becomes a doc: answers with a URL, carrying a grant good for ten minutes, to send the bytes to with curl --data-binary. The token is never needed in a shell. kind file: add &filename=<name>, and &title= or &issuerOnly=1 as wanted. kind doc: add &title= unless the file's leading heading is the title, and &issuerOnly=1 to leave yourself off the byline; the doc is made as ${listedName("create_doc")} makes one. Either is PRIVATE, like everything you create. The upload answers with the new file's or doc's URL.`,
   input: z.strictObject({
     kind: z.enum(["file", "doc"]).describe("file: a PDF or .docx upload. doc: a Markdown body becoming a doc."),
   }),

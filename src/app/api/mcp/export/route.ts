@@ -7,7 +7,7 @@ import { exportCatalog, exportTar, selectByFilters, selectByList, type ExportFor
 // docs/MCP.md §5, §6 — the export: a tar of docs as files, or with `catalog=1`
 // each doc's id, slug, title, size and newest version, as JSON. `GET` takes
 // search's filters; `POST` a JSON list of doc URLs or ids. The `read` scope,
-// through the bearer token or a grant from `download_url`.
+// through the bearer token or a grant from `download`.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

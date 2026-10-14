@@ -288,7 +288,7 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
 /**
  * One whole document merged into another, top-level block by block — what
  * planEdits does after its Transform, for a caller that has the new document
- * whole: the MCP server's edit_annotation, whose body is short enough to send
+ * whole: the MCP server's edit_note, whose body is short enough to send
  * entire and whose surviving words must still keep their marks.
  */
 export function mergeDoc(old: PMNode, next: PMNode, options: MergeOptions): PMNode {

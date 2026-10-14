@@ -226,7 +226,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   };
 }
 
-/** A file with no pages to read — a .docx: its title, filename, size and tags; its bytes through `download_url`. */
+/** A file with no pages to read — a .docx: its title, filename, size and tags; its bytes through `download`. */
 async function readPlainFile(file: ResolvedFile): Promise<ToolResult> {
   const chips = await tagsForTarget({ kind: "file", id: file.id });
   return {

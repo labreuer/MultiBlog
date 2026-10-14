@@ -586,8 +586,9 @@ unchanged, through the same functions; the scopes only take away.
 
 - **Claude's token never has `manage`**: what it reads includes text other people wrote, and an
   instruction planted there must not change who can see something.
-- **The tools that force a prompt** (`edit_link`, `edit_file`, `manage`) are listed only to a
-  token issued for Claude Code, the one client documented to honor the flag.
+- **The tools that force a prompt** (`edit_link`, `rename_file`, `manage`) are listed only to a
+  token issued for Claude Code, the one client documented to honor the flag. Tools are named
+  here as the code names them; a client lists each with a `multiblog_` prefix (MCP.md §15).
 - **A token is refused once its account or its issuer is deleted**, and soft-deleting an
   account revokes its tokens in the same transaction.
 - **A record** — an imported chat (`doc.record`) — is read-only to `edit_doc` whatever the

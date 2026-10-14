@@ -36,17 +36,17 @@ test("a 2026-07-28 client discovers, lists and calls, and is told to cache nothi
     expect(client.getDiscoverResult()).toMatchObject({ ttlMs: 0, cacheScope: "private" });
     const listed = await client.listTools();
     expect(listed).toMatchObject({ ttlMs: 0, cacheScope: "private" });
-    expect(listed.tools.map((t) => t.name)).toEqual(["search", "read", "find_users", "find_tags", "download_url"]);
+    expect(listed.tools.map((t) => t.name)).toEqual(["multiblog_search", "multiblog_read", "multiblog_find_users", "multiblog_find_tags", "multiblog_download"]);
 
     // Called after the list, so the client holds the result to read's
     // outputSchema, as a v2 client does once it has listed the tools.
-    const read = await client.callTool({ name: "read", arguments: { url: `/doc/${doc.slug}` } });
+    const read = await client.callTool({ name: "multiblog_read", arguments: { url: `/doc/${doc.slug}` } });
     expect(read.isError).toBeFalsy();
     expect(read.structuredContent).toMatchObject({ kind: "doc", id: doc.id });
 
     // A refusal carries text and no structuredContent, which the client
     // accepts from a tool that declares an outputSchema.
-    const refused = await client.callTool({ name: "read", arguments: { url: "/doc/no-such-doc-anywhere" } });
+    const refused = await client.callTool({ name: "multiblog_read", arguments: { url: "/doc/no-such-doc-anywhere" } });
     expect(refused.isError).toBe(true);
     expect(refused.structuredContent).toBeUndefined();
     expect(JSON.parse((refused.content as { text: string }[])[0].text).code).toBe("not_found");

@@ -67,14 +67,21 @@ export async function mcpRequest(
   return { status: res.status(), body };
 }
 
-/** `tools/call`, answered as the model would read it. */
+/** The prefix every listed tool name carries (docs/MCP.md §21, "The names"). */
+export const TOOL_PREFIX = "multiblog_";
+
+/**
+ * `tools/call`, answered as the model would read it. `name` is the tool's
+ * short name, the code's, and the prefix goes on here, so a spec changes
+ * only where a tool's verb does.
+ */
 export async function callTool(
   request: APIRequestContext,
   secret: string,
   name: string,
   args: Record<string, unknown>,
 ): Promise<ToolAnswer> {
-  const { status, body } = await mcpRequest(request, secret, "tools/call", { name, arguments: args });
+  const { status, body } = await mcpRequest(request, secret, "tools/call", { name: `${TOOL_PREFIX}${name}`, arguments: args });
   if (status !== 200 || !body.result) throw new Error(`tools/call ${name} answered ${status}: ${JSON.stringify(body)}`);
   const result = body.result as { isError?: boolean; structuredContent?: Record<string, unknown>; content?: { text: string }[] };
   const text = result.content?.[0]?.text ?? "";
@@ -100,10 +107,15 @@ export type Agent = {
 
 export async function createAgent(
   request: APIRequestContext,
-  opts: { scopes?: ("READ" | "WRITE" | "MANAGE")[]; client?: "CLAUDE_CODE" | "CLAUDE_AI" | "OTHER"; issuerEmail?: string } = {},
+  opts: {
+    scopes?: ("READ" | "WRITE" | "MANAGE")[];
+    client?: "CLAUDE_CODE" | "CLAUDE_AI" | "OTHER";
+    issuerEmail?: string;
+    name?: string;
+  } = {},
 ): Promise<Agent> {
   const email = uniqueEmail("mcp-bot");
-  const user = await createTestUser({ email, name: `E2E Bot ${Math.random().toString(36).slice(2, 7)}`, role: "AUTHOR" });
+  const user = await createTestUser({ email, name: opts.name ?? `E2E Bot ${Math.random().toString(36).slice(2, 7)}`, role: "AUTHOR" });
   const { id, secret } = await createTestApiToken({
     email,
     issuerEmail: opts.issuerEmail ?? ADMIN_EMAIL,

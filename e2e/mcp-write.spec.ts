@@ -65,8 +65,8 @@ test("create_doc: PRIVATE, the actor's text and byline, the title from the leadi
     created.push(String(issuerOnly.result.id));
     expect(issuerOnly.result.byline).toBe("E2E Admin");
 
-    // A Markdown body through upload_url and curl, as a local draft goes up.
-    const upload = await agent.call("upload_url", { kind: "doc" });
+    // A Markdown body through upload and curl, as a local draft goes up.
+    const upload = await agent.call("upload", { kind: "doc" });
     const posted = await request.post(`${upload.result.url}&title=${encodeURIComponent("From a file")}`, {
       data: Buffer.from("A draft refined in a local file."),
       headers: { "Content-Type": "text/markdown" },

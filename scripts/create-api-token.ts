@@ -18,7 +18,7 @@
 // may put on a new doc's byline or a file's owner list.
 //
 // **--client decides which tools the token lists.** Only a `claude-code`
-// token lists the three tools that force a prompt (edit_link, edit_file,
+// token lists the three tools that force a prompt (edit_link, rename_file,
 // manage), since Claude Code is the one client documented to honor the flag;
 // it defaults to `other`.
 //

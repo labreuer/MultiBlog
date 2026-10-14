@@ -1,7 +1,7 @@
 import { authenticateByteRequest, unauthorizedResponse } from "@/lib/api/request-auth";
 import { serveStoredFile } from "@/lib/file-serve";
 
-// docs/MCP.md §5 — a file's bytes for a token, or a grant `download_url`
+// docs/MCP.md §5 — a file's bytes for a token, or a grant `download`
 // minted from one, with the `read` scope. The body is the session route's
 // (src/lib/file-serve.ts): its gate, which answers 404 for a file the reader
 // can't see, and its streaming, Range and ETag.

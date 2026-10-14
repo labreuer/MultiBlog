@@ -3,7 +3,7 @@ import { authenticateSecret, authenticateTokenId, bearerSecret, type Authenticat
 
 // docs/MCP.md §5 — how a byte route knows who is calling: the bearer token,
 // from a program that holds one (a local script refreshing an export), or a
-// grant minted from it by `upload_url` or `download_url`, from a shell that
+// grant minted from it by `upload` or `download`, from a shell that
 // holds nothing. Either way §3's one check runs on the token, so a grant
 // stops working the moment its token or its user does.
 //

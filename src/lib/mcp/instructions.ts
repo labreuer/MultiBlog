@@ -1,16 +1,38 @@
 import { displayNameOf } from "@/lib/display-name";
+import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import type { AuthenticatedToken, TokenPerson } from "@/lib/api/tokens";
+import { listedName, TOOL_PREFIX, type Who } from "./tool";
 
-// docs/MCP.md §5 — the server instructions: the one part of the server every
-// session reads, since Claude Code defers each tool's own description behind
-// its tool search. Claude Code cuts them off at 2,048 characters, so they lead
-// with what matters most and leave each tool's detail to its own description
-// and parameters. A spec holds them under the cap (e2e/mcp-read.spec.ts).
+// docs/MCP.md §5, §21 — the server instructions, and the text they share
+// with the skill (./skill.ts). Claude Code reads the instructions in every
+// session where the server is configured; claude.ai never passes them to its
+// model. So they hold only what belongs to no one tool — whose account, what
+// the server holds, and to search it first — and each tool's conventions are
+// in that tool's description, which both clients show once the tool loads.
 //
-// They name the actor and the issuer, read from the token's two rows, so "my
-// annotations" needs no lookup and a token issued by someone else names them.
+// Claude Code cuts the instructions off at 2,048 characters. A spec holds
+// them under the cap with long names for the actor and the issuer
+// (e2e/mcp-read.spec.ts).
 
 export const INSTRUCTIONS_MAX_CHARS = 2048;
+
+/** What the server holds: the instructions' and the skill's. */
+export const HOLDS =
+  "MultiBlog is a research archive: docs and drafts, PDFs, notes on passages (annotations), anchored links, tags, posts and their comments, and earlier conversations with Claude imported as docs.";
+
+/** When to reach for it: the instructions' and the skill's. */
+export const FIRST =
+  "Search it before researching elsewhere or answering from memory, whenever a question might touch what it holds.";
+
+/** How a research session goes, step by step: the skill's, which the instructions leave to each tool's description. */
+export const SESSION_STEPS = [
+  `**Find.** Start with ${listedName("search")}: words or a phrase, or a filter (kinds, authors, tags, dates) to list what it selects. Pass exact:true when the question is whether something exists.`,
+  `**Read.** ${listedName("read")} takes any URL a hit gives. A long doc answers with its outline; read the sections you need, several reads at once. A doc hit's passage is one read with around set to a phrase from its snippet.`,
+  `**Cite.** Name every source you use by its MultiBlog URL, as search and read give it.`,
+  `**Write up**, when asked, with ${listedName("create_doc")}: the prompt quoted at the top, and each claim linked to the passage behind it.`,
+  `**Mark passages.** ${listedName("add_note")} leaves a note on a passage; ${listedName("create_link")} mints a link to one for a summary to cite, once ${listedName("read")} with include:["links"] shows there is none already.`,
+  `**Act on notes.** When you do what someone's note asks, reply to it with ${listedName("add_note")}: what was done, and a link.`,
+];
 
 function person(p: TokenPerson): string {
   // A nameless account's slug is made from its email (user-slug.ts), so it is
@@ -18,25 +40,22 @@ function person(p: TokenPerson): string {
   return p.name?.trim() ? `${displayNameOf(p)} (author slug ${p.slug})` : displayNameOf(p);
 }
 
-export function instructionsFor(token: AuthenticatedToken): string {
-  const actor = person(token.user);
+/** The token's two people, named as the instructions and the descriptions name them. */
+export function whoFor(token: AuthenticatedToken): Who {
   const sameIssuer = token.issuer.id === token.user.id;
-  const issuer = sameIssuer ? "the same account" : person(token.issuer);
-  const writes = token.scopes.includes("WRITE");
-  const lines = [
-    `MultiBlog: a research archive of docs, PDFs, annotations (notes on passages), anchored links, tags, posts and comments. You act as ${actor}, on a token issued by ${issuer}.`,
-    "Search it before researching elsewhere, and cite what you find by its URL.",
-    "Finding: `search` first. Pass exact=1 whenever the question is whether something exists — otherwise a typo is corrected and reported as corrected:true. A doc hit's passage is one `read` away, `around` a phrase from its snippet.",
-    "Reading: `read` takes any MultiBlog URL. A long doc answers with its outline; read the sections you need. Reads in one turn run in parallel. For a sweep over many docs, take the export or its catalog through `download_url` and curl, and Grep locally.",
-  ];
-  if (writes) {
-    lines.push(
-      `Writing: new docs and files are PRIVATE, with ${sameIssuer ? "you" : "you first and the issuer second"} on the byline${sameIssuer ? "" : ", or the issuer alone when they ask"}. A summary doc opens with the prompt quoted. Link a whole doc as /doc/<slug>, a section with a minted link (create_link), a PDF passage with a fragment link /pdf/<slug>#page=N&text=start,end — fragment links are checked when written.`,
-      "Anchoring: a section by its heading's text, a claim by its sentence, a long passage by its first and last words (start, end). Quote from a `text` read and send its `version`.",
-      "Reuse an existing link (read with include:[\"links\"]) before minting another.",
-      "already_done means the write happened already; to do it again on purpose, pass a new idempotencyKey.",
-      "Files and Markdown drafts go up through `upload_url` and curl --data-binary; nothing in a shell needs the token.",
-    );
-  }
-  return lines.join("\n");
+  return {
+    actor: person(token.user),
+    issuer: sameIssuer ? null : person(token.issuer),
+    issuerOnByline: !sameIssuer && BYLINE_ELIGIBLE_ROLES.includes(token.issuer.role),
+  };
+}
+
+export function instructionsFor(token: AuthenticatedToken): string {
+  const who = whoFor(token);
+  return [
+    `You act as ${who.actor}, on a token issued by ${who.issuer ?? "the same account"}.`,
+    HOLDS,
+    FIRST,
+    `Each ${TOOL_PREFIX}* tool's description carries its own conventions; a session starts with ${listedName("search")} and ${listedName("read")}.`,
+  ].join("\n");
 }

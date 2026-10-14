@@ -7,9 +7,9 @@ import { appOrigin } from "./resolve";
 
 // docs/MCP.md §8 — every fragment link in what the MCP server writes is
 // checked before anything is written: create_doc's body, edit_doc's
-// replacements and appends, and the bodies annotate and edit_annotation
-// write. An agent fixes the quote in the same turn, where otherwise a broken
-// link shows only when someone follows it.
+// replacements and appends, and the bodies add_note and edit_note write. An
+// agent fixes the quote in the same turn, where otherwise a broken link shows
+// only when someone follows it.
 //
 // The check is the integrity script's and the one-quote CLI's
 // (`FragmentChecker`), which reads as the operator — so the file's own read

@@ -48,34 +48,24 @@ test("a token authenticates, names its actor and issuer, and lists only what its
     const instructions = String(init.body.result?.instructions);
     expect(instructions).toContain(`You act as ${reader.user.name}`);
     expect(instructions).toContain("issued by E2E Admin");
-    // Claude Code cuts the instructions at 2,048 characters (§5).
-    expect(instructions.length).toBeLessThanOrEqual(2048);
-    expect(instructions).not.toContain("Writing:");
 
     const readerTools = (await mcpRequest(request, reader.secret, "tools/list")).body.result?.tools as {
       name: string;
       _meta: Record<string, unknown>;
       annotations: Record<string, unknown>;
     }[];
-    expect(readerTools.map((t) => t.name)).toEqual(["search", "read", "find_users", "find_tags", "download_url"]);
-    const read = readerTools.find((t) => t.name === "read")!;
+    expect(readerTools.map((t) => t.name)).toEqual(["multiblog_search", "multiblog_read", "multiblog_find_users", "multiblog_find_tags", "multiblog_download"]);
+    const read = readerTools.find((t) => t.name === "multiblog_read")!;
     expect(read._meta["anthropic/alwaysLoad"]).toBe(true);
     expect(read._meta["anthropic/maxResultSizeChars"]).toBe(200000);
     expect(read.annotations.readOnlyHint).toBe(true);
     expect(read.annotations.openWorldHint).toBe(false);
 
-    const writerInit = await mcpRequest(request, writer.secret, "initialize", {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "e2e", version: "0" },
-    });
-    expect(String(writerInit.body.result?.instructions)).toContain("Writing:");
-    expect(String(writerInit.body.result?.instructions).length).toBeLessThanOrEqual(2048);
     const writerTools = ((await mcpRequest(request, writer.secret, "tools/list")).body.result?.tools as { name: string }[]).map((t) => t.name);
-    expect(writerTools).toContain("upload_url");
+    expect(writerTools).toContain("multiblog_upload");
 
     // A tool the token doesn't list is refused as a tool, not run.
-    const refused = await reader.call("upload_url", { kind: "doc" });
+    const refused = await reader.call("upload", { kind: "doc" });
     expect(refused.isError).toBe(true);
     expect(refused.error.code).toBe("invalid");
   } finally {
@@ -84,12 +74,74 @@ test("a token authenticates, names its actor and issuer, and lists only what its
   }
 });
 
+test("every listed name fits claude.ai's limit, and every description and the instructions fit their caps, with long names", async ({ request }) => {
+  // Long enough that a description which names them twice over would show
+  // it: 64 characters each, where a real name is rarely half that (§21).
+  const longName = (label: string) => `${label} ${"Montgomery-Fitzwilliam Abernathy-Kowalczyk ".repeat(2)}`.slice(0, 64).trimEnd();
+  const issuerEmail = uniqueEmail("mcp-issuer");
+  const issuer = await createTestUser({ email: issuerEmail, name: longName("Issuer"), role: "AUTHOR" });
+  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], client: "CLAUDE_CODE", issuerEmail, name: longName("Actor") });
+  try {
+    const init = await mcpRequest(request, agent.secret, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "e2e", version: "0" },
+    });
+    const instructions = String(init.body.result?.instructions);
+    expect(instructions).toContain(`You act as ${agent.user.name} (author slug ${agent.user.slug})`);
+    expect(instructions).toContain(`issued by ${issuer.name} (author slug ${issuer.slug})`);
+    // Claude Code cuts the instructions at 2,048 characters (§5).
+    expect(instructions.length).toBeLessThanOrEqual(2048);
+
+    const tools = (await mcpRequest(request, agent.secret, "tools/list")).body.result?.tools as { name: string; description: string }[];
+    // Every tool, since this token's scopes and client list them all.
+    expect(tools.map((t) => t.name)).toEqual([
+      "multiblog_search",
+      "multiblog_read",
+      "multiblog_find_users",
+      "multiblog_find_tags",
+      "multiblog_download",
+      "multiblog_upload",
+      "multiblog_create_doc",
+      "multiblog_edit_doc",
+      "multiblog_rename_file",
+      "multiblog_add_note",
+      "multiblog_edit_note",
+      "multiblog_create_link",
+      "multiblog_extend_link",
+      "multiblog_edit_link",
+      "multiblog_tag",
+      "multiblog_untag",
+      "multiblog_manage",
+    ]);
+    for (const tool of tools) {
+      // claude.ai's built name, mcp__<connector id>__<tool>, takes 43
+      // characters before the tool's own and fails past 64 (§21).
+      expect(tool.name, tool.name).toMatch(/^multiblog_[a-z_]+$/);
+      expect(tool.name.length, tool.name).toBeLessThanOrEqual(21);
+      expect(tool.description.length, tool.name).toBeLessThanOrEqual(1200);
+      // Another tool is named as it is listed, never by its short name.
+      for (const mention of tool.description.match(/\bmultiblog_[a-z_]+/g) ?? []) {
+        expect(tools.map((t) => t.name), `${tool.name} names ${mention}`).toContain(mention);
+      }
+    }
+    const description = (name: string) => tools.find((t) => t.name === name)!.description;
+    for (const name of ["multiblog_search", "multiblog_create_doc"]) {
+      expect(description(name)).toContain(agent.user.name);
+      expect(description(name)).toContain(issuer.name);
+    }
+  } finally {
+    await agent.dispose();
+    await deleteTestUser(issuerEmail);
+  }
+});
+
 test("a deleted account's token and its grants stop working, and restoring the account brings neither back", async ({ request }) => {
   const agent = await createAgent(request);
   const file = await createTestFile({ ownerEmail: agent.user.email });
   try {
     expect((await agent.call("search", { q: "anything", exact: true })).isError).toBe(false);
-    const grant = await agent.call("download_url", { file: `/pdf/${file.slug}` });
+    const grant = await agent.call("download", { file: `/pdf/${file.slug}` });
     expect(grant.isError).toBe(false);
     const url = String(grant.result.url);
     expect((await request.get(url)).status()).toBe(200);
@@ -404,7 +456,7 @@ test("a tag reads with what carries it, and keeps reading under a past slug", as
   }
 });
 
-test("download_url: a file's bytes and the export, through a grant and never the token", async ({ request }) => {
+test("download: a file's bytes and the export, through a grant and never the token", async ({ request }) => {
   const agent = await createAgent(request, { scopes: ["READ"] });
   const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
   const tag = await createTestTag({ creatorEmail: ADMIN_EMAIL });
@@ -412,7 +464,7 @@ test("download_url: a file's bytes and the export, through a grant and never the
   try {
     await tagWithTestTag({ tagId: tag.id, target: { kind: "doc", id: doc.id }, taggerEmail: ADMIN_EMAIL });
 
-    const download = await agent.call("download_url", { file: `/pdf/${file.slug}` });
+    const download = await agent.call("download", { file: `/pdf/${file.slug}` });
     const bytes = await request.get(String(download.result.url));
     expect(bytes.status()).toBe(200);
     expect(bytes.headers()["content-type"]).toBe("application/pdf");
@@ -421,7 +473,7 @@ test("download_url: a file's bytes and the export, through a grant and never the
     const elsewhere = String(download.result.url).replace(`/api/mcp/files/${file.id}`, "/api/mcp/files/cnotthisfile0000000000000");
     expect((await request.get(elsewhere)).status()).toBe(401);
 
-    const exportUrl = String((await agent.call("download_url", { export: true })).result.url);
+    const exportUrl = String((await agent.call("download", { export: true })).result.url);
     const catalog = await request.get(`${exportUrl}&catalog=1&tags=${tag.slug}`);
     expect(catalog.status()).toBe(200);
     const entries = (await catalog.json()).docs as { id: string; slug: string; version: string; chars: number }[];

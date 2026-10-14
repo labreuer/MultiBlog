@@ -9,7 +9,7 @@ import { ApiError } from "./errors";
 // header to resend and no reason to keep a random key.
 //
 // - **It covers only the writes that add something**: create_doc, both
-//   upload routes, annotate, create_link, add_link_parts and edit_doc. Every
+//   upload routes, add_note, create_link, extend_link and edit_doc. Every
 //   other write changes nothing more when repeated, so a repeat simply runs.
 // - **The key is a hash of the operation and its canonical arguments**,
 //   unique under the token, or of a caller's own `idempotencyKey`, which is

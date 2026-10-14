@@ -10,7 +10,7 @@ import { setAnnotationDeleted } from "@/lib/annotation-manage";
 import { setLinkDeleted } from "@/lib/anchored-link-write";
 import { displayNameOf } from "@/lib/display-name";
 import { invalid, notFound } from "@/lib/api/errors";
-import { defineTool, objectRef, type McpContext, type ToolResult } from "../tool";
+import { defineTool, listedName, objectRef, type McpContext, type ToolResult } from "../tool";
 import { parse } from "../resolve";
 import { isViewerFragment } from "../url";
 import { annotationByFragment } from "../read/threads";
@@ -34,13 +34,13 @@ const input = z.strictObject({
   target: objectRef.describe("The doc, file, post, annotation or link to change."),
   visibility: z.enum(["PRIVATE", "SHARED"]).optional().describe("A doc's or file's."),
   slug: z.string().min(1).max(200).optional().describe("A doc's or file's."),
-  byline: people.optional().describe("A doc's whole byline, in order, as user ids from find_users."),
-  owners: people.optional().describe("A file's whole owner list, in order, as user ids from find_users."),
+  byline: people.optional().describe(`A doc's whole byline, in order, as user ids from ${listedName("find_users")}.`),
+  owners: people.optional().describe(`A file's whole owner list, in order, as user ids from ${listedName("find_users")}.`),
   allowRemovals: z
     .boolean()
     .optional()
     .describe("Let byline or owners leave someone off — which takes away their access to a PRIVATE doc or file."),
-  record: z.boolean().optional().describe("Whether a doc is a record (an imported chat), which edit_doc refuses."),
+  record: z.boolean().optional().describe(`Whether a doc is a record (an imported chat), which ${listedName("edit_doc")} refuses.`),
   tags: z.array(z.string().min(1).max(80)).min(1).max(20).optional().describe("Terms to put on a published or scheduled post."),
   delete: z.boolean().optional().describe("Soft-delete it."),
   restore: z.boolean().optional().describe("Restore a soft-deleted one."),
@@ -215,8 +215,7 @@ async function managedAnnotation(ctx: McpContext, ref: string): Promise<string |
 export const manageTool = defineTool({
   name: "manage",
   scope: "MANAGE",
-  description:
-    "Change who can see or reach something, or take it away: a doc's or file's visibility and slug; a doc's byline or a file's owners (ordered user ids from find_users; allowRemovals to leave someone off, which takes a PRIVATE one away from them); whether a doc is a record; tags on a published or scheduled post; delete or restore a doc, file, annotation or link. Each call prompts the person, whatever their settings. Prefer leaving these to a person in MultiBlog itself.",
+  description: `Manage who can see or reach something, or take it away: share or make private a doc or file (its visibility), change its slug, a doc's byline or a file's owners (ordered user ids from ${listedName("find_users")}; allowRemovals to leave someone off, which takes a PRIVATE one away from them); mark a doc a record; tag a published or scheduled post; delete or restore a doc, file, annotation or link. Each call prompts the person, whatever their settings. Prefer leaving these to a person in MultiBlog itself.`,
   input,
   output: z.looseObject({ changed: z.array(z.string()) }),
   readOnly: false,
@@ -239,7 +238,7 @@ async function runManage(ctx: McpContext, args: Args): Promise<ToolResult> {
     return { url: `/link/${id}`, changed: [args.delete ? "deleted" : "restored"] };
   }
   if (parsed.kind === "post" || parsed.kind === "post-id") {
-    if (parsed.fragment) throw invalid("manage tags a post itself, not a comment on it.");
+    if (parsed.fragment) throw invalid(`${listedName("manage")} tags a post itself, not a comment on it.`);
     onlyFieldsFor("post", args);
     const resolved = await resolveTagTarget(ctx, args.target);
     const result = await tagFor(ctx, resolved, args.tags!);
@@ -281,5 +280,5 @@ async function runManage(ctx: McpContext, args: Args): Promise<ToolResult> {
     }
     throw notFound(parsed.kind === "doc" ? "That doc" : "Anything with that id");
   }
-  throw invalid("manage takes a doc, a file, a post, an annotation (its id or card URL) or a link.");
+  throw invalid(`${listedName("manage")} takes a doc, a file, a post, an annotation (its id or card URL) or a link.`);
 }

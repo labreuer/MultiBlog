@@ -1,8 +1,9 @@
 # MultiBlog — an MCP server for machine clients
 
 **Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
-annotations, anchored links, tags, uploads and `manage`. Not built: OAuth and the move to SDK
-v2, so claude.ai can't connect yet (phase 5, planned in §21), and passage-level tags (phase
+annotations, anchored links, tags, uploads and `manage`. Not built: OAuth, so claude.ai can't
+connect yet (phase 5, planned in §21, whose first two steps are built: the move to SDK v2, and
+the tools' names and descriptions with a skill for claude.ai), and passage-level tags (phase
 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
 every such point is decided there rather than here. §21 is the plan for OAuth and SDK v2.
 
@@ -248,7 +249,7 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
 - **One endpoint, and tools rather than paths.** `/api/mcp` serves every operation as a tool
   (§15). A client reads the tools' schemas afresh each session, so a tool can change shape
   without a version number. What has to stay in step with the tools is §5's server
-  instructions, and they ship with the same code.
+  instructions and §21's skill, and both ship with the same code.
 - **Objects are named by URL or by id**, in every tool. A URL may carry a past slug: every
   kind with slug history is followed through it, as its own reading route follows it (§15).
 - **Errors** are tool results with `isError` set and a body of `{ code, message, … }`:
@@ -276,9 +277,9 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
   times out and retries would otherwise make a second doc, a second link or a second append,
   and through MCP it has no header to resend and no reason to keep a random key.
   - **It covers only the writes that add something**: `create_doc`, both upload routes,
-    `annotate`, `create_link`, `add_link_parts`, and `edit_doc`, whose appends and insertions
+    `add_note`, `create_link`, `extend_link`, and `edit_doc`, whose appends and insertions
     add text. Every other write changes nothing more when repeated (`tag`, `untag`,
-    `edit_file`, `edit_link`, `edit_annotation`, `manage`), so a repeat of one simply runs:
+    `rename_file`, `edit_link`, `edit_note`, `manage`), so a repeat of one simply runs:
     tag, untag and tag again leaves the tag on.
   - **Each covered write is a row in `api_write`**, under its token and a key (the schema
     below).
@@ -444,7 +445,7 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
   - `/api/mcp/export` answers with a tar of docs as files, or with `catalog`, each doc's id,
     slug, title, size and `version` (§6). It takes `search`'s filters as a `GET`, or a list of
     ids or URLs as a `POST`, with the `read` scope.
-  - Each takes a grant from `upload_url` or `download_url` (§15), or the endpoint's bearer
+  - Each takes a grant from `upload` or `download` (§15), or the endpoint's bearer
     token from a program that holds one, such as a local script that refreshes an export.
     Nothing else under `/api/mcp` answers outside MCP.
   - **A grant stands in for the token on one route, for ten minutes.** The tool answers with
@@ -537,52 +538,64 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     row is reached through an hour's access token and a rotating refresh token: OAuth is a way
     of issuing rows in that table, not a second auth system.
   - **Its tokens are issued for `claude-ai`**, which sets `read`'s bound for claude.ai (§21).
-    They list neither `edit_link` nor `edit_file`, whose forced prompt only Claude Code honors
+    They list neither `edit_link` nor `rename_file`, whose forced prompt only Claude Code honors
     (§15), and never `manage`, which is outside their scopes.
   - **Research gets an endpoint of its own.** claude.ai's Research calls a connector's tools
     without asking, so §21 adds `/api/mcp/read`, which lists only the reads, for a second
     connector that a person turns on there.
-- **Server instructions carry the conventions.** An MCP server returns `instructions` when a
-  client connects, and Claude Code loads them at session start, before any tool's definition,
-  so they also tell Claude when to reach for these tools. Shipped that way they deploy with
-  the code they describe and can't drift from it.
-  - **They are the one part of the server every session reads.** Claude Code defers MCP tools
-    behind its tool search by default, however few a server has: a session sees each tool's
-    name and the instructions, and loads a tool's description and schema when it first needs
-    it. `search` and `read` are the exception (§15, §16).
-  - **Claude Code cuts them off at 2,048 characters**, and each tool's description at the
-    same length. The cap is on the description string alone: a tool's input schema reaches the
-    model whole, so the detail of `read`'s URL forms and options goes on its parameters.
-  - **claude.ai never passes them to its model** (§21). So §21 moves what they say about one
-    tool into that tool's description, and leaves the rest to a skill the person installs.
+- **Server instructions say whose account, and when to reach for the server; each tool's
+  description carries its own conventions.** An MCP server returns `instructions` when a client
+  connects, and Claude Code loads them at session start, before any tool's definition. Shipped
+  that way, they and the descriptions deploy with the code they describe and can't drift from
+  it (`src/lib/mcp/instructions.ts`).
+  - **The instructions are the one part of the server every Claude Code session reads.** Claude
+    Code defers MCP tools behind its tool search by default, however few a server has: a
+    session sees each tool's name and the instructions, and loads a tool's description and
+    schema when it first needs it. `search` and `read` are the exception (§15, §16).
+  - **claude.ai never passes them to its model** (§21), and shows it a tool's description only
+    once the tool is loaded. So a convention about one tool goes in that tool's description,
+    which every client shows when the tool is about to be used, and what belongs to no one
+    tool goes in the instructions for Claude Code and in a skill the person installs for
+    claude.ai (§21, "The skill"). Both are built from the same text.
+  - **Claude Code cuts the instructions off at 2,048 characters**, and each tool's description
+    at the same length. The cap is on the description string alone: a tool's input schema
+    reaches the model whole, so the detail of `read`'s URL forms and options goes on its
+    parameters. §21 holds each description to 1,200.
 
-  So the instructions are short and lead with what matters most:
+  So the instructions are four short lines, the same for every token but the first:
   - whose account the session acts as, and who issued its token (below);
-  - what the server holds, and when to use it;
-  - the conventions for a summary doc: the prompt quoted at the top; Claude first on the
-    byline and the human second, or the human alone when they ask; `/doc/<slug>` for whole
-    docs, minted links for sections, and fragment links for PDF passages (§8);
-  - anchoring a section on its heading's text, a claim on its sentence, and a long passage by
-    its first and last words, quoting from a `text` read (§6, §7);
-  - reusing an existing link before minting another;
-  - searching before creating, with `exact=1` whenever the question is whether something
-    exists (§14);
-  - that `already_done` means the write happened already, and that doing it again on purpose
-    takes an `idempotencyKey` of its own (§4);
-  - the byte routes, through a URL from `upload_url` or `download_url` and then curl: a file up
-    or down, a Markdown draft in, and an export, or its catalog, before a sweep that must read
-    every doc.
+  - what the server holds;
+  - to search it before researching elsewhere or answering from memory;
+  - that each tool's description carries its conventions, and that a session starts with
+    `search` and `read`.
 - **They name the actor and the issuer.** The server is built after the token is checked
   (above), so its instructions can say whose account the session acts as and who issued the
   token, each by name, and by slug when it has a name (§14), read from those two rows. "My
   annotations" then needs no lookup. The names come from the token, not the code: a token
-  issued by someone else names them.
-- **A convention about one tool goes in that tool's description**, under the same cap.
-  `annotate`'s and `edit_doc`'s say that acting on a note means replying to it: what was done,
-  and a link to the passage or the doc it went into (§9). `search`'s says that a doc hit's
-  passage is one `read` away, `around` a phrase from its snippet (§14).
-- **No Claude Code skill is needed.** Everything one would have carried fits in the
-  instructions; a skill earns a place only for steps that depend on the local machine.
+  issued by someone else names them. `search`'s and `create_doc`'s descriptions name them too,
+  for claude.ai.
+- **A convention about one tool goes in that tool's description**, under the same cap:
+  - `search`: a call needs `q` or a filter; `exact` whenever the question is whether something
+    exists; a doc hit's passage is one `read` away, `around` a phrase from its snippet (§14);
+    cite what you use by its URL;
+  - `read`: a long doc's outline first, then the sections needed; several reads in one turn run
+    in parallel; the links into a doc or PDF, to reuse before minting another;
+  - `create_doc`: the byline's order, by name; the prompt quoted at the top of a summary;
+    `/doc/<slug>` for whole docs, minted links for sections and claims, and fragment links for
+    PDF passages (§8);
+  - `add_note`, `create_link` and `extend_link`: a section anchored on its heading's text, a
+    claim on its sentence, a long passage by its first and last words, quoted from a `text`
+    read (§6, §7); `create_link`'s, reusing a link before minting one;
+  - `add_note`'s and `edit_doc`'s: acting on a note means replying to it, saying what was done,
+    with a link to the passage or the doc it went into (§9);
+  - `download`'s and `upload`'s: the byte routes, through curl, and the export or its catalog
+    before a sweep that must read every doc.
+
+  What `already_done` means is in that refusal's message, which arrives when it is needed (§4).
+- **A skill serves claude.ai, not Claude Code.** Claude Code reads the instructions, and a
+  local skill would earn a place only for steps that depend on the local machine. claude.ai
+  reads neither the instructions nor a description before a tool loads, so the skill is how
+  "my research is in MultiBlog; look there first" reaches it (§21, "The skill").
 
 ## 6. Docs, through the collab interface
 
@@ -1147,7 +1160,7 @@ uploading one and editing its metadata.
   none of them. The ADMIN-only bandwidth probe (`?probe=1`) stays in the UI's route.
 - **A .docx is accepted, as `/files` accepts one**, and kept as bytes: it is checked for being
   a zip and never parsed (`src/lib/file-format.ts`), so nothing in it can be searched, read by
-  page or anchored. It is downloaded through `download_url`, and a `read` of it gives its
+  page or anchored. It is downloaded through `download`, and a `read` of it gives its
   title, filename, size and tags.
 - **The file is PRIVATE**, with the actor and the token's issuer as its owners, the actor first,
   or the issuer alone when they ask (§3, §12). The owners are written in the upload's own
@@ -1341,7 +1354,7 @@ That covers every text a call writes:
 
 - `create_doc`'s body;
 - `edit_doc`'s replacements and appends;
-- the bodies that `annotate` and `edit_annotation` write.
+- the bodies that `add_note` and `edit_note` write.
 
 The answers:
 
@@ -1361,7 +1374,7 @@ The answers:
 
 ## 9. Annotations
 
-**One call, `annotate`, creates a LIVE annotation**, root or reply. The UI spreads the same
+**One call, `add_note`, creates a LIVE annotation**, root or reply. The UI spreads the same
 work across a draft, the body's websocket, and Post:
 
 1. **Create.** The extracted creation core makes the row and its body ydoc.
@@ -1411,7 +1424,7 @@ checks read access to the container. The UI checks that only when the draft is c
   Claude's own account is never a recipient, being the poster or at `.invalid`, which
   `sendMail` refuses; the person who issued its token is. What the MCP server writes is LIVE, never RAISED. Resolving a thread, once it
   exists, is a person's act (TODO.md).
-- **Editing a posted body** is one call, `edit_annotation`. It begins an edit session, writes
+- **Editing a posted body** is one call, `edit_note`. It begins an edit session, writes
   the new body through `/admin/annotation-replace`, and finishes the session. Finishing writes
   a new snapshot as the next version, or none if nothing changed. If a step fails, the call
   cancels, putting the last settled body back as the UI's Cancel does.
@@ -1538,7 +1551,7 @@ checks read access to the container. The UI checks that only when the draft is c
   - The tray's `addAnchoredLinkPart` keeps such a part, with an empty quote.
   - The MCP server computes the quote and the quads from the same text, so a mismatch means the two
     normalisers disagree, which is worth surfacing.
-- **A minted link can be added to**, with `add_link_parts`, **and edited**, with `edit_link`.
+- **A minted link can be added to**, with `extend_link`, **and edited**, with `edit_link`.
   - Renaming follows `canUserRenameAnchoredLink`: the creator, or ADMIN/EDITOR once the link is
     minted.
   - Adding, removing and reordering parts are the creator's alone. They work by link id and
@@ -1652,7 +1665,8 @@ checks read access to the container. The UI checks that only when the draft is c
     default order becomes Claude first, to match; the importing account is on it whatever the
     list says, since `insertDocRow` seeds it.
   - **What Claude makes through the MCP server** names Claude first and the user who issued
-    its token second, on a doc's byline and a file's owner list (§5's instructions).
+    its token second, on a doc's byline and a file's owner list (`create_doc`'s description,
+    §5).
   - **Every doc the importer has made names both accounts already**: its default
     `BYLINE_EMAILS` names both, and a source whose byline names a missing account fails before
     anything is created, while the run goes on to the next. Its pass over earlier imports only
@@ -1826,7 +1840,7 @@ So `kinds=docs&authors=<slug>` is "this person's docs", and with the `tags` filt
     link, an agent asks whether one is already there. Without `exact=1`, typo correction
     answers with a near match. `e2e/search.spec.ts`'s absence checks use `exact=1` for the same
     reason.
-  - **The server instructions say so** (§5).
+  - **`search`'s description says so** (§5).
 - **Paging.**
   - **The overview** gives five hits per kind, with each kind's `total`. Then the client pages
     one kind at a time.
@@ -1932,35 +1946,36 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | `read` | read | Any MultiBlog URL (below): whole, as its outline, as a range or `around` a quote; changes `since` a version; and `include` for what hangs off the object, each list paged on its own, threads filtered under `threads` (§6, §9, §10) |
 | `find_users` | read | Byline-eligible users by name or slug, or one by exact email (§12) |
 | `find_tags` | read | Tag terms by name (§11) |
-| `download_url` | read | A URL for a file's bytes or for the export, carrying a grant good for ten minutes (§5) |
-| `upload_url` | write | A URL for uploading a PDF or a .docx, or for creating a doc from a Markdown body, carrying a grant good for ten minutes (§5) |
+| `download` | read | A URL for a file's bytes or for the export, carrying a grant good for ten minutes (§5) |
+| `upload` | write | A URL for uploading a PDF or a .docx, or for creating a doc from a Markdown body, carrying a grant good for ten minutes (§5) |
 | `create_doc` | write | Markdown and a title; the doc is PRIVATE, its byline the actor and then the token's issuer, or the issuer alone (§6, §12) |
 | `edit_doc` | write | Targeted edits, applied word by word, each passage named by its words or by its ends, and the title; reverting one edit, whole or in part (§6) |
-| `edit_file` | write | A file's title (§8) |
-| `annotate` | write | A LIVE annotation, root or reply, anchored by quote or on the whole; never raised or resolved (§9) |
-| `edit_annotation` | write | A posted annotation's body (§9) |
+| `rename_file` | write | A file's title (§8) |
+| `add_note` | write | A LIVE annotation, root or reply, anchored by quote or on the whole; never raised or resolved (§9) |
+| `edit_note` | write | A posted annotation's body (§9) |
 | `create_link` | write | One or more minted links, their parts anchored by quote (§10) |
-| `add_link_parts` | write | More parts on a minted link, anchored by quote (§10) |
+| `extend_link` | write | More parts on a minted link, anchored by quote (§10) |
 | `edit_link` | write | A link's name; removing and reordering its parts (§10) |
 | `tag` · `untag` | write | Apply a term, minting it when it is new, to anything but a published or scheduled post; remove one's own assignment, or anyone's as ADMIN/EDITOR (§11) |
 | `manage` | manage | A doc's or file's visibility, slug, byline or owners, and whether a doc is a record; tagging a published or scheduled post; deleting or restoring a doc, file, annotation or link |
 
-Uploading, downloading and exporting are §5's byte routes, not tools, reached at the URLs
-`upload_url` and `download_url` answer with.
+Uploading, downloading and exporting go through §5's byte routes, not through a tool's
+arguments: `upload` and `download` answer only with a route's URL.
 
-§21 renames every tool for claude.ai, which shows its model a tool's name and nothing of the
-server it comes from: each name gains a `multiblog_` prefix, and six gain a new verb (§21,
-"What the model is told").
+**Every tool is listed with a `multiblog_` prefix**, `multiblog_search` for `search`, since
+claude.ai shows its model a tool's name and nothing of the server it comes from (§21, "What
+the model is told"). This document names each tool as the code does, without it; any text a
+model reads names the listed one.
 
 **Hints.** Every tool carries MCP's annotations, which a client may use to decide how to
 present a call:
 
-- `readOnlyHint: true` on the four reads, and on `upload_url` and `download_url`, which
+- `readOnlyHint: true` on the four reads, and on `upload` and `download`, which
   change nothing themselves: an upload happens when its bytes arrive.
-- `destructiveHint: false` on the writes that only add: `create_doc`, `annotate`,
-  `create_link`, `add_link_parts`, `tag`.
-- `destructiveHint: true` on the writes that overwrite or remove: `edit_doc`, `edit_file`,
-  `edit_annotation`, `edit_link`, `untag`, `manage`.
+- `destructiveHint: false` on the writes that only add: `create_doc`, `add_note`,
+  `create_link`, `extend_link`, `tag`.
+- `destructiveHint: true` on the writes that overwrite or remove: `edit_doc`, `rename_file`,
+  `edit_note`, `edit_link`, `untag`, `manage`.
 - `idempotentHint: true` on every write, since a repeat with the same arguments changes
   nothing more: by the write's nature, or, for one that adds something, because a repeat
   within a day is refused (§4).
@@ -1978,7 +1993,8 @@ and schema when a session first needs it (§5). Two `_meta` keys shape that:
   are then in every session where the server is configured, which is one reason to configure
   it per project (§16).
 - `_meta["anthropic/searchHint"]` on every tool: a few words a tool search matches besides the
-  name, such as "outline section page quote thread link" for `read`.
+  name, such as "outline section page quote thread link" for `read`. claude.ai's tool search
+  doesn't read it, so each description holds the same words, leading with them (§21).
 
 **Forced prompts.** Claude Code doesn't decide its prompts by MCP's hints. What it honors is
 `_meta["anthropic/requiresUserInteraction"]: true` on a tool: it then asks on every call, even
@@ -1988,7 +2004,7 @@ only those:
 
 - `edit_link`: a link's name and part order keep no history, and removing a part deletes its
   anchor row, captured quote and all.
-- `edit_file`: a file's title keeps no history.
+- `rename_file`: a file's title keeps no history.
 - `manage`: an audience that has been widened has already seen the doc, a chip on a public
   post may already be in someone's cache, and someone taken off a PRIVATE byline or owner list
   can't get back in. Its slug changes and soft deletes could be undone, but they share the
@@ -2023,10 +2039,10 @@ restore-to-a-point exists ([DOCS.md](DOCS.md), "Deferred").
   {
     "permissions": {
       "allow": [
-        "mcp__multiblog__search",
-        "mcp__multiblog__read",
-        "mcp__multiblog__find_*",
-        "mcp__multiblog__download_url"
+        "mcp__multiblog__multiblog_search",
+        "mcp__multiblog__multiblog_read",
+        "mcp__multiblog__multiblog_find_*",
+        "mcp__multiblog__multiblog_download"
       ]
     }
   }
@@ -2159,7 +2175,7 @@ Items 1–3 should still be fixed on their own account (TODO.md).
      by both, each tool's hints, loading keys and forced prompt (§15), and the server
      instructions, naming the actor and the issuer (§5).
    - The actor, with an adapter for each shape identity takes today (§1).
-   - `download_url` and its grants, for the export, and an audience on the ydoc token (§5).
+   - `download` and its grants, for the export, and an audience on the ydoc token (§5).
    - Reads, each result lean, with `read` declaring its bound and keeping a smaller default
      (§4):
      - search, behind its strict parse, with one handle on each hit and each doc's size,
@@ -2182,7 +2198,7 @@ Items 1–3 should still be fixed on their own account (TODO.md).
      `doc.record`.
 2. **Doc writes, and notes that need no quote.**
    - Create, PRIVATE, in one transaction, with the author mark, the seed's clients and the
-     byline, from an argument or a Markdown body sent to an `upload_url` (§5); and the
+     byline, from an argument or a Markdown body sent to `upload`'s URL (§5); and the
      fragment-link check on what it writes (§8).
    - The targeted-edit endpoint, on `/admin/doc-apply-update`'s guards and matching before it
      opens, with its word-level diff, annotation marks that follow the words they cover, its
@@ -2207,8 +2223,8 @@ Items 1–3 should still be fixed on their own account (TODO.md).
    URL tools; PDF roots anchored by quote, their quads from `extractPageItems` and
    `quadsForRange`, with the spec that holds each edge within 1pt of a selection (§8); and the
    file half of `manage`, owner changes included (§12).
-5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own. Not
-   built.
+5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own. Its
+   first two steps are built: SDK v2, and the tools' names and descriptions.
 6. **If wanted:** passage-level tags (PLAN.md §20, PR 2). Not built.
 
 Phases 1–4 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
@@ -2291,7 +2307,7 @@ code beside each says why as well.
 
 **Annotations**
 
-- **`edit_annotation` gives new words the actor's mark only once the body has two writers**,
+- **`edit_note` gives new words the actor's mark only once the body has two writers**,
   which is when the editor turns the author mark on (`AnnotationBody`). Nothing backfills the
   first writer's words with a mark when a second arrives, as the editor doesn't either.
 - **A reply's result carries no `version`.** A reply quoting its parent is stamped in the
@@ -2333,9 +2349,23 @@ code beside each says why as well.
 - **A Markdown file's key is its name without its directory.** Two files of one name in
   different directories would be one doc's source; the match refuses a key two docs share.
 
+**Names and descriptions** (§21, step 2)
+
+- **`create_doc`'s description names the issuer only where a new doc's byline takes them.** For
+  a token its actor issued, or an issuer who can't carry a byline, it names the actor alone and
+  says nothing of `issuerOnly`, as `newObjectPeople` decides the byline.
+- **A renamed tool's `api_write` operation is its new name** (`add_note`, `extend_link`), so a
+  retry that straddles the deploy runs again rather than answering `already_done`.
+- **The skill and the instructions have unit tests besides the spec**
+  (`src/lib/mcp/skill.test.ts`): every `multiblog_…` name either mentions is one the server
+  lists, and the skill's name and description pass claude.ai's rules, the description as a
+  plain YAML scalar. The spec checks each description's mentions the same way, over
+  `tools/list`.
+
 ## 21. OAuth, for claude.ai
 
-**Status: planned; the first step, the move to SDK v2, is built** (§18's phase 5). claude.ai's
+**Status: planned; the first two steps, the move to SDK v2 and the tools' names and
+descriptions with the skill, are built** (§18's phase 5). claude.ai's
 custom connectors authenticate with OAuth, short of a request-header beta that serves for a
 trial and not as a connection (§5), so this makes MultiBlog an OAuth authorization server for
 its own MCP endpoint, as small a one as claude.ai needs and the MCP authorization spec allows.
@@ -2512,7 +2542,7 @@ that lists only the reads ("The read-only endpoint").
   hand as claude.ai's fallback (`--kind=claude-ai`, "Which clients", below). It is `other` for
   anything else. OAuth never issues a `claude-code` token, since a client's claim to be Claude
   Code rests on a loopback redirect, which any program on the machine can answer. So no
-  connection lists `edit_link` or `edit_file`, which stay a `claude-code` token's ("What else
+  connection lists `edit_link` or `rename_file`, which stay a `claude-code` token's ("What else
   changes for claude.ai", below), and `manage` is outside every connection's scopes.
 - **Deleting a person revokes the tokens they issued**, in the transaction that revokes their
   own (`softDeleteUser`). §3's check already refuses those tokens, but restoring the account
@@ -2577,7 +2607,7 @@ are three kinds:
   header.
   - **Its connections are `other`, never `claude-code`.** Any program on the machine can answer
     a loopback redirect, so a claim to be Claude Code can't be checked, and such a connection
-    lists neither `edit_link` nor `edit_file`. A session connected this way renames a link or
+    lists neither `edit_link` nor `rename_file`. A session connected this way renames a link or
     a file in the UI, or through the header (§5).
   - **The consent page warns** that the connection goes to a program on the person's own
     computer, and to approve it only if they started it from Claude Code. The spec asks for a
@@ -2607,12 +2637,12 @@ are three kinds:
     issues, it can carry `manage` for a person's own token, and nothing in it depends on the
     proxy or on OAuth.
   - **Its own identity**, for anyone without shell access to the server. It gets the same
-    `read` bound and the same scoping to one project, but neither `edit_link` nor `edit_file`,
+    `read` bound and the same scoping to one project, but neither `edit_link` nor `rename_file`,
     and it puts a token on the machine, which the sandbox must deny.
   - **The claude.ai connection**, through Anthropic's proxy ("What else changes for
     claude.ai", below). No token is stored on the machine. But it appears in every Claude Code
     session unless denied by name, it has claude.ai's `read` bound and neither `edit_link` nor
-    `edit_file`, and its allow rules are named `mcp__claude_ai_<Name>__*`.
+    `rename_file`, and its allow rules are named `mcp__claude_ai_<Name>__*`.
 - **Nobody issues themselves a header token.** `/dashboard` mints no `mb_` secret ("Seeing and
   ending a connection", below), and nothing else in the app does either: a header token comes
   only from the operator's script (§3). What a person can start for themselves is an OAuth
@@ -2891,7 +2921,7 @@ and the first item decides whether it works at all.
   - **claude.ai honors none of Claude Code's `_meta` keys**, `maxResultSizeChars` included
     (§4).
 - **A call may take 240 seconds** on claude.ai. Nothing measured here comes near that.
-- **`edit_link` and `edit_file` stay a `claude-code` token's**, as §3 and §15 have them, until
+- **`edit_link` and `rename_file` stay a `claude-code` token's**, as §3 and §15 have them, until
   both keep a history (TODO.md). Once they do, they need no forced prompt, and every client
   lists them.
   - **claude.ai's prompt doesn't stand in for Claude Code's.** claude.ai asks before a write or
@@ -2973,7 +3003,7 @@ when it is needed:
   names built the same way (`anthropics/claude-code#97616`). No dots, and nothing starting
   with `mcp_`, which has broken requests elsewhere.
 
-| Now | Renamed | Why the verb changes |
+| Before §21 | Listed as | Why the verb changed |
 |---|---|---|
 | `search`, `read`, `find_users`, `find_tags`, `create_doc`, `edit_doc`, `create_link`, `edit_link`, `tag`, `untag`, `manage` | the same, after `multiblog_` | — |
 | `download_url`, `upload_url` | `multiblog_download`, `multiblog_upload` | `multiblog_download_url` would take 22 characters, and the pair stays a pair; each description says it answers with a URL |
@@ -2981,14 +3011,16 @@ when it is needed:
 | `annotate`, `edit_annotation` | `multiblog_add_note`, `multiblog_edit_note` | `multiblog_edit_annotation` would take 25 characters, and "note" is the word the descriptions and a person use |
 | `add_link_parts` | `multiblog_extend_link` | `multiblog_add_link_parts` would take 24 characters |
 
-- **The prefix is added in `server.ts` alone**: where the tools are listed (`definitionOf`) and
-  where `tools/call` looks one up. Inside the code a tool keeps its short name, in `api_write`'s
-  `operation` and in the audit line too. Every name a model reads is the listed one: another
-  tool's name in a description, in the instructions or in an error's message.
+- **The prefix goes on in `server.ts`**: where the tools are listed (`definitionOf`) and where
+  `tools/call` looks one up. Inside the code a tool keeps its short name, one of `TOOL_NAMES`
+  (`src/lib/mcp/tool.ts`), in `api_write`'s `operation` and in the audit line too. Every name a
+  model reads is the listed one: another tool's name in a description, in the instructions, in
+  the skill or in an error's message, each written through `listedName`, which takes only a
+  name in `TOOL_NAMES`.
 - **`e2e/mcp.ts` adds the prefix too**, so the specs change only where a verb does.
 - **Claude Code shows the prefix twice**, `mcp__multiblog__multiblog_search`, which is harmless.
-  §15's suggested allow rules change once.
-- **Until the rename is built, this document names the tools as they are now**, §21 included.
+  §15's suggested allow rules carry it.
+- **This document names each tool by its short name**, the code's, §21 included (§15).
 
 **The descriptions:**
 
@@ -3032,7 +3064,10 @@ when it is needed:
   would use: the person's own notes, docs, PDFs, earlier conversations.
 - **It names no account.** The descriptions do that per token, so one skill serves every bot.
 - **The Connections card offers it as a ZIP**, `multiblog/SKILL.md` inside, which the person
-  uploads under Customize > Skills and turns on ("Seeing and ending a connection").
+  uploads under Customize > Skills and turns on ("Seeing and ending a connection"). Until the
+  card is built, `npx tsx scripts/mcp-skill.ts <out.zip>` writes the same ZIP from a checkout,
+  and `--print` shows its `SKILL.md`. The skill is `src/lib/mcp/skill.ts`, and its ZIP is
+  written by `src/lib/zip.ts`, as `src/lib/tar.ts` writes the export.
 - **Skills need code execution.** claude.ai runs them in its sandbox, so "Code execution and file
   creation" must be on, on a Pro, Max, Team or Enterprise plan. Without it, the card's paragraph
   for a Project's instructions does the same work in that Project's chats.
@@ -3059,7 +3094,7 @@ write, whatever claude.ai does about approvals. What is missing is a way to choo
 since a connection's scopes are fixed when it is made.
 
 - **`/api/mcp/read` is the same server, listing only the `read` scope's tools**: `search`,
-  `read`, `find_users`, `find_tags` and `download_url`, whatever the token allows. Its
+  `read`, `find_users`, `find_tags` and `download`, whatever the token allows. Its
   instructions and descriptions are a read-only token's. A call to any other tool there is
   refused as one the token doesn't list.
 - **Added as a second claude.ai connector, it is the per-chat switch claude.ai lacks**: the
@@ -3113,9 +3148,9 @@ endpoint.
     none in the early trial, and the later trials watch for a loop.
 - **The cache hints are set, not left to v2's default.** On the 2026-07-28 leg,
   `server/discover` and `tools/list` are cacheable results, each carrying a `ttlMs` and a
-  `cacheScope`. Both answers here are per token: the instructions name the actor and the issuer
-  (§5), and the tool list follows the token's client and scopes (§3). A shared cache holding
-  either would hand one person's to another.
+  `cacheScope`. Both answers here are per token: the instructions and two descriptions name the
+  actor and the issuer (§5), and the tool list follows the token's client and scopes (§3). A
+  shared cache holding either would hand one person's to another.
   - **v2 answers `ttlMs: 0` and `cacheScope: "private"` when nothing is set**, but a default
     can change in a minor release, and nothing here would notice.
   - **So `buildMcpServer` passes `cacheHints`**, beside the `instructions` that make it
@@ -3327,7 +3362,7 @@ tests pass (Build order).
     must have, a bot with a password, a person who is a COMMENTER, and a bot that outranks its
     person;
   - the tool list at each endpoint for each kind of token: at `/api/mcp`, `edit_link` and
-    `edit_file` for a `claude-code` token alone, and `manage` only for a person's
+    `rename_file` for a `claude-code` token alone, and `manage` only for a person's
     `claude-code` token with the scope; at `/api/mcp/read`, the reads alone, whatever the
     token's scopes;
   - an access token refused at the other endpoint, a byte grant and a ydoc token refused as
@@ -3356,7 +3391,7 @@ tests pass (Build order).
   - a signed-out visitor through sign-in and back to the page, and a signed-out visitor's
     malformed request sent to sign in rather than redirected to the client;
   - approve, code, token with its `token_type`, then `tools/list` without `edit_link`,
-    `edit_file` or `manage`;
+    `rename_file` or `manage`;
   - a code redeemed with no `redirect_uri`, and one refused for a `redirect_uri` that isn't
     its own;
   - a connection to the read-only endpoint: offered `read` alone, listing the reads alone, and
@@ -3443,7 +3478,7 @@ its answer (`/etc/nginx/conf.d/mcp-log.conf` there).
   no request. One that does opens with `server/discover` and calls from the list it holds,
   whatever the TTL of 0 says: four of eight connections fetched `tools/list` again. That bears
   on how long a changed description takes to show (#1044, the full trial).
-- **`download_url` was called twice, and nothing fetched the link it answered.**
+- **`download` was called twice, and nothing fetched the link it answered.**
 - **Research never called the connector.** With `read` on "Needs approval" and `find_tags` on
   "Blocked", and again with every tool on "Always allow" in a chat that had just used the
   connector, Research reported it unavailable and sent no request, not even `server/discover`.
@@ -3496,8 +3531,8 @@ connection at all.
      `claude-ai` client, good for a week: `create-api-token.ts --scopes=read --client=claude-ai
      --expires-days=7`, with the account, the issuer and a name. The connector is added with
      "No sign-in" and one request header, `Authorization`, whose value includes `Bearer `.
-   - **The skill** is uploaded from step 2's ZIP, with code execution on, for the question that
-     doesn't name MultiBlog.
+   - **The skill** is uploaded from step 2's ZIP (`npx tsx scripts/mcp-skill.ts <out.zip>`),
+     with code execution on, for the question that doesn't name MultiBlog.
    - **It tests nothing of OAuth's**, #1110 included, so the slice and its trial stay.
    - **Afterwards the token is revoked and the connector removed.** claude.ai can't change a
      connector's authentication once it is added, so the slice trial adds it anew.
