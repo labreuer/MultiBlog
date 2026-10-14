@@ -1567,9 +1567,9 @@ open.
 
 ## Remove the `adminInitials` token backfill on or after 2026-11-01
 
-**Status:** waiting on the date. Every instance (thicketry, explore, unchurch, kicking) was
-running PR #52, which put admin initials on the session for the collab caret's flag, by
-2026-10-02. The backfill is removable 30 days after that: **2026-11-01**.
+**Status:** waiting on the date. Every instance was running PR #52, which put admin initials on
+the session for the collab caret's flag, by 2026-10-02. The backfill is removable 30 days after
+that: **2026-11-01**.
 
 `src/lib/auth.ts`'s `jwt` callback has a block that looks up `adminInitials` for a token issued
 before the field existed. It is only there for the changeover. `auth.ts` sets no `maxAge`, so
