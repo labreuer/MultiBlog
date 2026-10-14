@@ -2350,6 +2350,9 @@ the plan leans on (Build order):
   is built, because an open claude.ai bug puts that in doubt (Open);
 - **the full trial**, once everything is built.
 
+An early trial on the same instance, against the move to SDK v2 alone, has answered the header
+trial's questions about the protocol, and raised two of its own ("The early trial").
+
 Claude Code keeps §5's header and its token file. Nothing here changes how it connects: a
 `headersHelper` that supplies `Authorization` takes precedence over OAuth in Claude Code.
 
@@ -2934,9 +2937,11 @@ old one (`anthropics/claude-ai-mcp#93`, a wire test with SDK v2 on 2026-10-09). 
 tool of a custom connector, `alwaysLoad` notwithstanding, and shows its model each one as a bare
 name, `mcp__<connector uuid>__<tool>`, with no connector name and no description until a tool
 search loads it (#1105). In that report's three chats that didn't name the connector, the model
-answered from its own knowledge and never called the server. So nothing in §5's instructions
-reaches claude.ai: whose account a session acts as, the byline's order, searching before
-creating. And `search` and `read`, by name alone, say nothing of MultiBlog.
+answered from its own knowledge and never called the server. The early trial confirmed #93 and
+#1105, but saw the connector's display name reach the model, which step 3 checks (Open). So
+nothing in §5's instructions reaches claude.ai: whose account a session acts as, the byline's
+order, searching before creating. And `search` and `read`, by name alone, say nothing of
+MultiBlog.
 
 The instructions aren't routed to the model by some other way. Instructions honored in every
 chat where a connector is on would let any server write into those chats' system prompts, which
@@ -3041,8 +3046,9 @@ Research is where text from the open web meets a connector's tools, and claude.a
 calls them "without further approval". Its help center's only advice is "Disable any tools
 that can take write actions", unchanged since before per-tool settings existed. Those settings
 apply to every chat, per connector, and a single chat can only switch a whole connector on or
-off. Whether "Needs approval" or "Blocked" holds inside Research isn't documented, and the
-header trial checks it.
+off. Whether "Needs approval" or "Blocked" holds inside Research isn't documented. In the early
+trial Research never called the connector at all, so whether this endpoint is needed waits on
+the slice trial (Open).
 
 Servers that write draw the line themselves: GitHub serves a `/readonly` URL, Linear a separate
 `/mcp/readonly`, and Cloudflare offers read-only access at consent, chosen by default. MCP's
@@ -3101,10 +3107,10 @@ endpoint.
   its acknowledgement and its result and closes at once, and never counts against v2's
   `maxSubscriptions`, which keeps its default. Checked against 2.3.1: with the cap set to 16,
   seventeen listens all completed.
-  - **Each listen still costs a bearer check and a server build.** Claude Code opens one per
-    server per session, and reopens one that closed within ten seconds three times before it
-    stops. Nothing documents what claude.ai does when one closes, so the trials watch for a
-    loop.
+  - **Each listen still costs a bearer check and a server build**, for a client that opens
+    one. Claude Code doesn't: on a 2026-07-28 connection to a server that declares no
+    list-changed capability, 2.1.296 opens none. Nothing documents what claude.ai does; it opened
+    none in the early trial, and the later trials watch for a loop.
 - **The cache hints are set, not left to v2's default.** On the 2026-07-28 leg,
   `server/discover` and `tools/list` are cacheable results, each carrying a `ttlMs` and a
   `cacheScope`. Both answers here are per token: the instructions name the actor and the issuer
@@ -3163,6 +3169,8 @@ endpoint.
       `tools/call`, or v2 refuses it (`-32020`);
   - Claude Code against the dev server. Since 2.1.274 it asks every HTTP server for
     2026-07-28 first (2.1.232 where it fetches feature flags), so it takes the new leg.
+    Checked with 2.1.296 and a `headersHelper`: `server/discover`, `tools/list` and a
+    `tools/call`, each under 2026-07-28 with a JSON answer, and no `subscriptions/listen`.
 - **The OAuth work is written against v2.**
   - **The documents' zod schemas** come from `@modelcontextprotocol/core`:
     `OAuthMetadataSchema`, `OAuthProtectedResourceMetadataSchema` and `OAuthTokensSchema`.
@@ -3387,13 +3395,15 @@ tests pass (Build order).
       appear before a tool search (#1105), and whether a question that doesn't name MultiBlog
       finds them, with the skill turned on and with it off;
     - whether claude.ai reopens `subscriptions/listen` in a loop;
+    - whether claude.ai builds each tool's name from the connector's display name (Open);
     - `read` near its bound, to find where claude.ai stops passing a result inline;
     - Research, with one tool set to "Needs approval" and another to "Blocked", to see whether
-      either setting holds there. A token that can only read puts nothing at stake;
+      either setting holds there, if Research calls the connector at all (Open). A token that
+      can only read puts nothing at stake;
   - **the slice trial**: claude.ai on the web and on iOS connecting through OAuth, listing the
-    tools and calling one, and showing the connector as connected (#1110, Open); and whether
-    it reopens `subscriptions/listen` in a loop. Without a header trial before it, it also
-    checks what that one would have;
+    tools and calling one, and showing the connector as connected (#1110, Open); whether it
+    reopens `subscriptions/listen` in a loop; and whether Research calls the connector, which
+    step 10 waits on. Without a header trial before it, it also checks what that one would have;
   - **the full trial, with everything**:
     - claude.ai on the web and on iOS refreshing after an hour without asking the person to
       reconnect, a revoke, and a reconnect replacing the connection before it;
@@ -3403,6 +3413,47 @@ tests pass (Build order).
       (#1044);
     - Claude Code signing in through its own identity with `/mcp`, and a sandboxed command
       refused its token file.
+
+### The early trial
+
+On 2026-10-13 claude.ai was connected to the trial instance, running step 1's build, through
+the request-header beta: a read-only `claude-ai` token acting as its Claude account and issued
+by Luke (TODO.md, "The claude.ai trial: what to undo"). It came before step 2's names, so it
+answers the header trial's questions about the protocol and leaves what the model is told to
+step 3. nginx logged each request to `/api/mcp` with its `MCP-Protocol-Version` and the type of
+its answer (`/etc/nginx/conf.d/mcp-log.conf` there).
+
+- **SDK v2 serves claude.ai.** On the web and on iOS, every connection opened with
+  `server/discover` under 2026-07-28 and was answered in JSON. It listed the tools and called
+  each of them. Nothing was refused but twice by `search`'s own `invalid`, and once a probe
+  from Anthropic's servers without the token, answered 401, after which they looked for OAuth's
+  metadata (a 404, since there is none yet).
+- **The path stayed `/api/mcp`, and every request carried a `Content-Type`** (#382, #1135).
+- **No `subscriptions/listen` was opened**, so there was no loop to find.
+- **The instructions don't reach the model (#93), and before a tool search it has only the
+  names (#1105).** Asked, without calling a tool, whose account the connector acts as, Claude
+  said it couldn't tell: it saw the connector with five tool names, and "their schemas and
+  descriptions aren't loaded".
+- **The connector's display name does reach the model**, which "What the model is told" says it
+  doesn't. A chat knew the connector by its display name, and Research named its tools
+  `mcp__<display name>__search` and so on. Whether claude.ai builds the names from it, or the
+  model only wrote them so, is step 3's to check (Open). The server can't see it: a call names
+  the bare tool.
+- **claude.ai keeps the tool list per connector, not per chat.** A chat that calls no tool sends
+  no request. One that does opens with `server/discover` and calls from the list it holds,
+  whatever the TTL of 0 says: four of eight connections fetched `tools/list` again. That bears
+  on how long a changed description takes to show (#1044, the full trial).
+- **`download_url` was called twice, and nothing fetched the link it answered.**
+- **Research never called the connector.** With `read` on "Needs approval" and `find_tags` on
+  "Blocked", and again with every tool on "Always allow" in a chat that had just used the
+  connector, Research reported it unavailable and sent no request, not even `server/discover`.
+  It knew the tools' names, less the blocked one. So the question is no longer which setting
+  holds in Research but whether Research calls a custom connector at all (Open).
+- **Its largest answer, a `read`, was 69,729 bytes**, far from the bound the header trial looks
+  for. The instance has no doc long enough, so that waits for explore.
+- **Two findings went to TODO.md**: a Markdown read writes `&` as `&amp;` (and an entity in a
+  body's text comes back changed), and `search`'s description should say that a call needs `q`
+  or a filter.
 
 ### Build order
 
@@ -3439,7 +3490,8 @@ connection at all.
    TODO.md.
 3. **The header trial, on explore**, if claude.ai's Add custom connector dialog offers Request
    headers, a beta only some accounts have (§5). It tries claude.ai against v2 and the renamed
-   tools before any OAuth is built, and checks what Testing lists for it.
+   tools before any OAuth is built, and checks what Testing lists for it. The early trial has
+   answered its questions about the protocol, on step 1's build.
    - **The token** acts as Claude's account and is issued by Luke, with `read` alone and the
      `claude-ai` client, good for a week: `create-api-token.ts --scopes=read --client=claude-ai
      --expires-days=7`, with the account, the issuer and a name. The connector is added with
@@ -3481,7 +3533,8 @@ connection at all.
 6. **The slice trial, on explore**: claude.ai on the web and on iOS connects through OAuth,
    lists the tools and calls one, under 2026-07-28, and shows the connector as connected.
    Nothing more is built until it does. If claude.ai shows #1110's symptom (Open), a client
-   registered by hand is tried next.
+   registered by hand is tried next. It also runs Research with the connector on, since
+   step 10's read-only endpoint is built only if Research calls it.
 7. **Refresh tokens**: `oauth_refresh_token`, the grant with its rotation and its check of
    `resource`, and `refresh_token` and `offline_access` in the metadata. With them:
    - a new claude.ai connection replacing the bot's last one, and the consent page saying so
@@ -3514,9 +3567,10 @@ connection at all.
    with no bot); **Claude Code's pinned identity**; the drift check over both identities, run
    by `deploy/deploy.sh`; and `scripts/oauth-client.ts`, which checks each redirect URI.
 10. **The read-only endpoint, the per-client bound on `read`, and the Connections card:**
-    - the read-only endpoint: its route, its document and 401, `toolsFor` taking the endpoint,
-      the second audience, and the consent page offering it `read` alone. A migration adds
-      `api_token.oauth_resource`, set to `/api/mcp` for every connection made before it;
+    - the read-only endpoint, if the slice trial saw Research call the connector: its route,
+      its document and 401, `toolsFor` taking the endpoint, the second audience, and the
+      consent page offering it `read` alone. A migration adds `api_token.oauth_resource`, set
+      to `/api/mcp` for every connection made before it;
     - the per-client bound on `read`;
     - the Connections card, with the endpoint as a column, and the skill and the paragraph for
       a Project to take.
@@ -3549,4 +3603,23 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    The drift check is what announces the change.
 3. **A revocation endpoint** (RFC 7009), if the full trial shows claude.ai calls one when a
    connector is removed.
+4. **Whether Research calls a custom connector at all.** In the early trial it never called the
+   header connector, whatever its tools' settings, and reported it unavailable. Either Research
+   leaves out a connector that authenticates by request headers, a beta, or it leaves out
+   custom connectors altogether. The slice trial runs Research against an OAuth connection to
+   tell the two apart. If it calls none, the read-only endpoint has nothing to guard, and
+   step 10 keeps only the per-client bound on `read` and the Connections card.
+5. **Whether a tool's name carries the connector's display name.** The early trial's model knew
+   the connector by its display name, and Research wrote its tools as
+   `mcp__<display name>__search`, where "What the model is told" has a uuid and no name. If
+   claude.ai builds names from the display name:
+   - the `multiblog_` prefix matters less for telling the model where a tool comes from,
+     though a tool search still finds the tools by it;
+   - the 21-character limit, worked out from the 43 characters a uuid's prefix takes, becomes
+     a limit on the display name a person types: 36 characters beside a 21-character tool
+     name, which the Connections card would say.
+
+   The server never sees the built names, so step 3 tells the two apart by the model's own
+   account in a chat and in Research, and by a connector given a display name long enough
+   that its longest built name passes 64 characters, which would fail the session's tool list.
 

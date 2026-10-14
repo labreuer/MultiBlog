@@ -245,6 +245,57 @@ yet done:
   `MAX_MARKDOWN_BYTES`, as `create_doc` bounds its one body, and give the handler a
   `maxRequestBodySize` of 8 MiB, which holds that much text however a client escapes it (six
   bytes a character at worst).
+- **`search`'s description doesn't say a call needs `q` or a filter.** A call with neither is
+  refused as `invalid`: "Give q, or a filter (kinds, authors, tags or a date) to list by."
+  (`src/lib/mcp/tools/search.ts`). claude.ai's model made exactly that call first in its first
+  trial, and retried correctly from the refusal. Step 2 of MCP.md §21 rewrites the descriptions
+  ("What the model is told"); `search`'s says it there.
+
+## The claude.ai trial: what to undo
+
+claude.ai connected to the trial instance on 2026-10-13 through a request-header connector,
+ahead of MCP.md §21's header trial (step 3), to see whether it reaches SDK v2 at all. Left in
+place for as long as the trial runs:
+
+- **A trial token**, `cmv77tijd0000gts6g0bj8vir`: read-only, client `claude-ai`, acting as the
+  instance's Claude account and issued by Luke, expiring 2026-10-20. Revoke it
+  (`npx tsx scripts/create-api-token.ts --revoke=cmv77tijd0000gts6g0bj8vir` in the instance's
+  directory) and remove the connector in claude.ai. claude.ai can't change a connector's
+  authentication, so step 3 adds a new one either way. The account itself,
+  `claude@multiblog.invalid` (AUTHOR, no password), stays: it is what §21's Claude connection
+  acts as.
+- **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks `origin/mcp-oauth`,
+  so the deploy wrapper's plain pull keeps it there. Switch it back (`git switch main`) when
+  `mcp-oauth`'s first PR merges, or before deploying main there.
+- **`deploy` on the instance's server is in the `adm` group**, so the trial could read nginx's
+  access log. Keep it, or undo it with `sudo gpasswd -d deploy adm`.
+
+## Markdown out of a body writes `&`, `<` and `>` as entities, and an entity in it comes back changed
+
+Both halves are in `src/lib/markdown-import.ts`, in all three of its `MarkdownManager`s (docs,
+comments, annotations).
+
+- **Out.** `@tiptap/markdown` writes every `&`, `<` and `>` in text as `&amp;`, `&lt;` and
+  `&gt;` (`encodeTextForMarkdown`, through `@tiptap/core`'s `encodeHtmlEntities`). So the MCP
+  server's `read` and its export give "new heavens &amp; earth" for a doc that says "new
+  heavens & earth", and so do the Markdown edit boxes for a comment
+  (`src/app/actions/comments.ts`) and an annotation. It is valid CommonMark, and parses back to
+  the same text. But a model reads the raw Markdown: claude.ai's Claude reported it as a bug in
+  the first claude.ai trial, and a model may copy the entity into what it writes.
+- **Back in, decoded twice.** Text that holds an entity literally, such as "Tom &amp; Jerry" or
+  "&copy;", goes out as `&amp;amp;` and `&amp;copy;` and comes back as "Tom & Jerry" and "©":
+  `@tiptap/markdown` decodes `&lt; &gt; &quot; &amp;`, and then `decodeNodeEntities` decodes
+  what that left. So a comment holding one, saved again from its Markdown edit box, is stored
+  changed, and nothing says so.
+- **The fix**, as one change, since the escaping out has to match the decoding in:
+  - take over `encodeTextForMarkdown` on the three managers so that it backslash-escapes `&`
+    only where it starts something that would parse as an entity reference, `<` only where it
+    could open HTML or an autolink, and `>` only where it starts a line and would open a
+    blockquote (CommonMark allows `\&`, `\<` and `\>`), leaving every other one as written;
+  - make the way in decode each reference once;
+  - unit tests (`src/lib/markdown-import`'s) for text with `&`, `<`, `>`, `&amp;` and
+    `&copy;` making the round trip unchanged through all three managers, and for the Markdown
+    each writes.
 
 ## `edit_link` and `edit_file` can't be audited or undone (MCP.md §15, §21)
 
