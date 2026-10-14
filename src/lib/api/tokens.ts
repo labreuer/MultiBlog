@@ -1,5 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { ApiScope, ApiTokenClient, Role } from "@/generated/prisma/enums";
+import type { Bearer } from "@/lib/mcp/bearer";
+import { verifyAccessToken } from "@/lib/oauth/access-token";
+import { mcpEndpointUrl } from "@/lib/oauth/discovery";
 import { prisma, type TransactionClient } from "@/lib/prisma";
 
 // docs/MCP.md §3 — API tokens: issuing one, and the one check that
@@ -74,7 +77,9 @@ export type AuthenticatedToken = {
   prefix: string;
   scopes: readonly ApiScope[];
   client: ApiTokenClient;
-  /** Never null for a header token, by a CHECK; the bearer check refuses a token without one (§21). */
+  /** A connection's client_id; null for a header token (§21, "A connection"). */
+  oauthClientId: string | null;
+  /** Never null for a header token, by a CHECK; null for a connection, whose access token carries one (§21). */
   expiresAt: Date | null;
   user: TokenPerson & { role: Role };
   issuer: TokenPerson & { role: Role };
@@ -98,9 +103,32 @@ export async function authenticateSecret(secret: string): Promise<AuthenticatedT
   return authenticate({ tokenHash: hashTokenSecret(secret) });
 }
 
-/** §3's one check, from a token id a byte grant carries (src/lib/api/grants.ts). */
+/** §3's one check, from the token id a byte grant (src/lib/api/grants.ts) or an access token (src/lib/oauth/access-token.ts) carries. */
 export async function authenticateTokenId(id: string): Promise<AuthenticatedToken | null> {
   return authenticate({ id });
+}
+
+/**
+ * §3's one check, from whatever bearer value a request to the MCP endpoint
+ * carries (§21, "The bearer check"): an `mb_` header token, by its hash,
+ * good at whichever endpoint it is sent to; or an OAuth connection's access
+ * token, by the row it names, good only at the endpoint it was made for. The
+ * bearer check compares that with the endpoint, so this accepts any
+ * endpoint's.
+ */
+export async function authenticateBearer(value: string, endpoint: URL): Promise<Bearer | null> {
+  if (value.startsWith(TOKEN_SECRET_PREFIX)) {
+    const token = await authenticateSecret(value);
+    if (!token) return null;
+    return { token, resource: endpoint, expiresAt: token.expiresAt ? Math.floor(token.expiresAt.getTime() / 1000) : undefined };
+  }
+  const access = await verifyAccessToken(value, [mcpEndpointUrl()]);
+  if (!access) return null;
+  const token = await authenticateTokenId(access.tokenId);
+  // Only a connection's row is named by an access token; this keeps a header
+  // token's row from being reached any way but by its secret.
+  if (!token || token.oauthClientId === null) return null;
+  return { token, resource: access.audience, expiresAt: access.expiresAt };
 }
 
 /**
@@ -124,6 +152,7 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
       prefix: true,
       scopes: true,
       client: true,
+      oauthClientId: true,
       userId: true,
       createdByUserId: true,
       expiresAt: true,
@@ -165,6 +194,7 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
     prefix: token.prefix,
     scopes: token.scopes,
     client: token.client,
+    oauthClientId: token.oauthClientId,
     expiresAt: token.expiresAt,
     user: { id: user.id, name: user.name, slug: user.slug, role: user.role },
     issuer: { id: issuedBy.id, name: issuedBy.name, slug: issuedBy.slug, role: issuedBy.role },

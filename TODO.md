@@ -201,9 +201,8 @@ Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a pr
 build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
 yet done:
 
-- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Until then only a
-  client that can send a header — Claude Code — reaches the server. Three of the plan's steps,
-  none of them OAuth, are built:
+- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Four of the plan's
+  steps are built:
   - the server is on SDK v2 (`@modelcontextprotocol/server`), which answers the 2026-07-28
     revision claude.ai opens in as well as every 2025-era client;
   - every tool is listed with a `multiblog_` prefix, since claude.ai drops the server's
@@ -212,13 +211,28 @@ yet done:
     (`scripts/mcp-skill.ts` writes its ZIP);
   - `/api/mcp` authenticates through v2's own bearer check, which refuses a token with no
     expiry. So every header token has one: a year by default from the script, and a year from
-    the `api_token_expiry` migration for each token issued before it.
+    the `api_token_expiry` migration for each token issued before it;
+  - a thin slice of OAuth (step 5): the discovery documents, the consent page, `/token` for the
+    `authorization_code` grant, an hour's access token, and Claude's pinned identity. A
+    connection acts as a bot that works for whoever approves it (`user.works_for_user_id`).
+    With no refresh token yet, it lasts its access token's hour.
 
-  The third step, the header trial, ran on the trial instance on 2026-10-14 (MCP.md §21, "The
-  header trial"). Next is a thin slice, just enough for claude.ai to connect, tried on explore
-  before the rest is built, because an open claude.ai bug (`anthropics/claude-ai-mcp#1110`)
-  leaves a server shaped like this one showing Connect with no tools loaded. A read-only
-  endpoint for Research is designed and not built (MCP.md §21, "The read-only endpoint").
+  The header trial and the slice trial ran on the trial instance on 2026-10-14 (MCP.md §21,
+  "The header trial" and "The slice trial"). claude.ai connects through OAuth on the web and on
+  iOS, lists the tools, calls them and shows the connector as connected, so
+  `anthropics/claude-ai-mcp#1110` didn't show here. Next is step 7, refresh tokens: until then
+  a connection ends after its access token's hour and the person connects again. The trial
+  instance runs the slice (9d91866, deployed 2026-10-14), and its Claude account works for
+  Luke, set once by hand (MCP.md §21, "Whose account").
+  Another instance's Claude account gets its person the same way before a build with the
+  works-for rule reaches it (step 8): `UPDATE "user" SET works_for_user_id = (SELECT id FROM
+  "user" WHERE email = 'labreuer@gmail.com') WHERE email = 'claude@multiblog.invalid';`, which
+  the CHECK refuses if the account has a password.
+
+  A read-only endpoint for Research is designed and not built (MCP.md §21, "The read-only
+  endpoint"), since Research calls no connector at all, neither this one nor a directory one
+  (§21, "The slice trial", and Open). Try a Research run again from time to time; if Research starts calling
+  connectors, see which tool settings hold there before deciding on the endpoint.
 - **The header trial's findings** (MCP.md §21, "The header trial"), each small:
   - **Dates are UTC unless `tz` is passed**, so claude.ai read a doc updated that evening as a
     day ahead. Nothing tells claude.ai the person's zone. Perhaps say in `search`'s and `read`'s
@@ -230,6 +244,11 @@ yet done:
     group's own discussion summary in MultiBlog. Its description could say what MultiBlog holds
     that memory doesn't: other people's notes and discussion summaries, and the docs
     themselves rather than recollections of a chat.
+- **The consent page renders the site header** (MCP.md §21, "The slice trial"). Its links were
+  prefetched as `/authorize` loaded, about 20 requests, one of them
+  `/sign-in?callbackUrl=%2Fauthorize`, which drops the authorization request's query. A
+  signed-in visitor is the only one who sees the page, so nothing has broken. Step 9's full
+  consent page should decide whether the header belongs there at all.
 - **Header tokens issued before `api_token_expiry` expire a year after it runs on their
   instance**, Claude Code's files under `~/.config/multiblog/` among them. Re-issue each with
   the script (`--write-to`) before then; nothing warns as the date nears, and an expired token
@@ -265,29 +284,24 @@ yet done:
 
 claude.ai connected to the trial instance on 2026-10-13 through a request-header connector,
 ahead of MCP.md §21's header trial (step 3), to see whether it reaches SDK v2 at all. The
-header trial ran there too, on 2026-10-14 (MCP.md §21, "The header trial"). Left in place until
-the slice trial, which runs there as well and needs the two connectors and their tokens gone
-first:
+header trial ran there too, on 2026-10-14 (MCP.md §21, "The header trial"). Its two
+connectors were removed on 2026-10-14 and their tokens revoked, ahead of the slice trial, which
+ran there the same day ("The slice trial"); so were the header connector and token it set
+beside the OAuth one. The instance's Claude account (`claude@multiblog.invalid`, AUTHOR, no
+password) stays, since it is what §21's Claude connection acts as. Still in place:
 
-- **A trial token**, `cmv77tijd0000gts6g0bj8vir`: read-only, client `claude-ai`, acting as the
-  instance's Claude account and issued by Luke, expiring 2026-10-20. Revoke it
-  (`npx tsx scripts/create-api-token.ts --revoke=cmv77tijd0000gts6g0bj8vir` in the instance's
-  directory) and remove the connector in claude.ai, once the header trial is done. claude.ai
-  can't change a connector's authentication, so the slice trial adds a new one. The account
-  itself, `claude@multiblog.invalid` (AUTHOR, no password), stays: it is what §21's Claude
-  connection acts as.
-- **A second trial token**, `cmv7ig9je00000os6kby7k92t` (read-only, `claude-ai`, expiring
-  2026-10-21), for the header trial's second connector, the one with the long display name, at
-  `/api/mcp?probe=1`. Revoke it as the first, and remove that connector too.
+- **The slice trial's OAuth connector**, at the instance's `/api/mcp` in Luke's claude.ai, and
+  a connection row for each time it was connected. With no refresh token yet each row ends with
+  its hour but stays unrevoked; step 7's migration revokes them.
 - **In Luke's claude.ai settings**: the instance's host among code execution's allowed domains,
-  the `multiblog` skill, and the first connector's tool settings from the Research test
-  (`multiblog_find_tags` Blocked, `multiblog_read` Needs approval, the rest Always allow).
+  and the `multiblog` skill.
 - **The read-bound test doc**, `/doc/read-bound-test-for-the-claude-ai-trial`, PRIVATE to
-  Claude's account and Luke, imported for the header trial's `read` near its bound. Delete it
-  in MultiBlog once that is measured.
-- **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks `origin/mcp-oauth`,
-  so the deploy wrapper's plain pull keeps it there. Switch it back (`git switch main`) when
-  `mcp-oauth`'s first PR merges, or before deploying main there.
+  Claude's account and Luke, imported for the header trial's `read` near its bound. The bound
+  is measured (MCP.md §21, "The header trial"), so it can be deleted in MultiBlog.
+- **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks
+  `origin/mcp-oauth`, so the deploy wrapper's plain pull keeps it there. Switch it back
+  (`git switch main`) once the PR carrying the slice (step 5) merges, or before deploying main
+  there.
 - **`deploy` on the instance's server is in the `adm` group**, so the trial could read nginx's
   access log. Keep it, or undo it with `sudo gpasswd -d deploy adm`.
 
@@ -329,8 +343,9 @@ claude.ai's prompt can't stand in for Claude Code's. It asks before each call to
 destructive, but a person can set a tool, or a whole group of tools, to "Always allow". The
 likely route there is not these two tools but the destructive ones a research session calls
 constantly: `edit_doc` and `edit_note` prompt on every call, and "Always allow" on the
-group that holds them would cover `edit_link` and `rename_file` too. And Research calls a
-connector's tools without asking at all. After either, an instruction planted in text Claude
+group that holds them would cover `edit_link` and `rename_file` too. And Research is
+documented to call a connector's tools without asking at all, though in MCP.md §21's trials it
+called none. After either, an instruction planted in text Claude
 reads could make these changes unseen. The UI's own paths have the same gap today.
 
 What can't be undone, in the functions both front doors call (the actions in
@@ -1555,9 +1570,9 @@ open.
 
 ## Remove the `adminInitials` token backfill on or after 2026-11-01
 
-**Status:** waiting on the date. Every instance (thicketry, explore, unchurch, kicking) was
-running PR #52, which put admin initials on the session for the collab caret's flag, by
-2026-10-02. The backfill is removable 30 days after that: **2026-11-01**.
+**Status:** waiting on the date. Every instance was running PR #52, which put admin initials on
+the session for the collab caret's flag, by 2026-10-02. The backfill is removable 30 days after
+that: **2026-11-01**.
 
 `src/lib/auth.ts`'s `jwt` callback has a block that looks up `adminInitials` for a token issued
 before the field existed. It is only there for the changeover. `auth.ts` sets no `maxAge`, so

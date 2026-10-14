@@ -5,9 +5,10 @@
 # §2). This is DEPLOY.md §3-§8 carried out in one pass, and it coexists
 # happily with any number of MultiBlog instances already on the machine.
 #
-# Unlike unchurch-dev-install.sh, this derives NOTHING from an existing
-# install: there is no live .env to inherit a DB role, password or site title
-# from. Everything comes from the configuration block below.
+# Unlike a script that clones a dev install from a live one, this derives
+# NOTHING from an existing install: there is no live .env to inherit a DB
+# role, password or site title from. Everything comes from the
+# configuration block below.
 #
 # PORTS ARE CHOSEN AUTOMATICALLY. `ss -ltn` is scanned for what is currently
 # listening, and the first free TCP port at or above WEB_PORT_FROM (3000) and

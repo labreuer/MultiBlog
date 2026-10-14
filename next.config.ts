@@ -65,5 +65,23 @@ export default function nextConfig(phase: string): NextConfig {
     // URLs are content-hashed, and the preload is a real win. docs/ENV.md,
     // "Testing on a real phone".
     ...(phase === PHASE_DEVELOPMENT_SERVER ? { reactMaxHeadersLength: 1 } : {}),
+    // docs/MCP.md §21, "The consent page" — a framed Approve button is a
+    // clickjacking target, so the page that grants an app a connection can't
+    // be framed, and nor can /sign-in, which a signed-out visitor passes
+    // through on the way to it (OAuth 2.1 §7.10). Both headers: CSP's for
+    // browsers that read it, X-Frame-Options for those that don't. A content
+    // security policy added later must allow the clients' origins in
+    // `form-action` on /authorize, since Chrome applies it to a form's
+    // redirects too.
+    async headers() {
+      const unframed = [
+        { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        { key: "X-Frame-Options", value: "DENY" },
+      ];
+      return [
+        { source: "/authorize", headers: unframed },
+        { source: "/sign-in", headers: unframed },
+      ];
+    },
   };
 }
