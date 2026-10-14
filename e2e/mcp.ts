@@ -23,8 +23,8 @@ let nextId = 1;
 type RpcBody = { id?: unknown; result?: Record<string, unknown>; error?: unknown };
 
 /**
- * One 2025-era JSON-RPC request to /api/mcp, its HTTP status, and its parsed
- * body. The server answers such a request with a one-event stream rather than
+ * One 2025-era JSON-RPC request to /api/mcp, its HTTP status and headers, and
+ * its parsed body. The server answers such a request with a one-event stream rather than
  * JSON (MCP.md §21, "Moving to SDK v2"), so the response is taken from the
  * event that carries this request's id; any other body is parsed whole.
  */
@@ -33,7 +33,7 @@ export async function mcpRequest(
   secret: string | null,
   method: string,
   params: unknown = {},
-): Promise<{ status: number; body: RpcBody }> {
+): Promise<{ status: number; headers: Record<string, string>; body: RpcBody }> {
   const id = nextId++;
   const res = await request.post("/api/mcp", {
     headers: {
@@ -64,7 +64,7 @@ export async function mcpRequest(
   } catch {
     // Not JSON-RPC: a refusal the route wrote itself keeps its text as `error`.
   }
-  return { status: res.status(), body };
+  return { status: res.status(), headers: res.headers(), body };
 }
 
 /** The prefix every listed tool name carries (docs/MCP.md §21, "The names"). */

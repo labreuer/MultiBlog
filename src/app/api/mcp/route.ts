@@ -1,6 +1,7 @@
 import { createMcpHandler, type AuthInfo } from "@modelcontextprotocol/server";
-import { authenticateSecret, bearerSecret, type AuthenticatedToken } from "@/lib/api/tokens";
-import { unauthorizedResponse } from "@/lib/api/request-auth";
+import { appUrl } from "@/lib/app-url";
+import { authenticateSecret, type AuthenticatedToken } from "@/lib/api/tokens";
+import { bearerGate } from "@/lib/mcp/bearer";
 import { buildMcpServer } from "@/lib/mcp/server";
 
 // docs/MCP.md §5 — the MCP endpoint: stateless Streamable HTTP, a fresh
@@ -9,8 +10,10 @@ import { buildMcpServer } from "@/lib/mcp/server";
 // to SDK v2"): 2026-07-28's per-request envelope, and every 2025-era client
 // through the SDK's stateless fallback.
 //
-// Bearer only. The session cookie is never read, so there is no CSRF surface
-// to defend, and nothing under /api/mcp answers a browser.
+// Bearer only, through SDK v2's bearer check (src/lib/mcp/bearer.ts), whose
+// 401 is v2's challenge with OAuth's error object. The session cookie is
+// never read, so there is no CSRF surface to defend, and nothing under
+// /api/mcp answers a browser.
 //
 // JSON responses on the 2026-07-28 leg: a stateless server has nothing to
 // push, and every call answers once. The 2025-era fallback answers with a
@@ -27,7 +30,7 @@ const handler = createMcpHandler((ctx) => buildMcpServer(tokenOf(ctx.authInfo)),
   responseMode: "json",
 });
 
-/** The token POST checked, which `authInfo` carries to the factory. */
+/** The token the bearer check passed, which `authInfo` carries to the factory. */
 function tokenOf(authInfo: AuthInfo | undefined): AuthenticatedToken {
   const token = authInfo?.extra?.token as AuthenticatedToken | undefined;
   if (!token) throw new Error("The MCP handler ran without an authenticated token.");
@@ -35,13 +38,12 @@ function tokenOf(authInfo: AuthInfo | undefined): AuthenticatedToken {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const secret = bearerSecret(request);
-  const token = secret ? await authenticateSecret(secret) : null;
-  if (!secret || !token) return unauthorizedResponse();
-
-  return handler.fetch(request, {
-    authInfo: { token: secret, clientId: token.prefix, scopes: [...token.scopes], extra: { token } },
-  });
+  // Read per request rather than at load: `APP_URL` is a runtime variable
+  // (docs/ENV.md). A header token reports the endpoint it was sent to.
+  const resource = new URL(appUrl("/api/mcp"));
+  const authInfo = await bearerGate(request, resource, authenticateSecret);
+  if (authInfo instanceof Response) return authInfo;
+  return handler.fetch(request, { authInfo });
 }
 
 // No sessions, so nothing to stream on a GET or end on a DELETE (the

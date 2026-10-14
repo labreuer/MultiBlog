@@ -202,24 +202,29 @@ build, with the annotation, snapshot and PDF integrity checks clean over MCP-wri
 yet done:
 
 - **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Until then only a
-  client that can send a header — Claude Code — reaches the server. The plan's first two
-  steps, which aren't OAuth, are built: the server is on SDK v2 (`@modelcontextprotocol/server`),
-  which answers the 2026-07-28 revision claude.ai opens in as well as every 2025-era client;
-  and every tool is listed with a `multiblog_` prefix, since claude.ai drops the server's
-  instructions and shows its model only a tool's name until it searches. The conventions are
-  in the descriptions, and a skill the person installs carries the rest
-  (`scripts/mcp-skill.ts` writes its ZIP).
+  client that can send a header — Claude Code — reaches the server. Three of the plan's steps,
+  none of them OAuth, are built:
+  - the server is on SDK v2 (`@modelcontextprotocol/server`), which answers the 2026-07-28
+    revision claude.ai opens in as well as every 2025-era client;
+  - every tool is listed with a `multiblog_` prefix, since claude.ai drops the server's
+    instructions and shows its model only a tool's name until it searches. The conventions are
+    in the descriptions, and a skill the person installs carries the rest
+    (`scripts/mcp-skill.ts` writes its ZIP);
+  - `/api/mcp` authenticates through v2's own bearer check, which refuses a token with no
+    expiry. So every header token has one: a year by default from the script, and a year from
+    the `api_token_expiry` migration for each token issued before it.
 
-  The third step is a trial: where claude.ai's connector dialog offers request headers (a
-  beta), a read-only header token good for a week tries claude.ai against v2, the new names
-  and the skill on explore, before any OAuth is built. The fourth changes what is built. `/api/mcp`
-  authenticates through v2's own bearer check, which refuses a token with no expiry. So every
-  header token gets one: a year by default from the script, and a year from the migration for
-  each token already issued. Then a thin slice, just enough for claude.ai to connect, is tried
+  The third step, a trial, waits on claude.ai: where its connector dialog offers request
+  headers (a beta), a read-only header token good for a week tries claude.ai against v2, the
+  new names and the skill on explore, before any OAuth is built. Then a thin slice, just enough for claude.ai to connect, is tried
   on explore before the rest is built, because an open claude.ai bug
   (`anthropics/claude-ai-mcp#1110`) leaves a server shaped like this one showing Connect with
   no tools loaded. Research, which calls a connector's tools without asking, gets a read-only
   endpoint of its own, `/api/mcp/read`.
+- **Header tokens issued before `api_token_expiry` expire a year after it runs on their
+  instance**, Claude Code's files under `~/.config/multiblog/` among them. Re-issue each with
+  the script (`--write-to`) before then; nothing warns as the date nears, and an expired token
+  is answered 401 like an unknown one.
 - **Issuing a token takes the script** (`scripts/create-api-token.ts`), and always will: nothing
   in the app issues an `mb_` token. The `/dashboard` panel for one's own tokens (MCP.md §3)
   isn't built; MCP.md §21 plans it for listing and revoking only, and anyone without a shell

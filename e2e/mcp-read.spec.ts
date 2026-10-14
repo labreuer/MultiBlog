@@ -14,6 +14,7 @@ import {
   deleteTestFile,
   deleteTestTag,
   deleteTestUser,
+  expireTestApiToken,
   renameTestTagSlug,
   restoreTestUser,
   softDeleteTestUser,
@@ -71,6 +72,37 @@ test("a token authenticates, names its actor and issuer, and lists only what its
   } finally {
     await reader.dispose();
     await writer.dispose();
+  }
+});
+
+test("the bearer check answers v2's challenge with and without a token, and refuses a token past its expiry", async ({ request }) => {
+  // MCP.md §21, "The bearer check": OAuth's error object, and the scopes
+  // named in the challenge. No resource_metadata until Discovery is built.
+  const none = await mcpRequest(request, null, "tools/list");
+  expect(none.status).toBe(401);
+  expect(none.headers["www-authenticate"]).toBe(
+    'Bearer error="invalid_token", error_description="Missing Authorization header", scope="read write"',
+  );
+  expect(none.body).toEqual({ error: "invalid_token", error_description: "Missing Authorization header" });
+
+  const unknown = await mcpRequest(request, "mb_not-a-real-token", "tools/list");
+  expect(unknown.status).toBe(401);
+  expect(unknown.headers["www-authenticate"]).toMatch(/^Bearer error="invalid_token", error_description="[^"]+", scope="read write"$/);
+
+  // The byte routes keep their own 401: they take a grant as well as the token.
+  const byteRoute = await request.get("/api/mcp/export");
+  expect(byteRoute.status()).toBe(401);
+  expect(byteRoute.headers()["www-authenticate"]).toBe('Bearer realm="multiblog"');
+
+  const agent = await createAgent(request, { scopes: ["READ"], client: "OTHER" });
+  try {
+    expect((await mcpRequest(request, agent.secret, "tools/list")).status).toBe(200);
+    await expireTestApiToken(agent.tokenId);
+    const expired = await mcpRequest(request, agent.secret, "tools/list");
+    expect(expired.status).toBe(401);
+    expect(expired.headers["www-authenticate"]).toContain('error="invalid_token"');
+  } finally {
+    await agent.dispose();
   }
 });
 

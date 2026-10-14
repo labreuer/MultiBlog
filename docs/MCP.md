@@ -2,9 +2,9 @@
 
 **Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
 annotations, anchored links, tags, uploads and `manage`. Not built: OAuth, so claude.ai can't
-connect yet (phase 5, planned in §21, whose first two steps are built: the move to SDK v2, and
-the tools' names and descriptions with a skill for claude.ai), and passage-level tags (phase
-6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
+connect yet (phase 5, planned in §21, whose steps 1, 2 and 4 are built: the move to SDK v2,
+the tools' names and descriptions with a skill for claude.ai, and the bearer check on v2's
+terms), and passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
 every such point is decided there rather than here. §21 is the plan for OAuth and SDK v2.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
@@ -219,9 +219,11 @@ the rules are:
 - **Tokens are issued by a script first**: `scripts/create-api-token.ts --email …
   --issued-by … --name … --scopes … --client …`. Later comes a `/dashboard` panel for your
   own tokens, which §21 builds for listing and revoking but never issuing. The script stays the
-  only way to issue a header token; everyone else connects through OAuth (§21). §21 also makes
-  an expiry required, a year unless the script is told otherwise, since SDK v2's bearer check
-  refuses a token without one.
+  only way to issue a header token; everyone else connects through OAuth (§21).
+- **Every token expires**: a year unless the script is told otherwise, with no way to ask for
+  none, since SDK v2's bearer check refuses a token without an expiry (§21, "The bearer
+  check"). A CHECK on `api_token` holds every header token to it. A header token is re-issued
+  before its year is up, and Claude Code reads the new file at its next connection (§5).
 - **Claude gets its own account, an AUTHOR, and never a person's token.** That keeps
   attribution honest: bylines, `userId` columns and Yjs `clients` entries all name Claude. It
   also keeps the anchored-link tray from colliding. A person's open link includes a minted
@@ -2224,7 +2226,8 @@ Items 1–3 should still be fixed on their own account (TODO.md).
    `quadsForRange`, with the spec that holds each edge within 1pt of a selection (§8); and the
    file half of `manage`, owner changes included (§12).
 5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own. Its
-   first two steps are built: SDK v2, and the tools' names and descriptions.
+   steps 1, 2 and 4 are built: SDK v2, the tools' names and descriptions, and the bearer
+   check.
 6. **If wanted:** passage-level tags (PLAN.md §20, PR 2). Not built.
 
 Phases 1–4 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
@@ -2362,10 +2365,23 @@ code beside each says why as well.
   plain YAML scalar. The spec checks each description's mentions the same way, over
   `tools/list`.
 
+**The bearer check** (§21, step 4)
+
+- **The gate takes §3's check as an argument** (`src/lib/mcp/bearer.ts`), so the verifier and
+  both of its answers are unit-tested without a database (`bearer.test.ts`), and the route
+  passes `authenticateSecret`.
+- **The scopes are reported by OAuth's names**, `read` rather than the enum's `READ`, as the
+  challenge names them.
+- **A check that fails rather than refuses**, such as a database error, is logged and answered
+  500 by v2, never 401, so a client doesn't take an outage for a revoked token.
+- **The e2e fixture's tokens expire in a day**, and a second fixture backdates one for the
+  expired-token spec.
+
 ## 21. OAuth, for claude.ai
 
-**Status: planned; the first two steps, the move to SDK v2 and the tools' names and
-descriptions with the skill, are built** (§18's phase 5). claude.ai's
+**Status: planned; steps 1, 2 and 4 are built**: the move to SDK v2, the tools' names and
+descriptions with the skill, and the bearer check on v2's terms (§18's phase 5). Step 3, the
+header trial, waits on claude.ai. claude.ai's
 custom connectors authenticate with OAuth, short of a request-header beta that serves for a
 trial and not as a connection (§5), so this makes MultiBlog an OAuth authorization server for
 its own MCP endpoint, as small a one as claude.ai needs and the MCP authorization spec allows.
@@ -3259,9 +3275,10 @@ tests pass (Build order).
   - the e2e fixture `createTestApiToken` issues with an expiry;
   - a header token is re-issued with the script before its year is up, and Claude Code picks
     up the new file at its next connection (§5).
-- **`/api/mcp`'s 401 changes** from `Bearer realm="multiblog"` and §4's `{ code, message }` to
-  v2's challenge and OAuth's error object (Discovery). The specs assert only its status. The
-  byte routes keep theirs, and `bearerSecret` with them; v2 parses `/api/mcp`'s header itself.
+- **`/api/mcp`'s 401 is v2's challenge and OAuth's error object** (Discovery), where it was
+  `Bearer realm="multiblog"` and §4's `{ code, message }`. Until Discovery is built (step 5) it
+  names no `resource_metadata`, since there is no document to point at. The byte routes keep
+  theirs, and `bearerSecret` with them; v2 parses `/api/mcp`'s header itself.
 - **Tested before anything continues:**
   - unit tests for the verifier's pure half: the `AuthInfo` it reports for an authenticated
     token, `expiresAt` in seconds included, and a refusal thrown as `OAuthError` with

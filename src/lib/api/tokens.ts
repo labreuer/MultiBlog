@@ -33,6 +33,10 @@ export function generateTokenSecret(): string {
  * one's own token, the person a bot works for otherwise. The secret is
  * returned once and never stored.
  *
+ * **Every token expires.** SDK v2's bearer check refuses one that doesn't
+ * (docs/MCP.md §21, "The bearer check"), and a CHECK on `api_token` holds
+ * every header token to it.
+ *
  * Takes named fields and builds the row from them (CLAUDE.md, check:prisma-data).
  */
 export async function issueApiToken(opts: {
@@ -41,7 +45,7 @@ export async function issueApiToken(opts: {
   name: string;
   scopes: readonly ApiScope[];
   client: ApiTokenClient;
-  expiresAt?: Date | null;
+  expiresAt: Date;
 }): Promise<{ secret: string; id: string }> {
   const scopes = ALL_SCOPES.filter((scope) => opts.scopes.includes(scope));
   if (scopes.length === 0) throw new Error("A token needs at least one scope.");
@@ -55,7 +59,7 @@ export async function issueApiToken(opts: {
       prefix: secret.slice(0, DISPLAY_PREFIX_LENGTH),
       scopes,
       client: opts.client,
-      expiresAt: opts.expiresAt ?? null,
+      expiresAt: opts.expiresAt,
     },
     select: { id: true },
   });
@@ -70,6 +74,8 @@ export type AuthenticatedToken = {
   prefix: string;
   scopes: readonly ApiScope[];
   client: ApiTokenClient;
+  /** Never null for a header token, by a CHECK; the bearer check refuses a token without one (§21). */
+  expiresAt: Date | null;
   user: TokenPerson & { role: Role };
   issuer: TokenPerson & { role: Role };
 };
@@ -159,6 +165,7 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
     prefix: token.prefix,
     scopes: token.scopes,
     client: token.client,
+    expiresAt: token.expiresAt,
     user: { id: user.id, name: user.name, slug: user.slug, role: user.role },
     issuer: { id: issuedBy.id, name: issuedBy.name, slug: issuedBy.slug, role: issuedBy.role },
   };

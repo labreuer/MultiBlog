@@ -590,7 +590,8 @@ unchanged, through the same functions; the scopes only take away.
   token issued for Claude Code, the one client documented to honor the flag. Tools are named
   here as the code names them; a client lists each with a `multiblog_` prefix (MCP.md §15).
 - **A token is refused once its account or its issuer is deleted**, and soft-deleting an
-  account revokes its tokens in the same transaction.
+  account revokes its tokens in the same transaction. Every token also expires, a year after
+  issue unless the script is told otherwise (MCP.md §3).
 - **A record** — an imported chat (`doc.record`) — is read-only to `edit_doc` whatever the
   byline; the editor doesn't consult the flag.
 
