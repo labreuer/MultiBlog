@@ -290,7 +290,9 @@ test("the page answers a wrong client or redirect URI itself, and redirects ever
 test("a signed-out visitor signs in before anything is redirected, and comes back to the page", async ({ browser, playwright, request, baseURL }) => {
   const d = await discover(request);
   const { challenge } = pkce();
-  const anonymous = await playwright.request.newContext({ baseURL });
+  // Empty by name: a context made here inherits the project's storageState,
+  // the admin's session, otherwise.
+  const anonymous = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
   try {
     // A malformed request too goes to sign in, never to the client unseen.
     for (const overrides of [{}, { response_type: "token" }] as Record<string, string>[]) {

@@ -220,14 +220,14 @@ yet done:
   The header trial ran on the trial instance on 2026-10-14 (MCP.md §21, "The header trial").
   Next is the slice trial, on that instance too, because an open claude.ai bug
   (`anthropics/claude-ai-mcp#1110`) leaves a server shaped like this one showing Connect with
-  no tools loaded. Before it:
-  - deploy `mcp-oauth` there, whose `oauth_slice` migration needs no backfill;
-  - give the trial instance's Claude account its person, once, by hand (MCP.md §21, "Whose
-    account"): `UPDATE "user" SET works_for_user_id = (SELECT id FROM "user" WHERE email =
-    'labreuer@gmail.com') WHERE email = 'claude@multiblog.invalid';`. The CHECK refuses it if
-    the account has a password;
-  - revoke the header trial's two tokens and remove their connectors ("The claude.ai trial:
-    what to undo", below), so the OAuth connector can be added at `/api/mcp` exactly.
+  no tools loaded. The trial instance runs the slice (9d91866, deployed 2026-10-14), and its
+  Claude account works for Luke, set once by hand (MCP.md §21, "Whose account"). The header
+  trial's two connectors are removed and their tokens revoked, so the OAuth connector can be
+  added at `/api/mcp` exactly: the slice trial is ready to run.
+  Another instance's Claude account gets its person the same way before a build with the
+  works-for rule reaches it (step 8): `UPDATE "user" SET works_for_user_id = (SELECT id FROM
+  "user" WHERE email = 'labreuer@gmail.com') WHERE email = 'claude@multiblog.invalid';`, which
+  the CHECK refuses if the account has a password.
 
   A read-only endpoint for Research is designed and not built (MCP.md §21, "The read-only
   endpoint").
@@ -277,26 +277,16 @@ yet done:
 
 claude.ai connected to the trial instance on 2026-10-13 through a request-header connector,
 ahead of MCP.md §21's header trial (step 3), to see whether it reaches SDK v2 at all. The
-header trial ran there too, on 2026-10-14 (MCP.md §21, "The header trial"). Left in place until
-the slice trial, which runs there as well and needs the two connectors and their tokens gone
-first:
+header trial ran there too, on 2026-10-14 (MCP.md §21, "The header trial"). Its two
+connectors were removed on 2026-10-14 and their tokens revoked, ahead of the slice trial, which
+runs there as well; the instance's Claude account (`claude@multiblog.invalid`, AUTHOR, no
+password) stays, since it is what §21's Claude connection acts as. Still in place:
 
-- **A trial token**, `cmv77tijd0000gts6g0bj8vir`: read-only, client `claude-ai`, acting as the
-  instance's Claude account and issued by Luke, expiring 2026-10-20. Revoke it (`npx tsx
-  scripts/create-api-token.ts --revoke=cmv77tijd0000gts6g0bj8vir` in the instance's directory)
-  and remove the connector in claude.ai, once the header trial is done. claude.ai can't change
-  a connector's authentication, so the slice trial adds a new one. The account itself,
-  `claude@multiblog.invalid` (AUTHOR, no password), stays: it is what §21's Claude connection
-  acts as.
-- **A second trial token**, `cmv7ig9je00000os6kby7k92t` (read-only, `claude-ai`, expiring
-  2026-10-21), for the header trial's second connector, the one with the long display name, at
-  `/api/mcp?probe=1`. Revoke it as the first, and remove that connector too.
 - **In Luke's claude.ai settings**: the instance's host among code execution's allowed domains,
-  the `multiblog` skill, and the first connector's tool settings from the Research test
-  (`multiblog_find_tags` Blocked, `multiblog_read` Needs approval, the rest Always allow).
+  and the `multiblog` skill.
 - **The read-bound test doc**, `/doc/read-bound-test-for-the-claude-ai-trial`, PRIVATE to
-  Claude's account and Luke, imported for the header trial's `read` near its bound. Delete it
-  in MultiBlog once that is measured.
+  Claude's account and Luke, imported for the header trial's `read` near its bound. The bound
+  is measured (MCP.md §21, "The header trial"), so it can be deleted in MultiBlog.
 - **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks
   `origin/mcp-oauth`, so the deploy wrapper's plain pull keeps it there. Switch it back
   (`git switch main`) when `mcp-oauth`'s first PR merges, or before deploying main there.
