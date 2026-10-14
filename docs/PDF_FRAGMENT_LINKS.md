@@ -335,10 +335,9 @@ It runs in:
      file that holds the quote once.
    - A quote elided with "…" or "..." is read as `start,end`.
    - A quote that runs across a page break comes back as two passages (`splitAcrossPages`).
-3. **The MCP server**, when it is built. Every body a call writes is checked before anything is
-   written: `create_doc`'s, `edit_doc`'s replacements and appends, and `annotate`'s and
-   `edit_annotation`'s. A miss refuses the call with `no_match`, as MCP.md §7 answers an anchor
-   (MCP.md §8).
+3. **The MCP server.** Every body a call writes is checked before anything is written:
+   `create_doc`'s, `edit_doc`'s replacements and appends, and `add_note`'s and `edit_note`'s. A
+   miss refuses the call with `no_match`, as MCP.md §7 answers an anchor (MCP.md §8).
 
 **Any text that holds a link holds them.**
 

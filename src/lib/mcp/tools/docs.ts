@@ -2,7 +2,7 @@ import { z } from "zod";
 import { MAX_MARKDOWN_BYTES } from "@/lib/markdown-import";
 import { onceWithin } from "@/lib/api/idempotency";
 import { invalid } from "@/lib/api/errors";
-import { defineTool, objectRef, versionString } from "../tool";
+import { defineTool, listedName, objectRef, versionString } from "../tool";
 import { createDocFor, editDocFor, revertEditFor } from "../doc-writes";
 
 // docs/MCP.md §6 — create_doc and edit_doc. Both add text, so both are
@@ -21,8 +21,12 @@ const markdown = z.string().max(MAX_MARKDOWN_BYTES);
 export const createDocTool = defineTool({
   name: "create_doc",
   scope: "WRITE",
-  description:
-    "Create a doc from Markdown. It is PRIVATE, with you first and the token's issuer second on its byline (issuerOnly: the issuer alone), and its text shows in your author colour. The title is `title`, or the Markdown's leading heading. Open a research summary with the prompt quoted; link whole docs as /doc/<slug>, sections with links from create_link, PDF passages with fragment links (/pdf/<slug>#page=N&text=start,end) — those are checked, and a miss is refused as no_match. For a long draft in a local file, use upload_url instead of typing it here. Answers the doc's url and version.",
+  description: (who) => {
+    const byline = who.issuerOnByline
+      ? `you, ${who.actor}, first and ${who.issuer} second — or them alone, with issuerOnly, when they ask`
+      : `you, ${who.actor}`;
+    return `Write a new doc from Markdown: a research summary, notes, a draft. It is PRIVATE, with ${byline} on its byline, and its text shows in your author colour. The title is \`title\`, or the Markdown's leading heading. A summary opens with the prompt that asked for it, quoted. Link a whole doc as /doc/<slug>; a section or a claim in a doc with a /link/<id> from ${listedName("create_link")}, anchored on the heading's text or the claim's sentence; a PDF passage with a fragment link, /pdf/<slug>#page=N&text=start,end. Fragment links are checked, and a miss is refused as no_match. For a long draft in a local file, ${listedName("upload")} sends it without typing it here. Answers the doc's url and version.`;
+  },
   input: z.strictObject({
     markdown: markdown.min(1),
     title: z.string().min(1).max(500).optional(),
@@ -71,14 +75,13 @@ const editItem = z.union([
 export const editDocTool = defineTool({
   name: "edit_doc",
   scope: "WRITE",
-  description:
-    "Targeted edits to a doc you're on the byline of — never a whole-body replace. Each edit replaces a passage (old: its exact words, or {start,end} for a long one; prefix/suffix when it occurs twice) with new Markdown, appends, or inserts after a heading; title sets the title. Words that survive keep their marks — a note's highlight, a person's colour, a link; new words are yours and keep the notes of the words they replace. All-or-nothing: a passage that isn't there is no_match with near misses, one that occurs twice ambiguous. A passage named by its ends needs `version`, the read's, and is refused if someone changed it since. Answers the new version, the blocks changed (read them to check), and the notes and link parts it touched, saying whether each still resolves — acting on a note means replying to it with annotate: what was done, and a link. revert:<version> undoes one edit, dryRun:true lists its hunks first. Records (imported chats) can't be edited.",
+  description: `Edit a doc you're on the byline of: revise or rewrite a passage, append, insert after a heading, retitle it, or revert an edit — targeted edits, never a whole-body replace. Each edit replaces a passage (old: its exact words, from a format:"text" read, or {start,end} for a long one; prefix/suffix when it occurs twice) with new Markdown, appends, or inserts after a heading; title sets the title. Words that survive keep their marks — a note's highlight, a person's colour, a link; new words are yours and keep the notes of the words they replace. All-or-nothing: a passage that isn't there is no_match with near misses, one that occurs twice ambiguous. A passage named by its ends needs \`version\`, the read's, and is refused if someone changed it since. Answers the new version, the blocks changed (read them to check), and the notes and link parts it touched, saying whether each still resolves. When an edit does what someone's note asked, reply to the note with ${listedName("add_note")}: what was done, and a link. revert:<version> undoes one edit, dryRun:true lists its hunks first. Records (imported chats) can't be edited.`,
   input: z.strictObject({
     url: objectRef.describe("The doc: /doc/<slug> or its id."),
     version: versionString.optional().describe("The version you read the passages at; needed for any named by start and end."),
     edits: z.array(editItem).min(1).max(50).optional(),
     title: z.string().max(500).optional(),
-    revert: versionString.optional().describe("An edit's version, as edit_doc answered it: undo that edit."),
+    revert: versionString.optional().describe(`An edit's version, as ${listedName("edit_doc")} answered it: undo that edit.`),
     hunks: z.array(z.number().int().min(1)).max(500).optional().describe("With revert: just these hunks, numbered as dryRun lists them."),
     dryRun: z.boolean().optional().describe("With revert: list the hunks, change nothing."),
     idempotencyKey,

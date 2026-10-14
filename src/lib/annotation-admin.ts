@@ -183,7 +183,7 @@ export async function flushAnnotationCache(opts: {
  * Puts `proseJson` back as an annotation body's whole content, through the
  * collab server so every connected client sees it (PLAN.md §22e).
  *
- * Cancel on an edit session, and the MCP server's edit_annotation, which
+ * Cancel on an edit session, and the MCP server's edit_note, which
  * passes `attribute`. **Not best-effort**, unlike
  * its neighbours here: a failed mark leaves an annotation document-level,
  * which the system already renders sensibly, but a failed restore leaves the

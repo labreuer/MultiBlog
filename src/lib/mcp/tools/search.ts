@@ -11,7 +11,7 @@ import { searchSections, docText } from "@/lib/doc-text";
 import { loadDocState } from "@/lib/doc-state";
 import { headingAbove } from "@/lib/doc-text";
 import { ApiError, ERROR_LIST_CAP, invalid } from "@/lib/api/errors";
-import { defineTool, objectRef, type McpContext, type ToolResult } from "../tool";
+import { defineTool, listedName, objectRef, type McpContext, type ToolResult } from "../tool";
 import { decodeCursor, encodeCursor, markedSnippet } from "../shape";
 import { shapeSearch } from "../search-shape";
 import { readableContainer, type ResolvedDoc, type ResolvedFile } from "../resolve";
@@ -216,8 +216,8 @@ async function searchPdf(file: ResolvedFile, q: string, exact: boolean, cursorRa
 export const searchTool = defineTool({
   name: "search",
   scope: "READ",
-  description:
-    "Full-text search over docs, posts, PDFs, annotations and comments you can read — and, with no q, a listing by filter (kinds, authors, tags, dates), newest first. Stemmed and accent-folded; a typo is corrected only when nothing matched, and the answer says corrected:true. Pass exact:true whenever the question is whether something exists. One handle per hit: its url (pass it to read), or an annotation's id. A doc hit's passage is one read away: read the url with around set to a phrase from inside its snippet's fragment. within a doc ranks its sections and gives each one's blocks for a ranged read; within a PDF ranks every matching page.",
+  description: (who) =>
+    `Search MultiBlog, this person's research archive: docs, PDFs, their notes on passages, links, tags, posts, comments and imported Claude chats. You act as ${who.actor}, on a token issued by ${who.issuer ?? "the same account"}. Find by full-text query (stemmed, accent-folded) over what you can read, or list by filter: kinds, authors, tags, dates. A call needs q or a filter; with no q, a filter lists what it selects, newest first. Pass exact:true whenever the question is whether something exists: otherwise a typo is corrected when nothing matched, and the answer says corrected:true. One handle per hit, its url (an annotation's is its id): cite what you use by its URL. A doc hit's passage is one ${listedName("read")} away, with around set to a phrase from inside its snippet's fragment. within a doc ranks its sections, each with its blocks for a ranged read; within a PDF, every matching page.`,
   input,
   output,
   readOnly: true,

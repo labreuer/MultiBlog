@@ -2,8 +2,8 @@ import { SignJWT, jwtVerify } from "jose";
 
 // docs/MCP.md §5 — a byte grant: a URL-borne stand-in for the bearer token on
 // one route, for ten minutes, so nothing Claude runs in a shell needs the
-// token itself. `upload_url` and `download_url` mint them; the byte routes
-// accept one in place of the token.
+// token itself. `upload` and `download` mint them; the byte routes accept one
+// in place of the token.
 //
 // Signed as the collab server's ydoc token is (jose, HS256, AUTH_SECRET;
 // src/lib/ydoc-token.ts), with an audience of its own — and that one has an

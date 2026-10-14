@@ -17,7 +17,7 @@ import { parse, readableContainer } from "./resolve";
 import { anchorInDoc, type QuoteInput } from "./annotation-writes";
 import { anchorPdfQuote } from "./pdf-anchoring";
 
-// docs/MCP.md §10 — create_link, add_link_parts and edit_link, over
+// docs/MCP.md §10 — create_link, extend_link and edit_link, over
 // src/lib/anchored-link-write.ts. A part is named the way an annotation's
 // passage is: the doc or PDF, and a quote in it — on a doc at the version
 // read, on a PDF narrowed by page or label. Every part is captured before

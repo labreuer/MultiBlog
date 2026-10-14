@@ -202,16 +202,17 @@ build, with the annotation, snapshot and PDF integrity checks clean over MCP-wri
 yet done:
 
 - **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Until then only a
-  client that can send a header — Claude Code — reaches the server. The plan's first step,
-  which isn't OAuth, is built: the server is on SDK v2 (`@modelcontextprotocol/server`), which
-  answers the 2026-07-28 revision claude.ai opens in as well as every 2025-era client.
+  client that can send a header — Claude Code — reaches the server. The plan's first two
+  steps, which aren't OAuth, are built: the server is on SDK v2 (`@modelcontextprotocol/server`),
+  which answers the 2026-07-28 revision claude.ai opens in as well as every 2025-era client;
+  and every tool is listed with a `multiblog_` prefix, since claude.ai drops the server's
+  instructions and shows its model only a tool's name until it searches. The conventions are
+  in the descriptions, and a skill the person installs carries the rest
+  (`scripts/mcp-skill.ts` writes its ZIP).
 
-  The second step renames the tools, each with a `multiblog_` prefix, since claude.ai drops
-  the server's instructions and shows its model only a tool's name until it searches; the
-  conventions move into the descriptions, and a skill the person installs carries the rest.
-  The third is a trial: where claude.ai's connector dialog offers request headers (a beta), a
-  read-only header token good for a week tries claude.ai against v2 and the new names on
-  explore, before any OAuth is built. The fourth changes what is built. `/api/mcp`
+  The third step is a trial: where claude.ai's connector dialog offers request headers (a
+  beta), a read-only header token good for a week tries claude.ai against v2, the new names
+  and the skill on explore, before any OAuth is built. The fourth changes what is built. `/api/mcp`
   authenticates through v2's own bearer check, which refuses a token with no expiry. So every
   header token gets one: a year by default from the script, and a year from the migration for
   each token already issued. Then a thin slice, just enough for claude.ai to connect, is tried
@@ -245,11 +246,6 @@ yet done:
   `MAX_MARKDOWN_BYTES`, as `create_doc` bounds its one body, and give the handler a
   `maxRequestBodySize` of 8 MiB, which holds that much text however a client escapes it (six
   bytes a character at worst).
-- **`search`'s description doesn't say a call needs `q` or a filter.** A call with neither is
-  refused as `invalid`: "Give q, or a filter (kinds, authors, tags or a date) to list by."
-  (`src/lib/mcp/tools/search.ts`). claude.ai's model made exactly that call first in its first
-  trial, and retried correctly from the refusal. Step 2 of MCP.md §21 rewrites the descriptions
-  ("What the model is told"); `search`'s says it there.
 
 ## The claude.ai trial: what to undo
 
@@ -297,7 +293,7 @@ comments, annotations).
     `&copy;` making the round trip unchanged through all three managers, and for the Markdown
     each writes.
 
-## `edit_link` and `edit_file` can't be audited or undone (MCP.md §15, §21)
+## `edit_link` and `rename_file` can't be audited or undone (MCP.md §15, §21)
 
 **Status:** decided 2026-10-12 with the OAuth plan, and not yet built. Only a `claude-code`
 token lists the two tools, because nothing they change can be undone and Claude Code's forced
@@ -307,8 +303,8 @@ included, until this item is done; then every client lists them.
 claude.ai's prompt can't stand in for Claude Code's. It asks before each call to a tool marked
 destructive, but a person can set a tool, or a whole group of tools, to "Always allow". The
 likely route there is not these two tools but the destructive ones a research session calls
-constantly: `edit_doc` and `edit_annotation` prompt on every call, and "Always allow" on the
-group that holds them would cover `edit_link` and `edit_file` too. And Research calls a
+constantly: `edit_doc` and `edit_note` prompt on every call, and "Always allow" on the
+group that holds them would cover `edit_link` and `rename_file` too. And Research calls a
 connector's tools without asking at all. After either, an instruction planted in text Claude
 reads could make these changes unseen. The UI's own paths have the same gap today.
 
@@ -337,7 +333,7 @@ What can't be undone, in the functions both front doors call (the actions in
   - A name and an order are restored from the history, and so is a file's title.
   - Undoing is offered in the UI (the `/links` table, the file's page) and through MCP, as
     `edit_doc` reverts an edit (MCP.md §6).
-- **Then the forced prompt goes.** `edit_link` and `edit_file` lose `requiresUserInteraction`,
+- **Then the forced prompt goes.** `edit_link` and `rename_file` lose `requiresUserInteraction`,
   and the "keeps no history" line in their descriptions and in `file-manage.ts`'s comment.
   MCP.md §15's list of what can't be undone shrinks to `manage`, and every client lists the
   two, a claude.ai connection included (`toolsFor`, `src/lib/mcp/server.ts`).

@@ -7,11 +7,11 @@ import { buildTestPdf } from "../scripts/make-test-pdf";
 // docs/MCP.md §5, §8: a PDF uploaded through the MCP server's byte route —
 // PRIVATE, owned by the actor and then the issuer, its labels stored with it,
 // the same bytes coming back as the file already there — retitled with
-// edit_file; and quads the server measures for a quote, held to within a
+// rename_file; and quads the server measures for a quote, held to within a
 // point of what a real selection in Chromium gives for the same words
 // (docs/PDF_QUADS.md, Appendix A: the fixture's worst edge was 0.82pt).
 
-test("upload_url and curl: a PRIVATE file owned by the actor and the issuer; the same bytes again are that file", async ({ request }) => {
+test("upload and curl: a PRIVATE file owned by the actor and the issuer; the same bytes again are that file", async ({ request }) => {
   const agent = await createAgent(request);
   const title = uniqueTitle("upload");
   const pdf = Buffer.from(
@@ -19,7 +19,7 @@ test("upload_url and curl: a PRIVATE file owned by the actor and the issuer; the
   );
   const ids: string[] = [];
   const upload = async (query: string) => {
-    const granted = await agent.call("upload_url", { kind: "file" });
+    const granted = await agent.call("upload", { kind: "file" });
     const res = await request.post(`${granted.result.url}&filename=paper.pdf${query}`, { data: pdf, headers: { "Content-Type": "application/pdf" } });
     return { status: res.status(), body: await res.json() };
   };
@@ -55,14 +55,14 @@ test("upload_url and curl: a PRIVATE file owned by the actor and the issuer; the
     ids.push(issuerOnly.body.id);
     expect((await getUploadFacts(issuerOnly.body.id))!.owners).toEqual([ADMIN_EMAIL]);
 
-    const wrongKind = await request.post(`${(await agent.call("upload_url", { kind: "file" })).result.url}&filename=notes.txt`, {
+    const wrongKind = await request.post(`${(await agent.call("upload", { kind: "file" })).result.url}&filename=notes.txt`, {
       data: Buffer.from("plain text"),
     });
     expect(wrongKind.status()).toBe(415);
 
-    const retitled = await agent.call("edit_file", { file: first.body.url, title: `${title} retitled` });
+    const retitled = await agent.call("rename_file", { file: first.body.url, title: `${title} retitled` });
     expect(retitled.result).toMatchObject({ url: first.body.url, title: `${title} retitled` });
-    expect((await agent.call("edit_file", { file: issuerOnly.body.id, title: "Not mine" })).error.code).toBe("not_found");
+    expect((await agent.call("rename_file", { file: issuerOnly.body.id, title: "Not mine" })).error.code).toBe("not_found");
   } finally {
     for (const id of ids) await deleteTestFile(id);
     await agent.dispose();
@@ -115,7 +115,7 @@ test("the server's quads for a quote land within a point of a Chromium selection
     await page.getByRole("button", { name: "Save" }).click();
     await expect(visibleText(page, "From the browser.")).toBeVisible({ timeout: 15_000 });
 
-    const posted = await agent.call("annotate", { on: `/pdf/${file.slug}`, body: "From the server.", quote: phrase });
+    const posted = await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "From the server.", quote: phrase });
     expect(posted.isError, JSON.stringify(posted.error)).toBe(false);
 
     const rows = await getFileAnnotationQuads(file.id);

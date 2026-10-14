@@ -30,7 +30,7 @@ import { annotationByFragment } from "./read/threads";
 import { checkFragmentLinks } from "./fragment-links";
 import { anchorPdfQuote } from "./pdf-anchoring";
 
-// docs/MCP.md §9 — `annotate`: a LIVE annotation, root or reply, anchored by
+// docs/MCP.md §9 — `add_note`: a LIVE annotation, root or reply, anchored by
 // quote or on the whole. Always the column mechanism: the MCP server has no
 // editor surface, so it never writes an annotation mark into a doc.
 //
@@ -203,7 +203,7 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
 }
 
 /**
- * edit_annotation (§9): a posted body rewritten in one call — an edit
+ * edit_note (§9): a posted body rewritten in one call — an edit
  * session begun, the new body written through /admin/annotation-replace
  * (attributed to the actor, and refusing a read-only token), and the session
  * finished, which records the new version, or none if nothing changed. A

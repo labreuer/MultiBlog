@@ -29,10 +29,10 @@ test("manage is listed only with the manage scope, and only to a client that pro
   try {
     const names = async (secret: string) =>
       ((await mcpRequest(request, secret, "tools/list")).body.result?.tools as { name: string; _meta: Record<string, unknown> }[]) ?? [];
-    expect((await names(writer.secret)).map((t) => t.name)).not.toContain("manage");
-    const listed = (await names(manager.secret)).find((t) => t.name === "manage");
+    expect((await names(writer.secret)).map((t) => t.name)).not.toContain("multiblog_manage");
+    const listed = (await names(manager.secret)).find((t) => t.name === "multiblog_manage");
     expect(listed?._meta["anthropic/requiresUserInteraction"]).toBe(true);
-    expect((await names(web.secret)).map((t) => t.name)).not.toContain("manage");
+    expect((await names(web.secret)).map((t) => t.name)).not.toContain("multiblog_manage");
   } finally {
     await writer.dispose();
     await manager.dispose();
@@ -122,7 +122,7 @@ test("manage a file's owners, an annotation, a link, and a published post's tags
     expect(renamed.result.url).toBe(`/pdf/${file.slug}-moved`);
     expect((await agent.call("manage", { target: file.id, record: true })).error.code).toBe("invalid");
 
-    const note = await agent.call("annotate", { on: `/doc/${doc.slug}`, body: "Mine to take back." });
+    const note = await agent.call("add_note", { on: `/doc/${doc.slug}`, body: "Mine to take back." });
     const gone = await agent.call("manage", { target: String(note.result.id), delete: true });
     expect(gone.result).toMatchObject({ changed: ["deleted"] });
     expect((await agent.call("read", { url: String(note.result.id) })).error.code).toBe("not_found");

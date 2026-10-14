@@ -92,7 +92,7 @@ test("create_link mints several links in one call, each part captured by quote; 
   }
 });
 
-test("add_link_parts and edit_link: the creator's alone, by part number, keeping the last part", async ({ request }) => {
+test("extend_link and edit_link: the creator's alone, by part number, keeping the last part", async ({ request }) => {
   const agent = await createAgent(request);
   const other = await createAgent(request);
   const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Alpha one. Beta two. Gamma three." });
@@ -100,9 +100,9 @@ test("add_link_parts and edit_link: the creator's alone, by part number, keeping
     const minted = await agent.call("create_link", { links: [{ parts: [{ on: `/doc/${doc.slug}`, quote: "Alpha one" }] }] });
     const url = (minted.result.links as { url: string }[])[0].url;
 
-    const added = await agent.call("add_link_parts", { link: url, parts: [{ on: doc.id, quote: "Beta two" }, { on: doc.id, quote: "Gamma three" }] });
+    const added = await agent.call("extend_link", { link: url, parts: [{ on: doc.id, quote: "Beta two" }, { on: doc.id, quote: "Gamma three" }] });
     expect(added.result).toEqual({ url, parts: 3 });
-    expect((await other.call("add_link_parts", { link: url, parts: [{ on: doc.id, quote: "Beta two" }] })).error.code).toBe("not_found");
+    expect((await other.call("extend_link", { link: url, parts: [{ on: doc.id, quote: "Beta two" }] })).error.code).toBe("not_found");
 
     const reordered = await agent.call("edit_link", { link: url, order: [3, 1, 2], name: "Greek" });
     expect(reordered.result).toMatchObject({ changed: ["order", "name"], parts: 3 });

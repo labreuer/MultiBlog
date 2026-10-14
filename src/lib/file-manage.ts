@@ -10,7 +10,7 @@ import type { Actor } from "@/lib/actor";
 // deletion — as plain functions taking an explicit actor, the file
 // counterpart of src/lib/doc-manage.ts: /files' actions
 // (src/app/actions/files.ts) wrap them with the session, and the MCP
-// server's `manage` and `edit_file` with a token's user. Each refusal is an
+// server's `manage` and `rename_file` with a token's user. Each refusal is an
 // ApiError, whose message reads the same in either front door.
 //
 // Deleting is a soft delete only. The bytes stay on disk: they are
@@ -33,7 +33,7 @@ export async function setFileVisibility(actor: Actor, fileId: string, visibility
   await prismaIncludingDeleted.storedFile.update({ where: { id: fileId }, data: { visibility, updatedByUserId: actor.userId } });
 }
 
-/** A file's title, trimmed and capped. It keeps no history, which is why edit_file prompts. */
+/** A file's title, trimmed and capped. It keeps no history, which is why rename_file prompts. */
 export async function setFileTitle(actor: Actor, fileId: string, title: string): Promise<string> {
   await requireManageable(actor, fileId);
   const trimmed = title.trim().slice(0, 500);

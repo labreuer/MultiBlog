@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import { invalid } from "@/lib/api/errors";
-import { defineTool } from "../tool";
+import { defineTool, listedName } from "../tool";
 
 // docs/MCP.md §11 and §12 — the two lookups a write needs and `search`
 // doesn't answer: who may go on a byline, and which tag terms exist.
@@ -13,7 +13,7 @@ export const findUsersTool = defineTool({
   name: "find_users",
   scope: "READ",
   description:
-    "Byline-eligible accounts (ADMIN, EDITOR, AUTHOR) by name or author slug, or one account by its exact email. Answers id, slug and name: enough to name someone on a byline. An account without a name is found only by its exact email, since its slug is made from that email.",
+    "Look up people — users and authors who can be on a byline (ADMIN, EDITOR, AUTHOR) — by name or author slug, or one account by its exact email. Answers id, slug and name: enough to name someone on a byline. An account without a name is found only by its exact email, since its slug is made from that email.",
   input: z.strictObject({
     query: z.string().min(1).max(100).optional().describe("Part of a name or slug."),
     email: z.string().email().max(320).optional().describe("An exact email address."),
@@ -55,7 +55,7 @@ export const findTagsTool = defineTool({
   name: "find_tags",
   scope: "READ",
   description:
-    "Tag terms by name: each one's name, slug and description. A term carries no visibility of its own, so every live term is listed; what carries it is `search` with tags:[slug], or read of /tag/<slug>.",
+    `Look up tag terms — the vocabulary of labels and topics — by name: each one's name, slug and description. Prefer an existing term to minting one. A term carries no visibility of its own, so every live term is listed; what carries one is ${listedName("search")} with tags:[slug], or ${listedName("read")} of /tag/<slug>.`,
   input: z.strictObject({ query: z.string().min(1).max(100).describe("Part of a term's name.") }),
   output: z.object({
     tags: z.array(z.object({ name: z.string(), slug: z.string(), description: z.string().optional() })),

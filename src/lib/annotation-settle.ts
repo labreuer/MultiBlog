@@ -11,7 +11,7 @@ import { ydocStore, encodeYdocState } from "../../server/ydoc-store";
 // PLAN.md §22e — settling an annotation body: recording a version of it.
 // Plain functions taking identity explicitly (docs/MCP.md §1), shared by the
 // actions that post and finish editing an annotation
-// (src/app/actions/annotations.ts) and by the MCP server's annotate, which
+// (src/app/actions/annotations.ts) and by the MCP server's add_note, which
 // creates a LIVE annotation in one call. Never exported from a "use server"
 // file: every export of one is callable from any browser with any arguments.
 

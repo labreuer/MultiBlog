@@ -3,14 +3,14 @@ import { setFileTitle } from "@/lib/file-manage";
 import { defineTool, objectRef } from "../tool";
 import { readableFile } from "../resolve";
 
-// docs/MCP.md §8, §15 — edit_file: a file's title, the one thing about a file
-// a write changes, since its bytes are its identity. A title keeps no history,
-// so every call prompts.
+// docs/MCP.md §8, §15 — rename_file: a file's title, the one thing about a
+// file a write changes, since its bytes are its identity. A title keeps no
+// history, so every call prompts.
 
-export const editFileTool = defineTool({
-  name: "edit_file",
+export const renameFileTool = defineTool({
+  name: "rename_file",
   scope: "WRITE",
-  description: "Retitle a file you own (a PDF or .docx). A file's bytes never change; its title keeps no history, so each call prompts the person.",
+  description: "Rename or retitle a file you own: a PDF or .docx. A file's bytes never change; its title keeps no history, so each call prompts the person.",
   input: z.strictObject({
     file: objectRef.describe("The file: /pdf/<slug>, /files/<slug> or its id."),
     title: z.string().min(1).max(500),

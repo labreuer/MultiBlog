@@ -11,6 +11,60 @@ import type { AuthenticatedToken } from "@/lib/api/tokens";
 // `parseCommentBody` — and a parsed argument is still never a Prisma write's
 // data (§1): an operation builds that from named fields.
 
+/**
+ * Every tool's name in the code, which is also its `api_write` operation and
+ * its audit line's. A client lists each one with `TOOL_PREFIX` in front (§21,
+ * "The names").
+ */
+export const TOOL_NAMES = [
+  "search",
+  "read",
+  "find_users",
+  "find_tags",
+  "download",
+  "upload",
+  "create_doc",
+  "edit_doc",
+  "rename_file",
+  "add_note",
+  "edit_note",
+  "create_link",
+  "extend_link",
+  "edit_link",
+  "tag",
+  "untag",
+  "manage",
+] as const;
+export type ToolName = (typeof TOOL_NAMES)[number];
+
+/**
+ * In front of every listed name: claude.ai shows its model a tool's name and
+ * nothing of the server it comes from, so the name has to say (§21).
+ */
+export const TOOL_PREFIX = "multiblog_";
+
+/**
+ * A tool's name as a client lists it — and so the name any text the model
+ * reads gives it: a description, the instructions, an error's message.
+ */
+export function listedName(name: ToolName): string {
+  return `${TOOL_PREFIX}${name}`;
+}
+
+/**
+ * The two people a token names, as the instructions and the descriptions of
+ * `search` and `create_doc` name them (§5, §21): each by name, and by author
+ * slug when they have a name.
+ */
+export type Who = {
+  /** The account the session acts as. */
+  actor: string;
+  /** Who issued the token, or null when the actor issued it. */
+  issuer: string | null;
+  /** Whether a new doc's byline takes the issuer after the actor, which needs a byline-eligible role (§12). */
+  issuerOnByline: boolean;
+};
+
 /** Who a call acts as, and the token it came in on. */
 export type McpContext = {
   token: AuthenticatedToken;
@@ -21,15 +75,16 @@ export type McpContext = {
 export type ToolResult = Record<string, unknown>;
 
 export type McpTool = {
-  name: string;
+  name: ToolName;
   scope: ApiScope;
-  description: string;
+  /** Leads with the words a person searches by; per token for the two that name its people (§21). */
+  description: string | ((who: Who) => string);
   input: z.ZodObject;
   output: z.ZodType;
   /** MCP's hints (§15): read-only tools run concurrently in Claude Code; `destructive` names an overwrite or a removal. */
   readOnly: boolean;
   destructive: boolean;
-  /** A few words a client's tool search matches besides the name. */
+  /** A few words Claude Code's tool search matches besides the name; claude.ai's reads only the description, which has them too (§21). */
   searchHint: string;
   /** Loaded up front rather than through tool search: `search` and `read` only (§15, §16). */
   alwaysLoad?: boolean;

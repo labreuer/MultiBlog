@@ -8,7 +8,7 @@ import { newObjectPeople } from "@/lib/mcp/doc-writes";
 
 // docs/MCP.md §5, §8 — an upload from a raw request body
 // (`curl --data-binary @paper.pdf`), with the `write` scope, through a grant
-// from `upload_url` or the bearer token: a PDF or a .docx, as /files takes.
+// from `upload` or the bearer token: a PDF or a .docx, as /files takes.
 // It is src/lib/file-ingest.ts behind the token, with three parameters the UI's
 // route doesn't pass:
 //

@@ -2,15 +2,21 @@ import { Server, type CallToolResult } from "@modelcontextprotocol/server";
 import { ApiError, ERROR_LIST_CAP } from "@/lib/api/errors";
 import { takeRateLimit } from "@/lib/api/rate-limit";
 import type { AuthenticatedToken } from "@/lib/api/tokens";
-import { instructionsFor } from "./instructions";
+import { instructionsFor, whoFor } from "./instructions";
 import { issueLines } from "./issues";
-import { jsonSchemaOf, type McpContext, type McpTool } from "./tool";
+import { jsonSchemaOf, listedName, type McpContext, type McpTool, type Who } from "./tool";
 import { TOOLS } from "./tools";
 
 // docs/MCP.md §5 — one MCP server per request, built by the route's handler
 // after the token has been checked, so that it can list only what that token
-// may call and name, in its instructions, whose account it acts as. The same
-// server answers both protocol eras (§21, "Moving to SDK v2").
+// may call and name, in its instructions and two descriptions, whose account
+// it acts as. The same server answers both protocol eras (§21, "Moving to SDK
+// v2").
+//
+// **Listed names carry `multiblog_`; the code's don't** (§21, "The names").
+// The prefix goes on here, where the tools are listed and where a call looks
+// one up, and through `listedName` in any text the model reads. A tool's
+// `api_write` operation and its audit line keep the short name.
 //
 // **The low-level `Server`, not `McpServer`.** McpServer validates a tool's
 // arguments itself and answers a refusal as a bare sentence, where every
@@ -28,14 +34,19 @@ export function toolsFor(token: AuthenticatedToken): McpTool[] {
   );
 }
 
-function definitionOf(tool: McpTool) {
+/** A tool's description, built for this token's people where it names them. */
+function describe(tool: McpTool, who: Who): string {
+  return typeof tool.description === "function" ? tool.description(who) : tool.description;
+}
+
+function definitionOf(tool: McpTool, who: Who) {
   const meta: Record<string, unknown> = { "anthropic/searchHint": tool.searchHint };
   if (tool.alwaysLoad) meta["anthropic/alwaysLoad"] = true;
   if (tool.forcePrompt) meta["anthropic/requiresUserInteraction"] = true;
   if (tool.maxResultSizeChars) meta["anthropic/maxResultSizeChars"] = tool.maxResultSizeChars;
   return {
-    name: tool.name,
-    description: tool.description,
+    name: listedName(tool.name),
+    description: describe(tool, who),
     inputSchema: jsonSchemaOf(tool.input, "input") as { type: "object" },
     outputSchema: jsonSchemaOf(tool.output, "output") as { type: "object" },
     annotations: {
@@ -80,7 +91,7 @@ export async function callTool(tool: McpTool, rawArgs: unknown, ctx: McpContext)
     const issues = issueLines(parsed.error.issues, tool.input);
     return errorResult({
       code: "invalid",
-      message: `The arguments to ${tool.name} don't fit its schema.`,
+      message: `The arguments to ${listedName(tool.name)} don't fit its schema.`,
       issues: issues.slice(0, ERROR_LIST_CAP),
       ...(issues.length > ERROR_LIST_CAP ? { moreIssues: issues.length - ERROR_LIST_CAP } : {}),
     });
@@ -109,24 +120,26 @@ export async function callTool(tool: McpTool, rawArgs: unknown, ctx: McpContext)
 
 export function buildMcpServer(token: AuthenticatedToken): Server {
   const ctx: McpContext = { token, actor: { userId: token.user.id, role: token.user.role } };
+  const who = whoFor(token);
   const tools = toolsFor(token);
-  const byName = new Map(tools.map((tool) => [tool.name, tool]));
+  const byName = new Map(tools.map((tool) => [listedName(tool.name), tool]));
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       capabilities: { tools: {} },
       instructions: instructionsFor(token),
-      // Both answers are per token: the instructions name the actor and the
-      // issuer, and the tool list follows the token's client and scopes. So
-      // neither may sit in a shared cache, whatever the SDK's default.
+      // Both answers are per token: the instructions and two descriptions
+      // name the actor and the issuer, and the tool list follows the token's
+      // client and scopes. So neither may sit in a shared cache, whatever the
+      // SDK's default.
       cacheHints: {
         "server/discover": { ttlMs: 0, cacheScope: "private" },
         "tools/list": { ttlMs: 0, cacheScope: "private" },
       },
     },
   );
-  server.setRequestHandler("tools/list", async () => ({ tools: tools.map(definitionOf) }));
+  server.setRequestHandler("tools/list", async () => ({ tools: tools.map((tool) => definitionOf(tool, who)) }));
   server.setRequestHandler("tools/call", async (request) => {
     const tool = byName.get(request.params.name);
     if (!tool) {
