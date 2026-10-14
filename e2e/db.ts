@@ -368,6 +368,8 @@ export const sweepTestData = (...args: Parameters<DbHandlers["sweepTestData"]>) 
 // docs/MCP.md — tokens and accounts for the MCP server's specs.
 export const createTestApiToken = (...args: Parameters<DbHandlers["createTestApiToken"]>) =>
   call("createTestApiToken", ...args);
+export const expireTestApiToken = (...args: Parameters<DbHandlers["expireTestApiToken"]>) =>
+  call("expireTestApiToken", ...args);
 export const softDeleteTestUser = (...args: Parameters<DbHandlers["softDeleteTestUser"]>) =>
   call("softDeleteTestUser", ...args);
 export const restoreTestUser = (...args: Parameters<DbHandlers["restoreTestUser"]>) => call("restoreTestUser", ...args);

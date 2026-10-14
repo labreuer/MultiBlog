@@ -2337,7 +2337,16 @@ export async function createTestApiToken(opts: {
     name: "e2e",
     scopes: opts.scopes,
     client: opts.client ?? "OTHER",
+    // A day: every token expires (docs/MCP.md §21), and no spec runs that long.
+    expiresAt: new Date(Date.now() + 86_400_000),
   });
+}
+
+/** Backdates a token's expiry to a minute ago, for the bearer check's refusal of an expired token. */
+export async function expireTestApiToken(id: string): Promise<void> {
+  const token = await prisma.apiToken.findUniqueOrThrow({ where: { id }, select: { user: { select: { email: true } } } });
+  assertSafe(token.user.email);
+  await prisma.apiToken.update({ where: { id }, data: { expiresAt: new Date(Date.now() - 60_000) } });
 }
 
 /**
@@ -2584,6 +2593,7 @@ const handlers = {
   createTestAnchoredLink,
   deleteTestAnchoredLink,
   createTestApiToken,
+  expireTestApiToken,
   softDeleteTestUser,
   restoreTestUser,
   appendTestDocParagraph,

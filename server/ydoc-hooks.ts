@@ -407,7 +407,7 @@ export async function handleFlushAnnotationCache(
 // content back — writing the old text *forward* is not a workaround for Yjs
 // having no undo, it is the truthful record: the abandoned attempt happened,
 // `ydoc_update` says so, and the revision sequence stays a list of states
-// readers were actually shown. And the MCP server's edit_annotation writes a
+// readers were actually shown. And the MCP server's edit_note writes a
 // new body (docs/MCP.md §9), with `attribute: true`.
 //
 // **A read-only token is refused**, as on every /admin endpoint

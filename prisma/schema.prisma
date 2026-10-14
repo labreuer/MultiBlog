@@ -1852,6 +1852,8 @@ model ApiToken {
   prefix          String
   scopes          ApiScope[]
   client          ApiTokenClient @default(OTHER)
+  // Required of every header token by a hand-written CHECK (api_token_expiry):
+  // SDK v2's bearer check refuses a token without one (docs/MCP.md §21).
   expiresAt       DateTime?      @map("expires_at")
   revokedAt       DateTime?      @map("revoked_at")
   // Written at most once a minute, so a busy token isn't a write per call.
@@ -1868,7 +1870,7 @@ model ApiToken {
 }
 
 // docs/MCP.md §4 — one row per write that adds something (create_doc, the
-// upload routes, annotate, create_link, add_link_parts, edit_doc), so a retry
+// upload routes, add_note, create_link, extend_link, edit_doc), so a retry
 // within a day is answered `already_done` rather than run twice.
 //
 // **Inserting the row is the claim**: a covered write inserts it RUNNING

@@ -35,7 +35,7 @@ export const downloadTool = defineTool({
   name: "download",
   scope: "READ",
   description:
-    `Download a file's bytes (any PDF or .docx you can read) or an export of docs as a tar: answers with a URL, carrying a grant good for ten minutes, to fetch with curl. The token is never needed in a shell. The export: GET with ${listedName("search")}'s filters as query parameters (tags, authors, created_from…; kinds is docs only), or POST a JSON list of doc URLs or ids as {"docs": […]}; add format=markdown (default), text or json. catalog=1 answers only each doc's id, slug, title, size and newest version: save it, and Grep it to find docs by title before reading any. For a sweep that must read every doc, take the export or its catalog and Grep locally rather than reading each.`,
+    `Download a file's bytes (any PDF or .docx you can read) or an export of docs as a tar: answers with a URL, carrying a grant good for ten minutes, to fetch with curl. The token is never needed in a shell. The export: GET with ${listedName("search")}'s filters as query parameters (tags, authors, created_from…; kinds is docs only), or POST a JSON list of doc URLs or ids as {"docs": […]}; add format=markdown (default), text or json. catalog=1 answers, unpaged, every doc selected with only its id, slug, title, length in characters (chars) and newest version: save it, and Grep it to find docs by title before reading any. For a sweep that must read every doc, take the export or its catalog and Grep locally rather than reading each.`,
   input: z.strictObject({
     file: objectRef.optional().describe("The file to download: /pdf/<slug>, /files/<slug> or an id."),
     export: z.boolean().optional().describe("The export route instead of a file."),

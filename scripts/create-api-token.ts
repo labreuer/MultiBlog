@@ -8,6 +8,12 @@
 //   npx tsx scripts/create-api-token.ts --list --email=<account>
 //   npx tsx scripts/create-api-token.ts --revoke=<token id>
 //
+// **Every token expires**, in --expires-days, a year by default, and there is
+// no way to ask for none: SDK v2's bearer check refuses a token without an
+// expiry (docs/MCP.md §21, "The bearer check"). Re-issue a header token
+// before its year is up; Claude Code reads the new file at its next
+// connection.
+//
 // The secret is printed once — or, with --write-to, written to that file with
 // mode 0600 and not printed at all, which is how a Claude Code headersHelper
 // reads it (docs/MCP.md §5: ~/.config/multiblog/<server>.token). Only its
@@ -48,6 +54,8 @@ function flag(name: string): string | undefined {
   const prefix = `--${name}=`;
   return process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
+
+const DEFAULT_EXPIRES_DAYS = 365;
 
 const SCOPES: Record<string, ApiScope> = { read: "READ", write: "WRITE", manage: "MANAGE" };
 const CLIENTS: Record<string, ApiTokenClient> = { "claude-code": "CLAUDE_CODE", "claude-ai": "CLAUDE_AI", other: "OTHER" };
@@ -92,15 +100,13 @@ async function main() {
     return scope ?? usage(`Unknown scope ${s}.`);
   });
   const client = CLIENTS[(flag("client") ?? "other").toLowerCase()] ?? usage("Unknown --client.");
-  const days = flag("expires-days");
-  const expiresAt = days ? new Date(Date.now() + Number(days) * 86_400_000) : null;
-  if (days && !(Number(days) > 0)) usage("--expires-days is a positive number.");
+  const days = Number(flag("expires-days") ?? DEFAULT_EXPIRES_DAYS);
+  if (!(days > 0)) usage("--expires-days is a positive number.");
+  const expiresAt = new Date(Date.now() + days * 86_400_000);
 
   const { secret, id } = await issueApiToken({ userId: user.id, issuerId: issuer.id, name, scopes, client, expiresAt });
   console.log(
-    `Issued ${id} for ${user.email} (${user.role}), issued by ${issuer.email}: ${scopes.join(", ")}, client ${client}` +
-      (expiresAt ? `, expires ${expiresAt.toISOString()}` : ", no expiry") +
-      ".",
+    `Issued ${id} for ${user.email} (${user.role}), issued by ${issuer.email}: ${scopes.join(", ")}, client ${client}, expires ${expiresAt.toISOString()}.`,
   );
   const writeTo = flag("write-to");
   if (writeTo) {
