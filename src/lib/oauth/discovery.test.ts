@@ -27,16 +27,17 @@ test("the issuer is APP_URL's origin exactly, with no trailing slash", () => {
   withAppUrl("https://multiblog.example/", () => assert.equal(issuer(), "https://multiblog.example"));
 });
 
-test("the authorization server's metadata parses, names the issuer and lists what the slice offers", () => {
+test("the authorization server's metadata parses, names the issuer and lists what it offers", () => {
   withAppUrl("https://multiblog.example", () => {
     const metadata = OAuthMetadataSchema.parse(authorizationServerMetadata());
     assert.equal(metadata.issuer, "https://multiblog.example");
     assert.equal(metadata.authorization_endpoint, "https://multiblog.example/authorize");
     assert.equal(metadata.token_endpoint, "https://multiblog.example/token");
-    assert.deepEqual(metadata.grant_types_supported, ["authorization_code"]);
+    assert.deepEqual(metadata.grant_types_supported, ["authorization_code", "refresh_token"]);
     assert.deepEqual(metadata.code_challenge_methods_supported, ["S256"]);
     assert.deepEqual(metadata.token_endpoint_auth_methods_supported, ["none"]);
-    assert.deepEqual(metadata.scopes_supported, ["read", "write"]);
+    // offline_access here and nowhere else, as the spec asks.
+    assert.deepEqual(metadata.scopes_supported, ["read", "write", "offline_access"]);
     assert.equal(metadata.client_id_metadata_document_supported, true);
     assert.equal(metadata.authorization_response_iss_parameter_supported, true);
     assert.equal(metadata.registration_endpoint, undefined);

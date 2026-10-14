@@ -49,6 +49,10 @@ export function resourceMetadataUrl(): string {
  * `none` as the only token-endpoint authentication, with CIMD supported, is
  * what makes claude.ai use its published identity rather than registering.
  * No `registration_endpoint`: there is no dynamic registration.
+ *
+ * `offline_access` is listed here and nowhere else, as the spec asks. A
+ * client that sees it may add it to its request, which changes nothing: a
+ * refresh token comes with every grant.
  */
 export function authorizationServerMetadata(): OAuthMetadata {
   const origin = issuer();
@@ -57,10 +61,10 @@ export function authorizationServerMetadata(): OAuthMetadata {
     authorization_endpoint: `${origin}/authorize`,
     token_endpoint: `${origin}/token`,
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: [...OAUTH_SCOPES],
+    scopes_supported: [...OAUTH_SCOPES, "offline_access"],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
   };

@@ -53,6 +53,7 @@ import {
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { captureAnchor } from "@/lib/doc-link-anchor";
 import { postContentFromYdoc } from "@/lib/post-content";
+import { hashRefreshToken } from "@/lib/oauth/refresh";
 import { docContentFromYdoc } from "@/lib/doc-content";
 import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
@@ -2376,6 +2377,21 @@ export async function expireTestApiToken(id: string): Promise<void> {
 }
 
 /**
+ * Moves a refresh token's rotation `msAgo` further into the past, for a
+ * replay past the two minutes a rotated token is answered as a retry
+ * (docs/MCP.md §21, "A connection"), without waiting them out.
+ */
+export async function backdateRefreshRotation(refreshToken: string, msAgo: number): Promise<void> {
+  const row = await prisma.oauthRefreshToken.findUniqueOrThrow({
+    where: { tokenHash: hashRefreshToken(refreshToken) },
+    select: { id: true, usedAt: true, apiToken: { select: { user: { select: { email: true } } } } },
+  });
+  assertSafe(row.apiToken.user.email);
+  if (row.usedAt === null) throw new Error("backdateRefreshRotation: the token hasn't been rotated.");
+  await prisma.oauthRefreshToken.update({ where: { id: row.id }, data: { usedAt: new Date(row.usedAt.getTime() - msAgo) } });
+}
+
+/**
  * A doc's marks as its stored row holds them — after an MCP edit, the collab
  * server stores the doc as its direct connection closes: how many characters
  * each author's mark covers (by email), the text each annotation's mark
@@ -2620,6 +2636,7 @@ const handlers = {
   deleteTestAnchoredLink,
   createTestApiToken,
   expireTestApiToken,
+  backdateRefreshRotation,
   createTestBot,
   softDeleteTestUser,
   restoreTestUser,

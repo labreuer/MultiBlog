@@ -101,6 +101,15 @@ export function scopesAsked(scope: string | null): ApiScope[] {
   return words.has("read") && !words.has("write") ? ["READ"] : ["READ", "WRITE"];
 }
 
+/**
+ * Whether a refresh's `scope` asks for more than the connection holds, which
+ * is refused (§21, "The token endpoint"). Only `write` can: every connection
+ * holds `read`, and any other word is ignored, as at the consent page.
+ */
+export function asksForMore(scope: string | null, held: readonly ApiScope[]): boolean {
+  return (scope ?? "").split(" ").includes("write") && !held.includes("WRITE");
+}
+
 /** What a connection is granted: `read`, and `write` only when the client asked and the person chose it. */
 export function grantedScopes(asked: readonly ApiScope[], writeChosen: boolean): ApiScope[] {
   return asked.includes("WRITE") && writeChosen ? ["READ", "WRITE"] : ["READ"];

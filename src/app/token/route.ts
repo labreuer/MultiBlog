@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { pruneSpentCodes, tokenGrant, type TokenAnswer } from "@/lib/oauth/grant";
+import { pruneSpent, tokenGrant, type TokenAnswer } from "@/lib/oauth/grant";
 
 // docs/MCP.md §21, "The token endpoint" — `POST /token`, a form-encoded body
 // answered with JSON and `Cache-Control: no-store`. The logic is
@@ -41,7 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     result = { status: 500, body: { error: "server_error", error_description: "Something went wrong on the server." } };
   }
   // After the answer, never before it: claude.ai gives /token 10 seconds.
-  after(() => pruneSpentCodes().catch((err) => console.error("[oauth] pruning codes failed:", err)));
+  after(() => pruneSpent().catch((err) => console.error("[oauth] pruning failed:", err)));
   return answer(result);
 }
 

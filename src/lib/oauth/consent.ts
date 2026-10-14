@@ -2,6 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import type { ApiScope } from "@/generated/prisma/enums";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { replacesConnections, type OauthClientInfo } from "./clients";
+import { NEWEST_REFRESH_TOKEN } from "./refresh";
+import { hasLapsed } from "./rotation";
 
 // docs/MCP.md §21, "Whose account" and "The consent page" — the bots a
 // person may connect, and the code Approve mints.
@@ -38,6 +41,29 @@ export async function botsFor(personId: string): Promise<Bot[]> {
     select: { id: true, name: true, slug: true },
     orderBy: [{ name: "asc" }, { slug: "asc" }],
   });
+}
+
+/**
+ * When a client's new connection replaces the bot's last one through it
+ * (`replacesConnections`), the bots among `botIds` that `personId` already
+ * connected through it, each with when its connection was made, so the page
+ * can say before Approve that approving replaces that connection (§21, "The
+ * token endpoint"). A revoked or lapsed connection is left out: nothing it
+ * holds still works.
+ */
+export async function connectedBots(client: OauthClientInfo, personId: string, botIds: readonly string[]): Promise<Map<string, Date>> {
+  const made = new Map<string, Date>();
+  if (!replacesConnections(client) || botIds.length === 0) return made;
+  const connections = await prisma.apiToken.findMany({
+    where: { userId: { in: [...botIds] }, createdByUserId: personId, oauthClientId: client.clientId, revokedAt: null },
+    select: { userId: true, createdAt: true, refreshTokens: NEWEST_REFRESH_TOKEN },
+    orderBy: { createdAt: "asc" },
+  });
+  const now = new Date();
+  for (const connection of connections) {
+    if (!hasLapsed(connection.refreshTokens, now)) made.set(connection.userId, connection.createdAt);
+  }
+  return made;
 }
 
 /** Whether `botId` is a live account working for `personId`. */

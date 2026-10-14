@@ -201,7 +201,7 @@ Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a pr
 build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
 yet done:
 
-- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Four of the plan's
+- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Five of the plan's
   steps are built:
   - the server is on SDK v2 (`@modelcontextprotocol/server`), which answers the 2026-07-28
     revision claude.ai opens in as well as every 2025-era client;
@@ -214,20 +214,34 @@ yet done:
     the `api_token_expiry` migration for each token issued before it;
   - a thin slice of OAuth (step 5): the discovery documents, the consent page, `/token` for the
     `authorization_code` grant, an hour's access token, and Claude's pinned identity. A
-    connection acts as a bot that works for whoever approves it (`user.works_for_user_id`).
-    With no refresh token yet, it lasts its access token's hour.
+    connection acts as a bot that works for whoever approves it (`user.works_for_user_id`);
+  - refresh tokens (step 7), rotated on every use, so a connection lasts until it goes 90 days
+    unused, and a new claude.ai connection replaces the bot's last one. Its migration,
+    `oauth_refresh_token`, revokes the slice's connections, which had none.
 
   The header trial and the slice trial ran on the trial instance on 2026-10-14 (MCP.md §21,
   "The header trial" and "The slice trial"). claude.ai connects through OAuth on the web and on
   iOS, lists the tools, calls them and shows the connector as connected, so
-  `anthropics/claude-ai-mcp#1110` didn't show here. Next is step 7, refresh tokens: until then
-  a connection ends after its access token's hour and the person connects again. The trial
-  instance runs the slice (9d91866, deployed 2026-10-14), and its Claude account works for
-  Luke, set once by hand (MCP.md §21, "Whose account").
+  `anthropics/claude-ai-mcp#1110` didn't show here. Refresh tokens have not met claude.ai yet:
+  whether it refreshes after an hour without asking the person, and whether #1110's symptom
+  shows once there are refresh tokens (MCP.md §21, Open), are the full trial's to see, or a
+  look on the trial instance first. Next is step 8, the rest of bot accounts. The trial
+  instance runs main (d413758, the slice, deployed 2026-10-14), and its Claude account works
+  for Luke, set once by hand (MCP.md §21, "Whose account").
   Another instance's Claude account gets its person the same way before a build with the
   works-for rule reaches it (step 8): `UPDATE "user" SET works_for_user_id = (SELECT id FROM
   "user" WHERE email = 'labreuer@gmail.com') WHERE email = 'claude@multiblog.invalid';`, which
   the CHECK refuses if the account has a password.
+
+  **Deploying main to an instance from before the slice, explore first** (explore runs
+  9ef8de6; thicketry, kicking and notes fb56178):
+  - the migrations `api_token_expiry` (every header token gets a year from that day),
+    `oauth_slice` and `oauth_refresh_token` run;
+  - the tools are renamed `multiblog_<name>`, so a Claude Code project's allow rules for that
+    instance's server change to match: `mcp__multiblog__search` becomes
+    `mcp__multiblog__multiblog_search` (MCP.md §15's suggested rules carry the new names);
+  - each claude.ai connector to that instance needs "Refresh tool list" in its settings, or it
+    keeps calling the old names, which are refused (MCP.md §21, "The header trial").
 
   A read-only endpoint for Research is designed and not built (MCP.md §21, "The read-only
   endpoint"), since Research calls no connector at all, neither this one nor a directory one
@@ -291,17 +305,14 @@ beside the OAuth one. The instance's Claude account (`claude@multiblog.invalid`,
 password) stays, since it is what §21's Claude connection acts as. Still in place:
 
 - **The slice trial's OAuth connector**, at the instance's `/api/mcp` in Luke's claude.ai, and
-  a connection row for each time it was connected. With no refresh token yet each row ends with
-  its hour but stays unrevoked; step 7's migration revokes them.
+  a connection row for each time it was connected. Each row ended with its hour but stays
+  unrevoked until `oauth_refresh_token` (step 7) runs there, which revokes them; claude.ai then
+  connects again at its next call.
 - **In Luke's claude.ai settings**: the instance's host among code execution's allowed domains,
   and the `multiblog` skill.
 - **The read-bound test doc**, `/doc/read-bound-test-for-the-claude-ai-trial`, PRIVATE to
   Claude's account and Luke, imported for the header trial's `read` near its bound. The bound
   is measured (MCP.md §21, "The header trial"), so it can be deleted in MultiBlog.
-- **The instance runs branch `mcp-oauth`**, not main. Its checkout tracks
-  `origin/mcp-oauth`, so the deploy wrapper's plain pull keeps it there. Switch it back
-  (`git switch main`) once the PR carrying the slice (step 5) merges, or before deploying main
-  there.
 - **`deploy` on the instance's server is in the `adm` group**, so the trial could read nginx's
   access log. Keep it, or undo it with `sudo gpasswd -d deploy adm`.
 

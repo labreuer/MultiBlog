@@ -3,11 +3,21 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { OAuthMetadataSchema, OAuthProtectedResourceMetadataSchema, OAuthTokensSchema } from "@modelcontextprotocol/core";
 import { test, expect } from "./fixtures";
-import { ADMIN_EMAIL, TEST_PASSWORD, createTestBot, createTestUser, deleteTestUser, uniqueEmail, type TestUser } from "./db";
+import {
+  ADMIN_EMAIL,
+  TEST_PASSWORD,
+  backdateRefreshRotation,
+  createTestBot,
+  createTestUser,
+  deleteTestUser,
+  uniqueEmail,
+  type TestUser,
+} from "./db";
 import { mcpRequest } from "./mcp";
 
-// docs/MCP.md §21, Build order 5 — the thin slice: enough OAuth for claude.ai
-// to connect. Claude's real published identity throughout, so the redirect
+// docs/MCP.md §21, Build order 5 and 7 — the thin slice, enough OAuth for
+// claude.ai to connect, and refresh tokens with their rotation. Claude's real
+// published identity throughout, so the redirect
 // URI is claude.ai's callback: the spec reads each code from the `Location`
 // of the decision's 303 and redeems it itself, never following it.
 //
@@ -23,7 +33,10 @@ import { mcpRequest } from "./mcp";
 const CLAUDE = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 const CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback";
 const STATE = "e2e-state";
+/** Past the two minutes a rotated refresh token is answered as a retry. */
+const PAST_THE_RETRY_WINDOW = 3 * 60_000;
 
+type OAuthTokens = ReturnType<typeof OAuthTokensSchema.parse>;
 type Discovered = { endpoint: string; issuer: string; authorize: string; token: string; metadataUrl: string };
 
 async function discover(request: APIRequestContext): Promise<Discovered> {
@@ -84,9 +97,9 @@ function callback(d: Discovered, location: string | undefined): URLSearchParams 
   return url.searchParams;
 }
 
-/** Approves through the decision directly and returns the code. */
-async function approve(request: APIRequestContext, d: Discovered, bot: TestUser, challenge: string): Promise<string> {
-  const res = await decide(request, d, { ...authorizeFields(d, challenge), bot: bot.id, write: "1", decision: "approve" });
+/** Approves through the decision directly, with write unless told otherwise, and returns the code. */
+async function approve(request: APIRequestContext, d: Discovered, bot: TestUser, challenge: string, write = true): Promise<string> {
+  const res = await decide(request, d, { ...authorizeFields(d, challenge), bot: bot.id, ...(write ? { write: "1" } : {}), decision: "approve" });
   expect(res.status()).toBe(303);
   const code = callback(d, res.headers()["location"]).get("code");
   expect(code).toBeTruthy();
@@ -95,6 +108,37 @@ async function approve(request: APIRequestContext, d: Discovered, bot: TestUser,
 
 function redeem(request: APIRequestContext, d: Discovered, form: Record<string, string>): Promise<APIResponse> {
   return request.post(d.token, { form: { grant_type: "authorization_code", client_id: CLAUDE, ...form } });
+}
+
+/** A claude.ai connection for `bot`, approved and redeemed: its first access and refresh tokens. */
+async function connect(request: APIRequestContext, d: Discovered, bot: TestUser, write = true): Promise<OAuthTokens> {
+  const { verifier, challenge } = pkce();
+  const code = await approve(request, d, bot, challenge, write);
+  const res = await redeem(request, d, { code, code_verifier: verifier });
+  expect(res.status()).toBe(200);
+  return OAuthTokensSchema.parse(await res.json());
+}
+
+function refresh(request: APIRequestContext, d: Discovered, refreshToken: string | undefined, form: Record<string, string> = {}): Promise<APIResponse> {
+  expect(refreshToken).toMatch(/^mbr_/);
+  return request.post(d.token, { form: { grant_type: "refresh_token", client_id: CLAUDE, refresh_token: refreshToken!, ...form } });
+}
+
+/** A refresh that must succeed, and the pair it answers. */
+async function refreshed(request: APIRequestContext, d: Discovered, refreshToken: string | undefined): Promise<OAuthTokens> {
+  const res = await refresh(request, d, refreshToken);
+  expect(res.status()).toBe(200);
+  return OAuthTokensSchema.parse(await res.json());
+}
+
+async function errorOf(res: APIResponse): Promise<string> {
+  expect(res.status()).toBe(400);
+  return (await res.json()).error;
+}
+
+/** What a call with this access token gets: 200, or 401 once its connection has ended. */
+async function callStatus(request: APIRequestContext, accessToken: string): Promise<number> {
+  return (await mcpRequest(request, accessToken, "tools/list")).status;
 }
 
 async function toolNames(request: APIRequestContext, accessToken: string): Promise<string[]> {
@@ -117,10 +161,11 @@ test("the documents name the endpoint and this origin, and the 401 points at the
     authorization_endpoint: `${d.issuer}/authorize`,
     token_endpoint: `${d.issuer}/token`,
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: ["read", "write"],
+    // offline_access here and nowhere else, as the spec asks.
+    scopes_supported: ["read", "write", "offline_access"],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
   });
@@ -187,7 +232,7 @@ test("a connection approved on the page lists a claude.ai connection's tools, to
     expect(tokens.token_type).toBe("Bearer");
     expect(tokens.scope).toBe("read write");
     expect(tokens.expires_in).toBe(3600);
-    expect(tokens.refresh_token).toBeUndefined();
+    expect(tokens.refresh_token).toMatch(/^mbr_/);
 
     // The 2025-era leg.
     const names = await toolNames(request, tokens.access_token);
@@ -365,11 +410,122 @@ test("the decision trusts no Origin but this site's, no bot but the person's, an
   }
 });
 
-test("the token endpoint refuses what the slice doesn't offer", async ({ request }) => {
+test("a refresh rotates its token; a retry within two minutes is answered, and the pair it gets retires the first", async ({ request }) => {
   const d = await discover(request);
-  const refresh = await request.post(d.token, { form: { grant_type: "refresh_token", refresh_token: "mbr_x", client_id: CLAUDE } });
-  expect(refresh.status()).toBe(400);
-  expect((await refresh.json()).error).toBe("unsupported_grant_type");
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  try {
+    const first = await connect(request, d, bot);
+
+    const res = await refresh(request, d, first.refresh_token, { resource: d.endpoint });
+    expect(res.status()).toBe(200);
+    expect(res.headers()["cache-control"]).toBe("no-store");
+    const one = OAuthTokensSchema.parse(await res.json());
+    expect(one.token_type).toBe("Bearer");
+    expect(one.expires_in).toBe(3600);
+    expect(one.scope).toBe("read write");
+    expect(one.refresh_token).toMatch(/^mbr_/);
+    expect(one.refresh_token).not.toBe(first.refresh_token);
+    expect(await callStatus(request, one.access_token)).toBe(200);
+
+    // The same token again, as a client that lost the answer sends it: still
+    // answered, though the access token that answer carried has been used.
+    const two = await refreshed(request, d, first.refresh_token);
+    expect(two.refresh_token).not.toBe(one.refresh_token);
+    expect(await callStatus(request, two.access_token)).toBe(200);
+    expect(await callStatus(request, one.access_token)).toBe(200);
+
+    // Using either new refresh token retires the other, and the retired one,
+    // presented later, is a replay: the connection ends.
+    const three = await refreshed(request, d, two.refresh_token);
+    expect(await errorOf(await refresh(request, d, one.refresh_token))).toBe("invalid_grant");
+    expect(await callStatus(request, three.access_token)).toBe(401);
+    expect(await errorOf(await refresh(request, d, three.refresh_token))).toBe("invalid_grant");
+  } finally {
+    await deleteTestUser(bot.email);
+  }
+});
+
+test("a rotated refresh token presented after its successor's use, or past two minutes, ends the connection", async ({ request }) => {
+  const d = await discover(request);
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  try {
+    // A token issued from it has been used, so the old one is a copy.
+    const spent = await connect(request, d, bot);
+    const child = await refreshed(request, d, spent.refresh_token);
+    const grandchild = await refreshed(request, d, child.refresh_token);
+    expect(await errorOf(await refresh(request, d, spent.refresh_token))).toBe("invalid_grant");
+    expect(await callStatus(request, grandchild.access_token)).toBe(401);
+
+    // Past the window, though nothing issued from it has been used.
+    const late = await connect(request, d, bot);
+    const next = await refreshed(request, d, late.refresh_token);
+    await backdateRefreshRotation(late.refresh_token!, PAST_THE_RETRY_WINDOW);
+    expect(await errorOf(await refresh(request, d, late.refresh_token))).toBe("invalid_grant");
+    expect(await callStatus(request, next.access_token)).toBe(401);
+  } finally {
+    await deleteTestUser(bot.email);
+  }
+});
+
+test("a refresh asking for another endpoint, more scope or another client is refused, and ends nothing", async ({ request }) => {
+  const d = await discover(request);
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  try {
+    const readOnly = await connect(request, d, bot, false);
+    expect(readOnly.scope).toBe("read");
+
+    for (const resource of [new URL("/api/mcp/read", d.issuer).href, `${d.endpoint}#fragment`]) {
+      expect(await errorOf(await refresh(request, d, readOnly.refresh_token, { resource }))).toBe("invalid_target");
+    }
+    expect(await errorOf(await refresh(request, d, readOnly.refresh_token, { scope: "read write" }))).toBe("invalid_scope");
+    const otherClient = await refresh(request, d, readOnly.refresh_token, { client_id: "https://evil.example/client.json" });
+    expect(await errorOf(otherClient)).toBe("invalid_client");
+    expect(await callStatus(request, readOnly.access_token)).toBe(200);
+
+    // None of those spent the token. offline_access changes nothing, and the
+    // answer carries the connection's scopes.
+    const res = await refresh(request, d, readOnly.refresh_token, { scope: "read offline_access" });
+    expect(res.status()).toBe(200);
+    const tokens = OAuthTokensSchema.parse(await res.json());
+    expect(tokens.scope).toBe("read");
+    expect(await toolNames(request, tokens.access_token)).not.toContain("multiblog_create_doc");
+  } finally {
+    await deleteTestUser(bot.email);
+  }
+});
+
+test("a bot's new claude.ai connection replaces its last one, which the page says first, and leaves another bot's", async ({ page, request }) => {
+  const d = await discover(request);
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  const other = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  try {
+    const old = await connect(request, d, bot);
+    const others = await connect(request, d, other);
+
+    await page.goto(authorizeUrl(d, pkce().challenge));
+    await expect(page.getByText(`${bot.name} already has a connection to claude.ai`)).toBeVisible();
+    await expect(page.getByText(`Approving as ${bot.name} replaces it`)).toBeVisible();
+
+    const fresh = await connect(request, d, bot);
+    expect(await callStatus(request, old.access_token)).toBe(401);
+    expect(await errorOf(await refresh(request, d, old.refresh_token))).toBe("invalid_grant");
+    expect(await callStatus(request, fresh.access_token)).toBe(200);
+    expect(await callStatus(request, others.access_token)).toBe(200);
+  } finally {
+    await deleteTestUser(other.email);
+    await deleteTestUser(bot.email);
+  }
+});
+
+test("the token endpoint refuses a grant it doesn't offer, and a code or refresh token it never issued", async ({ request }) => {
+  const d = await discover(request);
+  // Claude's own document lists the jwt-bearer grant; this server doesn't offer it.
+  const jwtBearer = await request.post(d.token, {
+    form: { grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: "x", client_id: CLAUDE },
+  });
+  expect(await errorOf(jwtBearer)).toBe("unsupported_grant_type");
+
+  expect(await errorOf(await refresh(request, d, "mbr_not-a-token"))).toBe("invalid_grant");
 
   const unknownClient = await redeem(request, d, { client_id: "https://evil.example/client.json", code: "x", code_verifier: pkce().verifier });
   expect((await unknownClient.json()).error).toBe("invalid_client");

@@ -1,11 +1,11 @@
 # MultiBlog — an MCP server for machine clients
 
 **Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
-annotations, anchored links, tags, uploads and `manage`. Not built: OAuth beyond a thin slice
-(phase 5, planned in §21, whose steps 1, 2, 4 and 5 are built: the move to SDK v2, the tools'
-names and descriptions with a skill for claude.ai, the bearer check on v2's terms, and enough
-OAuth for claude.ai to connect for an hour at a time, not yet tried with claude.ai), and
-passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
+annotations, anchored links, tags, uploads and `manage`. Not built: the rest of OAuth (phase
+5, planned in §21, whose steps 1, 2, 4, 5 and 7 are built: the move to SDK v2, the tools' names
+and descriptions with a skill for claude.ai, the bearer check on v2's terms, enough OAuth for
+claude.ai to connect, tried on the web and on iOS, and refresh tokens, so a connection lasts
+until it goes 90 days unused), and passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
 every such point is decided there rather than here. §21 is the plan for OAuth and SDK v2.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
@@ -2228,8 +2228,8 @@ Items 1–3 should still be fixed on their own account (TODO.md).
    `quadsForRange`, with the spec that holds each edge within 1pt of a selection (§8); and the
    file half of `manage`, owner changes included (§12).
 5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own. Its
-   steps 1, 2, 4 and 5 are built: SDK v2, the tools' names and descriptions, the bearer
-   check, and the thin slice of OAuth.
+   steps 1, 2, 4, 5 and 7 are built: SDK v2, the tools' names and descriptions, the bearer
+   check, the thin slice of OAuth, and refresh tokens.
 6. **If wanted:** passage-level tags (PLAN.md §20, PR 2). Not built.
 
 Phases 1–4 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
@@ -2414,15 +2414,47 @@ code beside each says why as well.
 - **The e2e fixture `createTestBot`** makes a bot with no password, working for a given
   person. `createAgent` (`e2e/mcp.ts`) is unchanged until step 8.
 
+**Refresh tokens** (§21, step 7)
+
+- **The rotation rule is a function of a token's state** (`src/lib/oauth/rotation.ts`,
+  unit-tested): whether it has been rotated and when, whether a token issued from it has been
+  used, and whether a sibling has. The token endpoint reads that state under a `FOR UPDATE`
+  lock on the connection's `api_token` row, so two refreshes sent at once each see the other's
+  rotation, and the second is answered as a retry rather than taken for a replay.
+- **A refresh token's parent is a plain column**, `oauth_refresh_token.parent_id`, not a
+  foreign key, so pruning a parent leaves its children able to find their siblings.
+- **A new connection replaces the bot's last one for any `claude-ai` client**, including one
+  registered by hand as claude.ai's fallback, not for Claude's published identity alone
+  (`replacesConnections`): the reason, claude.ai reconnecting to recover, holds for both.
+- **The consent page names each bot with a live connection** through the client from the
+  person signed in, when that connection was made, and that approving as that bot ends it.
+- **A refresh's bucket is its own**, keyed on the connection, apart from the one its calls
+  take from, so a burst of calls can't make a refresh fail. An empty one is answered 429
+  with `invalid_request`, since OAuth has no error code for it. The bucket has no unit test:
+  it is taken between two database reads, and the unit tests touch no database.
+- **A refresh needs `client_id`**, as a code's redemption does, since a public client names
+  itself that way. A known client other than the connection's is `invalid_grant`.
+- **A refresh's `scope` asks for more only by naming `write`** on a connection that can only
+  read (`asksForMore`). Any other word is ignored, as on the consent page.
+- **`create-api-token.ts --list` shows a lapsed connection as lapsed.** It is the one part of
+  "Seeing and ending a connection" built here, since only refresh tokens let a connection
+  lapse; the Connections card is step 10's.
+- **The migration revokes every connection with no refresh token**, which is every
+  connection the slice made.
+- **The e2e covers §21 Testing's refresh cases but two**: Revoke on `/dashboard`, which is
+  step 10's, and a connection to the read-only endpoint, which isn't built. A replay past the
+  two minutes is set up by `backdateRefreshRotation`.
+
 ## 21. OAuth, for claude.ai
 
-**Status: planned; steps 1, 2, 4 and 5 are built**: the move to SDK v2, the tools' names and
-descriptions with the skill, the bearer check on v2's terms, and the thin slice: Discovery,
+**Status: planned; steps 1, 2, 4, 5 and 7 are built**: the move to SDK v2, the tools' names
+and descriptions with the skill, the bearer check on v2's terms, the thin slice (Discovery,
 the consent page, `/token` for the `authorization_code` grant, the access token, and Claude's
-pinned identity (§18's phase 5; §20 says where the slice departs from this plan). Step 3, the
-header trial, and step 6, the slice trial, ran on 2026-10-14 ("The header trial", "The slice
-trial"): claude.ai connects through OAuth on the web and on iOS. Step 7, refresh tokens, is
-next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
+pinned identity), and refresh tokens with their rotation, a new claude.ai connection replacing
+the bot's last one (§18's phase 5; §20 says where the build departs from this plan). Step 3,
+the header trial, and step 6, the slice trial, ran on 2026-10-14 ("The header trial", "The
+slice trial"): claude.ai connects through OAuth on the web and on iOS. Step 8, the rest of bot
+accounts, is next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
 authorization spec allows.
@@ -3681,8 +3713,8 @@ request.
   token until step 7, the connector's settings offer Connect again once the hour is up. The next
   chat sent the expired token and got 401 `invalid_token`, retried with no token and got a 401
   again, then read both documents and asked the person to connect. Approving made a new
-  connection and the chat carried on. The old connection's row stays unrevoked until step 7's
-  migration revokes the slice's connections. It happened twice, the same way each time.
+  connection and the chat carried on. The old connection's row stayed unrevoked, since nothing
+  revoked a connection then; step 7's migration revokes the slice's connections. It happened twice, the same way each time.
 - **A chat that reconnects stays on 2025-11-25.** After each reconnect, claude.ai fetched
   `server/discover` and `tools/list` under 2026-07-28 and then made that chat's calls through
   the 2025-11-25 fallback: `initialize` answered as a stream, `notifications/initialized`, and
@@ -3870,8 +3902,8 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    2025-11-25 alike. #1067 shows the same Settings symptom with a client registered by hand,
    though there the tools did load. **It didn't happen in the slice trial**: the tools loaded
    and the connector showed connected ("The slice trial"). But #1110's server also issues
-   rotating refresh tokens, which the slice doesn't, so the full trial looks again once step 7
-   has added them.
+   rotating refresh tokens, which the slice didn't, so the full trial looks again now that step
+   7 has added them.
 2. **Whether claude.ai's Research calls a connector at all.** In every trial it called neither
    this one nor a directory connector, and the approval its help center describes never
    appeared ("The slice trial"). Nothing in this server decides it. If it does start calling
