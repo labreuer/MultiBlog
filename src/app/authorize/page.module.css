@@ -21,6 +21,23 @@
   font-size: 0.9rem;
 }
 
+/* Who is signed in, and the switch: a form of its own, since the decision's
+   form can't hold another. */
+.who {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.linkButton {
+  font: inherit;
+  border: none;
+  background: none;
+  color: var(--link);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* account.module.css styles a field's <input>; this is its <select>. */
 .select {
   font: inherit;
@@ -50,6 +67,30 @@
   margin-bottom: 0.25rem;
   color: var(--text-secondary);
   font-size: 0.85rem;
+}
+
+/* What the connection can do, below the choices it depends on. */
+.can {
+  font-size: 0.9rem;
+}
+
+.can h2 {
+  margin-bottom: 0.25rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: normal;
+}
+
+.can ul {
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* The sentence in place of the choices, for a person with nothing to connect as. */
+.noBot {
+  font-size: 0.95rem;
 }
 
 .buttons {

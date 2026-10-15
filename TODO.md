@@ -123,6 +123,35 @@ is the cheaper path to it.
 
 ---
 
+## Eleven help texts lose a space before an element, and no check catches the shape
+
+**Next's SWC drops the leading space of a JSX text that spans lines and holds an HTML entity.**
+`<strong>PRIVATE</strong> docs you carry a⏎byline on … &quot;Show all docs&quot;` renders
+"PRIVATE**docs** you carry"; the same text without the entity keeps its space, and so does one
+on a single line. Checked against `next@16.2.11`'s own `transform` (`&apos;`, `&rsquo;` and
+`&quot;` alike); Babel's JSX whitespace rule trims only the lines after the first, so this is
+SWC's. The consent page hit it in two sentences ("Claudewrites"), and `e2e/mcp-oauth.spec.ts`
+caught it; those are fixed. These are not, all in the admin tables' help text:
+
+- `src/components/CommentsTable.tsx:443` ("{spam}— counts")
+- `src/components/DocsTable.tsx:411`, `:414`, `:417`
+- `src/components/FilesTable.tsx:414`, `:421`
+- `src/components/LinksTable.tsx:484`, `:487`, `:496`
+- `src/components/PostsTable.tsx:405`
+- `src/components/UsersTable.tsx:1006` ("Works foris a bot's person")
+
+**The fix at each** is the consent page's: end the line before the text with `{" "}` and start
+the text on a line of its own, where JSX trims its leading whitespace anyway. Rewrapping so the
+entity lands on the first line doesn't help; the whole text node is what counts.
+
+**No check covers it.** `tsc` and `eslint` see valid JSX, and a spec asserts on a passage only
+where someone thought to. A script in `npm run check` would: parse each `src/**/*.tsx` with the
+TypeScript API and fail on a `JsxText` that contains a newline and an entity and whose first
+line starts with whitespace before other text. About 20 lines; it found exactly these eleven
+and the consent page's two.
+
+---
+
 ## Comment quotations: deferred follow-ups (PLAN.md §23)
 
 **Status:** §23 built in full on `annotations-and-comments`, 2026-09-16 (seven commits, Phase 0
@@ -221,7 +250,11 @@ yet done:
   - the rest of bot accounts (step 8): `/users` makes a bot and moves it to another person,
     and §3's check refuses a token not issued by its account's person, or a bot's while it
     outranks its person or works for a COMMENTER. No bot's token lists `manage`, and deleting
-    a person revokes the tokens they issued.
+    a person revokes the tokens they issued;
+  - the consent page in full (step 9), Claude Code's pinned identity, whose connections are
+    `other`, `scripts/oauth-client.ts` for a client registered by hand, and
+    `scripts/check-oauth-clients.ts`, which `deploy/deploy.sh` runs to compare both pinned
+    identities with what Anthropic publishes.
 
   The header trial and the slice trial ran on the trial instance on 2026-10-14 (MCP.md §21,
   "The header trial" and "The slice trial"). claude.ai connects through OAuth on the web and on
@@ -229,8 +262,8 @@ yet done:
   `anthropics/claude-ai-mcp#1110` didn't show here. The refresh trial ran there on 2026-10-14
   and 15 against step 7's build ("The refresh trial"): claude.ai on the web refreshes on its own
   before the call that needs it, stays connected, and a reconnect replaces the connection
-  before it; iOS's refresh is left to the full trial. Next is step 9, the consent page in
-  full. The trial instance's Claude account works for Luke, set once by hand (MCP.md §21,
+  before it; iOS's refresh is left to the full trial. Next is step 10, the per-client bound on
+  `read` and the Connections card. The trial instance's Claude account works for Luke, set once by hand (MCP.md §21,
   "Whose account").
   Another instance's Claude account gets its person the same way before step 8's build reaches
   it, or every header token issued for it is refused: `UPDATE "user" SET works_for_user_id =
@@ -266,11 +299,6 @@ yet done:
     group's own discussion summary in MultiBlog. Its description could say what MultiBlog holds
     that memory doesn't: other people's notes and discussion summaries, and the docs
     themselves rather than recollections of a chat.
-- **The consent page renders the site header** (MCP.md §21, "The slice trial"). Its links were
-  prefetched as `/authorize` loaded, about 20 requests, one of them
-  `/sign-in?callbackUrl=%2Fauthorize`, which drops the authorization request's query. A
-  signed-in visitor is the only one who sees the page, so nothing has broken. Step 9's full
-  consent page should decide whether the header belongs there at all.
 - **Header tokens issued before `api_token_expiry` expire a year after it runs on their
   instance**, Claude Code's files under `~/.config/multiblog/` among them. Re-issue each with
   the script (`--write-to`) before then; nothing warns as the date nears, and an expired token

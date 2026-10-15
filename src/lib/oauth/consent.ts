@@ -21,7 +21,7 @@ export const CODE_TTL_MS = 2 * 60_000;
 
 export type Bot = { id: string; name: string | null; slug: string };
 
-export type Person = { id: string; name: string | null; role: Role };
+export type Person = { id: string; name: string | null; email: string; role: Role };
 
 /**
  * Whoever is signed in, if their account is still live. The row is read, not
@@ -32,22 +32,26 @@ export async function signedInPerson(): Promise<Person | null> {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) return null;
-  return prisma.user.findUnique({ where: { id }, select: { id: true, name: true, role: true } });
+  return prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, role: true } });
 }
 
 /**
- * The live accounts that work for `person`, by name, leaving out any whose
- * tokens §3's check would refuse: one ranked above them, or every one of a
- * COMMENTER's. A deleted bot is left out by the soft-delete filter
- * (src/lib/prisma.ts).
+ * The live accounts that work for `person`, by name: `offered`, the ones the
+ * page offers, and `refused`, the ones §3's check would refuse a token of, so
+ * the page can say why it offers none. A bot is refused when it ranks above
+ * its person, and every one of a COMMENTER's is. A deleted bot is left out by
+ * the soft-delete filter (src/lib/prisma.ts).
  */
-export async function botsFor(person: Person): Promise<Bot[]> {
+export async function botsFor(person: Person): Promise<{ offered: Bot[]; refused: Bot[] }> {
   const bots = await prisma.user.findMany({
     where: { worksForUserId: person.id },
     select: { id: true, name: true, slug: true, role: true },
     orderBy: [{ name: "asc" }, { slug: "asc" }],
   });
-  return bots.filter((bot) => botRoleRefusal(bot.role, person.role) === null).map(({ id, name, slug }) => ({ id, name, slug }));
+  const offered: Bot[] = [];
+  const refused: Bot[] = [];
+  for (const { id, name, slug, role } of bots) (botRoleRefusal(role, person.role) === null ? offered : refused).push({ id, name, slug });
+  return { offered, refused };
 }
 
 /**

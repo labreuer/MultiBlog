@@ -2409,8 +2409,6 @@ code beside each says why as well.
 - **An S256 challenge must be 43 base64url characters**, which is the only shape one can have,
   and a decision without Approve is Cancel. The write box appears only when the client asked
   for `write`.
-- **A person with no bot** sees a sentence saying so, and Cancel alone. Step 9's sentence
-  replaces it.
 - **The e2e fixture `createTestBot`** makes a bot with no password, working for a given
   person. `createAgent` (`e2e/mcp.ts`) is unchanged until step 8.
 
@@ -2478,19 +2476,60 @@ code beside each says why as well.
   panel makes there is named "E2E …", so its address, `e2e-…@multiblog.invalid`, is one the
   fixtures may touch and the sweep removes.
 
+**The consent page in full, and the clients** (§21, step 9)
+
+- **The pins are in `src/lib/oauth/pinned-clients.ts`**, a module with no database, beside the
+  comparison the drift check runs (`client-drift.ts`, unit-tested). So
+  `scripts/check-oauth-clients.ts` needs neither `.env` nor Postgres. `clients.ts` builds its
+  lookup from the pins, and holds `registerClient` and `revokeClient`, which the script and
+  the e2e fixtures both call.
+- **The drift check compares the acted-on lists as sets**, since the server acts on none's
+  order. It exits 1 on a warning, for a run by hand; `deploy.sh` ignores the status.
+- **`oauth-client.ts --list` shows the two pins beside the rows**, and `--revoke` refuses a
+  pin. A redirect URI with a private-use scheme (`com.example.app:/callback`) passes: it is
+  absolute, and the rule names only plain `http`. A client's name is at most 100 characters,
+  since the page shows it whole.
+- **The page renders no site header** (`SiteHeader` returns nothing on `/authorize`). It is a
+  step in another app's flow, and every link off it abandons that flow; the header's own Sign
+  out lands on `/`. Its prefetches go with it, among them a sign-in link that drops the
+  request's query.
+- **The switch signs out**, through a server action, and sends the person to sign in with the
+  whole request as the destination. Signing in over a live session would have worked too, but
+  the first person's session would then outlive a switch they abandoned.
+- **The client's identity is named by its `client_id`'s host only for an `https` URL**: "Its
+  identity is published by claude.ai". A client registered by hand has a cuid for an id, and
+  no host to name.
+- **The loopback warning names the host and port** the connection goes to, and asks the person
+  to approve only if they started it from the client themselves. It sits above the warning
+  against a flow someone else started, which every page carries.
+- **"What the connection can do"** says that it acts as the bot, reading only what the bot can
+  read and writing in its name; what it can't do, which is `manage`'s work; and that it lasts
+  until it goes 90 days unused. That `/dashboard` ends it waits for the Connections card
+  (step 10). The scope boxes name what each scope's tools do.
+- **A person with nothing to connect as is told why**, in one of three sentences, with Cancel
+  alone: a COMMENTER, who can't have a bot; a person whose bots all outrank them, named, with
+  what an ADMIN can change; and a person with no bot, told that an ADMIN makes one, or, when
+  they are an ADMIN, pointed to `/users`. `botsFor` returns the refused bots beside the
+  offered ones for this.
+- **Claude Code's connections don't replace each other**, as a claude.ai client's do
+  (`replacesConnections`): its kind is `other`, and each `/mcp` sign-in is a connection of its
+  own, which lapses with its refresh token.
+
 ## 21. OAuth, for claude.ai
 
-**Status: planned; steps 1, 2, 4, 5, 7 and 8 are built**: the move to SDK v2, the tools' names
-and descriptions with the skill, the bearer check on v2's terms, the thin slice (Discovery,
-the consent page, `/token` for the `authorization_code` grant, the access token, and Claude's
-pinned identity), refresh tokens with their rotation, a new claude.ai connection replacing
-the bot's last one, and the rest of bot accounts: `/users` making and moving them, and their
-rules in §3's check (§18's phase 5; §20 says where the build departs from this plan). Step 3,
+**Status: planned; steps 1, 2, 4, 5, 7, 8 and 9 are built**: the move to SDK v2, the tools'
+names and descriptions with the skill, the bearer check on v2's terms, the thin slice
+(Discovery, the consent page, `/token` for the `authorization_code` grant, the access token,
+and Claude's pinned identity), refresh tokens with their rotation, a new claude.ai connection
+replacing the bot's last one, the rest of bot accounts (`/users` making and moving them, and
+their rules in §3's check), and the consent page in full with Claude Code's pinned identity,
+the drift check `deploy.sh` runs, and `scripts/oauth-client.ts` for a client registered by
+hand (§18's phase 5; §20 says where the build departs from this plan). Step 3,
 the header trial, and step 6, the slice trial, ran on 2026-10-14 ("The header trial", "The
 slice trial"): claude.ai connects through OAuth on the web and on iOS. The refresh trial ran on
 2026-10-14 and 15 against step 7's build: claude.ai refreshes on its own, and a reconnect
-replaces the connection before it ("The refresh trial"). Step 9, the consent page in full,
-is next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
+replaces the connection before it ("The refresh trial"). Step 10, the per-client bound on
+`read` and the Connections card, is next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
 authorization spec allows.

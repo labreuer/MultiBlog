@@ -8,18 +8,24 @@ import {
   TEST_PASSWORD,
   backdateRefreshRotation,
   createTestBot,
+  createTestOauthClient,
   createTestUser,
+  deleteTestOauthClient,
   deleteTestUser,
+  revokeTestOauthClient,
+  setTestUserRole,
   uniqueEmail,
   type TestUser,
 } from "./db";
+import { uniqueTitle } from "./naming";
 import { mcpRequest } from "./mcp";
 
-// docs/MCP.md §21, Build order 5 and 7 — the thin slice, enough OAuth for
-// claude.ai to connect, and refresh tokens with their rotation. Claude's real
-// published identity throughout, so the redirect
-// URI is claude.ai's callback: the spec reads each code from the `Location`
-// of the decision's 303 and redeems it itself, never following it.
+// docs/MCP.md §21, Build order 5, 7 and 9 — the thin slice, enough OAuth for
+// claude.ai to connect, refresh tokens with their rotation, and the consent
+// page in full with the other two kinds of client. Claude's real published
+// identity unless a test says otherwise, so the redirect URI is claude.ai's
+// callback: the spec reads each code from the `Location` of the decision's
+// 303 and redeems it itself, never following it.
 //
 // **The issuer and the endpoint's URL come from the documents**, as a client
 // reads them, and are sent as `Origin` and `resource`; nothing is computed.
@@ -32,6 +38,7 @@ import { mcpRequest } from "./mcp";
 
 const CLAUDE = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 const CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback";
+const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
 const STATE = "e2e-state";
 /** Past the two minutes a rotated refresh token is answered as a retry. */
 const PAST_THE_RETRY_WINDOW = 3 * 60_000;
@@ -88,11 +95,11 @@ function decide(request: APIRequestContext, d: Discovered, form: Record<string, 
   });
 }
 
-/** What a redirect to claude.ai's callback carries, after checking it goes there and names the issuer. */
-function callback(d: Discovered, location: string | undefined): URLSearchParams {
+/** What a redirect to the client's callback, claude.ai's unless named, carries, after checking it goes there and names the issuer. */
+function callback(d: Discovered, location: string | undefined, redirectUri = CLAUDE_CALLBACK): URLSearchParams {
   expect(location).toBeTruthy();
   const url = new URL(location!);
-  expect(url.origin + url.pathname).toBe(CLAUDE_CALLBACK);
+  expect(url.origin + url.pathname).toBe(redirectUri);
   expect(url.searchParams.get("iss")).toBe(d.issuer);
   return url.searchParams;
 }
@@ -204,7 +211,14 @@ test("a connection approved on the page lists a claude.ai connection's tools, to
     // The client's name and the host its connection goes to, which the spec
     // requires on every consent page.
     await expect(page.getByText("the connection goes to claude.ai")).toBeVisible();
+    await expect(page.getByText("Its identity is published by claude.ai")).toBeVisible();
     await expect(page.getByText("Approve only a connection you have just started yourself")).toBeVisible();
+    await expect(page.getByText("is a program on your own computer")).toHaveCount(0);
+    await expect(page.getByText("Signed in as")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sign in as someone else" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "What the connection can do" })).toBeVisible();
+    // Every link off the page would abandon the flow, so the site's header isn't there.
+    await expect(page.locator("header")).toHaveCount(0);
     await expect(page.locator('input[name="write"]')).not.toBeChecked();
 
     // The form's post goes to the real decision, whose 303 is read and not
@@ -514,6 +528,138 @@ test("a bot's new claude.ai connection replaces its last one, which the page say
   } finally {
     await deleteTestUser(other.email);
     await deleteTestUser(bot.email);
+  }
+});
+
+test("Claude Code's identity takes a loopback redirect on any port, warns of it, and connects as other", async ({ page, request }) => {
+  const d = await discover(request);
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  const loopback = "http://127.0.0.1:53712/callback";
+  const asClaudeCode = { client_id: CLAUDE_CODE, redirect_uri: loopback };
+  try {
+    const { verifier, challenge } = pkce();
+    await page.goto(authorizeUrl(d, challenge, asClaudeCode));
+    await expect(page.getByRole("heading", { name: "Connect Claude Code" })).toBeVisible();
+    await expect(page.getByText("Its identity is published by claude.ai")).toBeVisible();
+    await expect(page.getByText("the connection goes to 127.0.0.1:53712")).toBeVisible();
+    await expect(page.getByText("127.0.0.1:53712 is a program on your own computer")).toBeVisible();
+
+    const res = await decide(request, d, { ...authorizeFields(d, challenge, asClaudeCode), bot: bot.id, write: "1", decision: "approve" });
+    expect(res.status()).toBe(303);
+    const code = callback(d, res.headers()["location"], loopback).get("code");
+    const redeemed = await redeem(request, d, { client_id: CLAUDE_CODE, code: code!, code_verifier: verifier });
+    expect(redeemed.status()).toBe(200);
+    const tokens = OAuthTokensSchema.parse(await redeemed.json());
+
+    // A claim to be Claude Code can't be checked, so its connection is
+    // `other`: it writes, but lists none of a claude-code token's tools.
+    const names = await toolNames(request, tokens.access_token);
+    expect(names).toContain("multiblog_create_doc");
+    for (const forced of ["multiblog_edit_link", "multiblog_rename_file", "multiblog_manage"]) expect(names).not.toContain(forced);
+
+    // Its refresh names its own client. And a second connection leaves the
+    // first: only a claude.ai client's replaces.
+    const next = await request.post(d.token, { form: { grant_type: "refresh_token", client_id: CLAUDE_CODE, refresh_token: tokens.refresh_token! } });
+    expect(next.status()).toBe(200);
+    const second = pkce();
+    const again = await decide(request, d, { ...authorizeFields(d, second.challenge, { ...asClaudeCode, redirect_uri: "http://localhost:8123/callback" }), bot: bot.id, decision: "approve" });
+    const secondCode = callback(d, again.headers()["location"], "http://localhost:8123/callback").get("code");
+    expect((await redeem(request, d, { client_id: CLAUDE_CODE, code: secondCode!, code_verifier: second.verifier })).status()).toBe(200);
+    expect(await callStatus(request, OAuthTokensSchema.parse(await next.json()).access_token)).toBe(200);
+
+    // Its two redirect URIs mean a request must name one, and only those.
+    for (const [overrides, message] of [
+      [{ client_id: CLAUDE_CODE, redirect_uri: null }, "its client has more than one"],
+      [{ client_id: CLAUDE_CODE, redirect_uri: "http://127.0.0.1:53712/other" }, "one its client registered"],
+      [{ client_id: CLAUDE_CODE, redirect_uri: "https://127.0.0.1:53712/callback" }, "one its client registered"],
+    ] as const) {
+      const refused = await request.get(authorizeUrl(d, challenge, overrides), { maxRedirects: 0 });
+      expect(refused.status()).toBe(200);
+      expect(await refused.text()).toContain(message);
+    }
+  } finally {
+    await deleteTestUser(bot.email);
+  }
+});
+
+test("a client registered by hand connects, and revoking it ends its connections", async ({ request }) => {
+  const d = await discover(request);
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  const redirectUri = "https://app.example/oauth/callback";
+  const name = uniqueTitle("client");
+  const clientId = await createTestOauthClient({ name, redirectUris: [redirectUri], kind: "OTHER" });
+  const asIt = { client_id: clientId, redirect_uri: redirectUri };
+  try {
+    const { verifier, challenge } = pkce();
+    const html = await (await request.get(authorizeUrl(d, challenge, asIt))).text();
+    expect(html).toContain(name);
+    // Its client_id is no URL, so there is no host to name for it.
+    expect(html).not.toContain("Its identity is published by");
+
+    const res = await decide(request, d, { ...authorizeFields(d, challenge, asIt), bot: bot.id, decision: "approve" });
+    const code = callback(d, res.headers()["location"], redirectUri).get("code");
+    const redeemed = await redeem(request, d, { client_id: clientId, code: code!, code_verifier: verifier });
+    expect(redeemed.status()).toBe(200);
+    const tokens = OAuthTokensSchema.parse(await redeemed.json());
+    expect(await callStatus(request, tokens.access_token)).toBe(200);
+
+    expect(await revokeTestOauthClient(clientId)).toEqual({ connections: 1 });
+    expect(await callStatus(request, tokens.access_token)).toBe(401);
+    const refused = await request.post(d.token, { form: { grant_type: "refresh_token", client_id: clientId, refresh_token: tokens.refresh_token! } });
+    expect(await errorOf(refused)).toBe("invalid_client");
+    expect(await (await request.get(authorizeUrl(d, challenge, asIt), { maxRedirects: 0 })).text()).toContain("comes from a client this site");
+  } finally {
+    await deleteTestUser(bot.email);
+    await deleteTestOauthClient(clientId);
+  }
+});
+
+test("a person with no bot to connect as is told why, and offered Cancel alone; the switch signs in someone else", async ({ browser, request }) => {
+  const d = await discover(request);
+  const email = uniqueEmail("oauth-person");
+  await createTestUser({ email, role: "AUTHOR" });
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  try {
+    const page = await context.newPage();
+    const url = authorizeUrl(d, pkce().challenge);
+    await page.goto(url);
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(TEST_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("heading", { name: "Connect Claude" })).toBeVisible();
+    await expect(page.getByText(`(${email})`)).toBeVisible();
+    // The space before "writes": SWC drops one that opens a multi-line JSX text holding an entity.
+    await expect(page.getByText("so that what Claude writes carries the bot’s name")).toBeVisible();
+    await expect(page.getByText("No bot works for you yet. An ADMIN can make one")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+
+    // A bot that came to outrank its person is named, and not offered.
+    const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: email });
+    try {
+      await setTestUserRole(email, "AUTHORIZED");
+      await page.reload();
+      await expect(page.getByText(`${bot.name} works for you, but a bot can’t outrank its person`)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+
+      await setTestUserRole(email, "COMMENTER");
+      await page.reload();
+      await expect(page.getByText("a COMMENTER can’t have one")).toBeVisible();
+    } finally {
+      await deleteTestUser(bot.email);
+    }
+
+    // The switch signs out and back in, to the same request.
+    await page.getByRole("button", { name: "Sign in as someone else" }).click();
+    await expect(page).toHaveURL(/\/sign-in\?callbackUrl=/);
+    await page.getByLabel("Email").fill(ADMIN_EMAIL);
+    await page.getByLabel("Password").fill(TEST_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByText(`(${ADMIN_EMAIL})`)).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("code_challenge")).toBe(new URL(url).searchParams.get("code_challenge"));
+  } finally {
+    await context.close();
+    await deleteTestUser(email);
   }
 });
 

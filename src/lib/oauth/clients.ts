@@ -1,12 +1,14 @@
 import { prisma } from "@/lib/prisma";
+import { redirectUriRefusal } from "./authorize-request";
+import { PINNED_CLIENTS } from "./pinned-clients";
 
 // docs/MCP.md §21, "Which clients" — who may ask for a connection. A request
 // names its client by `client_id`, and an unknown one is refused before
 // anything else. Every client is public: PKCE is the proof on the code.
 //
-// Two kinds so far: Claude's published identity, pinned here, and a client
-// registered by hand, a row in `oauth_client`. Claude Code's identity is an
-// unknown client until it is pinned beside Claude's (§21, Build order 9).
+// Two kinds: the published identities pinned in pinned-clients.ts, Claude's
+// and Claude Code's, and a client registered by hand, a row in
+// `oauth_client` that scripts/oauth-client.ts registers, lists and revokes.
 
 /** A client a request may name. */
 export type OauthClientInfo = {
@@ -17,41 +19,13 @@ export type OauthClientInfo = {
   kind: "CLAUDE_AI" | "OTHER";
 };
 
-/**
- * Claude's client ID metadata document, as
- * https://claude.ai/oauth/mcp-oauth-client-metadata served it on
- * 2026-10-14. **Pinned, not fetched**: a request naming that URL is answered
- * from this constant, so the authorize path makes no outbound request and
- * nobody can make the server fetch a URL of their choosing. Every Claude app
- * uses it: the web, Desktop and mobile.
- *
- * Its `jwt-bearer` grant is one this server doesn't offer, and its
- * `token_endpoint_auth_method` of `none` is what a pin of a public client
- * rests on; if Anthropic ever names a key here, the token endpoint must
- * verify it (§21, Open).
- */
-export const CLAUDE_AI_METADATA = {
-  client_id: "https://claude.ai/oauth/mcp-oauth-client-metadata",
-  client_name: "Claude",
-  client_uri: "https://claude.ai",
-  redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
-  grant_types: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
-  response_types: ["code"],
-  token_endpoint_auth_method: "none",
-} as const;
-
 /** The pinned identities, by client_id. Any other URL is an unknown client: the pins are an allowlist. */
-const PINNED = new Map<string, OauthClientInfo>([
-  [
-    CLAUDE_AI_METADATA.client_id,
-    {
-      clientId: CLAUDE_AI_METADATA.client_id,
-      name: CLAUDE_AI_METADATA.client_name,
-      redirectUris: CLAUDE_AI_METADATA.redirect_uris,
-      kind: "CLAUDE_AI",
-    },
-  ],
-]);
+const PINNED = new Map<string, OauthClientInfo>(
+  PINNED_CLIENTS.map(({ document, kind }) => [
+    document.client_id,
+    { clientId: document.client_id, name: document.client_name, redirectUris: document.redirect_uris, kind },
+  ]),
+);
 
 /**
  * Whether a new connection through `client` replaces the bot's last one
@@ -80,4 +54,47 @@ export async function findClient(clientId: string): Promise<OauthClientInfo | nu
   // CLAUDE_CODE is refused by a CHECK on the table; this keeps the type honest.
   if (!row || row.revokedAt !== null || row.client === "CLAUDE_CODE") return null;
   return { clientId: row.id, name: row.name, redirectUris: row.redirectUris, kind: row.client };
+}
+
+/** No client registered by hand has a longer name; the consent page shows it whole. */
+const MAX_CLIENT_NAME_LENGTH = 100;
+
+/**
+ * Registers a client by hand: a name, its redirect URIs, and the kind its
+ * connections get. `CLAUDE_AI` is for claude.ai's fallback, its "Use your own
+ * OAuth client" option, which keeps claude.ai connecting should its published
+ * identity stop matching the pin; `OTHER` for anything else, the MCP
+ * Inspector say. Throws, with a message for whoever runs the script, on a
+ * redirect URI `redirectUriRefusal` refuses. Returns the new client_id.
+ *
+ * Takes named fields and builds the row from them (CLAUDE.md, check:prisma-data).
+ */
+export async function registerClient(opts: { name: string; redirectUris: readonly string[]; kind: "CLAUDE_AI" | "OTHER" }): Promise<string> {
+  const name = opts.name.trim();
+  if (!name) throw new Error("A client needs a name: the consent page shows it.");
+  if (name.length > MAX_CLIENT_NAME_LENGTH) throw new Error(`A client's name is at most ${MAX_CLIENT_NAME_LENGTH} characters.`);
+  const redirectUris = [...new Set(opts.redirectUris)];
+  if (redirectUris.length === 0) throw new Error("A client needs at least one redirect URI.");
+  for (const uri of redirectUris) {
+    const refusal = redirectUriRefusal(uri);
+    if (refusal) throw new Error(refusal);
+  }
+  const row = await prisma.oauthClient.create({ data: { name, redirectUris, client: opts.kind }, select: { id: true } });
+  return row.id;
+}
+
+/**
+ * Revokes a client registered by hand, and every connection made through it,
+ * in one transaction. A code it holds is refused at the token endpoint from
+ * then on, since `findClient` no longer knows the client. Null when no live
+ * client has that id; a pinned identity can't be revoked.
+ */
+export async function revokeClient(clientId: string): Promise<{ connections: number } | null> {
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const revoked = await tx.oauthClient.updateMany({ where: { id: clientId, revokedAt: null }, data: { revokedAt: now } });
+    if (revoked.count === 0) return null;
+    const connections = await tx.apiToken.updateMany({ where: { oauthClientId: clientId, revokedAt: null }, data: { revokedAt: now } });
+    return { connections: connections.count };
+  });
 }

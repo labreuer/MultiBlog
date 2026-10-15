@@ -104,6 +104,12 @@ export default function SiteHeader() {
     };
   }, []);
 
+  // The consent page (docs/MCP.md §21) is a step in another app's flow, and
+  // every link off it abandons that flow, this header's Sign out included,
+  // which lands on "/". The page names who is signed in and offers its own
+  // way to switch, back to the same request.
+  if (pathname === "/authorize") return null;
+
   // Built as a list and joined with separators rather than each block carrying
   // its own leading "|", so the bars stay correct whatever combination of
   // permissions is present — including the one the brand already renders.
