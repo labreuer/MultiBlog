@@ -19,13 +19,16 @@ import { uniqueTitle } from "./naming";
 
 // docs/MCP.md §3, §15: `manage`, the scope that changes who can see a thing
 // or takes it away. Listed only to a MANAGE token on a client that can be
-// made to prompt for every call; and a byline change that would take a
-// PRIVATE doc away from someone is refused unless the call says it means it.
+// made to prompt for every call, and never to a bot's (§21, "Whose
+// account"); and a byline change that would take a PRIVATE doc away from
+// someone is refused unless the call says it means it. So every agent here
+// that calls manage is a person holding their own token.
 
-test("manage is listed only with the manage scope, and only to a client that prompts for it", async ({ request }) => {
-  const writer = await createAgent(request, { scopes: ["READ", "WRITE"] });
-  const manager = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"] });
-  const web = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], client: "CLAUDE_AI" });
+test("manage is listed only with the manage scope, only to a client that prompts for it, and never to a bot", async ({ request }) => {
+  const writer = await createAgent(request, { scopes: ["READ", "WRITE"], person: true });
+  const manager = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], person: true });
+  const web = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], client: "CLAUDE_AI", person: true });
+  const bot = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"] });
   try {
     const names = async (secret: string) =>
       ((await mcpRequest(request, secret, "tools/list")).body.result?.tools as { name: string; _meta: Record<string, unknown> }[]) ?? [];
@@ -33,15 +36,23 @@ test("manage is listed only with the manage scope, and only to a client that pro
     const listed = (await names(manager.secret)).find((t) => t.name === "multiblog_manage");
     expect(listed?._meta["anthropic/requiresUserInteraction"]).toBe(true);
     expect((await names(web.secret)).map((t) => t.name)).not.toContain("multiblog_manage");
+    // A bot's token lists the other forced-prompt tools its client allows, and not manage.
+    const botNames = (await names(bot.secret)).map((t) => t.name);
+    expect(botNames).toContain("multiblog_edit_link");
+    expect(botNames).not.toContain("multiblog_manage");
+    const called = await bot.call("manage", { target: "/doc/anything", visibility: "SHARED" });
+    expect(called.isError).toBe(true);
+    expect(called.error.message).toContain("No tool named multiblog_manage");
   } finally {
     await writer.dispose();
     await manager.dispose();
     await web.dispose();
+    await bot.dispose();
   }
 });
 
 test("manage a doc: visibility, slug, byline with its removal guard, record, delete and restore", async ({ request }) => {
-  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"] });
+  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], person: true });
   const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, bodyText: "A doc to manage." });
   await addTestDocAuthor(doc.id, agent.user.email);
   try {
@@ -88,7 +99,7 @@ test("manage a doc: visibility, slug, byline with its removal guard, record, del
 });
 
 test("manage refuses a doc its actor can only read, and hides one it can't", async ({ request }) => {
-  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"] });
+  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], person: true });
   const shared = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Readable only." });
   const hidden = await createTestDoc({ authorEmail: ADMIN_EMAIL, bodyText: "Private to the admin." });
   try {
@@ -102,7 +113,7 @@ test("manage refuses a doc its actor can only read, and hides one it can't", asy
 });
 
 test("manage a file's owners, an annotation, a link, and a published post's tags", async ({ request }) => {
-  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"] });
+  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], person: true });
   const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, pages: [["A page to manage."]] });
   const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Notes go here." });
   const draft = await createTestAnnotation({ docId: doc.id, authorEmail: ADMIN_EMAIL, bodyText: "Private thoughts.", draft: true });

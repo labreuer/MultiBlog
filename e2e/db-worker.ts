@@ -61,6 +61,7 @@ import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
+import { createBot, moveBot, requireBotRole, requireInvitable } from "@/lib/bots";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
@@ -68,15 +69,17 @@ import { Prisma } from "@/generated/prisma/client";
 import { generateToken } from "@/lib/tokens";
 import { INVITE_TTL_MS } from "@/lib/invite";
 import { appUrl } from "@/lib/app-url";
-import { SAFE_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, ADMIN_EMAIL, uniqueTitle, docFromText } from "./naming";
+import { SAFE_EMAIL, SAFE_BOT_EMAIL, TEST_PASSWORD, E2E_PREFIX, E2E_TITLE_PREFIX, ADMIN_EMAIL, uniqueTitle, docFromText } from "./naming";
 // server/ isn't under src/, but it's still part of the one tsconfig project
 // (CLAUDE.md's ydoc-store note) — same relative-import style server/collab.ts
 // itself uses for src/lib.
 import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 
 function assertSafe(email: string) {
-  if (!SAFE_EMAIL.test(email)) {
-    throw new Error(`Refusing to touch "${email}" — the e2e helpers only operate on @example.com addresses.`);
+  if (!SAFE_EMAIL.test(email) && !SAFE_BOT_EMAIL.test(email)) {
+    throw new Error(
+      `Refusing to touch "${email}" — the e2e helpers only operate on @example.com addresses, and on e2e-…@multiblog.invalid bots.`,
+    );
   }
 }
 
@@ -2278,7 +2281,13 @@ export async function sweepTestData(): Promise<{
   }
 
   const staleUsers = await prisma.user.findMany({
-    where: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
+    where: {
+      OR: [
+        { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
+        // Bots made through /users' panel (naming.ts's SAFE_BOT_EMAIL).
+        { email: { startsWith: E2E_PREFIX, endsWith: "@multiblog.invalid" } },
+      ],
+    },
     select: { email: true },
   });
   for (const user of staleUsers) await deleteTestUser(user.email);
@@ -2346,27 +2355,72 @@ export async function createTestApiToken(opts: {
 /**
  * A bot: an account with no password, working for `worksForEmail`
  * (docs/MCP.md §21, "Whose account"). An OAuth connection needs one, since
- * the consent page offers only the bots that work for whoever is signed in.
- * `createTestUser` always sets a password, which a CHECK refuses on a bot.
+ * the consent page offers only the bots that work for whoever is signed in,
+ * and so does every MCP token for an agent's account (e2e/mcp.ts). Made by
+ * `createBot` as the suite's admin, so a test's bot is held to the rules
+ * /users holds a real one to: a person with a password who isn't a
+ * COMMENTER, and a role no higher than theirs.
  */
 export async function createTestBot(opts: { email: string; worksForEmail: string; name?: string; role?: Role }): Promise<TestUser> {
   const { email, worksForEmail, name = `E2E Bot ${Math.random().toString(36).slice(2, 7)}`, role = "AUTHOR" } = opts;
   assertSafe(email);
   assertSafe(worksForEmail);
   await deleteTestUser(email);
-  const person = await prisma.user.findUniqueOrThrow({ where: { email: worksForEmail }, select: { id: true } });
-  const user = await prisma.user.create({
-    data: {
-      email,
-      slug: await uniqueUserSlug(name, email),
-      name,
-      role,
-      color: colorForSeed(email),
-      adminInitials: name.slice(0, 2).toUpperCase(),
-      worksForUserId: person.id,
-    },
+  const [person, admin] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { email: worksForEmail }, select: { id: true } }),
+    prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL }, select: { id: true, role: true } }),
+  ]);
+  const bot = await createBot({ userId: admin.id, role: admin.role }, { name, personId: person.id, role, email });
+  return { id: bot.id, email, name, role, slug: bot.slug };
+}
+
+/** Moves a bot to another person as /users' Works for does, as the suite's admin: the previous person's tokens for it are revoked. */
+export async function moveTestBot(botEmail: string, personEmail: string): Promise<{ revoked: number }> {
+  assertSafe(botEmail);
+  assertSafe(personEmail);
+  const [bot, person, admin] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { email: botEmail }, select: { id: true } }),
+    prisma.user.findUniqueOrThrow({ where: { email: personEmail }, select: { id: true } }),
+    prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL }, select: { id: true, role: true } }),
+  ]);
+  return moveBot({ userId: admin.id, role: admin.role }, bot.id, person.id);
+}
+
+/**
+ * Points a bot at another person by a bare UPDATE, as a hand-run one would,
+ * revoking nothing — so a token its new person didn't issue is left live,
+ * for the check to refuse at a call.
+ */
+export async function repointTestBot(botEmail: string, personEmail: string): Promise<void> {
+  assertSafe(botEmail);
+  assertSafe(personEmail);
+  const person = await prisma.user.findUniqueOrThrow({ where: { email: personEmail }, select: { id: true } });
+  await prisma.user.update({ where: { email: botEmail }, data: { worksForUserId: person.id } });
+}
+
+/** Sets a role through the bot rule /users' role cell applies first (src/lib/bots.ts's `requireBotRole`). */
+export async function setTestUserRoleAsAdmin(email: string, role: Role): Promise<void> {
+  assertSafe(email);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
+  await requireBotRole(user.id, role);
+  await prisma.user.update({ where: { id: user.id }, data: { role } });
+}
+
+/** Who a bot works for (by email), its role, and whether it has a password, which a CHECK forbids. */
+export async function getTestBotFacts(email: string): Promise<{ worksForEmail: string | null; role: Role; hasPassword: boolean }> {
+  assertSafe(email);
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { email },
+    select: { role: true, passwordHash: true, worksFor: { select: { email: true } } },
   });
-  return { id: user.id, email: user.email, name, role, slug: user.slug };
+  return { worksForEmail: user.worksFor?.email ?? null, role: user.role, hasPassword: user.passwordHash !== null };
+}
+
+/** The check /users' Send invite runs before anything is minted or mailed: it throws for a bot. */
+export async function requireTestInvitable(email: string): Promise<void> {
+  assertSafe(email);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
+  await requireInvitable(user.id);
 }
 
 /** Backdates a token's expiry to a minute ago, for the bearer check's refusal of an expired token. */
@@ -2638,6 +2692,11 @@ const handlers = {
   expireTestApiToken,
   backdateRefreshRotation,
   createTestBot,
+  moveTestBot,
+  repointTestBot,
+  setTestUserRoleAsAdmin,
+  requireTestInvitable,
+  getTestBotFacts,
   softDeleteTestUser,
   restoreTestUser,
   appendTestDocParagraph,

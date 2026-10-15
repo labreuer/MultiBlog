@@ -8,9 +8,11 @@ import { revokeTokensOf } from "@/lib/api/tokens";
 //
 // **One transaction with the account's API tokens** (docs/MCP.md §3): a token
 // may be why the account is being deleted, so none outlives it, and restoring
-// the account brings none back. The token check refuses a deleted user's
-// token anyway, on the filtered user read; revoking as well is what keeps a
-// restore from reviving every token the account ever had.
+// the account brings none back. That covers the tokens it issued as well as
+// the ones it holds — a person's bot's, a connection they approved (§21). The
+// token check refuses both anyway, on the filtered user read; revoking as
+// well is what keeps a restore from reviving every token the account ever had
+// or issued.
 //
 // Callers check who may delete whom: plain server code, not "use server".
 export async function softDeleteUser(userId: string, deletedByUserId: string): Promise<void> {

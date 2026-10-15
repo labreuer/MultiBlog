@@ -15,15 +15,21 @@ import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { SITE_TITLE } from "@/lib/site-config";
 import { softDeleteUser } from "@/lib/user-delete";
+import { createBot as createBotAs, moveBot, requireBotRole, requireInvitable } from "@/lib/bots";
+import { actorFromSessionUser, type Actor } from "@/lib/actor";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 async function requireAdmin(): Promise<string> {
+  return (await adminActor()).userId;
+}
+
+async function adminActor(): Promise<Actor> {
   const session = await auth();
   if (!session?.user || !isAdmin(session.user.role)) {
     throw new Error("You don't have permission to manage users.");
   }
-  return session.user.id;
+  return actorFromSessionUser(session.user);
 }
 
 export async function updateUserRole(userId: string, role: Role): Promise<void> {
@@ -34,8 +40,25 @@ export async function updateUserRole(userId: string, role: Role): Promise<void> 
   if (adminId === userId && role !== Role.ADMIN) {
     throw new Error("You can't remove your own admin role.");
   }
+  // A bot is never promoted above its person (docs/MCP.md §21, "Whose
+  // account"); demoting anyone is never refused.
+  await requireBotRole(userId, role);
   await prisma.user.update({ where: { id: userId }, data: { role } });
   revalidatePath("/users");
+}
+
+// docs/MCP.md §21, "Whose account" — the bodies are src/lib/bots.ts's, which
+// the e2e fixtures share; these add the session and the revalidation.
+export async function createBot(name: string, personId: string, role: Role): Promise<{ id: string; email: string }> {
+  const bot = await createBotAs(await adminActor(), { name: String(name), personId: String(personId), role });
+  revalidatePath("/users");
+  return { id: bot.id, email: bot.email };
+}
+
+export async function updateUserWorksFor(userId: string, personId: string): Promise<{ revoked: number }> {
+  const result = await moveBot(await adminActor(), userId, String(personId));
+  revalidatePath("/users");
+  return result;
 }
 
 export async function updateUserModerationPolicy(userId: string, moderationPolicy: ModerationPolicy): Promise<void> {
@@ -152,6 +175,7 @@ export async function sendUserInvite(userId: string): Promise<{ url: string }> {
   if (!user) {
     throw new Error("That user no longer exists.");
   }
+  await requireInvitable(userId);
 
   // No-cron answer to expiry: sweep this user's own stale, unconsumed tokens
   // whenever they're next invited, rather than a scheduled job. Expired rows

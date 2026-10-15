@@ -2445,18 +2445,52 @@ code beside each says why as well.
   step 10's, and a connection to the read-only endpoint, which isn't built. A replay past the
   two minutes is set up by `backdateRefreshRotation`.
 
+**Bot accounts** (§21, step 8)
+
+- **The rule is one pure function**, `tokenRefusal` (`src/lib/bot-rules.ts`, unit-tested):
+  the issuer a token must have, then a bot's role against its person's. §3's check applies it
+  on every call, and **`issueApiToken` applies it at issue**, rather than the script alone, so
+  the script and the e2e fixture share the refusal.
+- **Redeeming a code refuses a bot that has come to outrank its person**, as well as one that
+  no longer works for them. The plan named only §3's check, which would refuse every call
+  such a connection made.
+- **The consent page leaves out a bot the check would refuse**: one ranked above the person
+  signed in, and every bot of a COMMENTER. The decision refuses the same bots.
+- **Only a promotion is refused.** A bot's role cell offers its own role and every one below
+  it, and above that only what its person allows. Demoting a bot or a person never is, since a
+  person demoted below their bot stops its tokens at the check.
+- **Moving a bot takes an inline Yes/No**, as Send invite does, since the tokens it revokes
+  don't come back. Unlike the table's other selects, choosing a person commits nothing.
+- **The Works for column is hidden by default** (PLAN.md §16m), since it is blank on every
+  person's row. It sorts by the name of the person a bot works for.
+- **`+ New bot` is a panel below the table**, just above its help. It offers only the people a bot may work for,
+  and only the roles a bot may have under the one chosen. A bot starts as an AUTHOR where its
+  person allows, as Claude's account is (§3).
+- **A bot's slug is made from its name, and its address from its slug.** The e2e fixtures pass
+  an address of their own (`createBot`'s `email`), so a crashed run's bots are swept up with
+  its other accounts.
+- **A bot's token asking for `manage` is issued all the same**, and lists no `manage`
+  (`toolsFor`); the script says so as it issues one.
+- **The e2e holds /users' refusals beneath the UI** (`e2e/mcp-bots.spec.ts`), through the
+  functions the actions wrap (`src/lib/bots.ts`). That includes a person with no password,
+  which only a database read can see, so no unit test reaches it; a bot with a password is the
+  CHECK's to refuse. `e2e/users-bots.spec.ts` drives the panel and the column once. A bot the
+  panel makes there is named "E2E …", so its address, `e2e-…@multiblog.invalid`, is one the
+  fixtures may touch and the sweep removes.
+
 ## 21. OAuth, for claude.ai
 
-**Status: planned; steps 1, 2, 4, 5 and 7 are built**: the move to SDK v2, the tools' names
+**Status: planned; steps 1, 2, 4, 5, 7 and 8 are built**: the move to SDK v2, the tools' names
 and descriptions with the skill, the bearer check on v2's terms, the thin slice (Discovery,
 the consent page, `/token` for the `authorization_code` grant, the access token, and Claude's
-pinned identity), and refresh tokens with their rotation, a new claude.ai connection replacing
-the bot's last one (§18's phase 5; §20 says where the build departs from this plan). Step 3,
+pinned identity), refresh tokens with their rotation, a new claude.ai connection replacing
+the bot's last one, and the rest of bot accounts: `/users` making and moving them, and their
+rules in §3's check (§18's phase 5; §20 says where the build departs from this plan). Step 3,
 the header trial, and step 6, the slice trial, ran on 2026-10-14 ("The header trial", "The
 slice trial"): claude.ai connects through OAuth on the web and on iOS. The refresh trial ran on
 2026-10-14 and 15 against step 7's build: claude.ai refreshes on its own, and a reconnect
-replaces the connection before it ("The refresh trial"). Step 8, the rest of bot accounts, is
-next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
+replaces the connection before it ("The refresh trial"). Step 9, the consent page in full,
+is next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
 authorization spec allows.
@@ -2618,8 +2652,10 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
     refuses the update if the account still has a password, and neither has one (§3).
   - **Its address stays `claude@multiblog.invalid`.** The importer's `MB_EMAIL` and
     `BYLINE_EMAILS` default to it, and a bot's address is an identifier, never a mailbox.
-  - A Claude account on another instance gets its person in the web interface when Claude is
-    first connected there.
+  - **A Claude account on another instance gets its person the same way**, by the same
+    `UPDATE`, before a build with the works-for rule reaches it. The web interface can't do
+    it, since it never turns an existing account into a bot. The other way is a new bot, made
+    in the web interface beside the old account.
 - **Otherwise a bot is as §3 describes Claude's account.** Its tokens act with its own role,
   which its person's only bounds.
 - **Scopes: `read`, or `read` and `write`.** The person chooses on the page, never more than
@@ -3928,8 +3964,8 @@ connection at all.
       a Project to take.
 11. **The full trial, on explore**, then the other four instances. Those run fb56178, from
     before the MCP server, so this is also their first deploy of §18's phases 1–4 and every
-    migration those carry. A Claude account there gets its person in the web interface when
-    Claude is first connected, or is made there as a bot.
+    migration those carry. A Claude account there gets its person by the one-time update
+    before the deploy ("Whose account"), or a new bot is made there in the web interface.
 12. **The docs**: PERMISSIONS.md's "API tokens" (who connects, as whom, the rules for bots, and
     the tools each kind of token lists), DASHBOARD.md (the card), DEPLOY.md (the drift check
     `deploy.sh` runs), §16 (Claude Code's three ways in, claude.ai's connector and the skill),

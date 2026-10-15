@@ -4,7 +4,7 @@
 // request context carries the suite's admin cookie, which the endpoint never
 // reads — every call here is the bearer token's.
 import type { APIRequestContext } from "@playwright/test";
-import { createTestApiToken, createTestUser, deleteTestUser, type TestUser } from "./db";
+import { createTestApiToken, createTestBot, createTestUser, deleteTestUser, type TestUser } from "./db";
 import { ADMIN_EMAIL, uniqueEmail } from "./naming";
 
 export type ToolAnswer = {
@@ -96,7 +96,14 @@ export async function callTool(
   };
 }
 
-/** A machine client: its own AUTHOR account with a name, and a token issued by the shared admin. */
+/**
+ * A machine client: by default a bot, an AUTHOR working for its issuer (the
+ * shared admin unless `issuerEmail` says otherwise), with a token that issuer
+ * issued — §3's check refuses any other (docs/MCP.md §21, "Whose account").
+ * With `person`, an account of its own with a password, holding a token it
+ * issued itself: what a spec that calls `manage` needs, since no bot's token
+ * lists it.
+ */
 export type Agent = {
   user: TestUser;
   secret: string;
@@ -112,13 +119,18 @@ export async function createAgent(
     client?: "CLAUDE_CODE" | "CLAUDE_AI" | "OTHER";
     issuerEmail?: string;
     name?: string;
+    person?: boolean;
   } = {},
 ): Promise<Agent> {
   const email = uniqueEmail("mcp-bot");
-  const user = await createTestUser({ email, name: opts.name ?? `E2E Bot ${Math.random().toString(36).slice(2, 7)}`, role: "AUTHOR" });
+  const name = opts.name ?? `E2E Bot ${Math.random().toString(36).slice(2, 7)}`;
+  const issuerEmail = opts.person ? email : (opts.issuerEmail ?? ADMIN_EMAIL);
+  const user = opts.person
+    ? await createTestUser({ email, name, role: "AUTHOR" })
+    : await createTestBot({ email, worksForEmail: issuerEmail, name, role: "AUTHOR" });
   const { id, secret } = await createTestApiToken({
     email,
-    issuerEmail: opts.issuerEmail ?? ADMIN_EMAIL,
+    issuerEmail,
     scopes: opts.scopes ?? ["READ", "WRITE"],
     client: opts.client ?? "CLAUDE_CODE",
   });

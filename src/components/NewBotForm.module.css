@@ -1,0 +1,39 @@
+/* /users' "+ New bot" panel (docs/MCP.md §21, "Whose account"): a disclosure
+   box below the table, just above its help panel and framed like it. */
+.panel {
+  margin: 1em 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.summary {
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.lead {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.form {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.9rem;
+}
+
+.made {
+  margin-top: 8px;
+  color: var(--success);
+}

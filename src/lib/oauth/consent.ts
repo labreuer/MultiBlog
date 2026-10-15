@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { ApiScope } from "@/generated/prisma/enums";
+import type { ApiScope, Role } from "@/generated/prisma/enums";
 import { auth } from "@/lib/auth";
+import { botRoleRefusal } from "@/lib/bot-rules";
 import { prisma } from "@/lib/prisma";
 import { replacesConnections, type OauthClientInfo } from "./clients";
 import { NEWEST_REFRESH_TOKEN } from "./refresh";
@@ -12,35 +13,41 @@ import { hasLapsed } from "./rotation";
 // **A connection acts as a bot, never as the person approving it**, so what
 // claude.ai writes carries Claude's name and it reads only what has been
 // shared with Claude. The page offers only the bots that work for whoever is
-// signed in, and that person becomes the connection's issuer.
+// signed in, and that §3's check would accept (src/lib/bot-rules.ts), and
+// that person becomes the connection's issuer.
 
 /** How long a code is good for, and it is good once. */
 export const CODE_TTL_MS = 2 * 60_000;
 
 export type Bot = { id: string; name: string | null; slug: string };
 
+export type Person = { id: string; name: string | null; role: Role };
+
 /**
  * Whoever is signed in, if their account is still live. The row is read, not
  * just the session: a session outlives a deleted account (src/lib/prisma.ts's
- * filter leaves one out).
+ * filter leaves one out), and carries the role from sign-in, not the current one.
  */
-export async function signedInPerson(): Promise<{ id: string; name: string | null } | null> {
+export async function signedInPerson(): Promise<Person | null> {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) return null;
-  return prisma.user.findUnique({ where: { id }, select: { id: true, name: true } });
+  return prisma.user.findUnique({ where: { id }, select: { id: true, name: true, role: true } });
 }
 
 /**
- * The live accounts that work for `personId`, by name. A deleted bot is left
- * out by the soft-delete filter (src/lib/prisma.ts).
+ * The live accounts that work for `person`, by name, leaving out any whose
+ * tokens §3's check would refuse: one ranked above them, or every one of a
+ * COMMENTER's. A deleted bot is left out by the soft-delete filter
+ * (src/lib/prisma.ts).
  */
-export async function botsFor(personId: string): Promise<Bot[]> {
-  return prisma.user.findMany({
-    where: { worksForUserId: personId },
-    select: { id: true, name: true, slug: true },
+export async function botsFor(person: Person): Promise<Bot[]> {
+  const bots = await prisma.user.findMany({
+    where: { worksForUserId: person.id },
+    select: { id: true, name: true, slug: true, role: true },
     orderBy: [{ name: "asc" }, { slug: "asc" }],
   });
+  return bots.filter((bot) => botRoleRefusal(bot.role, person.role) === null).map(({ id, name, slug }) => ({ id, name, slug }));
 }
 
 /**
@@ -66,10 +73,10 @@ export async function connectedBots(client: OauthClientInfo, personId: string, b
   return made;
 }
 
-/** Whether `botId` is a live account working for `personId`. */
-export async function worksFor(botId: string, personId: string): Promise<boolean> {
-  const bot = await prisma.user.findUnique({ where: { id: botId }, select: { worksForUserId: true } });
-  return bot !== null && bot.worksForUserId === personId;
+/** Whether `botId` is a live account working for `person`, one `botsFor` would offer. */
+export async function worksFor(botId: string, person: Person): Promise<boolean> {
+  const bot = await prisma.user.findUnique({ where: { id: botId }, select: { worksForUserId: true, role: true } });
+  return bot !== null && bot.worksForUserId === person.id && botRoleRefusal(bot.role, person.role) === null;
 }
 
 export function hashCode(code: string): string {

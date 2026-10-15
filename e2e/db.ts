@@ -373,6 +373,12 @@ export const expireTestApiToken = (...args: Parameters<DbHandlers["expireTestApi
 export const backdateRefreshRotation = (...args: Parameters<DbHandlers["backdateRefreshRotation"]>) =>
   call("backdateRefreshRotation", ...args);
 export const createTestBot = (...args: Parameters<DbHandlers["createTestBot"]>) => call("createTestBot", ...args);
+export const moveTestBot = (...args: Parameters<DbHandlers["moveTestBot"]>) => call("moveTestBot", ...args);
+export const repointTestBot = (...args: Parameters<DbHandlers["repointTestBot"]>) => call("repointTestBot", ...args);
+export const setTestUserRoleAsAdmin = (...args: Parameters<DbHandlers["setTestUserRoleAsAdmin"]>) =>
+  call("setTestUserRoleAsAdmin", ...args);
+export const requireTestInvitable = (...args: Parameters<DbHandlers["requireTestInvitable"]>) => call("requireTestInvitable", ...args);
+export const getTestBotFacts = (...args: Parameters<DbHandlers["getTestBotFacts"]>) => call("getTestBotFacts", ...args);
 export const softDeleteTestUser = (...args: Parameters<DbHandlers["softDeleteTestUser"]>) =>
   call("softDeleteTestUser", ...args);
 export const restoreTestUser = (...args: Parameters<DbHandlers["restoreTestUser"]>) => call("restoreTestUser", ...args);

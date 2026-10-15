@@ -27,10 +27,18 @@ import { TOOLS } from "./tools";
 export const SERVER_NAME = "multiblog";
 const SERVER_VERSION = "1.0.0";
 
-/** The tools a token may see: its scopes', and the forced-prompt ones only for Claude Code (§3, §15). */
+/**
+ * The tools a token may see: its scopes', the forced-prompt ones only for
+ * Claude Code (§3, §15), and `manage` never for a bot's, whatever its scopes
+ * (§21, "Whose account"). A bot reads text other people wrote, so an
+ * instruction planted there must not be able to change who can see something.
+ */
 export function toolsFor(token: AuthenticatedToken): McpTool[] {
   return TOOLS.filter(
-    (tool) => token.scopes.includes(tool.scope) && (!tool.forcePrompt || token.client === "CLAUDE_CODE"),
+    (tool) =>
+      token.scopes.includes(tool.scope) &&
+      (!tool.forcePrompt || token.client === "CLAUDE_CODE") &&
+      !(token.bot && tool.scope === "MANAGE"),
   );
 }
 

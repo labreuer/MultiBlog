@@ -86,6 +86,9 @@ export const ADMIN_TABLE_COLUMNS = {
     // contributor fields above.
     { key: "invite", label: "Send invite", defaultHidden: true },
     { key: "inviteUrl", label: "Invite URL", defaultHidden: true },
+    // A bot's person (docs/MCP.md §21, "Whose account"), defaulted hidden
+    // like the invites: it is blank on every person's row.
+    { key: "worksFor", label: "Works for", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   comments: [
