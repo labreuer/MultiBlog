@@ -123,6 +123,35 @@ is the cheaper path to it.
 
 ---
 
+## Eleven help texts lose a space before an element, and no check catches the shape
+
+**Next's SWC drops the leading space of a JSX text that spans lines and holds an HTML entity.**
+`<strong>PRIVATE</strong> docs you carry a⏎byline on … &quot;Show all docs&quot;` renders
+"PRIVATE**docs** you carry"; the same text without the entity keeps its space, and so does one
+on a single line. Checked against `next@16.2.11`'s own `transform` (`&apos;`, `&rsquo;` and
+`&quot;` alike); Babel's JSX whitespace rule trims only the lines after the first, so this is
+SWC's. The consent page hit it in two sentences ("Claudewrites"), and `e2e/mcp-oauth.spec.ts`
+caught it; those are fixed. These are not, all in the admin tables' help text:
+
+- `src/components/CommentsTable.tsx:443` ("{spam}— counts")
+- `src/components/DocsTable.tsx:411`, `:414`, `:417`
+- `src/components/FilesTable.tsx:414`, `:421`
+- `src/components/LinksTable.tsx:484`, `:487`, `:496`
+- `src/components/PostsTable.tsx:405`
+- `src/components/UsersTable.tsx:1006` ("Works foris a bot's person")
+
+**The fix at each** is the consent page's: end the line before the text with `{" "}` and start
+the text on a line of its own, where JSX trims its leading whitespace anyway. Rewrapping so the
+entity lands on the first line doesn't help; the whole text node is what counts.
+
+**No check covers it.** `tsc` and `eslint` see valid JSX, and a spec asserts on a passage only
+where someone thought to. A script in `npm run check` would: parse each `src/**/*.tsx` with the
+TypeScript API and fail on a `JsxText` that contains a newline and an entity and whose first
+line starts with whitespace before other text. About 20 lines; it found exactly these eleven
+and the consent page's two.
+
+---
+
 ## Comment quotations: deferred follow-ups (PLAN.md §23)
 
 **Status:** §23 built in full on `annotations-and-comments`, 2026-09-16 (seven commits, Phase 0
