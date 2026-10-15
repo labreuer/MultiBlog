@@ -307,9 +307,6 @@ password) stays, since it is what §21's Claude connection acts as. Still in pla
 - **The slice trial's OAuth connector**, at the instance's `/api/mcp` in Luke's claude.ai, now
   holding a connection with a refresh token (MCP.md §21, "The refresh trial"). Its earlier
   connections are revoked: the slice's by `oauth_refresh_token`, the next by a reconnect.
-- **The instance runs branch `mcp-refresh-tokens`** (step 7), not main, for the refresh trial.
-  Its checkout tracks `origin/mcp-refresh-tokens`, so the deploy wrapper's plain pull keeps it
-  there. Switch it back (`git switch main`) once that PR merges, or before deploying main there.
 - **In Luke's claude.ai settings**: the instance's host among code execution's allowed domains,
   and the `multiblog` skill.
 - **The read-bound test doc**, `/doc/read-bound-test-for-the-claude-ai-trial`, PRIVATE to

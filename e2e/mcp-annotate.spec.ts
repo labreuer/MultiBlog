@@ -50,10 +50,11 @@ test("add_note a doc: on the whole, by quote at a version, a reply, a reply quot
 
     const reply = await agent.call("add_note", { on: String(quoted.result.id), body: "The quick brown one." });
     expect(reply.result.replyTo).toBe(quoted.result.id);
-    // By its card, as a person's link to it reads — unless two of this
-    // writer's notes were opened within the same second, which share a card.
+    // By its card, as a person's link to it reads — unless another of this
+    // writer's notes was opened within the same second, which shares the card:
+    // the note on the whole doc before it, or the reply just made.
     const byCard = await agent.call("add_note", { on: String(quoted.result.card), body: "Or the lazy one." });
-    if (quoted.result.card === whole.result.card) expect(byCard.error.code).toBe("ambiguous");
+    if ([whole, reply].some((note) => note.result.card === quoted.result.card)) expect(byCard.error.code).toBe("ambiguous");
     else expect(byCard.result.replyTo).toBe(quoted.result.id);
 
     // The note reads back where a person sees it.
