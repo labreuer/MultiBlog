@@ -23,6 +23,11 @@
 // bot account's, the person it works for. It decides who else a `write` call
 // may put on a new doc's byline or a file's owner list.
 //
+// **A token the check would refuse is refused at issue** (docs/MCP.md §21,
+// "Whose account"): one issued by anyone but its account's person, or a bot's
+// while it outranks its person or its person is a COMMENTER. A bot's token
+// lists no `manage` whatever its scopes, so asking for one says so.
+//
 // **--client decides which tools the token lists.** Only a `claude-code`
 // token lists the three tools that force a prompt (edit_link, rename_file,
 // manage), since Claude Code is the one client documented to honor the flag;
@@ -67,7 +72,10 @@ const SCOPES: Record<string, ApiScope> = { read: "READ", write: "WRITE", manage:
 const CLIENTS: Record<string, ApiTokenClient> = { "claude-code": "CLAUDE_CODE", "claude-ai": "CLAUDE_AI", other: "OTHER" };
 
 async function account(email: string) {
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, name: true, role: true } });
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, email: true, name: true, role: true, worksForUserId: true },
+  });
   if (!user) usage(`No live account has the email ${email}.`);
   return user;
 }
@@ -128,10 +136,24 @@ async function main() {
   if (!(days > 0)) usage("--expires-days is a positive number.");
   const expiresAt = new Date(Date.now() + days * 86_400_000);
 
-  const { secret, id } = await issueApiToken({ userId: user.id, issuerId: issuer.id, name, scopes, client, expiresAt });
+  let issued: { secret: string; id: string };
+  try {
+    issued = await issueApiToken({ userId: user.id, issuerId: issuer.id, name, scopes, client, expiresAt });
+  } catch (err) {
+    // issueApiToken's refusals are written for whoever issues the token.
+    if (err instanceof Error && err.name === "Error") {
+      console.error(`Refused: ${err.message}`);
+      return process.exit(1);
+    }
+    throw err;
+  }
+  const { secret, id } = issued;
   console.log(
     `Issued ${id} for ${user.email} (${user.role}), issued by ${issuer.email}: ${scopes.join(", ")}, client ${client}, expires ${expiresAt.toISOString()}.`,
   );
+  if (user.worksForUserId !== null && scopes.includes("MANAGE")) {
+    console.log("It lists no manage tool: a bot's token never does, whatever its scopes (docs/MCP.md §21).");
+  }
   const writeTo = flag("write-to");
   if (writeTo) {
     await mkdir(dirname(writeTo), { recursive: true, mode: 0o700 });

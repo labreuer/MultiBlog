@@ -23,6 +23,7 @@ function token(oauthClientId: string | null = null): AuthenticatedToken {
     expiresAt: null,
     user: person,
     issuer: person,
+    bot: false,
   };
 }
 

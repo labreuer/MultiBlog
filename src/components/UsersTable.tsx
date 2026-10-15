@@ -18,6 +18,7 @@ import {
   updateUserOrcid,
   updateUserWebsite,
   sendUserInvite,
+  updateUserWorksFor,
   deleteUser,
   restoreUser,
   bulkDeleteUsers,
@@ -26,6 +27,7 @@ import {
   bulkSetUserModerationPolicy,
 } from "@/app/actions/users";
 import { Role, ModerationPolicy } from "@/generated/prisma/enums";
+import { ROLES_BY_RANK, botRoleRefusal, outranks } from "@/lib/bot-rules";
 import { PAGE_SIZE_OPTIONS, sameCols, type PageSize, type TablePrefs } from "@/lib/table-query";
 import { type UsersFilters, buildUsersQueryString } from "@/lib/users-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
@@ -63,6 +65,15 @@ import {
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
+import NewBotForm from "@/components/NewBotForm";
+
+/** An account a bot may work for, or the one it does (docs/MCP.md §21, "Whose account"). */
+export type BotPerson = { id: string; name: string | null; email: string; role: Role };
+
+/** A person as /users names them in a list: by name, with the address that tells two apart. */
+export function personLabel(person: BotPerson): string {
+  return person.name?.trim() ? `${person.name.trim()} (${person.email})` : person.email;
+}
 
 export type UserRow = {
   id: string;
@@ -96,6 +107,8 @@ export type UserRow = {
   } | null;
   deletedAt: Date | null;
   deleted: boolean;
+  /** The person a bot works for; null on a person's row. */
+  worksFor: BotPerson | null;
 };
 
 // Every editable cell reports what it's doing through the row's left border
@@ -437,6 +450,87 @@ function InviteCell({
   );
 }
 
+// Moving a bot revokes the tokens its previous person issued for it, and a
+// move back revives none (docs/MCP.md §21, "Whose account"), so like an
+// invite it takes the inline two-step confirm rather than committing on
+// change the way SelectCell does. Only the people the bot may work for are
+// offered — a COMMENTER, or anyone it outranks, is left out — beside the
+// one it works for now, so the select always shows a matching option.
+function WorksForCell({
+  userId,
+  botRole,
+  worksFor,
+  people,
+  disabled,
+  run,
+}: {
+  userId: string;
+  botRole: Role;
+  worksFor: BotPerson;
+  people: BotPerson[];
+  disabled: boolean;
+  run: (action: () => Promise<void>) => Promise<void>;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [moving, setMoving] = useState<BotPerson | null>(null);
+  const options = [
+    worksFor,
+    ...people.filter((person) => person.id !== worksFor.id && botRoleRefusal(botRole, person.role) === null),
+  ];
+
+  function move(to: BotPerson) {
+    setMoving(null);
+    setError(null);
+    startTransition(async () => {
+      try {
+        await run(async () => {
+          await updateUserWorksFor(userId, to.id);
+        });
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to move the bot.");
+      }
+    });
+  }
+
+  if (moving) {
+    return (
+      <span style={{ color: "var(--text-secondary)" }}>
+        Move to {personLabel(moving)}? The tokens {personLabel(worksFor)} issued for it stop working.{" "}
+        <button type="button" onClick={() => move(moving)} disabled={pending} style={{ fontWeight: "bold", color: "var(--success)" }}>
+          Yes
+        </button>{" "}
+        /{" "}
+        <button type="button" onClick={() => setMoving(null)} disabled={pending} style={{ fontWeight: "bold", color: "var(--danger)" }}>
+          No
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <select
+        value={worksFor.id}
+        disabled={disabled || pending}
+        onChange={(e) => {
+          const to = options.find((person) => person.id === e.target.value);
+          if (to && to.id !== worksFor.id) setMoving(to);
+        }}
+      >
+        {options.map((person) => (
+          <option key={person.id} value={person.id}>
+            {personLabel(person)}
+          </option>
+        ))}
+      </select>
+      <CellError message={error} />
+    </>
+  );
+}
+
 // No component state needed — the raw token is server-sourced (row data), the
 // simplification the "store raw until consumed" choice buys (docs/EMAIL.md).
 function InviteUrlCell({
@@ -499,6 +593,7 @@ const SORTABLE_KEYS = [
   "createdAt",
   "deletedAt",
   "deleted",
+  "worksFor",
 ] as const;
 
 export default function UsersTable({
@@ -506,11 +601,14 @@ export default function UsersTable({
   totalCount,
   filters,
   prefs,
+  people,
 }: {
   rows: UserRow[];
   totalCount: number;
   filters: UsersFilters;
   prefs: TablePrefs;
+  /** Every account a bot may work for, for the Works for column and the New bot panel. */
+  people: BotPerson[];
 }) {
   const router = useRouter();
   const [dateFormat, setDateFormat] = useState<DateFormat>("yyyy-MM-dd");
@@ -550,6 +648,15 @@ export default function UsersTable({
     },
     ...softDeleteBulkActions<UserRow>("users", bulkDeleteUsers, bulkRestoreUsers),
   ];
+
+  // A bot is offered no role above its person's (docs/MCP.md §21), though
+  // any demotion is — so its own role and everything below it, whoever its
+  // person is now. updateUserRole refuses the rest regardless.
+  function rolesFor(row: UserRow): Role[] {
+    const person = row.worksFor;
+    if (!person) return ROLES_BY_RANK.slice();
+    return ROLES_BY_RANK.filter((role) => !outranks(role, row.role) || botRoleRefusal(role, person.role) === null);
+  }
 
   function handleDeleteToggle(row: UserRow) {
     setError(null);
@@ -619,7 +726,7 @@ export default function UsersTable({
       cell: (row) => (
         <SelectCell
           value={row.role}
-          options={Object.values(Role)}
+          options={rolesFor(row)}
           save={(next) => updateUserRole(row.id, next)}
           failureMessage="Failed to update role."
           run={(action) => runWithStatus(row.id, action)}
@@ -752,7 +859,7 @@ export default function UsersTable({
         <InviteCell
           userId={row.id}
           email={row.email}
-          disabled={row.deleted}
+          disabled={row.deleted || row.worksFor !== null}
           run={(action) => runWithStatus(row.id, action)}
         />
       ),
@@ -760,6 +867,24 @@ export default function UsersTable({
     inviteUrl: {
       headerTitle: "The most recent invite's link, until it's accepted or revoked",
       cell: (row) => <InviteUrlCell invite={row.lastInvite} count={row.inviteCount} dateFormat={dateFormat} />,
+    },
+    // A bot's person (docs/MCP.md §21, "Whose account"). A person's row is
+    // blank: /users never makes an existing account into a bot.
+    worksFor: {
+      sortKey: "worksFor",
+      cell: (row) =>
+        row.worksFor ? (
+          <WorksForCell
+            userId={row.id}
+            botRole={row.role}
+            worksFor={row.worksFor}
+            people={people}
+            disabled={row.deleted}
+            run={(action) => runWithStatus(row.id, action)}
+          />
+        ) : (
+          ""
+        ),
     },
     // Defaulted hidden (§16l/§16i): the raw timestamp behind the existing
     // Deleted action column's boolean.
@@ -865,6 +990,8 @@ export default function UsersTable({
       <DateFormatSelect value={dateFormat} onChange={setDateFormat} />
       <ShowDeletedToggle checked={filters.deleted} onChange={(deleted) => updateFilters({ deleted })} />
 
+      <NewBotForm people={people} />
+
       <FilterHelp
         sortKeys={SORTABLE_KEYS}
         defaultPageSize={prefs.pageSize}
@@ -873,9 +1000,12 @@ export default function UsersTable({
           <p style={{ marginTop: 8 }}>
             <strong>Rows/page</strong> is that account&apos;s own default page size for every admin table. A{" "}
             <code>?pageSize=</code> in the URL overrides it for that navigation only, without changing the stored
-            preference (PLAN.md §16b). <strong>Deleted at</strong>, <strong>Send invite</strong> and{" "}
-            <strong>Invite URL</strong> are hidden by default (Columns picker, above). The invite URL disappears
-            once that invite is accepted or revoked — re-showing it means sending again.
+            preference (PLAN.md §16b). <strong>Deleted at</strong>, <strong>Send invite</strong>,{" "}
+            <strong>Invite URL</strong> and <strong>Works for</strong> are hidden by default (Columns picker,
+            above). The invite URL disappears once that invite is accepted or revoked — re-showing it means
+            sending again. <strong>Works for</strong> is a bot&apos;s person, the one who issues its tokens
+            (docs/MCP.md §21); moving a bot stops the tokens its previous person issued for it, and a bot is
+            never invited.
           </p>
         }
       />

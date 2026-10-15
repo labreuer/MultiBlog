@@ -114,6 +114,9 @@ test("every listed name fits claude.ai's limit, and every description and the in
   const issuerEmail = uniqueEmail("mcp-issuer");
   const issuer = await createTestUser({ email: issuerEmail, name: longName("Issuer"), role: "AUTHOR" });
   const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], client: "CLAUDE_CODE", issuerEmail, name: longName("Actor") });
+  // manage is listed to no bot (§21, "Whose account"), so its description is
+  // read from a person's own token; it names no one.
+  const owner = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], client: "CLAUDE_CODE", person: true, name: longName("Owner") });
   try {
     const init = await mcpRequest(request, agent.secret, "initialize", {
       protocolVersion: "2025-06-18",
@@ -126,8 +129,15 @@ test("every listed name fits claude.ai's limit, and every description and the in
     // Claude Code cuts the instructions at 2,048 characters (§5).
     expect(instructions.length).toBeLessThanOrEqual(2048);
 
-    const tools = (await mcpRequest(request, agent.secret, "tools/list")).body.result?.tools as { name: string; description: string }[];
-    // Every tool, since this token's scopes and client list them all.
+    const listed = (await mcpRequest(request, agent.secret, "tools/list")).body.result?.tools as { name: string; description: string }[];
+    // Every tool but manage, since this token's scopes and client list them
+    // all and its account is a bot; the person's lists manage too.
+    expect(listed.map((t) => t.name)).not.toContain("multiblog_manage");
+    const manage = ((await mcpRequest(request, owner.secret, "tools/list")).body.result?.tools as { name: string; description: string }[]).find(
+      (t) => t.name === "multiblog_manage",
+    );
+    expect(manage).toBeTruthy();
+    const tools = [...listed, manage!];
     expect(tools.map((t) => t.name)).toEqual([
       "multiblog_search",
       "multiblog_read",
@@ -165,6 +175,7 @@ test("every listed name fits claude.ai's limit, and every description and the in
     }
   } finally {
     await agent.dispose();
+    await owner.dispose();
     await deleteTestUser(issuerEmail);
   }
 });

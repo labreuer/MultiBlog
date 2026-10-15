@@ -1,5 +1,6 @@
 import { takeRateLimit } from "@/lib/api/rate-limit";
 import { ALL_SCOPES, authenticateTokenId } from "@/lib/api/tokens";
+import { botRoleRefusal } from "@/lib/bot-rules";
 import type { ApiScope } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { signAccessToken } from "./access-token";
@@ -114,12 +115,14 @@ async function redeemCode(form: URLSearchParams): Promise<TokenAnswer> {
   }
 
   // The bot must still work for the person who approved it, and both be
-  // live: the soft-delete filter leaves a deleted account out.
+  // live: the soft-delete filter leaves a deleted account out. Nor may it
+  // have come to outrank them meanwhile, since §3's check would refuse every
+  // call the connection made.
   const [bot, issuer] = await Promise.all([
-    prisma.user.findUnique({ where: { id: row.userId }, select: { worksForUserId: true } }),
-    prisma.user.findUnique({ where: { id: row.issuerId }, select: { id: true } }),
+    prisma.user.findUnique({ where: { id: row.userId }, select: { worksForUserId: true, role: true } }),
+    prisma.user.findUnique({ where: { id: row.issuerId }, select: { id: true, role: true } }),
   ]);
-  if (!bot || !issuer || bot.worksForUserId !== issuer.id) {
+  if (!bot || !issuer || bot.worksForUserId !== issuer.id || botRoleRefusal(bot.role, issuer.role) !== null) {
     return invalidGrant("The account no longer works for the person who approved the connection.");
   }
 

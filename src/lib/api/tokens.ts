@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { ApiScope, ApiTokenClient, Role } from "@/generated/prisma/enums";
+import { tokenRefusal } from "@/lib/bot-rules";
 import type { Bearer } from "@/lib/mcp/bearer";
 import { verifyAccessToken } from "@/lib/oauth/access-token";
 import { mcpEndpointUrl } from "@/lib/oauth/discovery";
@@ -36,6 +37,11 @@ export function generateTokenSecret(): string {
  * one's own token, the person a bot works for otherwise. The secret is
  * returned once and never stored.
  *
+ * **A token §3's check would refuse is refused here instead** (`tokenRefusal`,
+ * docs/MCP.md §21, "Whose account"), so whoever issues one gets an error
+ * rather than a token that never works. Both accounts are read through the
+ * filtered client, so a deleted one can neither hold nor issue a token.
+ *
  * **Every token expires.** SDK v2's bearer check refuses one that doesn't
  * (docs/MCP.md §21, "The bearer check"), and a CHECK on `api_token` holds
  * every header token to it.
@@ -52,6 +58,14 @@ export async function issueApiToken(opts: {
 }): Promise<{ secret: string; id: string }> {
   const scopes = ALL_SCOPES.filter((scope) => opts.scopes.includes(scope));
   if (scopes.length === 0) throw new Error("A token needs at least one scope.");
+  const select = { id: true, role: true, worksForUserId: true } as const;
+  const [account, issuer] = await Promise.all([
+    prisma.user.findUnique({ where: { id: opts.userId }, select }),
+    prisma.user.findUnique({ where: { id: opts.issuerId }, select }),
+  ]);
+  if (!account || !issuer) throw new Error("No live account has that id.");
+  const refusal = tokenRefusal(account, issuer);
+  if (refusal) throw new Error(refusal);
   const secret = generateTokenSecret();
   const row = await prisma.apiToken.create({
     data: {
@@ -83,6 +97,8 @@ export type AuthenticatedToken = {
   expiresAt: Date | null;
   user: TokenPerson & { role: Role };
   issuer: TokenPerson & { role: Role };
+  /** Whether the account is a bot, whose tokens list no `manage` whatever their scopes (§21, "Whose account"). */
+  bot: boolean;
 };
 
 /**
@@ -143,6 +159,11 @@ export async function authenticateBearer(value: string, endpoint: URL): Promise<
  * deletion takes effect on the token's very next call. A deleted issuer stops
  * the token too: a bot's token acts for its issuer, and an account that is
  * gone has nobody left to act for.
+ *
+ * **Then the issuer must be the account's person**, and a bot must not
+ * outrank them or work for a COMMENTER (`tokenRefusal`, §21, "Whose
+ * account"), on the two rows already read. So demoting a person stops their
+ * bot's tokens on the next call, as demoting the bot itself does.
  */
 async function authenticate(where: { tokenHash: string } | { id: string }): Promise<AuthenticatedToken | null> {
   const token = await prisma.apiToken.findUnique({
@@ -164,7 +185,7 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
   const now = Date.now();
   if (token.expiresAt !== null && token.expiresAt.getTime() <= now) return null;
 
-  const select = { id: true, name: true, slug: true, role: true } as const;
+  const select = { id: true, name: true, slug: true, role: true, worksForUserId: true } as const;
   const [user, issuer] = await Promise.all([
     prisma.user.findUnique({ where: { id: token.userId }, select }),
     token.createdByUserId === token.userId
@@ -174,6 +195,7 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
   if (!user) return null;
   const issuedBy = token.createdByUserId === token.userId ? user : issuer;
   if (!issuedBy) return null;
+  if (tokenRefusal(user, issuedBy) !== null) return null;
 
   if (token.lastUsedAt === null || now - token.lastUsedAt.getTime() >= LAST_USED_RESOLUTION_MS) {
     // Conditional, so two concurrent requests write once; not awaited, since
@@ -198,14 +220,19 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
     expiresAt: token.expiresAt,
     user: { id: user.id, name: user.name, slug: user.slug, role: user.role },
     issuer: { id: issuedBy.id, name: issuedBy.name, slug: issuedBy.slug, role: issuedBy.role },
+    bot: user.worksForUserId !== null,
   };
 }
 
 /**
- * Revokes every live token of `userId`, inside the caller's transaction —
- * what soft-deleting a user does in the same transaction as the delete
- * (docs/MCP.md §3). Restoring the account brings none back.
+ * Revokes every live token `userId` holds or issued, inside the caller's
+ * transaction — what soft-deleting a user does in the same transaction as the
+ * delete (docs/MCP.md §3, §21). The check refuses both kinds already, on the
+ * filtered user read; revoking is what keeps a restore from bringing any back.
  */
 export async function revokeTokensOf(tx: TransactionClient, userId: string, at: Date): Promise<void> {
-  await tx.apiToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } });
+  await tx.apiToken.updateMany({
+    where: { OR: [{ userId }, { createdByUserId: userId }], revokedAt: null },
+    data: { revokedAt: at },
+  });
 }

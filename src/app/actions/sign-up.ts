@@ -5,19 +5,10 @@ import { redirect } from "next/navigation";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
+import { deriveInitials } from "@/lib/user-initials";
 import { signInAfterSignUpPath } from "@/lib/sign-in-redirect";
 
 export type SignUpState = { error?: string };
-
-function deriveInitials(name: string | null, email: string): string {
-  const words = name?.trim().split(/\s+/).filter(Boolean) ?? [];
-  if (words.length > 0) {
-    const first = words[0][0];
-    const last = words.length > 1 ? words[words.length - 1][0] : words[0][1];
-    return `${first}${last ?? ""}`.toUpperCase();
-  }
-  return email.slice(0, 2).toUpperCase();
-}
 
 export async function signUp(_prevState: SignUpState, formData: FormData): Promise<SignUpState> {
   const email = formData.get("email");

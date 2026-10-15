@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/core";
 import { auth } from "@/lib/auth";
-import { prismaIncludingDeleted } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { isAdmin } from "@/lib/authz";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
 import type { Prisma } from "@/generated/prisma/client";
@@ -68,6 +68,9 @@ function buildOrderBy(sort: SortColumn<UsersSortKey>[]): Prisma.UserOrderByWithR
         return { deletedAt: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
       case "deleted":
         return { deletedByUserId: { sort: dir, nulls: dir === "asc" ? "first" : "last" } };
+      case "worksFor":
+        // A person's row has no one to work for, and sorts as a null.
+        return { worksFor: { name: { sort: dir, nulls: "last" } } };
     }
   });
 }
@@ -98,7 +101,7 @@ export default async function UsersPage({
   const filters = parseUsersFilters(urlSearchParams, prefs);
   const where = buildFilterWhere(filters);
 
-  const [users, totalCount] = await Promise.all([
+  const [users, totalCount, people] = await Promise.all([
     prismaIncludingDeleted.user.findMany({
       where,
       orderBy: buildOrderBy(filters.sort),
@@ -111,6 +114,7 @@ export default async function UsersPage({
       include: {
         _count: { select: { postAuthors: true, invites: true } },
         avatar: { select: { hash: true } },
+        worksFor: { select: { id: true, name: true, email: true, role: true } },
         invites: {
           orderBy: { sentAt: "desc" },
           take: 1,
@@ -119,6 +123,14 @@ export default async function UsersPage({
       },
     }),
     prismaIncludingDeleted.user.count({ where }),
+    // Who a bot may work for (docs/MCP.md §21, "Whose account"): a live
+    // account with a password, which is what makes it a person's, and not a
+    // COMMENTER. A bot has no password, by a CHECK, so none is listed.
+    prisma.user.findMany({
+      where: { passwordHash: { not: null }, role: { not: "COMMENTER" } },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: [{ name: { sort: "asc", nulls: "last" } }, { email: "asc" }],
+    }),
   ]);
 
   const rows = users.map((user) => ({
@@ -164,12 +176,13 @@ export default async function UsersPage({
       : null,
     deletedAt: user.deletedAt,
     deleted: user.deletedByUserId !== null,
+    worksFor: user.worksFor,
   }));
 
   return (
     <main style={{ maxWidth: 1200, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>Users</h1>
-      <UsersTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} />
+      <UsersTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} people={people} />
     </main>
   );
 }

@@ -17,7 +17,8 @@ import {
 // ROLE_ORDER constant spelled out while the sort was client-side.
 // deletedAt is the one addition: a plain User column, defaulted hidden
 // (§16l) — the raw timestamp behind the existing Deleted action column's
-// boolean.
+// boolean. worksFor sorts by the name of the person a bot works for
+// (docs/MCP.md §21), a to-one relation Prisma's orderBy reaches directly.
 // isListedContributor/contributorOrder/orcid/website (PLAN.md §17i) are
 // plain scalar User columns, so they sort the same way any other column
 // here does. contributorBlurb is deliberately absent — it's Json, which
@@ -39,7 +40,8 @@ export type UsersSortKey =
   | "website"
   | "createdAt"
   | "deletedAt"
-  | "deleted";
+  | "deleted"
+  | "worksFor";
 const SORT_KEYS: readonly UsersSortKey[] = [
   "name",
   "email",
@@ -55,6 +57,7 @@ const SORT_KEYS: readonly UsersSortKey[] = [
   "createdAt",
   "deletedAt",
   "deleted",
+  "worksFor",
 ];
 export const DEFAULT_SORT: SortColumn<UsersSortKey>[] = [{ key: "createdAt", dir: "desc" }];
 

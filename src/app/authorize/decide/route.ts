@@ -62,7 +62,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const botId = form.get("bot");
-  if (!botId || !(await worksFor(botId, person.id))) return refused(403, "That account doesn't work for you.");
+  if (!botId || !(await worksFor(botId, person))) return refused(403, "That account doesn't work for you.");
 
   const code = await mintAuthorizationCode({
     clientId: approved.client.clientId,

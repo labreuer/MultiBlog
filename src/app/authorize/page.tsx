@@ -61,7 +61,7 @@ export default async function AuthorizePage({
   }
 
   const { request } = parsed;
-  const bots = await botsFor(person.id);
+  const bots = await botsFor(person);
   const connected = await connectedBots(request.client, person.id, bots.map((bot) => bot.id));
   const name = request.client.name;
   const host = new URL(request.redirectUri).host;

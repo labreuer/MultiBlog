@@ -5,6 +5,13 @@
 
 export const SAFE_EMAIL = /^[\w.+-]+@example\.com$/i;
 
+/**
+ * A bot /users' New bot panel made in a spec: its address is made from its
+ * slug, `<slug>@multiblog.invalid` (src/lib/bots.ts), so a bot named
+ * "E2E …" gets this one, which the helpers may touch and the sweep removes.
+ */
+export const SAFE_BOT_EMAIL = /^e2e-[\w.+-]+@multiblog\.invalid$/i;
+
 export const TEST_PASSWORD = "testpass123";
 export const ADMIN_EMAIL = "e2e-admin@example.com";
 

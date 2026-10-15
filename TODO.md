@@ -201,7 +201,7 @@ Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a pr
 build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
 yet done:
 
-- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Five of the plan's
+- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Six of the plan's
   steps are built:
   - the server is on SDK v2 (`@modelcontextprotocol/server`), which answers the 2026-07-28
     revision claude.ai opens in as well as every 2025-era client;
@@ -217,7 +217,11 @@ yet done:
     connection acts as a bot that works for whoever approves it (`user.works_for_user_id`);
   - refresh tokens (step 7), rotated on every use, so a connection lasts until it goes 90 days
     unused, and a new claude.ai connection replaces the bot's last one. Its migration,
-    `oauth_refresh_token`, revokes the slice's connections, which had none.
+    `oauth_refresh_token`, revokes the slice's connections, which had none;
+  - the rest of bot accounts (step 8): `/users` makes a bot and moves it to another person,
+    and §3's check refuses a token not issued by its account's person, or a bot's while it
+    outranks its person or works for a COMMENTER. No bot's token lists `manage`, and deleting
+    a person revokes the tokens they issued.
 
   The header trial and the slice trial ran on the trial instance on 2026-10-14 (MCP.md §21,
   "The header trial" and "The slice trial"). claude.ai connects through OAuth on the web and on
@@ -225,13 +229,14 @@ yet done:
   `anthropics/claude-ai-mcp#1110` didn't show here. The refresh trial ran there on 2026-10-14
   and 15 against step 7's build ("The refresh trial"): claude.ai on the web refreshes on its own
   before the call that needs it, stays connected, and a reconnect replaces the connection
-  before it; iOS's refresh is left to the full trial. Next is step 8, the rest of bot accounts.
-  The trial instance's Claude account works for Luke, set once by hand (MCP.md §21, "Whose
-  account").
-  Another instance's Claude account gets its person the same way before a build with the
-  works-for rule reaches it (step 8): `UPDATE "user" SET works_for_user_id = (SELECT id FROM
-  "user" WHERE email = 'labreuer@gmail.com') WHERE email = 'claude@multiblog.invalid';`, which
-  the CHECK refuses if the account has a password.
+  before it; iOS's refresh is left to the full trial. Next is step 9, the consent page in
+  full. The trial instance's Claude account works for Luke, set once by hand (MCP.md §21,
+  "Whose account").
+  Another instance's Claude account gets its person the same way before step 8's build reaches
+  it, or every header token issued for it is refused: `UPDATE "user" SET works_for_user_id =
+  (SELECT id FROM "user" WHERE email = 'labreuer@gmail.com') WHERE email =
+  'claude@multiblog.invalid';`, which the CHECK refuses if the account has a password.
+  `/users` can't do it: it gives a person only to a bot it makes (MCP.md §21, "Whose account").
 
   **Deploying main to an instance from before the slice, explore first** (explore runs
   9ef8de6; thicketry, kicking and notes fb56178):
@@ -242,6 +247,9 @@ yet done:
     `mcp__multiblog__multiblog_search` (MCP.md §15's suggested rules carry the new names);
   - each claude.ai connector to that instance needs "Refresh tool list" in its settings, or it
     keeps calling the old names, which are refused (MCP.md §21, "The header trial").
+  - first of all, the instance's Claude account gets its person by the `UPDATE` above, or each
+    header token issued for it is refused from the deploy on; so is any token whose issuer
+    isn't its account's person (`create-api-token.ts --list --email=…` shows what each holds).
 
   A read-only endpoint for Research is designed and not built (MCP.md §21, "The read-only
   endpoint"), since Research calls no connector at all, neither this one nor a directory one
