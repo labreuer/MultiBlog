@@ -8,7 +8,8 @@ import {
   searchParamsOf,
 } from "@/lib/oauth/authorize-request";
 import { findClient } from "@/lib/oauth/clients";
-import { botsFor, signedInPerson } from "@/lib/oauth/consent";
+import LocalTime from "@/components/LocalTime";
+import { botsFor, connectedBots, signedInPerson } from "@/lib/oauth/consent";
 import { issuer, mcpEndpointUrl } from "@/lib/oauth/discovery";
 import { signInPath } from "@/lib/sign-in-redirect";
 import { SITE_TITLE } from "@/lib/site-config";
@@ -61,14 +62,15 @@ export default async function AuthorizePage({
 
   const { request } = parsed;
   const bots = await botsFor(person.id);
+  const connected = await connectedBots(request.client, person.id, bots.map((bot) => bot.id));
   const name = request.client.name;
+  const host = new URL(request.redirectUri).host;
   return (
     <main className={styles.main}>
       <div className={account.card}>
         <h1>Connect {name}</h1>
         <p className={styles.lead}>
-          {name} is asking to connect to {SITE_TITLE}. If you approve, the connection goes to{" "}
-          <strong>{new URL(request.redirectUri).host}</strong>.
+          {name} is asking to connect to {SITE_TITLE}. If you approve, the connection goes to <strong>{host}</strong>.
         </p>
         <p className={styles.warning}>
           Approve only a connection you have just started yourself. If someone else sent you here, approving would
@@ -90,6 +92,15 @@ export default async function AuthorizePage({
                   ))}
                 </select>
               </label>
+              {bots
+                .filter((bot) => connected.has(bot.id))
+                .map((bot) => (
+                  <p key={bot.id} className={styles.replaces}>
+                    {bot.name ?? bot.slug} already has a connection to {host}, made{" "}
+                    <LocalTime value={connected.get(bot.id)} />. Approving as {bot.name ?? bot.slug} replaces it, and that
+                    one stops working.
+                  </p>
+                ))}
               <fieldset className={styles.scopes}>
                 <legend>It may</legend>
                 <label>

@@ -53,6 +53,18 @@ const PINNED = new Map<string, OauthClientInfo>([
   ],
 ]);
 
+/**
+ * Whether a new connection through `client` replaces the bot's last one
+ * through it (§21, "The token endpoint"). A claude.ai client's does, whether
+ * the pinned identity or one registered by hand as its fallback: reconnecting
+ * is how claude.ai recovers from most failures, and each reconnect would
+ * otherwise leave the old refresh token good for up to 90 days, wherever
+ * claude.ai keeps it.
+ */
+export function replacesConnections(client: OauthClientInfo): boolean {
+  return client.kind === "CLAUDE_AI";
+}
+
 /** No client_id is longer: a pinned URL, or a cuid. */
 const MAX_CLIENT_ID_LENGTH = 200;
 

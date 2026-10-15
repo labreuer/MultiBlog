@@ -32,6 +32,12 @@
   border-radius: 4px;
 }
 
+/* A bot's existing claude.ai connection, which approving replaces. */
+.replaces {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
 .scopes {
   display: flex;
   flex-direction: column;

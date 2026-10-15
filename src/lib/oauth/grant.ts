@@ -1,21 +1,30 @@
-import { ALL_SCOPES } from "@/lib/api/tokens";
+import { takeRateLimit } from "@/lib/api/rate-limit";
+import { ALL_SCOPES, authenticateTokenId } from "@/lib/api/tokens";
 import type { ApiScope } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { signAccessToken } from "./access-token";
-import { findClient } from "./clients";
+import { asksForMore } from "./authorize-request";
+import { findClient, replacesConnections } from "./clients";
 import { hashCode } from "./consent";
 import { mcpEndpointUrl } from "./discovery";
 import { verifierMatches } from "./pkce";
+import { hashRefreshToken, issueRefreshToken, pruneExpiredRefreshTokens, refreshStateOf } from "./refresh";
+import { rotationVerdict } from "./rotation";
 import { namesEndpoint } from "./resource";
 
-// docs/MCP.md §21, "The token endpoint" — what `POST /token` answers, for
-// the `authorization_code` grant: a code minted on the consent page,
-// redeemed once, makes the connection's `api_token` row and an access token
-// for it. Errors are RFC 6749 §5.2's.
+// docs/MCP.md §21, "The token endpoint" — what `POST /token` answers. The
+// `authorization_code` grant redeems a code minted on the consent page, once,
+// and makes the connection's `api_token` row; the `refresh_token` grant
+// rotates the connection's refresh token (src/lib/oauth/rotation.ts). Each
+// answers an access token and a refresh token. Errors are RFC 6749 §5.2's.
 //
-// No rate limit here: a code is good once, and only a person approving on the
-// consent page makes one. A code that matches no row is refused for the cost
-// of a hash and an index lookup.
+// **The rate limit is §4's token bucket, keyed on the connection**, and taken
+// only once a refresh token has resolved to its row. Never per client:
+// Claude's client_id is public, so anyone could keep a bucket keyed on it
+// empty, and every claude.ai connection on the instance would fail to
+// refresh. A code needs none: it is good once, and only a person approving
+// on the consent page makes one. A code or refresh token that matches no row
+// is refused for the cost of a hash and an index lookup.
 
 export type TokenAnswer = { status: number; body: Record<string, unknown> };
 
@@ -42,8 +51,12 @@ function scopeString(scopes: readonly ApiScope[]): string {
     .join(" ");
 }
 
-/** One line per grant and revocation, beside §4's audit line: the client, the row's prefix, the account and the issuer. */
-function logLine(fields: { event: "grant" | "revoke"; reason?: string; client: string; token: string; user: string; issuer: string }): void {
+/**
+ * One line per grant, refresh and revocation, beside §4's audit line: the
+ * client, the row's prefix, the account and the issuer. A refresh answered
+ * as a retry, and a revocation, give their reason.
+ */
+function logLine(fields: { event: "grant" | "refresh" | "revoke"; reason?: string; client: string; token: string; user: string; issuer: string }): void {
   console.log(JSON.stringify({ at: "oauth", ...fields }));
 }
 
@@ -56,8 +69,9 @@ export async function tokenGrant(form: URLSearchParams): Promise<TokenAnswer> {
   }
   const grantType = form.get("grant_type") || null;
   if (!grantType) return oauthError("invalid_request", "grant_type is required.");
-  if (grantType !== "authorization_code") return oauthError("unsupported_grant_type", "Only the authorization_code grant is supported.");
-  return redeemCode(form);
+  if (grantType === "authorization_code") return redeemCode(form);
+  if (grantType === "refresh_token") return refresh(form);
+  return oauthError("unsupported_grant_type", "Only the authorization_code and refresh_token grants are supported.");
 }
 
 /**
@@ -130,7 +144,19 @@ async function redeemCode(form: URLSearchParams): Promise<TokenAnswer> {
     const prefix = connectionPrefix(created.id);
     await tx.apiToken.update({ where: { id: created.id }, data: { prefix } });
     await tx.oauthCode.update({ where: { id: row.id }, data: { apiTokenId: created.id } });
-    return { id: created.id, prefix };
+    // A new claude.ai connection replaces the bot's others through the same
+    // client, from the same issuer; the consent page said so.
+    const replaced = replacesConnections(client)
+      ? await tx.apiToken.findMany({
+          where: { userId: row.userId, createdByUserId: row.issuerId, oauthClientId: client.clientId, revokedAt: null, id: { not: created.id } },
+          select: { id: true, prefix: true },
+        })
+      : [];
+    if (replaced.length > 0) {
+      await tx.apiToken.updateMany({ where: { id: { in: replaced.map((token) => token.id) }, revokedAt: null }, data: { revokedAt: now } });
+    }
+    const refreshToken = await issueRefreshToken(tx, created.id, null, now);
+    return { id: created.id, prefix, replaced, refreshToken };
   });
   if (!made) {
     // Another redemption claimed it first, so this one is the replay.
@@ -139,10 +165,97 @@ async function redeemCode(form: URLSearchParams): Promise<TokenAnswer> {
   }
 
   const { accessToken, expiresIn } = await signAccessToken(made.id, endpoint);
-  logLine({ event: "grant", client: client.clientId, token: made.prefix, user: row.userId, issuer: row.issuerId });
+  const fields = { client: client.clientId, user: row.userId, issuer: row.issuerId };
+  for (const old of made.replaced) logLine({ event: "revoke", reason: "replaced", ...fields, token: old.prefix });
+  logLine({ event: "grant", ...fields, token: made.prefix });
   return {
     status: 200,
-    body: { access_token: accessToken, token_type: "Bearer", expires_in: expiresIn, scope: scopeString(row.scopes) },
+    body: {
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: expiresIn,
+      scope: scopeString(row.scopes),
+      refresh_token: made.refreshToken,
+    },
+  };
+}
+
+/**
+ * The `refresh_token` grant. The token must be unexpired and of the same
+ * client; a `resource`, if sent, must be the connection's endpoint, which the
+ * new access token names whatever is sent; then §3's one check runs on the
+ * row, so a refresh can't outlive what a call couldn't; then the rotation.
+ * The answer always carries the row's scopes, and a `scope` asking for more
+ * is refused.
+ */
+async function refresh(form: URLSearchParams): Promise<TokenAnswer> {
+  const presented = form.get("refresh_token") || null;
+  const clientId = form.get("client_id") || null;
+  if (!presented || !clientId) return oauthError("invalid_request", "refresh_token and client_id are required.");
+
+  const client = await findClient(clientId);
+  if (!client) return oauthError("invalid_client", "The client is unknown.");
+
+  const row = await prisma.oauthRefreshToken.findUnique({
+    where: { tokenHash: hashRefreshToken(presented) },
+    select: { id: true, apiTokenId: true, expiresAt: true, apiToken: { select: { oauthClientId: true } } },
+  });
+  if (!row) return invalidGrant("The refresh token is unknown.");
+  // A bucket of its own, so a burst of calls can't make a refresh fail.
+  if (!takeRateLimit(`oauth-refresh:${row.apiTokenId}`)) {
+    return {
+      status: 429,
+      body: { error: "invalid_request", error_description: "Too many refreshes on this connection; wait a few seconds and retry." },
+    };
+  }
+  if (row.apiToken.oauthClientId !== client.clientId) return invalidGrant("The refresh token was issued to another client.");
+  const now = new Date();
+  if (row.expiresAt <= now) return invalidGrant("The refresh token has expired.");
+
+  const endpoint = mcpEndpointUrl();
+  if (form.getAll("resource").some((resource) => !namesEndpoint(resource, endpoint))) {
+    return oauthError("invalid_target", "resource must be the connection's endpoint, with no query or fragment.");
+  }
+
+  const token = await authenticateTokenId(row.apiTokenId);
+  if (!token) return invalidGrant("The connection has ended.");
+  if (asksForMore(form.get("scope"), token.scopes)) return oauthError("invalid_scope", "scope asks for more than the connection holds.");
+
+  const outcome = await prisma.$transaction(async (tx) => {
+    // One rotation at a time per connection, so two refreshes sent at once
+    // each see what the other did.
+    const [connection] = await tx.$queryRaw<{ revoked_at: Date | null }[]>`
+      SELECT revoked_at FROM api_token WHERE id = ${row.apiTokenId} FOR UPDATE`;
+    if (!connection || connection.revoked_at !== null) return { kind: "ended" } as const;
+    const state = await refreshStateOf(tx, row.id);
+    if (!state) return { kind: "ended" } as const;
+    const verdict = rotationVerdict(state, now.getTime());
+    if (verdict === "replay") {
+      await tx.apiToken.update({ where: { id: row.apiTokenId }, data: { revokedAt: now } });
+      return { kind: "replay" } as const;
+    }
+    if (verdict === "rotate") await tx.oauthRefreshToken.update({ where: { id: row.id }, data: { usedAt: now } });
+    return { kind: verdict, refreshToken: await issueRefreshToken(tx, row.apiTokenId, row.id, now) } as const;
+  });
+
+  const fields = { client: client.clientId, token: token.prefix, user: token.user.id, issuer: token.issuer.id };
+  if (outcome.kind === "ended") return invalidGrant("The connection has ended.");
+  if (outcome.kind === "replay") {
+    // Either the client or a thief holds a copy, and the row can't tell which.
+    logLine({ event: "revoke", reason: "refresh_replayed", ...fields });
+    return invalidGrant("The refresh token has been used.");
+  }
+  const { accessToken, expiresIn } = await signAccessToken(row.apiTokenId, endpoint);
+  logLine({ event: "refresh", ...(outcome.kind === "retry" ? { reason: "retry" } : {}), ...fields });
+  return {
+    status: 200,
+    body: {
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: expiresIn,
+      scope: scopeString(token.scopes),
+      refresh_token: outcome.refreshToken,
+    },
   };
 }
 
@@ -173,14 +286,16 @@ const CODE_KEPT_MS = 24 * 60 * 60_000;
 let lastPrunedAt = 0;
 
 /**
- * Deletes codes a day past their expiry, at most once an hour per process.
- * The route runs it after its answer is sent (`after()`): claude.ai waits 10
+ * Deletes codes a day past their expiry, and refresh tokens past their 90
+ * days but each connection's newest, at most once an hour per process. The
+ * route runs it after its answer is sent (`after()`): claude.ai waits 10
  * seconds for `/token`, and a flow answered later fails even when the token
  * was issued.
  */
-export async function pruneSpentCodes(): Promise<void> {
+export async function pruneSpent(): Promise<void> {
   const now = Date.now();
   if (now - lastPrunedAt < PRUNE_EVERY_MS) return;
   lastPrunedAt = now;
   await prisma.oauthCode.deleteMany({ where: { expiresAt: { lt: new Date(now - CODE_KEPT_MS) } } });
+  await pruneExpiredRefreshTokens(new Date(now));
 }

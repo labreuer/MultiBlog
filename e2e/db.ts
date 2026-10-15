@@ -370,6 +370,8 @@ export const createTestApiToken = (...args: Parameters<DbHandlers["createTestApi
   call("createTestApiToken", ...args);
 export const expireTestApiToken = (...args: Parameters<DbHandlers["expireTestApiToken"]>) =>
   call("expireTestApiToken", ...args);
+export const backdateRefreshRotation = (...args: Parameters<DbHandlers["backdateRefreshRotation"]>) =>
+  call("backdateRefreshRotation", ...args);
 export const createTestBot = (...args: Parameters<DbHandlers["createTestBot"]>) => call("createTestBot", ...args);
 export const softDeleteTestUser = (...args: Parameters<DbHandlers["softDeleteTestUser"]>) =>
   call("softDeleteTestUser", ...args);

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OauthClientInfo } from "./clients";
 import {
+  asksForMore,
   authorizationResponseUrl,
   grantedScopes,
   parseAuthorizeRequest,
@@ -156,6 +157,16 @@ test("write implies read, neither asks for both, and any other word is ignored",
   assert.deepEqual(scopesAsked("offline_access"), ["READ", "WRITE"]);
   assert.deepEqual(scopesAsked("openid profile email"), ["READ", "WRITE"]);
   assert.deepEqual(scopesAsked("manage"), ["READ", "WRITE"]);
+});
+
+test("a refresh asks for more only by naming write on a connection that can only read", () => {
+  assert.equal(asksForMore("read write", ["READ"]), true);
+  assert.equal(asksForMore("write", ["READ"]), true);
+  assert.equal(asksForMore("read write offline_access", ["READ", "WRITE"]), false);
+  assert.equal(asksForMore("read offline_access", ["READ"]), false);
+  assert.equal(asksForMore("manage", ["READ"]), false);
+  assert.equal(asksForMore(null, ["READ"]), false);
+  assert.equal(asksForMore("", ["READ"]), false);
 });
 
 test("the page grants read alone until the person chooses write, and never more than was asked", () => {

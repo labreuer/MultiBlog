@@ -1880,10 +1880,11 @@ model ApiToken {
   createdByUserId String         @map("created_by_user_id")
   createdAt       DateTime       @default(now()) @map("created_at")
 
-  user               User        @relation("ApiTokenUser", fields: [userId], references: [id], onDelete: Cascade)
-  createdBy          User        @relation("ApiTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  user               User                @relation("ApiTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy          User                @relation("ApiTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
   writes             ApiWrite[]
   authorizationCodes OauthCode[]
+  refreshTokens      OauthRefreshToken[]
 
   @@index([userId])
   @@map("api_token")
@@ -1932,6 +1933,30 @@ model OauthCode {
 
   @@index([expiresAt])
   @@map("oauth_authorization_code")
+}
+
+// docs/MCP.md §21, "A connection" — a connection's refresh token, `mbr_` and
+// 32 random bytes, kept as its SHA-256: good for 90 days, and rotated on every
+// use. `usedAt` is its rotation, and the tokens a rotation issues name it as
+// their `parentId` — a plain column, not a foreign key, so a pruned parent
+// leaves its children able to find their siblings (src/lib/oauth/refresh.ts).
+// A connection lapses when its newest one expires, so the pruner keeps that
+// one.
+model OauthRefreshToken {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique @map("token_hash")
+  apiTokenId String    @map("api_token_id")
+  parentId   String?   @map("parent_id")
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  apiToken ApiToken @relation(fields: [apiTokenId], references: [id], onDelete: Cascade)
+
+  @@index([apiTokenId])
+  @@index([parentId])
+  @@index([expiresAt])
+  @@map("oauth_refresh_token")
 }
 
 // docs/MCP.md §4 — one row per write that adds something (create_doc, the
