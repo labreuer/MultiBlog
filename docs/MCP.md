@@ -2453,8 +2453,10 @@ the consent page, `/token` for the `authorization_code` grant, the access token,
 pinned identity), and refresh tokens with their rotation, a new claude.ai connection replacing
 the bot's last one (§18's phase 5; §20 says where the build departs from this plan). Step 3,
 the header trial, and step 6, the slice trial, ran on 2026-10-14 ("The header trial", "The
-slice trial"): claude.ai connects through OAuth on the web and on iOS. Step 8, the rest of bot
-accounts, is next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
+slice trial"): claude.ai connects through OAuth on the web and on iOS. The refresh trial ran on
+2026-10-14 and 15 against step 7's build: claude.ai refreshes on its own, and a reconnect
+replaces the connection before it ("The refresh trial"). Step 8, the rest of bot accounts, is
+next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
 authorization spec allows.
@@ -2470,7 +2472,9 @@ leans on (Build order), the first two on a trial instance and the last on explor
 - **the full trial**, once everything is built.
 
 An early trial on the same instance, against the move to SDK v2 alone, has answered the header
-trial's questions about the protocol, and raised two of its own ("The early trial").
+trial's questions about the protocol, and raised two of its own ("The early trial"). A refresh
+trial there, against step 7's build before it merged, has answered the full trial's about
+refreshing on the web and a reconnect replacing a connection ("The refresh trial").
 
 Claude Code keeps §5's header and its token file. Nothing here changes how it connects: a
 `headersHelper` that supplies `Authorization` takes precedence over OAuth in Claude Code.
@@ -3562,8 +3566,9 @@ tests pass (Build order).
     whether Research calls the connector. Without a header trial before it, it also checks what
     that one would have;
   - **the full trial, with everything**:
-    - claude.ai on the web and on iOS refreshing after an hour without asking the person to
-      reconnect, a revoke, and a reconnect replacing the connection before it;
+    - claude.ai on iOS refreshing after an hour without asking the person to reconnect, and a
+      revoke. The web's refresh, and a reconnect replacing the connection before it, were seen
+      in the refresh trial;
     - whether Research calls the connector by then (Open);
     - the read-only connector beside the full one: a Research run with it alone turned on,
       calling only the reads;
@@ -3743,6 +3748,45 @@ request.
   page loaded, about 20 requests, one of them `/sign-in?callbackUrl=%2Fauthorize` with the
   request's query dropped.
 
+### The refresh trial
+
+Step 7's build (59c86c2) was deployed to the trial instance from its branch on 2026-10-14, before
+its PR, and the slice trial's connector was used across a day. Its migration revoked the
+slice's three connections; the first chat afterwards sent the revoked connection's token, got
+401 `invalid_token`, retried with no token and got a 401 again, and the person connected anew.
+The same logs as the slice trial's gave each request. A script against a dev server checked the
+retry, which claude.ai never needed.
+
+- **claude.ai refreshes on its own, before the call that needs it.** 5 h 56 min after the
+  connection was made, a chat's first request was a refresh at `/token`, not a call: claude.ai
+  knew from `expires_in` that the access token had lapsed, so no 401 came first. Then
+  `server/discover`, `tools/list` and the calls, under 2026-07-28, and no consent page. A second
+  refresh 10.5 hours later went the same way. Each spent one refresh token and got one.
+- **One refresh serves every chat.** Two chats opened at the same instant both used the
+  connection, and claude.ai sent one refresh between them, so it never sent a token twice.
+- **The connector stayed connected** in claude.ai's settings across both refreshes (Open).
+- **claude.ai asks for `offline_access`** now that the metadata lists it:
+  `scope=read write offline_access`. The page ignores it, as designed.
+- **The reconnect's calls stayed on 2026-07-28**, where the slice trial's two reconnects had
+  fallen back to 2025-11-25 for the rest of their chats ("The slice trial"). What decides it is
+  unknown; the server answers both.
+- **Disconnect sends nothing, and a reconnect replaces the connection.** Disconnecting in the
+  connector's settings made no request. Connecting again showed the consent page's sentence:
+  "Claude already has a connection to claude.ai, made 10/14/2026, 1:49:24 PM. Approving as
+  Claude replaces it, and that one stops working." Approving revoked the old connection and made
+  the new one in one transaction, logged as a `revoke` with reason `replaced`, then a `grant`.
+- **The retry, checked by hand** against a dev server, with a throwaway bot:
+  - five refreshes of one token sent at the same instant were all answered, with five distinct
+    refresh tokens: one rotation and four retries, since the lock on the connection's row takes
+    them one at a time;
+  - using one of the five retired the other four, and one presented after that ended the
+    connection;
+  - on the real clock, a rotated token presented again 115 seconds after its rotation was
+    answered, and at 125 seconds ended the connection;
+  - the log lines read as designed: `refresh`, `refresh` with reason `retry`, and `revoke`
+    with reason `refresh_replayed`.
+- **Not tried**: iOS refreshing, which the full trial covers.
+
 ### Build order
 
 What this server can't test locally is whether claude.ai connects to it at all, and an open
@@ -3849,6 +3893,8 @@ connection at all.
    - the slice's connections revoked, in the migration that adds the table. They have no
      refresh token, and a connection's lapse is dated by its newest one ("Seeing and ending a
      connection"), so they would otherwise show as live for good.
+
+   Tried on the trial instance from its branch before it merged ("The refresh trial").
 8. **The rest of bot accounts**:
    - the web interface that makes bots and moves them to another person, with their rules: no
      password, a person who has one and isn't a COMMENTER, a role no higher than theirs, and no
@@ -3900,10 +3946,9 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    completes and claude.ai lists the tools with its new token. Yet the connector keeps showing
    Connect, and no tools load in a chat, under 2026-07-28 and after its fallback to
    2025-11-25 alike. #1067 shows the same Settings symptom with a client registered by hand,
-   though there the tools did load. **It didn't happen in the slice trial**: the tools loaded
-   and the connector showed connected ("The slice trial"). But #1110's server also issues
-   rotating refresh tokens, which the slice didn't, so the full trial looks again now that step
-   7 has added them.
+   though there the tools did load. **It didn't happen in the slice trial or the refresh
+   trial**: the tools loaded and the connector showed connected, with rotating refresh tokens as
+   well as without ("The slice trial", "The refresh trial"). The full trial looks again.
 2. **Whether claude.ai's Research calls a connector at all.** In every trial it called neither
    this one nor a directory connector, and the approval its help center describes never
    appeared ("The slice trial"). Nothing in this server decides it. If it does start calling
@@ -3915,4 +3960,5 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    `private_key_jwt` against it (`jose`'s `createRemoteJWKSet`, from the pinned `jwks_uri`).
    The drift check is what announces the change.
 4. **A revocation endpoint** (RFC 7009), if the full trial shows claude.ai calls one when a
-   connector is removed.
+   connector is removed. Disconnecting sent nothing in the refresh trial, but the metadata
+   lists no revocation endpoint, so that says nothing about whether claude.ai would call one.
