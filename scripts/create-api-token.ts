@@ -35,7 +35,9 @@
 //
 // --list shows an OAuth connection beside the header tokens, and a lapsed one
 // as lapsed: its newest refresh token is past its 90 days, so nothing it
-// holds still works (docs/MCP.md §21, "Seeing and ending a connection").
+// holds still works (docs/MCP.md §21, "Seeing and ending a connection"). The
+// state is src/lib/api/token-state.ts's, which /dashboard's Connections card
+// shows too.
 //
 // No @example.com restriction: this operates on real accounts on purpose, the
 // scope of create-admin.ts and set-user-password.ts. The soft-delete-aware
@@ -47,7 +49,7 @@ import { dirname } from "node:path";
 import { prisma } from "../src/lib/prisma";
 import { issueApiToken } from "../src/lib/api/tokens";
 import { NEWEST_REFRESH_TOKEN } from "../src/lib/oauth/refresh";
-import { hasLapsed } from "../src/lib/oauth/rotation";
+import { tokenState } from "../src/lib/api/token-state";
 import type { ApiScope, ApiTokenClient } from "../src/generated/prisma/enums";
 
 function usage(message?: string): never {
@@ -110,13 +112,7 @@ async function main() {
     });
     const now = new Date();
     for (const t of tokens) {
-      const state = t.revokedAt
-        ? "revoked"
-        : t.oauthClientId !== null && hasLapsed(t.refreshTokens, now)
-          ? "lapsed"
-          : t.expiresAt && t.expiresAt <= now
-            ? "expired"
-            : "live";
+      const state = tokenState(t, now).kind;
       console.log(
         `${t.id}  ${t.prefix}…  ${state}  ${t.client}  ${t.scopes.join(",")}  ${t.name}  last used ${t.lastUsedAt?.toISOString() ?? "never"}`,
       );

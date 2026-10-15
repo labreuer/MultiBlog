@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AuthenticatedToken } from "@/lib/api/tokens";
 import { instructionsFor, INSTRUCTIONS_MAX_CHARS } from "./instructions";
-import { SKILL_DESCRIPTION, SKILL_DESCRIPTION_MAX_CHARS, SKILL_NAME, skillMarkdown } from "./skill";
+import { projectInstructions, SKILL_DESCRIPTION, SKILL_DESCRIPTION_MAX_CHARS, SKILL_NAME, skillMarkdown } from "./skill";
 import { listedName, TOOL_NAMES, TOOL_PREFIX } from "./tool";
 
 // docs/MCP.md §21, "The skill" — what claude.ai refuses a skill for, and the
@@ -38,6 +38,16 @@ test("every tool the skill names is one the server lists", () => {
   assert.ok(named.length > 0);
   assert.deepEqual(
     named.filter((name) => !LISTED.has(name)),
+    [],
+  );
+});
+
+test("the Project paragraph is one paragraph, naming no tool the server doesn't list", () => {
+  const paragraph = projectInstructions();
+  assert.doesNotMatch(paragraph, /\n/);
+  assert.ok(paragraph.includes(TOOL_PREFIX));
+  assert.deepEqual(
+    namedTools(paragraph).filter((name) => !LISTED.has(name)),
     [],
   );
 });

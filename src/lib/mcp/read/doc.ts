@@ -22,7 +22,7 @@ import { ApiError, ERROR_LIST_CAP, invalid } from "@/lib/api/errors";
 import type { McpContext, ToolResult } from "../tool";
 import { bylineOf, dayOf, sizeOf } from "../shape";
 import type { ResolvedDoc } from "../resolve";
-import { DEFAULT_READ_CHARS, MAX_READ_CHARS, type ReadArgs } from "./args";
+import { DEFAULT_READ_CHARS, readBoundFor, type ReadArgs } from "./args";
 
 // docs/MCP.md §6 — reading a doc: whole, as its outline, a section, a run of
 // blocks, every occurrence of a quote with the blocks around it, or what has
@@ -145,6 +145,7 @@ export async function readDoc(
 
   const state = await loadDocState(doc.id);
   const url = `/doc/${doc.slug}`;
+  const maxChars = readBoundFor(ctx.token.client);
 
   if (args.since !== undefined) return changesSince(doc, state, BigInt(args.since));
   if (args.around !== undefined) {
@@ -163,7 +164,7 @@ export async function readDoc(
     if (args.outline) {
       return { kind: "doc-outline", url, version: versionOf(state), from: span.from, to: span.to, outline: outlineOf(state.blocks, { depth: args.depth, within: span }) };
     }
-    const fitted = fitBlocks(state.blocks.slice(span.from - 1, span.to), format, MAX_READ_CHARS - 1000);
+    const fitted = fitBlocks(state.blocks.slice(span.from - 1, span.to), format, maxChars - 1000);
     const lastIncluded = fitted.next === null ? span.to : fitted.next - 1;
     return {
       kind: "doc-blocks",
@@ -181,7 +182,7 @@ export async function readDoc(
   const more = await extras(state, null);
   if (!args.outline) {
     const whole = { ...meta, [bodyKey(format)]: render(state.blocks, format), ...more };
-    const bound = args.whole ? MAX_READ_CHARS : DEFAULT_READ_CHARS;
+    const bound = args.whole ? maxChars : DEFAULT_READ_CHARS;
     if (sizeOf(whole) <= bound) return whole;
   }
   const automatic = !args.outline;
@@ -191,8 +192,8 @@ export async function readDoc(
     ...(automatic
       ? {
           note: args.whole
-            ? `Longer than ${MAX_READ_CHARS} characters: read it by section or by blocks.`
-            : `Longer than ${DEFAULT_READ_CHARS} characters: read the sections you need, or pass whole:true for up to ${MAX_READ_CHARS}.`,
+            ? `Longer than ${maxChars} characters: read it by section or by blocks.`
+            : `Longer than ${DEFAULT_READ_CHARS} characters: read the sections you need, or pass whole:true for up to ${maxChars}.`,
         }
       : {}),
     ...more,

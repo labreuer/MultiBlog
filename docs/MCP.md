@@ -2,10 +2,11 @@
 
 **Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
 annotations, anchored links, tags, uploads and `manage`. Not built: the rest of OAuth (phase
-5, planned in §21, whose steps 1, 2, 4, 5 and 7 are built: the move to SDK v2, the tools' names
-and descriptions with a skill for claude.ai, the bearer check on v2's terms, enough OAuth for
-claude.ai to connect, tried on the web and on iOS, and refresh tokens, so a connection lasts
-until it goes 90 days unused), and passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
+5, planned in §21, whose steps 1, 2, 4, 5 and 7–10 are built: the move to SDK v2, the tools'
+names and descriptions with a skill for claude.ai, the bearer check on v2's terms, enough OAuth
+for claude.ai to connect, tried on the web and on iOS, refresh tokens, so a connection lasts
+until it goes 90 days unused, bot accounts, the consent page in full, and `read`'s bound for
+claude.ai with `/dashboard`'s Connections card), and passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
 every such point is decided there rather than here. §21 is the plan for OAuth and SDK v2.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
@@ -218,9 +219,9 @@ the rules are:
   after the same predicate `/api/doc/[id]/token` checks, and calls `/admin/*` over loopback
   (`collabHttpOrigin`).
 - **Tokens are issued by a script first**: `scripts/create-api-token.ts --email …
-  --issued-by … --name … --scopes … --client …`. Later comes a `/dashboard` panel for your
-  own tokens, which §21 builds for listing and revoking but never issuing. The script stays the
-  only way to issue a header token; everyone else connects through OAuth (§21).
+  --issued-by … --name … --scopes … --client …`. `/dashboard`'s Connections card is the panel
+  for your own tokens, listing and revoking but never issuing (§21). The script stays the only
+  way to issue a header token; everyone else connects through OAuth (§21).
 - **Every token expires**: a year unless the script is told otherwise, with no way to ask for
   none, since SDK v2's bearer check refuses a token without an expiry (§21, "The bearer
   check"). A CHECK on `api_token` holds every header token to it. A header token is re-issued
@@ -399,9 +400,9 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
   - **The ceiling's cost.** 200,000 characters is about 50,000 tokens, a quarter of a
     200,000-token window in one call. It is room for a long doc a task needs whole: the longest
     imported chat is 88,000 characters.
-  - **claude.ai's limit is about 150,000 characters**, by Anthropic's connector documentation,
-    and it honors none of Claude Code's `_meta` keys. So a `claude-ai` token's `read` stops
-    below that limit (§21).
+  - **claude.ai passes 100,000 characters to its model inline**, as measured in the header
+    trial, and honors none of Claude Code's `_meta` keys. So a `claude-ai` token's `read`
+    stops at 95,000, for `whole: true` and a range alike (§21).
 - **Lists** take `limit`, 20 by default and at most 100, and an opaque `cursor`. Search pages
   by rank, at most 20 at a time (§14).
 
@@ -2434,14 +2435,13 @@ code beside each says why as well.
   itself that way. A known client other than the connection's is `invalid_grant`.
 - **A refresh's `scope` asks for more only by naming `write`** on a connection that can only
   read (`asksForMore`). Any other word is ignored, as on the consent page.
-- **`create-api-token.ts --list` shows a lapsed connection as lapsed.** It is the one part of
-  "Seeing and ending a connection" built here, since only refresh tokens let a connection
-  lapse; the Connections card is step 10's.
+- **`create-api-token.ts --list` shows a lapsed connection as lapsed**, by the rule the
+  Connections card applies (`tokenState`, step 10).
 - **The migration revokes every connection with no refresh token**, which is every
   connection the slice made.
-- **The e2e covers §21 Testing's refresh cases but two**: Revoke on `/dashboard`, which is
-  step 10's, and a connection to the read-only endpoint, which isn't built. A replay past the
-  two minutes is set up by `backdateRefreshRotation`.
+- **The e2e covers §21 Testing's refresh cases but one**, a connection to the read-only
+  endpoint, which isn't built. A replay past the two minutes is set up by
+  `backdateRefreshRotation`, and Revoke on `/dashboard` is step 10's.
 
 **Bot accounts** (§21, step 8)
 
@@ -2504,8 +2504,9 @@ code beside each says why as well.
   against a flow someone else started, which every page carries.
 - **"What the connection can do"** says that it acts as the bot, reading only what the bot can
   read and writing in its name; what it can't do, which is `manage`'s work; and that it lasts
-  until it goes 90 days unused. That `/dashboard` ends it waits for the Connections card
-  (step 10). The scope boxes name what each scope's tools do.
+  until it goes 90 days unused, or until it is revoked under Connections on the dashboard. That
+  is said in words, not a link, since every link off the page abandons the flow. The scope
+  boxes name what each scope's tools do.
 - **A person with nothing to connect as is told why**, in one of three sentences, with Cancel
   alone: a COMMENTER, who can't have a bot; a person whose bots all outrank them, named, with
   what an ADMIN can change; and a person with no bot, told that an ADMIN makes one, or, when
@@ -2515,21 +2516,49 @@ code beside each says why as well.
   (`replacesConnections`): its kind is `other`, and each `/mcp` sign-in is a connection of its
   own, which lapses with its refresh token.
 
+**`read`'s bound for claude.ai, and the Connections card** (§21, step 10)
+
+- **A `claude-ai` token's bound is 95,000 characters** (`readBoundFor`,
+  `src/lib/mcp/read/args.ts`), 5,000 under claude.ai's 100,000. The margin is for what
+  `include` adds to a ranged read, which is paged on its own rather than fitted with the
+  blocks. Every bound is measured by the serialized result's JavaScript length, which never
+  counts fewer characters than claude.ai does.
+- **`read`'s description is built per token**, since it names the bound `whole: true` lifts a
+  read to; a description function takes the token's client beside its people. The `whole`
+  parameter's own description names no number, since the input schema is the same for every
+  token. `_meta["anthropic/maxResultSizeChars"]` stays 200,000 on every token: only Claude
+  Code reads it, and it is a ceiling, not a promise.
+- **The card and `create-api-token.ts --list` read one rule**, `tokenState`
+  (`src/lib/api/token-state.ts`, unit-tested).
+- **Revoke takes an inline Yes/No**, as `/users`' Send invite does, since a revoked token
+  never comes back. Revoking a connection logs the token endpoint's line, with the reason
+  `dashboard`. The rule is `revokeToken` (`src/lib/api/token-card.ts`), taking an `Actor`, and
+  the action wraps it.
+- **The skill's ZIP is served at `/dashboard/multiblog-skill.zip`**, built per request from
+  `skill.ts`, so it matches the tools that build serves. It asks for a session only because
+  the card does: it names no account.
+- **The paragraph for a Project** is `projectInstructions` (`skill.ts`): what MultiBlog holds,
+  to search it first, and how its tools are named, from the text the skill and the
+  instructions share. The steps of a research session stay the skill's, since each tool's
+  description carries its own part of them. The card shows it in a box that one click selects
+  whole.
+
 ## 21. OAuth, for claude.ai
 
-**Status: planned; steps 1, 2, 4, 5, 7, 8 and 9 are built**: the move to SDK v2, the tools'
+**Status: planned; steps 1, 2, 4, 5 and 7–10 are built**: the move to SDK v2, the tools'
 names and descriptions with the skill, the bearer check on v2's terms, the thin slice
 (Discovery, the consent page, `/token` for the `authorization_code` grant, the access token,
 and Claude's pinned identity), refresh tokens with their rotation, a new claude.ai connection
 replacing the bot's last one, the rest of bot accounts (`/users` making and moving them, and
-their rules in §3's check), and the consent page in full with Claude Code's pinned identity,
+their rules in §3's check), the consent page in full with Claude Code's pinned identity,
 the drift check `deploy.sh` runs, and `scripts/oauth-client.ts` for a client registered by
-hand (§18's phase 5; §20 says where the build departs from this plan). Step 3,
-the header trial, and step 6, the slice trial, ran on 2026-10-14 ("The header trial", "The
-slice trial"): claude.ai connects through OAuth on the web and on iOS. The refresh trial ran on
-2026-10-14 and 15 against step 7's build: claude.ai refreshes on its own, and a reconnect
-replaces the connection before it ("The refresh trial"). Step 10, the per-client bound on
-`read` and the Connections card, is next. claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
+hand, and the per-client bound on `read` with `/dashboard`'s Connections card (§18's phase 5;
+§20 says where the build departs from this plan). Step 3, the header trial, and step 6, the
+slice trial, ran on 2026-10-14 ("The header trial", "The slice trial"): claude.ai connects
+through OAuth on the web and on iOS. The refresh trial ran on 2026-10-14 and 15 against step
+7's build: claude.ai refreshes on its own, and a reconnect replaces the connection before it
+("The refresh trial"). Step 11, the full trial on explore, is next.
+claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
 authorization spec allows.
@@ -3047,7 +3076,10 @@ errors are RFC 6749 §5.2's.
 ### Seeing and ending a connection
 
 - **A Connections card on `/dashboard`** lists the tokens a person issued or acts as: name,
-  client, endpoint, account, scopes, created, last used, and Revoke.
+  client, account, scopes, created, last used, and Revoke.
+  - **The endpoint is named once, above the table**, as the URL to give claude.ai, while
+    `/api/mcp` is the only one. It becomes a column with the read-only endpoint, if that is
+    built.
   - **It offers what claude.ai needs besides a connection**: the skill, as a ZIP to upload, and
     the paragraph for a Project's instructions ("What the model is told", below).
   - It is §3's "panel for your own tokens", listing and revoking only. It issues no token:
@@ -3060,6 +3092,10 @@ errors are RFC 6749 §5.2's.
     check") and isn't revoked, so its state comes from that refresh token, which the pruner
     keeps for this. A header token past its `expires_at` shows as expired, as the script
     already lists one.
+  - **A revoked token isn't listed.** Nothing it holds works, and each claude.ai reconnect
+    revokes the connection before it, so they would pile up.
+  - **A COMMENTER sees the card only for a token of their own.** They can have no bot, so the
+    skill and the paragraph would serve them nothing.
   - It is a plain `<table>`, as Recent docs is ([DASHBOARD.md](DASHBOARD.md)).
 - **The script lists and revokes connections** as it does any token (`create-api-token.ts
   --list`, `--revoke`), and lists a lapsed one as lapsed.
@@ -3085,8 +3121,8 @@ and the first item decides whether it works at all.
     characters, not tokens. Past it, the model gets the first 100,000 characters and a note,
     and the whole result is kept as a file its Read tool opens until the reply ends, with code
     execution on or off.
-  - **So a `claude-ai` token's reads get a bound of their own**, a little under 100,000, for
-    `whole: true` and a range alike, where Claude Code's is 200,000. The 40,000 default doesn't
+  - **So a `claude-ai` token's reads get a bound of their own**, 95,000, for `whole: true` and
+    a range alike, where Claude Code's is 200,000. The 40,000 default doesn't
     change.
   - **claude.ai honors none of Claude Code's `_meta` keys**, `maxResultSizeChars` included
     (§4).
@@ -3244,9 +3280,9 @@ when it is needed:
   would use: the person's own notes, docs, PDFs, earlier conversations.
 - **It names no account.** The descriptions do that per token, so one skill serves every bot.
 - **The Connections card offers it as a ZIP**, `multiblog/SKILL.md` inside, which the person
-  uploads under Customize > Skills and turns on ("Seeing and ending a connection"). Until the
-  card is built, `npx tsx scripts/mcp-skill.ts <out.zip>` writes the same ZIP from a checkout,
-  and `--print` shows its `SKILL.md`. The skill is `src/lib/mcp/skill.ts`, and its ZIP is
+  uploads under Customize > Skills and turns on ("Seeing and ending a connection"). `npx tsx
+  scripts/mcp-skill.ts <out.zip>` writes the same ZIP from a checkout, and `--print` shows its
+  `SKILL.md`. The skill is `src/lib/mcp/skill.ts`, and its ZIP is
   written by `src/lib/zip.ts`, as `src/lib/tar.ts` writes the export.
 - **Skills need code execution.** claude.ai runs them in its sandbox, so "Code execution and file
   creation" must be on, on a Pro, Max, Team or Enterprise plan. Without it, the card's paragraph
@@ -3999,7 +4035,7 @@ connection at all.
     designed and not built: "The read-only endpoint"):
     - the per-client bound on `read`: a little under 100,000 characters for a `claude-ai`
       token, whole or ranged ("What else changes for claude.ai");
-    - the Connections card, with the endpoint as a column, and the skill and the paragraph for
+    - the Connections card, with the endpoint named above it, and the skill and the paragraph for
       a Project to take.
 11. **The full trial, on explore**, then the other four instances. Those run fb56178, from
     before the MCP server, so this is also their first deploy of §18's phases 1–4 and every

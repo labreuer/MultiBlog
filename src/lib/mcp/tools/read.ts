@@ -8,7 +8,7 @@ import type { BlockSpan } from "@/lib/doc-text";
 import { defineTool, type McpContext, type ToolResult } from "../tool";
 import { parse, readableDocByParam, readableFileBySlug, refuseRef } from "../resolve";
 import { isViewerFragment } from "../url";
-import { MAX_READ_CHARS, readInput, type ReadArgs } from "../read/args";
+import { MAX_READ_CHARS, readBoundFor, readInput, type ReadArgs } from "../read/args";
 import { readDoc } from "../read/doc";
 import { readPdf } from "../read/pdf";
 import { allThreads, annotationByFragment, containerThreads, oneThread } from "../read/threads";
@@ -127,8 +127,9 @@ async function readFileRef(ctx: McpContext, slug: string, fragment: string, args
 export const readTool = defineTool({
   name: "read",
   scope: "READ",
-  description:
-    "Read or open anything in MultiBlog by its URL — a doc, a PDF page or passage, a file, an annotation thread, a link, a post and its comments, a tag, an author — or an annotation by its id. Cite what you use by its URL. A doc comes whole up to 40,000 characters; a longer one answers with its outline (headings, block numbers, section sizes), and you then read the sections you need, by heading or a run of blocks, or pass whole:true for up to 200,000. Each read carries `version`: send it back with a quote you anchor, or ask what changed `since` it. format:\"text\" gives text a quote can be copied from exactly. around:<quote> answers whether and where a quote really is, with the passage around it. include adds a doc's or PDF's annotation threads (filtered under threads, e.g. awaiting:true for the notes waiting on you) or the links into it, or a post's comments. Reads in one turn run in parallel, so ask for several at once.",
+  // The bound whole:true lifts a read to is the token's client's (§21).
+  description: (_who, client) =>
+    `Read or open anything in MultiBlog by its URL — a doc, a PDF page or passage, a file, an annotation thread, a link, a post and its comments, a tag, an author — or an annotation by its id. Cite what you use by its URL. A doc comes whole up to 40,000 characters; a longer one answers with its outline (headings, block numbers, section sizes), and you then read the sections you need, by heading or a run of blocks, or pass whole:true for up to ${readBoundFor(client).toLocaleString("en-US")}. Each read carries \`version\`: send it back with a quote you anchor, or ask what changed \`since\` it. format:"text" gives text a quote can be copied from exactly. around:<quote> answers whether and where a quote really is, with the passage around it. include adds a doc's or PDF's annotation threads (filtered under threads, e.g. awaiting:true for the notes waiting on you) or the links into it, or a post's comments. Reads in one turn run in parallel, so ask for several at once.`,
   input: readInput,
   output: z.looseObject({ kind: z.string().optional() }),
   readOnly: true,

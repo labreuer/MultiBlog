@@ -372,6 +372,7 @@ export const expireTestApiToken = (...args: Parameters<DbHandlers["expireTestApi
   call("expireTestApiToken", ...args);
 export const backdateRefreshRotation = (...args: Parameters<DbHandlers["backdateRefreshRotation"]>) =>
   call("backdateRefreshRotation", ...args);
+export const lapseTestConnection = (...args: Parameters<DbHandlers["lapseTestConnection"]>) => call("lapseTestConnection", ...args);
 export const createTestOauthClient = (...args: Parameters<DbHandlers["createTestOauthClient"]>) => call("createTestOauthClient", ...args);
 export const revokeTestOauthClient = (...args: Parameters<DbHandlers["revokeTestOauthClient"]>) => call("revokeTestOauthClient", ...args);
 export const deleteTestOauthClient = (...args: Parameters<DbHandlers["deleteTestOauthClient"]>) => call("deleteTestOauthClient", ...args);

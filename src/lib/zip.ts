@@ -24,7 +24,7 @@ export type ZipEntry = {
 };
 
 /** The archive's bytes, each entry stored as it is, in the order given. */
-export function zipStored(entries: ZipEntry[]): Uint8Array {
+export function zipStored(entries: ZipEntry[]): Uint8Array<ArrayBuffer> {
   const locals: Uint8Array[] = [];
   const centrals: Uint8Array[] = [];
   let offset = 0;

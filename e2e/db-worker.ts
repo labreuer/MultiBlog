@@ -2447,6 +2447,20 @@ export async function backdateRefreshRotation(refreshToken: string, msAgo: numbe
 }
 
 /**
+ * Lapses the connection a refresh token belongs to, by moving every one of
+ * its refresh tokens' expiries to a minute ago (docs/MCP.md §21, "Seeing and
+ * ending a connection"), without waiting 90 days.
+ */
+export async function lapseTestConnection(refreshToken: string): Promise<void> {
+  const row = await prisma.oauthRefreshToken.findUniqueOrThrow({
+    where: { tokenHash: hashRefreshToken(refreshToken) },
+    select: { apiTokenId: true, apiToken: { select: { user: { select: { email: true } } } } },
+  });
+  assertSafe(row.apiToken.user.email);
+  await prisma.oauthRefreshToken.updateMany({ where: { apiTokenId: row.apiTokenId }, data: { expiresAt: new Date(Date.now() - 60_000) } });
+}
+
+/**
  * A client registered by hand (docs/MCP.md §21, "Which clients"), through the
  * function scripts/oauth-client.ts calls, so its redirect URIs are held to
  * the script's rule. Its name starts with the suite's title prefix, which is
@@ -2713,6 +2727,7 @@ const handlers = {
   createTestApiToken,
   expireTestApiToken,
   backdateRefreshRotation,
+  lapseTestConnection,
   createTestOauthClient,
   revokeTestOauthClient,
   deleteTestOauthClient,

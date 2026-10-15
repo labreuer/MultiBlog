@@ -29,6 +29,9 @@ export const SKILL_DESCRIPTION =
   'as in "what did I write about…", "find my notes on…", "what have I read on…", "we talked about this before", "summarize my research on…" or "write this up". ' +
   "Look there before the web or memory whenever a question might already be answered in it.";
 
+/** How the tools are named, and how a client that defers them loads them: the skill's and the Project paragraph's. */
+const TOOLS_NAMED = `Its tools are named \`${TOOL_PREFIX}*\`. Where they load through a tool search, search for "multiblog" to load them.`;
+
 /** The skill's SKILL.md. */
 export function skillMarkdown(): string {
   return [
@@ -41,7 +44,7 @@ export function skillMarkdown(): string {
     "",
     `${HOLDS} ${FIRST}`,
     "",
-    `Its tools are named \`${TOOL_PREFIX}*\`. Where they load through a tool search, search for "multiblog" to load them. Each one's description carries its own conventions: how to anchor a quote, which kind of link to use for what, what a refusal means.`,
+    `${TOOLS_NAMED} Each one's description carries its own conventions: how to anchor a quote, which kind of link to use for what, what a refusal means.`,
     "",
     "## A research session",
     "",
@@ -51,9 +54,21 @@ export function skillMarkdown(): string {
 }
 
 /** The ZIP claude.ai takes under Customize > Skills: the skill's folder, holding its SKILL.md. */
-export function skillZip(): Uint8Array {
+export function skillZip(): Uint8Array<ArrayBuffer> {
   return zipStored([
     { name: `${SKILL_NAME}/` },
     { name: `${SKILL_NAME}/SKILL.md`, content: new TextEncoder().encode(skillMarkdown()) },
   ]);
+}
+
+/**
+ * The skill's cold start as one paragraph for a claude.ai Project's
+ * instructions, which /dashboard's Connections card offers beside the ZIP: a
+ * skill runs only with code execution on, and without it the paragraph does
+ * the same work in that Project's chats (§21, "The skill"). What the archive
+ * holds, to search it first, and how its tools are named; each tool's
+ * description carries the rest.
+ */
+export function projectInstructions(): string {
+  return `${HOLDS} ${FIRST} ${TOOLS_NAMED}`;
 }

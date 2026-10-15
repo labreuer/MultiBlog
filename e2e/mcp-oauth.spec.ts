@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { OAuthMetadataSchema, OAuthProtectedResourceMetadataSchema, OAuthTokensSchema } from "@modelcontextprotocol/core";
-import { test, expect } from "./fixtures";
+import { test, expect, openDashboardCard } from "./fixtures";
 import {
   ADMIN_EMAIL,
   TEST_PASSWORD,
@@ -12,20 +12,23 @@ import {
   createTestUser,
   deleteTestOauthClient,
   deleteTestUser,
+  expireTestApiToken,
+  lapseTestConnection,
   revokeTestOauthClient,
   setTestUserRole,
   uniqueEmail,
   type TestUser,
 } from "./db";
 import { uniqueTitle } from "./naming";
-import { mcpRequest } from "./mcp";
+import { createAgent, mcpRequest } from "./mcp";
 
-// docs/MCP.md §21, Build order 5, 7 and 9 — the thin slice, enough OAuth for
-// claude.ai to connect, refresh tokens with their rotation, and the consent
-// page in full with the other two kinds of client. Claude's real published
-// identity unless a test says otherwise, so the redirect URI is claude.ai's
-// callback: the spec reads each code from the `Location` of the decision's
-// 303 and redeems it itself, never following it.
+// docs/MCP.md §21, Build order 5, 7, 9 and 10 — the thin slice, enough OAuth
+// for claude.ai to connect, refresh tokens with their rotation, the consent
+// page in full with the other two kinds of client, and /dashboard's
+// Connections card. Claude's real published identity unless a test says
+// otherwise, so the redirect URI is claude.ai's callback: the spec reads each
+// code from the `Location` of the decision's 303 and redeems it itself, never
+// following it.
 //
 // **The issuer and the endpoint's URL come from the documents**, as a client
 // reads them, and are sent as `Origin` and `resource`; nothing is computed.
@@ -683,4 +686,56 @@ test("the token endpoint refuses a grant it doesn't offer, and a code or refresh
   expect(json.status()).toBe(400);
   expect((await json.json()).error).toBe("invalid_request");
   expect(json.headers()["access-control-allow-origin"]).toBe("*");
+});
+
+test("the dashboard lists what a person issued, a lapsed connection and an expired token as such, and Revoke ends a connection at its next call", async ({ page, request }) => {
+  // MCP.md §21, "Seeing and ending a connection". Each row is found by its
+  // bot's name, since the suite's admin issues every spec's tokens.
+  const d = await discover(request);
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  const lapsing = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  const header = await createAgent(request, { scopes: ["READ"], client: "CLAUDE_CODE" });
+  try {
+    const live = await connect(request, d, bot);
+    const lapsed = await connect(request, d, lapsing, false);
+    await lapseTestConnection(lapsed.refresh_token!);
+    await expireTestApiToken(header.tokenId);
+
+    await page.goto("/dashboard");
+    await openDashboardCard(page, "Connections");
+    const row = (name: string) => page.getByRole("row").filter({ hasText: name });
+
+    await expect(row(bot.name)).toContainText("Claude");
+    await expect(row(bot.name)).toContainText("read, write");
+    await expect(row(lapsing.name)).toContainText("Lapsed");
+    await expect(row(lapsing.name).getByRole("button", { name: "Revoke" })).toHaveCount(0);
+    await expect(row(header.user.name)).toContainText("Claude Code · header token");
+    await expect(row(header.user.name)).toContainText("Expired");
+    await expect(row(header.user.name).getByRole("button", { name: "Revoke" })).toHaveCount(0);
+
+    expect(await callStatus(request, live.access_token)).toBe(200);
+    await row(bot.name).getByRole("button", { name: "Revoke" }).click();
+    await row(bot.name).getByRole("button", { name: "Yes" }).click();
+    await expect(row(bot.name)).toHaveCount(0);
+    expect(await callStatus(request, live.access_token)).toBe(401);
+    expect(await errorOf(await refresh(request, d, live.refresh_token))).toBe("invalid_grant");
+  } finally {
+    await header.dispose();
+    await deleteTestUser(lapsing.email);
+    await deleteTestUser(bot.email);
+  }
+});
+
+test("the dashboard offers claude.ai the skill as a ZIP and the paragraph for a Project", async ({ page, request }) => {
+  await page.goto("/dashboard");
+  await openDashboardCard(page, "Connections");
+  await expect(page.getByText("Its tools are named `multiblog_*`.")).toBeVisible();
+
+  const href = await page.getByRole("link", { name: "The MultiBlog skill" }).getAttribute("href");
+  const zip = await request.get(href!);
+  expect(zip.status()).toBe(200);
+  expect(zip.headers()["content-type"]).toBe("application/zip");
+  const bytes = await zip.body();
+  expect(bytes.subarray(0, 2).toString()).toBe("PK");
+  expect(bytes.includes("multiblog/SKILL.md")).toBe(true);
 });

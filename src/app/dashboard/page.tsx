@@ -12,6 +12,8 @@ import SessionRefresh from "@/components/SessionRefresh";
 import LocalTime from "@/components/LocalTime";
 import ContributorPanel from "@/components/ContributorPanel";
 import AccountSettings from "@/components/AccountSettings";
+import ConnectionsCard from "@/components/ConnectionsCard";
+import { cardTokensOf } from "@/lib/api/token-card";
 import styles from "./page.module.css";
 import account from "@/styles/account.module.css";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
@@ -79,6 +81,12 @@ export default async function DashboardPage() {
         .map((u) => ({ ...u, label: staffDisplayNameOf(u, session.user.role) }))
         .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }))
     : null;
+
+  // The tokens this person issued or acts as (docs/DASHBOARD.md
+  // "Connections"). A COMMENTER can have no bot, so sees the card only for a
+  // token of their own.
+  const tokens = await cardTokensOf(session.user.id, new Date());
+  const showConnections = tokens.length > 0 || session.user.role !== "COMMENTER";
 
   return (
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
@@ -195,6 +203,16 @@ export default async function DashboardPage() {
               orcid={contributor.orcid}
               website={contributor.website}
             />
+          </div>
+        </details>
+      )}
+      {showConnections && (
+        <details className={`${account.card} ${styles.card}`}>
+          <summary>
+            <h2>Connections</h2>
+          </summary>
+          <div className={styles.cardBody}>
+            <ConnectionsCard tokens={tokens} />
           </div>
         </details>
       )}

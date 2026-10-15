@@ -14,7 +14,7 @@ import type { McpContext, ToolResult } from "../tool";
 import { dayOf } from "../shape";
 import type { ResolvedFile } from "../resolve";
 import { fragmentParams } from "../url";
-import { MAX_READ_CHARS, type ReadArgs } from "./args";
+import { readBoundFor, type ReadArgs } from "./args";
 
 // docs/MCP.md §8 — reading a PDF: the file itself (title, page count, labels
 // as ranges, outline, tags), a page or a run of pages, every page carrying a
@@ -121,11 +121,11 @@ function findEntry(entries: readonly StoredOutlineEntry[], title: string): numbe
 }
 
 /**
- * Pages as a read returns them, fitted to the bound: each with its sheet
+ * Pages as a read returns them, fitted to the token's bound: each with its sheet
  * number, its label and its text, and the next page to ask for when they don't
  * all fit.
  */
-async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes: number[]): Promise<ToolResult> {
+async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes: number[], maxChars: number): Promise<ToolResult> {
   const texts = await pageTexts(file.id, indexes);
   const pages: Record<string, unknown>[] = [];
   let size = 0;
@@ -133,7 +133,7 @@ async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes:
   for (const index of indexes) {
     const entry = { page: index + 1, ...(labels ? { label: labels[index] } : {}), text: texts.get(index) ?? "" };
     const cost = JSON.stringify(entry).length;
-    if (pages.length > 0 && size + cost > MAX_READ_CHARS - 1000) {
+    if (pages.length > 0 && size + cost > maxChars - 1000) {
       next = index + 1;
       break;
     }
@@ -173,6 +173,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   const metadata = await pdfMetadata(file.id);
   const labels = metadata ? usablePageLabels(metadata.pageLabels, file.pageCount) : null;
   const pageCount = file.pageCount;
+  const maxChars = readBoundFor(ctx.token.client);
   const { page: fragmentPage, hasText } = viewerFragment(fragment);
 
   if (hasText) return fragmentPassages(file, labels, fragment);
@@ -187,7 +188,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
     }
     const span = outline.spanOf(index);
     if (!span) throw new ApiError("not_found", `The outline entry "${args.entry}" points at no page of this file.`);
-    return pagesResult(file, labels, allPages(pageCount).slice(span.from, span.to + 1));
+    return pagesResult(file, labels, allPages(pageCount).slice(span.from, span.to + 1), maxChars);
   }
 
   const asked = [args.page !== undefined, args.pages !== undefined, args.label !== undefined].filter(Boolean).length;
@@ -195,13 +196,13 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   if (args.label !== undefined) {
     const indexes = pagesLabelled(labels, args.label).filter((index) => index < pageCount);
     if (indexes.length === 0) throw new ApiError("not_found", `No page of this PDF is labelled "${args.label}".`);
-    return pagesResult(file, labels, indexes);
+    return pagesResult(file, labels, indexes, maxChars);
   }
-  if (args.pages !== undefined) return pagesResult(file, labels, pageRange(args.pages, pageCount));
+  if (args.pages !== undefined) return pagesResult(file, labels, pageRange(args.pages, pageCount), maxChars);
   const page = args.page ?? fragmentPage;
   if (page !== null && page !== undefined) {
     if (page > pageCount) throw invalid(`This PDF has ${pageCount} pages.`);
-    return pagesResult(file, labels, [page - 1]);
+    return pagesResult(file, labels, [page - 1], maxChars);
   }
 
   // The file itself.

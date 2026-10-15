@@ -230,14 +230,14 @@ Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a pr
 build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
 yet done:
 
-- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Six of the plan's
+- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Eight of the plan's
   steps are built:
   - the server is on SDK v2 (`@modelcontextprotocol/server`), which answers the 2026-07-28
     revision claude.ai opens in as well as every 2025-era client;
   - every tool is listed with a `multiblog_` prefix, since claude.ai drops the server's
     instructions and shows its model only a tool's name until it searches. The conventions are
-    in the descriptions, and a skill the person installs carries the rest
-    (`scripts/mcp-skill.ts` writes its ZIP);
+    in the descriptions, and a skill the person installs carries the rest (the Connections
+    card offers its ZIP, and `scripts/mcp-skill.ts` writes the same one);
   - `/api/mcp` authenticates through v2's own bearer check, which refuses a token with no
     expiry. So every header token has one: a year by default from the script, and a year from
     the `api_token_expiry` migration for each token issued before it;
@@ -254,7 +254,12 @@ yet done:
   - the consent page in full (step 9), Claude Code's pinned identity, whose connections are
     `other`, `scripts/oauth-client.ts` for a client registered by hand, and
     `scripts/check-oauth-clients.ts`, which `deploy/deploy.sh` runs to compare both pinned
-    identities with what Anthropic publishes.
+    identities with what Anthropic publishes;
+  - the per-client bound on `read` and `/dashboard`'s Connections card (step 10). A
+    `claude-ai` token's `whole: true` and ranged reads stop at 95,000 characters, under the
+    100,000 claude.ai passes to its model inline. The card lists the tokens a person issued
+    or acts as, a lapsed connection and an expired token as such, revokes a live one, and
+    offers the skill's ZIP and a paragraph for a Project's instructions.
 
   The header trial and the slice trial ran on the trial instance on 2026-10-14 (MCP.md §21,
   "The header trial" and "The slice trial"). claude.ai connects through OAuth on the web and on
@@ -262,8 +267,8 @@ yet done:
   `anthropics/claude-ai-mcp#1110` didn't show here. The refresh trial ran there on 2026-10-14
   and 15 against step 7's build ("The refresh trial"): claude.ai on the web refreshes on its own
   before the call that needs it, stays connected, and a reconnect replaces the connection
-  before it; iOS's refresh is left to the full trial. Next is step 10, the per-client bound on
-  `read` and the Connections card. The trial instance's Claude account works for Luke, set once by hand (MCP.md §21,
+  before it; iOS's refresh is left to the full trial. Next is step 11, the full trial on
+  explore. The trial instance's Claude account works for Luke, set once by hand (MCP.md §21,
   "Whose account").
   Another instance's Claude account gets its person the same way before step 8's build reaches
   it, or every header token issued for it is refused: `UPDATE "user" SET works_for_user_id =
@@ -304,9 +309,9 @@ yet done:
   the script (`--write-to`) before then; nothing warns as the date nears, and an expired token
   is answered 401 like an unknown one.
 - **Issuing a token takes the script** (`scripts/create-api-token.ts`), and always will: nothing
-  in the app issues an `mb_` token. The `/dashboard` panel for one's own tokens (MCP.md §3)
-  isn't built; MCP.md §21 plans it for listing and revoking only, and anyone without a shell
-  on the server connects through OAuth instead.
+  in the app issues an `mb_` token. `/dashboard`'s Connections card lists and revokes one's own
+  tokens and issues none (MCP.md §21), and anyone without a shell on the server connects
+  through OAuth instead.
 - **MCP.md §17's items 1–3 are still in the UI's annotation paths.** The MCP server avoids all
   three; the actions don't. They have their own entry below, "Posting an annotation trusts
   three things the client sends".

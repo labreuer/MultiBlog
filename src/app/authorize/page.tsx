@@ -155,7 +155,9 @@ export default async function AuthorizePage({
                     whatever it writes carries the bot&rsquo;s name.
                   </li>
                   <li>It can&rsquo;t change who may read or edit anything, or delete a doc, file, note or link.</li>
-                  <li>It lasts until it goes 90 days unused.</li>
+                  <li>
+                    It lasts until it goes 90 days unused, or until you revoke it under Connections on your dashboard.
+                  </li>
                 </ul>
               </div>
             </>

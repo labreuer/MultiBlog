@@ -333,6 +333,55 @@ test("reading a doc: whole, its outline, a section, blocks, around a quote, text
   }
 });
 
+test("read's bound is the client's: a claude-ai token's stays under claude.ai's 100,000, whole and ranged", async ({ request }) => {
+  // MCP.md §21, "What else changes for claude.ai": claude.ai passes a result
+  // inline up to 100,000 characters and reads none of Claude Code's _meta, so
+  // a claude-ai token's whole:true and ranges stop at 95,000, where Claude
+  // Code's stop at 200,000. The doc is about 116,000 characters, between the
+  // two.
+  const claudeAi = await createAgent(request, { scopes: ["READ"], client: "CLAUDE_AI" });
+  const claudeCode = await createAgent(request, { scopes: ["READ"], client: "CLAUDE_CODE" });
+  const filler = "Filler words that make a long doc long, sentence after sentence, for the bound. ".repeat(20);
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: { type: "doc", content: Array.from({ length: 70 }, (_, i) => [heading(2, `Part ${i + 1}`), para(filler)]).flat() },
+  });
+  const description = async (secret: string) =>
+    ((await mcpRequest(request, secret, "tools/list")).body.result?.tools as { name: string; description: string }[]).find(
+      (t) => t.name === "multiblog_read",
+    )!.description;
+  try {
+    expect(await description(claudeAi.secret)).toContain("whole:true for up to 95,000.");
+    expect(await description(claudeCode.secret)).toContain("whole:true for up to 200,000.");
+
+    const fromClaudeCode = await claudeCode.call("read", { url: `/doc/${doc.slug}`, whole: true });
+    expect(fromClaudeCode.result.kind).toBe("doc");
+    expect(fromClaudeCode.size).toBeGreaterThan(110_000);
+
+    const fromClaudeAi = await claudeAi.call("read", { url: `/doc/${doc.slug}`, whole: true });
+    expect(fromClaudeAi.result).not.toHaveProperty("markdown");
+    expect(String(fromClaudeAi.result.note)).toBe("Longer than 95000 characters: read it by section or by blocks.");
+
+    const ranged = await claudeAi.call("read", { url: `/doc/${doc.slug}`, from: 1 });
+    expect(ranged.result.kind).toBe("doc-blocks");
+    expect(ranged.result.next).toBe(Number(ranged.result.to) + 1);
+    expect(ranged.size).toBeLessThanOrEqual(95_000);
+    expect(ranged.size).toBeGreaterThan(90_000);
+    const rest = await claudeAi.call("read", { url: `/doc/${doc.slug}`, from: Number(ranged.result.next) });
+    expect(rest.result.to).toBe(140);
+    expect(rest.result).not.toHaveProperty("next");
+
+    const allOfIt = await claudeCode.call("read", { url: `/doc/${doc.slug}`, from: 1 });
+    expect(allOfIt.result.to).toBe(140);
+    expect(allOfIt.result).not.toHaveProperty("next");
+  } finally {
+    await deleteTestDoc(doc.id);
+    await claudeAi.dispose();
+    await claudeCode.dispose();
+  }
+});
+
 test("reading a PDF: the file with its labels and outline, pages, around a quote, and a fragment link as its passage", async ({ request }) => {
   const agent = await createAgent(request, { scopes: ["READ"] });
   const file = await createTestFile({
