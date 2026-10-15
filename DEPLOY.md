@@ -848,6 +848,11 @@ The script never empties anything the running site reads from. In order:
 5. The new build is swapped in for `.next` by rename, the old one goes to `.deploy/prev/`, and
    both units restart.
 6. It waits for the app to answer, then deletes `.deploy/`.
+7. It fetches Claude's and Claude Code's published OAuth client documents and compares each
+   with its pin (`scripts/check-oauth-clients.ts`, docs/MCP.md §21, "Which clients"). It
+   prints what it finds and never fails the deploy. A `WARNING` line means claude.ai or
+   Claude Code may stop connecting until the pin in `src/lib/oauth/pinned-clients.ts` is
+   updated; a `note` is cosmetic, or a fetch that couldn't complete.
 
 A failure in steps 3–4 puts the old `node_modules` back and leaves `.next` alone, so the site
 keeps serving the previous build. The tree is at the pulled commit, so fix forward and deploy

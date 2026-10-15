@@ -4,9 +4,12 @@ import type { OauthClientInfo } from "./clients";
 import {
   asksForMore,
   authorizationResponseUrl,
+  clientIdHost,
   grantedScopes,
+  isLoopbackRedirect,
   parseAuthorizeRequest,
   redirectUriMatches,
+  redirectUriRefusal,
   scopesAsked,
   searchParamsOf,
   type AuthorizeParse,
@@ -119,6 +122,45 @@ test("a loopback redirect URI matches on any port, and nothing else does", () =>
   }
   // Only a loopback URI is matched on any port.
   assert.equal(redirectUriMatches("https://claude.ai/api/mcp/auth_callback", "https://claude.ai:444/api/mcp/auth_callback"), false);
+});
+
+test("a client_id's host is shown only when the id is an https URL", () => {
+  assert.equal(clientIdHost("https://claude.ai/oauth/mcp-oauth-client-metadata"), "claude.ai");
+  assert.equal(clientIdHost("https://claude.ai/oauth/claude-code-client-metadata"), "claude.ai");
+  assert.equal(clientIdHost("cmv9r8eov0000ycijfbjniqtp"), null);
+  assert.equal(clientIdHost("http://evil.example/client.json"), null);
+});
+
+test("a loopback redirect URI is plain http to this machine, on any port", () => {
+  for (const uri of ["http://localhost/callback", "http://127.0.0.1:53712/callback", "http://[::1]:8080/cb"]) {
+    assert.equal(isLoopbackRedirect(uri), true, uri);
+  }
+  for (const uri of ["https://localhost/callback", "https://claude.ai/api/mcp/auth_callback", "http://127.0.0.2/cb", "not a uri"]) {
+    assert.equal(isLoopbackRedirect(uri), false, uri);
+  }
+});
+
+test("a redirect URI registered by hand is absolute, has no fragment, and is https unless it is loopback", () => {
+  for (const uri of [
+    "https://app.example/callback",
+    "https://app.example/callback?keep=1",
+    "http://127.0.0.1/callback",
+    "http://localhost:6274/oauth/callback",
+    "http://[::1]/cb",
+    "com.example.app:/callback",
+  ]) {
+    assert.equal(redirectUriRefusal(uri), null, uri);
+  }
+  for (const uri of [
+    "/callback",
+    "app.example/callback",
+    "https://app.example/callback#x",
+    "https://app.example/callback#",
+    "http://app.example/callback",
+    "http://192.168.1.5/callback",
+  ]) {
+    assert.notEqual(redirectUriRefusal(uri), null, uri);
+  }
 });
 
 test("everything else is redirected to the client with its error and state", () => {

@@ -64,6 +64,56 @@ export function clientIdOf(params: URLSearchParams): string | null {
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
 
 /**
+ * The host of a client's `client_id` when that is an https URL, as a pinned
+ * identity's is, and null for a client registered by hand, whose id is a
+ * cuid. The consent page shows it: a host is the part of a client's identity
+ * that its own document can't make up.
+ */
+export function clientIdHost(clientId: string): string | null {
+  try {
+    const url = new URL(clientId);
+    return url.protocol === "https:" ? url.host : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a redirect URI goes to a program on the person's own computer:
+ * plain `http` to a loopback address, as a native app's does. The consent
+ * page warns of one, since any program on the machine can answer it.
+ */
+export function isLoopbackRedirect(uri: string): boolean {
+  try {
+    const url = new URL(uri);
+    return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why a redirect URI can't be registered for a client, or null if it can
+ * (§21, "Which clients"): one that isn't absolute, that has a fragment, or
+ * that is plain `http` to any host but a loopback address, as OAuth 2.1 and
+ * the MCP spec require. A code sent over plain `http` to another machine can
+ * be read on the way.
+ */
+export function redirectUriRefusal(uri: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return `${uri} isn't an absolute URI.`;
+  }
+  if (uri.includes("#")) return `${uri} has a fragment, which a redirect URI may not.`;
+  if (url.protocol === "http:" && !LOOPBACK_HOSTS.has(url.hostname)) {
+    return `${uri} is plain http to a host that isn't a loopback address; use https.`;
+  }
+  return null;
+}
+
+/**
  * Whether `requested` is `registered`: exactly, or, for a registered loopback
  * URI, on any port with every other part the same (OAuth 2.1 §8.4.2). A
  * native client listens on whatever port it gets.

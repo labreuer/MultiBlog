@@ -186,6 +186,13 @@ done
 # Answering, so the previous build is no longer worth its ~1.2 GB.
 rm -rf .deploy
 
+# Claude's and Claude Code's published OAuth client documents, against the
+# pins in src/lib/oauth/pinned-clients.ts (docs/MCP.md §21, "Which clients").
+# It prints what it finds and never fails the deploy: nothing else would run
+# it, and drift would otherwise first show as claude.ai failing to connect.
+echo "==> Checking the pinned OAuth clients against their published documents"
+npx tsx scripts/check-oauth-clients.ts || true
+
 echo "==> Done."
 systemctl --no-pager status "$WEB_UNIT" "$COLLAB_UNIT" | sed -n '1,12p'
 echo "==> Total deploy time: $(( $(date +%s) - DEPLOY_STARTED ))s"

@@ -53,6 +53,7 @@ import {
 import { findQuoteOccurrences } from "@/lib/quote-occurrences";
 import { captureAnchor } from "@/lib/doc-link-anchor";
 import { postContentFromYdoc } from "@/lib/post-content";
+import { registerClient, revokeClient } from "@/lib/oauth/clients";
 import { hashRefreshToken } from "@/lib/oauth/refresh";
 import { docContentFromYdoc } from "@/lib/doc-content";
 import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
@@ -2446,6 +2447,27 @@ export async function backdateRefreshRotation(refreshToken: string, msAgo: numbe
 }
 
 /**
+ * A client registered by hand (docs/MCP.md §21, "Which clients"), through the
+ * function scripts/oauth-client.ts calls, so its redirect URIs are held to
+ * the script's rule. Its name starts with the suite's title prefix, which is
+ * what `deleteTestOauthClient` deletes by. Returns its client_id.
+ */
+export async function createTestOauthClient(opts: { name: string; redirectUris: string[]; kind: "CLAUDE_AI" | "OTHER" }): Promise<string> {
+  if (!opts.name.startsWith(E2E_TITLE_PREFIX)) throw new Error(`createTestOauthClient: a test client's name starts with "${E2E_TITLE_PREFIX}".`);
+  return registerClient(opts);
+}
+
+/** Revokes a client registered by hand as the script's --revoke does, its connections with it. */
+export async function revokeTestOauthClient(clientId: string): Promise<{ connections: number } | null> {
+  return revokeClient(clientId);
+}
+
+/** Deletes a test client registered by hand. Its connections go with their bots. */
+export async function deleteTestOauthClient(clientId: string): Promise<void> {
+  await prisma.oauthClient.deleteMany({ where: { id: clientId, name: { startsWith: E2E_TITLE_PREFIX } } });
+}
+
+/**
  * A doc's marks as its stored row holds them — after an MCP edit, the collab
  * server stores the doc as its direct connection closes: how many characters
  * each author's mark covers (by email), the text each annotation's mark
@@ -2691,6 +2713,9 @@ const handlers = {
   createTestApiToken,
   expireTestApiToken,
   backdateRefreshRotation,
+  createTestOauthClient,
+  revokeTestOauthClient,
+  deleteTestOauthClient,
   createTestBot,
   moveTestBot,
   repointTestBot,
