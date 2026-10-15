@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ApiTokenClient } from "@/generated/prisma/enums";
 import { objectRef, versionString } from "../tool";
 
 // docs/MCP.md §15 — `read`'s arguments. The tool's description is cut at
@@ -35,7 +36,7 @@ export const readInput = z.strictObject({
     "What to read: /doc/<slug> (or its id, or /edit); /pdf/<slug>, with #page=N for a page or a fragment link's #page=N&text=… for its passage; /files/<slug>; /annotations; /link/<id> or a URL with ?sel=<id>; a doc or PDF URL with an annotation card's #fragment for that thread; a post's path or /post/<id>/edit, with a comment card's #fragment for that comment; /tag/<slug>; /authors/<slug>. Past slugs work.",
   ),
   format: z.enum(["markdown", "text"]).optional().describe("Doc and post bodies: markdown (default), or text, which a quote can be copied from exactly."),
-  whole: z.boolean().optional().describe("A doc whole up to 200,000 characters; without it, one over 40,000 answers with its outline."),
+  whole: z.boolean().optional().describe("A doc whole, up to the bound the description gives; without it, one over 40,000 answers with its outline."),
   outline: z.boolean().optional().describe("The outline even when the doc is short."),
   depth: z.number().int().min(1).max(6).optional().describe("Outline levels to keep, counted from the shallowest; for a doc or a PDF."),
   section: z
@@ -80,3 +81,16 @@ export type ReadArgs = z.infer<typeof readInput>;
 export const DEFAULT_READ_CHARS = 40_000;
 /** The bound itself, `whole: true` and any range: what `read` declares as its maximum result size. */
 export const MAX_READ_CHARS = 200_000;
+/**
+ * A `claude-ai` token's bound in place of `MAX_READ_CHARS` (§21, "What else
+ * changes for claude.ai"). claude.ai passes a result inline up to 100,000
+ * characters, counting the text block alone, and honors none of Claude
+ * Code's `_meta` keys; past that, the model gets the first 100,000 and a
+ * note, and the rest only for the reply it arrived in.
+ */
+export const CLAUDE_AI_READ_CHARS = 95_000;
+
+/** What `whole: true` and a range may return, for a token issued for `client`. */
+export function readBoundFor(client: ApiTokenClient): number {
+  return client === "CLAUDE_AI" ? CLAUDE_AI_READ_CHARS : MAX_READ_CHARS;
+}

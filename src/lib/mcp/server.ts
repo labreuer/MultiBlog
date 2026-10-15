@@ -1,6 +1,7 @@
 import { Server, type CallToolResult } from "@modelcontextprotocol/server";
 import { ApiError, ERROR_LIST_CAP } from "@/lib/api/errors";
 import { takeRateLimit } from "@/lib/api/rate-limit";
+import type { ApiTokenClient } from "@/generated/prisma/enums";
 import type { AuthenticatedToken } from "@/lib/api/tokens";
 import { instructionsFor, whoFor } from "./instructions";
 import { issueLines } from "./issues";
@@ -42,19 +43,19 @@ export function toolsFor(token: AuthenticatedToken): McpTool[] {
   );
 }
 
-/** A tool's description, built for this token's people where it names them. */
-function describe(tool: McpTool, who: Who): string {
-  return typeof tool.description === "function" ? tool.description(who) : tool.description;
+/** A tool's description, built for this token's people and client where it names them. */
+function describe(tool: McpTool, who: Who, client: ApiTokenClient): string {
+  return typeof tool.description === "function" ? tool.description(who, client) : tool.description;
 }
 
-function definitionOf(tool: McpTool, who: Who) {
+function definitionOf(tool: McpTool, who: Who, client: ApiTokenClient) {
   const meta: Record<string, unknown> = { "anthropic/searchHint": tool.searchHint };
   if (tool.alwaysLoad) meta["anthropic/alwaysLoad"] = true;
   if (tool.forcePrompt) meta["anthropic/requiresUserInteraction"] = true;
   if (tool.maxResultSizeChars) meta["anthropic/maxResultSizeChars"] = tool.maxResultSizeChars;
   return {
     name: listedName(tool.name),
-    description: describe(tool, who),
+    description: describe(tool, who, client),
     inputSchema: jsonSchemaOf(tool.input, "input") as { type: "object" },
     outputSchema: jsonSchemaOf(tool.output, "output") as { type: "object" },
     annotations: {
@@ -147,7 +148,7 @@ export function buildMcpServer(token: AuthenticatedToken): Server {
       },
     },
   );
-  server.setRequestHandler("tools/list", async () => ({ tools: tools.map((tool) => definitionOf(tool, who)) }));
+  server.setRequestHandler("tools/list", async () => ({ tools: tools.map((tool) => definitionOf(tool, who, token.client)) }));
   server.setRequestHandler("tools/call", async (request) => {
     const tool = byName.get(request.params.name);
     if (!tool) {

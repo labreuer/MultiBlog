@@ -55,9 +55,10 @@ function scopeString(scopes: readonly ApiScope[]): string {
 /**
  * One line per grant, refresh and revocation, beside §4's audit line: the
  * client, the row's prefix, the account and the issuer. A refresh answered
- * as a retry, and a revocation, give their reason.
+ * as a retry, and a revocation, give their reason. /dashboard's Revoke logs
+ * here too (src/lib/api/token-card.ts).
  */
-function logLine(fields: { event: "grant" | "refresh" | "revoke"; reason?: string; client: string; token: string; user: string; issuer: string }): void {
+export function logOauthLine(fields: { event: "grant" | "refresh" | "revoke"; reason?: string; client: string; token: string; user: string; issuer: string }): void {
   console.log(JSON.stringify({ at: "oauth", ...fields }));
 }
 
@@ -169,8 +170,8 @@ async function redeemCode(form: URLSearchParams): Promise<TokenAnswer> {
 
   const { accessToken, expiresIn } = await signAccessToken(made.id, endpoint);
   const fields = { client: client.clientId, user: row.userId, issuer: row.issuerId };
-  for (const old of made.replaced) logLine({ event: "revoke", reason: "replaced", ...fields, token: old.prefix });
-  logLine({ event: "grant", ...fields, token: made.prefix });
+  for (const old of made.replaced) logOauthLine({ event: "revoke", reason: "replaced", ...fields, token: old.prefix });
+  logOauthLine({ event: "grant", ...fields, token: made.prefix });
   return {
     status: 200,
     body: {
@@ -245,11 +246,11 @@ async function refresh(form: URLSearchParams): Promise<TokenAnswer> {
   if (outcome.kind === "ended") return invalidGrant("The connection has ended.");
   if (outcome.kind === "replay") {
     // Either the client or a thief holds a copy, and the row can't tell which.
-    logLine({ event: "revoke", reason: "refresh_replayed", ...fields });
+    logOauthLine({ event: "revoke", reason: "refresh_replayed", ...fields });
     return invalidGrant("The refresh token has been used.");
   }
   const { accessToken, expiresIn } = await signAccessToken(row.apiTokenId, endpoint);
-  logLine({ event: "refresh", ...(outcome.kind === "retry" ? { reason: "retry" } : {}), ...fields });
+  logOauthLine({ event: "refresh", ...(outcome.kind === "retry" ? { reason: "retry" } : {}), ...fields });
   return {
     status: 200,
     body: {
@@ -271,7 +272,7 @@ async function revokeReplayed(codeId: string): Promise<void> {
   if (!code?.apiToken) return;
   const revoked = await prisma.apiToken.updateMany({ where: { id: code.apiToken.id, revokedAt: null }, data: { revokedAt: new Date() } });
   if (revoked.count === 0) return;
-  logLine({
+  logOauthLine({
     event: "revoke",
     reason: "code_replayed",
     client: code.clientId,

@@ -1,7 +1,7 @@
 # /dashboard — cards, Settings tiers, author-color plumbing
 
 The signed-in landing page (`src/app/dashboard/page.tsx`): a header stating who
-you are, three collapsible section cards, and Sign out. Everything on it is
+you are, up to four collapsible section cards, and Sign out. Everything on it is
 self-service — the page never edits anyone but the signed-in user, and every
 write re-derives its permission from the session server-side rather than
 trusting which fields the form rendered.
@@ -12,8 +12,8 @@ Each major section is a native `<details className={styles.card}>` with its
 `<h2>` inside the `<summary>` (`src/app/dashboard/page.module.css`). Native
 disclosure rather than a client component on purpose: the collapse works in
 server-rendered HTML with zero JS state, and a card's default comes down to
-whether `open` is present in the JSX — Recent docs starts open, Settings and
-Contributor profile start collapsed. The cards' visual identity (and the
+whether `open` is present in the JSX — Recent docs starts open, Settings,
+Contributor profile and Connections start collapsed. The cards' visual identity (and the
 house button the Save/Sign out buttons wear) is `src/styles/account.module.css`,
 shared with the auth pages; the dashboard module keeps only the
 `<details>`-specific rules, split so the two never set the same property.
@@ -114,6 +114,36 @@ Save). Both halves reuse the real rendering precisely so they cannot drift:
   `role="button"`, no aria-label promising a jump with nowhere to go, cursor
   reset). A restyle of the real header drags the sample along for free; a
   copied-geometry sample would drift the first time.
+
+## Connections
+
+The AI agents you've connected and the account each one works as, yours or
+one of your bots, and what claude.ai needs besides a connection
+(`src/components/ConnectionsCard.tsx`, docs/MCP.md §21 "Seeing and ending a
+connection"). It lists and revokes; it never issues a token — an `mb_` secret
+is the script's, a connection the consent page's.
+
+- **The rows** are every token whose account is you or whose issuer is you
+  (`cardTokensOf`, `src/lib/api/token-card.ts`), which covers your own tokens
+  and every bot's, since a bot's tokens are issued by its person. No ADMIN
+  sees anyone else's. Revoked tokens aren't listed; a lapsed connection and an
+  expired header token are, with the day and no Revoke (`tokenState`,
+  `src/lib/api/token-state.ts`, the rule `create-api-token.ts --list` shows too).
+- **Revoke** is an inline Yes/No (`RevokeTokenButton`), and its action re-derives
+  from the session that the viewer is the token's account or issuer
+  (`revokeToken`). The token stops at its next call, a connection's refresh
+  included, since §3's check reads the row every time.
+- **The endpoint's URL** is in the card's first sentence, for pasting into
+  claude.ai, rather than a column: every row's would be `/api/mcp`.
+- **For claude.ai**: the skill as a ZIP (`/dashboard/multiblog-skill.zip`, built
+  per request from `src/lib/mcp/skill.ts`), and the paragraph for a Project's
+  instructions, in a box one click selects whole (`user-select: all`).
+- **Who sees it**: everyone but a COMMENTER with no token, who can have no bot.
+
+It is a plain `<table>` for Recent docs' reason, in an `overflow-x: auto` box
+(STYLE.md, "Narrow viewports"), since seven columns don't fit 640px on a phone.
+`e2e/mcp-oauth.spec.ts` covers a lapsed and an expired row, Revoke refusing the
+next call, and the ZIP.
 
 ## Where an author color is cached
 

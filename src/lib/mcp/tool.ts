@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ApiScope } from "@/generated/prisma/enums";
+import type { ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
 import type { Actor } from "@/lib/actor";
 import type { AuthenticatedToken } from "@/lib/api/tokens";
 
@@ -77,8 +77,11 @@ export type ToolResult = Record<string, unknown>;
 export type McpTool = {
   name: ToolName;
   scope: ApiScope;
-  /** Leads with the words a person searches by; per token for the two that name its people (§21). */
-  description: string | ((who: Who) => string);
+  /**
+   * Leads with the words a person searches by; per token for the two that
+   * name its people, and for `read`, whose bound is the token's client's (§21).
+   */
+  description: string | ((who: Who, client: ApiTokenClient) => string);
   input: z.ZodObject;
   output: z.ZodType;
   /** MCP's hints (§15): read-only tools run concurrently in Claude Code; `destructive` names an overwrite or a removal. */

@@ -596,6 +596,10 @@ unchanged, through the same functions; the scopes only take away.
 - **A token is refused once its account or its issuer is deleted**, and soft-deleting an
   account revokes the tokens it holds and the ones it issued in the same transaction. Every
   token also expires, a year after issue unless the script is told otherwise (MCP.md §3).
+- **A token is revoked on `/dashboard` by its account or its issuer**, and no one else: the
+  Connections card lists only those, and its action checks the same again. No ADMIN sees or
+  revokes anyone else's there; the script's `--revoke` takes any (MCP.md §21, "Seeing and
+  ending a connection").
 - **A record** — an imported chat (`doc.record`) — is read-only to `edit_doc` whatever the
   byline; the editor doesn't consult the flag.
 
@@ -677,6 +681,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |
 | What the post editor shows when only one of those holds | `src/app/post/[id]/edit/page.tsx`'s two doc gates, rendered by `PostPublisher`'s `selectedEditable` |
+| Who may revoke an API token on `/dashboard` (its account or its issuer) | `revokeToken` in `src/lib/api/token-card.ts`, wrapped by `src/app/actions/api-tokens.ts` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader
