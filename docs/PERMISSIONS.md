@@ -367,7 +367,10 @@ read. The ADMIN-only "Show all docs"/"Show all files" override is the exception:
 PRIVATE objects the admin may not read, and those rows get no tags at all — not in the cell,
 not in the page's data — and Tags does not sort while the override is on, since an order by
 tags would hint at what the cells withhold. The override still shows those rows' title, byline and annotation count; which terms
-are on them is the disclosure that stays with the object's read gate, as above.
+are on them is the disclosure that stays with the object's read gate, as above. The tables'
+bulk **+ tag** reaches the same rows and no others: tagging follows reading, so a row only the
+override lists is dropped from the run, and `canUserTagTarget` refuses it per row on the server
+regardless (TAGS.md, "Tagging from /docs and /files").
 
 **`/tag/[slug]` is three queries, not one UNION.** Each per-type section wears the
 predicate that already governs its own type, so the PRIVATE-doc rule in tables 1–4 holds

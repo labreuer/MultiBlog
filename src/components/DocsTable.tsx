@@ -50,6 +50,8 @@ import {
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 import { TagListCell } from "@/components/tags/TagChipList";
+import BulkTagPicker from "@/components/tags/BulkTagPicker";
+import { bulkTagObjects } from "@/app/actions/tags";
 import type { TagLink } from "@/lib/tag-data";
 import styles from "./DocsTable.module.css";
 
@@ -83,6 +85,9 @@ export type DocRow = {
   deletedAt: Date | null;
   deleted: boolean;
   canEdit: boolean;
+  // Whether this viewer may tag the doc — its read rule (docs/TAGS.md, "Who
+  // may tag"). False only on a row the ADMIN "Show all docs" override lists.
+  canTag: boolean;
 };
 
 const SORTABLE_KEYS = [
@@ -134,6 +139,16 @@ export default function DocsTable({
     useRowSelection(displayRows);
 
   const bulkActions: BulkAction<DocRow>[] = [
+    {
+      kind: "picker",
+      key: "tag",
+      label: "Tag",
+      // Tagging follows reading, not editing, so this applies to more rows
+      // than visibility does. A binned doc can't be tagged (canUserTagTarget).
+      applicableTo: (row) => !row.deleted && row.canTag,
+      render: (apply, pending) => <BulkTagPicker apply={apply} pending={pending} />,
+      run: (ids, tagId) => bulkTagObjects(tagId, "doc", ids),
+    },
     {
       kind: "select",
       key: "visibility",

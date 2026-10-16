@@ -1,7 +1,8 @@
 # Tags
 
 **Status: built for whole objects.** Docs, posts and PDFs carry tags, with chips on their pages,
-a browse page per term, an admin table of terms, and a Tags column in `/docs` and `/files`.
+a browse page per term, an admin table of terms, and a Tags column and bulk tagging in `/docs`
+and `/files`.
 Passage-level tags are not built: `tag_anchor`'s part columns exist, constrained, with no
 writer. That is PR 2 of the plan, which stays in [PLAN.md](../PLAN.md) §20e–§20f along with the
 anchor row shape every consumer shares (§20a–§20b). Who may do what is tabled in
@@ -132,7 +133,8 @@ doc by construction rather than by a second check that could disagree with the f
 - **`TagChipList`** is the chips alone, each a link to `/tag/<slug>` with "Applied by *n*
   people" on hover when more than one person reached for it. `TagStrip` and the admin tables'
   cells both render it, so a chip looks the same everywhere.
-- **`TagTagger`** is the popover. It fetches `loadTaggerState` (whether you may tag, the
+- **`TagTagger`** is the popover, its find-or-create control being `TagTermPicker`, which the
+  admin tables' bulk tagger shares. It fetches `loadTaggerState` (whether you may tag, the
   vocabulary, and what is applied) only when opened, so pages pay nothing for a control most
   readers never touch.
 
@@ -259,6 +261,30 @@ disclose.
 This is the one surface whose chips don't come through `TagChips`, so the row-level read test,
 rather than a page's gate, is what keeps them as private as the thing they are on.
 
+## Tagging from `/docs` and `/files`
+
+Both tables' bulk toolbar has a **+ tag**, which applies one term to every selected row. It is a
+`BulkToolbar` action of kind `"picker"`: the table supplies the control, and the toolbar still
+runs it, so which rows it applies to, each row's coloured border, the error line and the refresh
+afterwards work as they do for every other bulk action.
+
+- **`BulkTagPicker` chooses a term and nothing else.** It fetches the vocabulary each time it
+  opens (`loadTagOptions`), so a term minted anywhere is offered without a reload, and its
+  find-or-create control is `TagTermPicker`, the same one `TagTagger` uses. Creating a term
+  mints it (`createTag`) and then applies it, as on an object's own tagger. No term shows as
+  already applied: across a selection a term is on some rows and not others, and applying it
+  again where it already is changes nothing.
+- **Each row is its own act of tagging.** `bulkTagObjects` checks once that the term exists,
+  then runs `applyTags` per row through `settleBulk`, so every row passes exactly the gate a
+  single tag would, skips a term this person has already applied there, and revalidates its
+  own page. A row that fails, fails alone, with the message a single tag would give.
+- **Tagging follows reading, not editing.** The action applies to rows that aren't deleted and
+  carry `canTag`, the page's per-row read test, so it reaches rows the visibility select
+  doesn't. A row only the "Show all" override lists has `canTag` false and is dropped from the
+  run, as every bulk action drops rows it doesn't apply to, so selecting one reveals nothing
+  and fails nothing. `bulkTagObjects` refuses such a row by itself too, through
+  `canUserTagTarget`.
+
 ## Elsewhere
 
 - **The MCP server** tags and untags through the same write layer, reads an object's tags after
@@ -274,7 +300,8 @@ rather than a page's gate, is what keeps them as private as the thing they are o
 - **`e2e/tags.spec.ts`** covers tag → chip → browse → untag, minting and applying as one
   gesture, a signed-out reader seeing a post's chips, a PRIVATE doc's chips staying private,
   unpublished posts, the doc-to-post offer and its gate, `/tags` sorting through its view,
-  the Tags column and its withholding, the part columns staying unwritten, and the Settings
+  the Tags column and its withholding, bulk tagging from both tables (including that a row
+  only the override lists is skipped), the part columns staying unwritten, and the Settings
   panel's fetch on open.
 - **`scripts/integrity/check-tag-constraints.ts`** proves the hand-written DDL refuses what it
   claims to: both CHECKs and the case-insensitive name index, by attempting each violation in a
@@ -299,8 +326,9 @@ rather than a page's gate, is what keeps them as private as the thing they are o
 - **Chips on annotations and comments.** The gate and the write layer answer for both; no
   surface draws them.
 - **In the admin tables:** a Tags filter (under the override it would have to apply only to
-  readable rows, or it discloses the same thing through which rows match), the column on
-  `/posts`, and a bulk "tag these" action.
+  readable rows, or it discloses the same thing through which rows match), the column and bulk
+  tagging on `/posts`, and bulk *untagging*: removing a term from a selection would have to
+  choose between one's own assignments and, for a curator, everyone's.
 - **Around the doc-to-post offer:** tagging the doc from the post (a doc can source several
   posts, so that is a picker, not a row), move semantics, and offers between other pairs (file →
   post, annotation → doc).

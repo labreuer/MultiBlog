@@ -178,6 +178,8 @@ export default async function FilesPage({
 
   const rows = files.map((file) => {
     const isOwner = file.owners.some((o) => o.userId === session.user.id);
+    // canUserReadFile's rule inlined; only a row the override lists can fail it.
+    const readable = file.visibility === "SHARED" || isOwner;
     return {
       id: file.id,
       slug: file.slug,
@@ -192,9 +194,9 @@ export default async function FilesPage({
       annotationCount: file.metrics?.annotationCount ?? 0,
       // Null — withheld — on a PRIVATE file this viewer doesn't own, which only
       // the "Show all files" override lists; /docs' tags field says why, and
-      // why here rather than in the cell. canUserReadFile's rule inlined.
-      // Empty when the column is hidden, since nothing was read.
-      tags: file.visibility === "SHARED" || isOwner ? parseTagList(file.tagSummary?.terms) : null,
+      // why here rather than in the cell. Empty when the column is hidden,
+      // since nothing was read.
+      tags: readable ? parseTagList(file.tagSummary?.terms) : null,
       createdAt: file.createdAt,
       createdByName: file.createdBy ? staffDisplayNameOf(file.createdBy, session.user.role) : "",
       updatedAt: file.updatedAt,
@@ -206,6 +208,8 @@ export default async function FilesPage({
       // override has no say: it widens which rows are listed, not who may act on
       // them, so a PRIVATE file it brings into view is read-only in this table.
       canManage: isOwner || (viewerCanManageAnyShared && file.visibility === "SHARED"),
+      // The bulk "+ tag"'s affordance, as /docs' canTag.
+      canTag: readable,
     };
   });
 

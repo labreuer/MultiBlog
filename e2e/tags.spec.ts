@@ -543,6 +543,91 @@ test.describe("tags", () => {
     }
   });
 
+  // docs/TAGS.md, "Tagging from /docs and /files" — the toolbar's "+ tag"
+  // applies one term to every selected row, each as its own act of tagging.
+  // Minted from the picker on /docs, then picked from its list on /files.
+  test("/docs and /files tag their selected rows in bulk", async ({ page }) => {
+    const token = `bulktag${Date.now()}`;
+    const fresh = uniqueTitle("bulk");
+    const docs: string[] = [];
+    const files: string[] = [];
+    let slug: string | null = null;
+    try {
+      const first = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} first`) });
+      const second = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} second`) });
+      const unselected = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} third`) });
+      docs.push(first.id, second.id, unselected.id);
+
+      const table = page.getByRole("table").first();
+      const tagsCell = (title: string) => table.getByRole("row").filter({ hasText: title }).getByRole("cell").nth(2);
+
+      await gotoOk(page, `/docs?q=${token}&cols=title,tags`);
+      await page.getByLabel(`Select doc ${first.title}`).check();
+      await page.getByLabel(`Select doc ${second.title}`).check();
+      await page.getByLabel("Tag the selected rows").click();
+      await page.getByLabel("Find or add a tag").fill(fresh);
+      await page.getByRole("button", { name: `Create “${fresh}”` }).click();
+
+      // Minted once, applied to both selected rows and not the third. The
+      // slug comes off the chip's href, as in the minting spec above.
+      const chip = tagsCell(first.title).getByRole("link", { name: fresh });
+      await expect(chip).toBeVisible();
+      slug = (await chip.getAttribute("href"))!.replace("/tag/", "");
+      await expect(tagsCell(second.title).getByRole("link", { name: fresh })).toBeVisible();
+      await expect(tagsCell(unselected.title)).toHaveText("");
+      // A clean run clears the selection, which takes the toolbar with it.
+      await expect(page.getByLabel("Tag the selected rows")).toHaveCount(0);
+
+      const facts = await getTagFacts(slug);
+      expect(facts?.taggers).toEqual([ADMIN_EMAIL, ADMIN_EMAIL]);
+      expect(facts?.targets.map((t) => t.id).sort()).toEqual([first.id, second.id].sort());
+
+      const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} file`) });
+      files.push(file.id);
+      await gotoOk(page, `/files?q=${token}&cols=title,tags`);
+      await page.getByLabel(`Select file ${file.title}`).check();
+      await page.getByLabel("Tag the selected rows").click();
+      await page.getByLabel("Find or add a tag").fill(fresh);
+      // An exact match is offered from the list, with no "Create" beside it.
+      await expect(page.getByRole("button", { name: /^Create “/ })).toHaveCount(0);
+      await page.getByRole("button", { name: fresh, exact: true }).click();
+      await expect(tagsCell(file.title).getByRole("link", { name: fresh })).toBeVisible();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
+      for (const id of files) await deleteTestFile(id);
+      if (slug) await deleteTestTag(slug);
+    }
+  });
+
+  // A row only the ADMIN override lists is one its viewer may not read, so it
+  // isn't taggable: the toolbar drops it from the run, as every bulk action
+  // drops rows it doesn't apply to, and the rest of the selection succeeds.
+  test("bulk tagging skips the rows only the Show all override lists", async ({ page, secondUser }) => {
+    const token = `bulkskip${Date.now()}`;
+    const { user: other } = await secondUser({ role: "AUTHOR" });
+    const docs: string[] = [];
+    try {
+      const theirs = await createTestDoc({ authorEmail: other.email, title: uniqueTitle(`${token} theirs`) });
+      const mine = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} mine`) });
+      docs.push(theirs.id, mine.id);
+
+      await gotoOk(page, `/docs?q=${token}&showAllDocs=1`);
+      await page.getByLabel(`Select doc ${theirs.title}`).check();
+      await page.getByLabel(`Select doc ${mine.title}`).check();
+      await page.getByLabel("Tag the selected rows").click();
+      await page.getByLabel("Find or add a tag").fill(tag.name);
+      await page.getByRole("button", { name: tag.name, exact: true }).click();
+
+      await expect(page.getByLabel("Tag the selected rows")).toHaveCount(0);
+      const facts = await getTagFacts(tag.id);
+      expect(facts?.targets).toEqual([{ kind: "doc", id: mine.id }]);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
+    }
+  });
+
   test("the part columns ship present, constrained and unwritten", async ({ sharedDoc }) => {
     await tagWithTestTag({
       tagId: tag.id,

@@ -195,6 +195,10 @@ export default async function DocsPage({
 
   const rows = docs.map((doc) => {
     const isAuthor = doc.authors.some((a) => a.userId === session.user.id);
+    // canUserReadDoc's rule inlined, as canEdit's is below: anyone who reaches
+    // this page may read a SHARED doc. Only a row the "Show all docs" override
+    // lists can fail it.
+    const readable = doc.visibility === "SHARED" || isAuthor;
     return {
       id: doc.id,
       slug: doc.slug,
@@ -213,10 +217,9 @@ export default async function DocsPage({
       // lists: a PRIVATE doc this viewer isn't an author of. The terms on a doc
       // are as private as the doc (CLAUDE.md, "A tag chip is exactly as private
       // as the thing it is on"), and dropping them here keeps them out of the
-      // RSC payload rather than merely out of the cell. canUserReadDoc's rule
-      // inlined, as canEdit's is below: anyone who reaches this page may read a
-      // SHARED doc. Empty when the column is hidden, since nothing was read.
-      tags: doc.visibility === "SHARED" || isAuthor ? parseTagList(doc.tagSummary?.terms) : null,
+      // RSC payload rather than merely out of the cell. Empty when the column
+      // is hidden, since nothing was read.
+      tags: readable ? parseTagList(doc.tagSummary?.terms) : null,
       visibility: doc.visibility,
       createdAt: doc.createdAt,
       createdByName: doc.createdBy ? staffDisplayNameOf(doc.createdBy, session.user.role) : "",
@@ -232,6 +235,10 @@ export default async function DocsPage({
       // them, so a PRIVATE doc it brings into view carries no Edit link and the
       // column agrees with what /doc/[slug]/edit would answer.
       canEdit: isAuthor || (viewerCanEditAnyShared && doc.visibility === "SHARED"),
+      // Whether the bulk "+ tag" applies to this row: canUserTagTarget's rule,
+      // which is the role floor (every role reaching this page clears it) and
+      // the read rule. An affordance only — bulkTagObjects asks again per row.
+      canTag: readable,
     };
   });
 

@@ -55,6 +55,8 @@ import {
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 import { TagListCell } from "@/components/tags/TagChipList";
+import BulkTagPicker from "@/components/tags/BulkTagPicker";
+import { bulkTagObjects } from "@/app/actions/tags";
 import type { TagLink } from "@/lib/tag-data";
 import styles from "./FilesTable.module.css";
 
@@ -92,6 +94,8 @@ export type FileRow = {
   deletedAt: Date | null;
   deleted: boolean;
   canManage: boolean;
+  // Whether this viewer may tag the file — its read rule, as DocRow.canTag.
+  canTag: boolean;
 };
 
 const SORTABLE_KEYS = [
@@ -146,6 +150,15 @@ export default function FilesTable({
     useRowSelection(displayRows);
 
   const bulkActions: BulkAction<FileRow>[] = [
+    {
+      kind: "picker",
+      key: "tag",
+      label: "Tag",
+      // As /docs' bulk "+ tag": reading, not managing, decides it.
+      applicableTo: (row) => !row.deleted && row.canTag,
+      render: (apply, pending) => <BulkTagPicker apply={apply} pending={pending} />,
+      run: (ids, tagId) => bulkTagObjects(tagId, "file", ids),
+    },
     {
       kind: "select",
       key: "visibility",
