@@ -66,6 +66,24 @@ at all, since signing out reaches no server.
 
 ---
 
+## A PDF whose outline or page labels hold a NUL can't be uploaded
+
+**Status:** found 2026-10-15 in explore's journal; not fixed. A Claude Code session's uploads
+through `/api/mcp/files` failed with a 500 for some PDFs: `storedFile.create` in
+`src/lib/file-ingest.ts` died with Postgres `22P05`, "unsupported Unicode escape sequence".
+That is `jsonb` refusing `\u0000`, so the NUL is in `pageLabels` or `outline`, the two jsonb
+columns the create writes, most likely from a PDF string padded with NULs. The UI's upload
+goes through the same function, so it fails the same way.
+
+**The fix** belongs in `extractPdfMetadata` (`src/lib/pdf-extract.ts`), which builds each
+outline title and label: strip NULs there, with a unit test over a padded title and label. The
+viewer reads both from the PDF itself in the browser, where a NUL does no harm, so only the
+stored copy needs it. The page text needs nothing: `normalisePageText` already drops NULs
+(`src/lib/pdf-text.test.ts`). The same session also got a 504 and two 409s around the
+failures; whether those were retries meeting a half-stored file is unknown.
+
+---
+
 ## Server/client environment divergence has no check covering it
 
 **Status:** two instances found and fixed on 2026-08-11; the *class* is still untested, and one
@@ -267,36 +285,45 @@ yet done:
   `anthropics/claude-ai-mcp#1110` didn't show here. The refresh trial ran there on 2026-10-14
   and 15 against step 7's build ("The refresh trial"): claude.ai on the web refreshes on its own
   before the call that needs it, stays connected, and a reconnect replaces the connection
-  before it; iOS's refresh is left to the full trial. Next is step 11, the full trial on
-  explore. The trial instance's Claude account works for Luke, set once by hand (MCP.md §21,
-  "Whose account").
-  Another instance's Claude account gets its person the same way before step 8's build reaches
-  it, or every header token issued for it is refused: `UPDATE "user" SET works_for_user_id =
-  (SELECT id FROM "user" WHERE email = 'labreuer@gmail.com') WHERE email =
-  'claude@multiblog.invalid';`, which the CHECK refuses if the account has a password.
-  `/users` can't do it: it gives a person only to a bot it makes (MCP.md §21, "Whose account").
+  before it. The full trial ran on explore on 2026-10-15 ("The full trial"): iOS refreshes on
+  its own too, a revoke from `/dashboard` brings the consent page back on claude.ai and stops
+  Claude Code at its next call, Claude Code signs in with `/mcp`, and a sandboxed command is
+  refused the token's file. Next: #1044, timed on explore once the UTC sentence in `search`'s
+  and `read`'s descriptions deploys there; then the other four instances; then step 12.
 
-  **Deploying main to an instance from before the slice, explore first** (explore runs
-  9ef8de6; thicketry, kicking and notes fb56178):
+  The Claude accounts on the trial instance and explore work for Luke, each set once by hand
+  (MCP.md §21, "Whose account"). Another instance's Claude account gets its person the same
+  way, or every header token issued for it is refused: `UPDATE "user" SET password_hash = NULL,
+  works_for_user_id = (SELECT id FROM "user" WHERE email = 'labreuer@gmail.com') WHERE email =
+  'claude@multiblog.invalid';`, run once the deploy's `oauth_slice` has added the column and
+  before the new build serves (`deploy.sh` migrates before it builds). The CHECK refuses
+  `works_for_user_id` on an account with a password, hence the first assignment. `/users`
+  can't do it: it gives a person only to a bot it makes.
+
+  **Deploying main to an instance from before the slice** (thicketry, kicking and notes run
+  fb56178; the trial instance b09240d, which needs none of this):
   - the migrations `api_token_expiry` (every header token gets a year from that day),
     `oauth_slice` and `oauth_refresh_token` run;
+  - the instance's Claude account gets its person by the `UPDATE` above, while the build runs,
+    or each header token issued for it is refused from the swap on; so is any token whose
+    issuer isn't its account's person (`create-api-token.ts --list --email=…` shows what each
+    holds);
   - the tools are renamed `multiblog_<name>`, so a Claude Code project's allow rules for that
     instance's server change to match: `mcp__multiblog__search` becomes
     `mcp__multiblog__multiblog_search` (MCP.md §15's suggested rules carry the new names);
   - each claude.ai connector to that instance needs "Refresh tool list" in its settings, or it
     keeps calling the old names, which are refused (MCP.md §21, "The header trial").
-  - first of all, the instance's Claude account gets its person by the `UPDATE` above, or each
-    header token issued for it is refused from the deploy on; so is any token whose issuer
-    isn't its account's person (`create-api-token.ts --list --email=…` shows what each holds).
 
   A read-only endpoint for Research is designed and not built (MCP.md §21, "The read-only
   endpoint"), since Research calls no connector at all, neither this one nor a directory one
-  (§21, "The slice trial", and Open). Try a Research run again from time to time; if Research starts calling
-  connectors, see which tool settings hold there before deciding on the endpoint.
+  (§21, "The slice trial", "The full trial", and Open). Try a Research run again from time to
+  time; if Research starts calling connectors, see which tool settings hold there before
+  deciding on the endpoint.
 - **The header trial's findings** (MCP.md §21, "The header trial"), each small:
-  - **Dates are UTC unless `tz` is passed**, so claude.ai read a doc updated that evening as a
-    day ahead. Nothing tells claude.ai the person's zone. Perhaps say in `search`'s and `read`'s
-    dates that they are UTC, or give a timestamp rather than a day.
+  - **Dates are UTC days, and nothing tells claude.ai the person's zone**, so claude.ai read a
+    doc updated that evening as a day ahead. `search`'s and `read`'s descriptions now say their
+    dates are UTC, which warns of the slip rather than removing it; a timestamp rather than a
+    day would remove it.
   - **Results give site-relative URLs** (`/doc/<slug>`), which claude.ai can't make clickable
     and can't complete, not knowing the host. Every handle could carry the instance's origin,
     which `read` already accepts; the budget specs (MCP.md §4) would need a look.
