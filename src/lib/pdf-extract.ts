@@ -233,6 +233,13 @@ export type PdfMetadata = {
   outline: StoredOutlineEntry[];
 };
 
+// Both lists are stored as jsonb, which refuses U+0000 outright, so a single
+// NUL in one title fails the whole upload with a 22P05. Every NUL goes, not
+// just a trailing run: a label prefix padded with them puts one mid-label
+// ("A-\0" + "1"). Only the stored copy needs this — the viewer reads its own
+// labels and outline from the PDF in the browser. docs/PDF.md §10b.
+const NUL = /\0/g;
+
 /**
  * A PDF's page labels and outline — what the viewer reads in the browser
  * (`getPageLabels()`, and the Contents pane's `getOutline()` with each
@@ -286,13 +293,13 @@ export async function extractPdfMetadata(bytes: Uint8Array): Promise<PdfMetadata
         const dest = destOf(item);
         const pageIndex = dest ? await pageIndexOf(dest) : null;
         return {
-          title: String(item.title ?? "").replace(/\s+/g, " ").trim(),
+          title: String(item.title ?? "").replace(NUL, "").replace(/\s+/g, " ").trim(),
           depth,
           pageIndex: pageIndex !== null && pageIndex >= 0 && pageIndex < pdf.numPages ? pageIndex : null,
         };
       }),
     );
-    return { pageLabels: Array.isArray(labels) ? labels.map(String) : [], outline };
+    return { pageLabels: Array.isArray(labels) ? labels.map((label) => String(label).replace(NUL, "")) : [], outline };
   } finally {
     await task.destroy();
   }

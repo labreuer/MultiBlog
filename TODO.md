@@ -66,24 +66,6 @@ at all, since signing out reaches no server.
 
 ---
 
-## A PDF whose outline or page labels hold a NUL can't be uploaded
-
-**Status:** found 2026-10-15 in explore's journal; not fixed. A Claude Code session's uploads
-through `/api/mcp/files` failed with a 500 for some PDFs: `storedFile.create` in
-`src/lib/file-ingest.ts` died with Postgres `22P05`, "unsupported Unicode escape sequence".
-That is `jsonb` refusing `\u0000`, so the NUL is in `pageLabels` or `outline`, the two jsonb
-columns the create writes, most likely from a PDF string padded with NULs. The UI's upload
-goes through the same function, so it fails the same way.
-
-**The fix** belongs in `extractPdfMetadata` (`src/lib/pdf-extract.ts`), which builds each
-outline title and label: strip NULs there, with a unit test over a padded title and label. The
-viewer reads both from the PDF itself in the browser, where a NUL does no harm, so only the
-stored copy needs it. The page text needs nothing: `normalisePageText` already drops NULs
-(`src/lib/pdf-text.test.ts`). The same session also got a 504 and two 409s around the
-failures; whether those were retries meeting a half-stored file is unknown.
-
----
-
 ## Server/client environment divergence has no check covering it
 
 **Status:** two instances found and fixed on 2026-08-11; the *class* is still untested, and one
