@@ -485,31 +485,54 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     a 401 or 403 before retrying the call once, so a token replaced in its file is picked up
     without a restart. One helper serves every instance, since Claude Code passes the
     server's name in `CLAUDE_CODE_MCP_SERVER_NAME`.
-  - **Settings that keep the file from the model**, in `~/.claude/settings.json`:
+  - **Settings that keep the file from the model**, in the settings of the sessions that hold
+    the token:
 
     ```json
     {
-      "permissions": { "deny": ["Read(~/.config/multiblog/**)"] },
+      "permissions": {
+        "deny": ["Read(~/.config/multiblog/**)", "Read(~/.claude/.credentials.json)"]
+      },
       "sandbox": {
         "enabled": true,
         "allowUnsandboxedCommands": false,
         "failIfUnavailable": true,
-        "credentials": { "files": [{ "path": "~/.config/multiblog", "mode": "deny" }] },
+        "credentials": {
+          "files": [
+            { "path": "~/.config/multiblog", "mode": "deny" },
+            { "path": "~/.claude/.credentials.json", "mode": "deny" }
+          ]
+        },
         "network": { "allowedDomains": ["<host>"] }
       }
     }
     ```
 
-    - `sandbox.credentials` denies the directory to every command Claude runs, enforced by
-      the operating system. On Linux the sandbox needs `bubblewrap` and `socat`. Claude Code
-      honors `credentials` only from user and managed settings, never a project's, which is
-      why these live in `~/.claude/settings.json`.
+    - `sandbox.credentials` denies each path to every command Claude runs, enforced by the
+      operating system. On Linux the sandbox needs `bubblewrap` and `socat`. A denied
+      directory is hidden whole, so a command reading the token is told "No such file or
+      directory"; a denied file answers "Permission denied".
+    - `~/.claude/.credentials.json` holds the tokens of a `/mcp` sign-in (§21, "Which
+      clients"). Claude Code reads it outside the sandbox, so denying it costs nothing.
+    - **Any settings file can add a `deny` entry**, and none can take away one another added;
+      only `mask` entries need user or managed settings. So the settings go wherever covers
+      the sessions to protect: `~/.claude/settings.json` for every session, a project's
+      `.claude/settings.local.json` for that project's, or `--settings` for one session.
+    - **Every session is usually too wide.** A sandboxed command writes only in its working
+      directory and the temp directory, and reaches the network only through an HTTP proxy,
+      so plain `ssh`, `scp` and database drivers can't connect, even to an allowed host. A
+      command let out of the sandbox (`excludedCommands`) can read the token's file again. So
+      the settings suit a project whose commands are local files and HTTPS, as a research
+      project's are.
     - `allowUnsandboxedCommands: false` stops a command from asking to run outside the
       sandbox.
     - `failIfUnavailable: true` makes Claude Code stop with an error when the sandbox can't
       start. Otherwise it runs every command unsandboxed, and the token's file is readable.
     - The Read deny rule covers Claude's own file tools, which run outside the sandbox.
       Claude Code applies it to Grep and Glob on a best-effort basis.
+    - **Auto mode's classifier can refuse a command before the sandbox sees it**, so a check
+      that the sandbox holds runs in another permission mode, as `--permission-mode default`
+      (§21, "The full trial").
     - `allowedDomains` lets curl reach the host with a grant. Nothing in the shell holds the
       token.
 - **There is no REST API.** Nothing would call one, and a contract nobody calls goes stale
@@ -2557,7 +2580,9 @@ hand, and the per-client bound on `read` with `/dashboard`'s Connections card (�
 slice trial, ran on 2026-10-14 ("The header trial", "The slice trial"): claude.ai connects
 through OAuth on the web and on iOS. The refresh trial ran on 2026-10-14 and 15 against step
 7's build: claude.ai refreshes on its own, and a reconnect replaces the connection before it
-("The refresh trial"). Step 11, the full trial on explore, is next.
+("The refresh trial"). Step 11's full trial ran on explore on 2026-10-15: iOS refreshes on its
+own too, a revoke from `/dashboard` brings the consent page back, and a sandboxed command is
+refused the token's file ("The full trial"). The other four instances follow.
 claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
@@ -2714,14 +2739,20 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
 - **The Claude accounts on the trial instance and explore get their person once, by hand.** One
   `UPDATE` on each sets its `works_for_user_id` to Luke's account: the trial instance's before
   the slice trial, which runs there, since the consent page offers only a bot that works for
-  whoever is signed in; explore's before the works-for rule ships there (step 8), which would
-  refuse the header tokens already issued for it.
-  - Luke is the only person using Claude, so nothing needs checking first. The CHECK above
-    refuses the update if the account still has a password, and neither has one (§3).
+  whoever is signed in; explore's as the works-for rule (step 8) reaches it, since the rule
+  refuses the header tokens already issued for it.
+  - **The update runs after the migration and before the new build serves.** The column comes
+    with `oauth_slice`, so on an instance without it the update can't come first. `deploy.sh`
+    migrates, then builds, then swaps the build in, so an update made while it builds leaves no
+    moment when the new code refuses a header token.
+  - Luke is the only person using Claude, so nothing needs checking first. **The CHECK above
+    refuses the update while the account has a password, so the same statement clears it**
+    (`SET password_hash = NULL, works_for_user_id = …`). Explore's had one; the trial
+    instance's didn't.
   - **Its address stays `claude@multiblog.invalid`.** The importer's `MB_EMAIL` and
     `BYLINE_EMAILS` default to it, and a bot's address is an identifier, never a mailbox.
   - **A Claude account on another instance gets its person the same way**, by the same
-    `UPDATE`, before a build with the works-for rule reaches it. The web interface can't do
+    `UPDATE`, as a build with the works-for rule reaches it. The web interface can't do
     it, since it never turns an existing account into a bot. The other way is a new bot, made
     in the web interface beside the old account.
 - **Otherwise a bot is as §3 describes Claude's account.** Its tokens act with its own role,
@@ -3248,6 +3279,9 @@ when it is needed:
 - **`multiblog_search`'s and `multiblog_create_doc`'s name the actor and the issuer**, in the
   sentence that opens the instructions today (§5), built per token as the instructions are.
   One is the tool a session starts with; the other puts names on a byline.
+- **`multiblog_search`'s and `multiblog_read`'s say their dates are UTC.** Nothing tells
+  claude.ai the person's zone, and a bare day read as a day ahead in the header trial;
+  `search`'s adds that `tz` moves only its filters.
 - **A convention moves to the tool it governs**, where today the instructions alone carry it:
   - citing by URL, to `multiblog_search` and `multiblog_read`;
   - `exact=1` whenever the question is whether something exists, to `multiblog_search`;
@@ -3676,13 +3710,13 @@ tests pass (Build order).
     as connected (#1110, Open); whether it reopens `subscriptions/listen` in a loop; and
     whether Research calls the connector. Without a header trial before it, it also checks what
     that one would have;
-  - **the full trial, with everything**:
+  - **the full trial, with everything** (run on 2026-10-15: "The full trial"):
     - claude.ai on iOS refreshing after an hour without asking the person to reconnect, and a
       revoke. The web's refresh, and a reconnect replacing the connection before it, were seen
       in the refresh trial;
     - whether Research calls the connector by then (Open);
-    - the read-only connector beside the full one: a Research run with it alone turned on,
-      calling only the reads;
+    - the read-only connector beside the full one, once it is built: a Research run with it
+      alone turned on, calling only the reads;
     - after a deploy that changes a tool's description, how long claude.ai takes to show it
       (#1044);
     - Claude Code signing in through its own identity with `/mcp`, and a sandboxed command
@@ -3898,6 +3932,50 @@ retry, which claude.ai never needed.
     with reason `refresh_replayed`.
 - **Not tried**: iOS refreshing, which the full trial covers.
 
+### The full trial
+
+Main at step 10 (512214f) was deployed to explore on 2026-10-15, with `api_token_expiry`,
+`oauth_slice` and `oauth_refresh_token`. Explore's Claude account got its person by the
+one-time update while the build ran, its password cleared in the same statement ("Whose
+account"), and its one live token, Claude Code's header token issued by Luke, passed §3's check
+throughout. A new claude.ai connector was added at `/api/mcp`, and Claude Code signed in to a
+second server entry with `/mcp`. nginx's MCP log, which on explore also takes `/authorize` and
+`/token`, and the `{"at":"oauth"}` lines gave each request.
+
+- **claude.ai connects and calls on the web**, under 2026-07-28: the consent page, `/token`,
+  `server/discover`, `tools/list`, then a call. The connector showed connected (Open).
+- **The web and iOS both refresh on their own, before the request that needs it.** A web chat
+  an hour after the access token had lapsed opened with a refresh at `/token`, and so did an
+  iOS chat later, one second before its first call: no 401 before either, and no consent page.
+  Every request came from claude.ai's servers, the phone's as much as the browser's, so the
+  refresh doesn't depend on the device.
+- **A revoke from `/dashboard` brings the consent page back.** claude.ai's next request carried
+  the revoked token and got 401 `invalid_token`. claude.ai refreshed at once and got 400, sent
+  `initialize` with no token and got 401, fetched both discovery documents, and asked the person
+  to connect. Approving made a new connection, and the chat went on.
+  - So claude.ai refreshes on a 401 as well as ahead of the hour.
+  - **The reconnect's calls fell back to 2025-11-25** for the rest of the chat, as the slice
+    trial's two did and the refresh trial's didn't. What decides it is still unknown; the
+    server answers both.
+- **Claude Code signs in with `/mcp` through its pinned identity**, from a server entry with no
+  `headersHelper`: discovery, the consent page with its warning about a program on the person's
+  own computer, `/token` from Claude Code itself, then calls under 2026-07-28.
+- **A revoke from `/dashboard` stops Claude Code at its next call.** The six calls it had in
+  flight were answered 401, and the six refreshes it sent for them 400.
+- **A sandboxed command is refused the token's file.** A session started in the research
+  project with §5's settings, through `--settings` and `--permission-mode default`, ran `wc -c`
+  on the header token's file and on `~/.claude/.credentials.json`: "No such file or directory"
+  for the first, since the sandbox hides a denied directory whole, and "Permission denied" for
+  the second. Its `search` through the header went through as before. The same command under
+  auto mode was refused by the classifier before the sandbox ran, so it showed nothing about
+  the sandbox.
+- **Research** sent one `server/discover` and no call, in manual mode, as in the slice trial
+  (Open).
+- **Measured after the trial**: #1044, how long a changed description takes to reach
+  claude.ai. The change is `search`'s and `read`'s sentence on UTC dates ("What the model is
+  told").
+- **Not tried**: the read-only connector, which isn't built ("The read-only endpoint").
+
 ### Build order
 
 What this server can't test locally is whether claude.ai connects to it at all, and an open
@@ -4037,10 +4115,11 @@ connection at all.
       token, whole or ranged ("What else changes for claude.ai");
     - the Connections card, with the endpoint named above it, and the skill and the paragraph for
       a Project to take.
-11. **The full trial, on explore**, then the other four instances. Those run fb56178, from
-    before the MCP server, so this is also their first deploy of §18's phases 1–4 and every
-    migration those carry. A Claude account there gets its person by the one-time update
-    before the deploy ("Whose account"), or a new bot is made there in the web interface.
+11. **The full trial, on explore**, then the other four instances. Three of them run fb56178,
+    from before the MCP server, so this is also their first deploy of §18's phases 1–4 and
+    every migration those carry. A Claude account there gets its person by the one-time update,
+    run once the deploy's migration has added the column ("Whose account"), or a new bot is
+    made there in the web interface.
 12. **The docs**: PERMISSIONS.md's "API tokens" (who connects, as whom, the rules for bots, and
     the tools each kind of token lists), DASHBOARD.md (the card), DEPLOY.md (the drift check
     `deploy.sh` runs), §16 (Claude Code's three ways in, claude.ai's connector and the skill),
@@ -4057,12 +4136,12 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    completes and claude.ai lists the tools with its new token. Yet the connector keeps showing
    Connect, and no tools load in a chat, under 2026-07-28 and after its fallback to
    2025-11-25 alike. #1067 shows the same Settings symptom with a client registered by hand,
-   though there the tools did load. **It didn't happen in the slice trial or the refresh
-   trial**: the tools loaded and the connector showed connected, with rotating refresh tokens as
-   well as without ("The slice trial", "The refresh trial"). The full trial looks again.
+   though there the tools did load. **It didn't happen in any trial**: the tools loaded and the
+   connector showed connected, with rotating refresh tokens as well as without, on the web and
+   on iOS ("The slice trial", "The refresh trial", "The full trial").
 2. **Whether claude.ai's Research calls a connector at all.** In every trial it called neither
    this one nor a directory connector, and the approval its help center describes never
-   appeared ("The slice trial"). Nothing in this server decides it. If it does start calling
+   appeared ("The slice trial", "The full trial"). Nothing in this server decides it. If it does start calling
    connectors, which of a tool's settings hold there decides whether the read-only endpoint is
    built ("The read-only endpoint").
 3. **Claude as a confidential client**, should Anthropic make it one. Its documentation says
@@ -4070,6 +4149,6 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    confidential Claude's document would name a key, and the token endpoint would verify
    `private_key_jwt` against it (`jose`'s `createRemoteJWKSet`, from the pinned `jwks_uri`).
    The drift check is what announces the change.
-4. **A revocation endpoint** (RFC 7009), if the full trial shows claude.ai calls one when a
-   connector is removed. Disconnecting sent nothing in the refresh trial, but the metadata
+4. **A revocation endpoint** (RFC 7009), if claude.ai turns out to call one when a connector
+   is disconnected or removed. Disconnecting sent nothing in the refresh trial, but the metadata
    lists no revocation endpoint, so that says nothing about whether claude.ai would call one.
