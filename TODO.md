@@ -843,6 +843,52 @@ order) and §16m (site-wide defaults) both shipped without it.
 
 ---
 
+## The annotation counts in `doc_metrics`/`file_metrics` aggregate the whole table on every load
+
+**Status:** found 2026-10-15 while building `/docs`' and `/files`' Tags column (PLAN.md §20n),
+which avoided the same cost by taking a view of its own (`doc_tag_summary`,
+`file_tag_summary`). Not urgent at today's sizes; the fix is that same pattern.
+
+**What happens.** Both views are a `FULL OUTER JOIN` of two aggregates — the byline (or
+owners) and the live, non-DRAFT annotation count — keyed on `COALESCE(authors.doc_id,
+notes.doc_id)`. Postgres can't prune a branch of a full join, since either branch can add
+rows, and can't push the page's `WHERE doc_id IN (…)` through the `COALESCE`. So every read
+builds the whole view, whichever columns it asks for: `EXPLAIN` shows a sequential scan and
+`GROUP BY` over all of `annotation` under the dashboard's byline-only read, and under `/docs`
+when its Annotations column is hidden (the default there).
+
+**Measured** on a throwaway database with ~585-byte annotation rows, the median of 7
+`EXPLAIN ANALYZE` runs, for one page of 25 rows:
+
+| | 400 docs / 2k annotations | 5k docs / 50k annotations |
+|---|---|---|
+| Page read through `doc_metrics` (/docs, /files, dashboard) | 1.1–1.3 ms | 25–26 ms |
+| Same read, byline and count as two plain `GROUP BY` views | 0.35 ms | 2.3 ms |
+| Sort by annotations, now / split | 1.2 / 0.6 ms | 18 / 20 ms |
+
+The current read grows with the annotation table and the split one with the page. A sort
+through a view builds the whole aggregate either way (§16l), so sorting doesn't change.
+
+**The fix.** `doc_metrics` keeps only the byline (a plain `GROUP BY doc_id` over `doc_author`,
+which then admits the pushdown too), and the count moves to a view of its own,
+`doc_annotation_count`, with the same split for `file_metrics`. `/docs` then reads the count
+only when its Annotations column is showing, as `/docs` and `/files` already do for Tags
+(`showTags` in each page). `admin-table.spec.ts`' "Author(s), Length and Annotations sort
+through the doc_metrics view" covers the sorts and the rendered count.
+
+**The guard it needs, which is also a bug today.** Prisma writes the annotations sort as
+`ORDER BY annotation_count DESC` with no `NULLS LAST`, and Postgres puts NULLs first in a
+descending sort. So a doc with no `doc_metrics` row at all, meaning no authors and no
+annotations, sorts to the *top* of "most annotations first". Reproduced on the throwaway
+database. The comments beside both pages' `annotations` sort key say the opposite ("which
+Prisma puts last"). Rare today: a doc with an empty byline, and never a file, since every
+file has an owner. After a split, though, *every* un-annotated doc would have no row in the
+count view. So the new view's count must be declared nullable on the Prisma side and sorted
+`{ sort: dir, nulls: "last" }`, the `TagMetrics` arrangement, with the cell reading
+`?? 0`. Add an e2e case for an un-annotated doc landing last on `annotations:desc`.
+
+---
+
 ## No "older posts" link from the landing page (PLAN.md §17d/§17m/§21h)
 
 The landing page shows only the 10 most recent published posts (`take: 10`, added alongside
