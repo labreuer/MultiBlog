@@ -572,7 +572,7 @@ the file's slug and the passage's words to everyone who can read the text holdin
 anchored link's id carries neither. The check behind its tooling reads as the operator, so a
 front door that reads as a user must gate on `canUserReadFile` first.
 
-## API tokens (docs/MCP.md §3)
+## API tokens (docs/MCP.md §3, §21)
 
 A token acts as its account, with that account's current role, **intersected with its
 scopes**: it can never do what the account's session couldn't. Every rule above applies to it
@@ -584,15 +584,50 @@ unchanged, through the same functions; the scopes only take away.
 | `write` | creating a doc or file (PRIVATE, its byline or owners the actor and the token's issuer, or the issuer alone), an annotation, a link or a tag; editing a doc's text and title, an annotation's body, a link's name and parts, a file's title; tagging and untagging — but not a published or scheduled post |
 | `manage` | a doc's or file's visibility, slug, byline or owners, a doc's record flag; tagging a published or scheduled post; deleting and restoring a doc, file, annotation or link |
 
-- **Claude's token never has `manage`**: what it reads includes text other people wrote, and an
-  instruction planted there must not change who can see something.
-- **The tools that force a prompt** (`edit_link`, `rename_file`, `manage`) are listed only to a
-  token issued for Claude Code, the one client documented to honor the flag, and `manage` to
-  no bot's token at all. Tools are named here as the code names them; a client lists each with
-  a `multiblog_` prefix (MCP.md §15).
+**Who connects, and as whom.** A token comes one of two ways, and one that comes through OAuth
+never acts as the person who approved it:
+
+| Way in | Started by | Acts as | Issued by | Scopes | Client |
+|---|---|---|---|---|---|
+| A header token, from `scripts/create-api-token.ts` | the operator, with a shell on the server | a person, or a bot | that person, or the bot's person | any of the three | `claude-code`, `claude-ai` or `other`, as issued |
+| An OAuth connection from claude.ai | the person, on the consent page | one of their bots | the person approving | `read`, or `read` and `write` | `claude-ai` |
+| An OAuth connection from Claude Code's `/mcp`, or from a client registered by hand | the person, on the consent page | one of their bots | the person approving | `read`, or `read` and `write` | `other`, or `claude-ai` for a client registered as claude.ai's |
+
+- **A connection acts as a bot so that what it writes carries the bot's name**, and it reads
+  only what has been shared with the bot (MCP.md §12). The consent page offers only the
+  person's own bots that the check below accepts, `write` only when they tick it, and never
+  `manage`.
+- **Nobody issues themselves a token in the app.** Only the script mints an `mb_` secret; the
+  Connections card lists and revokes.
+- **A bot's token never lists `manage`**, Claude's included: what an agent reads includes text
+  other people wrote, and an instruction planted there must not change who can see something.
+  Only a person's own token issued for Claude Code can list it, and Claude Code then asks
+  before every call (MCP.md §15).
+
+**Bots.** A bot is an AI agent's account. It has no password, so nothing signs in as it, and it
+works for one person (`user.works_for_user_id`), who issues every token it holds:
+
+| | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER |
+|---|---|---|---|---|---|
+| Make a bot, or move one to another person, on `/users` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Have a bot, and so connect an agent through OAuth | ✅ | ✅ | ✅ | ✅ | ❌ |
+| The highest role a bot of theirs may have | ADMIN | EDITOR | AUTHOR | AUTHORIZED | — |
+| See the Connections card on `/dashboard` | ✅ | ✅ | ✅ | ✅ | only when it lists a token |
+
+- **Only an account with no password works for someone, and only for an account with one.** A
+  CHECK on `user` keeps a bot from gaining a password, and `/users` refuses to invite one. It
+  never turns an existing account into a bot either: an imported account nobody has claimed
+  has no password, and it is still a person's.
+- **A bot never outranks its person**, since its tokens act with its own role. `/users`
+  refuses the promotion, and the check below refuses the bot's tokens while it does, so
+  demoting the person takes effect at the bot's next call.
+- **Moving a bot to another person revokes the tokens the previous person issued for it.**
+
+**The check, on every call:**
+
 - **A token is accepted only from its account's person**: a person's own, or the person a bot
   works for, while the bot ranks no higher than them and they aren't a COMMENTER (MCP.md §21,
-  "Whose account").
+  "Whose account"). The script refuses at issue a token the check would refuse.
 - **A token is refused once its account or its issuer is deleted**, and soft-deleting an
   account revokes the tokens it holds and the ones it issued in the same transaction. Every
   token also expires, a year after issue unless the script is told otherwise (MCP.md §3).
@@ -602,6 +637,26 @@ unchanged, through the same functions; the scopes only take away.
   ending a connection").
 - **A record** — an imported chat (`doc.record`) — is read-only to `edit_doc` whatever the
   byline; the editor doesn't consult the flag.
+
+**The tools each kind of token lists.** A token lists only the tools its scopes allow, and two
+rules take more away:
+
+| Token | The reads | The writes | `edit_link`, `rename_file` | `manage` |
+|---|---|---|---|---|
+| A person's own, issued for `claude-code` | with `read` | with `write` | with `write` | with `manage` |
+| A bot's, issued for `claude-code` | with `read` | with `write` | with `write` | ❌ |
+| Any `claude-ai` or `other` token, a header token or a connection | with `read` | with `write` | ❌ | ❌ |
+
+- **The reads** are `search`, `read`, `find_users`, `find_tags` and `download`; **the writes**
+  `upload`, `create_doc`, `edit_doc`, `add_note`, `edit_note`, `create_link`, `extend_link`,
+  `tag` and `untag`.
+- **The tools that force a prompt** (`edit_link`, `rename_file`, `manage`) are listed only to a
+  token issued for Claude Code, the one client documented to honor the flag, and `manage` to
+  no bot's token, whatever its scopes. No connection is ever `claude-code`: a claim to be
+  Claude Code rests on a loopback redirect, which any program on the machine can answer
+  (MCP.md §21, "Which clients").
+- Tools are named here as the code names them; a client lists each with a `multiblog_` prefix
+  (MCP.md §15).
 
 ## Search (docs/FULLTEXT.md)
 
@@ -682,6 +737,10 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |
 | What the post editor shows when only one of those holds | `src/app/post/[id]/edit/page.tsx`'s two doc gates, rendered by `PostPublisher`'s `selectedEditable` |
 | Who may revoke an API token on `/dashboard` (its account or its issuer) | `revokeToken` in `src/lib/api/token-card.ts`, wrapped by `src/app/actions/api-tokens.ts` |
+| A token's issuer, and a bot's rank against its person, on every call and at issue | `tokenRefusal` in `src/lib/bot-rules.ts`, applied by `authenticate` and `issueApiToken` in `src/lib/api/tokens.ts` |
+| Which tools a token lists (scopes, client, bot) | `toolsFor` in `src/lib/mcp/server.ts` |
+| Making and moving a bot (ADMIN only; no password; the role a bot may have) | `createBot` / `moveBot` in `src/lib/bots.ts`, `botRoleRefusal` in `src/lib/bot-rules.ts`, wrapped by `src/app/actions/users.ts` |
+| Which bots the consent page offers, and the decision's re-check | `botsFor` / `worksFor` in `src/lib/oauth/consent.ts` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader

@@ -242,79 +242,26 @@ glyphs. Not yet done:
 
 ## The MCP server: what is left (docs/MCP.md)
 
-**Status:** phases 1–4 of MCP.md §18 built 2026-10-07, and merged in stages: tokens and every
-read, doc writes and targeted edits, annotations, anchored links, tags, uploads and `manage`.
-Tested by the `e2e/mcp-*.spec.ts` specs and the full chromium suite against a production
-build, with the annotation, snapshot and PDF integrity checks clean over MCP-written rows. Not
-yet done:
+**Status:** built through MCP.md §18's phase 5, and merged in stages: tokens and every read,
+doc writes and targeted edits, annotations, anchored links, tags, uploads and `manage` (phases
+1–4, built 2026-10-07), then OAuth for claude.ai on SDK v2 (phase 5, MCP.md §21, merged
+2026-10-15), every step of its build order but the read-only endpoint. Tested by the
+`e2e/mcp-*.spec.ts` specs and the full chromium suite against a production build, with the
+annotation, snapshot and PDF integrity checks clean over MCP-written rows, and by five trials
+against claude.ai and Claude Code (MCP.md §21, "The early trial" through "The full trial").
+All five instances run main with all of it. Not yet done:
 
-- **OAuth, so claude.ai can connect** (phase 5, planned in MCP.md §21). Eight of the plan's
-  steps are built:
-  - the server is on SDK v2 (`@modelcontextprotocol/server`), which answers the 2026-07-28
-    revision claude.ai opens in as well as every 2025-era client;
-  - every tool is listed with a `multiblog_` prefix, since claude.ai drops the server's
-    instructions and shows its model only a tool's name until it searches. The conventions are
-    in the descriptions, and a skill the person installs carries the rest (the Connections
-    card offers its ZIP, and `scripts/mcp-skill.ts` writes the same one);
-  - `/api/mcp` authenticates through v2's own bearer check, which refuses a token with no
-    expiry. So every header token has one: a year by default from the script, and a year from
-    the `api_token_expiry` migration for each token issued before it;
-  - a thin slice of OAuth (step 5): the discovery documents, the consent page, `/token` for the
-    `authorization_code` grant, an hour's access token, and Claude's pinned identity. A
-    connection acts as a bot that works for whoever approves it (`user.works_for_user_id`);
-  - refresh tokens (step 7), rotated on every use, so a connection lasts until it goes 90 days
-    unused, and a new claude.ai connection replaces the bot's last one. Its migration,
-    `oauth_refresh_token`, revokes the slice's connections, which had none;
-  - the rest of bot accounts (step 8): `/users` makes a bot and moves it to another person,
-    and §3's check refuses a token not issued by its account's person, or a bot's while it
-    outranks its person or works for a COMMENTER. No bot's token lists `manage`, and deleting
-    a person revokes the tokens they issued;
-  - the consent page in full (step 9), Claude Code's pinned identity, whose connections are
-    `other`, `scripts/oauth-client.ts` for a client registered by hand, and
-    `scripts/check-oauth-clients.ts`, which `deploy/deploy.sh` runs to compare both pinned
-    identities with what Anthropic publishes;
-  - the per-client bound on `read` and `/dashboard`'s Connections card (step 10). A
-    `claude-ai` token's `whole: true` and ranged reads stop at 95,000 characters, under the
-    100,000 claude.ai passes to its model inline. The card lists the tokens a person issued
-    or acts as, a lapsed connection and an expired token as such, revokes a live one, and
-    offers the skill's ZIP and a paragraph for a Project's instructions.
-
-  The header trial and the slice trial ran on the trial instance on 2026-10-14 (MCP.md §21,
-  "The header trial" and "The slice trial"). claude.ai connects through OAuth on the web and on
-  iOS, lists the tools, calls them and shows the connector as connected, so
-  `anthropics/claude-ai-mcp#1110` didn't show here. The refresh trial ran there on 2026-10-14
-  and 15 against step 7's build ("The refresh trial"): claude.ai on the web refreshes on its own
-  before the call that needs it, stays connected, and a reconnect replaces the connection
-  before it. The full trial ran on explore on 2026-10-15 ("The full trial"): iOS refreshes on
-  its own too, a revoke from `/dashboard` brings the consent page back on claude.ai and stops
-  Claude Code at its next call, Claude Code signs in with `/mcp`, and a sandboxed command is
-  refused the token's file. Next: #1044, timed on explore once the UTC sentence in `search`'s
-  and `read`'s descriptions deploys there; then the other four instances; then step 12.
-
-  The Claude accounts on the trial instance and explore work for Luke, each set once by hand
-  (MCP.md §21, "Whose account"). Another instance's Claude account gets its person the same
-  way, or every header token issued for it is refused: `UPDATE "user" SET password_hash = NULL,
-  works_for_user_id = (SELECT id FROM "user" WHERE email = 'labreuer@gmail.com') WHERE email =
-  'claude@multiblog.invalid';`, run once the deploy's `oauth_slice` has added the column and
-  before the new build serves (`deploy.sh` migrates before it builds). The CHECK refuses
-  `works_for_user_id` on an account with a password, hence the first assignment. `/users`
-  can't do it: it gives a person only to a bot it makes.
-
-  **Deploying main to an instance from before the slice** (thicketry, kicking and notes run
-  fb56178; the trial instance b09240d, which needs none of this):
-  - the migrations `api_token_expiry` (every header token gets a year from that day),
-    `oauth_slice` and `oauth_refresh_token` run;
-  - the instance's Claude account gets its person by the `UPDATE` above, while the build runs,
-    or each header token issued for it is refused from the swap on; so is any token whose
-    issuer isn't its account's person (`create-api-token.ts --list --email=…` shows what each
-    holds);
-  - the tools are renamed `multiblog_<name>`, so a Claude Code project's allow rules for that
-    instance's server change to match: `mcp__multiblog__search` becomes
-    `mcp__multiblog__multiblog_search` (MCP.md §15's suggested rules carry the new names);
-  - each claude.ai connector to that instance needs "Refresh tool list" in its settings, or it
-    keeps calling the old names, which are refused (MCP.md §21, "The header trial").
-
-  A read-only endpoint for Research is designed and not built (MCP.md §21, "The read-only
+- **Nobody can connect through OAuth on thicketry, kicking or notes yet.** A connection acts
+  as a bot, and none of the three had one when main first reached it: no account there was
+  given a person, since none held a token for the works-for rule to refuse. Either an ADMIN
+  there makes a bot on `/users`, or a Claude account there gets its person by the one-time
+  `UPDATE` that explore's and the trial instance's got (MCP.md §21, "Whose account"), with the
+  email of whoever uses it: `UPDATE "user" SET password_hash = NULL, works_for_user_id =
+  (SELECT id FROM "user" WHERE email = 'labreuer@gmail.com') WHERE email =
+  'claude@multiblog.invalid';`. The CHECK refuses `works_for_user_id` on an account with a
+  password, hence the first assignment. `/users` can't do it: it gives a person only to a bot
+  it makes.
+- **A read-only endpoint for Research is designed and not built** (MCP.md §21, "The read-only
   endpoint"), since Research calls no connector at all, neither this one nor a directory one
   (§21, "The slice trial", "The full trial", and Open). Try a Research run again from time to
   time; if Research starts calling connectors, see which tool settings hold there before
@@ -382,6 +329,10 @@ password) stays, since it is what §21's Claude connection acts as. Still in pla
   is measured (MCP.md §21, "The header trial"), so it can be deleted in MultiBlog.
 - **`deploy` on the instance's server is in the `adm` group**, so the trial could read nginx's
   access log. Keep it, or undo it with `sudo gpasswd -d deploy adm`.
+- **The same on explore's server, for the full trial** (MCP.md §21, "The full trial"):
+  `deploy` is in `adm` there too, and nginx logs each request to `/api/mcp`, `/authorize` and
+  `/token` (`/etc/nginx/conf.d/mcp-log.conf`). Keep both, or undo the first as above and
+  delete the file.
 
 ## Markdown out of a body writes `&`, `<` and `>` as entities, and an entity in it comes back changed
 

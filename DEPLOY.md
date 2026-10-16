@@ -342,7 +342,7 @@ AUTH_SECRET="<openssl rand -base64 32>"     # generate FRESH — do not reuse th
 AUTH_TRUST_HOST=true
 AUTH_URL="https://<app-host>"               # canonical https origin
 
-APP_URL="https://<app-host>"                # absolute links (reset links, RSS)
+APP_URL="https://<app-host>"                # absolute links (reset links, RSS); OAuth issuer
 COLLAB_PORT=1234
 NEXT_PUBLIC_COLLAB_URL="wss://<app-host>/collab"   # path-based; see note below
 COLLAB_INTERNAL_URL="http://127.0.0.1:1234"        # optional — only if collab is on another host
@@ -419,8 +419,15 @@ the deliverability argument, and the invite feature: [docs/EMAIL.md](docs/EMAIL.
 
 `AUTH_SECRET` also signs the short-lived ydoc tokens the collab server checks
 (`src/lib/ydoc-token.ts`), so the app and collab services **must share the same value** — both
-units point at this one `.env`. It signs the MCP server's byte grants too
-(`src/lib/api/grants.ts`), which only the app checks.
+units point at this one `.env`. It signs the MCP server's byte grants and OAuth access tokens
+too (`src/lib/api/grants.ts`, `src/lib/oauth/access-token.ts`), which only the app checks.
+Rotating it ends every access token at once, and each client refreshes, since a refresh token
+is a hash in the database rather than a signature.
+
+`APP_URL`'s origin is also the OAuth issuer, and `<APP_URL>/api/mcp` the URL a claude.ai
+connector is added at (docs/MCP.md §21, "Discovery"). A client compares the issuer as a
+string and refuses the metadata on any difference, so `APP_URL` is the site's public `https`
+origin, never an internal address.
 
 ---
 
@@ -742,6 +749,11 @@ Reload after editing: `sudo nginx -t && sudo systemctl reload nginx`.
   *generic* error page while the service stays `active`, so a 500 is easy to miss — if the
   page errors, the real cause (e.g. `DYNAMIC_SERVER_USAGE`) is in `journalctl -u
   multiblog-web`. Don't take a running service as proof the page rendered.
+- `curl -s https://<app-host>/.well-known/oauth-authorization-server` → JSON whose `issuer`
+  is exactly `https://<app-host>`, and `curl -si -X POST https://<app-host>/api/mcp` → 401
+  with a `WWW-Authenticate` naming `resource_metadata`. Together they confirm `APP_URL` (§4)
+  and the discovery a claude.ai connector follows to the consent page (docs/MCP.md §16 says
+  how one is added).
 
 ---
 
@@ -876,6 +888,13 @@ sudo systemctl restart multiblog-web multiblog-collab
 A migration the deploy applied stays applied, so roll back only to code that works against the
 new schema; an additive migration usually leaves the old code working. The next deploy starts
 by deleting `.deploy/`.
+
+**A deploy that renames an MCP tool or rewords its description** reaches claude.ai only when
+each person with a connector to the instance presses "Refresh tool list" in its settings.
+Until then claude.ai keeps the old list, and a renamed tool is called by its old name and
+refused (docs/MCP.md §21, "What else changes for claude.ai"). Claude Code reads the list
+afresh at its next connection, but a project's allow rules name tools, so a rename changes
+them too (docs/MCP.md §15).
 
 **Changing the site icon** (docs/FAVICON.md) isn't part of this flow — it's not triggered by a
 code change, so `git pull` won't touch it. Replace `site-icons/master.png` and run
