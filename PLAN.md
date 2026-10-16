@@ -5100,6 +5100,12 @@ place.
 
 ## 20. Tags, and the anchor envelope they share with annotations
 
+PR 1 built 2026-08-24; §20l and §20m (2026-09-16) and §20n (2026-10-15) followed. **Tags as
+built: [docs/TAGS.md](docs/TAGS.md).** What stays here in full is what no doc owns: the anchor
+envelope every consumer shares (§20a–§20b), and PR 2, which is not built (§20e–§20h, with the
+envelope-level deferrals in §20i). The other subsections say where their content lives now.
+Their plan text is in the parent of the commit that introduced these stubs.
+
 Tags are new: a vocabulary of terms (`tag`), applied to content by acts of tagging
 (`tag_assignment`), where one act may target **the whole of, or parts of** a doc, a post,
 an uploaded file, or an annotation's body — several parts at once, the way one
@@ -5219,89 +5225,8 @@ Selector kinds are the enum `SelectorKind { DOC_RANGE, PDF_TEXT }`, both writers
 PR 2. `POST_RANGE` is added when its feature is (`ALTER TYPE … ADD VALUE` is cheap; an enum
 value with no writer for several sections is not).
 
-### 20c. Tag schema (PR 1)
-
-```
-model Tag {
-  id          String  @id @default(cuid())
-  slug        String  @unique
-  name        String
-  description String?
-  createdById String  @map("created_by_id")
-  createdAt   DateTime @default(now()) @map("created_at")
-  deletedByUserId String?   @map("deleted_by_user_id")
-  deletedAt       DateTime? @map("deleted_at")
-  @@map("tag")
-}
-
-model TagAssignment {
-  id        String   @id @default(cuid())
-  tagId String   @map("tag_id")
-  userId    String   @map("user_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  deletedByUserId String?   @map("deleted_by_user_id")
-  deletedAt       DateTime? @map("deleted_at")
-  // tag (Cascade), user; anchors TagAnchor[]
-  @@index([tagId])
-  @@index([userId])
-  @@map("tag_assignment")
-}
-```
-
-- **An assignment is one act of tagging** — the `doc_link_group` analogue. It owns 1..n
-  anchors and carries who tagged and when. Tagging a whole doc is one assignment with one
-  selector-less anchor; PR 2's part-tagging adds anchors, not concepts.
-- **Anchors have no soft delete of their own.** Removing one part of a multi-part act
-  deletes that row; removing the act soft-deletes the assignment. An anchor is a part of a
-  record, not a record.
-- **Soft-delete wiring:** `tag` joins the `$extends` filter in `src/lib/prisma.ts` (it
-  has an admin table that needs `prismaIncludingDeleted` to offer restore, same as
-  `storedFile`). `tag_assignment` does **not** join it and filters by hand — the filter
-  intercepts top-level operations only, and assignments are read almost exclusively through
-  `tag_anchor` includes, which it cannot reach. Stating that here so the divergence reads
-  as chosen, not missed (the §14b convention).
-- **Hand-written DDL** in the migration, with comments citing this section: both CHECKs from
-  §20b, and `CREATE UNIQUE INDEX … ON tag (lower(name))` — slug uniqueness alone would
-  admit "Epistemology" and "epistemology" as distinct terms.
-- **Slugs are their own namespace** (`/tag/*`), like docs' and files': `tagSlugInUse`
-  checks `tag` only. No slug history table in v1 — a renamed tag breaks inbound
-  `/tag/…` links until it earns one (§20i).
-- **Whole-object dedup is app-level find-first** in the action (same tag, same object,
-  same user → no second assignment). The DB-enforced version needs `tag_id` denormalized
-  onto the anchor for a partial unique index; deferred until concurrent tagging is a thing
-  that happens (§20i).
-
-### 20d. Tag surfaces (PR 1)
-
-- **Chips on the object pages** — `/doc/[slug]`, post pages, `/pdf/[slug]`: one indexed
-  `tag_anchor` query by container, joined through live assignments to terms.
-  Server-rendered; gated by the page's own access check, so a PRIVATE doc's chips are as
-  private as the doc.
-- **`/tag/[slug]`** — the browse page, as **per-type sections** (docs tagged K, posts
-  tagged K, files tagged K), each an indexed, SQL-paginated query wearing that type's
-  existing permission predicate (`readablePostWhere` — `publishedPostWhere` as built,
-  widened in §20l; doc visibility + `DocAuthor`; `file-authz`). Deliberately not an interleaved single timeline: that is a UNION view that
-  would re-implement four permission models in one place — the easiest leak to write and the
-  hardest to see. Counts shown here come from the filtered queries, never from the view
-  below, for the same reason.
-- **`/tags`** — an admin table through the §16 kit: `tags-query.ts` over
-  `table-query.ts`, plus a `tag_metrics` view keyed 1:1 on `tag_id` (assignment
-  count, per-type object counts, last used) so every column sorts. Built by grouping the
-  assignment/anchor tables, **never `FROM tag`** — `doc_metrics`' double-scan lesson
-  (§16l). All cheap aggregates (`count(*) FILTER`, `max`); nothing here is
-  expensive-to-compute, so no trigger-maintained column unless sorting by usage measures
-  badly at real scale (the §16l view-vs-column rule decides, not taste).
-- **Permissions** get their own rows in docs/PERMISSIONS.md before the actions land.
-  Proposed defaults, confirmed there rather than here: applying or removing your own tag on
-  a surface follows the permission to annotate that surface; creating a new term follows the
-  same; renaming, merging, and deleting terms is ADMIN/EDITOR. Open question §20j-1.
-- **Cache:** tagging revalidates the tagged object's own path; `/tag/[slug]` renders
-  dynamic (it is permission-shaped per viewer, so ISR would be wrong anyway). CACHING.md gets
-  a line when built.
-- **Tie-off:** at the end of PR 1 the part columns exist, constrained, and unwritten; no UI
-  mentions parts. The feature is complete as "tag whole things": chips, browse, admin,
-  fixtures that create and delete their own throwaway tags (docs/TEST_DATA.md gets the
-  script), and e2e specs for tag → chip → browse → untag.
+### 20c. Tag schema (PR 1) — docs/TAGS.md, "What a tag is" and "Schema"
+### 20d. Tag surfaces (PR 1) — docs/TAGS.md, "Chips", "`/tag/[slug]`" and "`/tags`"; docs/PERMISSIONS.md, "Tags"
 
 ### 20e. Anchors become rows on the annotation side (PR 2)
 
@@ -5388,26 +5313,8 @@ control for exactly the rows where it currently points a doc scrubber at a forei
 
 ### 20h. Build order — two PRs
 
-**PR 1 — the shared layer, and whole-object tags.**
-
-1. Extract `src/lib/anchors/`: the anchor TS type (target arc as a discriminated union,
-   selector kinds), `parseSelector` (the `parseDocLinkMark` convention — every jsonb read
-   goes through a parse, never a cast), and the capture/resolve functions refactored out of
-   `annotation-anchor-capture.ts`/`annotation-anchors.ts`. Pure refactor; annotations
-   unchanged; the e2e suite is the proof.
-2. Migration: `tag`, `tag_assignment`, `tag_anchor` (§20b/§20c), with the
-   hand-written CHECKs, `lower(name)` unique index, and arc indexes.
-3. `tag_metrics` view migration + schema `view` block (§16e caveats apply verbatim).
-4. PERMISSIONS.md rows; server actions: create term, tag object (find-first dedup), untag,
-   admin rename/delete.
-5. Surfaces: chips on the three object pages; `/tag/[slug]` per-type sections;
-   `/tags` through the kit.
-6. Tie-off: e2e specs (tag → chip → browse → untag; `/tags` sort through the view);
-   throwaway-tag script in docs/TEST_DATA.md; integrity walk from §20g. Part columns
-   present, constrained, unwritten.
-
-§20k records what PR 1 actually shipped — only the places it deviates from, or decides
-something left open by, the sections above.
+**PR 1 — the shared layer, and whole-object tags.** Built; what it shipped is docs/TAGS.md,
+and its six steps are in the commit messages.
 
 **PR 2 — part-targeting, and the annotation migration.**
 
@@ -5439,8 +5346,9 @@ something left open by, the sections above.
   be text-search-and-hope (COLLAB.md strategy 4's fragility, stored). If they become
   targets, they get **whole-object anchors only** until they gain a log or a snapshot
   discipline. This is the rule that keeps the envelope honest as kinds multiply.
-- **Tag slug history; DB-enforced whole-object dedup; partial arc indexes.** Each a
-  small, known upgrade with a named trigger condition above.
+- **Partial arc indexes** (`WHERE doc_id IS NOT NULL`), a small hand-written upgrade if the
+  anchor tables ever get large enough to care (§20g). Tag slug history is built, and
+  DB-enforced whole-object dedup is a tag matter: docs/TAGS.md, "Schema" and "Not built".
 - **The supertype pivot.** If targetable kinds push past the high single digits, or a
   third-plus consumer family lands, or a feature needs "any object" pervasively (a
   cross-type activity feed, global search), the classic answer is an `object(id, kind)`
@@ -5450,309 +5358,11 @@ something left open by, the sections above.
   TS union, which is precisely what keeps that future rewrite small if it ever earns
   itself.
 
-### 20j. Open questions
-
-1. **Who may mint terms?** The §20d proposal ties term creation to the annotate
-   permission, which means AUTHORIZED users grow the vocabulary. If curation matters more
-   than friction, restrict creation to AUTHOR+ and let AUTHORIZED users only apply
-   existing terms. PERMISSIONS.md decides.
-2. **Merge semantics.** Renaming a term is an UPDATE; merging two terms means re-pointing
-   assignments and deduping collisions per object. Admin-only either way; the merge action
-   can wait for the first real duplicate pair.
-3. **Does `/tag/[slug]` paginate per section or cap-with-link?** Per-section
-   querystring pagination matches the kit's habits; a cap ("first 20, see all") reads
-   better on a mixed page. Decide when the page has real content to look at.
-
-### 20k. PR 1 as built (2026-08-24)
-
-Steps 1–6 of §20h, complete and tied off. What follows is only where the build **differs from
-or decides something left open by** the sections above; everything unmentioned went in as
-written.
-
-**The shared library split in two, browser-safe and server.** `src/lib/anchors/index.ts`
-exports the pure half (`resolveAnchorInDoc`, the target arc, `parseSelector`);
-`src/lib/anchors/capture.ts` is imported explicitly by server callers. §20h said "extract
-`src/lib/anchors/`" and did not say this, but a single barrel would have dragged PrismaClient
-into every client bundle wanting `resolveAnchorInDoc` — `annotation-highlight-extension.ts`
-imports it and ships to the browser. The `avatar.ts`/`avatar-url.ts` precedent, applied.
-`captureAnnotationAnchor` became `captureAnchorInYdoc`: it was never annotation-specific.
-
-**A unit-test runner arrived with it.** `npm run test:unit` — `node --import tsx --test` over
-`src/**/*.test.ts`, no new dependency. §20h calls step 1 a pure refactor whose proof is the
-e2e suite; that proof is a two-minute production build, and the three resolve tiers and
-`parseSelector`'s rejection surface are tables of inputs rather than things to drive a browser
-through. 19 cases, sub-second. CLAUDE.md says when to reach for it and when not to.
-
-**A schema-level integrity script, `check-tag-constraints.ts`.** §20g's replay walk covers
-stored data; nothing covered the *DDL*. It attempts each violation in a rolled-back
-transaction and asserts Postgres refuses it. It earned itself immediately: it caught that
-§20b's stated CHECK — `(selector_kind IS NULL) = (anchor_from IS NULL AND anchor_to IS NULL
-AND selector IS NULL)` — is a **group-wide equality, not a per-kind rule**, so a `DOC_RANGE`
-row with offsets and no `selector` blob is legal. That is correct and load-bearing: it is
-exactly the shape §20e step 1's backfill writes, since today's annotation column anchors carry
-offsets, a quote and a stamp but no context blob. A stricter CHECK would have blocked PR 2's
-migration. The residual it leaves — `PDF_TEXT` with offsets and no blob — is printed by the
-script rather than buried, and belongs with PR 2's writer.
-
-**`tag_metrics`' count columns are declared nullable, and it matters.** A term nobody has
-used has no view row (the `doc_metrics` semantic, §16l), so Prisma's LEFT JOIN yields NULL —
-and plain `DESC` puts NULLs *first* in Postgres, which made "sort by most used" lead with
-never-applied terms. Declared non-null, Prisma rejects the `{ sort, nulls }` form. Nullable
-plus `nulls: "last"` is the fix. Caught by the e2e spec, not by review. `file_metrics` is
-declared the other way and escapes this only because every file has an owner, so its FULL
-OUTER JOIN always emits a row.
-
-**Chips read no session at all**, which is not how §20d's "server-rendered" reads at first.
-`/[slug]` carries `generateStaticParams` and `revalidate = 60`, and a dynamic API there throws
-`DYNAMIC_SERVER_USAGE` at build (§12f) — so reaching for `auth()` to decide whether to draw a
-tagger would have broken the build on the page tags most need to reach. Which terms are on
-an object is the same answer for every viewer who can see it; everything viewer-shaped moved
-into a client island that calls `loadTaggerState` when opened. The build output confirms
-`/[slug]` is still `●`.
-
-**§20j-1 decided: minting a term is the same permission as applying one.** AUTHORIZED users
-grow the vocabulary. **§20j-3 decided: per-section cap, not per-section pagination** —
-`PAGE_CAP = 50` with an honest "showing the first N" line, since three `?page=` params on one
-page is a URL nobody can read for a page that has a handful of rows per type. Both recorded in
-docs/PERMISSIONS.md and `tag-browse.ts` respectively, both cheap to revisit.
-
-**One judgment call not in §20d**: tagging requires a signed-in AUTHORIZED account on *every*
-surface, posts included. "Follows the permission to annotate that surface" read literally
-would open post-tagging to COMMENTER and to signed-out visitors, since commenting is open to
-both — and a tag is curatorial where a comment is conversational. docs/PERMISSIONS.md states
-it as a judgment call rather than as a reading.
-
-**On `/pdf/[slug]` the chips are a panel tab rather than a strip.** Not a §20d departure —
-same component, same gate, same `tagsForTarget` query, only a different container. A strip
-above the viewer would take height from the PDF permanently on a page whose layout exists to
-give the document the whole viewport, so the chips are the **Metadata** tab of the side panel
-instead. §19's deviation list carries the mechanism and the constraints it has to respect.
-
-**On `/doc/[slug]` the chips are a second line of the byline**, not a block below the text — a
-tag says what the whole document is about, which is the same kind of fact as who wrote it
-and when, so it belongs with the rest of the document's metadata. The strip therefore has two
-variants (`TagStrip`'s own type documents the split), and the question they answer is
-whether the strip has to name itself: a **section** — a post page, the PDF viewer's Metadata
-pane — carries the "Tags" label, because nothing around it says what the row is; a
-**bare** one carries none, because it has been dropped into something that already says so.
-One prop rather than two, because it is one decision.
-
-**Not in §20d: the doc editor's Settings panel gets a Tags field.** §20d put chips on
-reading surfaces only, and `/doc/[slug]/edit` is where the rest of a doc's metadata is
-administered — authors, visibility, URL — so tags being absent there was a gap rather
-than a boundary. It is `TagStrip` itself, `bare` under a `<legend>Tags</legend>` —
-not a lookalike built from the panel's own parts. What a chip looks like, where it links, who
-may tag, what the popover offers, how you retract your own tag: all of it stays in one place,
-so the two surfaces cannot drift. The panel contributes the fieldset and nothing else, and in
-particular **no second permission check** — `canUserTagTarget` reads a doc through
-soft-delete-filtered `prisma`, so a binned doc is already untaggable and the tagger says so on
-open; a client-side guard beside that could only disagree with it.
-
-The one asymmetry left is where the chips come from, and it is the reason for the two seams
-this needed. An object page server-renders them and the actions' `revalidatePath` brings them
-back; the panel fetches them when it opens, which is out of reach of both that and
-`router.refresh()` — hence `TagTagger`'s optional `onChange`, passed through by
-`TagStrip`. And `TaggerState` now carries `applied: TagChip[]` instead of an id list
-plus a separate "yours" list, because the panel has to *name* the applied terms; both of the
-old fields are `filter`s over the new one.
-
-**Also decided in passing**: `/tags` sets the same bar as every other admin table
-(`canManageDocs`), not `canApplyTags` — an AUTHORIZED user reaches the vocabulary through
-the tagger and `/tag/[slug]` instead of a seventh visibility tier. The four arc legs are
-all live in the action and authz layer, including annotations, though only three have chip UI;
-the fourth is one `canUserTagTarget` branch rather than a hole to fill in later.
-
-### 20l. Tagging an unpublished post (2026-09-16)
-
-**Built 2026-09-16.** PR 1 made a post taggable only once it was live:
-`canUserTagTarget`'s post branch wore `publishedPostWhere()`, and the comment beside it named
-the reason — a tag on a draft would be a title `/tag/[slug]` could show to a stranger. That
-reason was sound and the remedy was aimed at the wrong end. Tagging is most useful *while*
-something is being written; what must not leak is the browse page, not the act.
-
-So the containment moved to the surface that does the leaking:
-
-- **`readablePostWhere(userId, role)`** (`src/lib/post-status.ts`) — `publishedPostWhere()`
-  ORed with the unpublished posts this viewer may edit. It is `canUserEditPost` written as a
-  `where` clause, with the same caveat `listDocs` records about Prisma being unable to share a
-  predicate between a per-row check and a query filter, and the same
-  `role === "AUTHOR"` narrowing that function has (a byline survives a demotion; the
-  permission does not).
-- **`canUserTagTarget`'s post branch and `tag-browse.ts`'s `listPosts` both call it**, which
-  is the whole point of it being a function: the gate that lets a tag land and the page that
-  lists what was tagged cannot drift into disagreeing about who may see a draft.
-- **An unpublished row links into the editor, not to a public URL.** `postPath` throws on a
-  null `publishedAt` by design, and a scheduled post's `/yyyy/mm/dd/slug` does not answer
-  until its date arrives — so both get `/post/[id]/edit`, plus a `draft`/`scheduled` chip on
-  the row. `TagHit` gained a `note` field for it. Without that the same list quietly means
-  different things to different viewers, which is the kind of per-viewer page that is worth
-  admitting to being one.
-- **Nothing public moved.** The landing page, the archives, RSS, search and
-  `/yyyy/mm/dd/slug` stay on `publishedPostWhere()`; `readablePostWhere` is only for surfaces
-  that were already viewer-shaped. `/tag/[slug]` is `force-dynamic` already, so there is no
-  shared cache entry to leak through.
-
-Two things needed no change, both because they had already decided this question the other
-way and said so. `tag_metrics` deliberately does not filter publication state — its migration
-comment reads "a draft post is real content an editor is curating" — and `/tags`, where those
-counts surface, is AUTHOR-and-up with no per-viewer row scoping because a *term* carries no
-visibility. And `pathForTarget` already returned null for a post with no `publishedAt`, so
-tagging a draft revalidates nothing public.
-
-**Also in the same change: the post editor grows a tag strip.** `/post/[id]/edit` renders
-`TagChips` above the rule that separates the post's own metadata from the read-only render of
-the doc — the same gap §20k closed on the doc side, and the surface that made the draft
-restriction impossible to miss. `TagChips` is an async Server Component and `PostPublisher` is
-`"use client"`, so it crosses as a keyed prop, the way `/pdf/[slug]` hands one to its viewer.
-
-### 20m. Carrying a doc's tags onto its post (2026-09-16)
-
-**Built 2026-09-16.** A post is a snapshot of a doc (§15), and the two are tagged
-independently — so the terms you filed the doc under while writing it were, until now, terms
-you had to find again by hand on the post. The remedy is an **offer**, not a copy.
-
-**`/post/[id]/edit` grows a source-doc tag offer**, directly under the post's own tag strip
-(§20l put that strip there): the source doc's terms that are not yet on the post, as dashed
-one-click chips, plus an "Add all *n*" when there is more than one.
-
-- **It copies; the doc keeps its tags.** Applying a term here creates a fresh
-  `tag_assignment` by this viewer on the post. The doc is still about that subject after
-  publication, and `/tag/[slug]`'s Docs section should keep saying so; retracting the doc
-  side would also mean retracting *someone else's* act of tagging, which
-  `canUserRemoveAssignment` makes a moderation power rather than a publishing one. Move
-  semantics stay available as a later opt-in (§20i's list) if doc tags turn out to be purely
-  a staging area, which they are not today.
-- **Deliberately not the byline's behaviour**, and this is the asymmetry worth naming.
-  `createPostFromDoc` seeds `post_author` from the doc's byline automatically (§15d); tags
-  are offered instead. A doc's tags are a working filing system and a post's are public
-  taxonomy, and they are not the same list often enough for a silent copy to be right.
-- **No creation-time step was needed.** `createPostFromDoc` already redirects to
-  `/post/[id]/edit`, so the offer is waiting on arrival — and unlike a one-shot prompt at
-  creation, terms added to the doc *later* are still offered whenever the editor is next
-  opened.
-- **Its label is `Doc "<title>"`, deliberately not "From doc …".** `PostPublisher`'s
-  status line already says the latter, about `selectedDocId` — and this row is about
-  `post.docId`, so the two disagree the moment "Change doc…" is touched. Wording them alike
-  would read as one fact stated twice and be wrong half the time. The row carries
-  `data-doc-tag-offer` as its test handle for the same reason the label is not one: the
-  e2e case first written against the label matched the status line instead, which is how
-  the duplication was noticed at all.
-- **The row empties itself.** `tagsNotYetOn` subtracts what is already on the post — by
-  anyone, not just this viewer, the same rule the tagger's picker wears when it disables an
-  option as "Already applied here". An untagged doc, and a doc whose terms have all come
-  across, render nothing at all rather than an empty label.
-
-**The gate is the doc's, not the page's — the one place in §20 where that is true.**
-docs/PERMISSIONS.md's rule is that a chip is as private as the thing it is on,
-*structurally*: `TagChips` renders only from inside a page that has already gated, and takes
-a resolved target so it cannot be mounted anywhere else. This row breaks the premise rather
-than the rule — it shows **one object's tags on another object's page** — and a post author
-need not be an author of the doc the post was made from, so `/post/[id]/edit`'s own gate
-(ownership or `canEditAnyPost`) is precisely the wrong one to inherit. The page therefore
-runs `canUserReadDoc` as a second, narrower check and renders an empty offer when it fails.
-That resolves §20i's deferred "cross-container visibility needs a decision, and conjunctive
-is the safe default" for the display case, in favour of conjunctive.
-
-Applying a term needs no doc-read: `canUserTagTarget(post)` alone, unchanged, because a
-*term* carries no visibility (`listTagOptions` is unfiltered site-wide). Doc-read gates the
-**disclosure of which terms are on that doc**, and nothing else.
-
-**One new action, and one new writer under it.** `tagObjectMany(tagIds, kind, id)` — one
-permission check, one transaction, one `revalidatePath`. The client-side alternative (n
-calls to `tagObject`) is n round trips, n gate queries, and a half-filled strip if the fourth
-fails. Deliberately **not** `settleBulk`: that shape is for an admin table acting on rows a
-user selected independently, where one failure must not stop the rest; this is one act with
-several terms in it. `tagObject` and `tagObjectMany` both write through a non-exported
-`writeWholeObjectTags`, so the shape PR 1 is allowed to write (§20h: every part column
-unset) is stated once — and PR 2's part-tagging adds rows to that transaction rather than a
-second concept beside it.
-
-The two differ in one respect, on purpose: **a term that has vanished between the render and
-the click throws from `tagObject` and is skipped by `tagObjectMany`.** A single deliberate
-click is a question about *that* term, so "it isn't there any more" is the answer to it; "Add
-all" is a question about whatever is still available, where one binned term must not fail the
-rest.
-
-**"Change doc…" is not the source.** `PostPublisher`'s select moves only what the scrub bar
-previews; the post's own `docId` moves when it is published from a different doc. The offer
-is server-rendered from `post.docId` and so is right by construction, and the
-`router.refresh()` after a publish re-renders it against the new source. Wiring it to
-`selectedDocId` would show terms from a doc the post is not from.
-
-**Two small shape notes.** `tagsNotYetOn` returns `TagOption`, not `TagChip`:
-`ownAssignmentId` and `taggerCount` describe the *source*, and rendering either beside a
-control that writes to the *target* would be a number answering a question nobody asked. And
-`DocTagOffer` crosses into `PostPublisher` as **plain data** rather than as a rendered
-element — it is a client component, so `PostPublisher` imports it directly and §20l's keyed-
-lazy-chunk hazard (which `tags={<TagChips key="tags" …/>}` still carries) does not arise.
-
-`tagsForTarget(post)` consequently runs twice on this page — once inside `TagChips`, once
-inside `tagsNotYetOn`. Accepted rather than hoisted: hoisting means feeding `TagStrip`
-directly and giving up the property that `TagChips` always does its own read from a resolved
-target, which is the thing that makes it un-mountable on an ungated surface. One extra
-indexed query on a gated editor page is the cheaper side of that trade.
-
-**Deferred, named.** The reverse push (tagging the doc from the post, or "also tag the post"
-from the doc editor) — a doc can source several posts, so that is a picker rather than a row,
-and a different design. Move semantics, above. And generalising the offer to any related pair
-(file → post, annotation → doc): one prop away from what is built, and not built.
-
-**A pre-existing gap this made visible, not introduced.** A post author who cannot *edit* the
-source doc reaches `/post/[id]/edit` and gets a 403 from `/api/doc/[id]/replay`, so the
-read-only render below the controls never arrives. That predates this section and is
-untouched by it; the e2e case here asserts only that such a viewer sees the post's own
-strip and not the doc's terms.
-
-### 20n. Tags in `/docs` and `/files` (2026-10-15)
-
-**Built 2026-10-15.** Both admin tables gain a **Tags** column: the object's live terms as the
-chips its own page shows, each linking to `/tag/[slug]`, sortable, and `defaultHidden` (§16m)
-on both tables, so nobody's table widens by a column of chips unasked.
-
-- **Two views of their own draw and sort it**, `doc_tag_summary` and `file_tag_summary`
-  (migration `add_tag_summary_views`): `tag_anchor` through live assignments to live terms,
-  one row per object and term, then grouped by object. Each yields `names`, the names joined
-  in name order — the sort key — and `terms`, `[{slug, name, taggerCount}]` in the same order,
-  which the cell draws through `parseTagList` (`src/lib/tag-data.ts`). Both come out of one
-  subquery, so §16e's rule holds: what is shown is what is sorted. An untagged object has no
-  row, and `names` is declared nullable so the sort can say `nulls: "last"` (`TagMetrics`'
-  arrangement).
-- **Deliberately not columns of `doc_metrics`/`file_metrics`.** Those are a `FULL OUTER JOIN`
-  of aggregates keyed on a `COALESCE`, and `EXPLAIN` shows what that costs: Postgres can
-  neither prune a branch (one can add rows) nor push the page's `doc_id IN (…)` through the
-  `COALESCE`, so every read builds the whole view, whichever columns it names — the
-  dashboard's byline-only read included. A tags branch there put three tag-table scans on
-  every such load. A plain `GROUP BY` on the object's id takes the `IN (…)` down into
-  `tag_anchor`, so drawing a page of chips is an indexed lookup for that page's rows.
-- **A page not showing Tags reads no tag view at all.** Each page resolves the visible columns
-  the way `resolveColumns` will (`?cols=` or the stored preference, else
-  `codeDefaultColumns`) and selects the relation only when Tags is among them. Sorting by Tags
-  still builds the whole view, as every sort through a view does (§16l) — only on that sort.
-- **What counts is what the object page's chips count**, `tagsForTarget`'s filter: any anchor
-  on the object, a live assignment, a live term. Neither view reads `doc` or `file`, so an
-  object's own `deleted_at` isn't consulted, which is right: a soft-deleted doc shown under
-  "Show deleted" keeps its chips, as it keeps its byline and its annotation count.
-- **`TagChipList`** is `TagStrip`'s chip list, factored out so the cells draw the strip's
-  chips rather than a lookalike — §20k's rule for the doc editor's Settings panel. The table
-  offers no tagger.
-
-**The ADMIN "Show all" override withholds tags, and is the one place these columns depart
-from `TagChips`' structural guarantee.** Every row either table lists by default is one its
-viewer may read. The override is not: it lists PRIVATE objects the viewer has no byline or
-ownership on, and which terms are on such an object is the object's to disclose — §20m's
-"doc-read gates the disclosure of which terms are on that doc". So the page sends `tags: null`
-for those rows, keeping the terms out of the RSC payload rather than merely out of the cell,
-and the cell draws a muted dash that says why on hover (a blank would claim "untagged"). The
-read test is `canUserReadDoc`/`canUserReadFile` inlined per row (SHARED, or the viewer's
-own), the same way `canEdit` beside it inlines the edit rule. And the Tags sort is dropped for
-those visits (`withoutSortKey`, falling back to the default sort), with the header's arrows
-taken off to match, because an order by tags would hint at what the cells withhold. The
-override's existing columns are unchanged: title, byline, length and annotation count were
-already what it discloses.
-
-**Deferred, named.** A Tags filter (ANY/ALL/EXACTLY/NONE, the Authors panel's modes): under
-the override it would have to apply only to readable rows, or it discloses the same thing
-through which rows match. The column on `/posts`. A bulk "tag these" action in the toolbar.
+### 20j. Open questions — decided or moved: docs/TAGS.md, "Who may tag" (1), "Not built" (2) and "`/tag/[slug]`" (3)
+### 20k. PR 1 as built (2026-08-24) — docs/TAGS.md throughout; the `src/lib/anchors/` split is CLAUDE.md's "One anchor row shape", and the unit-test runner its "Checks"
+### 20l. Tagging an unpublished post (2026-09-16) — docs/TAGS.md, "Who may tag", "Chips" and "`/tag/[slug]`"; docs/PERMISSIONS.md, "Tags"
+### 20m. Carrying a doc's tags onto its post (2026-09-16) — docs/TAGS.md, "Carrying a doc's tags onto its post"
+### 20n. Tags in `/docs` and `/files` (2026-10-15) — docs/TAGS.md, "The Tags column in `/docs` and `/files`"
 
 ## 21. Dated post URLs (`/yyyy/mm/dd/slug`)
 

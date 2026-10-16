@@ -347,13 +347,13 @@ navigation regardless. The hash's job is avoiding a redundant fetch once a
 given hash is already cached — real, but not the reason changing the icon
 now works where it didn't before.
 
-## Tags (PLAN.md §20d)
+## Tags (docs/TAGS.md)
 
 Three rules, and the middle one is the one that shaped the components.
 
-**Tagging revalidates the tagged object's own path**, and only that: `/doc/<slug>`,
-`/<postSlug>`, `/pdf/<slug>`, plus `/tags` for the admin table's usage counts.
-`src/app/actions/tags.ts`'s `pathForTarget` is the single place that mapping lives.
+**Tagging revalidates the tagged object's own path**, and only that: `/doc/<slug>`, a
+published post's `/yyyy/mm/dd/<slug>`, `/pdf/<slug>`, plus `/tags` for the admin table's usage
+counts. `src/lib/tag-write.ts`'s `pathForTarget` is the single place that mapping lives.
 
 **`/tag/[slug]` is `force-dynamic`, and not for freshness.** The page is
 *permission-shaped per viewer* — an ADMIN and an AUTHORIZED reader see different docs under

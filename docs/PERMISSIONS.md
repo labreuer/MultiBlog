@@ -311,7 +311,7 @@ Three consequences worth stating plainly, because they are what the user-facing 
 That it can see PDF annotations at all is one of the reasons they are Postgres rows rather
 than entries in a per-file ydoc (PLAN.md §19).
 
-## Tags (PLAN.md §20)
+## Tags ([TAGS.md](TAGS.md))
 
 **A term is vocabulary; an assignment is one person's act of tagging.** The two have
 different owners and therefore different rules, and conflating them is the mistake this
@@ -360,13 +360,13 @@ you may read, plus a role floor", so anything it returns was readable anyway. Wo
 because the paragraph above is about `TagChips`, and this surface does not go through it.
 
 **`/docs` and `/files` show each row's tags, and withhold them where listing is wider than
-reading** (PLAN.md §20n). Their Tags column reads chips from the `doc_tag_summary`/`file_tag_summary`
-view rather than through `TagChips`, so the table's own row scoping is the gate — and every
-row either table lists by default is one its viewer may read. The ADMIN-only "Show all
-docs"/"Show all files" override is the exception: it lists PRIVATE objects the admin may not
-read, and those rows get no tags at all — not in the cell, not in the page's data — and Tags
-does not sort while the override is on, since an order by tags would hint at what the cells
-withhold. The override still shows those rows' title, byline and annotation count; which terms
+reading** (TAGS.md, "The Tags column"). Their Tags column reads chips from the
+`doc_tag_summary`/`file_tag_summary` views rather than through `TagChips`, so the table's own
+row scoping is the gate — and every row either table lists by default is one its viewer may
+read. The ADMIN-only "Show all docs"/"Show all files" override is the exception: it lists
+PRIVATE objects the admin may not read, and those rows get no tags at all — not in the cell,
+not in the page's data — and Tags does not sort while the override is on, since an order by
+tags would hint at what the cells withhold. The override still shows those rows' title, byline and annotation count; which terms
 are on them is the disclosure that stays with the object's read gate, as above.
 
 **`/tag/[slug]` is three queries, not one UNION.** Each per-type section wears the
