@@ -22,8 +22,8 @@ computed. `src/lib/collab-url.ts` depends on this.
 | variable | notes |
 |---|---|
 | `DATABASE_URL` | This slot's database. Never point a second checkout at the first's — see [DATABASE.md](DATABASE.md). |
-| `AUTH_SECRET` | `openssl rand -base64 32`. |
-| `APP_URL` | Used for absolute links. **Nothing binds a port from `APP_URL`** — slot B carried one naming its own port and went on binding :3000 every time. |
+| `AUTH_SECRET` | `openssl rand -base64 32`. Encrypts the session cookie, and signs the ydoc token, the MCP server's byte grants and its OAuth access tokens, so rotating it ends every access token at once (docs/MCP.md §21, "A connection"). |
+| `APP_URL` | Used for absolute links, and its origin is the OAuth issuer, which a client compares as a string (docs/MCP.md §21, "Discovery"). **Nothing binds a port from `APP_URL`** — slot B carried one naming its own port and went on binding :3000 every time. |
 | `COLLAB_PORT` | The Hocuspocus port. Bare, so not readable client-side at all — hence `NEXT_PUBLIC_COLLAB_PORT` below. |
 
 ## Slot-defining

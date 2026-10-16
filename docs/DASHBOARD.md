@@ -129,6 +129,11 @@ is the script's, a connection the consent page's.
   sees anyone else's. Revoked tokens aren't listed; a lapsed connection and an
   expired header token are, with the day and no Revoke (`tokenState`,
   `src/lib/api/token-state.ts`, the rule `create-api-token.ts --list` shows too).
+- **The Client column** names a connection's client by its own name: "Claude"
+  for claude.ai, "Claude Code" for a `/mcp` sign-in, or a client registered by
+  hand. A header token shows the client it was issued for, marked "header
+  token". The Account column says "you" for your own tokens and names the bot
+  otherwise.
 - **Revoke** is an inline Yes/No (`RevokeTokenButton`), and its action re-derives
   from the session that the viewer is the token's account or issuer
   (`revokeToken`). The token stops at its next call, a connection's refresh

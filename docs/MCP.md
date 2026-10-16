@@ -1,13 +1,14 @@
 # MultiBlog — an MCP server for machine clients
 
-**Status: built through §18's phase 4**: tokens and every read, doc writes and targeted edits,
-annotations, anchored links, tags, uploads and `manage`. Not built: the rest of OAuth (phase
-5, planned in §21, whose steps 1, 2, 4, 5 and 7–10 are built: the move to SDK v2, the tools'
-names and descriptions with a skill for claude.ai, the bearer check on v2's terms, enough OAuth
-for claude.ai to connect, tried on the web and on iOS, refresh tokens, so a connection lasts
-until it goes 90 days unused, bot accounts, the consent page in full, and `read`'s bound for
-claude.ai with `/dashboard`'s Connections card), and passage-level tags (phase 6). §1–§19 are the design the build followed; §20 lists where the build departs from it, and
-every such point is decided there rather than here. §21 is the plan for OAuth and SDK v2.
+**Status: built through §18's phase 5**: tokens and every read, doc writes and targeted edits,
+annotations, anchored links, tags, uploads and `manage` (phases 1–4); and OAuth for claude.ai
+on SDK v2 (phase 5, §21): bot accounts for a connection to act as, the consent page, refresh
+tokens, so a connection lasts until it goes 90 days unused, descriptions and a skill that tell
+claude.ai's model what the server holds, Claude Code's sign-in through its own identity, and
+`/dashboard`'s Connections card. Not built: §21's read-only endpoint, which is designed, and
+passage-level tags (phase 6). §1–§19 are the design the build followed, and §21 the plan for
+OAuth and SDK v2; §20 lists where the build departs from either, and every such point is
+decided there rather than here.
 
 The purpose is narrow: to let Claude put research into MultiBlog over HTTPS with a token —
 docs, PDFs, annotations, anchored links, tags, bylines — and to find and read it again as a
@@ -2114,17 +2115,35 @@ restore-to-a-point exists ([DOCS.md](DOCS.md), "Deferred").
 
 ## 16. Usage
 
-How a client is set up, and what a session spends on the server. The connection itself is §5's:
-the `mcpServers` entry, the token's file, and the settings that keep the token from the model.
+How each client connects, and what a session spends on the server. Claude Code's header is
+§5's: the `mcpServers` entry, the token's file, and the settings that keep the token from the
+model. OAuth is §21's.
+
+**Claude Code:**
 
 - **Configure the server per project, in a research directory, not for every project.**
   Claude Code puts a server's instructions in every session where it is configured, coding
   sessions included, and loads `search` and `read` there up front (§15). A project's
   `.mcp.json` keeps both to the sessions that use them, and the allow rules (§15) go in that
   project's `.claude/settings.json`.
-  - **A claude.ai connection would undo this**, by following its account into every Claude Code
-    session. The project's own entry outranks it there, and denying it by name keeps it out of
-    the rest (§21).
+- **There are three ways in** (§21, "Which clients"). The project's entry decides between the
+  first two:
+  - **The header**: an entry whose `headersHelper` reads a token the operator issued for
+    Claude Code (`create-api-token.ts --client=claude-code`, §3, §5). It is the only way in
+    that lists `edit_link` and `rename_file`, and `manage` with a person's own token.
+  - **A sign-in through Claude Code's own identity**, for anyone without a header token: an
+    entry with the URL and no `headersHelper`, then `/mcp`, which opens the consent page in a
+    browser. The page warns that the connection goes to a program on the person's own
+    computer, and they approve it as one of their bots, as a claude.ai connection is approved
+    (below). On Linux its tokens are kept in `~/.claude/.credentials.json`, which §5's settings
+    deny to the sandbox.
+  - **The claude.ai connection**, which follows the account into every Claude Code session as
+    `claude.ai <connector name>`, through Anthropic's proxy, with no token on the machine. It
+    lists what a claude.ai connection lists, has claude.ai's bound on `read`, and its allow
+    rules are named `mcp__claude_ai_<Name>__*`.
+- **A claude.ai connection would undo the per-project rule.** The project's own entry outranks
+  it there, and `deniedMcpServers` in `~/.claude/settings.json`, naming the connector, keeps it
+  out of every other session (§21, "What else changes for claude.ai").
 - **What a session spends**, as Claude Code 2.1.292 does it, measured with a probe server:
   - **in every session**: the instructions, cut at 2,048 characters (§5), and the schemas of
     `search` and `read`;
@@ -2142,11 +2161,36 @@ the `mcpServers` entry, the token's file, and the settings that keep the token f
   - several reads in one turn, which run in parallel (§15);
   - the export or its catalog, and Grep, before a sweep that must read every doc (§6);
   - a long passage named by its ends, rather than typed out (§6, §7).
-- **From claude.ai, the byte routes work only once the person allows the instance.** They need
-  curl, and code execution's egress proxy refuses a host that isn't among the allowed domains
-  in claude.ai's settings (§21, "The header trial"). Until it is, the export and its catalog
-  can't stand in for reads there, and the lean results (§4) are all that keeps a sweep
-  affordable.
+
+**claude.ai:**
+
+- **A connection acts as one of the person's bots**, never as the person (§21, "Whose
+  account"), so they need a bot first. An ADMIN makes one on `/users`, and the consent page
+  says so to a person with none.
+- **The connector is added in claude.ai**: a custom connector at the URL the Connections card
+  gives, `<APP_URL>/api/mcp` exactly, with Claude's published identity, which claude.ai's dialog
+  recommends. Connect opens the consent page on the instance, where the person signs in,
+  chooses the bot, leaves `write` unchecked for a connection that only reads, and approves. The
+  web, Desktop and the mobile apps share the one connector.
+- **It lasts until it goes 90 days unused**, refreshing on its own. Revoke, on the Connections
+  card, ends it at its next request, and claude.ai then asks the person to connect again.
+  Disconnecting or removing the connector in claude.ai ends nothing here.
+- **Each tool's setting is claude.ai's**: Always allow, Needs approval or Blocked. In a chat, a
+  call on Needs approval waits for the person, but claude.ai's auto mode approved such calls
+  unasked (§21, "The header trial").
+- **After a deploy that renames a tool or rewords its description**, the person presses
+  "Refresh tool list" in the connector's settings. Until then a chat calls the old names and
+  reads the old descriptions (§21, "The full trial"), and a tool on Always allow asks again
+  once its name or description has changed.
+- **The skill, or the paragraph for a Project**, both on the Connections card, tell claude.ai
+  that the person's research is in MultiBlog, which nothing in the connector can (§21, "What
+  the model is told"). The skill is uploaded under Customize > Skills and needs code
+  execution; the paragraph goes in a Project's instructions.
+- **The byte routes work only once the person allows the instance.** They need curl, and code
+  execution's egress proxy refuses a host that isn't among the allowed domains in claude.ai's
+  settings (§21, "The header trial"). Until it is, the export and its catalog can't stand in for
+  reads there, and the lean results (§4) are all that keeps a sweep affordable.
+- **Research has called no connector**, in any trial (§21, Open).
 
 ## 17. Existing gaps the MCP server must not inherit
 
@@ -2251,12 +2295,11 @@ Items 1–3 should still be fixed on their own account (TODO.md).
    URL tools; PDF roots anchored by quote, their quads from `extractPageItems` and
    `quadsForRange`, with the spec that holds each edge within 1pt of a selection (§8); and the
    file half of `manage`, owner changes included (§12).
-5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own. Its
-   steps 1, 2, 4, 5 and 7 are built: SDK v2, the tools' names and descriptions, the bearer
-   check, the thin slice of OAuth, and refresh tokens.
+5. **OAuth and SDK v2, for claude.ai**: planned in §21, with a build order of its own, and
+   built but for the read-only endpoint, which is designed.
 6. **If wanted:** passage-level tags (PLAN.md §20, PR 2). Not built.
 
-Phases 1–4 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
+Phases 1–5 are built, each with its specs (`e2e/mcp-*.spec.ts`), unit tests and integrity
 checks.
 
 Each phase ships with four things:
@@ -2281,8 +2324,8 @@ Each phase ships with four things:
 
 1. **The shape.** The shared operation layer, which means refactoring the actions the MCP
    server touches, rather than a parallel set of handlers. §1 recommends the shared layer.
-2. **claude.ai.** §21 is the plan for OAuth. claude.ai is where the research conversations
-   happen, so it is a target; what is open is the timing, and the questions §21 leaves.
+2. **claude.ai.** Settled: §21's OAuth is built. What is open is the questions §21 leaves
+   (§21, Open).
 3. **Tag granularity.** Passage-level tags now, or whole-object tags only.
 4. **The gaps.** Whether §17's gaps are fixed first, separately.
 5. **Files Claude can't see.** A PDF the user uploaded alone is invisible to Claude's account
@@ -2568,21 +2611,16 @@ code beside each says why as well.
 
 ## 21. OAuth, for claude.ai
 
-**Status: planned; steps 1, 2, 4, 5 and 7–10 are built**: the move to SDK v2, the tools'
-names and descriptions with the skill, the bearer check on v2's terms, the thin slice
-(Discovery, the consent page, `/token` for the `authorization_code` grant, the access token,
-and Claude's pinned identity), refresh tokens with their rotation, a new claude.ai connection
-replacing the bot's last one, the rest of bot accounts (`/users` making and moving them, and
-their rules in §3's check), the consent page in full with Claude Code's pinned identity,
-the drift check `deploy.sh` runs, and `scripts/oauth-client.ts` for a client registered by
-hand, and the per-client bound on `read` with `/dashboard`'s Connections card (§18's phase 5;
-§20 says where the build departs from this plan). Step 3, the header trial, and step 6, the
-slice trial, ran on 2026-10-14 ("The header trial", "The slice trial"): claude.ai connects
-through OAuth on the web and on iOS. The refresh trial ran on 2026-10-14 and 15 against step
-7's build: claude.ai refreshes on its own, and a reconnect replaces the connection before it
-("The refresh trial"). Step 11's full trial ran on explore on 2026-10-15: iOS refreshes on its
-own too, a revoke from `/dashboard` brings the consent page back, and a sandboxed command is
-refused the token's file ("The full trial"). The other four instances follow.
+**Status: built**, every step of the build order below, but for the read-only endpoint, which
+is designed ("The read-only endpoint"). §20 says where the build departs from this plan (§18's
+phase 5), and §16 how each client connects. Five trials tried claude.ai and Claude Code against
+it as it was built, four on a trial instance and the last on explore ("The early trial" through
+"The full trial"): claude.ai connects through OAuth on the web and on iOS, refreshes on its own
+on both, and asks the person to connect again after a revoke from `/dashboard`; a reconnect
+replaces the connection before it; a renamed or reworded tool reaches claude.ai only when the
+person refreshes the connector's tool list; Claude Code signs in through its own identity; and
+a sandboxed command is refused the token's file. Research calls no connector (Open).
+
 claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
@@ -2603,8 +2641,10 @@ trial's questions about the protocol, and raised two of its own ("The early tria
 trial there, against step 7's build before it merged, has answered the full trial's about
 refreshing on the web and a reconnect replacing a connection ("The refresh trial").
 
-Claude Code keeps §5's header and its token file. Nothing here changes how it connects: a
-`headersHelper` that supplies `Authorization` takes precedence over OAuth in Claude Code.
+Claude Code keeps §5's header and its token file, and gains two more ways in: signing in with
+`/mcp` through its own identity, and the claude.ai connection, which follows its account there
+("Which clients"). A `headersHelper` that supplies `Authorization` takes precedence over OAuth
+in Claude Code, so a server entry with one never signs in.
 
 The phase also moves the server to SDK v2, which comes first. claude.ai opens in a protocol
 revision that v1 refuses, and it can't list the tools without the move (below). The tools are
@@ -3179,9 +3219,11 @@ and the first item decides whether it works at all.
 - **A deploy that changes the tools reaches claude.ai late, and asks again.**
   - **A connector keeps its old tool list until the person refreshes it** (#1044). In the
     header trial it kept the list from before a deploy through two chats and a changed
-    `server/discover`; "Refresh tool list", in the connector's settings, fetched the new one
-    at once. Until then a renamed tool is called by its old name and refused, so a deploy that
-    renames or rewords a tool tells its people to refresh.
+    `server/discover`, and in the full trial a new chat read a reworded description from the
+    old list without sending a request at all. "Refresh tool list", in the connector's
+    settings, fetched the new one at once both times. Until then a renamed tool is called by
+    its old name and refused, so a deploy that renames or rewords a tool tells its people to
+    refresh.
   - **A person's "Always allow" is stored per tool**, under its name and a hash of its
     description and its parameters' descriptions (#1032). So renaming a tool, or rewording
     its description, asks again for it.
@@ -3971,9 +4013,13 @@ second server entry with `/mcp`. nginx's MCP log, which on explore also takes `/
   the sandbox.
 - **Research** sent one `server/discover` and no call, in manual mode, as in the slice trial
   (Open).
-- **Measured after the trial**: #1044, how long a changed description takes to reach
-  claude.ai. The change is `search`'s and `read`'s sentence on UTC dates ("What the model is
-  told").
+- **A reworded description reaches claude.ai only through "Refresh tool list"** (#1044). A
+  second deploy to explore, after the trial, added `search`'s and `read`'s sentence on UTC dates
+  ("What the model is told"). A new chat afterwards quoted the old description, and claude.ai
+  sent the server nothing: it answered from the list it held. "Refresh tool list", in the
+  connector's settings, fetched the new list at once, and the next chat quoted the new
+  sentence. How long claude.ai would have kept the old list on its own is unmeasured, since the
+  refresh ended the test, five minutes after the deploy.
 - **Not tried**: the read-only connector, which isn't built ("The read-only endpoint").
 
 ### Build order
@@ -4104,7 +4150,8 @@ connection at all.
 
    It deploys to an instance only after that instance's Claude account has its person, or the
    header tokens issued for it are refused: the trial instance's by step 5's one-time update,
-   explore's by the same update made there first.
+   explore's by the same update, made in the deploy that brought this step there, after its
+   migration and before the swap ("Whose account").
 9. **The consent page in full** (the host of the client's `client_id`; who is signed in, with a
    way to switch; the loopback warning; what the connection can do; the sentence for a person
    with no bot); **Claude Code's pinned identity**; the drift check over both identities, run
@@ -4115,11 +4162,11 @@ connection at all.
       token, whole or ranged ("What else changes for claude.ai");
     - the Connections card, with the endpoint named above it, and the skill and the paragraph for
       a Project to take.
-11. **The full trial, on explore**, then the other four instances. Three of them run fb56178,
-    from before the MCP server, so this is also their first deploy of §18's phases 1–4 and
-    every migration those carry. A Claude account there gets its person by the one-time update,
-    run once the deploy's migration has added the column ("Whose account"), or a new bot is
-    made there in the web interface.
+11. **The full trial, on explore**, then the other four instances. Three of them were on
+    fb56178, from before the MCP server, so this was also their first deploy of §18's phases
+    1–4 and every migration those carry. A Claude account there gets its person by the
+    one-time update, run once the deploy's migration has added the column ("Whose account"),
+    or a new bot is made there in the web interface.
 12. **The docs**: PERMISSIONS.md's "API tokens" (who connects, as whom, the rules for bots, and
     the tools each kind of token lists), DASHBOARD.md (the card), DEPLOY.md (the drift check
     `deploy.sh` runs), §16 (Claude Code's three ways in, claude.ai's connector and the skill),
