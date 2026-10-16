@@ -276,6 +276,13 @@ test.describe("the margin rail across the breakpoint", () => {
     await page.setViewportSize(IPAD_LANDSCAPE);
     await page.goto(`/doc/${sharedDoc.slug}`);
     await expect(page.locator("[data-margin-note-id]")).toHaveCount(1);
+    // Hydrated before the hash changes, not merely rendered: the count above is
+    // met by the server's HTML, and Next's router writes the URL it started with
+    // back into history when it hydrates (`history.replaceState`), so a hash set
+    // before then is erased and the reload below opens on no permalink at all.
+    // WebKit lost that race in roughly one run in three on the dev target. The
+    // card reaching the rail is the signal, since that takes a mounted editor.
+    await expect.poll(() => besideBy(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(0);
 
     // Read the permalink off the card rather than rebuilding `anchorName` here
     // — a second copy of that derivation would pass this test while the real
@@ -292,6 +299,9 @@ test.describe("the margin rail across the breakpoint", () => {
     // editor has mounted and while every card is still in the section below.
     // Without this line the whole test passed against the unfixed code.
     await page.reload();
+    // So that losing the hash fails here, as itself, rather than as a ten-second
+    // wait for a bar there was never a permalink to draw.
+    expect(new URL(page.url()).hash).toBe(href);
     await expect.poll(() => besideBy(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(0);
 
     // The bar's own geometry, against the element it is standing in for a
