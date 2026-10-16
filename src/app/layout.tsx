@@ -31,6 +31,13 @@ export const metadata: Metadata = {
   alternates: {
     types: { "application/rss+xml": "/rss.xml" },
   },
+  // iOS Safari's data detectors wrap anything resembling a phone number, date,
+  // address or email in a link of its own *before React hydrates* — so a doc
+  // citing "nos. 7984–7985" reaches hydration with a `tel:` <a> the server
+  // never sent, React reports a text mismatch, and it discards and re-renders
+  // the whole reading body on the client. Production hides the error, not the
+  // re-render. Our links are the ones the author wrote.
+  formatDetection: { telephone: false, date: false, address: false, email: false },
 };
 
 // The only other place --background's two values are duplicated — see
