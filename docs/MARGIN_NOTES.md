@@ -108,6 +108,23 @@ refresh would refresh forever.
 `page.reload()`, since a `goto` differing only in the hash is a same-document navigation and
 fires `hashchange` at a page whose cards are already in the rail.
 
+**A permalink's arrival is followed into the rail, once.** The browser jumps to a fragment a
+single time, at load, against the server-rendered layout — where the card is still in the
+section below the article — and the portal then moves the card up beside its passage, which
+on a long document is screens away. The bar follows the card (above); the scroll is
+`useMarginNotesLayout`'s to repeat, since the hook is what moved the card. It remembers the
+hash the page was opened on, and the first positioned pass that finds that id inside its own
+container scrolls the entry to the middle of the window — to its top instead if it is
+taller than the window, as a click on a highlight centres its entry — and then forgets it.
+It forgets it unscrolled the moment the reader scrolls, clicks or types, so a first pass that
+lands late never yanks back a reader who has already moved, and on `hashchange`, which the
+browser scrolls to itself against cards that are placed by then. The scroll goes to the
+entry (`[data-comment-id]`) rather than the permalink, which is the entry's timestamp: lined
+up with the top edge, as the browser's own jump lines it up, it cuts off the name beside it.
+A bounded rail is left out — the doc editor's has no permalinks, and the page is not what
+scrolls there. The spec's test for it builds a sixty-paragraph doc and arrives from
+`about:blank`; a reload does not reproduce it, because measured on one, no jump happened at all.
+
 **Which ids are anchored is the one thing that goes through React state**, because it
 decides what renders *where* rather than merely where it sits. `onAnchoredIdsChange` fires
 only when the resolved set actually changes, never on the per-keystroke passes that find the

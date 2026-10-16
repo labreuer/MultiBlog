@@ -356,6 +356,72 @@ test.describe("the margin rail across the breakpoint", () => {
       .toEqual({ inSection: true, alignedWithinAPixel: true });
   });
 
+  test("a permalink leaves its card on screen, beside the text and below it", async ({ page }) => {
+    // The browser jumps to a fragment once, at load, against the server-rendered
+    // layout — every card still in the section below the article — and the card
+    // then moves up into the rail beside its passage. Unless something follows
+    // it (use-margin-notes-layout.ts's arrivalRef), the reader is left at the
+    // bottom of the page with the card they were linked to far above. Its own
+    // document because the fixture's is one sentence, where both places are on
+    // screen at once: here the passage is near the top and the section is sixty
+    // paragraphs below it.
+    const paragraphs = Array.from(
+      { length: 60 },
+      (_, i) => `Paragraph ${i}. ${"Filler text to give it some length. ".repeat(4)}`,
+    );
+    paragraphs[2] = `TARGET ${paragraphs[2]}`;
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: paragraphs.join("\n\n") });
+    try {
+      // 1 for the opening of the doc, then each earlier paragraph's text and its two boundaries.
+      const from = 1 + paragraphs.slice(0, 2).reduce((sum, text) => sum + text.length + 2, 0);
+      await createTestAnnotation({
+        docId: doc.id,
+        authorEmail: ADMIN_EMAIL,
+        bodyText: "Linked to.",
+        anchor: { from, to: from + "TARGET".length, quotedText: "TARGET" },
+      });
+
+      await page.setViewportSize(MIDWAY);
+      await page.goto(`/doc/${doc.slug}`);
+      await expect(page.locator("[data-margin-note-id]")).toHaveCount(1);
+      const href = await page.locator("[data-margin-note-id] a[href^='#']").first().getAttribute("href");
+      expect(href).toBeTruthy();
+
+      // A document load carrying the hash, which is what following a link from
+      // elsewhere is. The bookmark-bar test above reloads instead, and that
+      // won't do here: a reload made no jump at all when measured, so the
+      // unfixed page stayed at the top with the card already on screen.
+      await page.goto("about:blank");
+      await page.goto(`/doc/${doc.slug}${href}`);
+
+      // The whole annotation rather than the permalink, which is only its
+      // timestamp: a card scrolled to with its author's name cut off by the
+      // top edge has not been shown to the reader.
+      const annotation = page.locator("[data-margin-note-id] [data-comment-id]", { has: page.locator(href ?? "#missing") });
+      const onScreen = async () => {
+        const box = await annotation.boundingBox();
+        const viewport = page.viewportSize();
+        return !!box && !!viewport && box.y >= 0 && box.y + box.height <= viewport.height;
+      };
+      await expect
+        .poll(async () => ({ inRail: (await besideBy(page)) >= 0, onScreen: await onScreen() }), { timeout: 10_000 })
+        .toEqual({ inRail: true, onScreen: true });
+
+      // Below the threshold the card never leaves the section the browser
+      // jumped to, so the browser's jump is the whole of it and the hook's
+      // must not fire: there is no rail for the card to land in. A guard
+      // against the follow-up scroll misfiring there rather than against the
+      // bug above, which needs the rail to happen at all.
+      await page.goto("about:blank");
+      await page.setViewportSize(NARROW);
+      await page.goto(`/doc/${doc.slug}${href}`);
+      await expect
+        .poll(async () => ({ inSection: (await belowBy(page)) > 0, onScreen: await onScreen() }), { timeout: 10_000 })
+        .toEqual({ inSection: true, onScreen: true });
+    } finally {
+      await deleteTestDoc(doc.id);
+    }
+  });
 });
 
 // PLAN.md §18f's surface, in the one orientation where the page is nothing but
