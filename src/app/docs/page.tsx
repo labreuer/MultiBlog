@@ -7,9 +7,9 @@ import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
 import { isAdmin } from "@/lib/authz";
 import { createDoc } from "@/app/actions/docs";
 import { docTitleOrFallback } from "@/lib/doc-title";
-import { toURLSearchParams } from "@/lib/table-query";
+import { toURLSearchParams, withoutSortKey } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
-import { parseDocsFilters, type DocsFilters, type DocsSortKey } from "@/lib/docs-query";
+import { DEFAULT_SORT, parseDocsFilters, type DocsFilters, type DocsSortKey } from "@/lib/docs-query";
 import { authorFilterWhere, listAuthorFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
@@ -17,6 +17,8 @@ import DocsTable from "@/components/DocsTable";
 import DocImportButton from "@/components/DocImportButton";
 import styles from "./page.module.css";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { parseTagList } from "@/lib/tag-data";
+import { codeDefaultColumns } from "@/lib/admin-table-columns";
 
 export const metadata: Metadata = { title: "Docs" };
 
@@ -62,6 +64,11 @@ function buildOrderBy(sort: SortColumn<DocsSortKey>[]): Prisma.DocOrderByWithRel
         // authors *and* no annotations — still sorts as a NULL *relation*,
         // which Prisma puts last. Same arrangement as /files' annotations key.
         return { metrics: { annotationCount: dir } };
+      case "tags":
+        // Through doc_tag_summary, the view the cell's chips come from (§20n).
+        // An untagged doc has no row there, so it sorts last either way, as a
+        // doc with no byline does.
+        return { tagSummary: { names: { sort: dir, nulls: "last" } } };
       case "slug":
         return { slug: dir };
       case "updatedAt":
@@ -134,6 +141,18 @@ export default async function DocsPage({
   const where: Prisma.DocWhereInput = {
     AND: [bypassAuthorScoping ? {} : authorScope, buildFilterWhere(filters)],
   };
+  // The override lists PRIVATE docs this admin may not read, and which terms
+  // are on such a doc is the doc's to disclose (docs/PERMISSIONS.md, Tags) —
+  // so their Tags cells are withheld below, and ordering by tags would hint at
+  // what those cells hide. Dropped here rather than in the table, so the
+  // header shows the order the rows are actually in; DocsTable takes the sort
+  // arrows off the column to match.
+  if (bypassAuthorScoping) filters.sort = withoutSortKey(filters.sort, "tags", DEFAULT_SORT);
+  // Whether this page draws the Tags column — DocsTable's resolveColumns
+  // rule, applied early: ?cols= or the stored preference, else the code
+  // default (where Tags is hidden). The tag view is read only when it is, so
+  // a table not showing tags never touches the tag tables (§20n).
+  const showTags = (filters.cols ?? codeDefaultColumns("docs")).includes("tags");
 
   const [docs, totalCount] = await Promise.all([
     prismaIncludingDeleted.doc.findMany({
@@ -158,6 +177,8 @@ export default async function DocsPage({
         // Both view columns are read from the same view that sorts them, so
         // the displayed and sorted expressions can't drift (§16e).
         metrics: { select: { byline: true, annotationCount: true } },
+        // Tags likewise, from doc_tag_summary — and only when shown (above).
+        tagSummary: showTags && { select: { terms: true } },
         // Still needed, but only for the ids: canEdit below is a membership
         // test, not a display value. The User join this used to carry (for
         // adminInitials) is the view's job now.
@@ -172,38 +193,47 @@ export default async function DocsPage({
     prismaIncludingDeleted.doc.count({ where }),
   ]);
 
-  const rows = docs.map((doc) => ({
-    id: doc.id,
-    slug: doc.slug,
-    // "Untitled" is a render-time fallback, never stored (PLAN.md §12n) —
-    // applied here so DocsTable's link shows the same string a user reads.
-    // Sort and search now happen in Postgres against the stored value, so an
-    // untitled doc sorts as the empty string it is, not as "Untitled".
-    title: docTitleOrFallback(doc.title),
-    // NULL only when the doc has no authors — the same empty cell the JS join
-    // produced for that case.
-    authors: doc.metrics?.byline ?? "",
-    // 0 when the doc has no view row at all (no authors and no annotations);
-    // the view itself already COALESCEs the count for every doc that does.
-    annotationCount: doc.metrics?.annotationCount ?? 0,
-    visibility: doc.visibility,
-    createdAt: doc.createdAt,
-    createdByName: doc.createdBy ? staffDisplayNameOf(doc.createdBy, session.user.role) : "",
-    updatedAt: doc.updatedAt,
-    updatedByName: doc.updatedBy ? staffDisplayNameOf(doc.updatedBy, session.user.role) : "",
-    length: doc.proseJsonLength,
-    deletedAt: doc.deletedAt,
-    deleted: doc.deletedByUserId !== null,
-    // Whether the Edit column renders a link, decided here rather than per
-    // row through canUserEditDoc (src/lib/doc-authz.ts), which costs a query
-    // apiece — these two terms are that function's rule. The "Show all docs"
-    // override has no say: it widens which rows are listed, not who may edit
-    // them, so a PRIVATE doc it brings into view carries no Edit link and the
-    // column agrees with what /doc/[slug]/edit would answer.
-    canEdit:
-      doc.authors.some((a) => a.userId === session.user.id) ||
-      (viewerCanEditAnyShared && doc.visibility === "SHARED"),
-  }));
+  const rows = docs.map((doc) => {
+    const isAuthor = doc.authors.some((a) => a.userId === session.user.id);
+    return {
+      id: doc.id,
+      slug: doc.slug,
+      // "Untitled" is a render-time fallback, never stored (PLAN.md §12n) —
+      // applied here so DocsTable's link shows the same string a user reads.
+      // Sort and search now happen in Postgres against the stored value, so an
+      // untitled doc sorts as the empty string it is, not as "Untitled".
+      title: docTitleOrFallback(doc.title),
+      // NULL only when the doc has no authors — the same empty cell the JS join
+      // produced for that case.
+      authors: doc.metrics?.byline ?? "",
+      // 0 when the doc has no view row at all (no authors and no annotations);
+      // the view itself already COALESCEs the count for every doc that does.
+      annotationCount: doc.metrics?.annotationCount ?? 0,
+      // Null — withheld, not empty — on a row only the "Show all docs" override
+      // lists: a PRIVATE doc this viewer isn't an author of. The terms on a doc
+      // are as private as the doc (CLAUDE.md, "A tag chip is exactly as private
+      // as the thing it is on"), and dropping them here keeps them out of the
+      // RSC payload rather than merely out of the cell. canUserReadDoc's rule
+      // inlined, as canEdit's is below: anyone who reaches this page may read a
+      // SHARED doc. Empty when the column is hidden, since nothing was read.
+      tags: doc.visibility === "SHARED" || isAuthor ? parseTagList(doc.tagSummary?.terms) : null,
+      visibility: doc.visibility,
+      createdAt: doc.createdAt,
+      createdByName: doc.createdBy ? staffDisplayNameOf(doc.createdBy, session.user.role) : "",
+      updatedAt: doc.updatedAt,
+      updatedByName: doc.updatedBy ? staffDisplayNameOf(doc.updatedBy, session.user.role) : "",
+      length: doc.proseJsonLength,
+      deletedAt: doc.deletedAt,
+      deleted: doc.deletedByUserId !== null,
+      // Whether the Edit column renders a link, decided here rather than per
+      // row through canUserEditDoc (src/lib/doc-authz.ts), which costs a query
+      // apiece — these two terms are that function's rule. The "Show all docs"
+      // override has no say: it widens which rows are listed, not who may edit
+      // them, so a PRIVATE doc it brings into view carries no Edit link and the
+      // column agrees with what /doc/[slug]/edit would answer.
+      canEdit: isAuthor || (viewerCanEditAnyShared && doc.visibility === "SHARED"),
+    };
+  });
 
   return (
     <main style={{ maxWidth: 1000, margin: "4rem auto", fontFamily: "sans-serif" }}>

@@ -468,8 +468,11 @@ links to the editor only when this viewer may edit that row ("Routes"). The Leng
 the stored, trigger-maintained `prose_json_length`, because a view has no `WHERE` to push
 down when sorted through (CLAUDE.md). Created by is `created_by_user_id` ("Who created a
 doc"), hidden by default beside Created and sorted by the creator's name, as Updated by is;
-`/files` has the same column for its uploader. The importer and the paste box are
-DOC_IMPORT.md.
+`/files` has the same column for its uploader. Tags, also hidden by default, shows the doc's
+terms as the chips its reading view shows, sorted by their names through `doc_tag_summary`; on a
+PRIVATE doc only the ADMIN "Show all docs" override lists, it is withheld (PLAN.md §20n,
+PERMISSIONS.md's Tags section). `/files` has the same column. The importer and the paste box
+are DOC_IMPORT.md.
 
 ## Annotations on a doc
 

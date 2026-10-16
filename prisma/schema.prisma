@@ -829,6 +829,7 @@ model Doc {
   posts               Post[]
   publicationEvents   PostPublicationEvent[]
   metrics             DocMetrics?
+  tagSummary          DocTagSummary?
   tagAnchors          TagAnchor[]            @relation("TagAnchorDoc")
   anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorDoc")
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
@@ -867,6 +868,33 @@ view DocMetrics {
   doc Doc @relation(fields: [docId], references: [id])
 
   @@map("doc_metrics")
+}
+
+// PLAN.md §20n — /docs' Tags column: the live terms on each tagged doc, as a
+// view keyed 1:1 on doc.id so Prisma sees a to-one relation and Tags sorts in
+// Postgres (§16e). See add_tag_summary_views.
+//
+// **Its own view, deliberately not a third branch of DocMetrics.** That view
+// is a FULL OUTER JOIN of aggregates keyed on a COALESCE, which Postgres can
+// neither prune (a branch can add rows) nor push a `doc_id IN (…)` into, so
+// every read of it builds all of it, whichever columns are asked for. A plain
+// GROUP BY on doc_id takes the page's `IN (…)` down into tag_anchor, and a
+// page not showing Tags never reads this view at all (src/app/docs/page.tsx).
+//
+// An untagged doc has no row, so the relation is the optional part, and
+// `names` is nullable for the reason TagMetrics' counts are: it is what lets
+// the sort say `nulls: "last"`.
+view DocTagSummary {
+  docId String  @unique @map("doc_id")
+  // The names joined in name order — the sort key, never split back apart.
+  names String? @map("names")
+  // `[{slug, name, taggerCount}]` in the same order — what the cell draws,
+  // read through parseTagList (src/lib/tag-data.ts) and never a cast.
+  terms Json    @map("terms")
+
+  doc Doc @relation(fields: [docId], references: [id])
+
+  @@map("doc_tag_summary")
 }
 
 model DocAuthor {
@@ -1249,6 +1277,7 @@ model StoredFile {
   pageTexts           FilePageText[]
   annotations         Annotation[]
   metrics             FileMetrics?
+  tagSummary          FileTagSummary?
   tagAnchors          TagAnchor[]          @relation("TagAnchorFile")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorFile")
   commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorFile")
@@ -1285,6 +1314,18 @@ view FileMetrics {
   file StoredFile @relation(fields: [fileId], references: [id])
 
   @@map("file_metrics")
+}
+
+// /files' Tags column — DocTagSummary's twin over tag_anchor.file_id, built
+// the same way for the same reasons (PLAN.md §20n).
+view FileTagSummary {
+  fileId String  @unique @map("file_id")
+  names  String? @map("names")
+  terms  Json    @map("terms")
+
+  file StoredFile @relation(fields: [fileId], references: [id])
+
+  @@map("file_tag_summary")
 }
 
 // Who a file belongs to (PLAN.md §19). Deliberately *not* called an author:

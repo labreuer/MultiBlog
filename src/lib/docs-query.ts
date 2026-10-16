@@ -13,7 +13,7 @@ import {
 
 // /docs' querystring vocabulary (PLAN.md §16e).
 
-// Three of these keys name something no plain `ORDER BY` on `doc` could, and
+// Four of these keys name something no plain `ORDER BY` on `doc` could, and
 // they get there by different routes — worth keeping straight:
 //
 //   authors      `doc_metrics.byline` — adminInitials string_agg'd across
@@ -32,6 +32,13 @@ import {
 //                would walk every doc in the table on every page load.
 //                Storing it makes that one walk per collab flush instead
 //                (PLAN.md §16l).
+//   tags         `doc_tag_summary.names` — the live terms' names joined in
+//                order, from the same view as the `terms` the cell draws
+//                (PLAN.md §20n). A view of its own rather than a doc_metrics
+//                column, so a page not showing Tags never reads it. Ignored
+//                under showAllDocs: the page drops it from the sort there,
+//                since ordering by it would hint at the tags on rows that the
+//                cell withholds.
 // slug/created/createdBy/deletedAt are plain Doc columns, defaulted hidden
 // (§16l) — available without cluttering the default view. createdBy and
 // updatedBy sort through their to-one User relation by name, a plain FK
@@ -46,6 +53,7 @@ export type DocsSortKey =
   | "createdBy"
   | "length"
   | "annotations"
+  | "tags"
   | "slug"
   | "updatedAt"
   | "updatedBy"
@@ -59,6 +67,7 @@ const SORT_KEYS: readonly DocsSortKey[] = [
   "createdBy",
   "length",
   "annotations",
+  "tags",
   "slug",
   "updatedAt",
   "updatedBy",

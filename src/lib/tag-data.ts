@@ -30,6 +30,36 @@ export type TagChip = {
   taggerCount: number;
 };
 
+/** What a chip needs to draw itself — TagChipList's input, and a TagChip is one. */
+export type TagLink = Pick<TagChip, "slug" | "name" | "taggerCount">;
+
+/**
+ * `doc_tag_summary.terms` / `file_tag_summary.terms` as chips — PLAN.md §20n,
+ * the Tags column of /docs and /files.
+ *
+ * The view builds this jsonb itself (add_tag_summary_views), so a malformed
+ * entry means the view and this function disagree, not that a user typed
+ * something. Each entry is still checked rather than cast, and one that
+ * doesn't fit is dropped rather than drawn: a column of chips is not worth a
+ * crashed page. Absent — an object with no live terms, so no view row, or a
+ * page that didn't read the view — is the empty list.
+ *
+ * **Does no permission work**, like everything else here. The admin tables
+ * call it only for rows their viewer may read, and send nothing at all for the
+ * rest (src/app/docs/page.tsx says why).
+ */
+export function parseTagList(value: unknown): TagLink[] {
+  if (!Array.isArray(value)) return [];
+  const links: TagLink[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { slug, name, taggerCount } = entry as Record<string, unknown>;
+    if (typeof slug !== "string" || typeof name !== "string" || typeof taggerCount !== "number") continue;
+    links.push({ slug, name, taggerCount });
+  }
+  return links;
+}
+
 /**
  * Every live term applied to one object, alphabetically.
  *

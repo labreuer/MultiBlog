@@ -2,7 +2,11 @@ import { test, expect, freshGoto, gotoOk } from "./fixtures";
 import {
   ADMIN_EMAIL,
   addTestPostAuthor,
+  createTestDoc,
+  createTestFile,
   createTestTag,
+  deleteTestDoc,
+  deleteTestFile,
   deleteTestTag,
   getTagAnchorPartColumns,
   getTagFacts,
@@ -426,6 +430,116 @@ test.describe("tags", () => {
       expect(cells.filter((c) => c.trim() === "1")).toHaveLength(2);
     } finally {
       await deleteTestTag(unused.id);
+    }
+  });
+
+  // PLAN.md §20n — the Tags column of /docs and /files: chips drawn from, and
+  // sorted through, the doc_tag_summary / file_tag_summary view.
+  // Tags is defaultHidden (§16m), so every visit asks for it with ?cols=.
+  test("/docs and /files list their tags, sorted through their tag views", async ({ page }) => {
+    const token = `tagcol${Date.now()}`;
+    // `tag` ("E2E tag …") is the later term, `early` the earlier one.
+    const early = await createTestTag({ creatorEmail: ADMIN_EMAIL, name: uniqueTitle("bbb early") });
+    const docs: string[] = [];
+    const files: string[] = [];
+    try {
+      // The viewer's own PRIVATE docs, so no override is needed to list them.
+      const earlyDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} early`) });
+      const lateDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} late`) });
+      const untaggedDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} none`) });
+      docs.push(earlyDoc.id, lateDoc.id, untaggedDoc.id);
+      await tagWithTestTag({ tagId: early.id, target: { kind: "doc", id: earlyDoc.id }, taggerEmail: ADMIN_EMAIL });
+      await tagWithTestTag({ tagId: tag.id, target: { kind: "doc", id: lateDoc.id }, taggerEmail: ADMIN_EMAIL });
+
+      const table = page.getByRole("table").first();
+      const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+
+      // Untagged sorts last in both directions — the view's NULL, ordered
+      // `nulls: "last"` — which is what tells this apart from a plain string sort.
+      await gotoOk(page, `/docs?q=${token}&cols=title,tags&sort=tags:asc`);
+      expect(await titlesInOrder()).toEqual([earlyDoc.title, lateDoc.title, untaggedDoc.title]);
+      await expect(page.getByRole("columnheader", { name: "Tags" })).toHaveText("Tags ▲");
+      await gotoOk(page, `/docs?q=${token}&cols=title,tags&sort=tags:desc`);
+      expect(await titlesInOrder()).toEqual([lateDoc.title, earlyDoc.title, untaggedDoc.title]);
+
+      // A chip is the object page's chip: a link to the term's page.
+      const earlyRow = table.getByRole("row").filter({ hasText: earlyDoc.title });
+      await expect(earlyRow.getByRole("link", { name: early.name })).toHaveAttribute("href", `/tag/${early.slug}`);
+
+      const earlyFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} early`) });
+      const lateFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} late`) });
+      files.push(earlyFile.id, lateFile.id);
+      await tagWithTestTag({ tagId: early.id, target: { kind: "file", id: earlyFile.id }, taggerEmail: ADMIN_EMAIL });
+      await tagWithTestTag({ tagId: tag.id, target: { kind: "file", id: lateFile.id }, taggerEmail: ADMIN_EMAIL });
+
+      await gotoOk(page, `/files?q=${token}&cols=title,tags&sort=tags:asc`);
+      expect(await titlesInOrder()).toEqual([earlyFile.title, lateFile.title]);
+      await gotoOk(page, `/files?q=${token}&cols=title,tags&sort=tags:desc`);
+      expect(await titlesInOrder()).toEqual([lateFile.title, earlyFile.title]);
+      const lateFileRow = table.getByRole("row").filter({ hasText: lateFile.title });
+      await expect(lateFileRow.getByRole("link", { name: tag.name })).toHaveAttribute("href", `/tag/${tag.slug}`);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
+      for (const id of files) await deleteTestFile(id);
+      await deleteTestTag(early.id);
+    }
+  });
+
+  // docs/PERMISSIONS.md's Tags section: the ADMIN-only "Show all" override
+  // lists PRIVATE objects their viewer may not read, and the terms on one are
+  // as private as it is. So the cell is withheld — not merely hidden: the
+  // terms are absent from the HTML and its RSC payload too — and Tags stops
+  // sorting, since an order by tags would hint at what the cells withhold.
+  test("rows only the Show all override lists have their tags withheld", async ({ page, secondUser }) => {
+    const token = `tagwithheld${Date.now()}`;
+    // Sorts before `tag`, so a sort by tags that was still honoured would put
+    // the withheld row first.
+    const secret = await createTestTag({ creatorEmail: ADMIN_EMAIL, name: uniqueTitle("aaa secret") });
+    const { user: other } = await secondUser({ role: "AUTHOR" });
+    const docs: string[] = [];
+    const files: string[] = [];
+    try {
+      // Created first, so the default sort (Updated, newest first) puts it last.
+      const hiddenDoc = await createTestDoc({ authorEmail: other.email, title: uniqueTitle(`${token} theirs`) });
+      docs.push(hiddenDoc.id);
+      await tagWithTestTag({ tagId: secret.id, target: { kind: "doc", id: hiddenDoc.id }, taggerEmail: other.email });
+      const ownDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} mine`) });
+      docs.push(ownDoc.id);
+      await tagWithTestTag({ tagId: tag.id, target: { kind: "doc", id: ownDoc.id }, taggerEmail: ADMIN_EMAIL });
+
+      const table = page.getByRole("table").first();
+      const tagsCell = (title: string) => table.getByRole("row").filter({ hasText: title }).getByRole("cell").nth(2);
+
+      const docsUrl = `/docs?q=${token}&cols=title,tags&sort=tags:asc&showAllDocs=1`;
+      await gotoOk(page, docsUrl);
+      await expect(tagsCell(hiddenDoc.title)).toHaveText("—");
+      await expect(tagsCell(ownDoc.title).getByRole("link", { name: tag.name })).toBeVisible();
+      // The page dropped tags from the sort: no arrow on the header, and the
+      // rows in the default order rather than the one ?sort= asked for.
+      await expect(page.getByRole("columnheader", { name: "Tags" })).toHaveText("Tags");
+      expect(await table.locator("tbody tr td:nth-child(2) a").allTextContents()).toEqual([
+        ownDoc.title,
+        hiddenDoc.title,
+      ]);
+      const docsHtml = await (await page.request.get(docsUrl)).text();
+      expect(docsHtml).toContain(tag.name);
+      expect(docsHtml).not.toContain(secret.name);
+
+      const hiddenFile = await createTestFile({ ownerEmail: other.email, title: uniqueTitle(`${token} theirs`) });
+      files.push(hiddenFile.id);
+      await tagWithTestTag({ tagId: secret.id, target: { kind: "file", id: hiddenFile.id }, taggerEmail: other.email });
+
+      const filesUrl = `/files?q=${token}&cols=title,tags&showAllFiles=1`;
+      await gotoOk(page, filesUrl);
+      await expect(tagsCell(hiddenFile.title)).toHaveText("—");
+      await expect(page.getByRole("columnheader", { name: "Tags" })).toHaveText("Tags");
+      expect(await (await page.request.get(filesUrl)).text()).not.toContain(secret.name);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
+      for (const id of files) await deleteTestFile(id);
+      await deleteTestTag(secret.id);
     }
   });
 

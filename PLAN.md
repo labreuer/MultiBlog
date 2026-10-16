@@ -5703,6 +5703,57 @@ read-only render below the controls never arrives. That predates this section an
 untouched by it; the e2e case here asserts only that such a viewer sees the post's own
 strip and not the doc's terms.
 
+### 20n. Tags in `/docs` and `/files` (2026-10-15)
+
+**Built 2026-10-15.** Both admin tables gain a **Tags** column: the object's live terms as the
+chips its own page shows, each linking to `/tag/[slug]`, sortable, and `defaultHidden` (§16m)
+on both tables, so nobody's table widens by a column of chips unasked.
+
+- **Two views of their own draw and sort it**, `doc_tag_summary` and `file_tag_summary`
+  (migration `add_tag_summary_views`): `tag_anchor` through live assignments to live terms,
+  one row per object and term, then grouped by object. Each yields `names`, the names joined
+  in name order — the sort key — and `terms`, `[{slug, name, taggerCount}]` in the same order,
+  which the cell draws through `parseTagList` (`src/lib/tag-data.ts`). Both come out of one
+  subquery, so §16e's rule holds: what is shown is what is sorted. An untagged object has no
+  row, and `names` is declared nullable so the sort can say `nulls: "last"` (`TagMetrics`'
+  arrangement).
+- **Deliberately not columns of `doc_metrics`/`file_metrics`.** Those are a `FULL OUTER JOIN`
+  of aggregates keyed on a `COALESCE`, and `EXPLAIN` shows what that costs: Postgres can
+  neither prune a branch (one can add rows) nor push the page's `doc_id IN (…)` through the
+  `COALESCE`, so every read builds the whole view, whichever columns it names — the
+  dashboard's byline-only read included. A tags branch there put three tag-table scans on
+  every such load. A plain `GROUP BY` on the object's id takes the `IN (…)` down into
+  `tag_anchor`, so drawing a page of chips is an indexed lookup for that page's rows.
+- **A page not showing Tags reads no tag view at all.** Each page resolves the visible columns
+  the way `resolveColumns` will (`?cols=` or the stored preference, else
+  `codeDefaultColumns`) and selects the relation only when Tags is among them. Sorting by Tags
+  still builds the whole view, as every sort through a view does (§16l) — only on that sort.
+- **What counts is what the object page's chips count**, `tagsForTarget`'s filter: any anchor
+  on the object, a live assignment, a live term. Neither view reads `doc` or `file`, so an
+  object's own `deleted_at` isn't consulted, which is right: a soft-deleted doc shown under
+  "Show deleted" keeps its chips, as it keeps its byline and its annotation count.
+- **`TagChipList`** is `TagStrip`'s chip list, factored out so the cells draw the strip's
+  chips rather than a lookalike — §20k's rule for the doc editor's Settings panel. The table
+  offers no tagger.
+
+**The ADMIN "Show all" override withholds tags, and is the one place these columns depart
+from `TagChips`' structural guarantee.** Every row either table lists by default is one its
+viewer may read. The override is not: it lists PRIVATE objects the viewer has no byline or
+ownership on, and which terms are on such an object is the object's to disclose — §20m's
+"doc-read gates the disclosure of which terms are on that doc". So the page sends `tags: null`
+for those rows, keeping the terms out of the RSC payload rather than merely out of the cell,
+and the cell draws a muted dash that says why on hover (a blank would claim "untagged"). The
+read test is `canUserReadDoc`/`canUserReadFile` inlined per row (SHARED, or the viewer's
+own), the same way `canEdit` beside it inlines the edit rule. And the Tags sort is dropped for
+those visits (`withoutSortKey`, falling back to the default sort), with the header's arrows
+taken off to match, because an order by tags would hint at what the cells withhold. The
+override's existing columns are unchanged: title, byline, length and annotation count were
+already what it discloses.
+
+**Deferred, named.** A Tags filter (ANY/ALL/EXACTLY/NONE, the Authors panel's modes): under
+the override it would have to apply only to readable rows, or it discloses the same thing
+through which rows match. The column on `/posts`. A bulk "tag these" action in the toolbar.
+
 ## 21. Dated post URLs (`/yyyy/mm/dd/slug`)
 
 A published post lives at `/[slug]` — a flat, top-level namespace. This section

@@ -54,6 +54,8 @@ import {
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
+import { TagListCell } from "@/components/tags/TagChipList";
+import type { TagLink } from "@/lib/tag-data";
 import styles from "./FilesTable.module.css";
 
 // PLAN.md §19 — /files, built from the shared table kit exactly as /docs is.
@@ -78,6 +80,10 @@ export type FileRow = {
   pageCount: number | null;
   byteSize: number;
   annotationCount: number;
+  // The live terms on the file, in name order, off file_tag_summary.terms
+  // (PLAN.md §20n); empty when the column is hidden. Null when the page
+  // withheld them: a PRIVATE file only the ADMIN override lists.
+  tags: TagLink[] | null;
   createdAt: Date;
   /** The uploader (StoredFile.createdBy), whether or not still an owner; blank when unknown. */
   createdByName: string;
@@ -96,6 +102,7 @@ const SORTABLE_KEYS = [
   "pages",
   "size",
   "annotations",
+  "tags",
   "created",
   "createdBy",
   "slug",
@@ -202,6 +209,11 @@ export default function FilesTable({
       nowrap: true,
       cellProps: () => ({ className: styles.numeric }),
       cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
+    },
+    tags: {
+      // Unsortable under "Show all files", as /docs' is under its override.
+      sortKey: isAdmin && filters.showAllFiles ? undefined : "tags",
+      cell: (row) => <TagListCell tags={row.tags} noun="file" />,
     },
     created: {
       sortKey: "created",
@@ -413,14 +425,17 @@ export default function FilesTable({
             Every column here sorts. <strong>Owner(s)</strong> and <strong>Annotations</strong> go through the{" "}
             <code>file_metrics</code> view — the initials joined in SQL across a file&apos;s owners, and a count that
             excludes deleted and still-private draft annotations, neither of which a plain <code>ORDER BY</code> could
-            name. <strong>Size</strong> sorts on the raw byte count even though it prints rounded, and{" "}
+            name. <strong>Tags</strong> sorts through a view of its own, <code>file_tag_summary</code>, by the
+            terms&apos; names in order, untagged files last. <strong>Size</strong> sorts on the raw byte count even though it prints rounded, and{" "}
             <strong>Pages</strong> and Size are both stored columns recorded once at upload, so sorting by either costs
-            no more than sorting by a date. <strong>Slug</strong>, <strong>Updated</strong>,{" "}
+            no more than sorting by a date. <strong>Tags</strong>, <strong>Slug</strong>, <strong>Updated</strong>,{" "}
             <strong>Updated by</strong> and <strong>Deleted at</strong> are hidden by default (Columns picker, above).
             This listing shows every <strong>SHARED</strong> file to an ADMIN or EDITOR, plus the{" "}
             <strong>PRIVATE</strong> files you own — so an AUTHOR sees only their own. ADMIN accounts also
             get a &quot;Show all files&quot; checkbox above, which adds everyone else&apos;s PRIVATE files for the
-            current visit; opening one still needs ownership of it (docs/PERMISSIONS.md). Deleting is a soft delete: the
+            current visit; opening one still needs ownership of it (docs/PERMISSIONS.md), and so does seeing its tags —
+            those rows show a dash under Tags, and Tags doesn&apos;t sort while the box is checked. Deleting is a soft
+            delete: the
             row is hidden and restorable, and the stored bytes are never swept, since another file may share them.
           </p>
         }

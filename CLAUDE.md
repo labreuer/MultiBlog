@@ -123,7 +123,10 @@ before changing the behavior it describes.
   tag offer (§20m) is the only one, and it breaks the premise rather than the rule: the
   page's own gate is about the post, and a post author need not be an author of the doc it
   was made from. That one runs `canUserReadDoc` as a second, narrower check, and the check
-  is load-bearing rather than belt-and-braces. PLAN.md §20d, §20m, docs/PERMISSIONS.md.
+  is load-bearing rather than belt-and-braces. `/docs`' and `/files`' Tags columns draw chips
+  per row from `doc_tag_summary`/`file_tag_summary` instead, and send none for a row only the ADMIN "Show all"
+  override lists, nor sort by tags under it (§20n). PLAN.md §20d, §20m, §20n,
+  docs/PERMISSIONS.md.
 - **A post's byline is not its doc's, and being on the first grants nothing over the
   second.** The two are seeded alike at creation and edited independently from then on
   (§15d), because credit for a published piece is not authority over its text. So

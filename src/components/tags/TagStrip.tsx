@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { canApplyTags } from "@/lib/role-checks";
 import type { AnchorTarget } from "@/lib/anchors";
 import type { TagChip } from "@/lib/tag-data";
-import Link from "next/link";
+import TagChipList from "./TagChipList";
 import TagTagger from "./TagTagger";
 import styles from "./TagChips.module.css";
 
@@ -56,25 +56,7 @@ export default function TagStrip({
   return (
     <div className={`${styles.strip} ${variant === "bare" ? styles.stripBare : ""}`}>
       {variant === "section" && chips.length > 0 && <span className={styles.label}>Tags</span>}
-      {chips.length > 0 && (
-        <ul className={styles.chips}>
-          {chips.map((chip) => (
-            <li key={chip.id}>
-              <Link
-                href={`/tag/${chip.slug}`}
-                className={styles.chip}
-                // The count is a hover detail rather than a visible badge: on
-                // most objects it is 1, and a strip of "(1)"s is noise. It
-                // matters only when several people independently reached for
-                // the same term, which is the signal worth being able to find.
-                title={chip.taggerCount === 1 ? undefined : `Applied by ${chip.taggerCount} people`}
-              >
-                {chip.name}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+      {chips.length > 0 && <TagChipList chips={chips} />}
       {mayTag && <TagTagger target={target} onChange={onChange} />}
     </div>
   );

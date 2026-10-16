@@ -49,6 +49,8 @@ import {
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
+import { TagListCell } from "@/components/tags/TagChipList";
+import type { TagLink } from "@/lib/tag-data";
 import styles from "./DocsTable.module.css";
 
 export type DocRow = {
@@ -73,6 +75,11 @@ export type DocRow = {
   // way to express in an orderBy. The /files twin of this column is
   // FileRow.annotationCount, counting the same thing the same way.
   annotationCount: number;
+  // The live terms on the doc, in name order, off doc_tag_summary.terms
+  // (PLAN.md §20n); empty when the column is hidden, since the page then
+  // reads nothing. Null when the page withheld them: a PRIVATE doc only the
+  // ADMIN override lists, whose terms are as private as it is.
+  tags: TagLink[] | null;
   deletedAt: Date | null;
   deleted: boolean;
   canEdit: boolean;
@@ -86,6 +93,7 @@ const SORTABLE_KEYS = [
   "createdBy",
   "length",
   "annotations",
+  "tags",
   "slug",
   "updatedAt",
   "updatedBy",
@@ -211,6 +219,14 @@ export default function DocsTable({
       // noise, and what an admin turns this on for is which docs have
       // discussion on them.
       cell: (row) => (row.annotationCount === 0 ? "" : row.annotationCount.toLocaleString()),
+    },
+    tags: {
+      // No sort arrows under "Show all docs", where the page has already
+      // dropped this key from the sort: ordering by tags would hint at the
+      // cells it withholds (src/app/docs/page.tsx). Same test as the page's
+      // bypassAuthorScoping, since isAdmin is that page's viewerIsAdmin.
+      sortKey: isAdmin && filters.showAllDocs ? undefined : "tags",
+      cell: (row) => <TagListCell tags={row.tags} noun="doc" />,
     },
     // Defaulted hidden (§16l/§16i): real Doc columns available on request.
     // slug is otherwise unused here (Title/Edit link on row.id). created
@@ -402,15 +418,19 @@ export default function DocsTable({
             view — the byline joined in SQL across a doc&apos;s authors, and a count that excludes deleted and
             still-private draft annotations, neither of which a plain <code>ORDER BY</code> could name. That count is
             every live remark on the doc rather than every thread: a reply counts as its own annotation, the same way
-            /files counts them. <strong>Length</strong> is a
+            /files counts them. <strong>Tags</strong> sorts through a view of its own, <code>doc_tag_summary</code>, by
+            the terms&apos; names in order, untagged docs last; each chip opens that term&apos;s page. <strong>Length</strong> is a
             stored character count of the document body, measured in Postgres and kept current by a trigger, so sorting
             by it costs no more than sorting by a date (PLAN.md §16l). <strong>Annotations</strong>,{" "}
-            <strong>Slug</strong>, <strong>Created</strong> and <strong>Deleted at</strong> are hidden by default
+            <strong>Tags</strong>, <strong>Slug</strong>, <strong>Created</strong> and <strong>Deleted at</strong> are
+            hidden by default
             (Columns picker, above) — sorting by one of them from a hand-edited URL still works while it is
             hidden. This listing shows every <strong>SHARED</strong> doc to an ADMIN or EDITOR, plus the{" "}
             <strong>PRIVATE</strong> docs you carry a
             byline on. ADMIN accounts also get a &quot;Show all docs&quot; checkbox above, which adds everyone
-            else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md).
+            else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md),
+            and so does seeing its tags — those rows show a dash under Tags, and Tags doesn&apos;t sort while the box
+            is checked.
             The <strong>Authors</strong> filter narrows this listing; it never widens it. Without &quot;Show all
             docs&quot; the listing is still your own bylines plus every SHARED doc, so filtering on someone else&apos;s
             name returns the SHARED docs they co-author and not their PRIVATE ones — and your own name under{" "}
