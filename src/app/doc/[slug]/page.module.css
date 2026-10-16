@@ -20,7 +20,7 @@
      **The gutter is sized to hold the FROZEN flag**, which hangs 1.25rem into
      it out of `DocReadingBody.module.css`'s `.flagTrack`, plus 4px so it
      doesn't sit flush against the window. It was 0.75rem and the flag was
-     clipped by `body`'s `overflow-x: hidden` at every width where
+     clipped by `body`'s `overflow-x: clip` at every width where
      `max-width: 100%` is what decides this container — not just phones but
      the whole 1180–1544 band, i.e. an ordinary desktop window with the rail
      showing. Shrinking it back costs the flag, not just breathing room.

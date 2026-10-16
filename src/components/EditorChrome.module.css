@@ -14,10 +14,9 @@
    .editorContent itself; when the available space can't satisfy it,
    .editorContent overflows this frame (which has no overflow:hidden), and
    the page scrolls to reveal it instead of the editor shrinking below a
-   usable height — body { overflow-x: hidden } in globals.css implicitly
-   computes body's overflow-y to auto per the CSS overflow spec (an
-   element can't have one axis hidden and the other stay visible), which
-   is what makes that page-level scroll actually happen. That spill is only
+   usable height — globals.css's body { overflow-x: clip } leaves body's
+   overflow-y visible, so the excess spills out of body's 100dvh and the
+   document itself scrolls. That spill is only
    harmless while nothing interactive sits below the frame to be painted over;
    see the floor-yielding rule further down, which is what holds up the "only"
    when the doc editor's Settings panel is open. */

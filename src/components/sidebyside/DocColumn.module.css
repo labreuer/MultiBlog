@@ -1,5 +1,5 @@
 /* PLAN.md §14f/§14g — min-width:0 is load-bearing (grid items default to
-   min-width:auto, and body's overflow-x:hidden would silently clip an
+   min-width:auto, and body's overflow-x:clip would silently clip an
    overflow instead of showing the bug). */
 .column {
   display: flex;

@@ -26,7 +26,7 @@
    the flag between the border and the article. That gutter is the *page*
    container's padding, and this width is what sizes it: `/doc/[slug]`'s
    .container pads 1.5rem, this 1.25rem plus 4px of breathing room, precisely
-   so body's overflow-x: hidden has nothing to clip at the widths where the
+   so body's overflow-x: clip has nothing to clip at the widths where the
    page container is the full window. So widening the track here is not a
    local change — it needs that padding widened to match, or the flag starts
    being cut off again. */
