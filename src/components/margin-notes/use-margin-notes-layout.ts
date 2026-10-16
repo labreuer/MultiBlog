@@ -137,6 +137,30 @@ export function useMarginNotesLayout({
   // finds the same set does nothing at all.
   const reportedIdsRef = useRef<Set<string> | null>(null);
 
+  // The permalink the page was opened on, until the card it names has been
+  // scrolled to in the rail. The browser jumps to a fragment once, at load,
+  // against the server-rendered layout, where every card is still in the
+  // section below the article; the card then moves up into the rail beside its
+  // passage, thousands of pixels away on a long document, and nothing repeats
+  // the jump. So the pass that first places the card here does, once. Dropped
+  // unscrolled the moment the reader scrolls, clicks or types — a first pass
+  // that lands late must not yank them back — or follows another permalink,
+  // which the browser scrolls to itself, the card being placed by then.
+  const arrivalRef = useRef<string | null>(null);
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    arrivalRef.current = hash;
+    const drop = () => {
+      arrivalRef.current = null;
+    };
+    const events = ["wheel", "touchmove", "pointerdown", "keydown", "hashchange"] as const;
+    for (const type of events) window.addEventListener(type, drop, { passive: true });
+    return () => {
+      for (const type of events) window.removeEventListener(type, drop);
+    };
+  }, []);
+
   const idKey = useMemo(() => ids.join(" "), [ids]);
 
   useEffect(() => {
@@ -259,6 +283,25 @@ export function useMarginNotesLayout({
       // frame); an unbounded one has absolutely positioned children that
       // contribute nothing to its height, so it needs to be told.
       container.style.height = band ? "" : `${height}px`;
+
+      // See arrivalRef. Unbounded only: the bounded rail is the doc editor's,
+      // which has no permalinks, and the page is not what scrolls there.
+      //
+      // To the comment or annotation the permalink names rather than to the
+      // permalink itself, which is its timestamp: lined up with the top edge,
+      // as the browser's own jump does, that cuts off the name beside it.
+      // Centred, as a click on a highlight centres its entry
+      // (DocReadingBody's jumpToAnnotationEntry), unless it is too tall for
+      // the window to show whole, when its top is what the reader needs.
+      const arrival = arrivalRef.current;
+      if (arrival && !boundsRef.current) {
+        const target = document.getElementById(arrival);
+        if (target && container.contains(target)) {
+          arrivalRef.current = null;
+          const entry = target.closest<HTMLElement>("[data-comment-id]") ?? target;
+          entry.scrollIntoView({ block: entry.offsetHeight < window.innerHeight ? "center" : "start" });
+        }
+      }
     };
 
     const schedule = () => {
