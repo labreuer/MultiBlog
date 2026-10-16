@@ -1207,9 +1207,9 @@ uploading one and editing its metadata.
   `text_version`. A label column there would be copied for every version and would need three
   writers outside the test fixtures: the upload, lazy extraction in `storedPageText`, and
   `scripts/upgrade-pdf-text-version.ts`.
-- **Where they come from.** `extractPdf` calls `getPageLabels()`, which is the viewer's call
-  and works in the legacy build the server parses with. The upload stores the result. pdfjs
-  answers `null` for a PDF that defines none, which is stored as `[]`.
+- **Where they come from.** `extractPdfMetadata` calls `getPageLabels()`, which is the
+  viewer's call and works in the legacy build the server parses with. The upload stores the
+  result. pdfjs answers `null` for a PDF that defines none, which is stored as `[]`.
 - **The column.** It is `page_labels Json?`:
   - NULL means "not computed";
   - `[]` means "the PDF defines none";

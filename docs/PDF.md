@@ -766,12 +766,15 @@ answer, not an error. The pane says so. `scripts/make-test-pdf.ts` can write one
 array, a named destination, and a closed-by-default subtree) because nothing else in the repo
 has one to test against.
 
+**A title can hold NULs**, as a page label can, in a literal string or a UTF-16 one alike.
+The stored copy drops them, for §10b's reason.
+
 ---
 
 ## 10b. Page labels
 
 `pdf.getPageLabels()` returns what the document prints on its pages — `["i","ii","iii","1",…]`
-— or `null`. Four things about it are worth knowing before touching it:
+— or `null`. Five things about it are worth knowing before touching it:
 
 - **The array is always full length or absent.** pdfjs builds an entry per page (a page
   outside any labelling range gets `""`), so there are no holes to iterate around — but there
@@ -786,6 +789,11 @@ has one to test against.
   `data-page-label` on each page div, and that list doesn't exist until the pages are laid out
   — call it earlier and it stores the labels while labelling nothing, with no error. Same
   ordering trap as `currentScaleValue`; both are done in `completeReady`.
+- **A label can hold NULs.** pdfjs passes them through from the PDF's strings, and a prefix
+  padded with them puts one *mid*-label: `/P (A-\0)` gives `"A-\u00001"`. The copy stored on
+  `file` (docs/MCP.md §8) can't keep them, because `jsonb` refuses U+0000 and one NUL fails
+  the whole upload, so `extractPdfMetadata` drops every NUL rather than trimming a trailing
+  run. The viewer uses its own copy as pdfjs returns it.
 
 Anchoring, presence and geometry all keep counting **sheets** (1-based indices). A label
 never enters a computation — only a rendering. PLAN.md §19c.
