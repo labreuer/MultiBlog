@@ -124,10 +124,18 @@ html {
   height: 100%;
 }
 
+/* `clip`, never `hidden`. Both cut off sideways overflow, but `hidden` makes a
+   scroll container: it computes `overflow-y` to `auto` with it, and `body`
+   has the definite height below, so `body` rather than the document would
+   scroll every page. iOS's tap on the status bar scrolls only the document
+   (WebKit gives an element's own scroll view `scrollsToTop = NO`), so the tap
+   would do nothing anywhere on the site. `clip` leaves `overflow-y` visible
+   and makes no scroller; on `html` it reaches the viewport as `hidden`, which
+   is what keeps the page from scrolling sideways. STYLE.md, Global baseline. */
 html,
 body {
   max-width: 100vw;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -151,7 +159,7 @@ body {
 
 /* Keeps every page's <main> at the viewport's width rather than its content's:
    without this a wide admin table inflates main past the viewport, and body's
-   `overflow-x: hidden` clips the excess unreachably instead of scrolling it —
+   `overflow-x: clip` clips the excess unreachably instead of scrolling it —
    so AdminTable.module.css's `.tableScroll` has nothing to overflow.
 
    Both declarations are load-bearing, against two different causes.

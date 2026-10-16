@@ -281,7 +281,7 @@ export function useEditorAnnotationWidget({
       // Preferred spot is genuinely outside the text column. Clamped into
       // the viewport for the narrow end of the supported range, where the
       // column nearly fills the window and there is no true gutter to sit
-      // in — body's `overflow-x: hidden` would otherwise clip the marker
+      // in — body's `overflow-x: clip` would otherwise clip the marker
       // away entirely (globals.css).
       const preferred = frameRect.right + MARKER_GAP;
       const maxLeft = viewportSize().width - ANNOTATE_MARKER_SIZE - MARKER_GAP;

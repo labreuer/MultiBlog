@@ -92,7 +92,7 @@
 
      The scroller is this element and not the page, which is the rule
      STYLE.md's "Narrow viewports and horizontal overflow" states: `html, body
-     { overflow-x: hidden }` in globals.css clips page-level horizontal
+     { overflow-x: clip }` in globals.css clips page-level horizontal
      overflow unreachably, so anything that can exceed the viewport carries
      its own `overflow-x: auto`. Naming overflow-y too is not redundant — a
      box cannot have one axis clipped and the other visible, so leaving it out

@@ -103,9 +103,17 @@ value that two systems depend on invites drift.
   `SiteHeader`" instead of silently reverting to content-based sizing and producing an
   always-present page scrollbar. `PostPublisher.module.css` has no equivalent budget to
   manage: nothing in it is a live editing surface any more (PLAN.md §15c).
-- `body` also gets an implicit `overflow-y: auto`, as a side effect of its
-  `overflow-x: hidden`, which makes `documentElement` the effective scroller. Use
-  `window.scrollY`, **not** `body.scrollTop`, when checking scroll position or behavior.
+- `html, body { overflow-x: clip }` — **`clip`, never `hidden`.** Both cut off sideways
+  overflow, but `hidden` makes a scroll container: it computes `overflow-y` to `auto`
+  with it, and with the definite height above, `body` would then scroll every page in
+  place of the document. iOS's tap on the status bar scrolls only the document — WebKit
+  sets `scrollsToTop = NO` on the scroll view it makes for any element that scrolls
+  (`ScrollingTreeScrollingNodeDelegateIOS.mm`) — so the tap would do nothing anywhere on
+  the site. `clip` leaves `overflow-y` visible and makes no scroller; on `html` it reaches
+  the viewport as `hidden`, which is what stops the page scrolling sideways. So the
+  document is the scroller: use `window.scrollY`, **not** `body.scrollTop`. The PDF
+  viewer and the doc editor scroll inside boxes of their own, where the tap does nothing,
+  and the page is sent no event it could answer the tap from.
 - Links: `a { color: var(--link); text-decoration: none; }`, `a:hover { text-decoration:
   underline; }` — sitewide default for **every** link except post titles (below).
 
@@ -347,7 +355,7 @@ other's symptom.
 `flex-grow` children have a budget — see the Global baseline section), so every page's
 `<main>` is a flex item. Every page also gives it `margin: <n>rem auto` inline. Left
 alone, main sizes itself to its *content* rather than to the viewport, and because
-`body` carries `overflow-x: hidden` the excess is silently clipped instead of becoming
+`body` carries `overflow-x: clip` the excess is silently clipped instead of becoming
 a scrollbar. Anything inside main then lays out against that inflated width, so a
 scroll container inside it has nothing to overflow — which is why the table wrapper
 below does nothing without this rule.
@@ -571,7 +579,7 @@ the rail is a queue in document order, with no passage to sit level with, so
 the extra width would buy nothing and cost the document. This is the "Narrow
 viewports and horizontal overflow" rule above rather than an exception to it —
 the scroller is `.container`, not the page, because
-`html, body { overflow-x: hidden }` would clip a page-level overflow
+`html, body { overflow-x: clip }` would clip a page-level overflow
 unreachably.
 
 Three consequences worth knowing before touching it.
@@ -656,7 +664,7 @@ Five centred-column widths now, and they are one decision rather than five:
   FROZEN flag (`DocReadingBody.module.css`'s `.flagTrack`) hangs 1.25rem to the left of
   the reading column, into that padding, and the 1.5rem is that plus 4px so it doesn't
   sit flush against the window. At 0.75rem the flag was clipped by `body`'s
-  `overflow-x: hidden` wherever `max-width: 100%` decided the container — which is not
+  `overflow-x: clip` wherever `max-width: 100%` decided the container — which is not
   only phone widths but the entire 1180–1544 band, an ordinary desktop window with the
   rail showing.
 
