@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { getSchema } from "@tiptap/core";
 import BaseStarterKit from "@tiptap/starter-kit";
 import {
+  EDITOR_LINK_OPTIONS,
   StarterKit,
   pmAnnotationContentSchema,
   pmCommentContentSchema,
@@ -35,4 +36,25 @@ test("StarterKit has the package's marks with code moved last, and still takes c
   const original = Object.keys(getSchema([BaseStarterKit]).marks);
   assert.deepEqual(Object.keys(getSchema([StarterKit]).marks), [...original.filter((mark) => mark !== "code"), "code"]);
   assert.equal(getSchema([StarterKit.configure({ code: false })]).marks.code, undefined);
+});
+
+// docs/TIPTAP.md "Autolink passes `.md` filenames by". Each value is what
+// linkify hands shouldAutoLink for a match — "docs/COLLAB.md" arrives as
+// "COLLAB.md", and a query is cut off — so these are its inputs as they
+// really come.
+test("autolink passes a scheme-less .md name by, and links everything else as before", () => {
+  const { shouldAutoLink } = EDITOR_LINK_OPTIONS;
+  for (const value of ["Connections.md", "COLLAB.md", "README.MD", "example.md/path", "example.md:8080"]) {
+    assert.equal(shouldAutoLink(value), false, value);
+  }
+  for (const value of ["https://example.md", "http://foo.md/x", "www.example.md", "user@example.md"]) {
+    assert.equal(shouldAutoLink(value), true, value);
+  }
+  // Untouched by the rule: other domains, and the default's own refusals.
+  for (const value of ["example.com", "claude.ai", "notes.mdx", "md.example.com"]) {
+    assert.equal(shouldAutoLink(value), true, value);
+  }
+  for (const value of ["192.168.0.1", "localhost"]) {
+    assert.equal(shouldAutoLink(value), false, value);
+  }
 });
