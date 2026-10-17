@@ -315,8 +315,14 @@ Every link mark whose href is a fragment link, relative or on the instance's own
 - **an unknown file**: no live file has the slug, past slugs followed. A link naming a past slug
   is a warning, since the redirect still carries it.
 
-Two properties of the check:
+Three properties of the check:
 
+- **It holds only the pages links name.** A run reads each named page once and keeps it, so
+  what it holds grows with the links rather than with the books they cite. A miss is the one
+  finding that reads past its page (the page it is on instead), so a miss reads that file
+  whole, and the check keeps one whole file at a time. The CLI asks for the whole file
+  outright. Holding every page of every file a run touched was enough to exhaust the web
+  process's heap: one doc linking into 75 books named 26,000 pages.
 - **It is read-only.** It reads `file_page_text` directly rather than through `storedPageText`,
   which would extract a file that lacks the current version. It takes the current version where
   the file has one, and otherwise the greatest it has, as search does (FULLTEXT.md §4); a
