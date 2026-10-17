@@ -116,22 +116,45 @@ export type FilePages = {
   pages: Map<number, { text: string; skeleton: Skeleton }>;
 };
 
-/** Caches each file's pages for one run, so a doc that quotes one book 65 times reads it once. */
+type FileRef = Omit<FilePages, "pages">;
+type PageMap = FilePages["pages"];
+
+/**
+ * Reads, for one run, each page a link names once, so a doc that quotes one
+ * book 65 times reads those pages once.
+ *
+ * **It holds the pages links name, never every page of every file a run
+ * touches** — one doc linking into 75 books named 26,000 pages, whose text and
+ * skeletons took the web process past its heap. What `check` keeps grows with
+ * the links, not the books. A whole file is read only for a miss, since its
+ * `foundOnPage` looks at every page, and only the most recent such file is
+ * held.
+ */
 export class FragmentChecker {
-  private files = new Map<string, Promise<FilePages | null>>();
+  private files = new Map<string, Promise<FileRef | null>>();
+  private cited = new Map<string, PageMap>();
+  private whole: { fileId: string; pages: Promise<FilePages> } | null = null;
   private version: Promise<string> | null = null;
 
-  /** The file a slug names now, past slugs followed; null for none, or a deleted one. */
+  /**
+   * Every page of the file a slug names now, past slugs followed; null for
+   * none, or a deleted one. Held until another file's every page is asked for.
+   */
   async pagesFor(slug: string): Promise<FilePages | null> {
+    const file = await this.fileFor(slug);
+    return file ? this.wholeFile(file) : null;
+  }
+
+  private fileFor(slug: string): Promise<FileRef | null> {
     let pending = this.files.get(slug);
     if (!pending) {
-      pending = this.load(slug);
+      pending = this.resolve(slug);
       this.files.set(slug, pending);
     }
     return pending;
   }
 
-  private async load(slug: string): Promise<FilePages | null> {
+  private async resolve(slug: string): Promise<FileRef | null> {
     const resolved = await resolveFileParam(slug, { id: true, slug: true, pageCount: true, deletedByUserId: true });
     if (!resolved || resolved.file.deletedByUserId !== null || resolved.file.pageCount === null) return null;
     const file = resolved.file;
@@ -141,29 +164,51 @@ export class FragmentChecker {
     const versions = await prisma.filePageText.groupBy({ by: ["textVersion"], where: { fileId: file.id } });
     const names = versions.map((row) => row.textVersion);
     const textVersion = names.includes(current) ? current : (names.sort().at(-1) ?? null);
+    return { fileId: file.id, slug: file.slug, pageCount: file.pageCount!, textVersion };
+  }
 
-    const pages = new Map<number, { text: string; skeleton: Skeleton }>();
-    if (textVersion !== null) {
-      const rows = await prisma.filePageText.findMany({
-        where: { fileId: file.id, textVersion },
-        select: { pageIndex: true, text: true },
-      });
-      for (const row of rows) pages.set(row.pageIndex, { text: row.text, skeleton: skeletonOf(row.text) });
+  private wholeFile(file: FileRef): Promise<FilePages> {
+    if (this.whole?.fileId !== file.fileId) {
+      this.whole = { fileId: file.fileId, pages: this.readPages(file, null).then((pages) => ({ ...file, pages })) };
     }
-    return { fileId: file.id, slug: file.slug, pageCount: file.pageCount!, textVersion, pages };
+    return this.whole.pages;
+  }
+
+  /** The pages at `indexes`, or every page for null. */
+  private async readPages(file: FileRef, indexes: readonly number[] | null): Promise<PageMap> {
+    const pages: PageMap = new Map();
+    if (file.textVersion === null || indexes?.length === 0) return pages;
+    const rows = await prisma.filePageText.findMany({
+      where: { fileId: file.fileId, textVersion: file.textVersion, ...(indexes ? { pageIndex: { in: [...indexes] } } : {}) },
+      select: { pageIndex: true, text: true },
+    });
+    for (const row of rows) pages.set(row.pageIndex, { text: row.text, skeleton: skeletonOf(row.text) });
+    return pages;
   }
 
   async check(link: FragmentLinkHref): Promise<FragmentLinkFinding> {
-    const file = await this.pagesFor(link.slug);
+    const file = await this.fileFor(link.slug);
     if (!file) return { kind: "unknown-file", slug: link.slug };
-    return {
-      kind: "checked",
-      slug: link.slug,
-      currentSlug: file.slug,
-      fileId: file.fileId,
-      passages: link.passages.map((passage) => checkPassage(file, passage)),
-      unread: link.unread,
-    };
+
+    let cited = this.cited.get(file.fileId);
+    if (!cited) {
+      cited = new Map();
+      this.cited.set(file.fileId, cited);
+    }
+    const toRead = [...new Set(link.passages.map((passage) => passage.page - 1))].filter(
+      (index) => index >= 0 && index < file.pageCount && !cited.has(index),
+    );
+    for (const [index, page] of await this.readPages(file, toRead)) cited.set(index, page);
+
+    // Only the pages links name, so a miss is asked again of the whole file,
+    // the one finding that reads past its own page.
+    const named: FilePages = { ...file, pages: cited };
+    const passages: PassageFinding[] = [];
+    for (const passage of link.passages) {
+      const finding = checkPassage(named, passage);
+      passages.push(finding.kind === "no-match" ? checkPassage(await this.wholeFile(file), passage) : finding);
+    }
+    return { kind: "checked", slug: link.slug, currentSlug: file.slug, fileId: file.fileId, passages, unread: link.unread };
   }
 }
 

@@ -1377,6 +1377,9 @@ check the integrity script and the one-quote CLI already share: `FragmentChecker
 - **It never extracts.** It reads the stored text at the current version, or the newest the
   file has, since a skeleton barely depends on the version. The anchor locator above extracts
   on a miss instead, because quads need the text the current pdfjs yields.
+- **It reads only the pages the links name**, and a whole file only for a miss, so a body
+  citing many books costs what it cites rather than what the books hold
+  ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md) §8).
 
 That covers every text a call writes:
 
