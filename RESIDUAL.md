@@ -9,8 +9,6 @@ anywhere else. Delete each item once it has a proper home, and the file once it'
   that are docs, addressed by author (`/wiki/[author]/[name]`), which stay out of the RSS
   feed, can be made public, and can be forked and diffed. This branch keeps the fuller,
   embedding-based design, committed as it stood on 2026-09-25. Nothing on it is built.
-- **`docs/computed/anchoring.md` is staged but deliberately not committed**, at the user's
-  request. It now carries the planned embedding row, marked ◇.
 
 ## Where the thinking lives
 
