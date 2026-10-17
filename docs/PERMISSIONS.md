@@ -311,7 +311,7 @@ Three consequences worth stating plainly, because they are what the user-facing 
 That it can see PDF annotations at all is one of the reasons they are Postgres rows rather
 than entries in a per-file ydoc (PLAN.md §19).
 
-## Tags (PLAN.md §20)
+## Tags ([TAGS.md](TAGS.md))
 
 **A term is vocabulary; an assignment is one person's act of tagging.** The two have
 different owners and therefore different rules, and conflating them is the mistake this
@@ -358,6 +358,19 @@ editor's Settings panel (`/doc/[slug]/edit`) renders `TagStrip` directly, fed by
 is stricter than the read rule above, never looser: `canUserTagTarget` is "you may tag what
 you may read, plus a role floor", so anything it returns was readable anyway. Worth knowing
 because the paragraph above is about `TagChips`, and this surface does not go through it.
+
+**`/docs` and `/files` show each row's tags, and withhold them where listing is wider than
+reading** (TAGS.md, "The Tags column"). Their Tags column reads chips from the
+`doc_tag_summary`/`file_tag_summary` views rather than through `TagChips`, so the table's own
+row scoping is the gate — and every row either table lists by default is one its viewer may
+read. The ADMIN-only "Show all docs"/"Show all files" override is the exception: it lists
+PRIVATE objects the admin may not read, and those rows get no tags at all — not in the cell,
+not in the page's data — and Tags does not sort while the override is on, since an order by
+tags would hint at what the cells withhold. The override still shows those rows' title, byline and annotation count; which terms
+are on them is the disclosure that stays with the object's read gate, as above. The tables'
+bulk **+ tag** reaches the same rows and no others: tagging follows reading, so a row only the
+override lists is dropped from the run, and `canUserTagTarget` refuses it per row on the server
+regardless (TAGS.md, "Tagging from /docs and /files").
 
 **`/tag/[slug]` is three queries, not one UNION.** Each per-type section wears the
 predicate that already governs its own type, so the PRIVATE-doc rule in tables 1–4 holds
@@ -725,6 +738,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts`; create, tag and untag in `src/lib/tag-write.ts` |
 | `/tag/[slug]`'s three per-type predicates | `src/lib/tag-browse.ts` |
 | `/tags` row scoping (there is none) + the curate gate | `src/app/tags/page.tsx` |
+| `/docs`' and `/files`' Tags cells and sort, withheld under the "Show all" override | `src/app/docs/page.tsx`, `src/app/files/page.tsx` |
 | Anchored-link follow filter (per-target, silent omission) | `src/lib/anchored-link-data.ts` |
 | Anchored-link landing (per-viewer redirect; existence vs. empty page) | `src/app/link/[id]/page.tsx`, `anchoredLinkLandingFor` in `src/lib/anchored-link-data.ts` |
 | Anchored-link create/draft/mint (read-the-target, creator-scoped) | `src/app/actions/anchored-links.ts` |

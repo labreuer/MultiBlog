@@ -17,6 +17,7 @@ to re-derive the decision from.
 | [docs/COMMENTS.md](docs/COMMENTS.md) | Comments as built: identity and moderation, the validated body and its two front doors, drafts, editing with history and the grace window, and quotation as an anchor row. |
 | [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
 | [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
+| [docs/TAGS.md](docs/TAGS.md) | Tags as built: term vs. assignment vs. anchor, one write layer for both front doors, "you may tag what you may read", chips that read no session and where they mount, `/tag/[slug]`'s per-type sections, `/tags`, and the Tags column in `/docs` and `/files` with what the ADMIN override withholds. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
 | [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. |
@@ -120,10 +121,13 @@ before changing the behavior it describes.
   lives in a client island that asks the server on open. `/tag/[slug]` is three per-type
   queries wearing three existing predicates, never one UNION. **The exception is a surface
   showing one object's tags on *another* object's page** — `/post/[id]/edit`'s source-doc
-  tag offer (§20m) is the only one, and it breaks the premise rather than the rule: the
+  tag offer is the only one, and it breaks the premise rather than the rule: the
   page's own gate is about the post, and a post author need not be an author of the doc it
   was made from. That one runs `canUserReadDoc` as a second, narrower check, and the check
-  is load-bearing rather than belt-and-braces. PLAN.md §20d, §20m, docs/PERMISSIONS.md.
+  is load-bearing rather than belt-and-braces. `/docs`' and `/files`' Tags columns draw chips
+  per row from `doc_tag_summary`/`file_tag_summary` instead, and send none for a row only the
+  ADMIN "Show all" override lists, nor sort by tags under it. docs/TAGS.md,
+  docs/PERMISSIONS.md.
 - **A post's byline is not its doc's, and being on the first grants nothing over the
   second.** The two are seeded alike at creation and edited independently from then on
   (§15d), because credit for a published piece is not authority over its text. So

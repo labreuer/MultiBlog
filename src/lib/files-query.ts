@@ -15,7 +15,7 @@ import {
 // src/lib/docs-query.ts, and this is deliberately its twin so the two admin
 // tables behave identically where they behave at all.
 //
-// Only one key here can't be reached by a plain `ORDER BY` on `file`:
+// Three keys here can't be reached by a plain `ORDER BY` on `file`:
 //
 //   owners       `file_metrics.owners` — admin_initials string_agg'd across
 //                FileOwner in owner order, a to-many Prisma could otherwise
@@ -25,6 +25,9 @@ import {
 //   annotations  `file_metrics.annotation_count` — a *filtered* count
 //                (non-deleted, non-DRAFT), which `_count` has no way to
 //                express in an orderBy.
+//   tags         `file_tag_summary.names` — /docs' tags key, through the
+//                twin view, and dropped under showAllFiles for the same
+//                reason (docs-query.ts).
 //
 // Size and Pages are plain stored columns and need neither a view nor a
 // trigger, which is the difference from /docs' Length: a doc's length is a
@@ -39,6 +42,7 @@ export type FilesSortKey =
   | "pages"
   | "size"
   | "annotations"
+  | "tags"
   | "created"
   | "createdBy"
   | "slug"
@@ -55,6 +59,7 @@ const SORT_KEYS: readonly FilesSortKey[] = [
   "pages",
   "size",
   "annotations",
+  "tags",
   "created",
   "createdBy",
   "slug",

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createTag, loadTaggerState, tagObject, untagObject, type TaggerState } from "@/app/actions/tags";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import type { AnchorTarget } from "@/lib/anchors";
+import TagTermPicker from "./TagTermPicker";
 import styles from "./TagChips.module.css";
 
 // PLAN.md §20d — pick an existing term, mint a new one, or take your own tag
@@ -86,14 +87,6 @@ export default function TagTagger({
   // The subset this viewer may take back off — §20c's rule, arriving as a
   // field on each chip rather than as a second list to keep in step.
   const own = chips.filter((c) => c.ownAssignmentId !== null);
-  const query = draft.trim().toLowerCase();
-  const matches = options.filter((o) => o.name.toLowerCase().includes(query)).slice(0, 12);
-  // An exact case-insensitive hit means "apply that one", not "mint a
-  // near-duplicate" — the same comparison `tag_name_lower_key` enforces in
-  // Postgres, so the button never offers to create something the database is
-  // about to refuse.
-  const exact = options.find((o) => o.name.toLowerCase() === query);
-  const canCreate = query.length > 0 && !exact;
 
   return (
     <details
@@ -113,56 +106,20 @@ export default function TagTagger({
 
         {state?.canTag && (
           <>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (exact) {
-                  run(() => tagObject(exact.id, target.kind, target.id));
-                } else if (draft.trim()) {
-                  const name = draft.trim();
-                  run(async () => {
-                    const tag = await createTag(name);
-                    await tagObject(tag.id, target.kind, target.id);
-                  });
-                }
-              }}
-            >
-              <input
-                type="text"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Find or add a tag …"
-                aria-label="Find or add a tag"
-                className={styles.taggerInput}
-                disabled={pending}
-              />
-              {canCreate && (
-                <button type="submit" disabled={pending} className={styles.taggerCreate}>
-                  Create &ldquo;{draft.trim()}&rdquo;
-                </button>
-              )}
-            </form>
-
-            {matches.length > 0 && (
-              <ul className={styles.taggerList}>
-                {matches.map((option) => (
-                  <li key={option.id}>
-                    <button
-                      type="button"
-                      onClick={() => run(() => tagObject(option.id, target.kind, target.id))}
-                      // Already applied by *somebody*. Deliberately disabled
-                      // rather than hidden: "this term is already on this
-                      // object" is the answer to the question being asked, and
-                      // hiding it would read as the term not existing.
-                      disabled={pending || applied.has(option.id)}
-                      title={applied.has(option.id) ? "Already applied here" : undefined}
-                    >
-                      {option.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <TagTermPicker
+              options={options}
+              applied={applied}
+              draft={draft}
+              onDraftChange={setDraft}
+              pending={pending}
+              onPick={(tagId) => run(() => tagObject(tagId, target.kind, target.id))}
+              onCreate={(name) =>
+                run(async () => {
+                  const tag = await createTag(name);
+                  await tagObject(tag.id, target.kind, target.id);
+                })
+              }
+            />
 
             {own.length > 0 && (
               <>

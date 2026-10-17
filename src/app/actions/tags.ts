@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
-import { canCurateTags } from "@/lib/role-checks";
+import { canApplyTags, canCurateTags } from "@/lib/role-checks";
 import { canUserTagTarget } from "@/lib/tag-authz";
 import { changeTagSlug, tagNameInUse } from "@/lib/tag-slug";
 import { tagsForTarget, listTagOptions, type TagChip, type TagOption } from "@/lib/tag-data";
@@ -171,6 +171,51 @@ export async function tagObjectMany(tagIds: string[], targetKind: string, target
   if (terms.length === 0) return;
 
   await applyTags(actor, target, terms.map((t) => t.id));
+}
+
+/**
+ * The vocabulary for a picker that isn't about one object — `/docs`' and
+ * `/files`' bulk tagger. `canTag` is the role floor only: which of the
+ * selected objects may be tagged is `bulkTagObjects`' question, asked per row.
+ */
+export async function loadTagOptions(): Promise<{ canTag: boolean; options: TagOption[] }> {
+  const session = await requireTagger();
+  if (!canApplyTags(session.user.role)) return { canTag: false, options: [] };
+  return { canTag: true, options: await listTagOptions() };
+}
+
+/**
+ * Applies one term to each of several whole objects — the bulk "+ tag" on
+ * `/docs` and `/files` (docs/TAGS.md, "Tagging from /docs and /files").
+ *
+ * **One act of tagging per object, through `applyTags`**, so each row passes
+ * the same gate a single tag would (`canUserTagTarget`: the role floor and
+ * that object's read rule), skips a term this person already applied there,
+ * and revalidates that object's page. `settleBulk` reports each row's outcome,
+ * the admin tables' convention, rather than one bit for the selection: a row
+ * this viewer may not tag fails alone with the same message a single tag gets.
+ *
+ * The term is checked once, up front: a term deleted since the picker opened
+ * fails the whole gesture with one message rather than every row with the
+ * same one.
+ */
+export async function bulkTagObjects(tagId: string, targetKind: string, targetIds: string[]): Promise<BulkResult> {
+  const session = await requireTagger();
+  const kind = parseAnchorTargetKind(targetKind);
+  if (!kind) {
+    throw new Error(`"${targetKind}" is not something a tag can be attached to.`);
+  }
+  if (!Array.isArray(targetIds) || !targetIds.every((id) => typeof id === "string" && id !== "")) {
+    throw new Error("Missing the objects to tag.");
+  }
+
+  const tag = await prisma.tag.findUnique({ where: { id: tagId }, select: { id: true } });
+  if (!tag) {
+    throw new Error("Tag not found.");
+  }
+
+  const actor = actorFromSessionUser(session.user);
+  return settleBulk([...new Set(targetIds)], (id) => applyTags(actor, { kind, id }, [tag.id]));
 }
 
 /** Retracts one act of tagging: one's own, or anyone's as ADMIN/EDITOR (`removeTagAssignment`). */

@@ -5,15 +5,17 @@ import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { canManageFiles, canManageAnySharedFile } from "@/lib/file-authz";
 import { isAdmin } from "@/lib/authz";
-import { toURLSearchParams } from "@/lib/table-query";
+import { toURLSearchParams, withoutSortKey } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
-import { parseFilesFilters, type FilesFilters, type FilesSortKey } from "@/lib/files-query";
+import { DEFAULT_SORT, parseFilesFilters, type FilesFilters, type FilesSortKey } from "@/lib/files-query";
 import { ownerFilterWhere, listOwnerFilterOptions } from "@/lib/author-filter";
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import FilesTable from "@/components/FilesTable";
 import FileUploader from "@/components/FileUploader";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { parseTagList } from "@/lib/tag-data";
+import { codeDefaultColumns } from "@/lib/admin-table-columns";
 
 export const metadata: Metadata = { title: "Files" };
 
@@ -54,6 +56,9 @@ function buildOrderBy(sort: SortColumn<FilesSortKey>[]): Prisma.StoredFileOrderB
         // Prisma rejects the {sort, nulls} form for it. A file with no view row
         // at all still sorts as a NULL *relation*, which Prisma puts last.
         return { metrics: { annotationCount: dir } };
+      case "tags":
+        // /docs' tags key, through file_tag_summary, doc_tag_summary's twin (§20n).
+        return { tagSummary: { names: { sort: dir, nulls: "last" } } };
       case "visibility":
         return { visibility: dir };
       case "pages":
@@ -133,6 +138,12 @@ export default async function FilesPage({
   const where: Prisma.StoredFileWhereInput = {
     AND: [bypassOwnerScoping ? {} : ownerScope, buildFilterWhere(filters)],
   };
+  // /docs' rule for its own override, for the same reason: the Tags cells of
+  // the PRIVATE files only the override lists are withheld below, so ordering
+  // by tags is too (src/app/docs/page.tsx).
+  if (bypassOwnerScoping) filters.sort = withoutSortKey(filters.sort, "tags", DEFAULT_SORT);
+  // Read the tag view only for a page that draws Tags, as /docs does.
+  const showTags = (filters.cols ?? codeDefaultColumns("files")).includes("tags");
 
   const [files, totalCount] = await Promise.all([
     prismaIncludingDeleted.storedFile.findMany({
@@ -155,6 +166,7 @@ export default async function FilesPage({
         // Read from the same view that sorts them, so the displayed and sorted
         // expressions can't drift (§16e).
         metrics: { select: { owners: true, annotationCount: true } },
+        tagSummary: showTags && { select: { terms: true } },
         // Ids only: canManage below is a membership test, not a display value.
         owners: { select: { userId: true } },
         createdBy: { select: { name: true, email: true } },
@@ -164,32 +176,42 @@ export default async function FilesPage({
     prismaIncludingDeleted.storedFile.count({ where }),
   ]);
 
-  const rows = files.map((file) => ({
-    id: file.id,
-    slug: file.slug,
-    title: file.title,
-    filename: file.filename,
-    // NULL only when the file has no owners — same empty cell either way.
-    owners: file.metrics?.owners ?? "",
-    visibility: file.visibility,
-    pageCount: file.pageCount,
-    byteSize: file.byteSize,
-    // No view row at all means no owners and no annotations, so zero.
-    annotationCount: file.metrics?.annotationCount ?? 0,
-    createdAt: file.createdAt,
-    createdByName: file.createdBy ? staffDisplayNameOf(file.createdBy, session.user.role) : "",
-    updatedAt: file.updatedAt,
-    updatedByName: file.updatedBy ? staffDisplayNameOf(file.updatedBy, session.user.role) : "",
-    deletedAt: file.deletedAt,
-    deleted: file.deletedByUserId !== null,
-    // canUserManageFile's rule inlined, decided here rather than per row
-    // through that function, which costs a query apiece. The "Show all files"
-    // override has no say: it widens which rows are listed, not who may act on
-    // them, so a PRIVATE file it brings into view is read-only in this table.
-    canManage:
-      file.owners.some((o) => o.userId === session.user.id) ||
-      (viewerCanManageAnyShared && file.visibility === "SHARED"),
-  }));
+  const rows = files.map((file) => {
+    const isOwner = file.owners.some((o) => o.userId === session.user.id);
+    // canUserReadFile's rule inlined; only a row the override lists can fail it.
+    const readable = file.visibility === "SHARED" || isOwner;
+    return {
+      id: file.id,
+      slug: file.slug,
+      title: file.title,
+      filename: file.filename,
+      // NULL only when the file has no owners — same empty cell either way.
+      owners: file.metrics?.owners ?? "",
+      visibility: file.visibility,
+      pageCount: file.pageCount,
+      byteSize: file.byteSize,
+      // No view row at all means no owners and no annotations, so zero.
+      annotationCount: file.metrics?.annotationCount ?? 0,
+      // Null — withheld — on a PRIVATE file this viewer doesn't own, which only
+      // the "Show all files" override lists; /docs' tags field says why, and
+      // why here rather than in the cell. Empty when the column is hidden,
+      // since nothing was read.
+      tags: readable ? parseTagList(file.tagSummary?.terms) : null,
+      createdAt: file.createdAt,
+      createdByName: file.createdBy ? staffDisplayNameOf(file.createdBy, session.user.role) : "",
+      updatedAt: file.updatedAt,
+      updatedByName: file.updatedBy ? staffDisplayNameOf(file.updatedBy, session.user.role) : "",
+      deletedAt: file.deletedAt,
+      deleted: file.deletedByUserId !== null,
+      // canUserManageFile's rule inlined, decided here rather than per row
+      // through that function, which costs a query apiece. The "Show all files"
+      // override has no say: it widens which rows are listed, not who may act on
+      // them, so a PRIVATE file it brings into view is read-only in this table.
+      canManage: isOwner || (viewerCanManageAnyShared && file.visibility === "SHARED"),
+      // The bulk "+ tag"'s affordance, as /docs' canTag.
+      canTag: readable,
+    };
+  });
 
   return (
     <main style={{ maxWidth: 1100, margin: "4rem auto", fontFamily: "sans-serif" }}>

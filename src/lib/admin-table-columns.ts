@@ -41,6 +41,9 @@ export const ADMIN_TABLE_COLUMNS = {
     { key: "updatedBy", label: "Updated by" },
     { key: "length", label: "Length" },
     { key: "annotations", label: "Annotations", defaultHidden: true },
+    // PLAN.md §20n — defaulted hidden per §16m, on both tables, so nobody's
+    // table widens by a column of chips unasked.
+    { key: "tags", label: "Tags", defaultHidden: true },
     { key: "slug", label: "Slug", defaultHidden: true },
     { key: "created", label: "Created", defaultHidden: true },
     { key: "createdBy", label: "Created by", defaultHidden: true },
@@ -54,6 +57,7 @@ export const ADMIN_TABLE_COLUMNS = {
     { key: "pages", label: "Pages" },
     { key: "size", label: "Size" },
     { key: "annotations", label: "Annotations" },
+    { key: "tags", label: "Tags", defaultHidden: true },
     { key: "created", label: "Added" },
     { key: "createdBy", label: "Created by", defaultHidden: true },
     { key: "slug", label: "Slug", defaultHidden: true },

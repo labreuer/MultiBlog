@@ -2,7 +2,11 @@ import { test, expect, freshGoto, gotoOk } from "./fixtures";
 import {
   ADMIN_EMAIL,
   addTestPostAuthor,
+  createTestDoc,
+  createTestFile,
   createTestTag,
+  deleteTestDoc,
+  deleteTestFile,
   deleteTestTag,
   getTagAnchorPartColumns,
   getTagFacts,
@@ -426,6 +430,201 @@ test.describe("tags", () => {
       expect(cells.filter((c) => c.trim() === "1")).toHaveLength(2);
     } finally {
       await deleteTestTag(unused.id);
+    }
+  });
+
+  // PLAN.md §20n — the Tags column of /docs and /files: chips drawn from, and
+  // sorted through, the doc_tag_summary / file_tag_summary view.
+  // Tags is defaultHidden (§16m), so every visit asks for it with ?cols=.
+  test("/docs and /files list their tags, sorted through their tag views", async ({ page }) => {
+    const token = `tagcol${Date.now()}`;
+    // `tag` ("E2E tag …") is the later term, `early` the earlier one.
+    const early = await createTestTag({ creatorEmail: ADMIN_EMAIL, name: uniqueTitle("bbb early") });
+    const docs: string[] = [];
+    const files: string[] = [];
+    try {
+      // The viewer's own PRIVATE docs, so no override is needed to list them.
+      const earlyDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} early`) });
+      const lateDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} late`) });
+      const untaggedDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} none`) });
+      docs.push(earlyDoc.id, lateDoc.id, untaggedDoc.id);
+      await tagWithTestTag({ tagId: early.id, target: { kind: "doc", id: earlyDoc.id }, taggerEmail: ADMIN_EMAIL });
+      await tagWithTestTag({ tagId: tag.id, target: { kind: "doc", id: lateDoc.id }, taggerEmail: ADMIN_EMAIL });
+
+      const table = page.getByRole("table").first();
+      const titlesInOrder = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+
+      // Untagged sorts last in both directions — the view's NULL, ordered
+      // `nulls: "last"` — which is what tells this apart from a plain string sort.
+      await gotoOk(page, `/docs?q=${token}&cols=title,tags&sort=tags:asc`);
+      expect(await titlesInOrder()).toEqual([earlyDoc.title, lateDoc.title, untaggedDoc.title]);
+      await expect(page.getByRole("columnheader", { name: "Tags" })).toHaveText("Tags ▲");
+      await gotoOk(page, `/docs?q=${token}&cols=title,tags&sort=tags:desc`);
+      expect(await titlesInOrder()).toEqual([lateDoc.title, earlyDoc.title, untaggedDoc.title]);
+
+      // A chip is the object page's chip: a link to the term's page.
+      const earlyRow = table.getByRole("row").filter({ hasText: earlyDoc.title });
+      await expect(earlyRow.getByRole("link", { name: early.name })).toHaveAttribute("href", `/tag/${early.slug}`);
+
+      const earlyFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} early`) });
+      const lateFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} late`) });
+      files.push(earlyFile.id, lateFile.id);
+      await tagWithTestTag({ tagId: early.id, target: { kind: "file", id: earlyFile.id }, taggerEmail: ADMIN_EMAIL });
+      await tagWithTestTag({ tagId: tag.id, target: { kind: "file", id: lateFile.id }, taggerEmail: ADMIN_EMAIL });
+
+      await gotoOk(page, `/files?q=${token}&cols=title,tags&sort=tags:asc`);
+      expect(await titlesInOrder()).toEqual([earlyFile.title, lateFile.title]);
+      await gotoOk(page, `/files?q=${token}&cols=title,tags&sort=tags:desc`);
+      expect(await titlesInOrder()).toEqual([lateFile.title, earlyFile.title]);
+      const lateFileRow = table.getByRole("row").filter({ hasText: lateFile.title });
+      await expect(lateFileRow.getByRole("link", { name: tag.name })).toHaveAttribute("href", `/tag/${tag.slug}`);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
+      for (const id of files) await deleteTestFile(id);
+      await deleteTestTag(early.id);
+    }
+  });
+
+  // docs/PERMISSIONS.md's Tags section: the ADMIN-only "Show all" override
+  // lists PRIVATE objects their viewer may not read, and the terms on one are
+  // as private as it is. So the cell is withheld — not merely hidden: the
+  // terms are absent from the HTML and its RSC payload too — and Tags stops
+  // sorting, since an order by tags would hint at what the cells withhold.
+  test("rows only the Show all override lists have their tags withheld", async ({ page, secondUser }) => {
+    const token = `tagwithheld${Date.now()}`;
+    // Sorts before `tag`, so a sort by tags that was still honoured would put
+    // the withheld row first.
+    const secret = await createTestTag({ creatorEmail: ADMIN_EMAIL, name: uniqueTitle("aaa secret") });
+    const { user: other } = await secondUser({ role: "AUTHOR" });
+    const docs: string[] = [];
+    const files: string[] = [];
+    try {
+      // Created first, so the default sort (Updated, newest first) puts it last.
+      const hiddenDoc = await createTestDoc({ authorEmail: other.email, title: uniqueTitle(`${token} theirs`) });
+      docs.push(hiddenDoc.id);
+      await tagWithTestTag({ tagId: secret.id, target: { kind: "doc", id: hiddenDoc.id }, taggerEmail: other.email });
+      const ownDoc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} mine`) });
+      docs.push(ownDoc.id);
+      await tagWithTestTag({ tagId: tag.id, target: { kind: "doc", id: ownDoc.id }, taggerEmail: ADMIN_EMAIL });
+
+      const table = page.getByRole("table").first();
+      const tagsCell = (title: string) => table.getByRole("row").filter({ hasText: title }).getByRole("cell").nth(2);
+
+      const docsUrl = `/docs?q=${token}&cols=title,tags&sort=tags:asc&showAllDocs=1`;
+      await gotoOk(page, docsUrl);
+      await expect(tagsCell(hiddenDoc.title)).toHaveText("—");
+      await expect(tagsCell(ownDoc.title).getByRole("link", { name: tag.name })).toBeVisible();
+      // The page dropped tags from the sort: no arrow on the header, and the
+      // rows in the default order rather than the one ?sort= asked for.
+      await expect(page.getByRole("columnheader", { name: "Tags" })).toHaveText("Tags");
+      expect(await table.locator("tbody tr td:nth-child(2) a").allTextContents()).toEqual([
+        ownDoc.title,
+        hiddenDoc.title,
+      ]);
+      const docsHtml = await (await page.request.get(docsUrl)).text();
+      expect(docsHtml).toContain(tag.name);
+      expect(docsHtml).not.toContain(secret.name);
+
+      const hiddenFile = await createTestFile({ ownerEmail: other.email, title: uniqueTitle(`${token} theirs`) });
+      files.push(hiddenFile.id);
+      await tagWithTestTag({ tagId: secret.id, target: { kind: "file", id: hiddenFile.id }, taggerEmail: other.email });
+
+      const filesUrl = `/files?q=${token}&cols=title,tags&showAllFiles=1`;
+      await gotoOk(page, filesUrl);
+      await expect(tagsCell(hiddenFile.title)).toHaveText("—");
+      await expect(page.getByRole("columnheader", { name: "Tags" })).toHaveText("Tags");
+      expect(await (await page.request.get(filesUrl)).text()).not.toContain(secret.name);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
+      for (const id of files) await deleteTestFile(id);
+      await deleteTestTag(secret.id);
+    }
+  });
+
+  // docs/TAGS.md, "Tagging from /docs and /files" — the toolbar's "+ tag"
+  // applies one term to every selected row, each as its own act of tagging.
+  // Minted from the picker on /docs, then picked from its list on /files.
+  test("/docs and /files tag their selected rows in bulk", async ({ page }) => {
+    const token = `bulktag${Date.now()}`;
+    const fresh = uniqueTitle("bulk");
+    const docs: string[] = [];
+    const files: string[] = [];
+    let slug: string | null = null;
+    try {
+      const first = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} first`) });
+      const second = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} second`) });
+      const unselected = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} third`) });
+      docs.push(first.id, second.id, unselected.id);
+
+      const table = page.getByRole("table").first();
+      const tagsCell = (title: string) => table.getByRole("row").filter({ hasText: title }).getByRole("cell").nth(2);
+
+      await gotoOk(page, `/docs?q=${token}&cols=title,tags`);
+      await page.getByLabel(`Select doc ${first.title}`).check();
+      await page.getByLabel(`Select doc ${second.title}`).check();
+      await page.getByLabel("Tag the selected rows").click();
+      await page.getByLabel("Find or add a tag").fill(fresh);
+      await page.getByRole("button", { name: `Create “${fresh}”` }).click();
+
+      // Minted once, applied to both selected rows and not the third. The
+      // slug comes off the chip's href, as in the minting spec above.
+      const chip = tagsCell(first.title).getByRole("link", { name: fresh });
+      await expect(chip).toBeVisible();
+      slug = (await chip.getAttribute("href"))!.replace("/tag/", "");
+      await expect(tagsCell(second.title).getByRole("link", { name: fresh })).toBeVisible();
+      await expect(tagsCell(unselected.title)).toHaveText("");
+      // A clean run clears the selection, which takes the toolbar with it.
+      await expect(page.getByLabel("Tag the selected rows")).toHaveCount(0);
+
+      const facts = await getTagFacts(slug);
+      expect(facts?.taggers).toEqual([ADMIN_EMAIL, ADMIN_EMAIL]);
+      expect(facts?.targets.map((t) => t.id).sort()).toEqual([first.id, second.id].sort());
+
+      const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} file`) });
+      files.push(file.id);
+      await gotoOk(page, `/files?q=${token}&cols=title,tags`);
+      await page.getByLabel(`Select file ${file.title}`).check();
+      await page.getByLabel("Tag the selected rows").click();
+      await page.getByLabel("Find or add a tag").fill(fresh);
+      // An exact match is offered from the list, with no "Create" beside it.
+      await expect(page.getByRole("button", { name: /^Create “/ })).toHaveCount(0);
+      await page.getByRole("button", { name: fresh, exact: true }).click();
+      await expect(tagsCell(file.title).getByRole("link", { name: fresh })).toBeVisible();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
+      for (const id of files) await deleteTestFile(id);
+      if (slug) await deleteTestTag(slug);
+    }
+  });
+
+  // A row only the ADMIN override lists is one its viewer may not read, so it
+  // isn't taggable: the toolbar drops it from the run, as every bulk action
+  // drops rows it doesn't apply to, and the rest of the selection succeeds.
+  test("bulk tagging skips the rows only the Show all override lists", async ({ page, secondUser }) => {
+    const token = `bulkskip${Date.now()}`;
+    const { user: other } = await secondUser({ role: "AUTHOR" });
+    const docs: string[] = [];
+    try {
+      const theirs = await createTestDoc({ authorEmail: other.email, title: uniqueTitle(`${token} theirs`) });
+      const mine = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} mine`) });
+      docs.push(theirs.id, mine.id);
+
+      await gotoOk(page, `/docs?q=${token}&showAllDocs=1`);
+      await page.getByLabel(`Select doc ${theirs.title}`).check();
+      await page.getByLabel(`Select doc ${mine.title}`).check();
+      await page.getByLabel("Tag the selected rows").click();
+      await page.getByLabel("Find or add a tag").fill(tag.name);
+      await page.getByRole("button", { name: tag.name, exact: true }).click();
+
+      await expect(page.getByLabel("Tag the selected rows")).toHaveCount(0);
+      const facts = await getTagFacts(tag.id);
+      expect(facts?.targets).toEqual([{ kind: "doc", id: mine.id }]);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const id of docs) await deleteTestDoc(id);
     }
   });
 

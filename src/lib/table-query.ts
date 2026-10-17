@@ -131,6 +131,20 @@ function parseSortParam<K extends string>(
   return columns.length > 0 ? columns : defaultSort;
 }
 
+// A parsed sort minus one key, for a column whose ordering a page decides it
+// can't offer this viewer after parsing — /docs' and /files' Tags under their
+// ADMIN-only "show all" override (PLAN.md §20n). Falls back to the default
+// when nothing else is left, the same rule parseSortParam applies to a sort
+// naming only unknown keys.
+export function withoutSortKey<K extends string>(
+  sort: SortColumn<K>[],
+  key: K,
+  defaultSort: SortColumn<K>[],
+): SortColumn<K>[] {
+  const kept = sort.filter((column) => column.key !== key);
+  return kept.length > 0 ? kept : defaultSort;
+}
+
 // An absent ?cols= means "whatever my preference is", exactly as ?pageSize=
 // does. An *empty* one (`?cols=`) falls back too rather than being honoured:
 // a table with no columns is unusable, and there is no way to get back to the

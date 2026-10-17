@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { IconTrash, IconTrashOff } from "@tabler/icons-react";
 import type { BulkFailure, BulkResult } from "@/lib/bulk-result";
 import styles from "./AdminTable.module.css";
@@ -43,6 +43,16 @@ export type BulkAction<T> = BulkActionBase<T> &
         // *has* that value.
         kind: "select";
         options: readonly string[];
+        run: (ids: string[], value: string) => Promise<BulkResult>;
+      }
+    | {
+        // A value picked from something richer than a fixed list: the tag
+        // picker, which searches a vocabulary and can mint a term. `render`
+        // draws only the control and calls `apply` with the chosen value. The
+        // toolbar still runs the action, so applicability, the row borders,
+        // the error line and onDone stay its job, exactly as for "select".
+        kind: "picker";
+        render: (apply: (value: string) => void, pending: boolean) => ReactNode;
         run: (ids: string[], value: string) => Promise<BulkResult>;
       }
   );
@@ -99,7 +109,7 @@ export function BulkToolbar<T extends { id: string }>({
       // action touched stay marked once they are no longer selected, which is
       // what makes the border readable as "these are the ones that changed".
       const failed = await runWithStatus(ids, async () => {
-        const result = action.kind === "select" ? await action.run(ids, value!) : await action.run(ids);
+        const result = action.kind === "button" ? await action.run(ids) : await action.run(ids, value!);
         return result.failed;
       });
 
@@ -142,6 +152,9 @@ export function BulkToolbar<T extends { id: string }>({
     <div className={styles.bulkToolbar}>
       <span>{selectedRows.length} selected</span>
       {actions.map((action) => {
+        if (action.kind === "picker") {
+          return <Fragment key={action.key}>{action.render((value) => void handle(action, value), pending)}</Fragment>;
+        }
         if (action.kind === "select") {
           return (
             <label key={action.key}>
