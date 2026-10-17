@@ -11,6 +11,7 @@ import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import CommentForm from "./CommentForm";
 import { useCommentQuote } from "./comment-quote-context";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
+import { isMouseDownOutside, markMouseDownInside } from "@/lib/outside-mousedown";
 import proseStyles from "@/styles/prose.module.css";
 
 type PendingSelection = {
@@ -99,7 +100,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
   useEffect(() => {
     if (!pending) return;
     const handleClick = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (isMouseDownOutside(event, containerRef.current)) {
         setPending(null);
       }
     };
@@ -108,7 +109,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
   }, [pending]);
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div ref={containerRef} onMouseDownCapture={markMouseDownInside} style={{ position: "relative" }}>
       <div style={{ display: ready ? "none" : "block" }}>{staticContent}</div>
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />

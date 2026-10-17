@@ -8,6 +8,7 @@ import { DocLink, setDocLinks, type ResolvedDocLink } from "@/lib/doc-link-exten
 import { createDocLinkResolver, captureAnchor, type DocLinkInput } from "@/lib/doc-link-anchor";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
 import { useSelectionPopover } from "@/lib/use-selection-popover";
+import { isMouseDownOutside, markMouseDownInside } from "@/lib/outside-mousedown";
 import { useDocPresence } from "@/components/annotation/doc-presence-context";
 import DocLinkPopover from "./DocLinkPopover";
 import DocLinkChooser from "./DocLinkChooser";
@@ -206,7 +207,7 @@ export default function SideBySideDocBody({
   useEffect(() => {
     if (!editingLink && !chooser) return;
     const handleClick = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (isMouseDownOutside(event, containerRef.current)) {
         setEditingLink(null);
         setChooser(null);
       }
@@ -222,7 +223,7 @@ export default function SideBySideDocBody({
   const { pending, popoverRef } = selection;
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div ref={containerRef} onMouseDownCapture={markMouseDownInside} style={{ position: "relative" }}>
       {synced && <span data-testid="live-doc-synced" style={{ display: "none" }} />}
       <div style={{ display: ready ? "none" : "block" }}>{staticBody}</div>
       {/* .noAnnotations paints over .annotation-highlight without touching the
