@@ -170,8 +170,10 @@ inlined into server code.
 | `SITE_BANNER` | — | Landing-page banner image path. `src/lib/site-banner.ts`, PLAN.md §17b. |
 | `SITE_BANNER_ASPECT` | — | Its aspect ratio. |
 | `SITE_BANNER_ALT` | — | Its alt text. |
+| `SITE_BANNER_TEXT` | — | A text banner in lieu of the image: these words, centred in the reading serif, as the page's `<h1>`. Set, it wins over `SITE_BANNER`. |
+| `SITE_BANNER_TEXT_SIZE` | `72px` | Its font size, any CSS length. Capped at `10vw`, so a long title shrinks on a phone and then wraps into balanced lines. |
 
-The three `SITE_BANNER*` vars are bare, unlike `NEXT_PUBLIC_SITE_TITLE`, on purpose: they
+The `SITE_BANNER*` vars are bare, unlike `NEXT_PUBLIC_SITE_TITLE`, on purpose: they
 are read server-side only, so changing them needs a **restart, not a rebuild** — and the
 image file itself (`public/banner.*`, gitignored) needs neither, since `public/` is served
 straight from disk at runtime.

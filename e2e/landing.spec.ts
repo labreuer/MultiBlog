@@ -10,8 +10,9 @@
 // only assertion here is the one that holds regardless of which doc won:
 // the literal title string never reaches the page.
 //
-// The banner is also untested here — it's an env var (SITE_BANNER) plus a
-// gitignored file, not app state this suite's fixtures control either way.
+// The banner is also untested here — it's an env var (SITE_BANNER plus a
+// gitignored file, or SITE_BANNER_TEXT), not app state this suite's fixtures
+// control either way.
 import type { Browser, Page } from "@playwright/test";
 import { test, expect, freshGoto, openDashboardCard, signIn } from "./fixtures";
 import { createTestUser, deleteTestUser, getAvatarFacts, getContributorFields, uniqueEmail } from "./db";

@@ -232,7 +232,8 @@ Two competing font stacks are in play, both deliberate:
 - **Reading surfaces** (article body, comments heading): serif —
   `Georgia, "Iowan Old Style", "Palatino Linotype", serif` — set on `.prose` (shared
   editor/render typography, `prose.module.css`), the post `<h1>` (`[year]/[month]/[day]/[slug]/page.module.css`
-  `.title`), and the comments `<h2>` (`CommentSection.module.css` `.heading`). Chosen for
+  `.title`), the comments `<h2>` (`CommentSection.module.css` `.heading`), and the landing
+  page's text banner (`page.module.css` `.bannerText`, `SITE_BANNER_TEXT`). Chosen for
   reading comfort; `.prose` also sets `font-size: 1.125rem; line-height: 1.5`.
 - **UI chrome** (nav, forms, byline metadata): system sans-serif —
   `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` on page containers — or

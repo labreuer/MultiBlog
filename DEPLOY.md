@@ -352,6 +352,8 @@ NEXT_PUBLIC_SITE_TITLE="<your blog's real name>"   # optional — omit to keep "
 SITE_BANNER="/banner.png"                   # optional — landing-page banner; omit to show none
 SITE_BANNER_ASPECT="4724 / 1609"            # optional — defaults to "3 / 1"
 SITE_BANNER_ALT=""                          # optional — empty is correct for a decorative banner
+SITE_BANNER_TEXT="<your blog's real name>"  # optional — a serif text banner instead; wins over SITE_BANNER
+SITE_BANNER_TEXT_SIZE="72px"                # optional — any CSS length; defaults to 72px, capped at 10vw
 
 RESEND_API_KEY="re_..."                     # optional — omit to keep sendMail() logging instead of sending
 MAIL_FROM="MultiBlog <noreply@your-domain>" # optional — required alongside RESEND_API_KEY to actually send
@@ -401,7 +403,10 @@ the opposite of `NEXT_PUBLIC_SITE_TITLE` just above, worth noting since the two 
 like the same kind of setting. The image itself lives at `/srv/multiblog/public/banner.*`
 (gitignored, same reasoning as `.env`) — swap the file directly on the server; that needs
 neither a restart nor a rebuild, since `public/` is served straight off disk at runtime.
-Leave `SITE_BANNER` unset to show no banner at all.
+`SITE_BANNER_TEXT` sets the banner as words instead — the title in the reading serif, no file
+at all — and takes precedence over `SITE_BANNER` when both are set; `SITE_BANNER_TEXT_SIZE`
+sizes it. Same rule: a restart picks either up. Leave both `SITE_BANNER` and
+`SITE_BANNER_TEXT` unset to show no banner at all.
 
 The landing page's preamble paragraph(s) are separate from all of this — not an env var, but
 the body of whichever `Doc` is titled exactly `FRONT PAGE` (PLAN.md §17c). Seed one after the

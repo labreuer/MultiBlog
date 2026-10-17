@@ -3442,8 +3442,18 @@ works as-is. The image renders `fill` inside a wrapper carrying `aspect-ratio` a
 style — a genuinely per-deployment value, which is STYLE.md's stated bar for inline over
 CSS Modules — with `object-fit: cover` and `priority` (it is the LCP element).
 
-Unset `SITE_BANNER` renders nothing at all and the page degrades to preamble + posts +
-contributors. A *set* variable pointing at a missing file is left to 404 rather than
+**A text banner in lieu of the image.** `SITE_BANNER_TEXT` sets the banner as words — the
+title centred in the reading serif (STYLE.md's Typography), at `SITE_BANNER_TEXT_SIZE`
+(default `72px`) — for a deployment with no image to show. It is the page's `<h1>`, since
+unlike the decorative image it *is* the page's name. When both are set the text wins:
+switching an instance from image to text is then one added line, not an edit and a removal.
+The size reaches CSS as an inline custom property, the same per-deployment bar the aspect
+ratio meets, and `page.module.css` caps it at `10vw` with `text-wrap: balance`, so a title
+that fits a desktop row at 72px still fits a phone, wrapping into even lines once the cap
+bites.
+
+Unset `SITE_BANNER` and `SITE_BANNER_TEXT` render nothing at all and the page degrades to
+preamble + posts + contributors. A *set* variable pointing at a missing file is left to 404 rather than
 detected and hidden: that is a deployment error, and failing visibly is the point.
 
 ### 17c. The preamble: a doc found by title

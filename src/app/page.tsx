@@ -1,9 +1,10 @@
+import type { CSSProperties } from "react";
 import Image from "next/image";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { prisma } from "@/lib/prisma";
 import { publishedPostWhere } from "@/lib/post-status";
 import { getFrontPagePreamble } from "@/lib/front-page";
-import { SITE_BANNER, SITE_BANNER_ASPECT, SITE_BANNER_ALT } from "@/lib/site-banner";
+import { SITE_BANNER, SITE_BANNER_ASPECT, SITE_BANNER_ALT, SITE_BANNER_TEXT, SITE_BANNER_TEXT_SIZE } from "@/lib/site-banner";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import PostListing, { postListingInclude } from "@/components/PostListing";
 import ContributorList from "@/components/ContributorList";
@@ -30,10 +31,16 @@ export default async function Home() {
 
   return (
     <div>
-      {SITE_BANNER && (
-        <div className={styles.banner} style={{ aspectRatio: SITE_BANNER_ASPECT }}>
-          <Image src={SITE_BANNER} alt={SITE_BANNER_ALT} fill priority className={styles.bannerImage} />
-        </div>
+      {SITE_BANNER_TEXT ? (
+        <h1 className={styles.bannerText} style={{ "--banner-text-size": SITE_BANNER_TEXT_SIZE } as CSSProperties}>
+          {SITE_BANNER_TEXT}
+        </h1>
+      ) : (
+        SITE_BANNER && (
+          <div className={styles.banner} style={{ aspectRatio: SITE_BANNER_ASPECT }}>
+            <Image src={SITE_BANNER} alt={SITE_BANNER_ALT} fill priority className={styles.bannerImage} />
+          </div>
+        )
       )}
       <div className={styles.layout}>
         <main>
