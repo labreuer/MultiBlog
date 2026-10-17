@@ -5,6 +5,7 @@ import TableDownloadButtons from "./TableDownloadButtons";
 import { EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
 import { useSelectionPopover } from "@/lib/use-selection-popover";
+import { markMouseDownInside } from "@/lib/outside-mousedown";
 import { AnnotationClick } from "@/lib/annotation-click-extension";
 import {
   AnnotationHighlight,
@@ -217,7 +218,11 @@ export default function DocReadingBody({
   }
 
   return (
-    <div ref={containerRef} className={`${styles.container} ${frozen ? styles.frozen : ""}`}>
+    <div
+      ref={containerRef}
+      onMouseDownCapture={markMouseDownInside}
+      className={`${styles.container} ${frozen ? styles.frozen : ""}`}
+    >
       {synced && <span data-testid="live-doc-synced" style={{ display: "none" }} />}
       {frozen && (
         <div className={styles.flagTrack}>

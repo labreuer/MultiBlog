@@ -13,6 +13,7 @@ import { useLiveTabTitle } from "@/lib/use-live-tab-title";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { EDITOR_FOCUS_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 import { useEditorAnnotationWidget } from "@/lib/use-editor-annotation-widget";
+import { markMouseDownInside } from "@/lib/outside-mousedown";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
 import DocSettingsPanel, { type EligibleUser } from "./DocSettingsPanel";
@@ -281,7 +282,12 @@ export default function DocEditor({
     <div className={styles.container} data-doc-editor-scroller="">
       {/* data-doc-editor-column is the `:has()` scope for the height-floor
           rule in EditorChrome.module.css — see DocSettingsPanel's <details>. */}
-      <div className={styles.mainColumn} data-doc-editor-column="" ref={containerRef}>
+      <div
+        className={styles.mainColumn}
+        data-doc-editor-column=""
+        ref={containerRef}
+        onMouseDownCapture={markMouseDownInside}
+      >
         {provider ? (
           <CollabTitleField
             ydoc={ydoc}

@@ -142,6 +142,24 @@ viewer may not read shows "You don't have permission to read this doc." in the b
 (the route renders Forbidden there rather than a 404, so the bubble reveals nothing following
 the link wouldn't), and a doc that doesn't exist adds nothing.
 
+### Autolink passes `.md` filenames by
+
+linkify, which Link uses to find URLs in text, knows `.md` as Moldova's top-level domain, so
+`Connections.md` — or the `COLLAB.md` at the end of `docs/COLLAB.md` — reads to it as an
+address, and Link would make it a link to `http://Connections.md`. Three of Link's paths ask
+first: autolink as you type, the paste rule that links URLs inside pasted text, and pasting a
+URL over a selection. All three consult `shouldAutoLink`, which `EDITOR_LINK_OPTIONS` sets to
+refuse a match whose host ends in `.md` and has no scheme, no `www.` and no `@`, and to hand
+everything else to Link's own default (which refuses a bare IP address and a dotless host).
+So `https://example.md`, `www.example.md` and `user@example.md` still link, and so does
+anything made through the link popover, which never asks. Markdown parsed by
+`@tiptap/markdown` needs no such rule: `marked`'s autolinks require a scheme or `www.`.
+
+Other file extensions that are also top-level domains (`.py`, `.sh`, `.rs`, `.zip`) still
+autolink. `.md` is the one this site's text is full of — imported chats, docs about docs —
+and the others are domains in real use (`bun.sh`, `docs.rs`), so one joins the rule only once
+its filenames show up in practice.
+
 ### The link popover is a form: title over URL
 
 `LinkControls.tsx`'s popover is two boxes, each prefixed by an icon saying which is which (Aa,

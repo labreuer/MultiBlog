@@ -5,6 +5,7 @@ import type { Editor } from "@tiptap/react";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { setPendingAnnotation } from "./pending-annotation-extension";
 import { findQuoteOccurrences } from "./quote-occurrences";
+import { isMouseDownOutside } from "./outside-mousedown";
 import { POPOVER_GAP, popoverBoundsElement } from "./popover-placement";
 
 export type PendingSelection = {
@@ -67,6 +68,9 @@ export function useSelectionPopover({
   editorRef: RefObject<Editor | null>;
   // Doubles as the region a click counts as "inside", and as the starting
   // point for finding the [data-popover-bounds] the popover is clamped into.
+  // The element it points at carries `onMouseDownCapture={markMouseDownInside}`
+  // too, or a click on anything the popover portals out counts as outside
+  // (outside-mousedown.ts).
   containerRef: RefObject<HTMLElement | null>;
   // The viewer's own color (PLAN.md §13f), for the pending decoration.
   userColor: string;
@@ -194,7 +198,7 @@ export function useSelectionPopover({
   useEffect(() => {
     if (!pending) return;
     const handleClick = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (isMouseDownOutside(event, containerRef.current)) {
         setPending(null);
         if (editorRef.current) setPendingAnnotation(editorRef.current.view, null);
       }

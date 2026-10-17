@@ -46,10 +46,10 @@ export const StarterKit = BaseStarterKit.extend({
 
 // StarterKit's Link options for a *live* editor. CollabEditorBody and
 // AnnotationBody each build their own StarterKit (undo/redo off, since
-// Collaboration owns history) and both take these, so they can't drift.
-// Only Link's click plugin is affected — contentExtensions below is a
-// schema, and the mark renders the same either way, so it doesn't need
-// them.
+// Collaboration owns history) and both take these, as does the comment
+// editor's Link below, so they can't drift. Only Link's plugins are
+// affected — click, autolink, paste — and contentExtensions below is a
+// schema whose mark renders the same either way, so it doesn't need them.
 //
 // openOnClick off: a click in a link places the caret, like a click
 // anywhere else. With it on, every click (every tap, on a phone) opened
@@ -61,7 +61,25 @@ export const StarterKit = BaseStarterKit.extend({
 // Don't reach for "whenNotEditable" as a middle ground: the installed
 // build maps it straight to `true`, and the click plugin already stands
 // down in a read-only view, so it is the same setting under another name.
-export const EDITOR_LINK_OPTIONS = { openOnClick: false } as const;
+//
+// shouldAutoLink: a scheme-less `name.md` is a Markdown file's name, not an
+// address on Moldova's domain, and this site's text is full of them —
+// imported chats, docs about docs. linkify reads one as a URL, so typing it,
+// pasting text holding it (Link's paste rule) or pasting it over a selection
+// would make it a link to http://name.md. Those three are what this gates;
+// written with a scheme or `www.`, or linked through the popover, it is a
+// link as ever, and an email address on the domain is left alone.
+// docs/TIPTAP.md "Autolink passes `.md` filenames by".
+export const EDITOR_LINK_OPTIONS = { openOnClick: false, shouldAutoLink } as const;
+
+function shouldAutoLink(value: string): boolean {
+  // Everything before a path, port, query or fragment: the host when the
+  // match has no scheme, and the scheme itself — never `.md` — when it has.
+  const head = value.split(/[/?#:]/)[0];
+  if (/\.md$/i.test(head) && !/^www\./i.test(head) && !head.includes("@")) return false;
+  // Link's own rule, which refuses a bare IP address and a dotless host.
+  return Link.options.shouldAutoLink(value);
+}
 
 // docs/TABLES.md — TipTap's own table nodes, as one list so the live editors
 // (CollabEditorBody builds its own StarterKit and adds these beside it) and

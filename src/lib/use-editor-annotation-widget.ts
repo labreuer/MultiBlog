@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import type { Editor } from "@tiptap/react";
 import { captureRelativeRange, resolveRelativeRange, type RelativeRange } from "./yjs-relative-anchor";
 import { pendingAnnotationKey, setPendingAnnotation } from "./pending-annotation-extension";
+import { isMouseDownOutside } from "./outside-mousedown";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import {
   POPOVER_GAP,
@@ -239,11 +240,12 @@ export function useEditorAnnotationWidget({
   // Dismiss on a click outside the editor column — same convention as
   // useSelectionPopover. The expanded composer lives outside `containerRef`
   // visually but inside it in the DOM, so clicking within it doesn't count
-  // as outside.
+  // as outside; what its body portals to <body> is inside by the React tree,
+  // through the caller's `markMouseDownInside` on that element.
   useEffect(() => {
     if (!pending) return;
     const handleClick = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (isMouseDownOutside(event, containerRef.current)) {
         clear();
       }
     };
