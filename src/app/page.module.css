@@ -10,6 +10,20 @@
   object-fit: cover;
 }
 
+/* SITE_BANNER_TEXT. The size arrives per deployment as --banner-text-size
+   (inline, like the image's aspect ratio); 10vw keeps a long title on a phone,
+   and balance splits it into even lines when it wraps anyway. */
+.bannerText {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: min(var(--banner-text-size), 10vw);
+  font-weight: normal;
+  line-height: 1.15;
+  text-align: center;
+  text-wrap: balance;
+  color: var(--foreground);
+  padding: 2rem 1rem 1rem;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;

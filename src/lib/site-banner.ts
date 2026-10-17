@@ -16,3 +16,10 @@
 export const SITE_BANNER = process.env.SITE_BANNER?.trim() || null;
 export const SITE_BANNER_ASPECT = process.env.SITE_BANNER_ASPECT?.trim() || "3 / 1";
 export const SITE_BANNER_ALT = process.env.SITE_BANNER_ALT?.trim() || "";
+
+// A text banner in lieu of the image: the words set in the reading serif.
+// Set, it wins over SITE_BANNER, so a deployment swaps its image for text by
+// adding one line rather than also removing another. The size is any CSS
+// length; page.module.css caps it at 10vw, so a long title still fits a phone.
+export const SITE_BANNER_TEXT = process.env.SITE_BANNER_TEXT?.trim() || null;
+export const SITE_BANNER_TEXT_SIZE = process.env.SITE_BANNER_TEXT_SIZE?.trim() || "72px";
