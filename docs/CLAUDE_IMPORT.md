@@ -124,7 +124,9 @@ them.
   spans are left alone.
 - **Attachments** become an italic "Attached:" line with the file name. A passage quoted from
   an earlier reply (an `excerpt_from_previous_claude_message` attachment) becomes a
-  blockquote, escaped as plain text.
+  blockquote, escaped as plain text. Text pasted into a prompt, which claude.ai turns into an
+  attachment with no name, goes in as the prompt's own text, Markdown as typed text is, in a
+  blockquote ahead of what was typed beside it.
 - **Replies** leave out thinking. Each run of web searches and fetches becomes one italic line
   naming the queries and pages; other tool calls are left out.
 - **Citations** go right after the span they support, where claude.ai draws its source chips:
@@ -195,7 +197,8 @@ more than its one seed update.
 
 ## 7. What is not imported
 
-- **Attachment files.** The export has only their extracted text, and it is not imported.
+- **Attachment files.** The export has only their extracted text, and it is not imported,
+  except a paste's (§4).
 - **HTML artifacts** in `frames-000.zip`. Only Claude Docs documents a session names are.
 - **Tool calls** other than web searches and fetches, and **thinking**.
 - **Branches** other than the one claude.ai shows.
