@@ -173,10 +173,10 @@ export default function DocsTable({
       cellProps: (row) => ({
         className: styles.titleCell,
         onClick: (e) => {
-          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/doc/${row.id}`);
+          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/doc/${row.slug}`);
         },
       }),
-      cell: (row) => <Link href={`/doc/${row.id}`}>{row.title}</Link>,
+      cell: (row) => <Link href={`/doc/${row.slug}`}>{row.title}</Link>,
     },
     edit: {
       cell: (row) => row.canEdit && <Link href={`/doc/${row.id}/edit`}>edit</Link>,
