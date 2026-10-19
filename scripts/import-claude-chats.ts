@@ -280,6 +280,11 @@ function humanTurn(m: Message): string[] {
     if (a.file_name.startsWith("excerpt_from_previous_claude_message") && a.extracted_content) {
       parts.push(plainToMarkdown(a.extracted_content).replace(/^/gm, "> "));
       seen.add(a.file_name);
+    } else if (!a.file_name && a.extracted_content?.trim()) {
+      // Text pasted into the prompt, which claude.ai turns into an attachment
+      // with no name: the prompt's own words, so Markdown as typed text is,
+      // in a blockquote that sets it off from what was typed.
+      parts.push(withLineBreaks(a.extracted_content).replace(/^/gm, "> "));
     } else {
       attached(a.file_name);
     }
