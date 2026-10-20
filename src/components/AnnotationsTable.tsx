@@ -54,6 +54,10 @@ export type AnnotationRow = {
   docId: string;
   docSlug: string;
   docTitle: string;
+  // The card's own permalink fragment on that page, so the Doc / File link
+  // lands on this annotation rather than the top of the container — and,
+  // through it, opens the card if this browser has it collapsed.
+  cardFragment: string;
   authorName: string;
   bodyText: string;
   // "" for a reply (only a root annotation is ever anchored) or a
@@ -153,7 +157,11 @@ export default function AnnotationsTable({
     doc: {
       sortKey: "doc",
       cell: (row) => (
-        <Link href={row.containerKind === "file" ? `/pdf/${row.docSlug}` : `/doc/${row.docSlug}`}>{row.docTitle}</Link>
+        <Link
+          href={`${row.containerKind === "file" ? `/pdf/${row.docSlug}` : `/doc/${row.docSlug}`}#${row.cardFragment}`}
+        >
+          {row.docTitle}
+        </Link>
       ),
     },
     author: { sortKey: "author", cell: (row) => row.authorName },

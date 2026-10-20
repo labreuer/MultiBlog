@@ -62,7 +62,8 @@ The row carries:
   control, since above the breakpoint it *is* the rail.
 - **`/annotations`**, the admin browse table: Doc / File, Author, Body, Quote, Status,
   Created, Edited, Deleted, Raised at; gated `canManageDocs`, scoped to the containers the
-  viewer may *read*, and excluding `DRAFT` outright.
+  viewer may *read*, and excluding `DRAFT` outright. Doc / File links to the row's own card,
+  through its permalink fragment, which opens it if this browser has it collapsed.
 
 ## The body is a ydoc
 

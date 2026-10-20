@@ -14,7 +14,8 @@ import { getTablePrefs } from "@/lib/user-preferences";
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import AnnotationsTable, { type AnnotationRow } from "@/components/AnnotationsTable";
-import { staffDisplayNameOf } from "@/lib/display-name";
+import { displayNameOf, staffDisplayNameOf } from "@/lib/display-name";
+import { annotationAnchorName } from "@/lib/annotation-anchor-name";
 
 export const metadata: Metadata = { title: "Annotations" };
 
@@ -232,6 +233,9 @@ export default async function AnnotationsPage({
       docId: a.container.id,
       docSlug: a.container.slug,
       docTitle: a.container.title,
+      // From the name every reader sees, as the card's own id is, and not the
+      // staff name beside it, which can be an email.
+      cardFragment: annotationAnchorName(displayNameOf(a.user), a.createdAt),
       authorName: staffDisplayNameOf(a.user, session.user.role),
       bodyText: a.bodyText,
       // Stored first, since a row that has one was never marked and looking

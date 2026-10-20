@@ -176,6 +176,26 @@ test.describe("collapsing an annotation card", () => {
     await expect(card(page, reply.id)).toHaveCount(0);
   });
 
+  test("/annotations' Doc / File link lands on its card, opening a collapsed thread on the way", async ({
+    page,
+    sharedDoc,
+  }) => {
+    const { root, reply } = await thread(sharedDoc.id);
+
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    const fragment = await card(page, reply.id).locator("a[id]").first().getAttribute("id");
+    expect(fragment).toBeTruthy();
+    await setCollapsed(card(page, root.id), true);
+
+    await page.goto(`/annotations?doc=${sharedDoc.id}`);
+    const link = page.getByRole("row").filter({ hasText: "E2E reply under it" }).locator('a[href^="/doc/"]');
+    await expect(link).toHaveAttribute("href", `/doc/${sharedDoc.slug}#${fragment}`);
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}#${fragment}$`));
+    await expect(card(page, reply.id)).toBeInViewport();
+    await expect(card(page, root.id).getByRole("button", { name: "Collapse annotation" })).toBeVisible();
+  });
+
   test("Collapse all closes every thread; Expand all opens every card in them", async ({ page, sharedDoc }) => {
     const first = await thread(sharedDoc.id);
     const second = await thread(sharedDoc.id);
