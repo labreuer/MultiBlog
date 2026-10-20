@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { createDraftAnnotation } from "@/app/actions/annotations";
+import { createDraftAnnotation, updateDraftAnchor } from "@/app/actions/annotations";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import { useAnnotationMove } from "./annotation-move-context";
@@ -107,6 +107,13 @@ export default function AnnotationPopover({
         setError(result.error);
         return;
       }
+      // The selection goes onto the row too, so the draft keeps it through a
+      // reload — unawaited, since the composer posts the anchor it has in
+      // hand and only a reload needs the row's (updateDraftAnchor). From the
+      // doc editor as well: its post clears the stored trio as it writes the
+      // mark, and a reload sends the draft to the reading view's "Your
+      // private notes", which posts by columns.
+      updateDraftAnchor(result.id, { from, to, quotedText, atVersion, ydocUpdateId }).catch(() => {});
       setDraft({ id: result.id, connection: result.connection });
       after(result.id);
     });

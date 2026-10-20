@@ -319,9 +319,13 @@ test.describe("annotations", () => {
     // derived at those offsets is exactly what was selected, and the doc's
     // ydoc was never written to. The last one is the point of the whole
     // split: a reader who may not edit this doc did not just edit it.
+    //
+    // The status is part of it because the draft carries its anchor too, from
+    // the moment it opens (docs/ANNOTATIONS.md, Lifecycle).
     await expect
       .poll(async () => (await getAnnotationStates(sharedDoc.id))[0], { timeout: 15_000 })
       .toMatchObject({
+        status: "LIVE",
         anchored: true,
         marked: false,
         quotedText: QUOTED_TEXT,
@@ -366,9 +370,10 @@ test.describe("annotations", () => {
     await annotationEditor(readerPage).click();
     await readerPage.keyboard.type("This quote is about to disappear.");
     await popup.getByRole("button", { name: "Post annotation" }).click();
+    // Posted, not merely anchored: the draft is anchored from the moment it opens.
     await expect
-      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.anchored)
-      .toBe(true);
+      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0])
+      .toMatchObject({ status: "LIVE", anchored: true });
 
     await page.goto(`/doc/${sharedDoc.id}/edit`);
     await waitForDocCollabReady(page);
@@ -448,9 +453,10 @@ test.describe("annotations", () => {
     await readerPage.keyboard.type("Stamped against what I could see.");
     await popup.getByRole("button", { name: "Post annotation" }).click();
 
+    // The status too: the draft carries the same quote from the moment it opens.
     await expect
-      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.quotedText, { timeout: 15_000 })
-      .toBe(QUOTED_TEXT);
+      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0], { timeout: 15_000 })
+      .toMatchObject({ status: "LIVE", quotedText: QUOTED_TEXT });
 
     // The stamp names a state *older* than the tail — i.e. the reader's, not
     // the server's. Asserted as a strict inequality rather than an exact id
@@ -487,12 +493,13 @@ test.describe("annotations", () => {
     await annotationEditor(readerPage).click();
     await readerPage.keyboard.type("The middle clause here is doing a lot of work.");
     await popup.getByRole("button", { name: "Post annotation" }).click();
-    // Polls the *posted* state, not the row count: "Annotate" already created
-    // the row as a DRAFT, so a length check would pass before Post's own
-    // round trip had done anything.
+    // Polls the *posted* state, not the row count or the quote: "Annotate"
+    // already created the row as a DRAFT, carrying its quote, so either would
+    // pass before Post's own round trip had done anything — and the reload
+    // below would then cut that round trip off.
     await expect
-      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0]?.quotedText, { timeout: 15_000 })
-      .toBe(QUOTED_TEXT);
+      .poll(async () => (await getAnnotationStates(sharedDoc.id))[0], { timeout: 15_000 })
+      .toMatchObject({ status: "LIVE", quotedText: QUOTED_TEXT });
 
     // Reload so the posted annotation renders through AnnotationBodyReader
     // rather than through whatever the composer left on screen.
@@ -533,6 +540,7 @@ test.describe("annotations", () => {
         timeout: 15_000,
       })
       .toMatchObject({
+        status: "LIVE",
         // The *second* selection is what it quotes — the first was replaced.
         quotedText: "doing a lot of work",
         bodyText: "Agreed, that's the crux.",

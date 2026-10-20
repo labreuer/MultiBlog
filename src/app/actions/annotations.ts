@@ -76,11 +76,158 @@ async function connectionBundleFor(
  * reopened later — after a reload, or from "Your private notes" — posts where
  * it was started rather than document-level. Request input only: what is
  * stored is the server's own capture of it, exactly as at post time.
+ *
+ * A PDF target is captured as the row is created, from stored page text. A
+ * range — a root on a doc, or a reply on either — goes to updateDraftAnchor
+ * instead, and the composer doesn't wait for it: capturing one materializes
+ * the document at its stamp, which on a large doc would hold the editor back
+ * by a noticeable fraction of a second.
  */
 export type DraftAnchorInput = { pdfTarget: unknown };
 
+/** A draft's range anchor: postAnnotation's own fields, meaning what they mean there. */
+export type DraftRangeInput = {
+  from: number;
+  to: number;
+  quotedText: string;
+  atVersion?: string | null;
+  ydocUpdateId?: string | null;
+};
+
 function pdfTargetOf(anchor: unknown): unknown {
   return typeof anchor === "object" && anchor !== null && "pdfTarget" in anchor ? anchor.pdfTarget : undefined;
+}
+
+type RangeRequest = { from: number; to: number; quotedText: string; atVersion?: string; ydocUpdateId?: string };
+
+// A range out of whatever JSON the client sent — a server action's argument
+// is the caller's, whatever its type says — or null when there isn't one.
+function rangeRequestOf(anchor: unknown): RangeRequest | null {
+  if (typeof anchor !== "object" || anchor === null) return null;
+  const { from, to, quotedText, atVersion, ydocUpdateId } = anchor as Record<string, unknown>;
+  if (typeof from !== "number" || typeof to !== "number" || typeof quotedText !== "string") return null;
+  if (!quotedText || to <= from) return null;
+  return {
+    from,
+    to,
+    quotedText,
+    atVersion: typeof atVersion === "string" ? atVersion : undefined,
+    ydocUpdateId: typeof ydocUpdateId === "string" ? ydocUpdateId : undefined,
+  };
+}
+
+// A client's scrub position, string because BigInt doesn't survive a server-
+// action boundary. A malformed value (should never happen, but this is a
+// server action) is no position, and the caller falls through to its own
+// fallback rather than failing over metadata.
+function parseStamp(value: string | undefined): bigint | null {
+  if (value === undefined) return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+/** What a range anchor is measured into: a root's doc, or — for a reply, on either container — its parent's body (§13p). */
+type RangeTarget = { kind: "doc"; docId: string } | { kind: "reply"; parentId: string };
+
+/**
+ * The version stamp a range anchor is measured against, and the anchor
+ * captured at it — postAnnotation's rule, and the one a draft stores its
+ * anchor by before it posts, so a draft reopened later posts exactly what
+ * posting when it was opened would have. `capture: false` stamps only (the
+ * doc editor's mark mode, which writes no columns).
+ */
+async function stampRangeAnchor(
+  target: RangeTarget,
+  request: RangeRequest,
+  capture: boolean,
+): Promise<{ stamp: bigint | null; range: { from: number; to: number; quotedText: string } | null }> {
+  // Which ydoc the anchor is measured into — and therefore which update log
+  // stamps it (§13o: the stamp is the coordinate system, so the two cannot be
+  // chosen independently).
+  const anchorYdocId = target.kind === "reply" ? ydocIdForAnnotation(target.parentId) : ydocIdForDoc(target.docId);
+
+  // The client's own position when it knew one precisely; otherwise the tail
+  // of the log that is about to matter.
+  //
+  // Computed before the anchor, not alongside it: the anchor has to be
+  // resolved against *this* state rather than whatever the document has
+  // become by the time the update lands.
+  let stamp = parseStamp(request.ydocUpdateId);
+  // PLAN.md §13q — the client's own version, converted. Tried before the tail
+  // because the two answer different questions: this one is "what was the
+  // annotator looking at", the tail is "what does the server hold now", and
+  // they diverge exactly when somebody else is editing — which is the case
+  // the stamp exists for.
+  //
+  // Only for an anchor into the doc. A reply's anchor targets its parent
+  // annotation's ydoc, which the client has no live connection to — an
+  // annotation body renders from its `proseJson` cache, not a tap — so there
+  // is no Yjs snapshot for it to capture and this path cannot apply. The
+  // reply's stamp comes from the parent's newest settled version instead,
+  // below.
+  if (stamp === null && request.atVersion && target.kind === "doc") {
+    try {
+      const headDoc = await materializeYdocAt(anchorYdocId, (await ydocStore.maxUpdateId(anchorYdocId))!);
+      const resolved = await resolveUpdateIdForSnapshot(
+        anchorYdocId,
+        Buffer.from(request.atVersion, "base64"),
+        headDoc,
+      );
+      headDoc.destroy();
+      stamp = resolved.updateId;
+      if (resolved.walked > 200) {
+        console.info(
+          `[annotations] resolved a version ${resolved.walked} rows back in ${anchorYdocId} — ` +
+            `checkpointing is one debounce behind head, so this means the annotator was frozen for a while`,
+        );
+      }
+    } catch (err) {
+      // A malformed or undecodable snapshot, or a store failure. Falls to the
+      // tail below, which is exactly the behaviour before this existed — the
+      // anchor stays self-consistent with whatever gets stamped either way
+      // (captureAnchorInYdoc re-derives against it), so this degrades
+      // rather than fails.
+      console.error(`[annotations] couldn't resolve the client's version for ${anchorYdocId}:`, err);
+    }
+  }
+  // PLAN.md §22e — **an anchored reply stamps the version its author was
+  // actually reading, which is the parent's newest settled version**: the
+  // mark of its newest snapshot (`parentSettledMark`). A reader of a body
+  // sees settled text and never keystrokes, so that is the exact answer, and
+  // no client-side capture is needed — which is just as well, since the
+  // client has no live connection to the parent body to capture from.
+  //
+  // It is *more* precise than the tail now that bodies are mutable, and in
+  // exactly the case that matters: while an edit session is open the tail
+  // names text the replier has never seen, while the snapshot names the text
+  // they quoted.
+  if (stamp === null && target.kind === "reply") {
+    stamp = await parentSettledMark(target.parentId);
+  }
+  if (stamp === null) {
+    stamp = await ydocStore.maxUpdateId(anchorYdocId);
+  }
+
+  if (!capture || stamp === null) {
+    return { stamp, range: null };
+  }
+  const range = await captureAnchorInYdoc({
+    ydocId: anchorYdocId,
+    throughUpdateId: stamp,
+    // The two targets are different documents with different schemas —
+    // decoding a doc body with the annotation schema would silently drop
+    // every annotation mark in it, and decoding an annotation body with the
+    // doc schema would register a mark that body can never contain.
+    extensions: target.kind === "reply" ? annotationContentExtensions : docContentExtensions,
+    schema: target.kind === "reply" ? pmAnnotationContentSchema : pmDocContentSchema,
+    from: request.from,
+    to: request.to,
+    quotedText: request.quotedText,
+  });
+  return { stamp, range: range && { from: range.from, to: range.to, quotedText: range.quotedText } };
 }
 
 // PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
@@ -92,7 +239,7 @@ function pdfTargetOf(anchor: unknown): unknown {
 // from here). Seeded with an empty paragraph, same shape seedAnnotationYdoc
 // already produces for real content.
 //
-// `anchor` is the selection the composer was opened on, captured now and
+// `anchor` is the PDF selection the composer was opened on, captured now and
 // stored on the row (see DraftAnchorInput) — the composer's own state does
 // not survive a reload, and postAnnotation falls back to the row when the
 // client sends no anchor of its own.
@@ -187,6 +334,66 @@ export async function createDraftAnnotation(
   return { id: annotation.id, connection };
 }
 
+// A draft's range anchor — a root on a doc, or a reply on either — stored on
+// its row (see DraftAnchorInput), with its stamp, by the rule postAnnotation
+// uses: stampRangeAnchor. Sent by the composer just after the row exists, and
+// not awaited by it; again by a reply's composer on every settled re-point
+// in its parent's body (§13p), or a reload would bring the reply back quoting
+// whatever it was first opened on. A client sends its actions one at a time
+// (Next's action queue), so these land in order and before its Post.
+//
+// Captured whichever surface opened the composer — the doc editor included,
+// whose post clears the trio as it writes its mark instead, so the row is
+// still one mechanism or the other once posted. A PDF root's target is not a
+// range and is fixed at creation; its composer is remounted per selection.
+export async function updateDraftAnchor(annotationId: string, anchor: DraftRangeInput): Promise<{ error?: string }> {
+  const session = await auth();
+  if (!session?.user) {
+    return { error: "Unauthorized." };
+  }
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: annotationId },
+    select: { userId: true, status: true, docId: true, parentAnnotationId: true },
+  });
+  if (!annotation) {
+    return { error: "Annotation not found." };
+  }
+  if (annotation.userId !== session.user.id) {
+    return { error: "You don't have permission to change this annotation." };
+  }
+  if (annotation.status !== "DRAFT") {
+    return { error: "This annotation has already been posted." };
+  }
+  const request = rangeRequestOf(anchor);
+  const target: RangeTarget | null =
+    annotation.parentAnnotationId !== null
+      ? { kind: "reply", parentId: annotation.parentAnnotationId }
+      : annotation.docId !== null
+        ? { kind: "doc", docId: annotation.docId }
+        : null;
+  if (!request || !target) {
+    return { error: "Invalid anchor." };
+  }
+
+  // Not found at its stamp is no anchor rather than the previous one: the
+  // draft then posts as the composer would have, document-level.
+  //
+  // Conditional on still being a DRAFT at the write, not just at the read
+  // above: the capture takes long enough on a large doc for a post or a
+  // discard from another tab to land in between.
+  const { stamp, range } = await stampRangeAnchor(target, request, true);
+  await prisma.annotation.updateMany({
+    where: { id: annotationId, status: "DRAFT" },
+    data: {
+      anchorFrom: range?.from ?? null,
+      anchorTo: range?.to ?? null,
+      quotedText: range?.quotedText ?? "",
+      ydocUpdateId: range ? stamp : null,
+    },
+  });
+  return {};
+}
+
 // Who a RAISED annotation emails, as a filter on a doc's `DocAuthor` rows or
 // a file's `FileOwner` rows — the two share the `userId`/`user` shape. Never
 // the poster, who already knows what they raised, and never a soft-deleted
@@ -268,6 +475,7 @@ export async function postAnnotation(opts: {
       status: true,
       pdfTarget: true,
       quotedText: true,
+      anchorFrom: true,
     },
   });
   if (!annotation) {
@@ -350,108 +558,40 @@ export async function postAnnotation(opts: {
   // anchor onto another annotation, and §13p doesn't change that.
   const anchorMode = parentId !== null ? "columns" : (opts.anchorMode ?? "columns");
 
-  // Which ydoc the anchor is measured into — and therefore which update log
-  // stamps it (§13o: the stamp is the coordinate system, so the two cannot be
-  // chosen independently).
-  const anchorYdocId = parentId !== null ? ydocIdForAnnotation(parentId) : ydocIdForDoc(docId);
-
-  // The client's own position when it knew one precisely; otherwise the tail
-  // of whichever log is about to matter. A malformed client value (should
-  // never happen, but this is a server action) falls through to the same tail
-  // lookup rather than failing the whole post over metadata.
-  //
-  // An *anchorless* annotation — including an anchorless reply, which is what
-  // the plain Reply button still produces — stamps the doc's log, as every row
-  // did before §13p: with no offsets to be a coordinate system for, the column
-  // means only §13n's "what was I looking at", and that is the doc.
-  //
-  // Computed before the anchor, not alongside it: the anchor has to be
-  // resolved against *this* state rather than whatever the document has
-  // become by the time the update lands.
-  let ydocUpdateId: bigint | null = null;
-  if (opts.ydocUpdateId !== undefined) {
-    try {
-      ydocUpdateId = BigInt(opts.ydocUpdateId);
-    } catch {
-      ydocUpdateId = null;
-    }
-  }
-  // PLAN.md §13q — the client's own version, converted. Tried before the tail
-  // because the two answer different questions: this one is "what was the
-  // annotator looking at", the tail is "what does the server hold now", and
-  // they diverge exactly when somebody else is editing — which is the case
-  // the stamp exists for.
-  //
-  // Only for an anchor into the doc. A reply's anchor targets its parent
-  // annotation's ydoc, which the client has no live connection to — an
-  // annotation body renders from its `proseJson` cache, not a tap — so there
-  // is no Yjs snapshot for it to capture and this path cannot apply. The
-  // reply's stamp comes from the parent's newest settled version instead,
-  // below.
-  if (ydocUpdateId === null && opts.atVersion && anchorRequested && parentId === null) {
-    try {
-      const headDoc = await materializeYdocAt(anchorYdocId, (await ydocStore.maxUpdateId(anchorYdocId))!);
-      const resolved = await resolveUpdateIdForSnapshot(
-        anchorYdocId,
-        Buffer.from(opts.atVersion, "base64"),
-        headDoc,
-      );
-      headDoc.destroy();
-      ydocUpdateId = resolved.updateId;
-      if (resolved.walked > 200) {
-        console.info(
-          `[annotations] resolved a version ${resolved.walked} rows back in ${anchorYdocId} — ` +
-            `checkpointing is one debounce behind head, so this means the annotator was frozen for a while`,
-        );
-      }
-    } catch (err) {
-      // A malformed or undecodable snapshot, or a store failure. Falls to the
-      // tail below, which is exactly the behaviour before this existed — the
-      // anchor stays self-consistent with whatever gets stamped either way
-      // (captureAnchorInYdoc re-derives against it), so this degrades
-      // rather than fails.
-      console.error(`[annotations] couldn't resolve the client's version for ${anchorYdocId}:`, err);
-    }
-  }
-  // PLAN.md §22e — **an anchored reply stamps the version its author was
-  // actually reading, which is the parent's newest settled version**: the
-  // mark of its newest snapshot (`parentSettledMark`). A reader of a body
-  // sees settled text and never keystrokes, so that is the exact answer, and
-  // no client-side capture is needed — which is just as well, since the
-  // client has no live connection to the parent body to capture from.
-  //
-  // It is *more* precise than the tail now that bodies are mutable, and in
-  // exactly the case that matters: while an edit session is open the tail
-  // names text the replier has never seen, while the snapshot names the text
-  // they quoted.
-  if (ydocUpdateId === null && anchorRequested && parentId !== null) {
-    ydocUpdateId = await parentSettledMark(parentId);
-  }
-  if (ydocUpdateId === null) {
-    ydocUpdateId = await ydocStore.maxUpdateId(
-      anchorRequested ? anchorYdocId : ydocIdForDoc(docId),
-    );
-  }
+  // Posting a draft this client didn't open — reopened after a reload, or
+  // from "Your private notes" — sends no anchor, and the one updateDraftAnchor
+  // stored on the row is the anchor: offsets, quote and stamp together,
+  // captured by stampRangeAnchor as posting would have captured them then,
+  // and self-consistent with each other whatever the document has done
+  // since. Never in mark mode: the doc editor sends no anchor only when its
+  // selection's text is gone, and that posts document-level.
+  const keepDraftAnchor = !anchorRequested && anchorMode === "columns" && annotation.anchorFrom !== null;
 
   // Resolved *before* the status write, unlike the mark below, because it is
   // part of the row rather than a separate document edit: one update, no
   // window in which a LIVE annotation exists without the anchor it was
   // posted with.
+  let ydocUpdateId: bigint | null = null;
   let capturedAnchor: { from: number; to: number; quotedText: string } | null = null;
-  if (anchorRequested && anchorMode === "columns" && ydocUpdateId !== null) {
-    capturedAnchor = await captureAnchorInYdoc({
-      ydocId: anchorYdocId,
-      throughUpdateId: ydocUpdateId,
-      // The two targets are different documents with different schemas —
-      // decoding a doc body with the annotation schema would silently drop
-      // every annotation mark in it, and decoding an annotation body with the
-      // doc schema would register a mark that body can never contain.
-      extensions: parentId !== null ? annotationContentExtensions : docContentExtensions,
-      schema: parentId !== null ? pmAnnotationContentSchema : pmDocContentSchema,
-      from: opts.anchorFrom!,
-      to: opts.anchorTo!,
-      quotedText: opts.quotedText!,
-    });
+  if (anchorRequested) {
+    ({ stamp: ydocUpdateId, range: capturedAnchor } = await stampRangeAnchor(
+      parentId !== null ? { kind: "reply", parentId } : { kind: "doc", docId },
+      {
+        from: opts.anchorFrom!,
+        to: opts.anchorTo!,
+        quotedText: opts.quotedText!,
+        atVersion: opts.atVersion,
+        ydocUpdateId: opts.ydocUpdateId,
+      },
+      anchorMode === "columns",
+    ));
+  } else if (!keepDraftAnchor) {
+    // An *anchorless* annotation — including an anchorless reply, which is
+    // what the plain Reply button still produces — stamps the doc's log, as
+    // every row did before §13p: with no offsets to be a coordinate system
+    // for, the column means only §13n's "what was I looking at", and that is
+    // the doc.
+    ydocUpdateId = parseStamp(opts.ydocUpdateId) ?? (await ydocStore.maxUpdateId(ydocIdForDoc(docId)));
   }
 
   // Version 1, the status and `postedAt` in one transaction (writeSettledBody),
@@ -465,10 +605,18 @@ export async function postAnnotation(opts: {
     alongside: {
       ...(opts.raise ? { status: "RAISED", raisedAt: now } : { status: "LIVE" }),
       postedAt: now,
-      ydocUpdateId,
-      ...(capturedAnchor
-        ? { anchorFrom: capturedAnchor.from, anchorTo: capturedAnchor.to, quotedText: capturedAnchor.quotedText }
-        : {}),
+      // A kept draft anchor is already on the row, stamp and all. Otherwise
+      // the trio is written even when nothing was captured, so a draft's
+      // stored anchor never outlives one the client replaced, or the mark
+      // the doc editor anchors with instead.
+      ...(keepDraftAnchor
+        ? {}
+        : {
+            ydocUpdateId,
+            anchorFrom: capturedAnchor?.from ?? null,
+            anchorTo: capturedAnchor?.to ?? null,
+            quotedText: capturedAnchor?.quotedText ?? "",
+          }),
     },
   });
 
@@ -972,6 +1120,10 @@ async function postFileAnnotation(opts: {
       postedAt: now,
       ...(storedTarget ? { pdfTarget: storedTarget as unknown as Prisma.InputJsonValue, quotedText } : {}),
       // A reply's anchor into its parent's body, unchanged from the doc side.
+      // A reply that sends none keeps whatever its draft stored, which is
+      // something only for a reopened draft first opened on a selection; one
+      // that asked and didn't resolve clears it, so the draft's never stands
+      // in for the one requested.
       ...(capturedReply
         ? {
             anchorFrom: capturedReply.from,
@@ -988,7 +1140,9 @@ async function postFileAnnotation(opts: {
             // construction, as a doc reply's is.
             ydocUpdateId: parentStamp,
           }
-        : {}),
+        : replyAnchor !== null
+          ? { anchorFrom: null, anchorTo: null, quotedText: "", ydocUpdateId: null }
+          : {}),
     },
   });
 

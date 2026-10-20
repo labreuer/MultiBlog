@@ -148,7 +148,10 @@ open and not set to Keep private.
 
 The rule is **the surface, never the permission**: an author reading `/doc/[slug]` gets the
 same anchor kind as a reader, and `postAnnotation` takes an explicit `anchorMode` rather than
-inferring one. A row has one form or none, never two.
+inferring one. A row has one form or none, never two. The surface that decides is the one that
+*posts*: a `DRAFT` carries the column form whichever surface opened it (Lifecycle, "A draft
+carries the anchor it was opened on"), the doc editor's post clears it as it writes the mark,
+and a draft reopened on a reading view posts by the columns it has.
 
 | Written from | Anchor | Stored where | Can drift? |
 |---|---|---|---|
@@ -220,7 +223,8 @@ being created, which on a slow server is a few hundred milliseconds after the ti
 fires — re-points it rather than opening a second draft; an empty selection is ignored, since
 clicking into the sibling composer collapses the body's selection. The pending decoration
 appears at once, the `DRAFT` row waits about 300ms for the selection to settle (a timer
-rather than `pointerup`, so shift+arrows settle the same way). Direct replies are drawn inside
+rather than `pointerup`, so shift+arrows settle the same way), and so does each write of the
+reply's anchor to that row (`updateDraftAnchor`). Direct replies are drawn inside
 the parent in each replier's colour, clickable to flash the reply's card.
 
 ### The version stamp
@@ -324,14 +328,24 @@ being dragged does not spin up a row per pixel. "Move to bottom" re-targets whic
 slot renders the id — same row, same ydoc — rather than copying content between two Yjs
 lineages.
 
-**A draft on a PDF carries the target it was opened on.** The panel holds its selection in
-React state, which a reload discards, so `createDraftAnnotation` also captures it onto the
-row, through the same capture posting runs — what is stored is the server's reading, never
-the client's. Posting takes the client's target when it sends one and the row's when it sends
-none, which is what a draft reopened from `OwnDraftsList` does; the composer shows the stored
-quote so the reader knows it will post anchored. The stored `pdfTarget` and its quote need
-nothing redone at post, since a file's bytes don't move. A draft on a doc keeps only its words:
-reopened, it posts document-level.
+**A draft carries the anchor it was opened on.** The composer holds its selection in React
+state, which a reload discards, so the row gets a copy, through the same capture posting runs
+— what is stored is the server's reading, never the client's. Posting takes the client's
+anchor when it sends one and the row's when it sends none, which is what a draft reopened from
+`OwnDraftsList` does; the composer shows the stored quote so the reader knows it will post
+anchored. On a PDF, `createDraftAnnotation` stores `pdfTarget` and its quote as it makes the
+row; they need nothing redone at post, since a file's bytes don't move. On a doc, and for a
+reply on either, the composer sends the range to `updateDraftAnchor` once the row exists and
+doesn't wait for it: the capture materializes the document at its stamp, 150–200ms on a doc of
+150,000 characters, which "Annotate" would otherwise spend before the editor opened. It stores
+the trio and its `ydocUpdateId` from `stampRangeAnchor`, the function posting itself stamps and
+captures with, so a reopened draft posts the anchor it would have posted when it was opened —
+true at its stamp by construction, and re-found in the live document at read time, like any
+other. A reply's composer sends it again on every settled re-point in its parent's body. A
+client's server actions run one at a time (Next's action queue), so these writes land in order
+and before that client's Post. The doc editor sends no anchor only when its passage is gone,
+so a mark-mode post never falls back to the row's, and a client anchor that fails to resolve
+clears the row's rather than letting it stand in.
 
 **Posting** (`postAnnotation`, `postFileAnnotation`) *settles* the body first
 (`settleAnnotationBody`): asks `/admin/annotation-flush` for the drained tail of the body's
@@ -601,6 +615,13 @@ else. One entry per decision; the measurements are the plan's own.
 - **Draft rows are eager, with discard on close-while-empty.** Staying local until the first
   keystroke would produce no garbage but adds a promotion step to the editor's lifecycle. The
   two-stage popover is what keeps eagerness from creating a row per selection adjustment.
+- **A draft stores its anchor in the same columns a posted annotation uses, with no separate
+  column for it.** A dedicated pending-anchor column would have needed a migration, a
+  conversion into the real columns at post time, and an integrity check of its own. The posted
+  columns already mean "true at this stamped version", and `check-annotation-anchors.ts` and
+  `check-pdf-anchors.ts` already verify every row of them, drafts included. The cost: a
+  `DRAFT` opened in the doc editor holds column values until it posts there, when they're
+  cleared for the mark. That's why the "one form or none" rule is stated of posted rows.
 - **The mark is applied row-first, and the client never mints the id.** Mark-first would
   leave a mark naming no row; row-first leaves a document-level annotation if the mark never
   lands, a state already rendered. Because the server chooses the id, a client cannot mark
