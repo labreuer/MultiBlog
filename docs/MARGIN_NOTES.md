@@ -236,6 +236,13 @@ The pane's "Rail" mode holds only the cards whose passages are on screen, level 
 "All" lists everything in page order. Out of the rail means `display: none`, never unmounted,
 because a card can hold an open reply composer.
 
+## Collapsed cards
+
+An annotation card can be collapsed to its meta line and one line of body, remembered per
+browser (docs/ANNOTATIONS.md, "Collapsing a card"). The layout sees only a card whose height
+changed, which every rail's per-card `ResizeObserver` already re-packs; nothing about
+alignment, packing or the breakpoint knows a card can be collapsed. Comment cards cannot be.
+
 ## Prepared, not built
 
 `collectAnnotationMarkRanges` answers "which annotations are presently anchored, and where"

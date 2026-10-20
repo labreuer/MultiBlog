@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "./AnnotationNode";
 import QuoteThreadHeader from "../QuoteThreadHeader";
+import CollapseAllControls from "./CollapseAllControls";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
 import { resolveAnnotationRanges } from "@/lib/annotation-marks";
 import { activatePseudoBorderForHash, refreshPseudoBorders } from "@/lib/pseudo-border";
+import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
 import marginStyles from "../margin-notes/MarginNotes.module.css";
 
 export type AnnotationEntry = {
@@ -36,6 +38,16 @@ type Props = {
 // to un-share.
 export default function AnnotationList({ entries, docId }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
+  const collapseState = useCollapseState();
+  // Every thread that draws a card — a fully deleted one draws nothing (see
+  // renderEntry), so there is nothing for "Collapse all" to close.
+  const roots = useMemo(
+    () =>
+      entries
+        .map((entry) => entry.root)
+        .filter((root) => root.deletedByUserId === null || hasNonDeletedDescendant(root)),
+    [entries],
+  );
   // Seeded from the server's snapshot answer — `quotedText` is non-empty
   // exactly when `Doc.proseJson` still carried the mark at the last store
   // debounce — then corrected by the live scan below. Seeding rather than
@@ -142,6 +154,7 @@ export default function AnnotationList({ entries, docId }: Props) {
             status="ACTIVE"
             context={null}
             color={entry.color}
+            collapsed={isCollapsed(collapseState, entry.root.id)}
           />
         )}
         <AnnotationNode annotation={entry.root} target={{ kind: "doc", id: docId }} />
@@ -159,6 +172,7 @@ export default function AnnotationList({ entries, docId }: Props) {
             <option value="quoteIndex">Quoted text position</option>
           </select>
         </label>
+        <CollapseAllControls roots={roots} />
       </div>
 
       <div className={marginStyles.list}>{belowEntries.map(renderEntry)}</div>

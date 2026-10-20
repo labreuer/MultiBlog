@@ -473,6 +473,55 @@ no-op. Don't wire the context into the doc surface for symmetry.
 editor's highlights keep the neutral fallback) and `authorHighlightBackground`; docs/DASHBOARD.md lists the four
 places a colour is cached and how stale each can be.
 
+## Collapsing a card
+
+Every annotation card — a thread's first and each reply, on all four surfaces — has a ▾/▸
+toggle at the start of its meta line. Collapsed, a card keeps that line and one line of its
+body, adds its live reply count, and drops the body, its buttons, the revision link, the
+history marker and its replies. A thread's quote header shrinks to one line, since it still
+says which passage the card is about. When replies arrived since the collapse, an **"N new"
+pill** follows the count. It is a button: it opens the card, scrolls to the first new reply
+and flashes each in its author's colour — the only place the reader learns *which* were new,
+since opening the card deletes the entry that knew. It also reveals any card on the way to a
+new reply (`replyCounts`' `through`), since one can sit under a reply collapsed separately.
+**Collapse all** closes each thread's first card; **Expand all** forgets every card in those
+threads, so nothing stays closed further down. They sit beside the sort control under a doc
+and the rail/list toggle in the PDF panel; the editor's rail has no chrome for them.
+
+**Per browser, not per account.** `src/lib/collapsed-annotations.ts` keeps one `localStorage`
+key, `multiblog.collapsedAnnotations`, mapping a collapsed card's id to `seen`: the newest
+`postedAt` in its subtree at the collapse. Ids are unique across docs and PDFs, so there is no
+key per container, and expanding deletes the entry. The map keeps insertion order, oldest
+first, and so does its JSON, since a cuid is never an integer-like key; past 2,000 the front
+goes, which is also the only way an entry for a deleted annotation does. The parse drops
+anything malformed rather than throwing. "New" is a reply whose `postedAt` is after `seen`,
+server time against server time. `postedAt` and not `createdAt`, because a reply's row is
+created when its composer opens, so one begun before the collapse and posted after would
+otherwise count as seen; a row from before `postedAt` existed falls back to `createdAt`. Edits
+don't count.
+
+**The server renders every card open.** It cannot read `localStorage`, so the store is read
+through `useSyncExternalStore` with "nothing collapsed" as the server snapshot, and collapsed
+cards below the article close just after hydration. The rail is placed after mount anyway, and
+the PDF surface is not server-rendered. A cookie would avoid the jump by sending the set with
+every request. A write re-reads storage first, merging another tab's collapses, and the
+`storage` event carries it to the other tabs; where storage throws, collapsing lasts the page.
+
+**Revealed is not expanded.** A permalink naming a card or anything under it, a click on a
+card's highlight in the doc or PDF, and a click on a reply's quoted range open a collapsed card
+without writing anything, so it is collapsed again next visit. A permalink is answered by the
+thread's first card, which reveals the whole path down to the named one, and only once per
+fragment per page load (`revealForFragment`) — or a card the reader closed again would reopen
+whenever the thread re-rendered or remounted with the fragment still in the URL. The jumps go
+through `revealThen`, which waits a frame when it opened something, so a scroll measures the
+card at its new height.
+
+**Never over a mounted editor.** A card with an edit session or a reply composer open ignores
+its collapsed state and disables the toggle: collapsing unmounts the body and replies, and
+either editor is a live connection with unsent words in it. Collapse all still records such a
+card, which closes when its editor does. The rails needed nothing (docs/MARGIN_NOTES.md,
+"Collapsed cards").
+
 ## Verification
 
 - **Integrity** (`scripts/integrity/README.md`): `check-annotation-anchors.ts` (the triple
@@ -486,10 +535,17 @@ places a colour is cached and how stale each can be.
   `annotation-editing.spec.ts`, `annotation-readonly.spec.ts` (from Node, with real cookies —
   the only way to test a rule no page exercises), `pdf-annotations.spec.ts`,
   `margin-rail-widths.spec.ts`, `text-selection.spec.ts` (the popovers and the editor's gutter
-  marker, including the 900px floor).
+  marker, including the 900px floor), `annotation-collapse.spec.ts` (a reload keeps it, another
+  browser doesn't share it, the "new" count, including a reply begun before the collapse and
+  posted after it, the pill opening its card through a separately collapsed reply without
+  writing that reveal, a permalink's reveal, Collapse all/Expand all).
+- **Unit**: `src/lib/collapsed-annotations.test.ts` — the stored map's parse and eviction, and
+  the reply counts.
 - **Fixtures**: `createTestAnnotation()` seeds the body's ydoc, sets `postedAt` and writes
   version 1 as a snapshot of the seed — without the ydoc an edit session connects to a document
   Hocuspocus auto-creates empty, and the first Done would settle that emptiness (refused).
+  `parentAnnotationId` makes it an anchorless reply, and `draftOpenedMsAgo` backdates its
+  `createdAt` while leaving `postedAt` now.
   `getAnnotationEditFacts()` decodes the versions; `backdateAnnotationPosting()` moves
   `postedAt` and version 1's timestamp together, and `setAnnotationEditingSince()` the session,
   producing the intervals the grace and staleness rules compare, since neither reads a clock.
@@ -659,6 +715,9 @@ in its columns or `pdfTarget`, and the stamp keeps its overload ("The version st
 - **Live co-editing of a posted body.** Readers see the settled text until Done; the
   awareness-mounted editor design stays available.
 - **No diff between versions**; the history lists them whole.
+- **Collapsing is annotations only.** `CommentNode` could use the same store, keyed by comment
+  id. A resolved thread would want to start collapsed, which needs an explicit "expanded"
+  entry so that a reader's choice still wins; the stored entry is an object so it can carry one.
 - **PDF fuzzy matching and lazy re-anchoring after a `textVersion` bump** (docs/PDF.md §3,
   §4); the quads carry every annotation meanwhile.
 - **`/annotations`**: the "Quoted text position" sort ties for mark-anchored rows; the

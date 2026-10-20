@@ -27,6 +27,10 @@ export type AnnotationComment = {
   // are still their creation-time empty-paragraph values.
   proseJson: JSONContent | null;
   createdAt: string;
+  // When readers could first see it: the DRAFT -> LIVE moment, where
+  // `createdAt` is when its composer opened. Null only for a row posted before
+  // the column existed.
+  postedAt: string | null;
   deletedByUserId: string | null;
   commenterUserId: string | null;
   // PLAN.md §13p — a reply's own anchor, into the body of the annotation it
@@ -444,6 +448,7 @@ function toComment(a: AnnotationRow, context: VersionContext): AnnotationComment
     bodyText: a.bodyText,
     proseJson: a.proseJson as JSONContent | null,
     createdAt: a.createdAt.toISOString(),
+    postedAt: a.postedAt?.toISOString() ?? null,
     deletedByUserId: a.deletedByUserId,
     commenterUserId: a.userId,
     // PLAN.md §13p — only a *reply* anchors into a body. A root's columns are

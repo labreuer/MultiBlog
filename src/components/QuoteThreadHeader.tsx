@@ -17,9 +17,21 @@ type Props = {
   /** Same pixels, interactivity stripped — for the dashboard Settings
       color sample (docs/DASHBOARD.md "The color sample"). */
   preview?: boolean;
+  /** The thread's card is collapsed (docs/ANNOTATIONS.md, "Collapsing a
+      card"): the quote shrinks to one line rather than going, since it is
+      still what says which passage the card is about. */
+  collapsed?: boolean;
 };
 
-export default function QuoteThreadHeader({ threadId, quotedText, status, context, color, preview = false }: Props) {
+export default function QuoteThreadHeader({
+  threadId,
+  quotedText,
+  status,
+  context,
+  color,
+  preview = false,
+  collapsed = false,
+}: Props) {
   const [showContext, setShowContext] = useState(false);
   const detached = status === "DETACHED";
 
@@ -90,7 +102,9 @@ export default function QuoteThreadHeader({ threadId, quotedText, status, contex
             style={{ width: BORDER_WIDTH }}
           />
         </div>
-        <blockquote className={`${styles.quote} ${detached ? styles.quoteDetached : styles.quoteActive}`}>
+        <blockquote
+          className={`${styles.quote} ${detached ? styles.quoteDetached : styles.quoteActive} ${collapsed ? styles.quoteCollapsed : ""}`}
+        >
           {quotedText}
         </blockquote>
       </div>

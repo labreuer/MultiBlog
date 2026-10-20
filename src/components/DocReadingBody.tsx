@@ -20,6 +20,7 @@ import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
 import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
 import { useOpenLinkParts } from "./anchored-link/open-link-store";
 import AnnotationPopover from "./annotation/AnnotationPopover";
+import { revealThen } from "@/lib/collapsed-annotations";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import { useMarginNotes, useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import proseStyles from "@/styles/prose.module.css";
@@ -72,15 +73,23 @@ type Props = {
 // once-only useEditor construction (see use-live-doc-content.ts) to go
 // stale over — unlike AnnotatableArticle's onIndicatorClick, which reads
 // `threads` and so is rebound via that editor's own [threads] deps array.
+//
+// A collapsed card is opened for the reader who clicked its passage, for this
+// visit only (docs/ANNOTATIONS.md, "Collapsing a card").
 function jumpToAnnotationEntry(ids: string[]) {
   const id = ids[0];
   if (!id) return;
-  const targets = document.querySelectorAll<HTMLElement>(`[data-thread-id="${id}"]`);
-  if (targets.length === 0) return;
-  const color = targets[0].dataset.threadColor ?? NEUTRAL_THREAD_COLOR;
-  targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
-  targets.forEach((target) => flashHighlight(target, color));
-  activatePseudoBordersForThread(id, color);
+  const first = document.querySelector<HTMLElement>(`[data-thread-id="${id}"]`);
+  if (!first) return;
+  const rootId = first.dataset.marginNoteId;
+  revealThen(rootId ? [rootId] : [], () => {
+    const targets = document.querySelectorAll<HTMLElement>(`[data-thread-id="${id}"]`);
+    if (targets.length === 0) return;
+    const color = targets[0].dataset.threadColor ?? NEUTRAL_THREAD_COLOR;
+    targets[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    targets.forEach((target) => flashHighlight(target, color));
+    activatePseudoBordersForThread(id, color);
+  });
 }
 
 
