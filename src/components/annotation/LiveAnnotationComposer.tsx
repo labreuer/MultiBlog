@@ -95,6 +95,14 @@ const VISIBILITY_OPTIONS: Record<AnnotationTarget["kind"], { value: Visibility; 
 // called by whichever parent — the bottom composer, a reply, or "Edit" on
 // an own saved draft — decided to open one) — this component never creates
 // the row itself, only connects to it.
+//
+// **A parent whose draft can change mounts this keyed on the draft's id.**
+// AnnotationBody's editor binds its Collaboration extension to a ydoc once,
+// at construction, and `useEditor` never rebuilds it; and the provider this
+// gates on stays set across an id change, so the editor never unmounts
+// either. Handed a new id in place, the composer posts the new draft while
+// the typing goes into the old one's destroyed ydoc, connected to nothing —
+// and the post fails as empty.
 export default function LiveAnnotationComposer({
   annotationId,
   connection,

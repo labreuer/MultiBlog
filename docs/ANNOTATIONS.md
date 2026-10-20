@@ -214,12 +214,13 @@ thing that can invalidate a stored anchor is that normaliser, hence `NORMALISER_
 
 Selecting inside a posted body opens a reply anchored to that passage; the target is chosen
 from `parentAnnotationId`, never taken as an argument, so a reply cannot quote the document
-and a root cannot quote another annotation. A selection with a reply already open re-points
-it rather than opening a second composer; an empty selection is ignored, since clicking into
-the sibling composer collapses the body's selection. The pending decoration appears at once,
-the `DRAFT` row waits about 300ms for the selection to settle (a timer rather than
-`pointerup`, so shift+arrows settle the same way). Direct replies are drawn inside the parent
-in each replier's colour, clickable to flash the reply's card.
+and a root cannot quote another annotation. A selection with a reply already open — or still
+being created, which on a slow server is a few hundred milliseconds after the timer below
+fires — re-points it rather than opening a second draft; an empty selection is ignored, since
+clicking into the sibling composer collapses the body's selection. The pending decoration
+appears at once, the `DRAFT` row waits about 300ms for the selection to settle (a timer
+rather than `pointerup`, so shift+arrows settle the same way). Direct replies are drawn inside
+the parent in each replier's colour, clickable to flash the reply's card.
 
 ### The version stamp
 
