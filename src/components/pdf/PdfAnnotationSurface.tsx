@@ -33,6 +33,7 @@ import { resolveTargetRects } from "@/lib/pdf-anchor-resolve";
 import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
 import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
+import type { OwnDraft } from "@/lib/annotation-data";
 import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
@@ -73,6 +74,8 @@ type Props = {
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
+  /** The viewer's own drafts — refetched alongside `entries`, see `liveEntries`. */
+  ownDrafts: OwnDraft[];
   /**
    * The link a ?sel= visit resolved for this viewer, delivered as an initial
    * prop — the one delivery that safely crosses this island's ssr:false
@@ -88,7 +91,15 @@ type Props = {
   metadata: ReactNode;
 };
 
-export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, anchoredLink, metadata }: Props) {
+export default function PdfAnnotationSurface({
+  fileId,
+  fileUrl,
+  title,
+  entries,
+  ownDrafts,
+  anchoredLink,
+  metadata,
+}: Props) {
   const handleRef = useRef<PdfViewerHandle | null>(null);
   const [ready, setReady] = useState(false);
   // Two separate questions, and the UI asks them in two places: the toolbar's
@@ -190,13 +201,22 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
   // supersedes it by simply existing — no effect resetting state, no window
   // where the two disagree, and no way for this to become a second source of
   // truth that outlives its usefulness.
-  const [refetched, setRefetched] = useState<{ base: PdfAnnotationEntry[]; list: PdfAnnotationEntry[] } | null>(null);
+  //
+  // The viewer's own drafts ride on the same fetch and the same key: both
+  // props come from one server render, so a refresh that replaces one has
+  // replaced the other.
+  const [refetched, setRefetched] = useState<{
+    base: PdfAnnotationEntry[];
+    list: PdfAnnotationEntry[];
+    drafts: OwnDraft[];
+  } | null>(null);
   const liveEntries = refetched?.base === entries ? refetched.list : entries;
+  const liveDrafts = refetched?.base === entries ? refetched.drafts : ownDrafts;
 
   const reloadEntries = useCallback(() => {
     const base = entries;
     loadPdfAnnotationEntries(fileId)
-      .then((list) => setRefetched({ base, list }))
+      .then(({ entries: list, ownDrafts: drafts }) => setRefetched({ base, list, drafts }))
       // Deliberately quiet, and deliberately not an empty list: the panel keeps
       // whatever it is already showing. The annotation is written either way —
       // this only decides how soon it is drawn — so the worst a failure here
@@ -844,6 +864,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
         <PdfAnnotationPanel
           fileId={fileId}
           entries={liveEntries}
+          ownDrafts={liveDrafts}
           resolveTops={resolveTops}
           subscribe={subscribe}
           positioned={positioned}
@@ -855,7 +876,7 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
         />
       </AnnotationReloadProvider>
     ),
-    [fileId, liveEntries, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries, handle],
+    [fileId, liveEntries, liveDrafts, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries, handle],
   );
 
   const panes = useMemo<PdfPane[]>(

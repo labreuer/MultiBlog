@@ -9,7 +9,20 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 // (AnnotationSection's tree) are siblings in page.tsx, not parent/child, so
 // handing a draft id across that boundary needs a context provider wrapping
 // both rather than a prop.
-export type MovedDraft = { id: string; anchorFrom?: number; anchorTo?: number; quotedText?: string };
+//
+// The three anchor fields are what a draft moved out of an open composer
+// still has in hand, and are posted as its anchor. A draft reopened from
+// "Your private notes" has none: its anchor is on its row, where
+// createDraftAnnotation stored it, and postAnnotation reads it from there.
+// `storedQuote` is that row's quote, for the composer to show — never sent
+// back as an anchor.
+export type MovedDraft = {
+  id: string;
+  anchorFrom?: number;
+  anchorTo?: number;
+  quotedText?: string;
+  storedQuote?: string;
+};
 
 type Ctx = { movedDraft: MovedDraft | null; setMovedDraft: (draft: MovedDraft | null) => void };
 

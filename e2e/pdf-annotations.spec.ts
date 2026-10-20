@@ -508,4 +508,52 @@ test.describe("pdf annotations", () => {
       await deleteTestFile(file.id);
     }
   });
+
+  // docs/ANNOTATIONS.md, Lifecycle — "A draft carries the anchor it was
+  // opened on". PRIVATE saves a DRAFT, and on a PDF nothing listed drafts, so
+  // a private note was unreachable the moment its composer closed; and the
+  // target lived only in the panel's state, so even reached it would have
+  // posted document-level.
+  test("a note saved PRIVATE is listed, survives a reload, and posts with its passage", async ({ page }) => {
+    const file = await makeFile();
+    const body = "E2E private note on the fox";
+    const privateNotes = page.getByText("Your private notes").locator("..");
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      await selectPhrase(page, 1, PHRASE);
+      await page.getByRole("button", { name: "Annotate" }).click();
+      const editor = annotationEditor(page);
+      await editor.click();
+      await editor.pressSequentially(body);
+      await page.getByRole("combobox", { name: "Annotation visibility" }).selectOption("private");
+      await page.getByRole("button", { name: "Save" }).click();
+
+      // Listed at once, through the panel's own fetch: this island can't count
+      // on a refresh to bring it (CLAUDE.md, router.refresh()).
+      await expect(privateNotes).toContainText(body, { timeout: 15_000 });
+      await expect(privateNotes).toContainText(`on “${PHRASE}”`);
+      expect(await getFileAnnotationFacts(file.id)).toEqual([]);
+
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      await expect(privateNotes).toContainText(body);
+      await privateNotes.getByRole("button", { name: "Edit" }).click();
+      await expect(page.getByText(`Annotating: “${PHRASE}”`)).toBeVisible({ timeout: 15_000 });
+      await expect(annotationEditor(page)).toHaveText(body, { timeout: 15_000 });
+      // SHARED is the select's default.
+      await page.getByRole("button", { name: "Save" }).click();
+
+      await expect(page.getByText("Your private notes")).toHaveCount(0, { timeout: 15_000 });
+      const [posted, ...rest] = await getFileAnnotationFacts(file.id);
+      expect(rest).toEqual([]);
+      expect(posted).toMatchObject({ bodyText: body, quotedText: PHRASE, pageIndex: 0 });
+      expect(posted.quadCount).toBeGreaterThan(0);
+      expect(posted.pageTextAtTarget?.slice(posted.position!.start, posted.position!.end)).toBe(PHRASE);
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
 });

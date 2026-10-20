@@ -202,7 +202,35 @@ export type OwnDraft = {
   id: string;
   bodyText: string;
   createdAt: string;
+  /** The passage the draft is anchored to, as stored when it was opened; "" for none. */
+  quotedText: string;
+  /** A reply posts under its parent wherever it is reopened, so the list says so. */
+  isReply: boolean;
 };
+
+const OWN_DRAFT_SELECT = {
+  id: true,
+  bodyText: true,
+  createdAt: true,
+  quotedText: true,
+  parentAnnotationId: true,
+} as const;
+
+function toOwnDraft(d: {
+  id: string;
+  bodyText: string;
+  createdAt: Date;
+  quotedText: string;
+  parentAnnotationId: string | null;
+}): OwnDraft {
+  return {
+    id: d.id,
+    bodyText: d.bodyText,
+    createdAt: d.createdAt.toISOString(),
+    quotedText: d.quotedText,
+    isReply: d.parentAnnotationId !== null,
+  };
+}
 
 // PLAN.md §13d — "Keep private" leaves a DRAFT sitting in the DB rather
 // than discarding it (Cancel's job); this is the *only* thing that makes
@@ -216,9 +244,9 @@ export async function getOwnDraftAnnotations(docId: string, userId: string): Pro
   const drafts = await prisma.annotation.findMany({
     where: { docId, userId, status: "DRAFT" },
     orderBy: { createdAt: "desc" },
-    select: { id: true, bodyText: true, createdAt: true },
+    select: OWN_DRAFT_SELECT,
   });
-  return drafts.map((d) => ({ id: d.id, bodyText: d.bodyText, createdAt: d.createdAt.toISOString() }));
+  return drafts.map(toOwnDraft);
 }
 
 // PLAN.md §19 — the file counterpart of getDocAnnotationsAsThreads.
@@ -269,13 +297,16 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
   return threads;
 }
 
+// The file counterpart of getOwnDraftAnnotations, under the same rule: the
+// caller's own id only. /pdf/[slug] lists it on first paint, and
+// loadPdfAnnotationEntries returns it after every change inside the island.
 export async function getOwnFileDraftAnnotations(fileId: string, userId: string): Promise<OwnDraft[]> {
   const drafts = await prisma.annotation.findMany({
     where: { fileId, userId, status: "DRAFT" },
     orderBy: { createdAt: "desc" },
-    select: { id: true, bodyText: true, createdAt: true },
+    select: OWN_DRAFT_SELECT,
   });
-  return drafts.map((d) => ({ id: d.id, bodyText: d.bodyText, createdAt: d.createdAt.toISOString() }));
+  return drafts.map(toOwnDraft);
 }
 
 type AnnotationRow = {

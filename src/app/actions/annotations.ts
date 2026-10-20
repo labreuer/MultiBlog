@@ -24,7 +24,9 @@ import {
   type AnnotationTarget,
 } from "@/lib/annotation-container";
 import { captureAnchorInYdoc, capturePdfTextAnchor } from "@/lib/anchors/capture";
+import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
+import { getOwnFileDraftAnnotations, type OwnDraft } from "@/lib/annotation-data";
 import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
@@ -69,6 +71,18 @@ async function connectionBundleFor(
   }
 }
 
+/**
+ * What a composer was opened on, kept on the DRAFT row so that a draft
+ * reopened later — after a reload, or from "Your private notes" — posts where
+ * it was started rather than document-level. Request input only: what is
+ * stored is the server's own capture of it, exactly as at post time.
+ */
+export type DraftAnchorInput = { pdfTarget: unknown };
+
+function pdfTargetOf(anchor: unknown): unknown {
+  return typeof anchor === "object" && anchor !== null && "pdfTarget" in anchor ? anchor.pdfTarget : undefined;
+}
+
 // PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
 // editor to before a single keystroke lands, so opening one (the bottom
 // composer, or Reply) creates a DRAFT eagerly: invisible to every other
@@ -77,9 +91,15 @@ async function connectionBundleFor(
 // (applyAnnotationMark is only ever called from postAnnotation below, never
 // from here). Seeded with an empty paragraph, same shape seedAnnotationYdoc
 // already produces for real content.
+//
+// `anchor` is the selection the composer was opened on, captured now and
+// stored on the row (see DraftAnchorInput) — the composer's own state does
+// not survive a reload, and postAnnotation falls back to the row when the
+// client sends no anchor of its own.
 export async function createDraftAnnotation(
   container: string | AnnotationTarget,
   parentAnnotationId?: string,
+  anchor?: DraftAnchorInput,
 ): Promise<{ id: string; connection?: AnnotationConnectionBundle } | { error: string }> {
   const session = await auth();
   if (!session?.user) {
@@ -129,6 +149,16 @@ export async function createDraftAnnotation(
     parentId = parentAnnotationId;
   }
 
+  // A root on a PDF: the same capture postFileAnnotation runs, so the stored
+  // target is the server's reading of it, never the client's. A reply never
+  // carries one (§13p), and a target that doesn't parse leaves the draft
+  // document-level, as it would have posted.
+  const rawPdfTarget = pdfTargetOf(anchor);
+  const pdfAnchor =
+    target.kind === "file" && parentId === null && rawPdfTarget !== undefined
+      ? await capturePdfTextAnchor({ fileId: target.id, rawTarget: rawPdfTarget })
+      : null;
+
   const seed = seedAnnotationYdoc("");
   const annotation = await prisma.annotation.create({
     data: {
@@ -138,6 +168,9 @@ export async function createDraftAnnotation(
       proseJson: seed.proseJson as Prisma.InputJsonValue,
       bodyText: "",
       status: "DRAFT",
+      ...(pdfAnchor
+        ? { pdfTarget: pdfAnchor.target as unknown as Prisma.InputJsonValue, quotedText: pdfAnchor.quotedText }
+        : {}),
     },
   });
   await ydocStore.createIfAbsent(ydocIdForAnnotation(annotation.id), seed.ydoc, seed.stateVector);
@@ -226,7 +259,16 @@ export async function postAnnotation(opts: {
 
   const annotation = await prisma.annotation.findUnique({
     where: { id: opts.annotationId },
-    select: { id: true, docId: true, fileId: true, userId: true, parentAnnotationId: true, status: true },
+    select: {
+      id: true,
+      docId: true,
+      fileId: true,
+      userId: true,
+      parentAnnotationId: true,
+      status: true,
+      pdfTarget: true,
+      quotedText: true,
+    },
   });
   if (!annotation) {
     return { error: "Annotation not found." };
@@ -262,12 +304,14 @@ export async function postAnnotation(opts: {
   // has no update log, no ydoc and a different byline table, so almost none of
   // it would survive being made conditional.
   if (annotation.fileId !== null) {
+    const draftTarget = parsePdfTarget(annotation.pdfTarget);
     return postFileAnnotation({
       annotationId: annotation.id,
       fileId: annotation.fileId,
       parentId,
       settled,
       rawTarget: opts.pdfTarget,
+      draftTarget: draftTarget ? { target: draftTarget, quotedText: annotation.quotedText } : null,
       raise: opts.raise === true,
       raisedBy: displayNameOf(session.user),
       authorUserId: session.user.id,
@@ -857,6 +901,8 @@ async function postFileAnnotation(opts: {
   /** The validated body, from `settleAnnotationBody` — version 1 is written from it. */
   settled: SettledBody;
   rawTarget: unknown;
+  /** The target createDraftAnnotation captured and stored, if any: what a reopened draft posts with. */
+  draftTarget: { target: PdfTarget; quotedText: string } | null;
   raise: boolean;
   /** Display name for the notification email — resolved by the caller, which already has the session. */
   raisedBy: string;
@@ -874,7 +920,17 @@ async function postFileAnnotation(opts: {
   // trusts, and derives the quote from this server's own page text — since
   // PR 2 it is the one writer of a PDF anchor's `quote.exact`, shared with
   // `tag_anchor`'s PDF_TEXT parts.
-  const captured = parentId === null ? await capturePdfTextAnchor({ fileId, rawTarget: opts.rawTarget }) : null;
+  //
+  // A client that sends no target is posting a draft it did not open here —
+  // reopened after a reload, or from "Your private notes" — so the row's own,
+  // stored by that same capture when the draft was created, is the anchor.
+  // A file's bytes don't move, so the stored target needs nothing redone.
+  const captured =
+    parentId === null
+      ? opts.rawTarget !== undefined
+        ? await capturePdfTextAnchor({ fileId, rawTarget: opts.rawTarget })
+        : opts.draftTarget
+      : null;
   const quotedText = captured?.quotedText ?? "";
   const storedTarget = captured?.target ?? null;
 
@@ -975,8 +1031,14 @@ async function postFileAnnotation(opts: {
  * reachable directly with any id a client cares to send. It throws rather than
  * returning `[]` on refusal, so a caller can leave the list it already has
  * standing instead of blanking the panel on a permission error.
+ *
+ * The viewer's own drafts ride along, for the same reason: "Your private
+ * notes" sits inside the same island, and a private save or a discard changes
+ * it through nothing but this fetch.
  */
-export async function loadPdfAnnotationEntries(fileId: string): Promise<PdfAnnotationEntry[]> {
+export async function loadPdfAnnotationEntries(
+  fileId: string,
+): Promise<{ entries: PdfAnnotationEntry[]; ownDrafts: OwnDraft[] }> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
@@ -988,5 +1050,9 @@ export async function loadPdfAnnotationEntries(fileId: string): Promise<PdfAnnot
   if (!file || !(await canUserReadFile(session.user.id, session.user.role, file))) {
     throw new Error("You don't have permission to read this file.");
   }
-  return pdfAnnotationEntriesFor(fileId);
+  const [entries, ownDrafts] = await Promise.all([
+    pdfAnnotationEntriesFor(fileId),
+    getOwnFileDraftAnnotations(fileId, session.user.id),
+  ]);
+  return { entries, ownDrafts };
 }

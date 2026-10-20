@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import AnnotationBody from "./AnnotationBody";
 import { useAnnotationProvider } from "./use-annotation-provider";
 import { useDocPresence } from "./doc-presence-context";
+import { useAnnotationReload } from "./annotation-reload-context";
 import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import type { AnnotationTarget } from "@/lib/annotation-container";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
@@ -122,6 +123,7 @@ export default function LiveAnnotationComposer({
   const router = useRouter();
   const { data: session } = useSession();
   const { awareness } = useDocPresence();
+  const reloadAnnotations = useAnnotationReload();
   // A composer only ever opens on this viewer's own DRAFT, so `readOnly`
   // cannot come back true here — it is threaded through rather than assumed
   // so that the one place deciding `editable` is the token, on both surfaces.
@@ -189,10 +191,16 @@ export default function LiveAnnotationComposer({
 
   function handleCancel() {
     onCancel();
-    discardDraftAnnotation(annotationId).catch(() => {
-      // Best-effort — an orphaned DRAFT is invisible to everyone but its own
-      // author (§13d) and harmless, not worth surfacing a failure for.
-    });
+    discardDraftAnnotation(annotationId)
+      // A discarded draft may have been listed in "Your private notes". The
+      // doc page's list is server-rendered and follows the action's own
+      // revalidation; /pdf/[slug]'s sits behind an ssr:false boundary and
+      // follows only a fetch of its own (CLAUDE.md's router.refresh() note).
+      .then(reloadAnnotations)
+      .catch(() => {
+        // Best-effort — an orphaned DRAFT is invisible to everyone but its own
+        // author (§13d) and harmless, not worth surfacing a failure for.
+      });
   }
 
   if (!provider || !session?.user) {

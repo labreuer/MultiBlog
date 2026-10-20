@@ -58,8 +58,9 @@ The row carries:
 - **`/pdf/[slug]`**: a side panel with an Annotations tab that is the rail — "Rail" shows
   cards level with passages on screen, "All" lists everything in page order — and
   highlights drawn on an `.annoLayer` per page. The composer speaks the file's vocabulary
-  (PRIVATE / SHARED, a Save button) and offers no "notify" option; the panel has no sort
-  control, since above the breakpoint it *is* the rail.
+  (PRIVATE / SHARED, a Save button) and offers no "notify" option, and the reader's own
+  drafts are listed under it (`OwnDraftsList`, fed by `loadPdfAnnotationEntries` alongside
+  the entries); the panel has no sort control, since above the breakpoint it *is* the rail.
 - **`/annotations`**, the admin browse table: Doc / File, Author, Body, Quote, Status,
   Created, Edited, Deleted, Raised at; gated `canManageDocs`, scoped to the containers the
   viewer may *read*, and excluding `DRAFT` outright. Doc / File links to the row's own card,
@@ -323,6 +324,15 @@ being dragged does not spin up a row per pixel. "Move to bottom" re-targets whic
 slot renders the id — same row, same ydoc — rather than copying content between two Yjs
 lineages.
 
+**A draft on a PDF carries the target it was opened on.** The panel holds its selection in
+React state, which a reload discards, so `createDraftAnnotation` also captures it onto the
+row, through the same capture posting runs — what is stored is the server's reading, never
+the client's. Posting takes the client's target when it sends one and the row's when it sends
+none, which is what a draft reopened from `OwnDraftsList` does; the composer shows the stored
+quote so the reader knows it will post anchored. The stored `pdfTarget` and its quote need
+nothing redone at post, since a file's bytes don't move. A draft on a doc keeps only its words:
+reopened, it posts document-level.
+
 **Posting** (`postAnnotation`, `postFileAnnotation`) *settles* the body first
 (`settleAnnotationBody`): asks `/admin/annotation-flush` for the drained tail of the body's
 own log without a cache write, with a bounded retry (a keystroke immediately followed by a
@@ -330,7 +340,8 @@ click can outrace the websocket), materialises the body at that mark and validat
 non-empty and at most 5,000 characters. Then it captures the anchor for the chosen mode and,
 in one transaction, writes **version 1** — a `ydoc_snapshot` at that mark — the cache columns
 from the same decoded document, `postedAt`, and the status. "Post" is `LIVE`; "Keep private" stays `DRAFT` (`saveDraftAnnotation`,
-reachable again through `OwnDraftsList`); "Post & notify authors" is `RAISED` — one
+reachable again through `OwnDraftsList`, as is a draft whose composer a reload took away);
+"Post & notify authors" is `RAISED` — one
 `sendMail` per byline author, or per file owner, and `raisedAt` stamped. The poster is never
 among the recipients, nor is a soft-deleted account still on the byline
 (`raiseRecipientWhere`, applied in the query). Any `DRAFT` can be

@@ -25,12 +25,30 @@
   font-size: 0.9rem;
 }
 
-.preview {
+.text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--foreground);
+}
+
+.kind {
+  color: var(--text-secondary);
+}
+
+.quote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 .editButton {
