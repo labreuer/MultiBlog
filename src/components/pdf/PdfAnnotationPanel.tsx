@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
 import QuoteThreadHeader from "@/components/QuoteThreadHeader";
 import CollapseAllControls from "@/components/annotation/CollapseAllControls";
+import { useRevealForFragment } from "@/components/annotation/use-reveal-for-fragment";
 import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
 import NewAnnotationComposer from "@/components/annotation/NewAnnotationComposer";
 import { usePdfMarginNotes } from "./use-pdf-margin-notes";
@@ -153,6 +154,7 @@ export default function PdfAnnotationPanel({
 
   const ids = useMemo(() => sorted.map((entry) => entry.root.id), [sorted]);
   const roots = useMemo(() => sorted.map((entry) => entry.root), [sorted]);
+  useRevealForFragment(roots);
   const collapseState = useCollapseState();
   const { containerRef, isAnchored } = usePdfMarginNotes({
     resolveTops,

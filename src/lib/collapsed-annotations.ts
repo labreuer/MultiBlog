@@ -245,26 +245,6 @@ export function revealThen(ids: readonly string[], jump: () => void) {
   else jump();
 }
 
-// The fragment each thread last answered to. A permalink opens what it names
-// once, when it is arrived at — not again each time the thread re-renders
-// with fresh data or remounts on its way between the rail and the list below
-// while the fragment is still in the URL, or a card the reader has since
-// closed would spring back open. Module-level rather than per card for that
-// second reason: a remount is a new component instance.
-const fragmentAnswered = new Map<string, string>();
-
-/**
- * A thread's answer to the URL's fragment (without `#`): if the fragment is
- * new to it, reveal `path`, the cards from the thread's first down to the one
- * the fragment names — every one of them, since a card inside a collapsed one
- * is not on the page for the browser to find. Empty when it names none.
- */
-export function revealForFragment(threadId: string, fragment: string, path: readonly string[]) {
-  if (fragmentAnswered.get(threadId) === fragment) return;
-  fragmentAnswered.set(threadId, fragment);
-  revealCards(path);
-}
-
 export function useCollapseState(): CollapseState {
   return useSyncExternalStore(subscribe, snapshot, () => SERVER_STATE);
 }
