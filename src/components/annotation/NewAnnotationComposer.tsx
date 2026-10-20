@@ -122,6 +122,9 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
   if (open) {
     return (
       <LiveAnnotationComposer
+        // "Move to bottom" swaps a different draft into an open slot, and a
+        // new draft is a new composer (LiveAnnotationComposer's header).
+        key={open.id}
         annotationId={open.id}
         connection={open.connection}
         anchorFrom={open.anchorFrom}

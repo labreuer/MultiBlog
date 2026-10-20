@@ -247,6 +247,12 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // below, since hook order has to be identical on every render — including
   // the renders where this node collapses to nothing.
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether a reply draft exists *or is on its way*: set the moment one is
+  // asked for, cleared when it closes or the ask fails. Not `replyDraft`,
+  // which stays null until createDraftAnnotation answers — a selection that
+  // changes in that window (a drag held still past the settle time, then
+  // carried on) would otherwise open a second draft beside the first.
+  const replyOpenRef = useRef(false);
   useEffect(
     () => () => {
       if (openTimerRef.current) clearTimeout(openTimerRef.current);
@@ -394,10 +400,14 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   };
 
   const openReply = () => {
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    if (replyOpenRef.current) return;
+    replyOpenRef.current = true;
     setReplyError(null);
     startReplyTransition(async () => {
       const result = await createDraftAnnotation(target, annotation.id);
       if ("error" in result) {
+        replyOpenRef.current = false;
         setReplyError(result.error);
         return;
       }
@@ -411,10 +421,11 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // whole feature:
   //
   //  - **No reply open** → open one, anchored here.
-  //  - **A reply already open** → re-point it. Not a second composer: the
-  //    reader is refining what they are replying *about*, not starting a
-  //    second reply, and opening one per selection adjustment would leave a
-  //    trail of abandoned DRAFT rows behind a single change of mind.
+  //  - **A reply already open, or opening** → re-point it. Not a second
+  //    composer: the reader is refining what they are replying *about*, not
+  //    starting a second reply, and opening one per selection adjustment
+  //    would leave a trail of abandoned DRAFT rows behind a single change of
+  //    mind.
   //
   // The anchor lands in state immediately (the decoration is free), but the
   // DRAFT row waits for the selection to settle — a drag emits a selection
@@ -423,13 +434,14 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // (shift+arrows, which never emits one) settles the same way.
   const handleBodySelect = (selection: BodySelection) => {
     setReplyAnchor(selection);
-    if (replyDraft || posted) return;
+    if (replyOpenRef.current || posted) return;
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
     openTimerRef.current = setTimeout(openReply, SELECTION_SETTLE_MS);
   };
 
   const closeReply = () => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    replyOpenRef.current = false;
     setReplyDraft(null);
     setReplyAnchor(null);
   };
@@ -677,6 +689,8 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
       )}
       {replyDraft && !posted && (
         <LiveAnnotationComposer
+          // A new draft is a new composer (LiveAnnotationComposer's header).
+          key={replyDraft.id}
           annotationId={replyDraft.id}
           connection={replyDraft.connection}
           // Read at submit time, so re-selecting while this sits open changes
