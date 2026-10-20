@@ -66,10 +66,10 @@ async function main(): Promise<void> {
 
   const annotations = await prisma.annotation.findMany({
     where: {
+      // Every status: a DRAFT opened on a selection carries the target it
+      // will post with, written by the same capture postAnnotation runs, so it
+      // makes the same claim and can break the same way.
       fileId: fileId ?? { not: null },
-      // A DRAFT has never been through postAnnotation, so it carries no target
-      // yet and there is nothing to verify.
-      status: { not: "DRAFT" },
     },
     orderBy: { createdAt: "asc" },
     select: {

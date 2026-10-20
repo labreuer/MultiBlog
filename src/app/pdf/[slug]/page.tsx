@@ -5,6 +5,7 @@ import { resolveFileParam } from "@/lib/file-slug";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
+import { getOwnFileDraftAnnotations } from "@/lib/annotation-data";
 import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import TagChips from "@/components/tags/TagChips";
@@ -114,6 +115,10 @@ export default async function PdfPage({
   // Shared with `loadPdfAnnotationEntries`, which the surface calls after a
   // post — see that action, and PdfAnnotationSurface's `liveEntries`.
   const entries = await pdfAnnotationEntriesFor(file.id);
+  // The viewer's own drafts — "Your private notes", the only way back into a
+  // draft once its composer is gone. Their own id, never anyone else's
+  // (getOwnFileDraftAnnotations).
+  const ownDrafts = await getOwnFileDraftAnnotations(file.id, user.id);
 
   // PLAN.md §20d — the tag chips, handed to the viewer as its Metadata
   // pane.
@@ -143,6 +148,7 @@ export default async function PdfPage({
         fileUrl={fileUrl}
         title={file.title}
         entries={entries}
+        ownDrafts={ownDrafts}
         anchoredLink={anchoredLink}
         metadata={<TagChips key="tags" target={{ kind: "file", id: file.id }} />}
       />

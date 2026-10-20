@@ -27,6 +27,7 @@ import {
   deleteAnnotation,
   getAnnotationHistory,
   getQuotedParentVersion,
+  updateDraftAnchor,
   type AnnotationVersion,
 } from "@/app/actions/annotations";
 import { useDocScrub, useHasDocScrub } from "../DocScrubContext";
@@ -253,6 +254,13 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // changes in that window (a drag held still past the settle time, then
   // carried on) would otherwise open a second draft beside the first.
   const replyOpenRef = useRef(false);
+  // The reply's anchor as of the newest selection, as its DRAFT row last
+  // stored it, and that row's id once it exists. Refs rather than state: the
+  // settle timer runs a closure from the render that set it, which would read
+  // `replyAnchor` one selection behind.
+  const replyAnchorRef = useRef<BodySelection | null>(null);
+  const storedReplyAnchorRef = useRef<BodySelection | null>(null);
+  const replyDraftIdRef = useRef<string | null>(null);
   useEffect(
     () => () => {
       if (openTimerRef.current) clearTimeout(openTimerRef.current);
@@ -399,6 +407,19 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
     });
   };
 
+  // The composer posts the anchor it has in hand; the row's copy is for a
+  // reload, which would otherwise bring the reply back unanchored, or quoting
+  // whatever it was first opened on (updateDraftAnchor). Once as the row
+  // appears and then once per settled selection, not per drag step, and
+  // best-effort: a failure costs only that copy.
+  const storeReplyAnchor = () => {
+    const id = replyDraftIdRef.current;
+    const anchor = replyAnchorRef.current;
+    if (!id || !anchor || anchor === storedReplyAnchorRef.current) return;
+    storedReplyAnchorRef.current = anchor;
+    updateDraftAnchor(id, anchor).catch(() => {});
+  };
+
   const openReply = () => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
     if (replyOpenRef.current) return;
@@ -411,7 +432,10 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
         setReplyError(result.error);
         return;
       }
+      replyDraftIdRef.current = result.id;
       setReplyDraft({ id: result.id, connection: result.connection });
+      // The selection that opened it, or wherever it has moved to since.
+      storeReplyAnchor();
     });
   };
 
@@ -421,11 +445,11 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // whole feature:
   //
   //  - **No reply open** → open one, anchored here.
-  //  - **A reply already open, or opening** → re-point it. Not a second
-  //    composer: the reader is refining what they are replying *about*, not
-  //    starting a second reply, and opening one per selection adjustment
-  //    would leave a trail of abandoned DRAFT rows behind a single change of
-  //    mind.
+  //  - **A reply already open, or opening** → re-point it, and its row once
+  //    the selection settles. Not a second composer: the reader is refining
+  //    what they are replying *about*, not starting a second reply, and
+  //    opening one per selection adjustment would leave a trail of abandoned
+  //    DRAFT rows behind a single change of mind.
   //
   // The anchor lands in state immediately (the decoration is free), but the
   // DRAFT row waits for the selection to settle — a drag emits a selection
@@ -434,14 +458,18 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // (shift+arrows, which never emits one) settles the same way.
   const handleBodySelect = (selection: BodySelection) => {
     setReplyAnchor(selection);
-    if (replyOpenRef.current || posted) return;
+    replyAnchorRef.current = selection;
+    if (posted) return;
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
-    openTimerRef.current = setTimeout(openReply, SELECTION_SETTLE_MS);
+    openTimerRef.current = setTimeout(replyOpenRef.current ? storeReplyAnchor : openReply, SELECTION_SETTLE_MS);
   };
 
   const closeReply = () => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
     replyOpenRef.current = false;
+    replyAnchorRef.current = null;
+    storedReplyAnchorRef.current = null;
+    replyDraftIdRef.current = null;
     setReplyDraft(null);
     setReplyAnchor(null);
   };

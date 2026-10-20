@@ -41,12 +41,19 @@ type Props = {
 // `connection` is present only for a draft this slot created itself
 // (annotation-connection.ts) — a draft that arrived by "Move to bottom" was
 // created in another component's action, so the composer fetches its own.
+//
+// So is `pdfTarget`: the selection this slot's own draft was opened on, kept
+// per draft rather than read from the prop at post time, so a draft that
+// arrives from "Your private notes" while a selection is pending posts with
+// its own stored target instead of the selection's.
 type OpenDraft = {
   id: string;
   connection?: AnnotationConnectionBundle;
+  pdfTarget?: unknown;
   anchorFrom?: number;
   anchorTo?: number;
   quotedText?: string;
+  storedQuote?: string;
 };
 
 // The bottom-of-page composer's open/closed wrapper (PLAN.md §13j Phase 2) —
@@ -74,6 +81,9 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
     const incoming = movedDraft;
     const previous = open;
     setMovedDraft(null);
+    // "Edit" on the draft this slot already has open: nothing to move, and
+    // committing "the previous one" would post the very draft being edited.
+    if (previous?.id === incoming.id) return;
     startTransition(async () => {
       if (previous) {
         const result = await postAnnotation({
@@ -91,6 +101,7 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
         anchorFrom: incoming.anchorFrom,
         anchorTo: incoming.anchorTo,
         quotedText: incoming.quotedText,
+        storedQuote: incoming.storedQuote,
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `open`/startTransition are read at fire time, not tracked as retrigger deps for this cross-tree signal
@@ -99,14 +110,16 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
   const openNew = useCallback(() => {
     setError(null);
     startTransition(async () => {
-      const result = await createDraftAnnotation(target);
+      // The selection goes onto the row as well as into this slot's state,
+      // so the draft keeps it through a reload (createDraftAnnotation).
+      const result = await createDraftAnnotation(target, undefined, pdfTarget !== undefined ? { pdfTarget } : undefined);
       if ("error" in result) {
         setError(result.error);
         return;
       }
-      setOpen({ id: result.id, connection: result.connection });
+      setOpen({ id: result.id, connection: result.connection, pdfTarget });
     });
-  }, [target]);
+  }, [target, pdfTarget]);
 
   // Fires once per mount. The PDF panel remounts this component (a fresh
   // `key`) on every capture, so "once per mount" is exactly once per selection
@@ -121,30 +134,41 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
 
   if (open) {
     return (
-      <LiveAnnotationComposer
-        // "Move to bottom" swaps a different draft into an open slot, and a
-        // new draft is a new composer (LiveAnnotationComposer's header).
-        key={open.id}
-        annotationId={open.id}
-        connection={open.connection}
-        anchorFrom={open.anchorFrom}
-        anchorTo={open.anchorTo}
-        quotedText={open.quotedText}
-        pdfTarget={pdfTarget}
-        container={target.kind}
-        onPosted={() => {
-          setOpen(null);
-          onSettled?.();
-          // Narrower than onSettled deliberately: that one also fires on a
-          // cancel and on a private save, neither of which changes the list
-          // any surface is drawing.
-          reloadAnnotations();
-        }}
-        onCancel={() => {
-          setOpen(null);
-          onSettled?.();
-        }}
-      />
+      <>
+        {/* What a reopened draft is anchored to. A draft opened on a fresh
+            selection needs no line here: its surface already shows the
+            selection. */}
+        {open.storedQuote && (
+          <p className={styles.quote}>
+            Annotating: “{open.storedQuote.length > 80 ? `${open.storedQuote.slice(0, 80)}…` : open.storedQuote}”
+          </p>
+        )}
+        <LiveAnnotationComposer
+          // "Move to bottom" swaps a different draft into an open slot, and a
+          // new draft is a new composer (LiveAnnotationComposer's header).
+          key={open.id}
+          annotationId={open.id}
+          connection={open.connection}
+          anchorFrom={open.anchorFrom}
+          anchorTo={open.anchorTo}
+          quotedText={open.quotedText}
+          pdfTarget={open.pdfTarget}
+          container={target.kind}
+          onPosted={() => {
+            setOpen(null);
+            onSettled?.();
+            // Narrower than onSettled deliberately: that one also fires on a
+            // cancel, whose discard is still in flight here and reloads for
+            // itself once it lands (LiveAnnotationComposer). A private save
+            // arrives here too, and changes "Your private notes".
+            reloadAnnotations();
+          }}
+          onCancel={() => {
+            setOpen(null);
+            onSettled?.();
+          }}
+        />
+      </>
     );
   }
 

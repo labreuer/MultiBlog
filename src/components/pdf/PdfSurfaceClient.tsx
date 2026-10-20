@@ -6,6 +6,7 @@ import { DocPresenceProvider } from "@/components/annotation/doc-presence-contex
 import { SignedOutNotice } from "@/components/SignedOutNotice";
 import type { PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import type { AnchoredLinkView } from "@/lib/anchored-link-data";
+import type { OwnDraft } from "@/lib/annotation-data";
 
 // PLAN.md §19 — the `ssr: false` boundary.
 //
@@ -38,6 +39,8 @@ export default function PdfSurfaceClient(props: {
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
+  /** The viewer's own drafts on this file, newest first. */
+  ownDrafts: OwnDraft[];
   /** The link a ?sel= visit resolved, or null — docs/ANCHORED_LINKS.md. */
   anchoredLink: AnchoredLinkView | null;
   metadata: ReactNode;

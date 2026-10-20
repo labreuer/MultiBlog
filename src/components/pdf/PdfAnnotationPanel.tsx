@@ -7,6 +7,8 @@ import CollapseAllControls from "@/components/annotation/CollapseAllControls";
 import { useRevealForFragment } from "@/components/annotation/use-reveal-for-fragment";
 import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
 import NewAnnotationComposer from "@/components/annotation/NewAnnotationComposer";
+import OwnDraftsList from "@/components/annotation/OwnDraftsList";
+import type { OwnDraft } from "@/lib/annotation-data";
 import { usePdfMarginNotes } from "./use-pdf-margin-notes";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import { quadsTopY } from "@/lib/pdf-anchor";
@@ -77,6 +79,8 @@ export function entryHasVisibleContent(entry: PdfAnnotationEntry): boolean {
 type Props = {
   fileId: string;
   entries: PdfAnnotationEntry[];
+  /** The viewer's own drafts, for "Your private notes" under the composer. */
+  ownDrafts: OwnDraft[];
   /** Viewport-space top edge per annotation id, for the ones on a rendered page. */
   resolveTops: () => Map<string, number>;
   /** Subscribe to "the rendering moved" — the viewer's scroll/render/scale events. */
@@ -109,6 +113,7 @@ type Props = {
 export default function PdfAnnotationPanel({
   fileId,
   entries,
+  ownDrafts,
   resolveTops,
   subscribe,
   positioned,
@@ -252,6 +257,12 @@ export default function PdfAnnotationPanel({
         autoOpen={pendingTarget !== null}
         onSettled={onClearPending}
       />
+
+      {/* A draft saved PRIVATE, or left open by a reload, is reachable from
+          here and nowhere else: the entries below exclude every DRAFT. Edit
+          hands it to the composer above, which posts it with the target the
+          row was created with. */}
+      <OwnDraftsList drafts={ownDrafts} />
 
       {sorted.length === 0 && (
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>

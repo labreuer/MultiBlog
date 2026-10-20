@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Actor } from "@/lib/actor";
-import { canUserAccessAnnotationYdoc } from "@/lib/annotation-authz";
+import { canUserAccessAnnotationYdoc, postedAnnotationWhere } from "@/lib/annotation-authz";
 import { isVersionQuoted, visibleVersions, withSupersededAt } from "@/lib/edit-grace";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { displayNameOf } from "@/lib/display-name";
@@ -56,7 +56,14 @@ export async function annotationHistoryFor(actor: Actor, annotationId: string): 
       include: { user: { select: { name: true } } },
     }),
     prisma.annotation.findMany({
-      where: { parentAnnotationId: annotationId, anchorFrom: { not: null }, deletedByUserId: null },
+      // Posted ones only: a DRAFT reply carries the anchor it was opened on
+      // too, and a private note must not decide what a reader is shown.
+      where: {
+        parentAnnotationId: annotationId,
+        anchorFrom: { not: null },
+        deletedByUserId: null,
+        ...postedAnnotationWhere(),
+      },
       select: { ydocUpdateId: true },
     }),
   ]);

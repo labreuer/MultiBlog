@@ -1136,6 +1136,8 @@ export async function getDocLinkFields(linkId: string): Promise<DocLinkFields | 
 export type AnnotationState = {
   id: string;
   parentAnnotationId: string | null;
+  /** DRAFT rows are included: a draft carries the anchor it was opened on (docs/ANNOTATIONS.md, Lifecycle). */
+  status: "DRAFT" | "LIVE" | "RAISED";
   bodyText: string;
   /**
    * Anchored by *either* mechanism (PLAN.md §13o) — a mark in the doc's ydoc,
@@ -1184,6 +1186,7 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
     annotations.map(async (a) => ({
       id: a.id,
       parentAnnotationId: a.parentAnnotationId,
+      status: a.status,
       bodyText: a.bodyText,
       anchored: markedIds.has(a.id) || (a.anchorFrom !== null && a.quotedText !== ""),
       marked: markedIds.has(a.id),

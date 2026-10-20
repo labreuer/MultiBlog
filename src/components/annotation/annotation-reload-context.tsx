@@ -12,15 +12,16 @@ import { createContext, useContext, type ReactNode } from "react";
 // (PdfAnnotationSurface's `liveEntries` carries the measurements) — so that
 // surface provides this and re-reads the list itself.
 //
-// A context rather than a prop because two of the three callers are out of
-// reach of one: AnnotationNode renders *itself* for replies, so a prop would
+// A context rather than a prop because most of its callers are out of reach
+// of one: AnnotationNode renders *itself* for replies, so a prop would
 // have to be threaded through every nesting level for the benefit of the one
 // surface that uses it. Same reason AnnotationMoveProvider and
 // DocPresenceProvider are contexts rather than props.
 //
 // It carries no argument on purpose. "Something changed, go and look" survives
-// a post, a reply, a delete and anything added later; a payload would have to
-// be right about *what* changed, which is the part the server already knows.
+// a post, a reply, a delete, a discarded draft and anything added later; a
+// payload would have to be right about *what* changed, which is the part the
+// server already knows.
 const AnnotationReloadContext = createContext<() => void>(() => {});
 
 export function useAnnotationReload(): () => void {

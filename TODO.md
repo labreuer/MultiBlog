@@ -414,11 +414,12 @@ hand-made call to the action, which any signed-in reader of the container can ma
    stopped writing marks" holds only because the reading views send `"columns"`.
    **Fix:** refuse `"mark"` unless `canUserEditDoc` passes for the poster. Only the editor
    sends it, and its users can edit.
-2. **The client's version stamp is parsed, not validated.** `postAnnotation` turns
-   `opts.ydocUpdateId` into a `BigInt` and anchors at it. Nothing checks that the id is in the
-   target's log or not past its tail, so a stamp from another doc, or from the future, breaks
-   "replay to the stamp and `textBetween` is `quotedText`" (`check-annotation-anchors.ts`) as
-   soon as the doc changes. **Fix:** the MCP server's check, `docLogTail` and `isDocVersion`
+2. **The client's version stamp is parsed, not validated.** `stampRangeAnchor`, which
+   `postAnnotation` and `updateDraftAnchor` both anchor through, turns the client's
+   `ydocUpdateId` into a `BigInt` and anchors at it; an anchorless post stamps it as is.
+   Nothing checks that the id is in the target's log or not past its tail, so a stamp from
+   another doc, or from the future, breaks "replay to the stamp and `textBetween` is
+   `quotedText`" (`check-annotation-anchors.ts`) as soon as the doc changes. **Fix:** the MCP server's check, `docLogTail` and `isDocVersion`
    (`src/lib/doc-state.ts`), as `annotation-writes.ts` applies them. A reply's stamp is in its
    parent's body log (`ydoc:annotation:<parentId>`), not the doc's, so `isDocVersion` needs a
    form that takes a ydoc id.
@@ -426,7 +427,8 @@ hand-made call to the action, which any signed-in reader of the container can ma
    the parent's `docId` and `fileId` and nothing about its status or deletion, so a reply can
    hang off someone else's DRAFT, and an anchored reply then searches that private body for
    its quote. **Fix:** refuse a parent that is a DRAFT or deleted, as `annotation-writes.ts`'s
-   target check does. Check whether `postAnnotation` needs the same.
+   target check does. Check whether `postAnnotation` needs the same; `updateDraftAnchor` only
+   ever captures into the parent its row was created with, so the check at creation covers it.
 
 **Shape of the fix:** the three checks can go into the actions as they stand. Or the UI's
 posting can move onto `src/lib/annotation-post.ts`, which the MCP server already uses, so each
