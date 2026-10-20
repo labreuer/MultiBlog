@@ -7,6 +7,7 @@ import { ListKeymap } from "@tiptap/extension-list";
 import { commentContentExtensions } from "@/lib/tiptap-schema";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
 import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
+import { FormatInputEvents } from "@/lib/format-input-extension";
 import EditorToolbar, { type ToolbarTool } from "./EditorToolbar";
 import proseStyles from "@/styles/prose.module.css";
 import bodyStyles from "./CommentBody.module.css";
@@ -51,7 +52,7 @@ export default function CommentEditor({
   }, [onChange]);
 
   const editor = useEditor({
-    extensions: [...commentContentExtensions, UndoRedo, ListKeymap, VirtualKeyboardEnter, QuoteDepthShortcuts],
+    extensions: [...commentContentExtensions, UndoRedo, ListKeymap, VirtualKeyboardEnter, QuoteDepthShortcuts, FormatInputEvents],
     content: initialContent ?? undefined,
     editable: !disabled,
     autofocus: autoFocus ? "end" : false,

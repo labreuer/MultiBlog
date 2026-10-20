@@ -11,6 +11,7 @@ import { EDITOR_LINK_OPTIONS, StarterKit } from "@/lib/tiptap-schema";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
 import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
+import { FormatInputEvents } from "@/lib/format-input-extension";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import DocRefMenu from "../DocRefMenu";
 import proseStyles from "@/styles/prose.module.css";
@@ -81,6 +82,9 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
       // Ctrl/⌘+Shift+. and , — quote depth in and out; the extension file
       // says why those keys and what they share with QuoteControls.
       QuoteDepthShortcuts,
+      // The iPad keyboard's B/I/U buttons, which send no key — the
+      // extension file says what they send instead.
+      FormatInputEvents,
     ],
     editorProps: { attributes: { "aria-label": "Annotation body", role: "textbox" } },
     immediatelyRender: false,

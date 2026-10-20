@@ -12,6 +12,7 @@ import { PendingAnnotation } from "@/lib/pending-annotation-extension";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
 import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
+import { FormatInputEvents } from "@/lib/format-input-extension";
 import {
   AnnotationHighlight,
   setAnnotationAnchors,
@@ -192,6 +193,9 @@ export default function CollabEditorBody({
       // Ctrl/⌘+Shift+. and , — quote depth in and out; the extension file
       // says why those keys and what they share with QuoteControls.
       QuoteDepthShortcuts,
+      // The iPad keyboard's B/I/U buttons, which send no key — the
+      // extension file says what they send instead.
+      FormatInputEvents,
       // Registers the mark type so a doc's annotation marks sync/render
       // correctly here too (PLAN.md §12i) — posts never get one applied,
       // and an unused mark type in the schema costs nothing.
