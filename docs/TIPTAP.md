@@ -342,6 +342,21 @@ Two keymap notes ride along:
   trade. The dropdown stays the layout-independent path — a reason it doesn't retire in favor
   of the shortcut.
 
+## The iPad's B/I/U buttons are `beforeinput` events, not keys
+
+The formatting buttons on the iPad's keyboard (and the Format item in iOS's selection callout)
+press no key, so no keymap sees them. WebKit runs its own toggle command, announced as a
+cancelable `beforeinput` with `inputType` `formatBold`, `formatItalic` or `formatUnderline` —
+and ProseMirror's `beforeinput` handler doesn't act on any of those, so the browser's own edit
+goes ahead and is lost. On a caret it sets only WebKit's typing style, which ProseMirror never
+reads (the next character is inserted with the marks *its* state holds), so the button does
+nothing. `FormatInputEvents` (`src/lib/format-input-extension.ts`) cancels the event and runs
+`toggleMark`, the command Mod-B/I/U run. It is registered beside the other editor-only
+extensions in every editor whose schema has marks (doc body, annotation body, comment, blurb),
+never in a schema list, and it swallows a mark the schema lacks (underline in a comment or a
+blurb) rather than letting the browser draw one ProseMirror will redraw away. Verified on a real
+iPad 2026-10-19.
+
 ## The tighten button rewrites blocks, and two systems are watching
 
 `tightenLines` (`src/lib/tighten-lines.ts`, EditorToolbar's "tighten" tool, both live body

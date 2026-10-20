@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { blurbExtensions, toPlainJSON } from "@/lib/tiptap-schema";
+import { FormatInputEvents } from "@/lib/format-input-extension";
 import {
   updateContributorProfile,
   optOutAsContributor,
@@ -72,7 +73,9 @@ export default function ContributorPanel({
   const [optOutError, setOptOutError] = useState<string | null>(null);
 
   const editor = useEditor({
-    extensions: blurbExtensions,
+    // The iPad keyboard's B/I buttons — format-input-extension.ts says why
+    // they need an extension. Beside the schema list, not in it.
+    extensions: [...blurbExtensions, FormatInputEvents],
     content: contributorBlurb ?? EMPTY_BLURB,
     editorProps: { attributes: { "aria-label": "Contributor blurb" } },
     immediatelyRender: false,
