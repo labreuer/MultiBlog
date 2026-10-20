@@ -6,6 +6,7 @@ import type { Editor } from "@tiptap/react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "./AnnotationNode";
 import QuoteThreadHeader from "../QuoteThreadHeader";
 import CollapseAllControls from "./CollapseAllControls";
+import { useRevealForFragment } from "./use-reveal-for-fragment";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
 import { resolveAnnotationRanges } from "@/lib/annotation-marks";
 import { activatePseudoBorderForHash, refreshPseudoBorders } from "@/lib/pseudo-border";
@@ -48,6 +49,7 @@ export default function AnnotationList({ entries, docId }: Props) {
         .filter((root) => root.deletedByUserId === null || hasNonDeletedDescendant(root)),
     [entries],
   );
+  useRevealForFragment(roots);
   // Seeded from the server's snapshot answer — `quotedText` is non-empty
   // exactly when `Doc.proseJson` still carried the mark at the last store
   // debounce — then corrected by the live scan below. Seeding rather than

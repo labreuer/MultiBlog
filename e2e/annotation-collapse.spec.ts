@@ -43,6 +43,10 @@ async function thread(docId: string) {
     authorEmail: ADMIN_EMAIL,
     bodyText: `E2E collapsible annotation ${stamp}`,
     anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+    // A permalink is author and time to the second, and the reply below is
+    // the same author in the same second: backdating the root's createdAt
+    // keeps the two fragments apart, so a link to the reply names the reply.
+    draftOpenedMsAgo: 5_000,
   });
   const reply = await createTestAnnotation({
     docId,
@@ -194,6 +198,16 @@ test.describe("collapsing an annotation card", () => {
     await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}#${fragment}$`));
     await expect(card(page, reply.id)).toBeInViewport();
     await expect(card(page, root.id).getByRole("button", { name: "Collapse annotation" })).toBeVisible();
+
+    // And again with no full load in between: closed again, back to the
+    // table (a client-side navigation), the same link. Each arrival at the
+    // permalink is answered, not just the page load's first.
+    await setCollapsed(card(page, root.id), true);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/annotations/);
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}#${fragment}$`));
+    await expect(card(page, reply.id)).toBeInViewport();
   });
 
   test("Collapse all closes every thread; Expand all opens every card in them", async ({ page, sharedDoc }) => {

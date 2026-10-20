@@ -511,9 +511,12 @@ every request. A write re-reads storage first, merging another tab's collapses, 
 **Revealed is not expanded.** A permalink naming a card or anything under it, a click on a
 card's highlight in the doc or PDF, and a click on a reply's quoted range open a collapsed card
 without writing anything, so it is collapsed again next visit. A permalink is answered by the
-thread's first card, which reveals the whole path down to the named one, and only once per
-fragment per page load (`revealForFragment`) — or a card the reader closed again would reopen
-whenever the thread re-rendered or remounted with the fragment still in the URL. The jumps go
+list that owns the threads (`useRevealForFragment`), which reveals the whole path down to the
+named card, once per fragment per mount of the list. A mount is an arrival: a full load or a
+client-side navigation back to the page, each of which must open the card again. The list
+stays mounted while its cards re-render or move between the rail and the list below, when a
+card the reader closed again must not reopen. Deduplicating per page load would miss
+every arrival after a session's first. The jumps go
 through `revealThen`, which waits a frame when it opened something, so a scroll measures the
 card at its new height.
 

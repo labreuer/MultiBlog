@@ -2,7 +2,7 @@
 
 import type { AnnotationTarget } from "@/lib/annotation-container";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { JSONContent } from "@tiptap/react";
@@ -39,7 +39,6 @@ import {
   newestInSubtree,
   replyCounts,
   revealCards,
-  revealForFragment,
   revealThen,
   useCollapseState,
 } from "@/lib/collapsed-annotations";
@@ -133,17 +132,6 @@ function jumpToReply(replyIds: string[]) {
     target.scrollIntoView({ behavior: "smooth", block: "center" });
     flashHighlight(target, NEUTRAL_THREAD_COLOR);
   });
-}
-
-// The ids from this card down to the one whose permalink is `fragment`, or
-// an empty list when no card here has it.
-function pathToFragment(annotation: AnnotationNodeData, fragment: string): string[] {
-  if (annotationAnchorName(annotation.displayName, annotation.createdAt) === fragment) return [annotation.id];
-  for (const reply of annotation.replies) {
-    const below = pathToFragment(reply, fragment);
-    if (below.length > 0) return [annotation.id, ...below];
-  }
-  return [];
 }
 
 // Where the "N new" pill lands, once its card is open: the first new reply
@@ -276,22 +264,6 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   const collapsed = isCollapsed(collapseState, annotation.id) && !holdsEditor;
   const excerpt = useMemo(() => (collapsed ? excerptOf(annotation.proseJson) : ""), [collapsed, annotation.proseJson]);
 
-  // Arriving at a permalink opens the way to it, answered once per thread by
-  // its first card. A reveal, so it is never written and the cards are
-  // collapsed again on the next visit; once per fragment, which
-  // `revealForFragment` says why; and a layout effect, so the card the
-  // browser has just scrolled to is not drawn collapsed for a frame on the
-  // way.
-  useLayoutEffect(() => {
-    if (depth > 0) return;
-    const answer = () => {
-      const fragment = window.location.hash.slice(1);
-      revealForFragment(annotation.id, fragment, pathToFragment(annotation, fragment));
-    };
-    answer();
-    window.addEventListener("hashchange", answer);
-    return () => window.removeEventListener("hashchange", answer);
-  }, [annotation, depth]);
 
   // Each direct reply that quotes part of this body, in its own author's
   // color. Only direct replies: an anchor points at the annotation it answers,
