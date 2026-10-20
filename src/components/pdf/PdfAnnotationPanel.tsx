@@ -3,6 +3,8 @@
 import { useCallback, useMemo, useState } from "react";
 import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
 import QuoteThreadHeader from "@/components/QuoteThreadHeader";
+import CollapseAllControls from "@/components/annotation/CollapseAllControls";
+import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
 import NewAnnotationComposer from "@/components/annotation/NewAnnotationComposer";
 import { usePdfMarginNotes } from "./use-pdf-margin-notes";
 import type { PdfTarget } from "@/lib/pdf-anchor";
@@ -150,6 +152,8 @@ export default function PdfAnnotationPanel({
   const railMode = positioned && !showAll;
 
   const ids = useMemo(() => sorted.map((entry) => entry.root.id), [sorted]);
+  const roots = useMemo(() => sorted.map((entry) => entry.root), [sorted]);
+  const collapseState = useCollapseState();
   const { containerRef, isAnchored } = usePdfMarginNotes({
     resolveTops,
     ids,
@@ -200,13 +204,14 @@ export default function PdfAnnotationPanel({
               status="ACTIVE"
               context={null}
               color={entry.color}
+              collapsed={isCollapsed(collapseState, entry.root.id)}
             />
           )}
           <AnnotationNode annotation={entry.root} target={{ kind: "file", id: fileId }} />
         </div>
       );
     },
-    [fileId, isAnchored, onJumpTo, railMode, pageLabels],
+    [fileId, isAnchored, onJumpTo, railMode, pageLabels, collapseState],
   );
 
   // The panel's own chrome, grouped so rail mode can lift it out of the flow
@@ -250,19 +255,22 @@ export default function PdfAnnotationPanel({
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>
       )}
 
-      {/* Only above the breakpoint: below it nothing is positioned, so the
-          list is all there is and a toggle would offer the state it's
-          already in. */}
-      {sorted.length > 0 && positioned && (
+      {sorted.length > 0 && (
         <div className={styles.modeRow}>
-          <button
-            type="button"
-            className={styles.modeToggle}
-            onClick={() => setShowAll((previous) => !previous)}
-            aria-pressed={showAll}
-          >
-            {showAll ? "Show beside the text" : `Show all ${sorted.length}`}
-          </button>
+          {/* Only above the breakpoint: below it nothing is positioned, so
+              the list is all there is and a toggle would offer the state
+              it's already in. */}
+          {positioned && (
+            <button
+              type="button"
+              className={styles.modeToggle}
+              onClick={() => setShowAll((previous) => !previous)}
+              aria-pressed={showAll}
+            >
+              {showAll ? "Show beside the text" : `Show all ${sorted.length}`}
+            </button>
+          )}
+          <CollapseAllControls roots={roots} />
         </div>
       )}
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import AnnotationNode from "./AnnotationNode";
 import QuoteThreadHeader from "../QuoteThreadHeader";
+import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
 import { useMarginNotes } from "../margin-notes/margin-notes-context";
 import { EDITOR_SCROLL_ATTRIBUTE } from "../editor-scroll";
@@ -74,6 +75,7 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
   }, []);
 
   const ids = useMemo(() => entries.map((entry) => entry.root.id), [entries]);
+  const collapseState = useCollapseState();
   // Phone-landscape focus mode turns this rail into a queue (STYLE.md's
   // fourth breakpoint). Read here rather than taken from the provider's
   // `wide`, which is the *union* of the two clauses that can put a rail on
@@ -172,6 +174,7 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
         status="ACTIVE"
         context={null}
         color={entry.color}
+        collapsed={isCollapsed(collapseState, entry.root.id)}
       />
       <AnnotationNode annotation={entry.root} target={{ kind: "doc", id: docId }} />
     </div>

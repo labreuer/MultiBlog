@@ -36,6 +36,7 @@ import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-dat
 import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
+import { revealThen } from "@/lib/collapsed-annotations";
 import styles from "./PdfAnnotations.module.css";
 
 // PLAN.md §19 Phase 3 — the seam between the viewer (imperative, pdfjs-owned)
@@ -379,9 +380,13 @@ export default function PdfAnnotationSurface({ fileId, fileUrl, title, entries, 
     const detachClicks = attachAnnoClicks(handle.container, (ids) => {
       // Topmost wins. Overlapping annotations are normal (docs/PDF.md §7
       // offers a disambiguation menu as the richer answer); scrolling the
-      // first into view in the panel is the useful minimum.
-      const card = document.querySelector<HTMLElement>(`[data-margin-note-id="${CSS.escape(ids[0])}"]`);
-      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      // first into view in the panel is the useful minimum — opened first if
+      // it is collapsed, for this visit only (docs/ANNOTATIONS.md,
+      // "Collapsing a card").
+      revealThen([ids[0]], () => {
+        const card = document.querySelector<HTMLElement>(`[data-margin-note-id="${CSS.escape(ids[0])}"]`);
+        card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
     });
 
     // The panel repositions — and the right-hand strip's thumb moves — on the

@@ -46,6 +46,7 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
       quotedText: a.quotedText,
       color: a.color,
       createdAt: a.createdAt,
+      postedAt: a.postedAt,
       deletedByUserId: a.deletedByUserId,
       commenterUserId: a.commenterUserId,
       ydocUpdateId: a.ydocUpdateId,

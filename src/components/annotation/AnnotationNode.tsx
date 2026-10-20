@@ -2,7 +2,7 @@
 
 import type { AnnotationTarget } from "@/lib/annotation-container";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { JSONContent } from "@tiptap/react";
@@ -32,6 +32,18 @@ import {
 import { useDocScrub, useHasDocScrub } from "../DocScrubContext";
 import { scrubHref } from "@/lib/scrub-url";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
+import {
+  collapseCards,
+  expandCards,
+  isCollapsed,
+  newestInSubtree,
+  replyCounts,
+  revealCards,
+  revealForFragment,
+  revealThen,
+  useCollapseState,
+} from "@/lib/collapsed-annotations";
+import { extractText } from "@/lib/diff";
 import styles from "./AnnotationNode.module.css";
 
 export type AnnotationNodeData = {
@@ -56,6 +68,10 @@ export type AnnotationNodeData = {
   quotedText: string;
   color: string;
   createdAt: string;
+  // When it became visible to readers, which for a reply can be long after
+  // `createdAt` (the moment its composer opened). What a collapsed card's
+  // "new" count compares — docs/ANNOTATIONS.md, "Collapsing a card".
+  postedAt: string | null;
   deletedByUserId: string | null;
   commenterUserId: string | null;
   // PLAN.md §12p/§13 — which ydoc_update this was posted against, or null
@@ -106,13 +122,50 @@ const SELECTION_SETTLE_MS = 300;
 // DocReadingBody's jumpToAnnotationEntry, keyed on `data-comment-id` (which
 // every rendered annotation already carries) rather than on a thread id,
 // since a reply is not a thread of its own.
+// A collapsed reply is opened first, for this visit only (docs/ANNOTATIONS.md,
+// "Collapsing a card").
 function jumpToReply(replyIds: string[]) {
   const id = replyIds[0];
   if (!id) return;
-  const target = document.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
-  if (!target) return;
-  target.scrollIntoView({ behavior: "smooth", block: "center" });
-  flashHighlight(target, NEUTRAL_THREAD_COLOR);
+  revealThen([id], () => {
+    const target = document.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    flashHighlight(target, NEUTRAL_THREAD_COLOR);
+  });
+}
+
+// The ids from this card down to the one whose permalink is `fragment`, or
+// an empty list when no card here has it.
+function pathToFragment(annotation: AnnotationNodeData, fragment: string): string[] {
+  if (annotationAnchorName(annotation.displayName, annotation.createdAt) === fragment) return [annotation.id];
+  for (const reply of annotation.replies) {
+    const below = pathToFragment(reply, fragment);
+    if (below.length > 0) return [annotation.id, ...below];
+  }
+  return [];
+}
+
+// Where the "N new" pill lands, once its card is open: the first new reply
+// brought into view, and each one tinted in its author's colour, the way a
+// quoted range's click marks its reply. The only showing of *which* replies
+// were new — opening the card forgets when it was collapsed.
+function flashNewReplies(replies: readonly AnnotationNodeData[]) {
+  let first = true;
+  for (const reply of replies) {
+    const target = document.querySelector<HTMLElement>(`[data-comment-id="${reply.id}"]`);
+    if (!target) continue;
+    if (first) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    first = false;
+    flashHighlight(target, reply.color);
+  }
+}
+
+// One line of a collapsed card's body: its text with the block breaks
+// flattened, cut well past anything a rail is wide enough to show, since the
+// ellipsis is CSS's to place.
+function excerptOf(proseJson: JSONContent | null): string {
+  return proseJson ? extractText(proseJson).replace(/\s+/g, " ").slice(0, 300) : "";
 }
 
 // Whether any annotation anywhere below this one (not just direct replies)
@@ -212,6 +265,33 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
     },
     [],
   );
+
+  // docs/ANNOTATIONS.md, "Collapsing a card" — remembered per browser. A
+  // collapsed card unmounts its body and its replies, so it never collapses
+  // over a mounted editor: an edit session or a reply composer is a live
+  // connection with unsent words in it, and either one holds the card open
+  // (the toggle is disabled for as long as it does).
+  const collapseState = useCollapseState();
+  const holdsEditor = editing !== null || replyDraft !== null;
+  const collapsed = isCollapsed(collapseState, annotation.id) && !holdsEditor;
+  const excerpt = useMemo(() => (collapsed ? excerptOf(annotation.proseJson) : ""), [collapsed, annotation.proseJson]);
+
+  // Arriving at a permalink opens the way to it, answered once per thread by
+  // its first card. A reveal, so it is never written and the cards are
+  // collapsed again on the next visit; once per fragment, which
+  // `revealForFragment` says why; and a layout effect, so the card the
+  // browser has just scrolled to is not drawn collapsed for a frame on the
+  // way.
+  useLayoutEffect(() => {
+    if (depth > 0) return;
+    const answer = () => {
+      const fragment = window.location.hash.slice(1);
+      revealForFragment(annotation.id, fragment, pathToFragment(annotation, fragment));
+    };
+    answer();
+    window.addEventListener("hashchange", answer);
+    return () => window.removeEventListener("hashchange", answer);
+  }, [annotation, depth]);
 
   // Each direct reply that quotes part of this body, in its own author's
   // color. Only direct replies: an anchor points at the annotation it answers,
@@ -382,11 +462,68 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
     setReplyAnchor(null);
   };
 
+  const toggleCollapsed = () => {
+    if (collapsed) expandCards([annotation.id]);
+    else collapseCards([{ id: annotation.id, seen: newestInSubtree(annotation) }]);
+  };
+
+  const collapseToggle = (
+    <button
+      type="button"
+      onClick={toggleCollapsed}
+      disabled={holdsEditor}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Expand annotation" : "Collapse annotation"}
+      title={holdsEditor ? "Stays open while it is being edited or replied to" : undefined}
+      className={styles.collapseToggle}
+    >
+      {collapsed ? "▸" : "▾"}
+    </button>
+  );
+
+  // What a collapsed card still says about what it hides: how many live
+  // replies, and which of those arrived since it was collapsed.
+  const {
+    replies: replyCount,
+    unseen,
+    through,
+  } = collapsed
+    ? replyCounts(annotation, collapseState.collapsed.get(annotation.id) ?? null)
+    : { replies: 0, unseen: [], through: [] };
+
+  // Open the card, and — for this visit only — any reply it had collapsed
+  // separately on the way to a new one; then, a frame later when they are on
+  // the page, show which replies are new.
+  const showNewReplies = () => {
+    expandCards([annotation.id]);
+    revealCards(through);
+    requestAnimationFrame(() => flashNewReplies(unseen));
+  };
+
+  const collapsedCounts = replyCount > 0 && (
+    <span className={styles.collapsedCounts}>
+      {replyCount} {replyCount === 1 ? "reply" : "replies"}
+      {unseen.length > 0 && (
+        <>
+          {" "}
+          <button
+            type="button"
+            onClick={showNewReplies}
+            aria-label={`Show ${unseen.length} new ${unseen.length === 1 ? "reply" : "replies"}`}
+            className={styles.newReplies}
+          >
+            {unseen.length} new
+          </button>
+        </>
+      )}
+    </span>
+  );
+
   return (
     <div className={`${styles.node} ${depth > 0 ? styles.nested : ""}`}>
       {isDeleted ? (
         <div className={styles.deleted} data-comment-id={annotation.id}>
-          [deleted]
+          {collapseToggle}[deleted]{collapsedCounts}
         </div>
       ) : (
         <div data-comment-id={annotation.id}>
@@ -396,11 +533,12 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
               made exactly this change when its marker moved into the meta line
               (PLAN.md §22c); this is the same fault on the same placement. */}
           <div className={styles.meta}>
+            {collapseToggle}
             <span className={styles.name}>{annotation.displayName}</span>
             <a id={anchorId} href={`#${anchorId}`} className={styles.timestamp}>
               <LocalTime value={annotation.createdAt} />
             </a>
-            {annotation.ydocUpdateId && hasDocScrub && (
+            {!collapsed && annotation.ydocUpdateId && hasDocScrub && (
               // A real link, not a button that looks like one: the revision
               // it names is a URL now, so this is something to copy, open in
               // a new tab, or send to somebody. The click is still handled in
@@ -426,7 +564,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                 at this revision
               </a>
             )}
-            {annotation.visiblyEdited && (
+            {!collapsed && annotation.visiblyEdited && (
               <>
                 {" "}
                 <EditHistory
@@ -441,115 +579,128 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                 />
               </>
             )}
+            {collapsedCounts}
           </div>
-          {editing ? (
-            <AnnotationEditSession
-              annotationId={annotation.id}
-              connection={editing.connection}
-              onFinished={endEditing}
-              onCancelled={endEditing}
-            />
-          ) : (
-            !historyShown && (
-              <AnnotationBodyReader
-                proseJson={annotation.proseJson}
-                staticBody={annotation.body}
-                replyAnchors={replyAnchors}
-                pending={
-                  replyAnchor && viewerColor
-                    ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
-                    : null
-                }
-                onSelect={handleBodySelect}
-                onAnchorClick={jumpToReply}
-                onResolvedAnchorsChange={setResolvedReplyIds}
-              />
+          {collapsed ? (
+            // A click anywhere on the line opens it: a bigger target than the
+            // toggle, for the pointer. Keyboard users have the toggle.
+            excerpt && (
+              <div className={styles.excerpt} onClick={toggleCollapsed}>
+                {excerpt}
+              </div>
             )
+          ) : (
+            <>
+              {editing ? (
+                <AnnotationEditSession
+                  annotationId={annotation.id}
+                  connection={editing.connection}
+                  onFinished={endEditing}
+                  onCancelled={endEditing}
+                />
+              ) : (
+                !historyShown && (
+                  <AnnotationBodyReader
+                    proseJson={annotation.proseJson}
+                    staticBody={annotation.body}
+                    replyAnchors={replyAnchors}
+                    pending={
+                      replyAnchor && viewerColor
+                        ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
+                        : null
+                    }
+                    onSelect={handleBodySelect}
+                    onAnchorClick={jumpToReply}
+                    onResolvedAnchorsChange={setResolvedReplyIds}
+                  />
+                )
+              )}
+              {quoteLost === true && (
+                <p className={styles.editStatus}>
+                  <button
+                    type="button"
+                    onClick={showQuotedVersion}
+                    className={styles.revisionButton}
+                    title="The passage this reply quoted is no longer in the annotation above"
+                  >
+                    {quotedVersionPending
+                      ? "Loading…"
+                      : quotedVersion
+                        ? "Hide the version this quoted"
+                        : "quoted an earlier version"}
+                  </button>
+                </p>
+              )}
+              {quotedVersion && (
+                <div className={styles.quotedVersion}>
+                  <p className={styles.editStatus}>The annotation as it read when this reply quoted it:</p>
+                  <AnnotationVersionBody proseJson={quotedVersion.proseJson} bodyText={quotedVersion.quotedText} />
+                </div>
+              )}
+              {heldByAnother && (
+                <p className={styles.editStatus}>
+                  Being edited since <LocalTime value={annotation.editingSince!} /> — what you see is the last saved
+                  version.
+                </p>
+              )}
+              {ownSessionOpen && (
+                <p className={styles.editStatus}>
+                  You have an edit open since <LocalTime value={annotation.editingSince!} /> — what you see is the last
+                  saved version.
+                </p>
+              )}
+              {!posted && !replyDraft && !editing && (
+                <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
+                  {replyPending ? "Opening…" : "Reply"}
+                </button>
+              )}
+              {replyError && <p className={styles.error}>{replyError}</p>}
+              {canEditBody && !editing && !confirmingDelete && !heldByAnother && (
+                <button type="button" onClick={startEditing} disabled={editPending} className={styles.editButton}>
+                  {editPending ? "Opening…" : sessionIsStale || ownSessionOpen ? "Resume editing" : "Edit"}
+                </button>
+              )}
+              {canEditBody && !editing && sessionIsStale && (
+                <button
+                  type="button"
+                  onClick={discardStaleSession}
+                  disabled={editPending}
+                  className={styles.discardButton}
+                  title="Put the last saved version back and close the abandoned session"
+                >
+                  Discard unsaved edit
+                </button>
+              )}
+              {editError && <p className={styles.error}>{editError}</p>}
+              {canDelete && !editing && !confirmingDelete && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(true)}
+                  className={isAdminOnOthers ? styles.deleteButtonAdmin : styles.deleteButton}
+                >
+                  Delete
+                </button>
+              )}
+              {confirmingDelete && (
+                <span className={styles.confirmPrompt}>
+                  Are you sure you want to delete?{" "}
+                  <button type="button" onClick={handleDelete} disabled={deletePending} className={styles.confirmYes}>
+                    Yes
+                  </button>{" "}
+                  /{" "}
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={deletePending}
+                    className={styles.confirmNo}
+                  >
+                    No
+                  </button>
+                </span>
+              )}
+              {deleteError && <p className={styles.error}>{deleteError}</p>}
+            </>
           )}
-          {quoteLost === true && (
-            <p className={styles.editStatus}>
-              <button
-                type="button"
-                onClick={showQuotedVersion}
-                className={styles.revisionButton}
-                title="The passage this reply quoted is no longer in the annotation above"
-              >
-                {quotedVersionPending
-                  ? "Loading…"
-                  : quotedVersion
-                    ? "Hide the version this quoted"
-                    : "quoted an earlier version"}
-              </button>
-            </p>
-          )}
-          {quotedVersion && (
-            <div className={styles.quotedVersion}>
-              <p className={styles.editStatus}>The annotation as it read when this reply quoted it:</p>
-              <AnnotationVersionBody proseJson={quotedVersion.proseJson} bodyText={quotedVersion.quotedText} />
-            </div>
-          )}
-          {heldByAnother && (
-            <p className={styles.editStatus}>
-              Being edited since <LocalTime value={annotation.editingSince!} /> — what you see is the last saved
-              version.
-            </p>
-          )}
-          {ownSessionOpen && (
-            <p className={styles.editStatus}>
-              You have an edit open since <LocalTime value={annotation.editingSince!} /> — what you see is the last
-              saved version.
-            </p>
-          )}
-          {!posted && !replyDraft && !editing && (
-            <button type="button" onClick={openReply} disabled={replyPending} className={styles.replyButton}>
-              {replyPending ? "Opening…" : "Reply"}
-            </button>
-          )}
-          {replyError && <p className={styles.error}>{replyError}</p>}
-          {canEditBody && !editing && !confirmingDelete && !heldByAnother && (
-            <button type="button" onClick={startEditing} disabled={editPending} className={styles.editButton}>
-              {editPending ? "Opening…" : sessionIsStale || ownSessionOpen ? "Resume editing" : "Edit"}
-            </button>
-          )}
-          {canEditBody && !editing && sessionIsStale && (
-            <button
-              type="button"
-              onClick={discardStaleSession}
-              disabled={editPending}
-              className={styles.discardButton}
-              title="Put the last saved version back and close the abandoned session"
-            >
-              Discard unsaved edit
-            </button>
-          )}
-          {editError && <p className={styles.error}>{editError}</p>}
-          {canDelete && !editing && !confirmingDelete && (
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              className={isAdminOnOthers ? styles.deleteButtonAdmin : styles.deleteButton}
-            >
-              Delete
-            </button>
-          )}
-          {confirmingDelete && (
-            <span className={styles.confirmPrompt}>
-              Are you sure you want to delete?{" "}
-              <button type="button" onClick={handleDelete} disabled={deletePending} className={styles.confirmYes}>
-                Yes
-              </button>{" "}
-              /{" "}
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(false)}
-                disabled={deletePending}
-                className={styles.confirmNo}
-              >
-                No
-              </button>
-            </span>
-          )}
-          {deleteError && <p className={styles.error}>{deleteError}</p>}
         </div>
       )}
       {replyDraft && !posted && (
@@ -572,25 +723,26 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
           onCancel={closeReply}
         />
       )}
-      {annotation.replies.map((reply) => (
-        <AnnotationNode
-          key={reply.id}
-          annotation={reply}
-          target={target}
-          // PLAN.md §22e — only this node can answer it: the reply's anchor
-          // points into *this* body, and whether it still resolves is what
-          // this body's own editor just reported. A reply with no anchor at
-          // all (the plain Reply button) is never "lost".
-          quoteLost={
-            resolvedReplyIds !== null &&
-            reply.anchorFrom !== null &&
-            reply.quotedText !== "" &&
-            reply.deletedByUserId === null &&
-            !resolvedReplyIds.includes(reply.id)
-          }
-          depth={depth + 1}
-        />
-      ))}
+      {!collapsed &&
+        annotation.replies.map((reply) => (
+          <AnnotationNode
+            key={reply.id}
+            annotation={reply}
+            target={target}
+            // PLAN.md §22e — only this node can answer it: the reply's anchor
+            // points into *this* body, and whether it still resolves is what
+            // this body's own editor just reported. A reply with no anchor at
+            // all (the plain Reply button) is never "lost".
+            quoteLost={
+              resolvedReplyIds !== null &&
+              reply.anchorFrom !== null &&
+              reply.quotedText !== "" &&
+              reply.deletedByUserId === null &&
+              !resolvedReplyIds.includes(reply.id)
+            }
+            depth={depth + 1}
+          />
+        ))}
     </div>
   );
 }

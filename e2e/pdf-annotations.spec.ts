@@ -404,12 +404,23 @@ test.describe("pdf annotations", () => {
 
       await selectPhrase(page, 1, PHRASE);
       await composeAnnotation(page, "Listed in the admin table.");
+      // The card's permalink, which the table's link should land on.
+      const fragment = await page
+        .locator("[data-comment-id]")
+        .filter({ hasText: "Listed in the admin table." })
+        .locator("a[id]")
+        .first()
+        .getAttribute("id");
+      expect(fragment).toBeTruthy();
 
       // The whole point of annotations being Postgres rows rather than entries
       // in a per-file ydoc (PLAN.md §19) is that this listing can see them.
       await gotoOk(page, "/annotations");
       await expect(visibleText(page, "Listed in the admin table.")).toBeVisible();
-      await expect(page.getByRole("link", { name: file.title })).toHaveAttribute("href", `/pdf/${file.slug}`);
+      await expect(page.getByRole("link", { name: file.title })).toHaveAttribute(
+        "href",
+        `/pdf/${file.slug}#${fragment}`,
+      );
     } finally {
       await deleteTestFile(file.id);
     }

@@ -1299,8 +1299,30 @@ export async function createTestAnnotation(opts: {
    * still seeded, as composing creates one.
    */
   draft?: boolean;
+  /**
+   * Makes this a reply, in the same container as its parent — which is also
+   * what `docId`/`fileId` must name. Anchorless: a reply's anchor would point
+   * into its parent's body rather than the doc, which no caller needs yet.
+   */
+  parentAnnotationId?: string;
+  /**
+   * How long before posting its composer was opened: `createdAt` goes back
+   * this far and `postedAt` stays now, the shape of a reply someone took a
+   * while to write. Ignored for a draft, which has not been posted.
+   */
+  draftOpenedMsAgo?: number;
 }): Promise<{ id: string }> {
-  const { docId, fileId, authorEmail, bodyText, anchor, ydocUpdateId, draft = false } = opts;
+  const {
+    docId,
+    fileId,
+    authorEmail,
+    bodyText,
+    anchor,
+    ydocUpdateId,
+    draft = false,
+    parentAnnotationId,
+    draftOpenedMsAgo,
+  } = opts;
   if ((docId === undefined) === (fileId === undefined)) {
     throw new Error("createTestAnnotation: pass exactly one of docId and fileId.");
   }
@@ -1331,6 +1353,8 @@ export async function createTestAnnotation(opts: {
       proseJson: seed.proseJson as Prisma.InputJsonValue,
       status: draft ? "DRAFT" : "LIVE",
       postedAt: draft ? null : now,
+      ...(!draft && draftOpenedMsAgo ? { createdAt: new Date(now.getTime() - draftOpenedMsAgo) } : {}),
+      parentAnnotationId,
       ...(anchor ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText } : {}),
       ...(ydocUpdateId ? { ydocUpdateId: BigInt(ydocUpdateId) } : {}),
     },

@@ -59,6 +59,16 @@
   color: var(--text-muted);
 }
 
+/* One line under a collapsed card. `min-width: 0` because the quote is a flex
+   item, which otherwise won't shrink below its text and so never overflows
+   to be cut. */
+.quoteCollapsed {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Per PLAN.md §5: a detached thread (its quote was edited or removed in a
    later revision) loses the inline indicator but stays listed, with a
    notice and a way to see the quote in its original context. */

@@ -1,0 +1,29 @@
+/* After whatever else shares the row: the doc list's sort, the PDF panel's
+   rail/list toggle. */
+.controls {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: 16px;
+}
+
+/* The same quiet underlined text as a card's Reply and Delete. */
+.control {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.control:hover:not(:disabled) {
+  color: var(--foreground);
+}
+
+.control:disabled {
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: default;
+}

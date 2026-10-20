@@ -25,6 +25,68 @@
   font-weight: bold;
 }
 
+/* docs/ANNOTATIONS.md, "Collapsing a card". A fixed width, so the name after
+   it doesn't shift when ▸ becomes ▾ — the two are not the same width in
+   every font. */
+.collapseToggle {
+  display: inline-block;
+  width: 1.1em;
+  margin-right: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--text-secondary);
+  text-align: center;
+  cursor: pointer;
+}
+
+.collapseToggle:hover {
+  color: var(--foreground);
+}
+
+/* Held open by an edit session or a reply composer. */
+.collapseToggle:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.collapsedCounts {
+  margin-left: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* "N new": the one part of a collapsed card's summary that asks to be looked
+   at, and a button, since it opens the card onto what arrived. The accent
+   pair is the app's selected-state wash; --link on it reads as something to
+   click and passes AA in both schemes. Vertical padding would grow the meta
+   line, so there is none. */
+.newReplies {
+  padding: 0 6px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent-wash);
+  color: var(--link);
+  font: inherit;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.newReplies:hover {
+  text-decoration: underline;
+}
+
+/* A collapsed card's body, cut to one line. */
+.excerpt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
 .timestamp {
   color: var(--text-secondary);
   font-size: 0.8rem;
