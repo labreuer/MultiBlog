@@ -69,7 +69,7 @@ doc-independent, so it is callable directly but unreachable through the UI.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Collab connection | write | write | write | ✗ | ✗ |
-| Replay history | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Replay history (the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | ✅ | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ✅ | — | — |
@@ -90,7 +90,7 @@ byline, role notwithstanding.
 | Read `/doc/[slug]` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Edit `/doc/[slug]/edit` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Collab connection | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Replay history | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Replay history (the scrub bar; MCP's `since`) | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Listed in `/docs` | ⚠️ | ❌ | ❌ | — | — |
 | Edit link in `/docs` | ❌ | ❌ | ❌ | — | — |
@@ -108,7 +108,7 @@ byline, role notwithstanding.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Collab connection | write | write | write | read-only | ✗ |
-| Replay history | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Replay history (the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | ✅ | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ✅ | — | — |
@@ -129,7 +129,7 @@ inconsistencies" below, both of which are visible here.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | **❌** | ❌ | ❌ |
 | Collab connection | write | write | **read-only** | read-only | ✗ |
-| Replay history | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Replay history (the scrub bar; MCP's `since`) | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | **❌** | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ❌ | — | — |
@@ -728,6 +728,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
+| A doc's history (`canUserEditDoc`): the scrub bar's replay, and MCP's `since` | `src/app/api/doc/[id]/replay/route.ts`; `readDoc` in `src/lib/mcp/read/doc.ts` |
 | Doc mutations (visibility, byline, slug, record, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
 | File mutations (visibility, title, slug, owners, delete) and the upload | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
 | Annotation create / delete / restore | `src/app/actions/annotations.ts`; delete and restore in `src/lib/annotation-manage.ts` |

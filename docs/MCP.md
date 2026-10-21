@@ -723,6 +723,10 @@ read returned, or an annotation's (§9).
 - **How.** It is the edit endpoint's alignment (below) run as a read: the doc rebuilt once at
   `version`, as anchoring rebuilds it (§7), its blocks aligned with the doc as read, and a
   word-level diff within each pair. The `version` is validated as an anchor's is.
+- **Who may ask: the doc's editors.** It shows the doc's history, and history is
+  `canUserEditDoc`'s, as the reading view's scrub bar is (`/api/doc/[id]/replay`;
+  PERMISSIONS.md). A reader who can't edit the doc is refused with `forbidden`, whatever
+  version they send.
 - **What it is for.** A client catches up on a long doc without reading all of it again, and
   sees how a passage has changed since a note on it was made.
 
@@ -1974,7 +1978,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | Tool | Scope | Does |
 |---|---|---|
 | `search` | read | Search, and filtered listing, across kinds; `within` one doc ranks its sections, within one PDF its pages; `tags`, `authors`, dates, `exact` (§14) |
-| `read` | read | Any MultiBlog URL (below): whole, as its outline, as a range or `around` a quote; changes `since` a version; and `include` for what hangs off the object, each list paged on its own, threads filtered under `threads` (§6, §9, §10) |
+| `read` | read | Any MultiBlog URL (below): whole, as its outline, as a range or `around` a quote; changes `since` a version, on a doc the actor can edit; and `include` for what hangs off the object, each list paged on its own, threads filtered under `threads` (§6, §9, §10) |
 | `find_users` | read | Byline-eligible users by name or slug, or one by exact email (§12) |
 | `find_tags` | read | Tag terms by name (§11) |
 | `download` | read | A URL for a file's bytes or for the export, carrying a grant good for ten minutes (§5) |

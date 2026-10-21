@@ -55,7 +55,7 @@ export const readInput = z.strictObject({
   suffix: z.string().max(500).optional().describe("With around: words just after the quote."),
   context: z.number().int().min(0).max(5).optional().describe("With around, on a doc: blocks either side, 1 by default."),
   occurrences: z.number().int().min(1).max(10).optional().describe("With around: how many occurrences, 5 by default."),
-  since: versionString.optional().describe("What changed in a doc since this version: each changed block as a word diff naming who added what."),
+  since: versionString.optional().describe("What changed in a doc since this version: each changed block as a word diff naming who added what. For a doc you can edit."),
   page: z.number().int().min(1).optional().describe("A PDF page by its 1-based sheet number."),
   pages: z
     .string()
