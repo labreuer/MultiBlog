@@ -1,6 +1,7 @@
 import { test, expect, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import {
   ADMIN_EMAIL,
+  addTestDocAuthor,
   appendTestDocParagraph,
   createComment,
   createTestAnchoredLink,
@@ -319,6 +320,9 @@ test("reading a doc: whole, its outline, a section, blocks, around a quote, text
 
     const added = "A sentence added after the first read.";
     await appendTestDocParagraph({ docId: short.id, text: added, authorEmail: ADMIN_EMAIL });
+    // History is the doc's editors': an AUTHOR off a SHARED doc's byline reads it and can't edit it.
+    expect((await agent.call("read", { url: `/doc/${short.slug}`, since: version })).error.code).toBe("forbidden");
+    await addTestDocAuthor(short.id, agent.user.email);
     const since = await agent.call("read", { url: `/doc/${short.slug}`, since: version });
     expect(since.result).toMatchObject({ kind: "doc-changes", since: version });
     expect(since.result.changes).toEqual([{ block: 7, heading: "Idolatry", added, by: "E2E Admin" }]);
