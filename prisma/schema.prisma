@@ -380,6 +380,9 @@ model Post {
   metrics             PostMetrics?
 
   @@index([docId])
+  // docs/BLOG.md — the listing's order, `/page/N`'s offset and a post's
+  // older and newer neighbours all sort and seek on this pair.
+  @@index([publishedAt, id])
   @@index([searchVector], type: Gin)
   @@map("post")
 }

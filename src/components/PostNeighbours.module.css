@@ -1,0 +1,58 @@
+/* docs/BLOG.md — two halves of one row, older left and newer right; under the
+   column's width they stack, older first. */
+.neighbours {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1rem 0;
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* The comments' own top rule closes the block, where a second rule of ours
+   would sit just above it: so no bottom border here, and none of the
+   section's usual space above that rule. An attribute, not a class, so a CSS
+   module can name CommentSection's root from outside it. */
+.neighbours + [data-comment-section] {
+  margin-top: 0;
+}
+
+.older,
+.newer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-decoration: none;
+  color: var(--foreground);
+}
+
+.newer {
+  grid-column: 2;
+  text-align: right;
+}
+
+.label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+}
+
+.title {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  overflow-wrap: anywhere;
+}
+
+.older:hover .title,
+.newer:hover .title {
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .neighbours {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .newer {
+    grid-column: 1;
+  }
+}

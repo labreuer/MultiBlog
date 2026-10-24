@@ -17,12 +17,18 @@ import { Prisma } from "@/generated/prisma/client";
 import { ModerationPolicy } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { signInPath } from "@/lib/sign-in-redirect";
-import { revalidatePostArchives, revalidatePostPage } from "@/lib/revalidate-post";
+import {
+  revalidatePostArchives,
+  revalidatePostListPages,
+  revalidatePostNeighbours,
+  revalidatePostPage,
+} from "@/lib/revalidate-post";
 
 // Publish/unpublish change what publishedPostWhere() returns, which is what
-// the home page, author pages, the date archives (§21h) and the post's own
-// page are built from — all of them need revalidating, not just the
-// admin-facing /posts list. `post` is
+// the home page and its `/page/N` continuations, author pages, the date
+// archives (§21h), the post's own page and its older and newer neighbours'
+// pages (docs/BLOG.md) are built from — all of them need revalidating, not
+// just the admin-facing /posts list. `post` is
 // whichever slug/publishedAt pair names the page that needs invalidating:
 // the values *after* a publish (a first publish moves publishedAt from null
 // to a real path), the values before an unpublish (unchanged by it).
@@ -31,9 +37,10 @@ async function revalidatePublicPaths(postId: string, post: { slug: string; publi
     where: { postId },
     select: { user: { select: { slug: true } } },
   });
-  revalidatePath("/");
+  revalidatePostListPages();
   revalidatePostPage(post);
   revalidatePostArchives(post);
+  await revalidatePostNeighbours({ id: postId, publishedAt: post.publishedAt });
   for (const { user } of authors) {
     revalidatePath(`/authors/${user.slug}`);
   }
@@ -333,6 +340,13 @@ async function setPostDeleted(postId: string, deleted: boolean): Promise<void> {
     data: deleted ? { deletedByUserId: session.user.id, deletedAt: new Date() } : { deletedByUserId: null, deletedAt: null },
   });
   revalidatePath("/posts");
+  // A published post leaves, or returns to, every public listing and its
+  // neighbours' Older and Newer links. A draft or a scheduled post is on none
+  // of them. derivePostStatus ignores deletion, so a post whose scheduled
+  // time passed while it was deleted counts as published here, as it should.
+  if (derivePostStatus(post) === "published") {
+    await revalidatePublicPaths(postId, post);
+  }
 }
 
 export async function deletePost(postId: string): Promise<void> {
